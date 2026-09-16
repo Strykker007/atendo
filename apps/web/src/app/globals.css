@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+html, body { height: 100%; }
+body { @apply bg-surface-muted text-gray-900 antialiased; }
+
+/* padrão de fundo do chat, estilo WhatsApp */
+.chat-bg {
+  background-color: #efeae2;
+  background-image: radial-gradient(#d9d3c7 0.6px, transparent 0.6px);
+  background-size: 18px 18px;
+}
+.scrollbar-thin::-webkit-scrollbar { width: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }

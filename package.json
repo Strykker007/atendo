@@ -1,0 +1,24 @@
+{
+  "name": "atendo",
+  "private": true,
+  "packageManager": "pnpm@12.4.2",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:migrate": "pnpm --filter @atendo/api prisma migrate dev",
+    "db:generate": "pnpm --filter @atendo/api prisma generate",
+    "db:seed": "pnpm --filter @atendo/api prisma db seed",
+    "db:studio": "pnpm --filter @atendo/api prisma studio",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.1.0",
+    "typescript": "^5.6.0"
+  }
+}
