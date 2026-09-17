@@ -15,8 +15,25 @@ export interface InboundMessage {
   media?: { url?: string; mimeType?: string; fileName?: string; caption?: string; providerMediaId?: string };
   location?: { lat: number; lng: number; name?: string };
   quotedExternalId?: string;
+  /** De onde o lead veio, quando o provider informa (anúncio Click-to-WhatsApp, link com contexto). */
+  referral?: LeadReferral;
   timestamp: Date;
   raw: unknown;
+}
+
+export interface LeadReferral {
+  /** 'ad' = anúncio Meta (Instagram/Facebook), 'post' = publicação, 'link' = wa.me com contexto */
+  sourceType: 'ad' | 'post' | 'link' | 'unknown';
+  /** id do anúncio/publicação */
+  sourceId?: string;
+  sourceUrl?: string;
+  /** título do anúncio */
+  headline?: string;
+  body?: string;
+  /** click-to-WhatsApp click id (Meta) — permite conversão de volta no Ads Manager */
+  ctwaClid?: string;
+  /** imagem/vídeo do anúncio */
+  mediaUrl?: string;
 }
 
 /** Formato canônico de saída: a UI monta isto, o adapter traduz para o provider. */

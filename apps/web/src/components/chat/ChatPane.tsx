@@ -11,6 +11,7 @@ import { useConversation, useMessages, useResend, useSendMessage, useSetStatus, 
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
+import { OriginBadge } from './OriginBadge';
 
 export function ChatPane() {
   const { conversationId, setConversation, status, setStatus: setFilterStatus, rightPanelOpen, toggleRightPanel } = useUI();
@@ -101,9 +102,9 @@ export function ChatPane() {
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-sm truncate text-ink">{conv.contact.name ?? `+${conv.contact.phone}`}</div>
-          <div className="text-xs text-muted truncate tnum">
-            +{conv.contact.phone} · {conv.number.label}
-            {conv.assignee && ` · ${conv.assignee.name}`}
+          <div className="text-xs text-muted truncate tnum flex items-center gap-1.5">
+            <span className="truncate">+{conv.contact.phone} · {conv.number.label}{conv.assignee && ` · ${conv.assignee.name}`}</span>
+            <OriginBadge origin={conv.origin} data={conv.originData} detailed />
           </div>
         </div>
         <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>

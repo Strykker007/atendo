@@ -36,7 +36,7 @@ provider_pricing (global, sem tenant)
 
 **contacts** — telefone E.164 único por tenant. Nome vem do `pushName`/profile do WhatsApp.
 
-**conversations** — um atendimento. Único aberto por (número, contato); encerrar e receber de novo cria outra linha. `lastInboundAt` define a janela de 24h da Meta. `unreadCount` para o badge. Índice em `(tenantId, status, lastMessageAt desc)` = a query da lista.
+**conversations** — um atendimento. `origin` (`organic | ad | post | link`) e `originData` (referral do anúncio) — ver [04 › Origem do lead](04-providers-whatsapp.md#origem-do-lead-atribuição-de-anúncio). Único aberto por (número, contato); encerrar e receber de novo cria outra linha. `lastInboundAt` define a janela de 24h da Meta. `unreadCount` para o badge. Índice em `(tenantId, status, lastMessageAt desc)` = a query da lista.
 
 **messages** — `externalId` único → idempotência de webhook. `raw` guarda o payload original (debug e reprocessamento). `authorId` = atendente que enviou.
 

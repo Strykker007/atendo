@@ -164,8 +164,27 @@ export class MetaProvider implements WhatsAppProvider {
           : undefined,
       location: msg.location ? { lat: msg.location.latitude, lng: msg.location.longitude, name: msg.location.name } : undefined,
       quotedExternalId: msg.context?.id,
+      referral: this.referralOf(msg),
       timestamp: new Date(Number(msg.timestamp) * 1000),
       raw: msg,
+    };
+  }
+
+  /**
+   * Anúncio Click-to-WhatsApp: a primeira mensagem do contato vem com `referral`
+   * (source_type 'ad' | 'post', source_id, headline, ctwa_clid). Só vem na primeira mensagem.
+   */
+  private referralOf(msg: any): InboundMessage['referral'] | undefined {
+    const r = msg.referral;
+    if (!r) return undefined;
+    return {
+      sourceType: r.source_type === 'ad' || r.source_type === 'post' ? r.source_type : 'unknown',
+      sourceId: r.source_id,
+      sourceUrl: r.source_url,
+      headline: r.headline,
+      body: r.body,
+      ctwaClid: r.ctwa_clid,
+      mediaUrl: r.image_url ?? r.video_url ?? r.thumbnail_url,
     };
   }
 

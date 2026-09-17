@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import type { ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client';
+import type { ConversationOrigin, ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client';
 import type { InboundMessage, StatusUpdate, NumberStatus, OutboundMessage } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -33,10 +33,11 @@ export class ConversationsService {
 
   // ---------- leitura ----------
 
-  list(tenantId: string, q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; cursor?: string; take?: number }) {
+  list(tenantId: string, q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; cursor?: string; take?: number }) {
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       ...(q.status && { status: q.status }),
+      ...(q.origin && { origin: q.origin }),
       ...(q.numberId && { numberId: q.numberId }),
       ...(q.tagIds?.length && { tags: { some: { tagId: { in: q.tagIds } } } }),
       ...(q.search && {
@@ -106,10 +107,16 @@ export class ConversationsService {
     let conversation = await this.prisma.conversation.findFirst({
       where: { numberId: number.id, contactId: contact.id, status: { not: 'closed' } },
     });
+    const origin = this.originOf(msg.referral);
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
-        data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting' },
+        data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
       });
+      if (origin === 'ad') await this.autoTagAd(conversation.id, number.tenantId, msg.referral?.headline);
+    } else if (msg.referral && conversation.origin === 'organic') {
+      // referral pode chegar numa mensagem posterior (contato clicou no anúncio já com conversa aberta)
+      conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { origin, originData: msg.referral as unknown as Prisma.InputJsonValue } });
+      if (origin === 'ad') await this.autoTagAd(conversation.id, number.tenantId, msg.referral?.headline);
     }
 
     const message = await this.prisma.message.create({
@@ -150,6 +157,25 @@ export class ConversationsService {
     this.gateway.emitMessage(number.tenantId, message);
     this.gateway.emitConversation(number.tenantId, conversation);
     return message;
+  }
+
+  private originOf(r?: InboundMessage['referral']) {
+    if (!r) return 'organic' as const;
+    if (r.sourceType === 'ad') return 'ad' as const;
+    if (r.sourceType === 'post') return 'post' as const;
+    return 'link' as const;
+  }
+
+  /**
+   * Lead de anúncio ganha a tag "Anúncio" automaticamente (criada por tenant se não existir),
+   * e uma tag com o título do anúncio quando houver — assim "leads por campanha" sai direto do filtro/relatório.
+   */
+  private async autoTagAd(conversationId: string, tenantId: string, headline?: string) {
+    const names = ['Anúncio', ...(headline ? [`Anúncio: ${headline.slice(0, 32)}`] : [])];
+    for (const name of names) {
+      const tag = await this.prisma.tag.upsert({ where: { tenantId_name: { tenantId, name } }, create: { tenantId, name, color: '#f97316' }, update: {} });
+      await this.prisma.conversationTag.upsert({ where: { conversationId_tagId: { conversationId, tagId: tag.id } }, create: { conversationId, tagId: tag.id }, update: {} });
+    }
   }
 
   async applyStatus(st: StatusUpdate) {

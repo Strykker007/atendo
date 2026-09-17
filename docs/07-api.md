@@ -41,7 +41,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | PATCH | `/numbers/:id` | tenant_admin | Label / ativo |
 | DELETE | `/numbers/:id` | tenant_admin | Remove (cascade em conversas) |
 | **Conversas** | | | |
-| GET | `/conversations?status=&numberId=&tagIds=a,b&search=&cursor=` | todos | Lista paginada por cursor |
+| GET | `/conversations?status=&numberId=&tagIds=a,b&search=&origin=&cursor=` | todos | Lista paginada por cursor; `origin` = organic/ad/post/link |
 | GET | `/conversations/counts?numberId=` | todos | `{waiting, in_progress, closed}` para os contadores dos filtros |
 | GET | `/conversations/:id` | todos | Uma conversa (contato, tags, atendente, número) |
 | GET | `/conversations/:id/messages?cursor=` | todos | Mensagens (mais recentes primeiro, 50); `mediaUrl` já vem assinada |
@@ -105,7 +105,7 @@ curl -X POST localhost:4000/reports/run -H "Authorization: Bearer $TOKEN" -H 'Co
 # → { definition, series: [{label:"lead com interesse", value: 12}, ...] }
 ```
 
-Métricas: `conversations`, `messages_in`, `messages_out`, `avg_first_response_min`. Agrupamentos: `day`, `week`, `month`, `tag`, `status`, `number`, `agent`. Filtros: `tagIds`, `status`, `numberId`.
+Métricas: `conversations`, `messages_in`, `messages_out`, `avg_first_response_min`. Agrupamentos: `day`, `week`, `month`, `tag`, `status`, `number`, `agent`, `origin`, `campaign` (título do anúncio). Filtros: `tagIds`, `status`, `numberId`, `origin`.
 
 ## Erros
 

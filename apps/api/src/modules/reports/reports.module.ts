@@ -12,11 +12,11 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
  */
 export const ReportDefinition = z.object({
   metric: z.enum(['conversations', 'messages_in', 'messages_out', 'avg_first_response_min']),
-  groupBy: z.enum(['day', 'week', 'month', 'tag', 'status', 'number', 'agent']),
+  groupBy: z.enum(['day', 'week', 'month', 'tag', 'status', 'number', 'agent', 'origin', 'campaign']),
   from: z.coerce.date(),
   to: z.coerce.date(),
   filters: z
-    .object({ tagIds: z.array(z.string().uuid()).optional(), status: z.enum(['waiting', 'in_progress', 'closed']).optional(), numberId: z.string().uuid().optional() })
+    .object({ tagIds: z.array(z.string().uuid()).optional(), status: z.enum(['waiting', 'in_progress', 'closed']).optional(), numberId: z.string().uuid().optional(), origin: z.enum(['organic', 'ad', 'post', 'link']).optional() })
     .default({}),
   chart: z.enum(['bar', 'line', 'pie']).default('bar'),
 });
@@ -54,6 +54,8 @@ class ReportsController {
       status: Prisma.sql`c.status::text`,
       number: Prisma.sql`n.label`,
       agent: Prisma.sql`coalesce(a.name, '(não atribuído)')`,
+      origin: Prisma.sql`c.origin::text`,
+      campaign: Prisma.sql`coalesce(c."originData"->>'headline', case when c.origin = 'ad' then '(anúncio sem título)' else '(orgânico)' end)`,
     }[d.groupBy];
 
     const metric = {
@@ -66,6 +68,7 @@ class ReportsController {
     const filters: Prisma.Sql[] = [Prisma.sql`c."tenantId" = ${tenantId}`, Prisma.sql`c."createdAt" >= ${d.from}`, Prisma.sql`c."createdAt" < ${d.to}`];
     if (d.filters.status) filters.push(Prisma.sql`c.status = ${d.filters.status}::"ConversationStatus"`);
     if (d.filters.numberId) filters.push(Prisma.sql`c."numberId" = ${d.filters.numberId}`);
+    if (d.filters.origin) filters.push(Prisma.sql`c.origin = ${d.filters.origin}::"ConversationOrigin"`);
     if (d.filters.tagIds?.length) filters.push(Prisma.sql`c.id in (select "conversationId" from conversation_tags where "tagId" in (${Prisma.join(d.filters.tagIds)}))`);
 
     const rows = await this.prisma.$queryRaw<{ label: string; value: number | null }[]>(Prisma.sql`

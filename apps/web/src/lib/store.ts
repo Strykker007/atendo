@@ -1,7 +1,7 @@
 'use client';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ConversationStatus } from '@atendo/shared';
+import type { ConversationStatus, ConversationOrigin } from '@atendo/shared';
 
 interface UIState {
   sidebarCollapsed: boolean;
@@ -10,6 +10,8 @@ interface UIState {
   numberId: string | null;
   status: ConversationStatus;
   tagIds: string[];
+  /** filtro de origem do lead; null = todas */
+  origin: ConversationOrigin | null;
   conversationId: string | null;
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
@@ -17,6 +19,7 @@ interface UIState {
   /** keep = true mantém a conversa selecionada (usado ao responder) */
   setStatus: (s: ConversationStatus, keep?: boolean) => void;
   setTags: (ids: string[]) => void;
+  setOrigin: (o: ConversationOrigin | null) => void;
   setConversation: (id: string | null) => void;
 }
 
@@ -28,12 +31,14 @@ export const useUI = create<UIState>()(
       numberId: null,
       status: 'waiting',
       tagIds: [],
+      origin: null,
       conversationId: null,
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
       setNumber: (numberId) => set({ numberId, conversationId: null }),
       setStatus: (status, keep) => set((s) => ({ status, conversationId: keep ? s.conversationId : null })),
       setTags: (tagIds) => set({ tagIds }),
+      setOrigin: (origin) => set({ origin }),
       setConversation: (conversationId) => set({ conversationId }),
     }),
     { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, numberId: s.numberId }) },

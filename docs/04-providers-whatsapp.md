@@ -100,6 +100,24 @@ Os providers **nunca precisam de URL pública** do nosso storage:
 
 O `InboundProcessor` chama `provider.fetchMedia()` depois de gravar a mensagem; se falhar, a mensagem fica com `error = "Mídia indisponível: …"` e a UI mostra isso (a mensagem de texto nunca se perde por causa da mídia). O `OutboundProcessor` lê o arquivo do storage e passa como `MediaPayload` para `provider.send()`. Ver [03 — Arquitetura › Storage](03-arquitetura.md#storage-de-mídia).
 
+## Origem do lead (atribuição de anúncio)
+
+Quando o contato chega por um anúncio **Click-to-WhatsApp** (Instagram/Facebook), a primeira mensagem traz metadados do anúncio. Cada adapter normaliza isso em `InboundMessage.referral` (`LeadReferral` no shared):
+
+| Provider | De onde vem | O que traz |
+|---|---|---|
+| Meta | `message.referral` | `source_type` (ad/post), `source_id`, `source_url`, `headline`, `body`, `ctwa_clid`, mídia do anúncio — completo e confiável |
+| Evolution | `contextInfo.externalAdReply` (ou `conversionSource`) | `title`, `body`, `sourceUrl`, `sourceId`, `ctwaClid` — depende do que o protocolo expõe; às vezes parcial |
+
+Na ingestão (`ConversationsService.ingestInbound`):
+1. `Conversation.origin` = `ad` | `post` | `link` | `organic` (padrão) e `originData` = o referral inteiro.
+2. Lead de anúncio ganha automaticamente as tags **"Anúncio"** e **"Anúncio: <título>"** (criadas por tenant, cor laranja). Isso alimenta filtro e relatório sem configuração.
+3. Se o referral chegar em mensagem posterior de uma conversa orgânica aberta, a origem é atualizada.
+
+Na UI: chip laranja "Anúncio" na lista e no cabeçalho (com o título e link para o anúncio); filtro por origem abaixo das tags. Relatórios: `groupBy: 'origin'` e `groupBy: 'campaign'` (título do anúncio), filtro `origin`.
+
+`ctwa_clid` fica guardado para, no futuro, enviar conversões de volta ao Ads Manager (Conversions API).
+
 ## Adicionando um terceiro provider
 
 1. Crie `providers/<nome>.provider.ts` implementando `WhatsAppProvider`.

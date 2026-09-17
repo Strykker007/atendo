@@ -57,6 +57,15 @@ export const BillingCategory = {
 } as const;
 export type BillingCategory = (typeof BillingCategory)[keyof typeof BillingCategory];
 
+/** Origem da conversa. `ad` vem de referral do provider; os outros são inferidos/manual. */
+export const ConversationOrigin = {
+  ORGANIC: 'organic', // contato mandou mensagem por conta própria
+  AD: 'ad', // anúncio Click-to-WhatsApp (Instagram/Facebook)
+  POST: 'post', // publicação com botão de WhatsApp
+  LINK: 'link', // link wa.me / botão em site
+} as const;
+export type ConversationOrigin = (typeof ConversationOrigin)[keyof typeof ConversationOrigin];
+
 export const Role = {
   SUPER_ADMIN: 'super_admin', // dono do Atendo
   TENANT_ADMIN: 'tenant_admin', // admin do cliente

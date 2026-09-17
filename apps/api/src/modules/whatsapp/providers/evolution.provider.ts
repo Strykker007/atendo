@@ -228,9 +228,37 @@ export class EvolutionProvider implements WhatsAppProvider {
       media: media ? { ...media, providerMediaId: m.key.id } : undefined,
       location: msg.locationMessage ? { lat: msg.locationMessage.degreesLatitude, lng: msg.locationMessage.degreesLongitude } : undefined,
       quotedExternalId: msg.extendedTextMessage?.contextInfo?.stanzaId,
+      referral: this.referralOf(msg),
       timestamp: new Date(Number(m.messageTimestamp) * 1000),
       raw: m,
     };
+  }
+
+  /**
+   * Via Baileys, um clique em anúncio chega com `contextInfo.externalAdReply`
+   * (title, body, sourceUrl, sourceId, ctwaClid) ou `conversionSource`. Menos completo que a Meta,
+   * mas suficiente para marcar a origem.
+   */
+  private referralOf(msg: any): InboundMessage['referral'] | undefined {
+    const ctx = msg.extendedTextMessage?.contextInfo ?? msg.imageMessage?.contextInfo ?? msg.videoMessage?.contextInfo ?? msg.conversation?.contextInfo;
+    const ad = ctx?.externalAdReply;
+    if (ad) {
+      const isAd = ad.sourceType === 'ad' || !!ad.ctwaClid || /facebook\.com\/ads|fb\.me\/ad|instagram\.com/i.test(ad.sourceUrl ?? '');
+      return {
+        sourceType: isAd ? 'ad' : ad.sourceUrl ? 'link' : 'unknown',
+        sourceId: ad.sourceId,
+        sourceUrl: ad.sourceUrl,
+        headline: ad.title,
+        body: ad.body,
+        ctwaClid: ad.ctwaClid,
+        mediaUrl: ad.thumbnailUrl ?? ad.mediaUrl,
+      };
+    }
+    if (ctx?.conversionSource || ctx?.entryPointConversionSource) {
+      const src = String(ctx.conversionSource ?? ctx.entryPointConversionSource);
+      return { sourceType: /ad|ctwa/i.test(src) ? 'ad' : 'link', body: src, ctwaClid: ctx.ctwaClid };
+    }
+    return undefined;
   }
 
   private mapAck(s: string | number): MessageStatus {

@@ -7,6 +7,8 @@ import { useUI } from '@/lib/store';
 import { useConversations, useConversationCounts, useNumbers, useTags, type Conversation } from '@/lib/hooks';
 import { avatarStyle, initialOf } from '@/lib/avatar';
 import { TagPicker } from './TagPicker';
+import { OriginBadge, ORIGIN_META } from './OriginBadge';
+import type { ConversationOrigin } from '@/lib/hooks';
 import { SkeletonConversations } from '@/components/ui/Skeleton';
 
 /** Semáforo: cada status tem cor (texto/faixa) e fundo suave. */
@@ -18,12 +20,12 @@ export const STATUS_META: Record<ConversationStatus, { label: string; short: str
 const ORDER: ConversationStatus[] = ['waiting', 'in_progress', 'closed'];
 
 export function ConversationList() {
-  const { numberId, setNumber, status, setStatus, tagIds, setTags, conversationId, setConversation } = useUI();
+  const { numberId, setNumber, status, setStatus, tagIds, setTags, origin, setOrigin, conversationId, setConversation } = useUI();
   const [search, setSearch] = useState('');
   const numbers = useNumbers();
   const tags = useTags();
   const counts = useConversationCounts(numberId);
-  const conversations = useConversations({ status, numberId, tagIds, search: search || undefined });
+  const conversations = useConversations({ status, numberId, tagIds, origin, search: search || undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
 
   return (
@@ -78,6 +80,14 @@ export function ConversationList() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-9 pr-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
         </div>
         <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTags} placeholder="Filtrar por tag…" />
+        {/* origem do lead — chips pequenos, um clique liga/desliga */}
+        <div className="flex flex-wrap gap-1">
+          {(['ad', 'link', 'post', 'organic'] as ConversationOrigin[]).map((o) => (
+            <button key={o} onClick={() => setOrigin(origin === o ? null : o)} className={cn('text-[10.5px] font-semibold px-2 py-0.5 rounded-md border transition-colors', origin === o ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>
+              {ORIGIN_META[o].label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Lista */}
@@ -116,8 +126,9 @@ function ConversationRow({ c, active, onClick, showNumber }: { c: Conversation; 
           <span className={cn('text-xs truncate', c.unreadCount > 0 ? 'text-ink' : 'text-muted')}>{c.lastMessagePreview ?? '—'}</span>
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
-        {(c.tags.length > 0 || showNumber || c.assignee) && (
+        {(c.tags.length > 0 || showNumber || c.assignee || c.origin !== 'organic') && (
           <div className="flex flex-wrap items-center gap-1 mt-1.5">
+            <OriginBadge origin={c.origin} data={c.originData} />
             {showNumber && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-field text-muted font-medium">{c.number.label}</span>}
             {c.tags.map(({ tag }) => (
               <span key={tag.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `color-mix(in srgb, ${tag.color} 18%, transparent)`, color: tag.color }}>{tag.name}</span>

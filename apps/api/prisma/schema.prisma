@@ -148,6 +148,13 @@ enum ConversationStatus {
   closed
 }
 
+enum ConversationOrigin {
+  organic
+  ad
+  post
+  link
+}
+
 model Conversation {
   id         String             @id @default(uuid())
   tenantId   String
@@ -155,6 +162,10 @@ model Conversation {
   contactId  String
   status     ConversationStatus @default(waiting)
   assigneeId String?
+  /// De onde o lead veio. `ad` = anúncio (referral do provider). Base do relatório "leads por campanha".
+  origin     ConversationOrigin @default(organic)
+  /// LeadReferral (packages/shared): id/título do anúncio, ctwa_clid, url
+  originData Json?
   /// Última mensagem recebida do contato — define a janela de 24h da Meta
   lastInboundAt  DateTime?
   lastMessageAt  DateTime?
@@ -172,6 +183,7 @@ model Conversation {
   tags     ConversationTag[]
 
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
+  @@index([tenantId, origin])
   @@index([numberId, contactId])
   @@map("conversations")
 }

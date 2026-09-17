@@ -8,8 +8,11 @@ import type { ConversationStatus, PlanLimits } from '@atendo/shared';
 export interface Tag { id: string; name: string; color: string }
 export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
+export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
+export interface LeadReferral { sourceType: string; sourceId?: string; sourceUrl?: string; headline?: string; body?: string; ctwaClid?: string; mediaUrl?: string }
 export interface Conversation {
   id: string; status: ConversationStatus; unreadCount: number; lastMessageAt: string | null; lastMessagePreview: string | null;
+  origin: ConversationOrigin; originData: LeadReferral | null;
   lastInboundAt: string | null; numberId: string;
   contact: { id: string; name: string | null; phone: string };
   tags: { tag: Tag }[];
@@ -39,12 +42,13 @@ export interface Usage {
 }
 export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/billing/usage'), refetchInterval: 60_000 });
 
-export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string }) =>
+export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null }) =>
   useQuery({
     queryKey: ['conversations', q],
     queryFn: () => {
       const p = new URLSearchParams({ status: q.status });
       if (q.numberId) p.set('numberId', q.numberId);
+      if (q.origin) p.set('origin', q.origin);
       if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
       if (q.search) p.set('search', q.search);
       return api<Conversation[]>(`/conversations?${p}`);

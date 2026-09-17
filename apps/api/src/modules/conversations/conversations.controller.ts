@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsArray, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { ConversationStatus } from '@prisma/client';
+import { ConversationOrigin, ConversationStatus } from '@prisma/client';
 import { ConversationsService } from './conversations.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -11,6 +11,7 @@ class ListDto {
   @IsOptional() @IsUUID() numberId?: string;
   @IsOptional() @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean))) @IsArray() tagIds?: string[];
   @IsOptional() @IsString() @MaxLength(100) search?: string;
+  @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
   @IsOptional() @IsUUID() cursor?: string;
 }
 class SendDto {
