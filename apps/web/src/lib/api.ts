@@ -40,7 +40,9 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}, ret
     const body = await res.json().catch(() => ({}));
     throw new Error(body.message ?? `Erro ${res.status}`);
   }
-  return res.status === 204 ? (undefined as T) : res.json();
+  // corpo vazio (204, ou o Nest devolvendo `null`) vira null em vez de erro de JSON
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 export const getAccessToken = () => accessToken;

@@ -47,18 +47,21 @@ function FlowsTab() {
   return (
     <div className="flex-1 overflow-y-auto scrollbar-thin">
       {!conversationId && <p className="p-5 text-xs text-muted text-center">Abra uma conversa para disparar um fluxo nela.</p>}
-      {active.data && <div className="m-2.5 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">🤖 <b>{active.data.flow.name}</b> está rodando nesta conversa. Disparar outro substitui este.</div>}
+      {active.data && <div className="m-2.5 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">🤖 <b>{active.data.flow.name}</b> está rodando nesta conversa{active.data.status === 'waiting' ? ' (esperando o contato)' : ''}. Disparar outro substitui este.</div>}
       {list.length === 0 && flows.data && <p className="p-5 text-xs text-muted text-center">Nenhum fluxo ativo. <Link href="/fluxos" className="text-accent-ink underline">Criar</Link></p>}
       <ul className="divide-y divide-line">
-        {list.map((f) => (
-          <li key={f.id} className="flex items-center gap-2 px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-ink truncate">{f.name}</div>
-              {f.description && <div className="text-[11px] text-muted truncate">{f.description}</div>}
-            </div>
-            <Button size="sm" icon={<Play size={12} />} disabled={!conversationId} loading={start.isPending && start.variables?.flowId === f.id} onClick={() => conversationId && start.mutateAsync({ flowId: f.id, conversationId }).then(() => toast.ok(`Fluxo "${f.name}" iniciado`)).catch(toast.err)}>Iniciar</Button>
-          </li>
-        ))}
+        {list.map((f) => {
+          const running = active.data?.flow.id === f.id;
+          return (
+            <li key={f.id} className={cn('flex items-center gap-2 px-3 py-2', running && 'bg-accent-soft/60')}>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-ink truncate flex items-center gap-1.5">{running && <span className="animate-pulse">🤖</span>}{f.name}{running && <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-ink bg-accent-soft rounded px-1">rodando</span>}</div>
+                {f.description && <div className="text-[11px] text-muted truncate">{f.description}</div>}
+              </div>
+              <Button size="sm" variant={running ? 'ghost' : 'primary'} icon={<Play size={12} />} disabled={!conversationId} loading={start.isPending && start.variables?.flowId === f.id} onClick={() => conversationId && start.mutateAsync({ flowId: f.id, conversationId }).then(() => toast.ok(`Fluxo "${f.name}" ${running ? 'reiniciado' : 'iniciado'}`)).catch(toast.err)}>{running ? 'Reiniciar' : 'Iniciar'}</Button>
+            </li>
+          );
+        })}
       </ul>
       <p className="px-3 py-3 text-[10.5px] text-faint">Enquanto o fluxo roda, o robô responde. Você pode parar a qualquer momento no cabeçalho da conversa. <Link href="/fluxos" className="underline">Gerenciar fluxos</Link></p>
     </div>
