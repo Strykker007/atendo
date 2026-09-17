@@ -35,10 +35,12 @@ src/
 │       ├── tags/           CRUD com paleta de cores
 │       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha
 │       ├── plano/          medidores de uso, excedente, explicação do limite
-│       ├── configuracoes/  pastas e respostas rápidas (CRUD)
+│       ├── configuracoes/  aparência + pastas e respostas rápidas (CRUD)
+│       ├── admin/          Financeiro do dono (KPIs, série, assinaturas, faturas, margem)
+│       ├── clientes/       Clientes do dono: criar, plano/status, ativar, Entrar como
 │       └── relatorios/     construtor (métrica, agrupamento, período, filtros) + gráfico/tabela + CSV + salvos
 ├── components/
-│   ├── layout/Sidebar.tsx | UsageBanner.tsx (aviso global 80/100%, past_due, suspended)
+│   ├── layout/Sidebar.tsx | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')
 │   ├── chat/ConversationList | ChatPane | TagPicker | QuickRepliesPanel
 │   ├── numbers/ProviderForm | NumberDialogs | QrModal
 │   └── ui/Modal | Toast | Confirm | Page   primitivos: modal, toasts, confirmação, cabeçalho/shell de página

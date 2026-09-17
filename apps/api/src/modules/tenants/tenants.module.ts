@@ -18,6 +18,12 @@ class CreateTenantDto {
   @IsString() @MaxLength(80) adminName: string;
   @IsString() @MinLength(8) adminPassword: string;
 }
+class UpdateTenantDto {
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsUUID() planId?: string;
+  @IsOptional() @IsIn(['trialing', 'active', 'past_due', 'suspended', 'canceled']) subscriptionStatus?: 'trialing' | 'active' | 'past_due' | 'suspended' | 'canceled';
+}
 class CreateAgentDto {
   @IsEmail() email: string;
   @IsString() @MaxLength(80) name: string;
@@ -45,7 +51,37 @@ class TenantsController {
   @NoTenantOk()
   @Roles('super_admin')
   list() {
-    return this.prisma.tenant.findMany({ include: { subscription: { include: { plan: true } }, _count: { select: { numbers: true, users: true } } } });
+    return this.prisma.tenant.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true } } } }, users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 }, _count: { select: { numbers: true, users: true, conversations: true } } },
+    });
+  }
+
+  /** Dono ajusta plano/status manualmente (sem passar pelo Stripe) ou ativa/desativa o cliente. */
+  @Patch(':id')
+  @NoTenantOk()
+  @Roles('super_admin')
+  async updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
+    if (dto.name !== undefined || dto.isActive !== undefined) await this.prisma.tenant.update({ where: { id }, data: { name: dto.name, isActive: dto.isActive } });
+    if (dto.planId || dto.subscriptionStatus) {
+      const now = new Date();
+      const end = new Date(now);
+      end.setMonth(end.getMonth() + 1);
+      await this.prisma.subscription.upsert({
+        where: { tenantId: id },
+        create: { tenantId: id, planId: dto.planId!, status: dto.subscriptionStatus ?? 'active', currentPeriodStart: now, currentPeriodEnd: end },
+        update: { ...(dto.planId && { planId: dto.planId }), ...(dto.subscriptionStatus && { status: dto.subscriptionStatus, graceUntil: null }) },
+      });
+    }
+    return this.prisma.tenant.findUniqueOrThrow({ where: { id }, include: { subscription: { include: { plan: true } } } });
+  }
+
+  /** "Entrar como": o dono recebe um token com o tenant escolhido (papel admin). */
+  @Post(':id/impersonate')
+  @NoTenantOk()
+  @Roles('super_admin')
+  impersonate(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.auth.impersonate(u, id);
   }
 
   @Post()

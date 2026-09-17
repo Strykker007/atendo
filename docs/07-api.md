@@ -30,6 +30,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Tenants** | | | |
 | GET | `/tenants` | super_admin | Lista clientes com plano e contagens |
 | POST | `/tenants` | super_admin | Cria cliente + assinatura + admin |
+| PATCH | `/tenants/:id` | super_admin | `name`, `isActive`, `planId`, `subscriptionStatus` (ajuste manual sem Stripe) |
+| POST | `/tenants/:id/impersonate` | super_admin | `{accessToken, tenant}` — "entrar como" (token com o tenant, papel admin, `impersonatorId`) |
 | GET | `/tenants/me/agents` | todos | Atendentes do meu tenant (todos podem listar para transferir) |
 | POST | `/tenants/me/agents` | tenant_admin, manager | Cria atendente (`role: agent`) ou gerente (`role: manager`, só admin); respeita `maxAgents` |
 | PATCH | `/tenants/me/agents/:id` | tenant_admin | Nome / ativo / `password` (redefine e revoga sessões) |

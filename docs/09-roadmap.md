@@ -22,6 +22,7 @@
 - Cobrança Stripe: checkout, troca de plano com proration, portal do cliente, webhooks, excedente na fatura, suspensão por carência, faturas na tela, margem por cliente (super_admin)
 - Papel gerente; cadeado com notas internas; financeiro completo do dono (KPIs, série mensal, assinaturas, faturas, margem); densidade visual
 - Fluxos de automação: editor visual (React Flow), motor (menu, pergunta com validação, condição, ação, aguardar, handoff), gatilhos manual/nova conversa/palavra-chave, aba Fluxos no chat, feature por plano
+- Dono: tela Clientes (criar, plano, status, ativar/desativar) e 'Entrar como' (impersonação com faixa e saída)
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida

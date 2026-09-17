@@ -7,6 +7,7 @@ import { useRealtime } from '@/lib/hooks';
 import { UsageBanner } from '@/components/layout/UsageBanner';
 import { Toaster } from '@/components/ui/Toast';
 import { NavigationProgress } from '@/components/layout/NavigationProgress';
+import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
 
 /** Shell autenticado: menu lateral + área do módulo. */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -53,6 +54,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <NavigationProgress />
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">
+        <ImpersonationBanner />
         <UsageBanner />
         <div key={pathname} className="flex-1 min-h-0 flex animate-fade-in">{children}</div>
       </div>

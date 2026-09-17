@@ -8,6 +8,8 @@ export interface AuthUser {
   role: Role;
   email: string;
   name: string;
+  /** presente quando o dono do sistema está "entrando como" este tenant */
+  impersonatorId?: string;
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthUser => {

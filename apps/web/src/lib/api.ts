@@ -7,10 +7,24 @@ export const setAccessToken = (t: string | null) => {
   accessToken = t;
 };
 
+const IMPERSONATE_KEY = 'atendo-impersonate';
+/** Dono "entrando como" um cliente: guardado por aba, para sobreviver ao refresh do token. */
+export const impersonation = {
+  get: (): { tenantId: string; name: string } | null => { try { return JSON.parse(sessionStorage.getItem(IMPERSONATE_KEY) ?? 'null'); } catch { return null; } },
+  set: (v: { tenantId: string; name: string } | null) => { try { v ? sessionStorage.setItem(IMPERSONATE_KEY, JSON.stringify(v)) : sessionStorage.removeItem(IMPERSONATE_KEY); } catch { /* ignore */ } },
+};
+
 async function refresh(): Promise<boolean> {
   const r = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
   if (!r.ok) return false;
   accessToken = (await r.json()).accessToken;
+  // se o dono estava dentro de um cliente, volta para lá com um token novo de impersonação
+  const imp = impersonation.get();
+  if (imp) {
+    const i = await fetch(`${API}/tenants/${imp.tenantId}/impersonate`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${accessToken}` } });
+    if (i.ok) accessToken = (await i.json()).accessToken;
+    else impersonation.set(null);
+  }
   return true;
 }
 

@@ -8,12 +8,14 @@ O Atendo é um SaaS de atendimento ao cliente via WhatsApp. Você (dono do Atend
 
 | Role | Quem é | O que pode |
 |---|---|---|
-| `super_admin` | Você, dono do Atendo | Criar clientes, definir planos, ver margem de todos |
+| `super_admin` | Você, dono do Atendo | **Financeiro** consolidado, **Clientes** (criar, plano, status, ativar/desativar) e **Entrar como** qualquer cliente para ver o sistema como o admin dele. Não tem área de cliente própria |
 | `tenant_admin` | Administrador do cliente | Tudo do gerente + números, plano/cobrança, criar gerentes |
 | `manager` | Gerente | Vê todas as conversas, transfere, orienta por **nota interna** (cadeado), gerencia tags, respostas rápidas e atendentes |
 | `agent` | Atendente do cliente | Atende as próprias conversas, aplica tags, usa respostas rápidas |
 
-Cada usuário pertence a um único tenant (exceto `super_admin`, que não pertence a nenhum). **Tudo** que um usuário vê é filtrado pelo `tenantId` do token dele — nunca por parâmetro da requisição.
+Cada usuário pertence a um único tenant (exceto `super_admin`, que não pertence a nenhum).
+
+**Quem vê o quê no financeiro:** o admin do cliente vê só o *Plano e uso* dele (consumo, faturas, planos). O Financeiro consolidado (MRR, margem, todos os clientes) é exclusivo do dono. Quando o dono "entra como" um cliente, vê exatamente o que o admin daquele cliente vê — com uma faixa no topo indicando isso e o botão *Sair do cliente*. **Tudo** que um usuário vê é filtrado pelo `tenantId` do token dele — nunca por parâmetro da requisição.
 
 ## Conceitos e como se relacionam
 

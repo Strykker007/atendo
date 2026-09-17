@@ -53,6 +53,20 @@ export class AuthService {
     return { accessToken, refreshToken, refreshMaxAge: ttlMs(env.JWT_REFRESH_TTL) };
   }
 
+  /**
+   * Dono do sistema "entra como" um cliente: token de acesso com o tenant escolhido e papel de admin,
+   * marcado com `impersonatorId`. O refresh cookie continua sendo o do dono — o front renova
+   * chamando /tenants/:id/impersonate de novo.
+   */
+  async impersonate(owner: { id: string; email: string; name: string }, tenantId: string) {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const accessToken = await this.jwt.signAsync(
+      { sub: owner.id, tenantId: tenant.id, role: 'tenant_admin', email: owner.email, name: `${owner.name} (dono)`, impersonatorId: owner.id },
+      { secret: env.JWT_ACCESS_SECRET, expiresIn: '1h' as any },
+    );
+    return { accessToken, tenant: { id: tenant.id, name: tenant.name } };
+  }
+
   hashPassword(p: string) {
     return argon2.hash(p, { type: argon2.argon2id });
   }

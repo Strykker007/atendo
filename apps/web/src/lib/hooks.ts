@@ -242,7 +242,7 @@ export const useUpdateReply = () => { const qc = useQueryClient(); return useMut
 export const useDeleteReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/quick-replies/${id}`, { method: 'DELETE' }), onSuccess: invQR(qc) }); };
 
 /** Usuário logado (role, tenant) — para esconder ações de admin. */
-export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id: string; tenantId: string; role: Agent['role']; email: string; name: string }>('/auth/me'), staleTime: Infinity });
+export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id: string; tenantId: string | null; role: Agent['role']; email: string; name: string; impersonatorId?: string }>('/auth/me'), staleTime: Infinity });
 
 
 // ---- Relatórios ----
@@ -309,3 +309,10 @@ export const useStopFlow = () => { const qc = useQueryClient(); return useMutati
 export const useActiveRun = (conversationId: string | null) => useQuery({ queryKey: ['active-run', conversationId], enabled: !!conversationId, queryFn: () => api<ActiveRun | null>(`/conversations/${conversationId}/flow`), refetchInterval: 15_000 });
 /** O plano inclui a funcionalidade? (usa /billing/usage já em cache) */
 export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as any), loading: u.isLoading }; };
+
+// ---- Clientes (dono) ----
+export interface TenantRow { id: string; name: string; slug: string; isActive: boolean; createdAt: string; subscription: { status: string; currentPeriodEnd: string; plan: { id: string; name: string; priceMonth: string } } | null; users: { email: string; name: string }[]; _count: { numbers: number; users: number; conversations: number } }
+export const useTenants = () => useQuery({ queryKey: ['tenants'], queryFn: () => api<TenantRow[]>('/tenants') });
+export const useCreateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; slug: string; planId: string; adminEmail: string; adminName: string; adminPassword: string }) => api('/tenants', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tenants'] }) }); };
+export const useUpdateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) => api(`/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); } }); };
+export const useImpersonate = () => useMutation({ mutationFn: (tenantId: string) => api<{ accessToken: string; tenant: { id: string; name: string } }>(`/tenants/${tenantId}/impersonate`, { method: 'POST' }) });
