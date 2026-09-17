@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { Plus, Pencil, Trash2, Tag as TagIcon } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
-import { Modal, Field, inputCls, btnPrimary, btnGhost } from '@/components/ui/Modal';
+import { Modal, Field, inputCls } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag, useMe, type Tag } from '@/lib/hooks';
@@ -40,7 +41,7 @@ export default function TagsPage() {
       <PageHeader
         title="Tags"
         subtitle="Classifique conversas durante o atendimento. As tags viram filtros e relatórios."
-        action={isAdmin && <button onClick={() => setEditing({ color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })} className={btnPrimary}><Plus size={16} className="inline mr-1 -mt-0.5" /> Nova tag</button>}
+        action={isAdmin && <Button onClick={() => setEditing({ color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })} icon={<Plus size={16} />}>Nova tag</Button>}
       />
 
       {tags.isLoading && <SkeletonRows rows={4} />}
@@ -78,8 +79,8 @@ export default function TagsPage() {
             Prévia: <span className="text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: editing?.color }}>{editing?.name || 'nome da tag'}</span>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setEditing(null)} className={btnGhost}>Cancelar</button>
-            <button disabled={create.isPending || update.isPending} className={btnPrimary}>Salvar</button>
+            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancelar</Button>
+            <Button type="submit" loading={create.isPending || update.isPending} loadingText="Salvando…">Salvar</Button>
           </div>
         </form>
       </Modal>
@@ -91,7 +92,7 @@ export default function TagsPage() {
         danger
         confirmLabel="Excluir"
         text={`A tag "${deleting?.name}" será removida de ${deleting?._count?.conversations ?? 0} conversa(s). Relatórios antigos deixam de contá-la.`}
-        onConfirm={() => deleting && remove.mutateAsync(deleting.id).then(() => toast.ok('Tag excluída')).catch(toast.err)}
+        onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Tag excluída'); } catch (err) { toast.err(err); throw err; } }}
       />
     </PageShell>
   );

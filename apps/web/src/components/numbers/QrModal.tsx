@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
-import { Modal, btnGhost } from '@/components/ui/Modal';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { useConnectNumber, useNumberQr, useNumbers } from '@/lib/hooks';
+import { toast } from '@/components/ui/Toast';
 
 /**
  * Mostra o QR da Evolution. O QR inicial vem da resposta de connect/create;
@@ -68,15 +70,16 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
             <p className="text-xs text-gray-400">O QR expira em ~40s. Se expirar, gere outro.</p>
           </>
         ) : (
-          <p className="py-8 text-sm text-gray-500">Gerando QR code…</p>
+          <div className="py-8 text-gray-500 text-sm">
+            <div className="w-64 h-64 mx-auto rounded-lg border border-surface-border bg-surface-muted animate-pulse mb-3" />
+            Gerando QR code… (a Evolution leva alguns segundos)
+          </div>
         )}
         <div className="flex justify-center gap-2">
           {!connected && (
-            <button onClick={refresh} disabled={connect.isPending} className={btnGhost}>
-              <RefreshCw size={14} className={`inline mr-1 ${connect.isPending ? 'animate-spin' : ''}`} /> Gerar novo QR
-            </button>
+            <Button variant="ghost" icon={<RefreshCw size={14} />} onClick={() => refresh().catch(toast.err)} loading={connect.isPending} loadingText="Gerando…">Gerar novo QR</Button>
           )}
-          <button onClick={onClose} className={btnGhost}>{connected ? 'Fechar' : 'Depois'}</button>
+          <Button variant="ghost" onClick={onClose}>{connected ? 'Fechar' : 'Depois'}</Button>
         </div>
       </div>
     </Modal>

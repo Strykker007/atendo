@@ -30,6 +30,9 @@ export class UsageService {
     direction: MessageDirection;
     billingCategory: BillingCategory;
   }) {
+    // Idempotente: uma mensagem só entra no ledger uma vez (retry/reenvio não pode contar de novo)
+    const exists = await this.prisma.messageUsage.findUnique({ where: { messageId: input.messageId }, select: { id: true } });
+    if (exists) return;
     const providerCost = await this.pricing.unitCost(input.provider, input.billingCategory);
     await this.prisma.messageUsage.create({ data: { ...input, providerCost } });
 

@@ -90,6 +90,8 @@ Painel ──POST /conversations/:id/messages──▶ ConversationsService.send
 
 Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avança, nunca regride.
 
+**Garantia de entrega única.** Depois que `provider.send()` retorna, a mensagem *já está no celular do contato*. Por isso o processor grava o `externalId` imediatamente e trata contabilidade (ledger/uso) como best-effort — um erro ali é logado, nunca vira `failed` nem retry. E um job que encontra mensagem `pending` **com `externalId`** não reenvia: só corrige o status. `UsageService.record` é idempotente por `messageId`. (Esse bug aconteceu de verdade: o ledger falhou por chave duplicada num reenvio, o retry reenviou e o contato recebeu em dobro.)
+
 ## Tempo real
 
 `ConversationsGateway` (Socket.IO). O cliente conecta com `auth.token` = access token; o gateway valida o JWT e coloca o socket na sala `tenant:<id>`. Eventos:

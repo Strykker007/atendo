@@ -141,4 +141,6 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 
 **Conectou e logo depois voltou para "Aguardando QR"** — o celular removeu o dispositivo (`conflict: device_removed` no log da Evolution). Costuma acontecer ao apagar o dispositivo "antigo" em *Dispositivos conectados* depois de já ter escaneado o novo: os dois aparecem com o mesmo nome. Ordem certa: **primeiro** remova os dispositivos antigos no celular, **depois** escaneie. Para reconectar basta *Conectar (QR)* — o adapter descarta a sessão morta e gera QR novo.
 
+**A mensagem chega no celular mas aparece como falha no painel** — o envio deu certo e algo *depois* dele falhou. Veja o erro na bolha/log. Desde 2026-09-17 a contabilidade pós-envio não marca mais falha nem reenvia (ver [03 › Garantia de entrega única](03-arquitetura.md)). Se ainda acontecer, é bug novo: abra o log da API.
+
 **QR expirou / status voltou para Desconectado** — normal, o QR vale ~40 s. Clique em *Conectar (QR)* de novo.

@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { Plus, Pencil, Trash2, Folder, Zap, GripVertical } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
-import { Modal, Field, inputCls, btnPrimary, btnGhost } from '@/components/ui/Modal';
+import { Modal, Field, inputCls } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
@@ -50,7 +51,7 @@ export default function ConfiguracoesPage() {
       <PageHeader
         title="Respostas rápidas"
         subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Variáveis: <code className="bg-surface-muted px-1 rounded">{'{{contact.name}}'}</code> <code className="bg-surface-muted px-1 rounded">{'{{agent.name}}'}</code></>}
-        action={<button onClick={() => setFolderModal({ name: '' })} className={btnPrimary}><Plus size={16} className="inline mr-1 -mt-0.5" /> Nova pasta</button>}
+        action={<Button onClick={() => setFolderModal({ name: '' })} icon={<Plus size={16} />}>Nova pasta</Button>}
       />
 
       {folders.isLoading && <SkeletonRows rows={3} />}
@@ -88,7 +89,7 @@ export default function ConfiguracoesPage() {
       <Modal open={!!folderModal} onClose={() => setFolderModal(null)} title={folderModal?.id ? 'Renomear pasta' : 'Nova pasta'} width="max-w-sm">
         <form onSubmit={saveFolder} className="space-y-4">
           <Field label="Nome"><input className={inputCls} value={folderModal?.name ?? ''} onChange={(e) => setFolderModal({ ...folderModal!, name: e.target.value })} maxLength={60} required autoFocus /></Field>
-          <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setFolderModal(null)} className={btnGhost}>Cancelar</button><button className={btnPrimary}>Salvar</button></div>
+          <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={() => setFolderModal(null)}>Cancelar</Button><Button type="submit" loading={createFolder.isPending || updateFolder.isPending} loadingText="Salvando…">Salvar</Button></div>
         </form>
       </Modal>
 
@@ -104,7 +105,7 @@ export default function ConfiguracoesPage() {
               <button type="button" key={v} onClick={() => setReplyModal({ ...replyModal!, body: (replyModal?.body ?? '') + v })} className="rounded bg-surface-muted px-1.5 py-0.5 font-mono hover:bg-gray-200">{v}</button>
             ))}
           </div>
-          <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setReplyModal(null)} className={btnGhost}>Cancelar</button><button className={btnPrimary}>Salvar</button></div>
+          <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={() => setReplyModal(null)}>Cancelar</Button><Button type="submit" loading={createReply.isPending || updateReply.isPending} loadingText="Salvando…">Salvar</Button></div>
         </form>
       </Modal>
 
@@ -115,7 +116,7 @@ export default function ConfiguracoesPage() {
         danger
         confirmLabel="Excluir"
         text={confirm?.kind === 'folder' ? `A pasta "${confirm.name}" e suas ${confirm.count} resposta(s) serão removidas.` : `A resposta "${confirm?.name}" será removida.`}
-        onConfirm={() => confirm && (confirm.kind === 'folder' ? deleteFolder : deleteReply).mutateAsync(confirm.id).then(() => toast.ok('Excluído')).catch(toast.err)}
+        onConfirm={async () => { if (!confirm) return; try { await (confirm.kind === 'folder' ? deleteFolder : deleteReply).mutateAsync(confirm.id); toast.ok('Excluído'); } catch (err) { toast.err(err); throw err; } }}
       />
     </PageShell>
   );

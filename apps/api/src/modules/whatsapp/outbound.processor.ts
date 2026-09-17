@@ -34,6 +34,13 @@ export class OutboundProcessor extends WorkerHost {
       include: { conversation: { include: { contact: true } } },
     });
     if (!message || message.status !== 'pending') return;
+    // Já foi entregue ao provider numa tentativa anterior (ex.: falhou só a contabilidade):
+    // NUNCA reenviar — o cliente receberia em dobro. Só conserta o status.
+    if (message.externalId) {
+      const fixed = await this.prisma.message.update({ where: { id: message.id }, data: { status: 'sent', error: null } });
+      this.gateway.emitMessage(ctxTenant(message), this.conversations.present(fixed));
+      return;
+    }
 
     const ctx = await this.numbers.context(message.conversation.numberId);
     const provider = this.registry.get(ctx.provider);
@@ -53,21 +60,9 @@ export class OutboundProcessor extends WorkerHost {
       ? { ...(await this.storage.get(message.mediaUrl)), fileName: message.mediaName ?? undefined }
       : undefined;
 
+    let result;
     try {
-      const result = await provider.send(ctx, outbound, media);
-      const updated = await this.prisma.message.update({
-        where: { id: message.id },
-        data: { status: result.status, externalId: result.externalId },
-      });
-      await this.usage.record({
-        tenantId: ctx.tenantId,
-        numberId: ctx.numberId,
-        messageId: message.id,
-        provider: ctx.provider,
-        direction: 'out',
-        billingCategory: result.billingCategory,
-      });
-      this.gateway.emitMessage(ctx.tenantId, this.conversations.present(updated));
+      result = await provider.send(ctx, outbound, media);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.log.error(`Falha ao enviar ${message.id}: ${error}`);
@@ -77,5 +72,27 @@ export class OutboundProcessor extends WorkerHost {
       }
       throw err;
     }
+
+    // A partir daqui a mensagem JÁ FOI ENTREGUE. Erro de contabilidade não pode marcar falha
+    // nem provocar retry (que reenviaria). Grava o externalId primeiro, o resto é best-effort.
+    const updated = await this.prisma.message.update({
+      where: { id: message.id },
+      data: { status: result.status, externalId: result.externalId, error: null },
+    });
+    this.gateway.emitMessage(ctx.tenantId, this.conversations.present(updated));
+    try {
+      await this.usage.record({
+        tenantId: ctx.tenantId,
+        numberId: ctx.numberId,
+        messageId: message.id,
+        provider: ctx.provider,
+        direction: 'out',
+        billingCategory: result.billingCategory,
+      });
+    } catch (err) {
+      this.log.error(`Uso não registrado para ${message.id} (mensagem foi entregue): ${err instanceof Error ? err.message : err}`);
+    }
   }
 }
+
+const ctxTenant = (m: { conversation: { tenantId: string } }) => m.conversation.tenantId;

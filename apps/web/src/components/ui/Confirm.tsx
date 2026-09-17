@@ -1,14 +1,31 @@
 'use client';
-import { Modal, btnGhost } from './Modal';
+import { useState } from 'react';
+import { Modal } from './Modal';
+import { Button } from './Button';
 
-/** Substitui window.confirm — funciona em qualquer navegador e segue o visual do app. */
-export function ConfirmDialog({ open, title, text, confirmLabel = 'Confirmar', danger, onConfirm, onClose }: { open: boolean; title: string; text: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void; onClose: () => void }) {
+/**
+ * Substitui window.confirm. `onConfirm` pode ser async: o botão mostra spinner
+ * até terminar e o diálogo só fecha quando der certo.
+ */
+export function ConfirmDialog({ open, title, text, confirmLabel = 'Confirmar', danger, onConfirm, onClose }: { open: boolean; title: string; text: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void | Promise<unknown>; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function confirm() {
+    setBusy(true);
+    try {
+      await onConfirm();
+      onClose();
+    } catch {
+      /* quem chamou já mostrou o toast */
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-sm">
+    <Modal open={open} onClose={busy ? () => undefined : onClose} title={title} width="max-w-sm">
       <p className="text-sm text-gray-600">{text}</p>
       <div className="flex justify-end gap-2 pt-5">
-        <button onClick={onClose} className={btnGhost}>Cancelar</button>
-        <button onClick={() => { onConfirm(); onClose(); }} className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-brand hover:bg-brand-hover'}`}>{confirmLabel}</button>
+        <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
+        <Button variant={danger ? 'danger' : 'primary'} onClick={confirm} loading={busy}>{confirmLabel}</Button>
       </div>
     </Modal>
   );

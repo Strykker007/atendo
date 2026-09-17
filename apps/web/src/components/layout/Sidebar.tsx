@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard } from 'lucide-react';
+import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -27,7 +27,9 @@ export function Sidebar() {
   const [target, setTarget] = useState<string | null>(null);
   useEffect(() => { if (!pending) setTarget(null); }, [pending]);
 
+  const [leaving, setLeaving] = useState(false);
   async function logout() {
+    setLeaving(true);
     await api('/auth/logout', { method: 'POST' }).catch(() => undefined);
     setAccessToken(null);
     window.location.href = '/login';
@@ -61,8 +63,8 @@ export function Sidebar() {
         })}
       </nav>
       <div className="border-t border-surface-border p-2 space-y-1">
-        <button onClick={logout} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-surface-muted', collapsed && 'justify-center px-0')}>
-          <LogOut size={18} /> {!collapsed && 'Sair'}
+        <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-surface-muted disabled:opacity-60', collapsed && 'justify-center px-0')}>
+          {leaving ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />} {!collapsed && (leaving ? 'Saindo…' : 'Sair')}
         </button>
         <button onClick={toggleSidebar} className="w-full flex items-center justify-center rounded-lg py-2 text-gray-400 hover:bg-surface-muted" title={collapsed ? 'Expandir' : 'Recolher'}>
           {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}

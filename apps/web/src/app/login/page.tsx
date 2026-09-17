@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, setAccessToken } from '@/lib/api';
+import { Button } from '@/components/ui/Button';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -41,9 +42,7 @@ export default function LoginPage() {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} className="mt-1 w-full rounded-lg border border-surface-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/40" />
         </label>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <button disabled={loading} className="w-full rounded-lg bg-brand hover:bg-brand-hover text-white py-2 font-medium disabled:opacity-60">
-          {loading ? 'Entrando…' : 'Entrar'}
-        </button>
+        <Button type="submit" className="w-full" loading={loading} loadingText="Entrando…">Entrar</Button>
       </form>
     </main>
   );

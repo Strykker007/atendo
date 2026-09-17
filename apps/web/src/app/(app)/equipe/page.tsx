@@ -4,7 +4,8 @@ import { Plus, KeyRound, Power, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
-import { Modal, Field, inputCls, btnPrimary, btnGhost } from '@/components/ui/Modal';
+import { Modal, Field, inputCls } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, type Agent } from '@/lib/hooks';
 
@@ -17,6 +18,19 @@ export default function EquipePage() {
   const update = useUpdateAgent();
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<Agent | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  async function toggle(a: Agent) {
+    setTogglingId(a.id);
+    try {
+      await update.mutateAsync({ id: a.id, isActive: !a.isActive });
+      toast.ok(a.isActive ? 'Atendente desativado' : 'Atendente ativado');
+    } catch (err) {
+      toast.err(err);
+    } finally {
+      setTogglingId(null);
+    }
+  }
 
   const max = usage.data?.limits?.maxAgents;
   const count = usage.data?.used.agents ?? 0;
@@ -27,7 +41,7 @@ export default function EquipePage() {
       <PageHeader
         title="Equipe"
         subtitle={<>Quem atende as conversas. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} atendentes.</>}</>}
-        action={isAdmin && <button onClick={() => setCreating(true)} disabled={full} className={btnPrimary} title={full ? 'Limite do plano atingido' : undefined}><Plus size={16} className="inline mr-1 -mt-0.5" /> Novo atendente</button>}
+        action={isAdmin && <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo atendente</Button>}
       />
 
       {full && <p className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-2 text-sm text-amber-800">Limite de atendentes do plano atingido. Desative alguém ou faça upgrade em <b>Plano e uso</b>.</p>}
@@ -52,7 +66,7 @@ export default function EquipePage() {
                     {isAdmin && a.role === 'agent' && (
                       <>
                         <button onClick={() => setResetting(a)} className="text-gray-400 hover:text-gray-700 p-1" title="Redefinir senha"><KeyRound size={15} /></button>
-                        <button onClick={() => update.mutateAsync({ id: a.id, isActive: !a.isActive }).then(() => toast.ok(a.isActive ? 'Atendente desativado' : 'Atendente ativado')).catch(toast.err)} className={cn('p-1', a.isActive ? 'text-gray-400 hover:text-red-600' : 'text-brand')} title={a.isActive ? 'Desativar' : 'Ativar'}><Power size={15} /></button>
+                        <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-gray-400 hover:text-red-600' : 'text-brand')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
                       </>
                     )}
                   </td>
@@ -77,7 +91,7 @@ function CreateAgentModal({ open, onClose, onSubmit, pending }: { open: boolean;
         <Field label="Nome"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required autoFocus /></Field>
         <Field label="E-mail"><input type="email" className={inputCls} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></Field>
         <Field label="Senha inicial" hint="Mínimo 8 caracteres. Envie ao atendente por um canal seguro."><input type="text" className={inputCls} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} minLength={8} required /></Field>
-        <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={onClose} className={btnGhost}>Cancelar</button><button disabled={pending} className={btnPrimary}>Criar</button></div>
+        <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText="Criando…">Criar</Button></div>
       </form>
     </Modal>
   );
@@ -89,7 +103,7 @@ function ResetPasswordModal({ agent, onClose, onSubmit, pending }: { agent: Agen
     <Modal open={!!agent} onClose={onClose} title={`Redefinir senha · ${agent?.name ?? ''}`} width="max-w-sm">
       <form onSubmit={(e) => { e.preventDefault(); onSubmit(p); setP(''); }} className="space-y-4">
         <Field label="Nova senha" hint="As sessões ativas deste atendente serão encerradas."><input type="text" className={inputCls} value={p} onChange={(e) => setP(e.target.value)} minLength={8} required autoFocus /></Field>
-        <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={onClose} className={btnGhost}>Cancelar</button><button disabled={pending} className={btnPrimary}>Redefinir</button></div>
+        <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText="Redefinindo…">Redefinir</Button></div>
       </form>
     </Modal>
   );

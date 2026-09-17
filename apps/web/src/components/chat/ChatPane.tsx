@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Paperclip, FileText, Download, X, RefreshCw, WifiOff } from 'lucide-react';
 import Link from 'next/link';
+import { Button } from '@/components/ui/Button';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
@@ -102,17 +103,18 @@ export function ChatPane() {
             {conv.assignee && ` · ${conv.assignee.name}`}
           </div>
         </div>
-        <div className="hidden lg:block w-72">
+        <div className="hidden lg:block w-72 relative">
+          {setTags.isPending && <span className="absolute -top-3 right-0 text-[10px] text-gray-400">salvando…</span>}
           <TagPicker compact tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} placeholder="Adicionar tag" />
         </div>
         {conv.status !== 'closed' ? (
-          <button onClick={() => setStatus.mutate({ id: conv.id, status: 'closed' })} title="Encerrar atendimento" className="inline-flex items-center gap-1 text-xs rounded-lg border border-surface-border px-2.5 py-1.5 text-gray-600 hover:bg-surface-muted">
-            <CheckCircle2 size={14} /> <span className="hidden sm:inline">Encerrar</span>
-          </button>
+          <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'closed' }).then(() => toast.ok('Atendimento encerrado')).catch(toast.err)} title="Encerrar atendimento">
+            <span className="hidden sm:inline">Encerrar</span>
+          </Button>
         ) : (
-          <button onClick={() => setStatus.mutate({ id: conv.id, status: 'in_progress' })} title="Reabrir" className="inline-flex items-center gap-1 text-xs rounded-lg border border-surface-border px-2.5 py-1.5 text-gray-600 hover:bg-surface-muted">
-            <RotateCcw size={14} /> <span className="hidden sm:inline">Reabrir</span>
-          </button>
+          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => toast.ok('Conversa reaberta')).catch(toast.err)} title="Reabrir">
+            <span className="hidden sm:inline">Reabrir</span>
+          </Button>
         )}
         <button onClick={toggleRightPanel} className="hidden xl:block text-gray-400 hover:text-gray-600" title="Respostas rápidas">
           {rightPanelOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
@@ -164,9 +166,7 @@ export function ChatPane() {
           )}
           <div className="flex items-end gap-2">
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept="image/*,audio/*,video/mp4,application/pdf,.doc,.docx,.xls,.xlsx" />
-          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} title="Anexar arquivo" className="w-10 h-10 rounded-full text-gray-500 hover:bg-surface-muted grid place-items-center disabled:opacity-50">
-            <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
-          </button>
+          <Button type="button" variant="ghost" className="w-10 h-10 rounded-full p-0 border-0 bg-transparent text-gray-500" onClick={() => fileRef.current?.click()} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -175,9 +175,7 @@ export function ChatPane() {
             placeholder={attachment ? 'Legenda (opcional)' : 'Digite uma mensagem (Enter envia, Shift+Enter quebra linha)'}
             className="flex-1 resize-none max-h-40 rounded-xl bg-surface-muted px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
           />
-          <button disabled={(!text.trim() && !attachment) || send.isPending || uploading} className="w-10 h-10 rounded-full bg-brand hover:bg-brand-hover text-white grid place-items-center disabled:opacity-50">
-            <Send size={18} />
-          </button>
+          <Button type="submit" className="w-10 h-10 rounded-full p-0" disabled={(!text.trim() && !attachment) || uploading} loading={send.isPending} icon={<Send size={18} />} title="Enviar" />
           </div>
         </form>
       )}

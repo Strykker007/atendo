@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { Modal, Field, inputCls, btnPrimary, btnGhost } from '@/components/ui/Modal';
+import { Modal, Field, inputCls } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { ProviderForm, toConfig, useProviderState } from './ProviderForm';
 import { useCreateNumber, useSwitchProvider, type NumberItem } from '@/lib/hooks';
 
@@ -35,8 +36,8 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
         <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} />
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className={btnGhost}>Cancelar</button>
-          <button disabled={create.isPending} className={btnPrimary}>{create.isPending ? 'Criando…' : ps.provider === 'evolution' ? 'Criar e gerar QR' : 'Criar e validar'}</button>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={create.isPending}>Cancelar</Button>
+          <Button type="submit" loading={create.isPending} loadingText={ps.provider === 'evolution' ? 'Criando e gerando QR…' : 'Validando na Meta…'}>{ps.provider === 'evolution' ? 'Criar e gerar QR' : 'Criar e validar'}</Button>
         </div>
       </form>
     </Modal>
@@ -74,8 +75,8 @@ export function SwitchProviderModal({ number, onClose, onDone }: { number: Numbe
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className={btnGhost}>Cancelar</button>
-          <button disabled={sw.isPending || ps.provider === number?.provider} className={btnPrimary}>{sw.isPending ? 'Trocando…' : 'Trocar agora'}</button>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={sw.isPending}>Cancelar</Button>
+          <Button type="submit" loading={sw.isPending} loadingText="Trocando…" disabled={ps.provider === number?.provider}>Trocar agora</Button>
         </div>
       </form>
     </Modal>

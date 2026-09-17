@@ -4,7 +4,7 @@ import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Sm
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, type NumberItem } from '@/lib/hooks';
-import { btnPrimary } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
 import { QrModal } from '@/components/numbers/QrModal';
@@ -31,16 +31,37 @@ export default function NumerosPage() {
   const max = usage.data?.limits?.maxNumbers as number | undefined;
   const count = numbers.data?.filter((n) => n.isActive).length ?? 0;
 
+  const [busyId, setBusyId] = useState<string | null>(null); // qual card está com ação em andamento
+
   const afterConnect = (r: { id: string; qrCode?: string; provider: string }) => {
     if (r.provider === 'evolution') setQr({ id: r.id, initial: r.qrCode });
   };
 
   async function reconnect(n: NumberItem) {
+    setBusyId(n.id);
+    // Evolution: abre o modal na hora em "Gerando QR…" — o QR chega quando a API responder
+    if (n.provider === 'evolution') setQr({ id: n.id });
     try {
       const r = await connect.mutateAsync(n.id);
       if (n.provider === 'evolution') setQr({ id: n.id, initial: r.qrCode });
+      else toast.ok(r.status === 'connected' ? 'Credenciais válidas' : 'Não foi possível validar');
+    } catch (err) {
+      if (n.provider === 'evolution') setQr(null);
+      toast.err(err);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleActive(n: NumberItem) {
+    setBusyId(n.id);
+    try {
+      await update.mutateAsync({ id: n.id, isActive: !n.isActive });
+      toast.ok(n.isActive ? 'Número desativado' : 'Número ativado');
     } catch (err) {
       toast.err(err);
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -54,9 +75,7 @@ export default function NumerosPage() {
               Cada número é um canal de atendimento. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} números.</>}
             </p>
           </div>
-          <button onClick={() => setCreating(true)} disabled={max !== undefined && count >= max} className={btnPrimary}>
-            <Plus size={16} className="inline mr-1 -mt-0.5" /> Novo número
-          </button>
+          <Button onClick={() => setCreating(true)} disabled={max !== undefined && count >= max} icon={<Plus size={16} />}>Novo número</Button>
         </header>
 
         {numbers.isLoading && <SkeletonCards count={2} />}
@@ -90,16 +109,16 @@ export default function NumerosPage() {
                   {!n.isActive && <span className="text-xs text-gray-400">· desativado</span>}
                 </div>
 
-                <div className="flex flex-wrap gap-2 text-xs">
+                <div className="flex flex-wrap gap-2">
                   {n.provider === 'evolution' && n.status !== 'connected' && (
-                    <Action icon={<QrCode size={14} />} onClick={() => reconnect(n)} primary>Conectar (QR)</Action>
+                    <Button size="sm" icon={<QrCode size={14} />} onClick={() => reconnect(n)} loading={busyId === n.id && connect.isPending} loadingText="Gerando QR…">Conectar (QR)</Button>
                   )}
                   {(n.provider === 'meta' || n.status === 'connected') && (
-                    <Action icon={<RefreshCw size={14} />} onClick={() => reconnect(n)}>Revalidar</Action>
+                    <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => reconnect(n)} loading={busyId === n.id && connect.isPending} loadingText="Validando…">Revalidar</Button>
                   )}
-                  <Action icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)}>Trocar provider</Action>
-                  <Action icon={<Power size={14} />} onClick={() => update.mutate({ id: n.id, isActive: !n.isActive })}>{n.isActive ? 'Desativar' : 'Ativar'}</Action>
-                  <Action icon={<Trash2 size={14} />} danger onClick={() => setDeleting(n)}>Excluir</Action>
+                  <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)} disabled={busyId === n.id}>Trocar provider</Button>
+                  <Button size="sm" variant="ghost" icon={<Power size={14} />} onClick={() => toggleActive(n)} loading={busyId === n.id && update.isPending}>{n.isActive ? 'Desativar' : 'Ativar'}</Button>
+                  <Button size="sm" variant="subtle" icon={<Trash2 size={14} />} onClick={() => setDeleting(n)} disabled={busyId === n.id}>Excluir</Button>
                 </div>
               </div>
             );
@@ -117,22 +136,9 @@ export default function NumerosPage() {
         danger
         confirmLabel="Excluir"
         text={`"${deleting?.label}" será desconectado e todas as conversas dele serão removidas. Isso não pode ser desfeito.`}
-        onConfirm={() => deleting && remove.mutateAsync(deleting.id).then(() => toast.ok('Número excluído')).catch(toast.err)}
+        onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Número excluído'); } catch (err) { toast.err(err); throw err; } }}
       />
     </div>
   );
 }
 
-function Action({ icon, children, onClick, primary, danger }: { icon: React.ReactNode; children: React.ReactNode; onClick: () => void; primary?: boolean; danger?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 transition-colors',
-        primary ? 'border-brand bg-brand text-white hover:bg-brand-hover' : danger ? 'border-surface-border text-red-600 hover:bg-red-50' : 'border-surface-border text-gray-700 hover:bg-surface-muted',
-      )}
-    >
-      {icon} {children}
-    </button>
-  );
-}
