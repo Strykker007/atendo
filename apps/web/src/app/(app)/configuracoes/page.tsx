@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, Folder, Zap, GripVertical } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
+import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls, btnPrimary, btnGhost } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
@@ -52,6 +53,7 @@ export default function ConfiguracoesPage() {
         action={<button onClick={() => setFolderModal({ name: '' })} className={btnPrimary}><Plus size={16} className="inline mr-1 -mt-0.5" /> Nova pasta</button>}
       />
 
+      {folders.isLoading && <SkeletonRows rows={3} />}
       {folders.data?.length === 0 && <Empty icon={<Zap size={36} />} title="Nenhuma pasta" text='Crie uma pasta como "Saudações" ou "Pós-venda" e adicione respostas.' />}
 
       <div className="space-y-4">

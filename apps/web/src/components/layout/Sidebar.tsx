@@ -5,6 +5,8 @@ import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLe
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
+import { useNav } from './NavigationProgress';
+import { useEffect, useState } from 'react';
 
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
@@ -20,6 +22,10 @@ const items = [
 export function Sidebar() {
   const path = usePathname();
   const { sidebarCollapsed: collapsed, toggleSidebar } = useUI();
+  const pending = useNav((s) => s.pending);
+  // destino clicado: destaca imediatamente, mesmo antes de a rota carregar
+  const [target, setTarget] = useState<string | null>(null);
+  useEffect(() => { if (!pending) setTarget(null); }, [pending]);
 
   async function logout() {
     await api('/auth/logout', { method: 'POST' }).catch(() => undefined);
@@ -34,15 +40,17 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 py-2">
         {items.map(({ href, label, icon: Icon }) => {
-          const active = path.startsWith(href);
+          const active = target ? target === href : path.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
               title={label}
+              onClick={() => { if (!path.startsWith(href)) setTarget(href); }}
               className={cn(
                 'flex items-center gap-3 mx-2 my-0.5 rounded-lg px-3 py-2 text-sm transition-colors',
-                active ? 'bg-brand-soft text-brand font-medium' : 'text-gray-600 hover:bg-surface-muted',
+                active ? 'bg-brand-soft text-brand font-medium' : 'text-gray-600 hover:bg-surface-muted active:bg-surface-border',
+                target === href && pending && 'animate-pulse',
                 collapsed && 'justify-center px-0',
               )}
             >

@@ -62,6 +62,22 @@ src/
 - `conversation` → invalida `['conversations']`.
 - `number` → guarda `qrCode` em `['number-qr', id]` e invalida `['numbers']`.
 
+## Feedback de carregamento
+
+Regra: **nenhuma ação fica sem resposta visual**.
+
+| Situação | O que o usuário vê | Onde |
+|---|---|---|
+| Clicou num item do menu | Item muda para ativo na hora e pulsa; barra verde fina no topo avança até a rota trocar | `Sidebar` + `layout/NavigationProgress.tsx` (zustand `useNav`) |
+| Rota ainda compilando/carregando | Esqueleto genérico de página | `app/(app)/loading.tsx` |
+| Dados da tela carregando | Esqueleto específico (linhas, cards, conversas, bolhas) | `components/ui/Skeleton.tsx`, usado com `query.isLoading` |
+| Lista refazendo fetch em segundo plano | Linha fina pulsando acima da lista | `ConversationList` (`isFetching`) |
+| Troca de tela concluída | Conteúdo entra com fade de 180 ms | `.animate-fade-in` em `globals.css`, `key={pathname}` no layout |
+| Restaurando sessão ao abrir o app | Spinner "Entrando…" | `app/(app)/layout.tsx` |
+| Mutação (salvar, enviar) | Botão desabilitado + texto "Salvando…"/"Criando…" | cada formulário |
+
+Em **dev** o Next compila cada rota no primeiro acesso, por isso a primeira troca de tela demora alguns segundos; em produção (`pnpm build && pnpm start`) é quase instantâneo e os links são pré-carregados.
+
 ## Padrões
 
 - Componentes de página são `'use client'` (dependem de estado e socket).

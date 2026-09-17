@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, type NumberItem } from '@/lib/hooks';
 import { btnPrimary } from '@/components/ui/Modal';
+import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
 import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
@@ -58,6 +59,7 @@ export default function NumerosPage() {
           </button>
         </header>
 
+        {numbers.isLoading && <SkeletonCards count={2} />}
         {numbers.data?.length === 0 && (
           <div className="rounded-2xl border border-dashed border-surface-border bg-white p-12 text-center text-gray-500">
             <Smartphone size={36} className="mx-auto mb-3 text-gray-300" />

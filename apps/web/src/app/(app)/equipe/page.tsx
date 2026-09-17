@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Plus, KeyRound, Power, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
+import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls, btnPrimary, btnGhost } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
 import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, type Agent } from '@/lib/hooks';
@@ -31,6 +32,7 @@ export default function EquipePage() {
 
       {full && <p className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-2 text-sm text-amber-800">Limite de atendentes do plano atingido. Desative alguém ou faça upgrade em <b>Plano e uso</b>.</p>}
 
+      {agents.isLoading && <SkeletonRows rows={3} />}
       {agents.data?.length === 0 && <Empty icon={<Users size={36} />} title="Nenhum usuário" text="Adicione atendentes para dividir o atendimento." />}
 
       {!!agents.data?.length && (

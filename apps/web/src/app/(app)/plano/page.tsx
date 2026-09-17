@@ -2,6 +2,7 @@
 import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
+import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
 import { useUsage } from '@/lib/hooks';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -15,7 +16,13 @@ const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', curren
 
 export default function PlanoPage() {
   const { data: u } = useUsage();
-  if (!u) return <PageShell><p className="text-sm text-gray-400">Carregando…</p></PageShell>;
+  if (!u) return (
+    <PageShell width="max-w-4xl">
+      <PageHeader title="Plano e uso" subtitle="Carregando consumo…" />
+      <div className="rounded-2xl bg-white border border-surface-border p-5 flex gap-6"><Skeleton className="w-12 h-12 rounded-xl" /><Skeleton className="h-10 flex-1" /></div>
+      <SkeletonCards count={4} />
+    </PageShell>
+  );
   if (!u.limits) return <PageShell><PageHeader title="Plano e uso" /><p className="text-sm text-gray-500">Este cliente não tem assinatura. Fale com o suporte.</p></PageShell>;
 
   const L = u.limits;

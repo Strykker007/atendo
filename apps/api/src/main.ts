@@ -15,7 +15,8 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: '30mb' });
   app.useBodyParser('urlencoded', { limit: '30mb', extended: true });
 
-  app.use(helmet());
+  // CORP 'same-origin' (padrão do helmet) impediria <img src="http://api/media/..."> na web em outra origem
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.enableCors({ origin: env.WEB_ORIGIN, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   app.enableShutdownHooks();

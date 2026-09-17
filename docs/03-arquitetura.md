@@ -118,7 +118,7 @@ No front, `useRealtime()` aplica os eventos direto no cache do react-query.
 | Webhooks | Meta: HMAC SHA-256 do corpo bruto com `META_APP_SECRET`. Evolution: token por instância derivado por HMAC da chave global |
 | Injeção | Prisma sempre; relatórios usam `Prisma.sql` com placeholders, dimensões/métricas de lista fechada |
 | Brute force | `@nestjs/throttler` global (120/min) e 10/min no login |
-| Headers | helmet |
+| Headers | helmet, com `Cross-Origin-Resource-Policy: cross-origin` (senão o navegador bloqueia `<img>` do storage servido pela API em outra origem) |
 | Input | `ValidationPipe` com `whitelist` + `forbidNonWhitelisted` — campo desconhecido = 400 |
 
 ## Storage de mídia

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { useConversations, useNumbers, useTags, type Conversation } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
+import { SkeletonConversations } from '@/components/ui/Skeleton';
 
 const STATUS: { value: ConversationStatus; label: string }[] = [
   { value: 'waiting', label: 'Aguardando' },
@@ -78,7 +79,8 @@ export function ConversationList() {
 
       {/* Lista */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {conversations.isLoading && <p className="p-4 text-sm text-gray-400">Carregando…</p>}
+        {conversations.isLoading && <SkeletonConversations />}
+        {conversations.isFetching && !conversations.isLoading && <div className="h-0.5 bg-brand/40 animate-pulse" />}
         {conversations.data?.length === 0 && <p className="p-6 text-sm text-gray-400 text-center">Nenhuma conversa aqui.</p>}
         {conversations.data?.map((c) => (
           <ConversationRow key={c.id} c={c} active={c.id === conversationId} onClick={() => setConversation(c.id)} showNumber={!numberId} />

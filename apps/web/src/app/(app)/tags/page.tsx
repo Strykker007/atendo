@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, Tag as TagIcon } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
+import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls, btnPrimary, btnGhost } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
@@ -42,6 +43,7 @@ export default function TagsPage() {
         action={isAdmin && <button onClick={() => setEditing({ color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })} className={btnPrimary}><Plus size={16} className="inline mr-1 -mt-0.5" /> Nova tag</button>}
       />
 
+      {tags.isLoading && <SkeletonRows rows={4} />}
       {tags.data?.length === 0 && <Empty icon={<TagIcon size={36} />} title="Nenhuma tag" text='Crie tags como "lead com interesse" ou "comprador recorrente".' />}
 
       {!!tags.data?.length && (

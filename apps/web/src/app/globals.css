@@ -14,5 +14,8 @@ body { @apply bg-surface-muted text-gray-900 antialiased; }
   background-image: radial-gradient(#d9d3c7 0.6px, transparent 0.6px);
   background-size: 18px 18px;
 }
+@keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+.animate-fade-in { animation: fade-in .18s ease-out; }
+
 .scrollbar-thin::-webkit-scrollbar { width: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }

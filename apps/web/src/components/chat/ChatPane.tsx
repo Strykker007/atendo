@@ -124,6 +124,13 @@ export function ChatPane() {
 
       {/* Mensagens */}
       <div className="flex-1 overflow-y-auto chat-bg px-4 py-3 space-y-1.5 scrollbar-thin">
+        {messages.isLoading && (
+          <div className="space-y-2 pt-2">
+            {[60, 40, 75, 35].map((w, i) => (
+              <div key={i} className={i % 2 ? 'flex justify-end' : 'flex'}><div className="animate-pulse rounded-lg bg-white/70 h-9" style={{ width: `${w}%` }} /></div>
+            ))}
+          </div>
+        )}
         {messages.data?.map((m) => <Bubble key={m.id} m={m} />)}
         <div ref={bottomRef} />
       </div>
