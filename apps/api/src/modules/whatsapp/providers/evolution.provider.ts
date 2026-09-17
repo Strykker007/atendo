@@ -51,6 +51,11 @@ export class EvolutionProvider implements WhatsAppProvider {
     // e o WhatsApp derruba a primeira ("conflict: replaced") — envio passa a falhar.
     const state = await this.api<any>(`/instance/connectionState/${name}`).catch(() => null);
     if (state?.instance?.state === 'open') return { status: NumberStatus.CONNECTED };
+    // 'close' = sessão caiu ou o celular removeu o dispositivo. O usuário pediu QR: descarta
+    // as credenciais antigas para a Evolution gerar um pareamento novo em vez de tentar reconectar.
+    if (state?.instance?.state === 'close') {
+      await this.api(`/instance/logout/${name}`, { method: 'DELETE' }).catch(() => undefined);
+    }
 
     // cria se não existir; se já existe seguimos direto para o QR
     const created = await this.api<any>('/instance/create', {
@@ -174,7 +179,9 @@ export class EvolutionProvider implements WhatsAppProvider {
       }
       case 'connection.update': {
         const phone = typeof data?.wuid === 'string' ? data.wuid.replace(/@.*$/, '') : undefined;
-        out.connection = { externalNumberId, status: this.mapConnection(data?.state), phone };
+        // statusReason 401 = deslogado pelo celular (device_removed / logged out)
+        const loggedOut = data?.state === 'close' && Number(data?.statusReason) === 401;
+        out.connection = { externalNumberId, status: this.mapConnection(data?.state), phone, transient: data?.state === 'connecting', loggedOut };
         break;
       }
       case 'qrcode.updated':

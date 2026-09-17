@@ -139,4 +139,6 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 
 **Responder dá "Connection Closed"** e o log da Evolution repete `stream:error … conflict type=replaced` — a sessão do WhatsApp foi substituída (QR escaneado duas vezes, ou "Gerar novo QR" depois de já ter lido). Solução: no celular remova o dispositivo "Evolution/Chrome" em *Dispositivos conectados*; na Evolution apague a instância (`curl -X DELETE localhost:8080/instance/delete/<nome> -H "apikey: $EVOLUTION_API_KEY"`); em *Números* clique *Conectar (QR)* e escaneie **uma vez só**. O `connect()` do adapter já não reabre uma sessão que está `open`, então clicar de novo não causa mais isso.
 
+**Conectou e logo depois voltou para "Aguardando QR"** — o celular removeu o dispositivo (`conflict: device_removed` no log da Evolution). Costuma acontecer ao apagar o dispositivo "antigo" em *Dispositivos conectados* depois de já ter escaneado o novo: os dois aparecem com o mesmo nome. Ordem certa: **primeiro** remova os dispositivos antigos no celular, **depois** escaneie. Para reconectar basta *Conectar (QR)* — o adapter descarta a sessão morta e gera QR novo.
+
 **QR expirou / status voltou para Desconectado** — normal, o QR vale ~40 s. Clique em *Conectar (QR)* de novo.

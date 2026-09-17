@@ -65,6 +65,8 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 
 **`providerConfig`:** `{ instanceName }`. O nome é gerado: `atendo-<8 chars do tenant>-<telefone>`.
 
+**Ciclo do QR (o que o adapter faz em `connect()`):** se a instância está `open`, não faz nada (reabrir criaria uma segunda sessão e o WhatsApp derrubaria a primeira). Se está `close`, faz `logout` antes de `connect` para descartar credenciais mortas e obter um pareamento novo. Caso contrário cria/conecta e devolve o QR.
+
 **Como conectamos:** `POST /instance/create` com `qrcode: true` e um `token` que nós geramos → resposta já traz o QR em base64. Se a instância existe, `GET /instance/connect/:name` gera QR novo.
 
 **Webhook global:** no compose, `WEBHOOK_GLOBAL_URL=http://host.docker.internal:4000/webhooks/evolution`. Todas as instâncias mandam para lá; o campo `instance` do corpo diz qual número é.
@@ -84,7 +86,7 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 |---|---|
 | `messages.upsert` | Mensagens de contatos (ignora `fromMe` e grupos `@g.us`) |
 | `messages.update` | Status: `SERVER_ACK`→sent, `DELIVERY_ACK`→delivered, `READ`→read |
-| `connection.update` | `open`→connected, `connecting`→pending_qr, resto→disconnected. Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone do número é corrigido |
+| `connection.update` | `open`→connected; `connecting` é **transitório** (o WhatsApp reinicia o socket logo após parear) e não derruba um número já conectado; `close` com `statusReason 401`→ deslogado pelo celular (dispositivo removido). Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone é corrigido |
 | `qrcode.updated` | QR novo → painel atualiza pelo socket |
 
 ### Mídia

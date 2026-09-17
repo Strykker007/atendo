@@ -1,5 +1,5 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Modal, btnGhost } from '@/components/ui/Modal';
@@ -16,8 +16,20 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
   const live = useNumberQr(numberId);
   const connect = useConnectNumber();
   const number = numbers.data?.find((n) => n.id === numberId);
-  const qr = live.data ?? initialQr;
   const connected = number?.status === 'connected';
+  // depois de conectar, QR antigo (do connect inicial) não vale mais: só um QR novo vindo do socket
+  const [seenConnected, setSeenConnected] = useState(false);
+  useEffect(() => { if (connected) setSeenConnected(true); }, [connected]);
+  useEffect(() => { setSeenConnected(false); }, [numberId]);
+  const qr = live.data ?? (seenConnected ? undefined : initialQr);
+  const syncing = !connected && !qr && seenConnected;
+
+  // conectou: fecha sozinho depois de mostrar a confirmação
+  useEffect(() => {
+    if (!connected || !numberId) return;
+    const t = setTimeout(onClose, 1800);
+    return () => clearTimeout(t);
+  }, [connected, numberId, onClose]);
 
   // Segurança além do socket: enquanto o modal está aberto e não conectou, consulta a cada 3 s
   useEffect(() => {
@@ -39,6 +51,11 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
           <div className="py-8 text-brand">
             <CheckCircle2 size={56} className="mx-auto" />
             <p className="mt-3 font-medium">Número conectado!</p>
+          </div>
+        ) : syncing ? (
+          <div className="py-8 text-gray-500 text-sm">
+            <div className="w-8 h-8 mx-auto rounded-full border-2 border-brand border-t-transparent animate-spin mb-3" />
+            Sincronizando com o celular… se o WhatsApp pedir um QR novo, ele aparece aqui.
           </div>
         ) : qr ? (
           <>

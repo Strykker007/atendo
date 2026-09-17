@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client';
@@ -14,6 +14,7 @@ const META_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class ConversationsService {
+  private readonly log = new Logger(ConversationsService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly usage: UsageService,
@@ -152,7 +153,11 @@ export class ConversationsService {
     this.gateway.emitMessage(m.conversation.tenantId, this.present(updated));
   }
 
-  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string }) {
+  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean }) {
+    // Logo após parear, o WhatsApp reinicia o socket ('connecting'): é sincronização, não queda.
+    // Um número já conectado não regride por causa disso.
+    if (c.transient && number.status === 'connected') return;
+    if (c.loggedOut) this.log.warn(`Número ${number.label} (${number.phone}) foi desconectado pelo celular (dispositivo removido)`);
     // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
     const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
     await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...(phone && { phone }) } }).catch(async (err) => {

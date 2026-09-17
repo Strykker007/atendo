@@ -19,7 +19,17 @@ export interface ParsedWebhook {
   messages: InboundMessage[];
   statuses: StatusUpdate[];
   /** mudanças de conexão (QR lido, desconectou) */
-  connection?: { externalNumberId: string; status: NumberStatus; qrCode?: string; /** telefone real que conectou (E.164 sem +), quando o provider informa */ phone?: string };
+  connection?: {
+    externalNumberId: string;
+    status: NumberStatus;
+    qrCode?: string;
+    /** telefone real que conectou (E.164 sem +), quando o provider informa */
+    phone?: string;
+    /** true = estado intermediário (ex.: 'connecting' logo após parear) — não deve derrubar um número conectado */
+    transient?: boolean;
+    /** true = o celular removeu o dispositivo / sessão encerrada; precisa de QR novo */
+    loggedOut?: boolean;
+  };
 }
 
 /**
