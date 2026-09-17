@@ -1,6 +1,8 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, Folder, Zap, GripVertical } from 'lucide-react';
+import { Plus, Pencil, Trash2, Folder, Zap, GripVertical, Sun, Moon, Monitor } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useTheme, type ThemeMode } from '@/lib/theme';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -48,6 +50,10 @@ export default function ConfiguracoesPage() {
 
   return (
     <PageShell width="max-w-4xl">
+      <PageHeader title="Configurações" subtitle="Aparência do painel e respostas rápidas da equipe." />
+
+      <AppearanceSection />
+
       <PageHeader
         title="Respostas rápidas"
         subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Variáveis: <code className="bg-field px-1 rounded">{'{{contact.name}}'}</code> <code className="bg-field px-1 rounded">{'{{agent.name}}'}</code></>}
@@ -119,5 +125,34 @@ export default function ConfiguracoesPage() {
         onConfirm={async () => { if (!confirm) return; try { await (confirm.kind === 'folder' ? deleteFolder : deleteReply).mutateAsync(confirm.id); toast.ok('Excluído'); } catch (err) { toast.err(err); throw err; } }}
       />
     </PageShell>
+  );
+}
+
+
+const THEMES: { mode: ThemeMode; label: string; desc: string; icon: React.ReactNode }[] = [
+  { mode: 'light', label: 'Claro', desc: 'Semáforo — status em cor forte, área clara', icon: <Sun size={18} /> },
+  { mode: 'dark', label: 'Escuro', desc: 'Sala de controle — para turnos longos', icon: <Moon size={18} /> },
+  { mode: 'system', label: 'Do sistema', desc: 'Acompanha o modo do seu computador', icon: <Monitor size={18} /> },
+];
+
+/** Aparência: escolha de tema (salva no navegador de cada usuário). */
+function AppearanceSection() {
+  const { mode, setMode } = useTheme();
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
+      <div>
+        <h2 className="font-display font-semibold text-ink">Aparência</h2>
+        <p className="text-sm text-muted">Vale só para este navegador — cada atendente escolhe o seu.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {THEMES.map((t) => (
+          <button key={t.mode} type="button" onClick={() => setMode(t.mode)} className={cn('text-left rounded-xl border p-3 transition-colors', mode === t.mode ? 'border-accent bg-accent-soft ring-1 ring-accent' : 'border-line hover:bg-field')}>
+            <div className={cn('mb-1', mode === t.mode ? 'text-accent-ink' : 'text-muted')}>{t.icon}</div>
+            <div className="text-sm font-semibold text-ink">{t.label}</div>
+            <div className="text-xs text-muted mt-0.5">{t.desc}</div>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }

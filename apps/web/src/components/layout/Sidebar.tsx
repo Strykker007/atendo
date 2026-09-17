@@ -2,12 +2,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, Sun, Moon, Monitor } from 'lucide-react';
+import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
-import { useTheme, applyTheme, type ThemeMode } from '@/lib/theme';
+import { useTheme, applyTheme } from '@/lib/theme';
 import { useConversationCounts, useMe } from '@/lib/hooks';
 
 const items = [
@@ -20,16 +20,13 @@ const items = [
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
 
-const THEME_ORDER: ThemeMode[] = ['light', 'dark', 'system'];
-const THEME_ICON = { light: Sun, dark: Moon, system: Monitor };
-const THEME_LABEL = { light: 'Tema claro', dark: 'Tema escuro', system: 'Tema do sistema' };
 
 /** Menu lateral: expansível ou recolhido só com ícones. Fundo escuro nos dois temas. */
 export function Sidebar() {
   const path = usePathname();
   const { sidebarCollapsed: collapsed, toggleSidebar, numberId } = useUI();
   const pending = useNav((s) => s.pending);
-  const { mode, setMode } = useTheme();
+  const mode = useTheme((s) => s.mode);
   const me = useMe();
   const counts = useConversationCounts(numberId);
   const [target, setTarget] = useState<string | null>(null);
@@ -50,8 +47,6 @@ export function Sidebar() {
     setAccessToken(null);
     window.location.href = '/login';
   }
-  const cycleTheme = () => setMode(THEME_ORDER[(THEME_ORDER.indexOf(mode) + 1) % THEME_ORDER.length]);
-  const ThemeIcon = THEME_ICON[mode];
   const waiting = counts.data?.waiting ?? 0;
 
   return (
@@ -95,9 +90,6 @@ export function Sidebar() {
             <div className="text-side-ink/70 truncate">{me.data.role === 'agent' ? 'Atendente' : 'Administrador'}</div>
           </div>
         )}
-        <button onClick={cycleTheme} title={THEME_LABEL[mode]} className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white', collapsed && 'justify-center px-0')}>
-          <ThemeIcon size={17} /> {!collapsed && THEME_LABEL[mode]}
-        </button>
         <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white disabled:opacity-60', collapsed && 'justify-center px-0')}>
           {leaving ? <Loader2 size={17} className="animate-spin" /> : <LogOut size={17} />} {!collapsed && (leaving ? 'Saindo…' : 'Sair')}
         </button>
