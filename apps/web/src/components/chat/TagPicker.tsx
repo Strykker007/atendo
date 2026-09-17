@@ -25,8 +25,8 @@ export function TagPicker({ tags, value, onChange, placeholder, compact }: { tag
 
   return (
     <div ref={ref} className="relative">
-      <div className={cn('flex flex-wrap items-center gap-1 rounded-lg bg-surface-muted px-2 min-h-9 cursor-text', compact && 'bg-transparent px-0 min-h-7')} onClick={() => setOpen(true)}>
-        <TagIcon size={14} className="text-gray-400 ml-1" />
+      <div className={cn('flex flex-wrap items-center gap-1 rounded-lg bg-field px-2 min-h-9 cursor-text', compact && 'bg-transparent px-0 min-h-7')} onClick={() => setOpen(true)}>
+        <TagIcon size={14} className="text-faint ml-1" />
         {selected.map((t) => (
           <span key={t.id} className="inline-flex items-center gap-1 text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: t.color }}>
             {t.name}
@@ -46,10 +46,10 @@ export function TagPicker({ tags, value, onChange, placeholder, compact }: { tag
         />
       </div>
       {open && (
-        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg bg-white border border-surface-border shadow-lg py-1">
-          {options.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Nenhuma tag</p>}
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg bg-panel border border-line shadow-lg py-1">
+          {options.length === 0 && <p className="px-3 py-2 text-xs text-faint">Nenhuma tag</p>}
           {options.map((t) => (
-            <button key={t.id} onClick={() => { toggle(t.id); setQ(''); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-surface-muted flex items-center gap-2">
+            <button key={t.id} onClick={() => { toggle(t.id); setQ(''); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-field flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full" style={{ background: t.color }} />
               {t.name}
             </button>

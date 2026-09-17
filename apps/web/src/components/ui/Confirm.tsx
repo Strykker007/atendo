@@ -22,7 +22,7 @@ export function ConfirmDialog({ open, title, text, confirmLabel = 'Confirmar', d
   }
   return (
     <Modal open={open} onClose={busy ? () => undefined : onClose} title={title} width="max-w-sm">
-      <p className="text-sm text-gray-600">{text}</p>
+      <p className="text-sm text-muted">{text}</p>
       <div className="flex justify-end gap-2 pt-5">
         <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
         <Button variant={danger ? 'danger' : 'primary'} onClick={confirm} loading={busy}>{confirmLabel}</Button>

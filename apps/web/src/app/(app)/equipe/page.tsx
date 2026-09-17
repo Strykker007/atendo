@@ -44,29 +44,29 @@ export default function EquipePage() {
         action={isAdmin && <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo atendente</Button>}
       />
 
-      {full && <p className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-2 text-sm text-amber-800">Limite de atendentes do plano atingido. Desative alguém ou faça upgrade em <b>Plano e uso</b>.</p>}
+      {full && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Limite de atendentes do plano atingido. Desative alguém ou faça upgrade em <b>Plano e uso</b>.</p>}
 
       {agents.isLoading && <SkeletonRows rows={3} />}
       {agents.data?.length === 0 && <Empty icon={<Users size={36} />} title="Nenhum usuário" text="Adicione atendentes para dividir o atendimento." />}
 
       {!!agents.data?.length && (
-        <div className="rounded-2xl bg-white border border-surface-border overflow-hidden">
+        <div className="rounded-2xl bg-panel border border-line overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-surface-muted text-left text-xs text-gray-500 uppercase tracking-wide">
+            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide">
               <tr><th className="px-5 py-2.5">Nome</th><th className="px-5 py-2.5 hidden sm:table-cell">E-mail</th><th className="px-5 py-2.5">Papel</th><th className="px-5 py-2.5 hidden md:table-cell">Último acesso</th><th className="px-5 py-2.5"></th></tr>
             </thead>
-            <tbody className="divide-y divide-surface-border">
+            <tbody className="divide-y divide-line">
               {agents.data.map((a) => (
                 <tr key={a.id} className={cn(!a.isActive && 'opacity-50')}>
-                  <td className="px-5 py-3 font-medium">{a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-gray-400">(você)</span>}</td>
-                  <td className="px-5 py-3 text-gray-500 hidden sm:table-cell">{a.email}</td>
-                  <td className="px-5 py-3"><span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-gray-100 text-gray-600' : 'bg-brand-soft text-brand')}>{a.role === 'agent' ? 'Atendente' : 'Admin'}</span></td>
-                  <td className="px-5 py-3 text-gray-500 hidden md:table-cell">{a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</td>
+                  <td className="px-5 py-3 font-medium">{a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}</td>
+                  <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}</td>
+                  <td className="px-5 py-3"><span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-field text-muted' : 'bg-accent-soft text-accent')}>{a.role === 'agent' ? 'Atendente' : 'Admin'}</span></td>
+                  <td className="px-5 py-3 text-muted hidden md:table-cell">{a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
                     {isAdmin && a.role === 'agent' && (
                       <>
-                        <button onClick={() => setResetting(a)} className="text-gray-400 hover:text-gray-700 p-1" title="Redefinir senha"><KeyRound size={15} /></button>
-                        <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-gray-400 hover:text-red-600' : 'text-brand')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
+                        <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>
+                        <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-faint hover:text-danger' : 'text-accent')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
                       </>
                     )}
                   </td>

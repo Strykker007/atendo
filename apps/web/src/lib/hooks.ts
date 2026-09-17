@@ -51,6 +51,9 @@ export const useConversations = (q: { status: ConversationStatus; numberId: stri
     },
   });
 
+export const useConversationCounts = (numberId: string | null) =>
+  useQuery({ queryKey: ['conversation-counts', numberId], queryFn: () => api<{ waiting: number; in_progress: number; closed: number }>(`/conversations/counts${numberId ? `?numberId=${numberId}` : ''}`), refetchInterval: 30_000 });
+
 export const useConversation = (id: string | null) =>
   useQuery({ queryKey: ['conversation', id], enabled: !!id, queryFn: () => api<Conversation>(`/conversations/${id}`) });
 
@@ -92,6 +95,7 @@ export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'docume
 const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
   qc.invalidateQueries({ queryKey: ['conversations'] });
   qc.invalidateQueries({ queryKey: ['conversation', id] });
+  qc.invalidateQueries({ queryKey: ['conversation-counts'] });
 };
 export const useSetStatus = () => {
   const qc = useQueryClient();
@@ -166,6 +170,7 @@ export function useRealtime() {
     socket.on('conversation', (c: { id: string }) => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', c.id] });
+      qc.invalidateQueries({ queryKey: ['conversation-counts'] });
     });
     socket.on('number', (n: { id: string; status: string; qrCode?: string }) => {
       if (n.qrCode) qc.setQueryData(['number-qr', n.id], n.qrCode);

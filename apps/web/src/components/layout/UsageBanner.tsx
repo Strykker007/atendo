@@ -21,7 +21,7 @@ export function UsageBanner() {
     : `Você usou ${Math.round(ratio * 100)}% do plano ${u.plan} este mês.`;
 
   return (
-    <div className={`flex items-center gap-2 px-4 py-2 text-sm ${blocked || u.status === 'suspended' ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-900'}`}>
+    <div className={`flex items-center gap-2 px-4 py-2 text-sm ${blocked || u.status === 'suspended' ? 'bg-danger text-white' : 'bg-warn-soft text-warn-ink'}`}>
       <AlertTriangle size={16} className="shrink-0" />
       <span className="flex-1">{text}</span>
       <Link href="/plano" className="underline font-medium whitespace-nowrap">Ver plano</Link>

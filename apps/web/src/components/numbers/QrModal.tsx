@@ -50,28 +50,28 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
     <Modal open={!!numberId} onClose={onClose} title={`Conectar ${number?.label ?? ''}`} width="max-w-md">
       <div className="text-center space-y-4">
         {connected ? (
-          <div className="py-8 text-brand">
+          <div className="py-8 text-accent">
             <CheckCircle2 size={56} className="mx-auto" />
             <p className="mt-3 font-medium">Número conectado!</p>
           </div>
         ) : syncing ? (
-          <div className="py-8 text-gray-500 text-sm">
-            <div className="w-8 h-8 mx-auto rounded-full border-2 border-brand border-t-transparent animate-spin mb-3" />
+          <div className="py-8 text-muted text-sm">
+            <div className="w-8 h-8 mx-auto rounded-full border-2 border-accent border-t-transparent animate-spin mb-3" />
             Sincronizando com o celular… se o WhatsApp pedir um QR novo, ele aparece aqui.
           </div>
         ) : qr ? (
           <>
-            <img src={qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`} alt="QR code" className="mx-auto w-64 h-64 rounded-lg border border-surface-border" />
-            <ol className="text-left text-sm text-gray-600 space-y-1 mx-auto max-w-xs">
+            <img src={qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`} alt="QR code" className="mx-auto w-64 h-64 rounded-lg border border-line bg-white p-1" />
+            <ol className="text-left text-sm text-muted space-y-1 mx-auto max-w-xs">
               <li>1. Abra o WhatsApp no celular deste número</li>
               <li>2. Toque em <b>Mais opções ⋮ → Dispositivos conectados</b></li>
               <li>3. Toque em <b>Conectar dispositivo</b> e aponte para o QR</li>
             </ol>
-            <p className="text-xs text-gray-400">O QR expira em ~40s. Se expirar, gere outro.</p>
+            <p className="text-xs text-faint">O QR expira em ~40s. Se expirar, gere outro.</p>
           </>
         ) : (
-          <div className="py-8 text-gray-500 text-sm">
-            <div className="w-64 h-64 mx-auto rounded-lg border border-surface-border bg-surface-muted animate-pulse mb-3" />
+          <div className="py-8 text-muted text-sm">
+            <div className="w-64 h-64 mx-auto rounded-lg border border-line bg-field animate-pulse mb-3" />
             Gerando QR code… (a Evolution leva alguns segundos)
           </div>
         )}

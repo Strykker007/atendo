@@ -48,16 +48,16 @@ export default function TagsPage() {
       {tags.data?.length === 0 && <Empty icon={<TagIcon size={36} />} title="Nenhuma tag" text='Crie tags como "lead com interesse" ou "comprador recorrente".' />}
 
       {!!tags.data?.length && (
-        <div className="rounded-2xl bg-white border border-surface-border divide-y divide-surface-border">
+        <div className="rounded-2xl bg-panel border border-line divide-y divide-line">
           {(tags.data as TagWithCount[]).map((t) => (
             <div key={t.id} className="flex items-center gap-3 px-5 py-3">
               <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: t.color }} />
               <span className="flex-1 font-medium text-sm">{t.name}</span>
-              <span className="text-xs text-gray-400">{t._count?.conversations ?? 0} conversa{(t._count?.conversations ?? 0) === 1 ? '' : 's'}</span>
+              <span className="text-xs text-faint">{t._count?.conversations ?? 0} conversa{(t._count?.conversations ?? 0) === 1 ? '' : 's'}</span>
               {isAdmin && (
                 <>
-                  <button onClick={() => setEditing(t)} className="text-gray-400 hover:text-gray-700 p-1" title="Editar"><Pencil size={15} /></button>
-                  <button onClick={() => setDeleting(t)} className="text-gray-400 hover:text-red-600 p-1" title="Excluir"><Trash2 size={15} /></button>
+                  <button onClick={() => setEditing(t)} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={15} /></button>
+                  <button onClick={() => setDeleting(t)} className="text-faint hover:text-danger p-1" title="Excluir"><Trash2 size={15} /></button>
                 </>
               )}
             </div>
@@ -75,7 +75,7 @@ export default function TagsPage() {
               ))}
             </div>
           </Field>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-muted">
             Prévia: <span className="text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: editing?.color }}>{editing?.name || 'nome da tag'}</span>
           </div>
           <div className="flex justify-end gap-2 pt-2">

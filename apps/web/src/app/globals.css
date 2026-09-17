@@ -2,20 +2,102 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   Tokens de tema. Claro = "Semáforo" (C). Escuro = "Sala de controle" (B).
+   Regra: componente nunca usa hex; usa classes do tailwind.config (bg-panel, text-muted…).
+   ============================================================ */
 :root {
   color-scheme: light;
-}
-html, body { height: 100%; }
-body { @apply bg-surface-muted text-gray-900 antialiased; }
+  --bg: #f2f4f8;
+  --panel: #ffffff;
+  --field: #eef1f6;
+  --line: #dfe4ec;
+  --line-strong: #c9d1de;
+  --ink: #1e2433;
+  --muted: #5f6b80;
+  --faint: #98a3b8;
 
-/* padrão de fundo do chat, estilo WhatsApp */
-.chat-bg {
-  background-color: #efeae2;
-  background-image: radial-gradient(#d9d3c7 0.6px, transparent 0.6px);
-  background-size: 18px 18px;
+  --accent: #2f5bea;
+  --accent-hover: #244ccc;
+  --accent-soft: #e4eaff;
+  --accent-ink: #1d3fb8;
+
+  --side: #243043;
+  --side-ink: #c9d2e3;
+  --side-on: #ffffff;
+  --side-on-ink: #243043;
+  --side-line: #2f3d54;
+
+  --wait: #c2410c;  --wait-soft: #ffedd5;
+  --prog: #1d4ed8;  --prog-soft: #dbe4ff;
+  --done: #4b5563;  --done-soft: #e5e7eb;
+
+  --ok: #16a34a;    --ok-soft: #dcfce7;
+  --warn: #d97706;  --warn-soft: #fef3c7; --warn-ink: #92400e;
+  --danger: #dc2626; --danger-soft: #fee2e2; --danger-ink: #991b1b;
+
+  --chat-bg: #e9edf5;
+  --bub-in: #ffffff;  --bub-in-ink: #1e2433;
+  --bub-out: #2f5bea; --bub-out-ink: #ffffff;
+
+  --meta-soft: #e0e7ff; --meta-ink: #3730a3;
+  --evo-soft: #fff3d6;  --evo-ink: #9a5b00;
 }
+
+.dark {
+  color-scheme: dark;
+  --bg: #0f1218;
+  --panel: #151a23;
+  --field: #1d2330;
+  --line: #222836;
+  --line-strong: #2f3748;
+  --ink: #e8ecf3;
+  --muted: #8a93a6;
+  --faint: #5d6678;
+
+  --accent: #3b9eff;
+  --accent-hover: #63b3ff;
+  --accent-soft: #1c2a3f;
+  --accent-ink: #7cc4ff;
+
+  --side: #0b0e14;
+  --side-ink: #aab3c5;
+  --side-on: #1c2a3f;
+  --side-on-ink: #7cc4ff;
+  --side-line: #1a2030;
+
+  --wait: #fbbf24;  --wait-soft: #3a2c0a;
+  --prog: #5eead4;  --prog-soft: #0f3b36;
+  --done: #8a93a6;  --done-soft: #222836;
+
+  --ok: #34d399;    --ok-soft: #0f3b2c;
+  --warn: #fbbf24;  --warn-soft: #3a2c0a; --warn-ink: #fde68a;
+  --danger: #f87171; --danger-soft: #4a1d1d; --danger-ink: #fecaca;
+
+  --chat-bg: #0f1218;
+  --bub-in: #1d2330;  --bub-in-ink: #e8ecf3;
+  --bub-out: #1b3a5c; --bub-out-ink: #dbeeff;
+
+  --meta-soft: #2a1f3d; --meta-ink: #c4a8ff;
+  --evo-soft: #3a2c0a;  --evo-ink: #fbbf24;
+}
+
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+/* fundo do chat: claro liso; escuro com grade fina (sala de controle) */
+.chat-bg { background-color: var(--chat-bg); }
+.dark .chat-bg {
+  background-image: linear-gradient(#141926 1px, transparent 1px), linear-gradient(90deg, #141926 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
 @keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 .animate-fade-in { animation: fade-in .18s ease-out; }
+@media (prefers-reduced-motion: reduce) { .animate-fade-in { animation: none; } }
 
 .scrollbar-thin::-webkit-scrollbar { width: 6px; }
-.scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; }
+
+/* números tabulares em horários, contadores e telefones */
+.tnum { font-variant-numeric: tabular-nums; }

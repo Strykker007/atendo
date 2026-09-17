@@ -22,7 +22,7 @@ export function ProviderForm({ value, onChange, config, onConfig }: { value: Pro
       </div>
 
       {value === 'evolution' ? (
-        <div className="flex gap-2 rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+        <div className="flex gap-2 rounded-lg bg-warn-soft border border-warn/30 p-3 text-xs text-warn-ink">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <span>Este modo emula o WhatsApp Web e <b>viola os termos da Meta</b>. Existe risco real de banimento do número, principalmente com disparos em massa. Use para atendimento receptivo.</span>
         </div>
@@ -39,10 +39,10 @@ export function ProviderForm({ value, onChange, config, onConfig }: { value: Pro
 
 function ProviderCard({ active, onClick, icon, title, desc }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; desc: string }) {
   return (
-    <button type="button" onClick={onClick} className={cn('text-left rounded-xl border p-3 transition-colors', active ? 'border-brand bg-brand-soft/50 ring-1 ring-brand' : 'border-surface-border hover:bg-surface-muted')}>
-      <div className={cn('mb-1', active ? 'text-brand' : 'text-gray-500')}>{icon}</div>
+    <button type="button" onClick={onClick} className={cn('text-left rounded-xl border p-3 transition-colors', active ? 'border-accent bg-accent-soft ring-1 ring-accent' : 'border-line hover:bg-field')}>
+      <div className={cn('mb-1', active ? 'text-accent' : 'text-muted')}>{icon}</div>
       <div className="text-sm font-medium">{title}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
+      <div className="text-xs text-muted mt-0.5">{desc}</div>
     </button>
   );
 }

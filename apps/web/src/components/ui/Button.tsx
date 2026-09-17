@@ -6,10 +6,10 @@ type Variant = 'primary' | 'ghost' | 'danger' | 'subtle';
 type Size = 'sm' | 'md' | 'icon';
 
 const VARIANT: Record<Variant, string> = {
-  primary: 'bg-brand hover:bg-brand-hover text-white border border-transparent',
-  ghost: 'border border-surface-border text-gray-700 hover:bg-surface-muted bg-white',
-  danger: 'bg-red-600 hover:bg-red-700 text-white border border-transparent',
-  subtle: 'border border-surface-border text-red-600 hover:bg-red-50 bg-white',
+  primary: 'bg-accent hover:bg-accent-hover text-white border border-transparent',
+  ghost: 'border border-line text-ink hover:bg-field bg-panel',
+  danger: 'bg-danger hover:bg-danger/90 text-white border border-transparent',
+  subtle: 'border border-line text-danger hover:bg-danger-soft bg-panel',
 };
 const SIZE: Record<Size, string> = {
   md: 'px-4 py-2 text-sm rounded-lg',

@@ -52,6 +52,14 @@ export class ConversationsService {
     });
   }
 
+  /** Contadores dos três filtros principais (opcionalmente por número). */
+  async counts(tenantId: string, numberId?: string) {
+    const rows = await this.prisma.conversation.groupBy({ by: ['status'], where: { tenantId, ...(numberId && { numberId }) }, _count: { _all: true } });
+    const out = { waiting: 0, in_progress: 0, closed: 0 };
+    for (const r of rows) out[r.status] = r._count._all;
+    return out;
+  }
+
   one(tenantId: string, id: string) {
     return this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },

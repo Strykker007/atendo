@@ -28,7 +28,7 @@ export function Toaster() {
   return (
     <div className="fixed bottom-4 right-4 z-[60] space-y-2 w-80 max-w-[calc(100vw-2rem)]">
       {items.map((t) => (
-        <div key={t.id} className={cn('flex items-start gap-2 rounded-xl px-4 py-3 text-sm shadow-lg text-white', t.kind === 'success' ? 'bg-gray-900' : 'bg-red-600')}>
+        <div key={t.id} className={cn('flex items-start gap-2 rounded-xl px-4 py-3 text-sm shadow-lg text-white', t.kind === 'success' ? 'bg-gray-900' : 'bg-danger')}>
           {t.kind === 'success' ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <AlertCircle size={16} className="mt-0.5 shrink-0" />}
           <span className="flex-1">{t.text}</span>
           <button onClick={() => remove(t.id)} className="opacity-70 hover:opacity-100"><X size={14} /></button>

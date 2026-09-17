@@ -31,8 +31,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!ready) return (
     <div className="h-screen grid place-items-center">
-      <div className="flex flex-col items-center gap-3 text-gray-400 text-sm">
-        <div className="w-8 h-8 rounded-full border-2 border-brand border-t-transparent animate-spin" />
+      <div className="flex flex-col items-center gap-3 text-faint text-sm">
+        <div className="w-8 h-8 rounded-full border-2 border-accent border-t-transparent animate-spin" />
         Entrando…
       </div>
     </div>

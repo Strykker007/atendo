@@ -9,6 +9,8 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useConversation, useMessages, useResend, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
+import { STATUS_META } from './ConversationList';
+import { avatarStyle, initialOf } from '@/lib/avatar';
 
 export function ChatPane() {
   const { conversationId, setConversation, status, setStatus: setFilterStatus, rightPanelOpen, toggleRightPanel } = useUI();
@@ -52,10 +54,11 @@ export function ChatPane() {
 
   if (!conv) {
     return (
-      <div className="flex-1 grid place-items-center text-gray-400 text-sm chat-bg">
+      <div className="flex-1 grid place-items-center chat-bg">
         <div className="text-center">
-          <p className="text-lg font-medium text-gray-500">Atendo</p>
-          <p>Selecione uma conversa para começar</p>
+          <div className="mx-auto w-12 h-12 rounded-2xl bg-accent/10 text-accent grid place-items-center mb-3"><Send size={20} /></div>
+          <p className="font-display font-semibold text-ink">Selecione uma conversa</p>
+          <p className="text-sm text-muted mt-1">A fila à esquerda está separada por status: aguardando, em atendimento e encerrado.</p>
         </div>
       </div>
     );
@@ -89,22 +92,25 @@ export function ChatPane() {
   return (
     <>
       {/* Cabeçalho: contato, tags, ações de status */}
-      <header className="bg-white border-b border-surface-border px-3 py-2 flex items-center gap-3">
-        <button className="md:hidden text-gray-500" onClick={() => setConversation(null)}>
+      <header className="bg-panel border-b border-line px-3 py-2 flex items-center gap-2.5 min-w-0">
+        <button className="md:hidden text-muted" onClick={() => setConversation(null)}>
           <ArrowLeft size={20} />
         </button>
-        <div className="w-10 h-10 rounded-full bg-gray-200 grid place-items-center text-gray-600 font-medium shrink-0">
-          {(conv.contact.name ?? conv.contact.phone).slice(0, 1).toUpperCase()}
+        <div className="w-10 h-10 rounded-xl grid place-items-center font-display font-semibold shrink-0" style={avatarStyle(conv.contact.phone)}>
+          {initialOf(conv.contact.name ?? conv.contact.phone)}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-sm truncate">{conv.contact.name ?? conv.contact.phone}</div>
-          <div className="text-xs text-gray-500 truncate">
-            {conv.contact.phone} · {conv.number.label}
+          <div className="font-semibold text-sm truncate text-ink">{conv.contact.name ?? `+${conv.contact.phone}`}</div>
+          <div className="text-xs text-muted truncate tnum">
+            +{conv.contact.phone} · {conv.number.label}
             {conv.assignee && ` · ${conv.assignee.name}`}
           </div>
         </div>
-        <div className="hidden lg:block w-72 relative">
-          {setTags.isPending && <span className="absolute -top-3 right-0 text-[10px] text-gray-400">salvando…</span>}
+        <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
+          <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
+        </span>
+        <div className="hidden lg:block flex-1 min-w-[140px] max-w-72 relative">
+          {setTags.isPending && <span className="absolute -top-3 right-0 text-[10px] text-faint">salvando…</span>}
           <TagPicker compact tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} placeholder="Adicionar tag" />
         </div>
         {conv.status !== 'closed' ? (
@@ -116,13 +122,13 @@ export function ChatPane() {
             <span className="hidden sm:inline">Reabrir</span>
           </Button>
         )}
-        <button onClick={toggleRightPanel} className="hidden xl:block text-gray-400 hover:text-gray-600" title="Respostas rápidas">
+        <button onClick={toggleRightPanel} className="hidden xl:block text-faint hover:text-ink" title="Respostas rápidas">
           {rightPanelOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
         </button>
       </header>
 
       {/* Tags no mobile/tablet */}
-      <div className="lg:hidden bg-white border-b border-surface-border px-3 py-1.5">
+      <div className="lg:hidden bg-panel border-b border-line px-3 py-1.5">
         <TagPicker compact tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} placeholder="Adicionar tag" />
       </div>
 
@@ -131,7 +137,7 @@ export function ChatPane() {
         {messages.isLoading && (
           <div className="space-y-2 pt-2">
             {[60, 40, 75, 35].map((w, i) => (
-              <div key={i} className={i % 2 ? 'flex justify-end' : 'flex'}><div className="animate-pulse rounded-lg bg-white/70 h-9" style={{ width: `${w}%` }} /></div>
+              <div key={i} className={i % 2 ? 'flex justify-end' : 'flex'}><div className="animate-pulse rounded-lg bg-panel/70 h-9" style={{ width: `${w}%` }} /></div>
             ))}
           </div>
         )}
@@ -141,39 +147,39 @@ export function ChatPane() {
 
       {/* Composer */}
       {numberOffline ? (
-        <div className="bg-red-50 border-t border-red-200 px-4 py-3 text-sm text-red-800 flex items-center gap-2">
+        <div className="bg-danger-soft border-t border-danger/30 px-4 py-3 text-sm text-danger-ink flex items-center gap-2">
           <WifiOff size={16} className="shrink-0" />
           <span className="flex-1">O número <b>{conv.number.label}</b> está desconectado. Você continua recebendo, mas não consegue responder.</span>
           <Link href="/numeros" className="underline font-medium whitespace-nowrap">Conectar</Link>
         </div>
       ) : quotaHit ? (
-        <div className="bg-amber-50 border-t border-amber-200 px-4 py-3 text-sm text-amber-800">
+        <div className="bg-warn-soft border-t border-warn/30 px-4 py-3 text-sm text-warn-ink">
           Limite de mensagens do plano <b>{usage.data?.plan}</b> atingido neste mês. Faça upgrade para continuar respondendo.
         </div>
       ) : conv.status === 'closed' ? (
-        <div className="bg-white border-t border-surface-border px-4 py-3 text-sm text-gray-500 text-center">Conversa encerrada. Reabra para responder.</div>
+        <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted text-center">Conversa encerrada. Reabra para responder.</div>
       ) : (
-        <form onSubmit={submit} className="bg-white border-t border-surface-border px-3 py-2 space-y-2">
+        <form onSubmit={submit} className="bg-panel border-t border-line px-3 py-2 space-y-2">
           {attachment && (
-            <div className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2 text-sm">
-              {attachment.mimeType.startsWith('image/') ? <img src={attachment.url} alt="" className="w-12 h-12 rounded object-cover" /> : <FileText size={20} className="text-gray-500" />}
+            <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
+              {attachment.mimeType.startsWith('image/') ? <img src={attachment.url} alt="" className="w-12 h-12 rounded object-cover" /> : <FileText size={20} className="text-muted" />}
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{attachment.fileName}</div>
-                <div className="text-xs text-gray-400">{(attachment.size / 1024).toFixed(0)} KB · legenda opcional abaixo</div>
+                <div className="text-xs text-faint">{(attachment.size / 1024).toFixed(0)} KB · legenda opcional abaixo</div>
               </div>
-              <button type="button" onClick={() => setAttachment(null)} className="text-gray-400 hover:text-gray-700"><X size={16} /></button>
+              <button type="button" onClick={() => setAttachment(null)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
           )}
           <div className="flex items-end gap-2">
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept="image/*,audio/*,video/mp4,application/pdf,.doc,.docx,.xls,.xlsx" />
-          <Button type="button" variant="ghost" className="w-10 h-10 rounded-full p-0 border-0 bg-transparent text-gray-500" onClick={() => fileRef.current?.click()} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
+          <Button type="button" variant="ghost" className="w-10 h-10 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => fileRef.current?.click()} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}
             rows={1}
-            placeholder={attachment ? 'Legenda (opcional)' : 'Digite uma mensagem (Enter envia, Shift+Enter quebra linha)'}
-            className="flex-1 resize-none max-h-40 rounded-xl bg-surface-muted px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
+            placeholder={attachment ? 'Legenda (opcional)' : 'Mensagem… (Enter envia)'}
+            className="flex-1 resize-none max-h-40 rounded-xl bg-field px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
           />
           <Button type="submit" className="w-10 h-10 rounded-full p-0" disabled={(!text.trim() && !attachment) || uploading} loading={send.isPending} icon={<Send size={18} />} title="Enviar" />
           </div>
@@ -188,18 +194,18 @@ function Bubble({ m, canResend }: { m: Message; canResend: boolean }) {
   const resend = useResend();
   return (
     <div className={cn('flex', out ? 'justify-end' : 'justify-start')}>
-      <div className={cn('max-w-[75%] rounded-lg px-3 py-1.5 text-sm shadow-sm', out ? 'bg-[#d9fdd3]' : 'bg-white')}>
+      <div className={cn('max-w-[75%] px-3 py-1.5 text-sm shadow-sm', out ? 'bg-chat-out text-chat-out-ink rounded-xl rounded-br-sm' : 'bg-chat-in text-chat-in-ink rounded-xl rounded-bl-sm')}>
         <MediaBody m={m} />
         {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
-        <div className="flex items-center justify-end gap-1 mt-0.5 text-[10px] text-gray-500">
+        <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>
           {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           {out && <StatusIcon status={m.status} />}
         </div>
         {(m.status === 'failed' || (m.error && !m.mediaUrl)) && (
-          <p className="text-[10px] text-red-600 mt-0.5 flex items-center gap-2">
+          <p className={cn('text-[10px] mt-0.5 flex items-center gap-2', out ? 'text-danger-ink bg-danger-soft rounded px-1.5 py-0.5' : 'text-danger')}>
             <span className="flex-1">{m.error ?? 'Falha ao enviar'}</span>
             {m.status === 'failed' && canResend && (
-              <button onClick={() => resend.mutateAsync({ conversationId: m.conversationId, messageId: m.id }).catch(toast.err)} disabled={resend.isPending} className="inline-flex items-center gap-1 rounded bg-white/70 px-1.5 py-0.5 text-red-700 hover:bg-white">
+              <button onClick={() => resend.mutateAsync({ conversationId: m.conversationId, messageId: m.id }).catch(toast.err)} disabled={resend.isPending} className="inline-flex items-center gap-1 rounded bg-panel/70 px-1.5 py-0.5 text-danger-ink hover:bg-panel">
                 <RefreshCw size={10} className={resend.isPending ? 'animate-spin' : ''} /> reenviar
               </button>
             )}
@@ -213,15 +219,15 @@ function Bubble({ m, canResend }: { m: Message; canResend: boolean }) {
 /** Corpo de mídia da bolha. Sem mediaUrl ainda (download em andamento) mostra placeholder. */
 function MediaBody({ m }: { m: Message }) {
   if (m.type === 'text' || m.type === 'template') return null;
-  if (!m.mediaUrl) return <span className="italic text-gray-500 text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
+  if (!m.mediaUrl) return <span className="italic text-muted text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
   if (m.type === 'image' || m.type === 'sticker') return <a href={m.mediaUrl} target="_blank" rel="noreferrer"><img src={m.mediaUrl} alt="" className="rounded-md max-h-72 max-w-full object-contain mb-1" /></a>;
   if (m.type === 'audio') return <audio controls preload="metadata" src={m.mediaUrl} className="max-w-[260px] h-10 mb-1" />;
   if (m.type === 'video') return <video controls preload="metadata" src={m.mediaUrl} className="rounded-md max-h-72 max-w-full mb-1" />;
   return (
     <a href={m.mediaUrl} target="_blank" rel="noreferrer" download={m.mediaName ?? undefined} className="flex items-center gap-2 rounded-md bg-black/5 px-2.5 py-2 mb-1 hover:bg-black/10">
-      <FileText size={20} className="text-gray-500 shrink-0" />
+      <FileText size={20} className="text-muted shrink-0" />
       <span className="truncate text-xs font-medium flex-1">{m.mediaName ?? labelOf(m.type)}</span>
-      <Download size={14} className="text-gray-400" />
+      <Download size={14} className="text-faint" />
     </a>
   );
 }
@@ -231,6 +237,6 @@ function StatusIcon({ status }: { status: string }) {
   if (status === 'pending') return <Clock size={12} />;
   if (status === 'sent') return <Check size={13} />;
   if (status === 'delivered') return <CheckCheck size={13} />;
-  if (status === 'read') return <CheckCheck size={13} className="text-sky-500" />;
-  return <AlertCircle size={12} className="text-red-500" />;
+  if (status === 'read') return <CheckCheck size={13} className="opacity-100" />;
+  return <AlertCircle size={12} className="text-danger" />;
 }

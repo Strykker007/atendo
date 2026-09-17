@@ -1,12 +1,14 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, Sun, Moon, Monitor } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
-import { useEffect, useState } from 'react';
+import { useTheme, applyTheme, type ThemeMode } from '@/lib/theme';
+import { useConversationCounts, useMe } from '@/lib/hooks';
 
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
@@ -18,56 +20,89 @@ const items = [
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
 
-/** Menu lateral: expansível ou recolhido só com ícones. */
+const THEME_ORDER: ThemeMode[] = ['light', 'dark', 'system'];
+const THEME_ICON = { light: Sun, dark: Moon, system: Monitor };
+const THEME_LABEL = { light: 'Tema claro', dark: 'Tema escuro', system: 'Tema do sistema' };
+
+/** Menu lateral: expansível ou recolhido só com ícones. Fundo escuro nos dois temas. */
 export function Sidebar() {
   const path = usePathname();
-  const { sidebarCollapsed: collapsed, toggleSidebar } = useUI();
+  const { sidebarCollapsed: collapsed, toggleSidebar, numberId } = useUI();
   const pending = useNav((s) => s.pending);
-  // destino clicado: destaca imediatamente, mesmo antes de a rota carregar
+  const { mode, setMode } = useTheme();
+  const me = useMe();
+  const counts = useConversationCounts(numberId);
   const [target, setTarget] = useState<string | null>(null);
-  useEffect(() => { if (!pending) setTarget(null); }, [pending]);
-
   const [leaving, setLeaving] = useState(false);
+  useEffect(() => { if (!pending) setTarget(null); }, [pending]);
+  useEffect(() => {
+    applyTheme(mode);
+    if (mode !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const h = () => applyTheme('system');
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, [mode]);
+
   async function logout() {
     setLeaving(true);
     await api('/auth/logout', { method: 'POST' }).catch(() => undefined);
     setAccessToken(null);
     window.location.href = '/login';
   }
+  const cycleTheme = () => setMode(THEME_ORDER[(THEME_ORDER.indexOf(mode) + 1) % THEME_ORDER.length]);
+  const ThemeIcon = THEME_ICON[mode];
+  const waiting = counts.data?.waiting ?? 0;
 
   return (
-    <aside className={cn('h-full bg-white border-r border-surface-border flex flex-col transition-[width] duration-200', collapsed ? 'w-16' : 'w-56')}>
-      <div className={cn('h-14 flex items-center border-b border-surface-border px-4', collapsed && 'justify-center px-0')}>
-        <span className="text-brand font-semibold text-lg">{collapsed ? 'A' : 'Atendo'}</span>
+    <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-16' : 'w-56')}>
+      <div className={cn('h-14 flex items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
+        <span className="w-7 h-7 rounded-lg bg-accent grid place-items-center text-white font-display font-bold text-sm shrink-0">A</span>
+        {!collapsed && <span className="font-display font-semibold text-[17px] text-white tracking-tight">Atendo</span>}
       </div>
+
       <nav className="flex-1 py-2">
         {items.map(({ href, label, icon: Icon }) => {
           const active = target ? target === href : path.startsWith(href);
+          const badge = href === '/conversas' && waiting > 0 ? waiting : null;
           return (
             <Link
               key={href}
               href={href}
-              title={label}
+              title={badge ? `${label} · ${badge} aguardando` : label}
               onClick={() => { if (!path.startsWith(href)) setTarget(href); }}
               className={cn(
-                'flex items-center gap-3 mx-2 my-0.5 rounded-lg px-3 py-2 text-sm transition-colors',
-                active ? 'bg-brand-soft text-brand font-medium' : 'text-gray-600 hover:bg-surface-muted active:bg-surface-border',
+                'relative flex items-center gap-3 mx-2 my-0.5 rounded-lg px-3 py-2 text-[13.5px] transition-colors',
+                active ? 'bg-side-on text-side-on-ink font-semibold' : 'text-side-ink hover:bg-white/5 hover:text-white',
                 target === href && pending && 'animate-pulse',
                 collapsed && 'justify-center px-0',
               )}
             >
               <Icon size={18} className="shrink-0" />
               {!collapsed && <span className="truncate">{label}</span>}
+              {badge !== null && (
+                <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-wait text-white', collapsed ? 'absolute -top-0.5 right-1' : 'ml-auto')}>{badge}</span>
+              )}
             </Link>
           );
         })}
       </nav>
-      <div className="border-t border-surface-border p-2 space-y-1">
-        <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-surface-muted disabled:opacity-60', collapsed && 'justify-center px-0')}>
-          {leaving ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />} {!collapsed && (leaving ? 'Saindo…' : 'Sair')}
+
+      <div className="border-t border-side-line p-2 space-y-0.5">
+        {!collapsed && me.data && (
+          <div className="px-3 py-1.5 text-xs">
+            <div className="text-white font-medium truncate">{me.data.name}</div>
+            <div className="text-side-ink/70 truncate">{me.data.role === 'agent' ? 'Atendente' : 'Administrador'}</div>
+          </div>
+        )}
+        <button onClick={cycleTheme} title={THEME_LABEL[mode]} className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white', collapsed && 'justify-center px-0')}>
+          <ThemeIcon size={17} /> {!collapsed && THEME_LABEL[mode]}
         </button>
-        <button onClick={toggleSidebar} className="w-full flex items-center justify-center rounded-lg py-2 text-gray-400 hover:bg-surface-muted" title={collapsed ? 'Expandir' : 'Recolher'}>
-          {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+        <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white disabled:opacity-60', collapsed && 'justify-center px-0')}>
+          {leaving ? <Loader2 size={17} className="animate-spin" /> : <LogOut size={17} />} {!collapsed && (leaving ? 'Saindo…' : 'Sair')}
+        </button>
+        <button onClick={toggleSidebar} className="w-full flex items-center justify-center rounded-lg py-1.5 text-side-ink/60 hover:text-white" title={collapsed ? 'Expandir' : 'Recolher'}>
+          {collapsed ? <ChevronsRight size={17} /> : <ChevronsLeft size={17} />}
         </button>
       </div>
     </aside>

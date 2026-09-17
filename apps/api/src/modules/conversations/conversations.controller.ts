@@ -39,6 +39,11 @@ export class ConversationsController {
     return this.conversations.list(u.tenantId, q);
   }
 
+  @Get('counts')
+  counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string) {
+    return this.conversations.counts(u.tenantId, numberId || undefined);
+  }
+
   @Get(':id')
   one(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.conversations.one(u.tenantId, id);

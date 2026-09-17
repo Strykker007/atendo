@@ -34,7 +34,7 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
           <Field label="Telefone com DDI" hint="Ex.: 5511999998888"><input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="55…" required /></Field>
         </div>
         <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={create.isPending}>Cancelar</Button>
           <Button type="submit" loading={create.isPending} loadingText={ps.provider === 'evolution' ? 'Criando e gerando QR…' : 'Validando na Meta…'}>{ps.provider === 'evolution' ? 'Criar e gerar QR' : 'Criar e validar'}</Button>
@@ -66,14 +66,14 @@ export function SwitchProviderModal({ number, onClose, onDone }: { number: Numbe
   return (
     <Modal open={!!number} onClose={onClose} title={`Trocar provider · ${number?.label ?? ''}`}>
       <form onSubmit={submit} className="space-y-4">
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-muted">
           Atualmente em <b>{number?.provider === 'meta' ? 'Oficial (Meta)' : 'Não-oficial (QR)'}</b>. As conversas e o histórico continuam intactos; só a forma de enviar e receber muda.
         </p>
         <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} />
         {ps.provider === 'meta' && (
-          <p className="text-xs text-gray-500">Lembrete: na Meta, mensagens fora da janela de 24h só saem por template aprovado.</p>
+          <p className="text-xs text-muted">Lembrete: na Meta, mensagens fora da janela de 24h só saem por template aprovado.</p>
         )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={sw.isPending}>Cancelar</Button>
           <Button type="submit" loading={sw.isPending} loadingText="Trocando…" disabled={ps.provider === number?.provider}>Trocar agora</Button>

@@ -50,7 +50,7 @@ export default function ConfiguracoesPage() {
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Respostas rápidas"
-        subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Variáveis: <code className="bg-surface-muted px-1 rounded">{'{{contact.name}}'}</code> <code className="bg-surface-muted px-1 rounded">{'{{agent.name}}'}</code></>}
+        subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Variáveis: <code className="bg-field px-1 rounded">{'{{contact.name}}'}</code> <code className="bg-field px-1 rounded">{'{{agent.name}}'}</code></>}
         action={<Button onClick={() => setFolderModal({ name: '' })} icon={<Plus size={16} />}>Nova pasta</Button>}
       />
 
@@ -59,26 +59,26 @@ export default function ConfiguracoesPage() {
 
       <div className="space-y-4">
         {folders.data?.map((f) => (
-          <div key={f.id} className="rounded-2xl bg-white border border-surface-border">
-            <div className="flex items-center gap-2 px-5 py-3 border-b border-surface-border">
-              <Folder size={16} className="text-amber-500" />
+          <div key={f.id} className="rounded-2xl bg-panel border border-line">
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-line">
+              <Folder size={16} className="text-warn" />
               <span className="font-medium text-sm flex-1">{f.name}</span>
-              <span className="text-xs text-gray-400 mr-2">{f.replies.length}</span>
-              <button onClick={() => setReplyModal({ folderId: f.id, title: '', body: '' })} className="text-xs rounded-lg border border-surface-border px-2 py-1 text-gray-700 hover:bg-surface-muted"><Plus size={12} className="inline -mt-0.5" /> Resposta</button>
-              <button onClick={() => setFolderModal({ id: f.id, name: f.name })} className="text-gray-400 hover:text-gray-700 p-1"><Pencil size={14} /></button>
-              <button onClick={() => setConfirm({ kind: 'folder', id: f.id, name: f.name, count: f.replies.length })} className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
+              <span className="text-xs text-faint mr-2">{f.replies.length}</span>
+              <button onClick={() => setReplyModal({ folderId: f.id, title: '', body: '' })} className="text-xs rounded-lg border border-line px-2 py-1 text-ink hover:bg-field"><Plus size={12} className="inline -mt-0.5" /> Resposta</button>
+              <button onClick={() => setFolderModal({ id: f.id, name: f.name })} className="text-faint hover:text-ink p-1"><Pencil size={14} /></button>
+              <button onClick={() => setConfirm({ kind: 'folder', id: f.id, name: f.name, count: f.replies.length })} className="text-faint hover:text-danger p-1"><Trash2 size={14} /></button>
             </div>
-            {f.replies.length === 0 && <p className="px-5 py-3 text-xs text-gray-400">Pasta vazia.</p>}
-            <ul className="divide-y divide-surface-border">
+            {f.replies.length === 0 && <p className="px-5 py-3 text-xs text-faint">Pasta vazia.</p>}
+            <ul className="divide-y divide-line">
               {f.replies.map((r: Reply) => (
                 <li key={r.id} className="flex items-start gap-3 px-5 py-3">
-                  <GripVertical size={14} className="text-gray-300 mt-1 shrink-0" />
+                  <GripVertical size={14} className="text-faint mt-1 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">{r.title}</div>
-                    <div className="text-xs text-gray-500 whitespace-pre-wrap line-clamp-2">{r.body}</div>
+                    <div className="text-xs text-muted whitespace-pre-wrap line-clamp-2">{r.body}</div>
                   </div>
-                  <button onClick={() => setReplyModal({ id: r.id, folderId: f.id, title: r.title, body: r.body })} className="text-gray-400 hover:text-gray-700 p-1"><Pencil size={14} /></button>
-                  <button onClick={() => setConfirm({ kind: 'reply', id: r.id, name: r.title })} className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
+                  <button onClick={() => setReplyModal({ id: r.id, folderId: f.id, title: r.title, body: r.body })} className="text-faint hover:text-ink p-1"><Pencil size={14} /></button>
+                  <button onClick={() => setConfirm({ kind: 'reply', id: r.id, name: r.title })} className="text-faint hover:text-danger p-1"><Trash2 size={14} /></button>
                 </li>
               ))}
             </ul>
@@ -100,9 +100,9 @@ export default function ConfiguracoesPage() {
             <textarea className={`${inputCls} min-h-32`} value={replyModal?.body ?? ''} onChange={(e) => setReplyModal({ ...replyModal!, body: e.target.value })} maxLength={4096} required />
           </Field>
           <div className="flex flex-wrap gap-1 text-xs">
-            <span className="text-gray-400 mr-1">Inserir:</span>
+            <span className="text-faint mr-1">Inserir:</span>
             {['{{contact.name}}', '{{agent.name}}'].map((v) => (
-              <button type="button" key={v} onClick={() => setReplyModal({ ...replyModal!, body: (replyModal?.body ?? '') + v })} className="rounded bg-surface-muted px-1.5 py-0.5 font-mono hover:bg-gray-200">{v}</button>
+              <button type="button" key={v} onClick={() => setReplyModal({ ...replyModal!, body: (replyModal?.body ?? '') + v })} className="rounded bg-field px-1.5 py-0.5 font-mono hover:bg-line-strong">{v}</button>
             ))}
           </div>
           <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={() => setReplyModal(null)}>Cancelar</Button><Button type="submit" loading={createReply.isPending || updateReply.isPending} loadingText="Salvando…">Salvar</Button></div>

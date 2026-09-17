@@ -42,6 +42,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | DELETE | `/numbers/:id` | tenant_admin | Remove (cascade em conversas) |
 | **Conversas** | | | |
 | GET | `/conversations?status=&numberId=&tagIds=a,b&search=&cursor=` | todos | Lista paginada por cursor |
+| GET | `/conversations/counts?numberId=` | todos | `{waiting, in_progress, closed}` para os contadores dos filtros |
 | GET | `/conversations/:id` | todos | Uma conversa (contato, tags, atendente, número) |
 | GET | `/conversations/:id/messages?cursor=` | todos | Mensagens (mais recentes primeiro, 50); `mediaUrl` já vem assinada |
 | POST | `/conversations/:id/messages` | todos | Envia: `{type:'text', text}` ou `{type:'image'|'audio'|'video'|'document', mediaKey, text?}` ou template |

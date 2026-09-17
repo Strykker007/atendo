@@ -52,7 +52,7 @@ export function NavigationProgress() {
   if (width === 0) return null;
   return (
     <div className="fixed top-0 left-0 right-0 z-[70] h-0.5 pointer-events-none">
-      <div className="h-full bg-brand shadow-[0_0_8px_rgba(22,163,74,.6)] transition-[width] duration-150 ease-out" style={{ width: `${width}%` }} />
+      <div className="h-full bg-accent shadow-[0_0_8px_rgba(22,163,74,.6)] transition-[width] duration-150 ease-out" style={{ width: `${width}%` }} />
     </div>
   );
 }

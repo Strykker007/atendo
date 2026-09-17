@@ -80,6 +80,43 @@ Regra: **nenhuma ação fica sem resposta visual**.
 
 Em **dev** o Next compila cada rota no primeiro acesso, por isso a primeira troca de tela demora alguns segundos; em produção (`pnpm build && pnpm start`) é quase instantâneo e os links são pré-carregados.
 
+## Tema e cores
+
+Dois temas, escolhidos no rodapé do menu (claro / escuro / sistema), aplicados pela classe `dark` no `<html>` antes do primeiro paint (script inline em `app/layout.tsx`, preferência em `localStorage` via `lib/theme.ts`).
+
+| | Claro — "Semáforo" | Escuro — "Sala de controle" |
+|---|---|---|
+| Ideia | Menu azul-ardósia, área clara, status como faixa cheia | Painel escuro, cores de estado luminosas, grade fina no chat |
+| Ação (`accent`) | azul `#2f5bea` | azul `#3b9eff` |
+| Aguardando / Atendendo / Encerrado | laranja / azul / cinza | âmbar / turquesa / cinza |
+| Balão de saída | azul sólido, texto branco | azul-marinho |
+
+**Tokens** vivem em `app/globals.css` (`:root` = claro, `.dark` = escuro) e são expostos como cores do Tailwind em `tailwind.config.ts`. Regra: **componente nunca usa hex nem `gray-*`/`red-*`** — usa os tokens:
+
+| Uso | Classes |
+|---|---|
+| Superfícies | `bg-canvas` (fundo da página), `bg-panel` (cartões/listas), `bg-field` (inputs/chips), `border-line` |
+| Texto | `text-ink` (principal), `text-muted` (secundário), `text-faint` (terciário) |
+| Ação | `bg-accent`, `hover:bg-accent-hover`, `bg-accent-soft`, `text-accent-ink` |
+| Menu | `bg-side`, `text-side-ink`, `bg-side-on` |
+| Status da conversa | `wait` / `prog` / `done` (+ `-soft`) — ver `STATUS_META` em `ConversationList.tsx` |
+| Semânticas | `ok`, `warn`, `danger` (+ `-soft`, `-ink`) |
+| Provider | `meta-soft`/`meta-ink` (oficial), `evo-soft`/`evo-ink` (QR) |
+| Chat | `bg-chat-in`/`bg-chat-out` e `text-chat-*-ink`; fundo `.chat-bg` |
+
+Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `color-mix` para o fundo suave — funcionam nos dois temas. Avatar: cor estável por telefone (`lib/avatar.ts`).
+
+**Tipografia**: Sora (marca, títulos — `font-display`), Source Sans 3 (interface — padrão), IBM Plex Mono (horários, contadores, telefones — `font-mono` + `.tnum`). Carregadas por `next/font`.
+
+## Sinalização de estado (o que o olho lê primeiro)
+
+- Filtros com **contador** por status (`GET /conversations/counts`), atualizado por socket.
+- Cada conversa tem **faixa lateral** com a cor do status; conversa selecionada em `accent-soft`.
+- Badge de **não-lidas** em `accent`; nome em negrito quando há não-lidas.
+- Seletor de número mostra **ponto de conexão** (verde/âmbar) e **badge do provider** (Oficial/QR).
+- Cabeçalho do chat: **pill de status** com a mesma cor da faixa.
+- Menu: item *Conversas* com badge laranja = quantas aguardando.
+
 ## Padrões
 
 - Componentes de página são `'use client'` (dependem de estado e socket).

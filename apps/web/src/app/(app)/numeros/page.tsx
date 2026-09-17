@@ -11,10 +11,10 @@ import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
-  connected: { label: 'Conectado', cls: 'bg-brand' },
-  pending_qr: { label: 'Aguardando QR', cls: 'bg-amber-500' },
-  disconnected: { label: 'Desconectado', cls: 'bg-gray-400' },
-  error: { label: 'Erro', cls: 'bg-red-500' },
+  connected: { label: 'Conectado', cls: 'bg-ok' },
+  pending_qr: { label: 'Aguardando QR', cls: 'bg-warn' },
+  disconnected: { label: 'Desconectado', cls: 'bg-faint' },
+  error: { label: 'Erro', cls: 'bg-danger' },
 };
 
 export default function NumerosPage() {
@@ -71,7 +71,7 @@ export default function NumerosPage() {
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold">Números</h1>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted">
               Cada número é um canal de atendimento. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} números.</>}
             </p>
           </div>
@@ -80,9 +80,9 @@ export default function NumerosPage() {
 
         {numbers.isLoading && <SkeletonCards count={2} />}
         {numbers.data?.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-surface-border bg-white p-12 text-center text-gray-500">
-            <Smartphone size={36} className="mx-auto mb-3 text-gray-300" />
-            <p className="font-medium text-gray-700">Nenhum número ainda</p>
+          <div className="rounded-2xl border border-dashed border-line bg-panel p-12 text-center text-muted">
+            <Smartphone size={36} className="mx-auto mb-3 text-faint" />
+            <p className="font-medium text-ink">Nenhum número ainda</p>
             <p className="text-sm">Cadastre o primeiro número para começar a receber mensagens.</p>
           </div>
         )}
@@ -91,13 +91,13 @@ export default function NumerosPage() {
           {numbers.data?.map((n) => {
             const st = STATUS[n.status] ?? STATUS.disconnected;
             return (
-              <div key={n.id} className={cn('rounded-2xl bg-white border border-surface-border p-5 space-y-4', !n.isActive && 'opacity-60')}>
+              <div key={n.id} className={cn('rounded-2xl bg-panel border border-line p-5 space-y-4', !n.isActive && 'opacity-60')}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-medium truncate">{n.label}</div>
-                    <div className="text-sm text-gray-500">+{n.phone}</div>
+                    <div className="text-sm text-muted">+{n.phone}</div>
                   </div>
-                  <span className={cn('inline-flex items-center gap-1.5 text-xs rounded-full px-2.5 py-1', n.provider === 'meta' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700')}>
+                  <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', n.provider === 'meta' ? 'bg-meta-soft text-meta-ink' : 'bg-evo-soft text-evo-ink')}>
                     {n.provider === 'meta' ? <ShieldCheck size={13} /> : <QrCode size={13} />}
                     {n.provider === 'meta' ? 'Oficial' : 'Não-oficial'}
                   </span>
@@ -105,8 +105,8 @@ export default function NumerosPage() {
 
                 <div className="flex items-center gap-2 text-sm">
                   <span className={cn('w-2.5 h-2.5 rounded-full', st.cls)} />
-                  <span className="text-gray-700">{st.label}</span>
-                  {!n.isActive && <span className="text-xs text-gray-400">· desativado</span>}
+                  <span className="text-ink">{st.label}</span>
+                  {!n.isActive && <span className="text-xs text-faint">· desativado</span>}
                 </div>
 
                 <div className="flex flex-wrap gap-2">

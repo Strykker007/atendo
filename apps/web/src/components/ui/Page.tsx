@@ -3,8 +3,8 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
   return (
     <header className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
-        {subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
+        <h1 className="font-display text-xl font-semibold text-ink tracking-tight">{title}</h1>
+        {subtitle && <p className="text-sm text-muted">{subtitle}</p>}
       </div>
       {action}
     </header>
@@ -21,9 +21,9 @@ export function PageShell({ children, width = 'max-w-5xl' }: { children: React.R
 
 export function Empty({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-surface-border bg-white p-12 text-center text-gray-500">
-      <div className="mx-auto mb-3 text-gray-300 w-fit">{icon}</div>
-      <p className="font-medium text-gray-700">{title}</p>
+    <div className="rounded-2xl border border-dashed border-line bg-panel p-12 text-center text-muted">
+      <div className="mx-auto mb-3 text-faint w-fit">{icon}</div>
+      <p className="font-medium text-ink">{title}</p>
       <p className="text-sm">{text}</p>
     </div>
   );

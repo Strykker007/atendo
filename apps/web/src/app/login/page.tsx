@@ -27,21 +27,21 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen grid place-items-center px-4">
-      <form onSubmit={submit} className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-surface-border p-8 space-y-5">
+    <main className="min-h-screen grid place-items-center px-4 bg-canvas">
+      <form onSubmit={submit} className="w-full max-w-sm bg-panel rounded-2xl shadow-sm border border-line p-8 space-y-5">
         <div>
-          <div className="text-2xl font-semibold text-brand">Atendo</div>
-          <p className="text-sm text-gray-500">Entre para acessar o atendimento</p>
+          <div className="flex items-center gap-2.5"><span className="w-9 h-9 rounded-xl bg-accent grid place-items-center text-white font-display font-bold">A</span><span className="font-display text-2xl font-semibold text-ink tracking-tight">Atendo</span></div>
+          <p className="text-sm text-muted">Entre para acessar o atendimento</p>
         </div>
         <label className="block text-sm">
-          <span className="text-gray-700">E-mail</span>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full rounded-lg border border-surface-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/40" />
+          <span className="text-ink">E-mail</span>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full rounded-lg border border-line px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent/40" />
         </label>
         <label className="block text-sm">
-          <span className="text-gray-700">Senha</span>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} className="mt-1 w-full rounded-lg border border-surface-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/40" />
+          <span className="text-ink">Senha</span>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} className="mt-1 w-full rounded-lg border border-line px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent/40" />
         </label>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
         <Button type="submit" className="w-full" loading={loading} loadingText="Entrando…">Entrar</Button>
       </form>
     </main>
