@@ -115,6 +115,8 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 | `pnpm db:generate` | Regenera o Prisma Client após mudar o schema |
 | `pnpm infra:logs` | Logs dos containers (útil para ver a Evolution) |
 | `pnpm infra:down` | Derruba a infra (dados ficam em `infra/volumes`) |
+| `pnpm db:migrate:create nome` | Cria e aplica migration **sem** o modo interativo do Prisma (usa um banco shadow `atendo_shadow`) |
+| `pnpm stripe:sync` | Cria os planos no Stripe (precisa de `STRIPE_SECRET_KEY`) |
 | `pnpm --filter @atendo/shared build` | Recompila os tipos compartilhados (a API importa do `dist`) |
 
 ## Erros comuns

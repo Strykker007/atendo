@@ -19,7 +19,7 @@ provider_pricing (global, sem tenant)
 
 ### Tenancy
 
-**tenants** — o cliente. `slug` único para URLs/identificação.
+**tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` criado no primeiro checkout.
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA.
 
@@ -46,9 +46,9 @@ provider_pricing (global, sem tenant)
 
 ### Cobrança
 
-**plans** — `limits` jsonb (`PlanLimits`). `billingModel` informativo (`fixed | usage | hybrid`).
+**plans** — `limits` jsonb (`PlanLimits`). `billingModel` informativo (`fixed | usage | hybrid`). `stripePriceId` (`price_…`) criado por `pnpm stripe:sync`.
 
-**subscriptions** — 1:1 com tenant. `status`: `trialing | active | past_due | suspended | canceled`. `externalId` = id no gateway.
+**subscriptions** — 1:1 com tenant. `status`: `trialing | active | past_due | suspended | canceled`. `externalId` = `sub_…` do Stripe; `cancelAtPeriodEnd`; `graceUntil`.
 
 **provider_pricing** — histórico de preços por `(provider, country, category)`; sempre inserir, nunca editar.
 
@@ -58,7 +58,7 @@ provider_pricing (global, sem tenant)
 
 **usage_alerts** — quais alertas já disparamos (única por tenant/período/métrica/threshold).
 
-**invoices** — fatura do período: base + excedente. Única por tenant/período.
+**invoices** — espelho da fatura do Stripe: base + excedente, `externalId` (`in_…`), `hostedUrl`. Única por tenant/período.
 
 ### Relatórios
 

@@ -3,7 +3,12 @@ import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle }
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
-import { useUsage } from '@/lib/hooks';
+import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe } from '@/lib/hooks';
+import { Button } from '@/components/ui/Button';
+import { toast } from '@/components/ui/Toast';
+import { useSearchParams } from 'next/navigation';
+import { useEffect, Suspense } from 'react';
+import { ExternalLink, Check, Receipt } from 'lucide-react';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   trialing: { label: 'Período de teste', cls: 'bg-meta-soft text-meta-ink' },
@@ -15,7 +20,25 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 export default function PlanoPage() {
-  const { data: u } = useUsage();
+  return <Suspense><PlanoInner /></Suspense>;
+}
+
+function PlanoInner() {
+  const { data: u, refetch } = useUsage();
+  const me = useMe();
+  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  const plans = usePlans();
+  const invoices = useInvoices();
+  const checkout = useCheckout();
+  const portal = usePortal();
+  const params = useSearchParams();
+  useEffect(() => {
+    if (params.get('success')) { toast.ok('Assinatura confirmada! Obrigado.'); refetch(); }
+    if (params.get('changed')) { toast.ok('Plano alterado. A diferença é ajustada na próxima fatura.'); refetch(); }
+    if (params.get('canceled')) toast.err('Checkout cancelado.');
+  }, [params, refetch]);
+
+  const go = (p: Promise<{ url: string }>) => p.then((r) => { window.location.href = r.url; }).catch(toast.err);
   if (!u) return (
     <PageShell width="max-w-4xl">
       <PageHeader title="Plano e uso" subtitle="Carregando consumo…" />
@@ -54,7 +77,11 @@ export default function PlanoPage() {
           <div className="font-medium">{u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}</div>
         </div>
         <span className={cn('text-xs rounded-full px-2.5 py-1', st.cls)}>{st.label}</span>
+        {isAdmin && u.billingEnabled && (
+          <Button size="sm" variant="ghost" icon={<ExternalLink size={13} />} loading={portal.isPending} onClick={() => go(portal.mutateAsync())}>Pagamento e faturas</Button>
+        )}
       </div>
+      {u.cancelAtPeriodEnd && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Cancelamento agendado: a assinatura termina em {u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}. Você pode reativar em "Pagamento e faturas".</p>}
 
       {(u.status === 'past_due' || u.status === 'suspended') && (
         <div className="flex gap-2 rounded-xl bg-danger-soft border border-danger/30 p-4 text-sm text-danger-ink">
@@ -78,8 +105,61 @@ export default function PlanoPage() {
         ) : (
           <p>Seu plano permite <b>excedente</b>: acima do incluído, cada mensagem custa {L.overagePricePerMessage != null ? brl(L.overagePricePerMessage) : '—'} e cada template {L.overagePricePerTemplate != null ? brl(L.overagePricePerTemplate) : '—'}, cobrados na próxima fatura. Você recebe aviso em 80% e 100%.</p>
         )}
-        <p className="text-faint text-xs pt-1">Para mudar de plano, fale com o suporte. (Autoatendimento de upgrade em breve.)</p>
       </div>
+
+      {/* Planos */}
+      {isAdmin && (
+        <section className="space-y-3">
+          <h2 className="font-display font-semibold text-ink">Planos</h2>
+          {!u.billingEnabled && <p className="text-sm text-muted">Cobrança online ainda não configurada — para mudar de plano, fale com o suporte.</p>}
+          <div className="grid gap-4 md:grid-cols-3">
+            {plans.data?.map((p) => {
+              const current = p.id === u.planId;
+              const L = p.limits;
+              return (
+                <div key={p.id} className={cn('rounded-2xl border p-5 space-y-3 bg-panel', current ? 'border-accent ring-1 ring-accent' : 'border-line')}>
+                  <div className="flex items-baseline justify-between">
+                    <div className="font-display font-semibold text-ink">{p.name}</div>
+                    {current && <span className="text-[10px] font-bold uppercase tracking-wider text-accent-ink bg-accent-soft rounded px-1.5 py-0.5">Atual</span>}
+                  </div>
+                  <div className="text-2xl font-semibold text-ink tnum">{brl(Number(p.priceMonth))}<span className="text-sm text-muted font-normal">/mês</span></div>
+                  <ul className="text-sm text-muted space-y-1">
+                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.maxNumbers} número{L.maxNumbers > 1 ? 's' : ''} · {L.maxAgents} atendentes</li>
+                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.includedMessagesMonth.toLocaleString('pt-BR')} mensagens/mês</li>
+                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.includedTemplatesMonth.toLocaleString('pt-BR')} templates/mês</li>
+                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.hardLimit ? 'Bloqueia ao atingir o limite' : `Excedente ${brl(L.overagePricePerMessage ?? 0)}/msg`}</li>
+                  </ul>
+                  <Button className="w-full" variant={current ? 'ghost' : 'primary'} disabled={current || !u.billingEnabled || !p.stripePriceId} loading={checkout.isPending && checkout.variables === p.id} onClick={() => go(checkout.mutateAsync(p.id))}>
+                    {current ? 'Plano atual' : u.status && u.status !== 'canceled' && u.billingEnabled ? 'Mudar para este' : 'Assinar'}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Faturas */}
+      {isAdmin && !!invoices.data?.length && (
+        <section className="rounded-2xl bg-panel border border-line overflow-hidden">
+          <div className="px-5 py-3 border-b border-line font-display font-semibold text-ink flex items-center gap-2"><Receipt size={16} className="text-muted" /> Faturas</div>
+          <table className="w-full text-sm">
+            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="px-5 py-2">Período</th><th className="px-5 py-2 text-right">Base</th><th className="px-5 py-2 text-right">Excedente</th><th className="px-5 py-2 text-right">Total</th><th className="px-5 py-2">Status</th><th></th></tr></thead>
+            <tbody className="divide-y divide-line">
+              {invoices.data.map((i) => (
+                <tr key={i.id}>
+                  <td className="px-5 py-2.5 tnum">{i.period}</td>
+                  <td className="px-5 py-2.5 text-right tnum">{brl(Number(i.baseAmount))}</td>
+                  <td className="px-5 py-2.5 text-right tnum">{brl(Number(i.overageAmount))}</td>
+                  <td className="px-5 py-2.5 text-right tnum font-semibold">{brl(Number(i.totalAmount))}</td>
+                  <td className="px-5 py-2.5"><span className={cn('text-xs rounded-full px-2 py-0.5', i.status === 'paid' ? 'bg-ok-soft text-ok' : i.status === 'failed' ? 'bg-danger-soft text-danger-ink' : 'bg-field text-muted')}>{{ draft: 'Rascunho', open: 'Em aberto', paid: 'Paga', failed: 'Falhou', void: 'Cancelada' }[i.status]}</span></td>
+                  <td className="px-5 py-2.5 text-right">{i.hostedUrl && <a href={i.hostedUrl} target="_blank" rel="noreferrer" className="text-accent-ink text-xs underline">ver</a>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
     </PageShell>
   );
 }

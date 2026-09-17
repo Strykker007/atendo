@@ -64,6 +64,12 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/uploads` | todos | multipart `file` → `{key, url, mimeType, fileName, size}` |
 | GET | `/media/*path?exp=&sig=` | — (assinatura) | Serve o arquivo se a assinatura for válida |
 | **Billing** | | | |
+| GET | `/billing/plans` | todos | Planos ativos com limites e `stripePriceId` |
+| GET | `/billing/invoices` | todos | Faturas do tenant (espelho do Stripe) |
+| POST | `/billing/checkout` | tenant_admin | `{planId}` → `{url}` do Checkout (ou troca com proration se já assina) |
+| POST | `/billing/portal` | tenant_admin | `{url}` do Customer Portal |
+| GET | `/billing/margin?period=` | super_admin | Margem por cliente |
+| POST | `/billing/sync-plans` | super_admin | Cria Products/Prices no Stripe |
 | GET | `/billing/usage` | todos | Uso do mês (mensagens, templates, números, atendentes), limites, status, mensalidade, excedente, fim do período |
 | **Relatórios** | | | |
 | POST | `/reports/run` | todos | Executa um `ReportDefinition` |
@@ -72,6 +78,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/webhooks/meta` | — | Verificação da Meta (`hub.challenge`) |
 | POST | `/webhooks/meta` | — | Eventos Meta (HMAC) |
 | POST | `/webhooks/evolution` | — | Eventos Evolution (token de instância) |
+| POST | `/webhooks/stripe` | — | Eventos Stripe (assinatura `stripe-signature`) |
 
 ## Exemplos
 

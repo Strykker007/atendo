@@ -15,7 +15,9 @@
     "infra:up": "docker compose -f infra/docker-compose.yml --env-file .env up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml --env-file .env down",
     "infra:logs": "docker compose -f infra/docker-compose.yml --env-file .env logs -f",
-    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\""
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "stripe:sync": "pnpm --filter @atendo/api stripe:sync",
+    "db:migrate:create": "cd apps/api && sh scripts/create-migration.sh"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

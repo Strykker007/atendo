@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2 } from 'lucide-react';
+import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -10,6 +10,7 @@ import { useNav } from './NavigationProgress';
 import { useTheme, applyTheme } from '@/lib/theme';
 import { useConversationCounts, useMe } from '@/lib/hooks';
 
+const ADMIN_ITEM = { href: '/admin', label: 'Margem (dono)', icon: ShieldCheck };
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
   { href: '/numeros', label: 'Números', icon: Smartphone },
@@ -57,7 +58,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 py-2">
-        {items.map(({ href, label, icon: Icon }) => {
+        {[...items, ...(me.data?.role === 'super_admin' ? [ADMIN_ITEM] : [])].map(({ href, label, icon: Icon }) => {
           const active = target ? target === href : path.startsWith(href);
           const badge = href === '/conversas' && waiting > 0 ? waiting : null;
           return (

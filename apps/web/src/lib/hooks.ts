@@ -32,6 +32,10 @@ export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => api<T
 export const useQuickReplies = () => useQuery({ queryKey: ['quick-replies'], queryFn: () => api<Folder[]>('/quick-replies') });
 export interface Usage {
   period: string;
+  billingEnabled: boolean;
+  cancelAtPeriodEnd: boolean;
+  graceUntil: string | null;
+  planId: string | null;
   used: { messages: number; templates: number; numbers: number; agents: number; messagesIn: number };
   limits: PlanLimits | null;
   status: string | null;
@@ -257,3 +261,14 @@ export const useDeleteSavedReport = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/reports/saved/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }) });
 };
+
+
+// ---- Cobrança (Stripe) ----
+export interface Plan { id: string; name: string; priceMonth: string; billingModel: string; limits: PlanLimits; stripePriceId: string | null }
+export interface Invoice { id: string; period: string; baseAmount: string; overageAmount: string; totalAmount: string; currency: string; status: 'draft' | 'open' | 'paid' | 'failed' | 'void'; hostedUrl: string | null; dueAt: string | null; paidAt: string | null; createdAt: string }
+export const usePlans = () => useQuery({ queryKey: ['plans'], queryFn: () => api<Plan[]>('/billing/plans') });
+export const useInvoices = () => useQuery({ queryKey: ['invoices'], queryFn: () => api<Invoice[]>('/billing/invoices') });
+export const useCheckout = () => useMutation({ mutationFn: (planId: string) => api<{ url: string }>('/billing/checkout', { method: 'POST', body: JSON.stringify({ planId }) }) });
+export const usePortal = () => useMutation({ mutationFn: () => api<{ url: string }>('/billing/portal', { method: 'POST' }) });
+export interface MarginRow { tenantId: string; name: string; plan: string | null; status: string | null; revenue: number; overage: number; providerCost: number; infraCost: number; margin: number; marginPct: number; messagesSent: number; templatesSent: number }
+export const useMargin = (period?: string) => useQuery({ queryKey: ['margin', period], queryFn: () => api<MarginRow[]>(`/billing/margin${period ? `?period=${period}` : ''}`) });

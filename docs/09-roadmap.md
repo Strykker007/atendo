@@ -19,15 +19,14 @@
 - Tema claro (Semáforo) e escuro (Sala de controle) com tokens; seleção em Configurações
 - Relatórios: construtor de parâmetros, gráfico (linha/barra/pizza), tabela, CSV, relatórios salvos
 - Posse do atendimento: assumir (atômico), transferir, devolver à fila; visão por atendente; admin vê todas
+- Cobrança Stripe: checkout, troca de plano com proration, portal do cliente, webhooks, excedente na fatura, suspensão por carência, faturas na tela, margem por cliente (super_admin)
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
 
 1. **Alertas por e-mail** — provedor (Resend/SES) + template; banner no painel.
-2. **Fechamento de fatura + gateway** — **Stripe** (decidido em 2026-09-17); webhook de pagamento; suspensão com grace.
-3. **Relatório de margem** (super_admin) — receita − custo por tenant.
-4. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
-5. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
-6. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
-7. **2FA** (TOTP) para admins.
-8. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.
+2. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
+3. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
+4. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
+5. **2FA** (TOTP) para admins.
+6. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.

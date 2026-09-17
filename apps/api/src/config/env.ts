@@ -37,6 +37,9 @@ const schema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional().default(''),
   S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
   MEDIA_MAX_MB: z.coerce.number().default(25),
+  STRIPE_SECRET_KEY: z.string().optional().default(''),
+  STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
+  STRIPE_CURRENCY: z.string().default('brl'),
 });
 
 const parsed = schema.safeParse(process.env);

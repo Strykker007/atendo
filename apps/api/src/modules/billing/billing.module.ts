@@ -5,13 +5,15 @@ import { UsageService } from './usage.service';
 import { PlanLimitGuard } from './plan-limit.guard';
 import { BillingController } from './billing.controller';
 import { BillingProcessor, BillingScheduler } from './billing.processor';
+import { StripeService } from './stripe.service';
+import { StripeWebhookController } from './stripe-webhook.controller';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUE_BILLING } from '../whatsapp/queues';
 
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_BILLING }), AuthModule],
-  controllers: [BillingController],
-  providers: [PricingService, UsageService, PlanLimitGuard, BillingProcessor, BillingScheduler],
-  exports: [PricingService, UsageService, PlanLimitGuard],
+  controllers: [BillingController, StripeWebhookController],
+  providers: [PricingService, UsageService, PlanLimitGuard, BillingProcessor, BillingScheduler, StripeService],
+  exports: [PricingService, UsageService, PlanLimitGuard, StripeService],
 })
 export class BillingModule {}

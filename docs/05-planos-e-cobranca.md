@@ -73,14 +73,53 @@ Limites de **quantidade** (números, atendentes) usam `PlanLimitGuard` + `@Requi
 
 Ao passar de **80%** e **100%** de mensagens ou templates, `usage_alerts` registra (chave única por tenant/período/métrica/threshold — nunca dispara duas vezes). Hoje só loga; enviar e-mail e mostrar banner no painel está no roadmap. `GET /billing/usage` já devolve `used` e `limits` para o front calcular a porcentagem.
 
-## Fechamento do período (a implementar)
+## Cobrança com Stripe
 
-1. `reconcile()` do mês.
-2. `Invoice`: `baseAmount = plan.priceMonth`, `overageAmount` do `usage_counters`, `total`.
-3. Envia ao gateway (Asaas ou Stripe) → `externalId`.
-4. Webhook do gateway: pago → `paid`; falhou → `subscription.status = past_due`, `graceUntil = hoje + graceDays`.
-5. Passou do grace sem pagar → `suspended`: números **param de enviar mas continuam recebendo** (histórico preservado, cliente não some).
+**Modelo:** cada `Plan` = um Price mensal recorrente no Stripe. O tenant vira um Customer no primeiro checkout. A assinatura do Stripe é a fonte da verdade; a tabela `subscriptions` é um espelho mantido pelos webhooks. Código: `apps/api/src/modules/billing/stripe.service.ts`.
 
-## Relatório de margem (a implementar)
+### Configurar (uma vez)
 
-Por tenant/mês: `receita (plano + excedente) − custo (Σ providerCost + Σ infraCostMonth dos números)`. Tudo já está no banco; falta o endpoint e a tela no painel do super_admin. É aqui que se descobre se um plano está mal precificado.
+1. Crie a conta em stripe.com e fique em **modo teste** (toggle no dashboard).
+2. Copie a chave secreta (`sk_test_…`) para `STRIPE_SECRET_KEY` no `.env`.
+3. Sincronize os planos → cria Product + Price para cada plano sem `stripePriceId`:
+   ```bash
+   pnpm stripe:sync
+   ```
+   (ou `POST /billing/sync-plans` como super_admin). Mudou o preço de um plano? Crie um Price novo no Stripe e atualize `plans.stripePriceId` — Prices são imutáveis.
+4. Webhook local, com a CLI do Stripe:
+   ```bash
+   stripe listen --forward-to localhost:4000/webhooks/stripe
+   ```
+   Copie o `whsec_…` impresso para `STRIPE_WEBHOOK_SECRET`. Em produção, cadastre `https://<api>/webhooks/stripe` no dashboard com os eventos: `checkout.session.completed`, `customer.subscription.*`, `invoice.created`, `invoice.finalized`, `invoice.paid`, `invoice.payment_failed`, `invoice.voided`.
+5. Cartão de teste: `4242 4242 4242 4242`, qualquer data futura e CVC. Para simular falha: `4000 0000 0000 0341`.
+
+Sem `STRIPE_SECRET_KEY` o sistema funciona normalmente, só sem autoatendimento: `GET /billing/usage` devolve `billingEnabled: false` e a tela mostra "fale com o suporte".
+
+### Fluxos
+
+| Ação do cliente (admin do tenant) | O que acontece |
+|---|---|
+| *Plano e uso → Assinar* | `POST /billing/checkout {planId}` → Checkout Session (assinatura) → redireciona ao Stripe → volta em `/plano?success=1`. Webhook `checkout.session.completed` espelha a assinatura. |
+| *Mudar para este* (já assinante) | Troca o Price na assinatura existente com **proration** (diferença cobrada/creditada na próxima fatura). Sem novo checkout. |
+| *Pagamento e faturas* | `POST /billing/portal` → Customer Portal do Stripe: trocar cartão, baixar faturas, cancelar ao fim do período. |
+
+### Ciclo mensal
+
+```
+Stripe cria a fatura do novo ciclo (invoice.created, billing_reason = subscription_cycle)
+   └─ addOverage(): reconcile() do mês que fechou → usage_counters.overageAmount
+      └─ > 0 ? InvoiceItem "Excedente de uso — 2026-09 (N msgs, M templates)" na MESMA fatura
+Stripe finaliza e cobra (~1 h depois)
+   ├─ invoice.paid          → invoices.status = paid; assinatura past_due/suspended volta a active
+   └─ invoice.payment_failed → subscription.past_due, graceUntil = hoje + plan.limits.graceDays
+Job diário (03:00 UTC, BillingProcessor)
+   └─ past_due com graceUntil vencido → suspended
+```
+
+**Suspensa** = `UsageService.canSend` bloqueia envio; os números **continuam recebendo** (histórico preservado, cliente não some). Pagou → `invoice.paid` reativa.
+
+Fatura espelhada em `invoices` com `hostedUrl` (link do Stripe para pagar/baixar) — aparece na tabela de faturas em *Plano e uso*.
+
+### Margem (dono do Atendo)
+
+`GET /billing/margin?period=YYYY-MM` (super_admin) e tela *Margem (dono)* no menu: por cliente, `receita (plano + excedente) − custo (Σ providerCost dos templates + Σ infraCostMonth dos números)`. Margem < 30% fica em laranja — é o sinal de plano mal precificado.
