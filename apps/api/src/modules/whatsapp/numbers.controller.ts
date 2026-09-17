@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
-import { IsEnum, IsObject, IsString, Matches } from 'class-validator';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { IsBoolean, IsEnum, IsObject, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -18,6 +18,10 @@ class CreateNumberDto {
 class SwitchProviderDto {
   @IsEnum(ProviderKind) provider: ProviderKind;
   @IsObject() config: Record<string, unknown>;
+}
+class UpdateNumberDto {
+  @IsOptional() @IsString() @MaxLength(60) label?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 @Controller('numbers')
@@ -64,6 +68,25 @@ export class NumbersController {
   async switchProvider(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: SwitchProviderDto) {
     await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
     return this.numbers.switchProvider(id, dto.provider, dto.config as any);
+  }
+
+  @Patch(':id')
+  @Roles('tenant_admin', 'super_admin')
+  update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
+    return this.prisma.whatsAppNumber.update({
+      where: { id, tenantId: user.tenantId },
+      data: dto,
+      select: { id: true, label: true, isActive: true },
+    });
+  }
+
+  /** Remove o número do provider e do banco (conversas vão junto — cascade). */
+  @Delete(':id')
+  @Roles('tenant_admin', 'super_admin')
+  async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
+    await this.numbers.remove(id);
+    return { ok: true };
   }
 
   /** Reconecta (gera QR novo na Evolution, revalida token na Meta). */

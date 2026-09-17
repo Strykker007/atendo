@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BillingCategory, MessageStatus, MessageType, NumberStatus } from '@atendo/shared';
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
@@ -26,7 +26,10 @@ export class EvolutionProvider implements WhatsAppProvider {
       headers: { apikey: env.EVOLUTION_API_KEY, 'Content-Type': 'application/json', ...init?.headers },
     });
     const json = (await res.json().catch(() => ({}))) as any;
-    if (!res.ok) throw new BadRequestException(json?.response?.message ?? json?.message ?? `Evolution ${res.status}`);
+    if (!res.ok) {
+      const raw = json?.response?.message ?? json?.message ?? `Evolution ${res.status}`;
+      throw new BadRequestException(Array.isArray(raw) ? raw.join('; ') : String(raw));
+    }
     return json as T;
   }
 
@@ -34,13 +37,26 @@ export class EvolutionProvider implements WhatsAppProvider {
     return (ctx.config as unknown as EvolutionNumberConfig).instanceName ?? ctx.externalId;
   }
 
+  /**
+   * Token por instância, derivado da chave global (HMAC). A Evolution devolve esse token
+   * no corpo de cada webhook (`apikey`), e assim validamos a origem sem consultar o banco.
+   */
+  private instanceToken(instanceName: string) {
+    return createHmac('sha256', env.EVOLUTION_API_KEY).update(instanceName).digest('hex');
+  }
+
   async connect(ctx: NumberContext) {
     const name = this.instance(ctx);
-    // cria se não existir; se já existe a Evolution devolve erro e seguimos para o QR
-    await this.api('/instance/create', {
+    // cria se não existir; se já existe seguimos direto para o QR
+    const created = await this.api<any>('/instance/create', {
       method: 'POST',
-      body: JSON.stringify({ instanceName: name, integration: 'WHATSAPP-BAILEYS', qrcode: true, number: ctx.phone }),
-    }).catch(() => undefined);
+      body: JSON.stringify({ instanceName: name, token: this.instanceToken(name), integration: 'WHATSAPP-BAILEYS', qrcode: true, number: ctx.phone }),
+    }).catch((err: Error) => {
+      if (/already|in use|já/i.test(err.message)) return null;
+      throw err;
+    });
+    if (created?.qrcode?.base64) return { status: NumberStatus.PENDING_QR, qrCode: created.qrcode.base64 };
+
     const r = await this.api<any>(`/instance/connect/${name}`);
     if (r?.instance?.state === 'open') return { status: NumberStatus.CONNECTED };
     return { status: NumberStatus.PENDING_QR, qrCode: r?.base64 ?? r?.code };
@@ -48,6 +64,11 @@ export class EvolutionProvider implements WhatsAppProvider {
 
   async disconnect(ctx: NumberContext) {
     await this.api(`/instance/logout/${this.instance(ctx)}`, { method: 'DELETE' }).catch(() => undefined);
+  }
+
+  async destroy(ctx: NumberContext) {
+    await this.disconnect(ctx);
+    await this.api(`/instance/delete/${this.instance(ctx)}`, { method: 'DELETE' }).catch(() => undefined);
   }
 
   async getStatus(ctx: NumberContext) {
@@ -88,11 +109,19 @@ export class EvolutionProvider implements WhatsAppProvider {
     }).catch(() => undefined);
   }
 
-  verifyWebhook(headers: Record<string, string | string[] | undefined>) {
-    // A Evolution manda a API key no header `apikey` quando configurado; validamos igualdade constante.
-    const got = Buffer.from(String(headers['apikey'] ?? ''));
-    const want = Buffer.from(env.EVOLUTION_API_KEY);
-    if (got.length !== want.length || !timingSafeEqual(got, want)) throw new UnauthorizedException('apikey Evolution inválida');
+  verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer) {
+    const eq = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+    // 1) chamada manual/teste com a chave global no header
+    if (eq(String(headers['apikey'] ?? ''), env.EVOLUTION_API_KEY)) return;
+    // 2) webhook real: `apikey` no corpo é o token da instância que nós mesmos geramos
+    let body: any = {};
+    try {
+      body = JSON.parse(rawBody.toString('utf8'));
+    } catch {
+      /* corpo inválido cai no erro abaixo */
+    }
+    if (typeof body?.instance === 'string' && eq(String(body.apikey ?? ''), this.instanceToken(body.instance))) return;
+    throw new UnauthorizedException('Webhook Evolution não autenticado');
   }
 
   parseWebhook(body: any): ParsedWebhook {

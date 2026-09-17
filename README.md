@@ -18,19 +18,24 @@ packages/shared enums e tipos canônicos compartilhados (InboundMessage, Outboun
 infra/          docker-compose (Postgres, Redis, Evolution API)
 ```
 
+## Documentação
+
+A pasta [`docs/`](docs/README.md) tem a documentação completa: visão geral, como rodar, arquitetura, providers WhatsApp, cobrança, modelo de dados, API, front-end e roadmap.
+
 ## Rodando local
 
-Pré-requisitos: Node 22+, Docker.
+Pré-requisitos: Node 22+, Docker (recomendado Colima — ver [docs/02](docs/02-rodando-local.md)).
 
 ```bash
 corepack enable && corepack prepare pnpm@latest --activate
 pnpm install
-cp .env.example .env            # já existe um .env gerado; ajuste se quiser
-# ENCRYPTION_KEY: openssl rand -base64 32
-pnpm infra:up                   # Postgres :5432, Redis :6379, Evolution :8080
+cp .env.example .env
+sed -i '' "s|^ENCRYPTION_KEY=$|ENCRYPTION_KEY=$(openssl rand -base64 32)|" .env
+ln -sfn ../../.env apps/api/.env && ln -sfn ../../.env apps/web/.env
+pnpm infra:up                   # Postgres :5433, Redis :6379, Evolution :8080
 pnpm db:migrate                 # cria as tabelas (prisma migrate dev)
 pnpm db:seed                    # planos, preços Meta BR, super admin e tenant demo
-pnpm dev                        # api :3001 + web :3000
+pnpm dev                        # api :4000 + web :3000
 ```
 
 Logins do seed: `admin@atendo.local / admin12345` (super admin) e `demo@atendo.local / demo12345` (admin do tenant demo).

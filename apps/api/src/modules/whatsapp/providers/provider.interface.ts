@@ -26,6 +26,8 @@ export interface WhatsAppProvider {
   /** Cria/registra o número no provider e devolve o que for necessário (QR, status). */
   connect(ctx: NumberContext): Promise<{ status: NumberStatus; qrCode?: string }>;
   disconnect(ctx: NumberContext): Promise<void>;
+  /** Remove definitivamente o número do provider (ex.: apaga a instância na Evolution). Opcional. */
+  destroy?(ctx: NumberContext): Promise<void>;
   getStatus(ctx: NumberContext): Promise<NumberStatus>;
 
   send(ctx: NumberContext, message: OutboundMessage): Promise<SendResult>;

@@ -53,6 +53,13 @@ export class NumbersService {
     return { ...updated, providerConfig: undefined, status: result.status, qrCode: result.qrCode };
   }
 
+  async remove(numberId: string) {
+    const ctx = await this.context(numberId);
+    const provider = this.registry.get(ctx.provider);
+    await (provider.destroy ? provider.destroy(ctx) : provider.disconnect(ctx)).catch(() => undefined);
+    await this.prisma.whatsAppNumber.delete({ where: { id: numberId } });
+  }
+
   async findByExternal(provider: ProviderKind, externalId: string) {
     return this.prisma.whatsAppNumber.findUnique({ where: { provider_externalId: { provider, externalId } } });
   }

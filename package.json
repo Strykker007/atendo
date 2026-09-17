@@ -12,8 +12,9 @@
     "db:generate": "pnpm --filter @atendo/api prisma generate",
     "db:seed": "pnpm --filter @atendo/api prisma db seed",
     "db:studio": "pnpm --filter @atendo/api prisma studio",
-    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:up": "docker compose -f infra/docker-compose.yml --env-file .env up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml --env-file .env down",
+    "infra:logs": "docker compose -f infra/docker-compose.yml --env-file .env logs -f",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\""
   },
   "devDependencies": {

@@ -1,4 +1,15 @@
 import { z } from 'zod';
+import { config as loadDotenv } from 'dotenv';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+// Carrega o .env: apps/api/.env é um symlink para o .env da raiz do monorepo.
+for (const candidate of [resolve(process.cwd(), '.env'), resolve(process.cwd(), '../../.env')]) {
+  if (existsSync(candidate)) {
+    loadDotenv({ path: candidate });
+    break;
+  }
+}
 
 // Valida o ambiente na subida. Falha cedo e com mensagem clara em vez de quebrar em runtime.
 const schema = z.object({

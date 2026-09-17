@@ -1,6 +1,6 @@
 # Atendo — guia para o Claude
 
-Monorepo pnpm/Turborepo. `apps/api` (NestJS + Prisma), `apps/web` (Next.js App Router), `packages/shared` (tipos canônicos). Leia o README para o contexto de produto.
+Monorepo pnpm/Turborepo. `apps/api` (NestJS + Prisma), `apps/web` (Next.js App Router), `packages/shared` (tipos canônicos). Leia o README e a pasta `docs/` para o contexto de produto. **Sempre que mudar comportamento, endpoint, schema ou fluxo, atualize o doc correspondente em `docs/` na mesma tarefa** — documentação desatualizada é bug.
 
 ## Regras do projeto
 - Idioma do código: identificadores em inglês, comentários e textos de UI em português.

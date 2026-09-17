@@ -1,6 +1,6 @@
 'use client';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 let accessToken: string | null = null;
 
 export const setAccessToken = (t: string | null) => {
