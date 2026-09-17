@@ -18,6 +18,7 @@
 - Origem do lead: referral de anúncio (Meta e Evolution) → `origin`/`originData`, tags automáticas, filtro e relatório por campanha
 - Tema claro (Semáforo) e escuro (Sala de controle) com tokens; seleção em Configurações
 - Relatórios: construtor de parâmetros, gráfico (linha/barra/pizza), tabela, CSV, relatórios salvos
+- Posse do atendimento: assumir (atômico), transferir, devolver à fila; visão por atendente; admin vê todas
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
@@ -29,4 +30,4 @@
 5. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
 6. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
 7. **2FA** (TOTP) para admins.
-8. **Atribuição automática** de conversas (round-robin entre atendentes online).
+8. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.

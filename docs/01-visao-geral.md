@@ -36,6 +36,21 @@ Tenant (cliente)
 4. Um atendente abre a conversa e responde → status vira **Em atendimento** e a conversa fica atribuída a ele.
 5. Ao terminar, o atendente clica em **Encerrar**. Nova mensagem do mesmo contato abre uma **nova** conversa (assim os relatórios contam atendimentos, não contatos).
 
+## Um número, várias atendentes — posse do atendimento
+
+O número é do **cliente**, não de um usuário: todas as atendentes do cliente veem o mesmo número sem "conectar de novo". O que separa quem atende quem é a **posse** da conversa:
+
+| Momento | Quem vê | Quem pode responder |
+|---|---|---|
+| Contato manda mensagem → *Aguardando* | todas | qualquer uma — a primeira que responder (ou clicar **Assumir**) vira dona |
+| Marta assumiu → *Em atendimento* | Marta (em "Minhas"); admin (em "Todos") | Marta; admin também (sem tomar a posse) |
+| Maria abre a mesma conversa | vê o histórico, mas o composer avisa "Marta está atendendo" | não |
+| Marta **transfere** para Maria | some para Marta, aparece para Maria | Maria |
+| Marta **devolve à fila** | volta para *Aguardando* de todas | qualquer uma |
+| Encerrada | todas | ninguém (reabrir = quem reabriu assume) |
+
+Se duas clicarem em *Assumir* ao mesmo tempo, o banco garante que só uma ganha; a outra recebe "Marta já assumiu este atendimento" (ver [03 › Posse atômica](03-arquitetura.md#posse-do-atendimento)).
+
 ## Os três filtros principais
 
 Sempre visíveis acima da lista: **Aguardando · Em atendimento · Encerrado**. São o status da conversa. Abaixo deles ficam os filtros secundários: número, busca por contato e tags.

@@ -42,12 +42,13 @@ export interface Usage {
 }
 export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/billing/usage'), refetchInterval: 60_000 });
 
-export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null }) =>
+export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null }) =>
   useQuery({
     queryKey: ['conversations', q],
     queryFn: () => {
       const p = new URLSearchParams({ status: q.status });
       if (q.numberId) p.set('numberId', q.numberId);
+      if (q.assigneeId) p.set('assigneeId', q.assigneeId);
       if (q.origin) p.set('origin', q.origin);
       if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
       if (q.search) p.set('search', q.search);
@@ -55,8 +56,19 @@ export const useConversations = (q: { status: ConversationStatus; numberId: stri
     },
   });
 
+const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
+  qc.invalidateQueries({ queryKey: ['conversations'] });
+  qc.invalidateQueries({ queryKey: ['conversation', id] });
+  qc.invalidateQueries({ queryKey: ['conversation-counts'] });
+};
+
 export const useConversationCounts = (numberId: string | null) =>
-  useQuery({ queryKey: ['conversation-counts', numberId], queryFn: () => api<{ waiting: number; in_progress: number; closed: number }>(`/conversations/counts${numberId ? `?numberId=${numberId}` : ''}`), refetchInterval: 30_000 });
+  useQuery({ queryKey: ['conversation-counts', numberId], queryFn: () => api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number }>(`/conversations/counts${numberId ? `?numberId=${numberId}` : ''}`), refetchInterval: 30_000 });
+
+// ---- posse do atendimento ----
+export const useClaim = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/claim`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
+export const useTransfer = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, agentId }: { id: string; agentId: string }) => api<Conversation>(`/conversations/${id}/transfer`, { method: 'POST', body: JSON.stringify({ agentId }) }), onSuccess: (_, v) => invConv(qc, v.id) }); };
+export const useRelease = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/release`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
 
 export const useConversation = (id: string | null) =>
   useQuery({ queryKey: ['conversation', id], enabled: !!id, queryFn: () => api<Conversation>(`/conversations/${id}`) });
@@ -96,11 +108,6 @@ export async function uploadFile(file: File): Promise<Upload> {
 export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'document' =>
   mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'document';
 
-const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
-  qc.invalidateQueries({ queryKey: ['conversations'] });
-  qc.invalidateQueries({ queryKey: ['conversation', id] });
-  qc.invalidateQueries({ queryKey: ['conversation-counts'] });
-};
 export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({

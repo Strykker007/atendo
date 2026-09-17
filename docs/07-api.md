@@ -30,7 +30,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Tenants** | | | |
 | GET | `/tenants` | super_admin | Lista clientes com plano e contagens |
 | POST | `/tenants` | super_admin | Cria cliente + assinatura + admin |
-| GET | `/tenants/me/agents` | tenant_admin | Atendentes do meu tenant |
+| GET | `/tenants/me/agents` | todos | Atendentes do meu tenant (todos podem listar para transferir) |
 | POST | `/tenants/me/agents` | tenant_admin | Cria atendente (respeita `maxAgents`) |
 | PATCH | `/tenants/me/agents/:id` | tenant_admin | Nome / ativo / `password` (redefine e revoga sessões) |
 | **Números** | | | |
@@ -41,11 +41,14 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | PATCH | `/numbers/:id` | tenant_admin | Label / ativo |
 | DELETE | `/numbers/:id` | tenant_admin | Remove (cascade em conversas) |
 | **Conversas** | | | |
-| GET | `/conversations?status=&numberId=&tagIds=a,b&search=&origin=&cursor=` | todos | Lista paginada por cursor; `origin` = organic/ad/post/link |
-| GET | `/conversations/counts?numberId=` | todos | `{waiting, in_progress, closed}` para os contadores dos filtros |
+| GET | `/conversations?status=&numberId=&tagIds=a,b&search=&origin=&assigneeId=&cursor=` | todos | Lista por cursor. Em `in_progress`, atendente vê só as suas; admin vê todas ou filtra por `assigneeId` |
+| GET | `/conversations/counts?numberId=` | todos | `{waiting, in_progress, closed, in_progress_mine, in_progress_all}` (`in_progress` já respeita a visão do usuário) |
 | GET | `/conversations/:id` | todos | Uma conversa (contato, tags, atendente, número) |
 | GET | `/conversations/:id/messages?cursor=` | todos | Mensagens (mais recentes primeiro, 50); `mediaUrl` já vem assinada |
 | POST | `/conversations/:id/messages` | todos | Envia: `{type:'text', text}` ou `{type:'image'|'audio'|'video'|'document', mediaKey, text?}` ou template |
+| POST | `/conversations/:id/claim` | todos | Assumir (atômico; 409 se outra pessoa assumiu) |
+| POST | `/conversations/:id/transfer` | dono ou admin | `{agentId}` |
+| POST | `/conversations/:id/release` | dono ou admin | Devolve à fila (waiting, sem dono) |
 | POST | `/conversations/:id/messages/:messageId/resend` | todos | Reenvia mensagem com status `failed` |
 | PATCH | `/conversations/:id/status` | todos | `waiting | in_progress | closed` |
 | PATCH | `/conversations/:id/tags` | todos | `{tagIds: []}` substitui as tags |
@@ -115,6 +118,7 @@ Formato padrão do Nest: `{ statusCode, message, error }`. Códigos relevantes:
 |---|---|
 | 400 | Validação (campo inválido/desconhecido), janela 24h expirada, conversa encerrada, número desconectado |
 | 401 | Token ausente/expirado, webhook não autenticado |
-| 403 | Role insuficiente, limite do plano, assinatura suspensa |
+| 403 | Role insuficiente, limite do plano, assinatura suspensa, transferir/devolver conversa que não é sua |
+| 409 | Outra atendente já assumiu a conversa |
 | 404 | Recurso de outro tenant ou inexistente (nunca revelamos qual) |
 | 429 | Throttling |

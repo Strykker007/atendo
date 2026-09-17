@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, FileText, Download, X, RefreshCw, WifiOff } from 'lucide-react';
+import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useConversation, useMessages, useResend, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
@@ -16,6 +16,15 @@ import { OriginBadge } from './OriginBadge';
 export function ChatPane() {
   const { conversationId, setConversation, status, setStatus: setFilterStatus, rightPanelOpen, toggleRightPanel } = useUI();
   const conv = useConversation(conversationId).data;
+  const me = useMe();
+  const agents = useAgents();
+  const claim = useClaim();
+  const transfer = useTransfer();
+  const release = useRelease();
+  const [transferOpen, setTransferOpen] = useState(false);
+  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  const mine = !!conv && conv.assignee?.id === me.data?.id;
+  const ownedByOther = !!conv && !!conv.assignee && !mine;
   const tags = useTags();
   const messages = useMessages(conversationId);
   const send = useSendMessage(conversationId);
@@ -114,6 +123,33 @@ export function ChatPane() {
           {setTags.isPending && <span className="absolute -top-3 right-0 text-[10px] text-faint">salvando…</span>}
           <TagPicker compact tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} placeholder="Adicionar tag" />
         </div>
+        {conv.status === 'waiting' && (
+          <Button size="sm" icon={<Hand size={14} />} loading={claim.isPending} loadingText="Assumindo…" onClick={() => claim.mutateAsync(conv.id).then(() => { toast.ok('Você assumiu este atendimento'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Assumir atendimento">
+            <span className="hidden sm:inline">Assumir</span>
+          </Button>
+        )}
+        {conv.status === 'in_progress' && (mine || isAdmin) && (
+          <div className="relative">
+            <Button size="sm" variant="ghost" icon={<ArrowRightLeft size={14} />} onClick={() => setTransferOpen((o) => !o)} title="Transferir ou devolver à fila">
+              <span className="hidden sm:inline">Transferir</span>
+            </Button>
+            {transferOpen && (
+              <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-xl bg-panel border border-line shadow-lg py-1 text-sm" onMouseLeave={() => setTransferOpen(false)}>
+                <div className="px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">Transferir para</div>
+                {agents.data?.filter((a) => a.isActive && a.id !== conv.assignee?.id).map((a) => (
+                  <button key={a.id} onClick={() => { setTransferOpen(false); transfer.mutateAsync({ id: conv.id, agentId: a.id }).then(() => toast.ok(`Transferido para ${a.name}`)).catch(toast.err); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2">
+                    <UserRound size={13} className="text-faint" /> {a.name}
+                  </button>
+                ))}
+                {agents.data?.filter((a) => a.isActive && a.id !== conv.assignee?.id).length === 0 && <div className="px-3 py-1.5 text-muted text-xs">Nenhum outro atendente ativo.</div>}
+                <div className="border-t border-line my-1" />
+                <button onClick={() => { setTransferOpen(false); release.mutateAsync(conv.id).then(() => { toast.ok('Devolvida para a fila'); setFilterStatus('waiting', true); }).catch(toast.err); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2">
+                  <Undo2 size={13} className="text-faint" /> Devolver à fila
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {conv.status !== 'closed' ? (
           <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'closed' }).then(() => toast.ok('Atendimento encerrado')).catch(toast.err)} title="Encerrar atendimento">
             <span className="hidden sm:inline">Encerrar</span>
@@ -147,7 +183,12 @@ export function ChatPane() {
       </div>
 
       {/* Composer */}
-      {numberOffline ? (
+      {ownedByOther && !isAdmin ? (
+        <div className="bg-field border-t border-line px-4 py-3 text-sm text-muted flex items-center gap-2">
+          <UserRound size={16} className="shrink-0" />
+          <span className="flex-1"><b className="text-ink">{conv.assignee?.name}</b> está atendendo esta conversa. Peça a transferência ou aguarde a devolução à fila.</span>
+        </div>
+      ) : numberOffline ? (
         <div className="bg-danger-soft border-t border-danger/30 px-4 py-3 text-sm text-danger-ink flex items-center gap-2">
           <WifiOff size={16} className="shrink-0" />
           <span className="flex-1">O número <b>{conv.number.label}</b> está desconectado. Você continua recebendo, mas não consegue responder.</span>

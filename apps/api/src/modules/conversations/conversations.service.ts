@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { ConversationOrigin, ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client';
@@ -33,11 +33,26 @@ export class ConversationsService {
 
   // ---------- leitura ----------
 
-  list(tenantId: string, q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; cursor?: string; take?: number }) {
+  /**
+   * Regra de posse:
+   *  - `waiting`: sem dono, todo mundo vê.
+   *  - `in_progress`: atendente comum vê SÓ as suas; admin vê todas (ou filtra por `assigneeId`).
+   *  - `closed`: todos veem.
+   * `viewer` decide isso; `assigneeId` explícito (admin) sobrescreve.
+   */
+  list(
+    tenantId: string,
+    viewer: { id: string; role: string },
+    q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; cursor?: string; take?: number },
+  ) {
+    const isAdmin = viewer.role !== 'agent';
+    const ownership: Prisma.ConversationWhereInput =
+      q.assigneeId && isAdmin ? { assigneeId: q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       ...(q.status && { status: q.status }),
       ...(q.origin && { origin: q.origin }),
+      ...ownership,
       ...(q.numberId && { numberId: q.numberId }),
       ...(q.tagIds?.length && { tags: { some: { tagId: { in: q.tagIds } } } }),
       ...(q.search && {
@@ -54,11 +69,58 @@ export class ConversationsService {
   }
 
   /** Contadores dos três filtros principais (opcionalmente por número). */
-  async counts(tenantId: string, numberId?: string) {
-    const rows = await this.prisma.conversation.groupBy({ by: ['status'], where: { tenantId, ...(numberId && { numberId }) }, _count: { _all: true } });
-    const out = { waiting: 0, in_progress: 0, closed: 0 };
-    for (const r of rows) out[r.status] = r._count._all;
-    return out;
+  async counts(tenantId: string, viewer: { id: string; role: string }, numberId?: string) {
+    const base = { tenantId, ...(numberId && { numberId }) };
+    const [waiting, closed, mine, all] = await Promise.all([
+      this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
+      this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
+      this.prisma.conversation.count({ where: { ...base, status: 'in_progress', assigneeId: viewer.id } }),
+      this.prisma.conversation.count({ where: { ...base, status: 'in_progress' } }),
+    ]);
+    // atendente comum conta só as suas em atendimento; admin conta todas
+    return { waiting, in_progress: viewer.role === 'agent' ? mine : all, closed, in_progress_mine: mine, in_progress_all: all };
+  }
+
+  /**
+   * Assumir atendimento — ATÔMICO: só ganha quem encontra a conversa ainda sem dono
+   * (ou já sua). Duas atendentes clicando juntas: a segunda recebe erro com o nome da primeira.
+   */
+  async claim(tenantId: string, id: string, user: { id: string; role: string }) {
+    const r = await this.prisma.conversation.updateMany({
+      where: { id, tenantId, status: { not: 'closed' }, OR: [{ assigneeId: null }, { assigneeId: user.id }] },
+      data: { assigneeId: user.id, status: 'in_progress' },
+    });
+    if (r.count === 0) {
+      const c = await this.prisma.conversation.findFirst({ where: { id, tenantId }, include: { assignee: { select: { name: true } } } });
+      if (!c) throw new NotFoundException('Conversa não encontrada');
+      if (c.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para assumir.');
+      throw new ConflictException(`${c.assignee?.name ?? 'Outro atendente'} já assumiu este atendimento.`);
+    }
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id } });
+    this.gateway.emitConversation(tenantId, conv);
+    return conv;
+  }
+
+  /** Transferir para outro atendente (admin, ou o próprio dono). */
+  async transfer(tenantId: string, id: string, toUserId: string, by: { id: string; role: string }) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (by.role === 'agent' && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou um admin) pode transferir.');
+    const target = await this.prisma.user.findFirst({ where: { id: toUserId, tenantId, isActive: true } });
+    if (!target) throw new NotFoundException('Atendente não encontrado');
+    const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: target.id, status: conv.status === 'closed' ? 'closed' : 'in_progress' } });
+    this.gateway.emitConversation(tenantId, updated);
+    return updated;
+  }
+
+  /** Devolver para a fila (sem dono, volta a Aguardando). */
+  async release(tenantId: string, id: string, by: { id: string; role: string }) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (by.role === 'agent' && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou um admin) pode devolver.');
+    const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: null, status: 'waiting' } });
+    this.gateway.emitConversation(tenantId, updated);
+    return updated;
   }
 
   one(tenantId: string, id: string) {
@@ -204,7 +266,8 @@ export class ConversationsService {
 
   // ---------- outbound (API) ----------
 
-  async send(tenantId: string, authorId: string, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string }) {
+  async send(tenantId: string, author: { id: string; role: string }, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string }) {
+    const authorId = author.id;
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
       include: { number: true },
@@ -223,6 +286,18 @@ export class ConversationsService {
 
     const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
+
+    // Responder = assumir. Atômico: se outra atendente assumiu no meio tempo, falha com o nome dela.
+    // Admin pode responder conversa de outro atendente sem tomar a posse.
+    if (conv.assigneeId !== authorId) {
+      if (!conv.assigneeId || author.role === 'agent') {
+        const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, OR: [{ assigneeId: null }, { assigneeId: authorId }] }, data: { assigneeId: authorId, status: 'in_progress' } });
+        if (r.count === 0) {
+          const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
+          throw new ConflictException(`${owner?.assignee?.name ?? 'Outro atendente'} já assumiu este atendimento.`);
+        }
+      }
+    }
 
     const message = await this.prisma.message.create({
       data: {
@@ -244,7 +319,6 @@ export class ConversationsService {
       where: { id: conv.id },
       data: {
         status: conv.status === 'waiting' ? 'in_progress' : conv.status,
-        assigneeId: conv.assigneeId ?? authorId,
         lastMessageAt: new Date(),
         lastMessagePreview: (input.text ?? `[${input.type}]`).slice(0, 120),
         unreadCount: 0,
@@ -271,7 +345,13 @@ export class ConversationsService {
   async setStatus(tenantId: string, id: string, status: ConversationStatus, userId: string) {
     const conv = await this.prisma.conversation.update({
       where: { id, tenantId },
-      data: { status, closedAt: status === 'closed' ? new Date() : null, ...(status === 'in_progress' && { assigneeId: userId }) },
+      data: {
+        status,
+        closedAt: status === 'closed' ? new Date() : null,
+        // reabrir em "in_progress" = quem reabriu assume; reabrir em "waiting" = volta para a fila
+        ...(status === 'in_progress' && { assigneeId: userId }),
+        ...(status === 'waiting' && { assigneeId: null }),
+      },
     });
     this.gateway.emitConversation(tenantId, conv);
     return conv;

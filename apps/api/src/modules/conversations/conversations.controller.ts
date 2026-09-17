@@ -12,7 +12,12 @@ class ListDto {
   @IsOptional() @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean))) @IsArray() tagIds?: string[];
   @IsOptional() @IsString() @MaxLength(100) search?: string;
   @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
+  /** admin: filtrar por atendente */
+  @IsOptional() @IsUUID() assigneeId?: string;
   @IsOptional() @IsUUID() cursor?: string;
+}
+class TransferDto {
+  @IsUUID() agentId: string;
 }
 class SendDto {
   @IsIn(['text', 'image', 'audio', 'video', 'document']) type: 'text' | 'image' | 'audio' | 'video' | 'document';
@@ -37,12 +42,27 @@ export class ConversationsController {
 
   @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: ListDto) {
-    return this.conversations.list(u.tenantId, q);
+    return this.conversations.list(u.tenantId, u, q);
+  }
+
+  @Post(':id/claim')
+  claim(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.claim(u.tenantId, id, u);
+  }
+
+  @Post(':id/transfer')
+  transfer(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: TransferDto) {
+    return this.conversations.transfer(u.tenantId, id, dto.agentId, u);
+  }
+
+  @Post(':id/release')
+  release(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.release(u.tenantId, id, u);
   }
 
   @Get('counts')
   counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string) {
-    return this.conversations.counts(u.tenantId, numberId || undefined);
+    return this.conversations.counts(u.tenantId, u, numberId || undefined);
   }
 
   @Get(':id')
@@ -59,7 +79,7 @@ export class ConversationsController {
   send(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: SendDto) {
     // mediaKey só pode apontar para o storage do próprio tenant
     if (dto.mediaKey && !dto.mediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('mediaKey inválida');
-    return this.conversations.send(u.tenantId, u.id, id, dto);
+    return this.conversations.send(u.tenantId, u, id, dto);
   }
 
   @Post(':id/messages/:messageId/resend')

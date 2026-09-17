@@ -4,7 +4,7 @@ import { Search, ChevronDown, ShieldCheck, QrCode } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useConversations, useConversationCounts, useNumbers, useTags, type Conversation } from '@/lib/hooks';
+import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, type Conversation } from '@/lib/hooks';
 import { avatarStyle, initialOf } from '@/lib/avatar';
 import { TagPicker } from './TagPicker';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
@@ -20,12 +20,15 @@ export const STATUS_META: Record<ConversationStatus, { label: string; short: str
 const ORDER: ConversationStatus[] = ['waiting', 'in_progress', 'closed'];
 
 export function ConversationList() {
-  const { numberId, setNumber, status, setStatus, tagIds, setTags, origin, setOrigin, conversationId, setConversation } = useUI();
+  const { numberId, setNumber, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation } = useUI();
+  const me = useMe();
+  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  const agents = useAgents();
   const [search, setSearch] = useState('');
   const numbers = useNumbers();
   const tags = useTags();
   const counts = useConversationCounts(numberId);
-  const conversations = useConversations({ status, numberId, tagIds, origin, search: search || undefined });
+  const conversations = useConversations({ status, numberId, tagIds, origin, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
 
   return (
@@ -63,9 +66,11 @@ export function ConversationList() {
             const m = STATUS_META[s];
             const n = counts.data?.[s];
             const on = status === s;
+            // atendente comum só vê as próprias em atendimento: o rótulo diz isso
+            const label = s === 'in_progress' && !isAdmin ? 'Minhas' : m.short;
             return (
               <button key={s} onClick={() => setStatus(s)} className={cn('rounded-md py-1.5 transition-colors flex items-center justify-center gap-1.5', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink')}>
-                {m.short}
+                {label}
                 {n !== undefined && <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px]', on ? 'bg-white/20 text-white' : cn(m.soft, m.color))}>{n}</span>}
               </button>
             );
@@ -80,6 +85,14 @@ export function ConversationList() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-9 pr-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
         </div>
         <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTags} placeholder="Filtrar por tag…" />
+        {/* admin em "Atendendo": escolher de quem ver */}
+        {isAdmin && status === 'in_progress' && (
+          <select value={assigneeId ?? ''} onChange={(e) => setAssignee(e.target.value || null)} className="w-full rounded-lg bg-field text-ink px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40">
+            <option value="">Todos os atendentes ({counts.data?.in_progress_all ?? 0})</option>
+            <option value="me">Só as minhas ({counts.data?.in_progress_mine ?? 0})</option>
+            {agents.data?.filter((a) => a.id !== me.data?.id && a.isActive).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        )}
         {/* origem do lead — chips pequenos, um clique liga/desliga */}
         <div className="flex flex-wrap gap-1">
           {(['ad', 'link', 'post', 'organic'] as ConversationOrigin[]).map((o) => (

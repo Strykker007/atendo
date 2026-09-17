@@ -92,6 +92,16 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 
 **Garantia de entrega única.** Depois que `provider.send()` retorna, a mensagem *já está no celular do contato*. Por isso o processor grava o `externalId` imediatamente e trata contabilidade (ledger/uso) como best-effort — um erro ali é logado, nunca vira `failed` nem retry. E um job que encontra mensagem `pending` **com `externalId`** não reenvia: só corrige o status. `UsageService.record` é idempotente por `messageId`. (Esse bug aconteceu de verdade: o ledger falhou por chave duplicada num reenvio, o retry reenviou e o contato recebeu em dobro.)
 
+## Posse do atendimento
+
+`Conversation.assigneeId` é a posse. Regras em `ConversationsService`:
+
+- **`claim()` é atômico**: `updateMany` com `where: { assigneeId: null OR = eu }`. Se `count === 0`, alguém ganhou antes → `409 Conflict` com o nome de quem assumiu. Não há janela entre "ler" e "gravar".
+- **Responder = assumir** com a mesma condição atômica (`send()`), então nem precisa clicar em *Assumir*. Admin responde conversa alheia sem tomar a posse.
+- **`list()`/`counts()` recebem o viewer**: atendente comum em `in_progress` vê só as suas; admin vê todas ou filtra por `assigneeId`. `waiting` e `closed` são de todos.
+- `transfer()` (dono ou admin) e `release()` (volta a `waiting`, sem dono). Encerrar mantém o dono no histórico; reabrir em `in_progress` = quem reabriu assume.
+- Toda mudança de posse emite `conversation` no socket → as listas das outras atendentes atualizam e a conversa some/aparece na hora.
+
 ## Tempo real
 
 `ConversationsGateway` (Socket.IO). O cliente conecta com `auth.token` = access token; o gateway valida o JWT e coloca o socket na sala `tenant:<id>`. Eventos:
