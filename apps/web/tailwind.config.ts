@@ -45,6 +45,7 @@ export default {
         // provider
         meta: { soft: v('meta-soft'), ink: v('meta-ink') },
         evo: { soft: v('evo-soft'), ink: v('evo-ink') },
+        c1: v('c1'), c2: v('c2'), c3: v('c3'), c4: v('c4'), c5: v('c5'), c6: v('c6'),
         // aliases antigos (mantidos para não quebrar; migrar aos poucos)
         brand: { DEFAULT: v('accent'), hover: v('accent-hover'), soft: v('accent-soft') },
         surface: { DEFAULT: v('panel'), muted: v('field'), border: v('line') },

@@ -75,6 +75,10 @@ Criadas dinamicamente pelo admin do cliente em *Tags* (ex.: "lead com interesse"
 
 Painel à direita do chat, organizado em pastas ("sessões"). Clicar numa resposta insere o texto no campo de digitação. Suporta variáveis `{{contact.name}}` e `{{agent.name}}` (substituição no front — ainda a implementar).
 
+## Fluxos de automação
+
+O cliente desenha o atendimento automático (menus, perguntas, condições) e dispara pelo chat ou automaticamente. Detalhes em [10 — Fluxos](10-fluxos-de-automacao.md). É uma funcionalidade **do plano** (Pro e Business).
+
 ## Oficial vs. não-oficial
 
 Cada número escolhe **como** fala com o WhatsApp:

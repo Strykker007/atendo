@@ -11,5 +11,6 @@
 | [07 — API](07-api.md) | Dev / Integrações | Endpoints, autenticação, exemplos com curl |
 | [08 — Front-end](08-frontend.md) | Dev | Estrutura do Next, layout de colunas, estado, tempo real |
 | [09 — Roadmap](09-roadmap.md) | Todos | O que está pronto e o que falta, em ordem |
+| [10 — Fluxos de automação](10-fluxos-de-automacao.md) | Dev / Cliente | Blocos, gatilhos, motor, editor, API |
 
 Convenção: código em inglês, comentários e documentação em português.

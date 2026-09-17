@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, ShieldCheck } from 'lucide-react';
+import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, ShieldCheck, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -14,6 +14,7 @@ const ADMIN_ITEM = { href: '/admin', label: 'Financeiro (dono)', icon: ShieldChe
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
   { href: '/numeros', label: 'Números', icon: Smartphone },
+  { href: '/fluxos', label: 'Fluxos', icon: Workflow },
   { href: '/tags', label: 'Tags', icon: Tags },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3 },
   { href: '/equipe', label: 'Equipe', icon: Users },

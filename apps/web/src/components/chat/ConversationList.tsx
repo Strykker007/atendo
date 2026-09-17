@@ -132,7 +132,7 @@ function ConversationRow({ c, active, onClick, showNumber }: { c: Conversation; 
       <div className="w-9 h-9 rounded-lg grid place-items-center font-display font-semibold text-[14px] shrink-0" style={avatarStyle(c.contact.phone)}>{initialOf(name)}</div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{name}</span>
+          <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}</span>
           <span className="tnum text-[10.5px] text-faint shrink-0 font-mono">{time}</span>
         </div>
         <div className="flex items-center justify-between gap-2 mt-0.5">

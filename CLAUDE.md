@@ -10,6 +10,7 @@ Monorepo pnpm/Turborepo. `apps/api` (NestJS + Prisma), `apps/web` (Next.js App R
 - UI, banco e filas só conhecem `InboundMessage`/`OutboundMessage`; lógica específica de Meta/Evolution fica dentro do adapter.
 - Cada mensagem enviada/recebida obrigatoriamente passa por `UsageService.record` (é o ledger de cobrança).
 - Antes de enviar: `UsageService.canSend` (quota) + regra da janela de 24h da Meta.
+- Funcionalidade nova que deve ser cobrada à parte: entra em `PlanLimits.features` + `@RequireFeature('x')` na API + `useHasFeature('x')` no front — nunca um if solto por nome de plano.
 
 ## Comandos
 - `pnpm typecheck` / `pnpm build` — sempre rodar antes de concluir uma tarefa.

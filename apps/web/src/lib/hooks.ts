@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken } from './api';
-import type { ConversationStatus, PlanLimits } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string }
 export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string }
@@ -13,6 +13,7 @@ export interface LeadReferral { sourceType: string; sourceId?: string; sourceUrl
 export interface Conversation {
   id: string; status: ConversationStatus; unreadCount: number; lastMessageAt: string | null; lastMessagePreview: string | null;
   origin: ConversationOrigin; originData: LeadReferral | null;
+  activeFlowRunId?: string | null;
   lastInboundAt: string | null; numberId: string;
   contact: { id: string; name: string | null; phone: string };
   tags: { tag: Tag }[];
@@ -191,6 +192,7 @@ export function useRealtime() {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', c.id] });
       qc.invalidateQueries({ queryKey: ['conversation-counts'] });
+      qc.invalidateQueries({ queryKey: ['active-run', c.id] });
     });
     socket.on('number', (n: { id: string; status: string; qrCode?: string }) => {
       if (n.qrCode) qc.setQueryData(['number-qr', n.id], n.qrCode);
@@ -288,3 +290,22 @@ export interface FinanceOverview {
   subscriptions: { tenant: string; plan: string; price: number; status: string; periodEnd: string; cancelAtPeriodEnd: boolean; graceUntil: string | null }[];
 }
 export const useFinance = (months = 12) => useQuery({ queryKey: ['finance', months], queryFn: () => api<FinanceOverview>(`/billing/finance?months=${months}`) });
+
+// ---- Fluxos de automação ----
+export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
+export interface Flow { id: string; name: string; description: string | null; isActive: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string }
+export interface ActiveRun { id: string; status: 'running' | 'waiting'; currentNodeId: string | null; flow: { id: string; name: string }; startedAt: string; waitUntil: string | null }
+export interface FlowRuns { byStatus: Record<string, number>; recent: { id: string; status: string; startedAt: string; endedAt: string | null; error: string | null; contact: { name: string | null; phone: string }; conversationId: string }[] }
+
+export const useFlows = () => useQuery({ queryKey: ['flows'], queryFn: () => api<FlowSummary[]>('/flows'), retry: false });
+export const useFlow = (id: string | null) => useQuery({ queryKey: ['flow', id], enabled: !!id && id !== 'novo', queryFn: () => api<Flow>(`/flows/${id}`) });
+export const useFlowRuns = (id: string | null) => useQuery({ queryKey: ['flow-runs', id], enabled: !!id && id !== 'novo', queryFn: () => api<FlowRuns>(`/flows/${id}/runs`) });
+const invFlows = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['flows'] }); qc.invalidateQueries({ queryKey: ['flow'] }); };
+export const useCreateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: Omit<Flow, 'id' | 'updatedAt'>) => api<Flow>('/flows', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
+export const useUpdateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<Flow> & { id: string }) => api<Flow>(`/flows/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
+export const useDeleteFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/flows/${id}`, { method: 'DELETE' }), onSuccess: invFlows(qc) }); };
+export const useStartFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ flowId, conversationId }: { flowId: string; conversationId: string }) => api(`/flows/${flowId}/start`, { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: (_, v) => { qc.refetchQueries({ queryKey: ['active-run', v.conversationId] }); invConv(qc, v.conversationId); } }); };
+export const useStopFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api(`/conversations/${conversationId}/flow/stop`, { method: 'POST' }), onSuccess: (_, id) => { qc.refetchQueries({ queryKey: ['active-run', id] }); invConv(qc, id); } }); };
+export const useActiveRun = (conversationId: string | null) => useQuery({ queryKey: ['active-run', conversationId], enabled: !!conversationId, queryFn: () => api<ActiveRun | null>(`/conversations/${conversationId}/flow`), refetchInterval: 15_000 });
+/** O plano inclui a funcionalidade? (usa /billing/usage já em cache) */
+export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as any), loading: u.isLoading }; };

@@ -7,7 +7,7 @@ import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen,
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
@@ -31,6 +31,8 @@ export function ChatPane() {
   useEffect(() => setUnlocked(false), [conversationId]);
   const sendNote = useSendNote(conversationId);
   const noteMode = isAdmin && ownedByOther;
+  const activeRun = useActiveRun(conversationId);
+  const stopFlow = useStopFlow();
   const tags = useTags();
   const messages = useMessages(conversationId);
   const send = useSendMessage(conversationId);
@@ -180,6 +182,15 @@ export function ChatPane() {
           {rightPanelOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
         </button>
       </header>
+
+      {/* Fluxo de automação rodando */}
+      {activeRun.data && (
+        <div className="bg-accent-soft border-b border-accent/20 px-3 py-1.5 text-xs text-accent-ink flex items-center gap-2">
+          <span className="animate-pulse">🤖</span>
+          <span className="flex-1 truncate">Fluxo <b>{activeRun.data.flow.name}</b> está atendendo{activeRun.data.status === 'waiting' && activeRun.data.waitUntil ? ` · aguardando até ${new Date(activeRun.data.waitUntil).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : activeRun.data.status === 'waiting' ? ' · esperando resposta do contato' : ''}</span>
+          <Button size="sm" variant="ghost" loading={stopFlow.isPending} onClick={() => conversationId && stopFlow.mutateAsync(conversationId).then(() => toast.ok('Fluxo parado — a conversa é sua')).catch(toast.err)}>Parar e assumir</Button>
+        </div>
+      )}
 
       {/* Tags no mobile/tablet */}
       <div className="lg:hidden bg-panel border-b border-line px-3 py-1.5">

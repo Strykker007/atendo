@@ -27,7 +27,8 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
   overagePricePerMessage: 0.02,   // null = não permite excedente
   overagePricePerTemplate: 0.6,
   hardLimit: false,               // true = bloqueia ao estourar; false = cobra excedente
-  graceDays: 7                    // tolerância após falha de pagamento
+  graceDays: 7,                   // tolerância após falha de pagamento
+  features: ['flows']             // funcionalidades plugáveis (ver docs/10); ausente = nenhuma
 }
 ```
 
