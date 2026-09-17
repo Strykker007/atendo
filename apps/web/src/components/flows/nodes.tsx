@@ -94,8 +94,8 @@ export function ConditionNodeView({ data, selected }: P) {
   );
 }
 export function ActionNodeView({ data, selected }: P) {
-  const d = data as { kind?: string; scope?: string };
-  const txt = (({ add_tag: 'Aplicar tag', remove_tag: 'Remover tag', assign: 'Atribuir a atendente', set_status: 'Mudar status', handoff: 'Entregar para humano' } as Record<string, string>)[d.kind ?? ''] ?? '') + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
+  const d = data as { kind?: string; scope?: string; varName?: string; value?: string };
+  const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : (({ add_tag: 'Aplicar tag', remove_tag: 'Remover tag', assign: 'Atribuir a atendente', set_status: 'Mudar status', handoff: 'Entregar para humano' } as Record<string, string>)[d.kind ?? ''] ?? '') + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
   return (
     <Shell type="action" selected={selected} summary={txt}>
       <Handle type="target" position={Position.Top} className={handleCls} />

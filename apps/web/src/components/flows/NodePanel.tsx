@@ -4,10 +4,11 @@ import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META } from './nodes';
 import { useTags, useAgents } from '@/lib/hooks';
+import { TextWithVars, type FlowVar } from './TextWithVars';
 import type { FlowNode } from '@atendo/shared';
 
 /** Painel lateral: edita os dados do bloco selecionado. Cada tipo tem seus campos. */
-export function NodePanel({ node, onChange, onDelete }: { node: FlowNode; onChange: (data: FlowNode['data']) => void; onDelete: () => void }) {
+export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; onChange: (data: FlowNode['data']) => void; onDelete: () => void; vars: FlowVar[] }) {
   const tags = useTags();
   const agents = useAgents();
   const m = NODE_META[node.type];
@@ -28,8 +29,8 @@ export function NodePanel({ node, onChange, onDelete }: { node: FlowNode; onChan
 
         {node.type === 'message' && (
           <>
-            <Field label="Texto" hint="Variáveis: {{contact.name}}, {{contact.phone}} e as das perguntas, ex.: {{email}}">
-              <textarea className={`${inputCls} min-h-28`} value={node.data.text ?? ''} onChange={(e) => set({ text: e.target.value })} />
+            <Field label="Texto">
+              <TextWithVars value={node.data.text ?? ''} onChange={(v) => set({ text: v })} vars={vars} placeholder="Olá {{contact.name}}! …" />
             </Field>
             <p className="text-[11px] text-faint">Anexar imagem/arquivo ao bloco: em breve (use uma resposta rápida por enquanto).</p>
           </>
@@ -37,23 +38,27 @@ export function NodePanel({ node, onChange, onDelete }: { node: FlowNode; onChan
 
         {node.type === 'question' && (
           <>
-            <Field label="Pergunta"><textarea className={`${inputCls} min-h-20`} value={node.data.text} onChange={(e) => set({ text: e.target.value })} /></Field>
-            <Field label="Guardar resposta em" hint="Nome da variável, sem espaços. Use depois como {{nome}}">
-              <input className={inputCls} value={node.data.varName} onChange={(e) => set({ varName: e.target.value.replace(/[^\w]/g, '_').toLowerCase() })} />
-            </Field>
+            <Field label="Pergunta"><TextWithVars value={node.data.text} onChange={(v) => set({ text: v })} vars={vars} placeholder="Qual o seu e-mail?" /></Field>
+            <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3 space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-ink">Este bloco cria uma variável</div>
+              <Field label="Nome da variável" hint="Só letras, números e _ . A resposta do contato fica guardada aqui.">
+                <input className={inputCls} value={node.data.varName} onChange={(e) => set({ varName: e.target.value.replace(/[^\w]/g, '_').toLowerCase() })} placeholder="email" />
+              </Field>
+              <p className="text-[11.5px] text-muted">Depois, em qualquer bloco, use <code className="font-mono bg-panel border border-line rounded px-1">{`{{${node.data.varName || 'nome'}}}`}</code> — ou clique em <b>Inserir variável</b> nos campos de texto.</p>
+            </div>
             <Field label="Validação">
               <select className={inputCls} value={node.data.validation} onChange={(e) => set({ validation: e.target.value })}>
                 <option value="none">Qualquer texto</option><option value="email">E-mail</option><option value="phone">Telefone</option><option value="number">Número</option>
               </select>
             </Field>
-            <Field label="Mensagem se inválido"><input className={inputCls} value={node.data.invalidText ?? ''} onChange={(e) => set({ invalidText: e.target.value })} placeholder="Não entendi. Pode repetir?" /></Field>
+            <Field label="Mensagem se inválido"><TextWithVars multiline={false} value={node.data.invalidText ?? ''} onChange={(v) => set({ invalidText: v })} vars={vars} placeholder="Não entendi. Pode repetir?" /></Field>
             <Field label="Tentativas antes de desistir" hint="Depois disso, entrega para humano"><input type="number" min={0} max={5} className={inputCls} value={node.data.maxRetries} onChange={(e) => set({ maxRetries: Number(e.target.value) })} /></Field>
           </>
         )}
 
         {node.type === 'menu' && (
           <>
-            <Field label="Texto do menu" hint="As opções são numeradas automaticamente"><textarea className={`${inputCls} min-h-20`} value={node.data.text} onChange={(e) => set({ text: e.target.value })} /></Field>
+            <Field label="Texto do menu" hint="As opções são numeradas automaticamente"><TextWithVars value={node.data.text} onChange={(v) => set({ text: v })} vars={vars} placeholder="Como posso ajudar?" /></Field>
             <Field label="Opções">
               <div className="space-y-1.5">
                 {node.data.options.map((o, i) => (
@@ -66,7 +71,8 @@ export function NodePanel({ node, onChange, onDelete }: { node: FlowNode; onChan
                 <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ options: [...node.data.options, { id: crypto.randomUUID().slice(0, 8), label: `Opção ${node.data.options.length + 1}` }] })}>Adicionar opção</Button>
               </div>
             </Field>
-            <Field label="Mensagem se inválido"><input className={inputCls} value={node.data.invalidText ?? ''} onChange={(e) => set({ invalidText: e.target.value })} placeholder="Opção inválida. Responda com o número." /></Field>
+            <Field label="Mensagem se inválido"><TextWithVars multiline={false} value={node.data.invalidText ?? ''} onChange={(v) => set({ invalidText: v })} vars={vars} placeholder="Opção inválida. Responda com o número." /></Field>
+            <p className="text-[11px] text-muted">A opção escolhida fica na variável <code className="font-mono bg-field rounded px-1">{`{{menu_${node.id}}}`}</code>.</p>
             <Field label="Tentativas" hint="Depois disso segue pela saída 'resposta inválida' ou entrega para humano"><input type="number" min={0} max={5} className={inputCls} value={node.data.maxRetries} onChange={(e) => set({ maxRetries: Number(e.target.value) })} /></Field>
           </>
         )}
@@ -80,7 +86,13 @@ export function NodePanel({ node, onChange, onDelete }: { node: FlowNode; onChan
             </Field>
             {(node.data.kind === 'var_equals' || node.data.kind === 'var_contains') && (
               <>
-                <Field label="Variável"><input className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: e.target.value })} placeholder="email" /></Field>
+                <Field label="Variável">
+                  <select className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: e.target.value })}>
+                    <option value="">Escolha…</option>
+                    {vars.map((v) => <option key={v.key} value={v.key}>{v.key} — {v.label}</option>)}
+                  </select>
+                  {vars.length === 0 && <span className="text-[11px] text-faint">Nenhuma variável ainda: adicione um bloco Perguntar antes.</span>}
+                </Field>
                 <Field label="Valor"><input className={inputCls} value={node.data.value ?? ''} onChange={(e) => set({ value: e.target.value })} /></Field>
               </>
             )}
@@ -107,9 +119,16 @@ export function NodePanel({ node, onChange, onDelete }: { node: FlowNode; onChan
           <>
             <Field label="Ação">
               <select className={inputCls} value={node.data.kind} onChange={(e) => set({ kind: e.target.value })}>
-                <option value="add_tag">Aplicar tag</option><option value="remove_tag">Remover tag</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="handoff">Entregar para humano (fim do fluxo)</option>
+                <option value="set_var">Definir variável</option><option value="add_tag">Aplicar tag</option><option value="remove_tag">Remover tag</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="handoff">Entregar para humano (fim do fluxo)</option>
               </select>
             </Field>
+            {node.data.kind === 'set_var' && (
+              <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3 space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-ink">Este bloco cria/atualiza uma variável</div>
+                <Field label="Nome da variável"><input className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: e.target.value.replace(/[^\w]/g, '_').toLowerCase() })} placeholder="origem" /></Field>
+                <Field label="Valor" hint="Pode usar outras variáveis, ex.: Olá {{contact.name}}"><TextWithVars multiline={false} value={node.data.value ?? ''} onChange={(v) => set({ value: v })} vars={vars} placeholder="site" /></Field>
+              </div>
+            )}
             {(node.data.kind === 'add_tag' || node.data.kind === 'remove_tag') && (
               <>
                 <Field label="Tag"><select className={inputCls} value={node.data.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}><option value="">Escolha…</option>{tags.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>

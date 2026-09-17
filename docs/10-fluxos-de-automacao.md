@@ -18,11 +18,18 @@ Onde aparece:
 | **Perguntar** | Envia a pergunta, **espera a resposta** e guarda em `{{varName}}`. Validação: qualquer / e-mail / telefone / número. Resposta inválida → mensagem de erro e nova tentativa; estourou `maxRetries` → entrega para humano | 1 |
 | **Menu de opções** | Envia texto + opções numeradas ("1 - Vendas"). Aceita número ou o texto da opção. Inválida → tentativa; estourou → saída *resposta inválida* (ou humano, se não ligada) | uma por opção + `fallback` |
 | **Condição** | Variável igual/contém · conversa tem tag · dentro do horário comercial (fuso São Paulo) | `yes` / `no` |
-| **Ação** | Aplicar/remover tag (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **entregar para humano** (encerra o fluxo; opcionalmente já atribui) | 1 (handoff: nenhuma) |
+| **Ação** | **Definir variável** · aplicar/remover tag (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **entregar para humano** (encerra o fluxo; opcionalmente já atribui) | 1 (handoff: nenhuma) |
 | **Aguardar** | Pausa de N minutos (job BullMQ com delay) | 1 |
 | **Fim** | Encerra o fluxo; opcionalmente encerra a conversa | 0 |
 
 Um bloco sem saída ligada termina o fluxo (`done`).
+
+## Variáveis
+
+- **Do sistema**: `{{contact.name}}` (nome no WhatsApp), `{{contact.phone}}`.
+- **Criadas no fluxo**: o bloco **Perguntar** cria uma (campo "Nome da variável" — a resposta do contato fica nela); o **Menu** guarda a opção escolhida em `{{menu_<id>}}`; a ação **Definir variável** grava um valor fixo ou composto (`Olá {{contact.name}}`).
+- Todo campo de texto do editor tem o botão **Inserir variável**, que lista as do sistema e as criadas no fluxo e insere `{{…}}` no cursor. A lista completa fica nas configurações do fluxo (botão *Gatilho*). Ela é atualizada na hora: criou a variável num bloco, já aparece nos outros.
+- A **Condição** escolhe a variável num seletor (não precisa digitar).
 
 ## Gatilhos
 
@@ -43,7 +50,7 @@ Um bloco sem saída ligada termina o fluxo (`done`).
 
 ## Editor (`apps/web/src/components/flows/`)
 
-React Flow (`@xyflow/react`). Paleta à esquerda (clique adiciona), canvas no meio (arrastar, ligar bolinhas, Delete remove), painel de propriedades à direita (muda conforme o bloco). Uma saída só liga a um destino (ligar de novo substitui). Barra superior: nome, gatilho/configurações, execuções (contagem por status + últimas 20), Salvar. "Alterações não salvas" compara o conteúdo com o último salvo.
+React Flow (`@xyflow/react`). Paleta à esquerda (clique adiciona; **arrastar e soltar** posiciona onde soltou), canvas no meio (arrastar, ligar bolinhas, Delete remove), painel de propriedades à direita (muda conforme o bloco). Uma saída só liga a um destino (ligar de novo substitui). Barra superior: nome, gatilho/configurações, execuções (contagem por status + últimas 20), Salvar. "Alterações não salvas" compara o conteúdo com o último salvo.
 
 Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado; conexões válidas; blocos de mensagem/pergunta/menu preenchidos.
 

@@ -215,7 +215,7 @@ export class FlowEngineService {
 
   // ---------- nós ----------
 
-  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { conversation: Conversation }): Promise<boolean> {
+  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { conversation: Conversation & { contact: { name: string | null; phone: string } } }): Promise<boolean> {
     const d = node.data;
     switch (d.kind) {
       case 'add_tag':
@@ -237,6 +237,13 @@ export class FlowEngineService {
       case 'handoff':
         await this.handoff(run.id, 'transferido para humano pelo fluxo', d.agentId);
         return true;
+      case 'set_var': {
+        if (!d.varName) break;
+        const vars = { ...(run.vars as Record<string, string>) };
+        vars[d.varName] = this.interpolate(d.value ?? '', { contact: run.conversation.contact, vars });
+        await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
+        return false;
+      }
     }
     this.gateway.emitConversation(run.tenantId, await this.prisma.conversation.findUniqueOrThrow({ where: { id: run.conversationId } }));
     return false;

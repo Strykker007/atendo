@@ -17,7 +17,7 @@ export type QuestionNode = FlowNodeBase<'question', { text: string; varName: str
 export type MenuNode = FlowNodeBase<'menu', { text: string; options: { id: string; label: string }[]; invalidText?: string; maxRetries: number }>;
 export type ConditionNode = FlowNodeBase<'condition', { kind: 'var_equals' | 'var_contains' | 'has_tag' | 'business_hours'; varName?: string; value?: string; tagId?: string; hours?: { start: string; end: string; days: number[] } }>;
 /** scope: 'conversation' (padrão) = tag do atendimento; 'contact' = tag da pessoa, vale para sempre */
-export type ActionNode = FlowNodeBase<'action', { kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff'; tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed' }>;
+export type ActionNode = FlowNodeBase<'action', { kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var'; tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed'; /** set_var */ varName?: string; value?: string }>;
 export type WaitNode = FlowNodeBase<'wait', { minutes: number }>;
 export type EndNode = FlowNodeBase<'end', { closeConversation: boolean }>;
 

@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ReactFlow, Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState, type Connection, type Edge, type Node, BackgroundVariant } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState, useReactFlow, type Connection, type Edge, type Node, BackgroundVariant } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Save, ArrowLeft, Settings2, Activity } from 'lucide-react';
 import Link from 'next/link';
@@ -10,6 +10,7 @@ import { Field, inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
 import { nodeTypes, NODE_META, defaultData } from './nodes';
 import { NodePanel } from './NodePanel';
+import { collectFlowVars, SYSTEM_VARS } from './TextWithVars';
 import { useNumbers, useFlowRuns, type Flow } from '@/lib/hooks';
 import type { FlowDefinition, FlowNode, FlowNodeType, FlowTrigger } from '@atendo/shared';
 
@@ -17,7 +18,12 @@ const PALETTE: FlowNodeType[] = ['message', 'question', 'menu', 'condition', 'ac
 const EMPTY: FlowDefinition = { nodes: [{ id: 'start', type: 'start', position: { x: 250, y: 40 }, data: {} as never }], edges: [] };
 
 /** Editor visual de fluxo: paleta à esquerda, canvas no meio, propriedades à direita. */
-export function FlowEditor({ flow, onSave, saving }: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
+export function FlowEditor(props: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
+  return <ReactFlowProvider><FlowEditorInner {...props} /></ReactFlowProvider>;
+}
+
+function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
+  const rf = useReactFlow();
   const def = flow.definition ?? EMPTY;
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(def.nodes.map(toRf));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(def.edges.map((e) => ({ ...e, sourceHandle: e.sourceHandle ?? undefined, type: 'smoothstep', animated: false })));
@@ -37,18 +43,31 @@ export function FlowEditor({ flow, onSave, saving }: { flow: Partial<Flow>; onSa
   }, [snapshot]);
 
   const selected = useMemo(() => nodes.find((n) => n.id === selectedId), [nodes, selectedId]);
+  const flowVars = useMemo(() => collectFlowVars(nodes as { id: string; type: string; data: Record<string, unknown> }[]), [nodes]);
 
   const onConnect = useCallback((c: Connection) => {
     // uma saída (source+handle) só liga a um destino: substitui a anterior
     setEdges((eds) => addEdge({ ...c, id: `e-${c.source}-${c.sourceHandle ?? 'out'}-${c.target}`, type: 'smoothstep' }, eds.filter((e) => !(e.source === c.source && (e.sourceHandle ?? null) === (c.sourceHandle ?? null)))));
   }, [setEdges]);
 
-  const addNode = (type: FlowNodeType) => {
+  /** Adiciona um bloco: por clique (abaixo do último) ou por drag-and-drop (na posição solta). */
+  const addNode = (type: FlowNodeType, position?: { x: number; y: number }) => {
     const id = `${type}-${crypto.randomUUID().slice(0, 6)}`;
     const last = nodes[nodes.length - 1];
-    setNodes((ns) => [...ns, { id, type, position: { x: (last?.position.x ?? 200) + 40, y: (last?.position.y ?? 0) + 140 }, data: defaultData(type) as Record<string, unknown> }]);
+    const pos = position ?? { x: (last?.position.x ?? 200) + 40, y: (last?.position.y ?? 0) + 140 };
+    setNodes((ns) => [...ns, { id, type, position: pos, data: defaultData(type) as Record<string, unknown> }]);
     setSelectedId(id);
     setSide('node');
+  };
+  const onDragStart = (e: React.DragEvent, type: FlowNodeType) => { e.dataTransfer.setData('application/atendo-node', type); e.dataTransfer.effectAllowed = 'move'; };
+  const onDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const type = e.dataTransfer.getData('application/atendo-node') as FlowNodeType;
+    if (!type) return;
+    // converte a posição do mouse (tela) para coordenadas do canvas (respeita zoom/pan)
+    const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    addNode(type, { x: position.x - 100, y: position.y - 20 });
   };
 
   const updateSelected = (data: FlowNode['data']) => setNodes((ns) => ns.map((n) => (n.id === selectedId ? { ...n, data: data as Record<string, unknown> } : n)));
@@ -89,17 +108,17 @@ export function FlowEditor({ flow, onSave, saving }: { flow: Partial<Flow>; onSa
           {PALETTE.map((t) => {
             const m = NODE_META[t];
             return (
-              <button key={t} onClick={() => addNode(t)} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-field" title={m.hint}>
+              <button key={t} draggable onDragStart={(e) => onDragStart(e, t)} onClick={() => addNode(t)} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-field cursor-grab active:cursor-grabbing" title={`${m.hint} — clique ou arraste para o canvas`}>
                 <span className={cn('w-5 h-5 rounded-md grid place-items-center shrink-0', m.color)}>{m.icon}</span>
                 <span className="text-[12px] text-ink">{m.label}</span>
               </button>
             );
           })}
-          <p className="text-[10.5px] text-faint px-1 pt-2">Clique para adicionar; arraste no canvas; ligue as bolinhas para conectar. Delete remove o selecionado.</p>
+          <p className="text-[10.5px] text-faint px-1 pt-2">Clique ou <b>arraste</b> um bloco para o canvas; ligue as bolinhas para conectar. Delete remove o selecionado.</p>
         </aside>
 
         {/* Canvas */}
-        <div className="flex-1 min-w-0 relative">
+        <div className="flex-1 min-w-0 relative" onDragOver={onDragOver} onDrop={onDrop}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -122,7 +141,7 @@ export function FlowEditor({ flow, onSave, saving }: { flow: Partial<Flow>; onSa
 
         {/* Lateral direita */}
         <aside className="w-80 shrink-0 border-l border-line bg-panel overflow-hidden">
-          {side === 'node' && selected && <NodePanel node={{ id: selected.id, type: selected.type as FlowNodeType, position: selected.position, data: selected.data } as FlowNode} onChange={updateSelected} onDelete={deleteSelected} />}
+          {side === 'node' && selected && <NodePanel node={{ id: selected.id, type: selected.type as FlowNodeType, position: selected.position, data: selected.data } as FlowNode} onChange={updateSelected} onDelete={deleteSelected} vars={flowVars} />}
           {side === 'settings' && (
             <div className="p-4 space-y-4 text-sm overflow-y-auto h-full">
               <div className="font-semibold text-ink">Configurações do fluxo</div>
@@ -148,6 +167,16 @@ export function FlowEditor({ flow, onSave, saving }: { flow: Partial<Flow>; onSa
                 </Field>
               )}
               <label className="flex items-center gap-2 text-ink"><input type="checkbox" checked={meta.isActive} onChange={(e) => setMeta({ ...meta, isActive: e.target.checked })} /> Fluxo ativo</label>
+
+              <div className="pt-2 border-t border-line">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">Variáveis disponíveis</div>
+                <ul className="space-y-1">
+                  {[...SYSTEM_VARS, ...flowVars].map((v) => (
+                    <li key={v.key} className="flex items-baseline gap-2"><code className="font-mono text-[11.5px] bg-field rounded px-1 text-ink">{`{{${v.key}}}`}</code><span className="text-[11px] text-muted truncate">{v.label}</span></li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-faint mt-1.5">Crie novas com o bloco <b>Perguntar</b>. Use em qualquer texto pelo botão "Inserir variável".</p>
+              </div>
               <p className="text-[11px] text-faint">Um fluxo inativo não dispara automaticamente nem aparece no painel do chat.</p>
             </div>
           )}
