@@ -91,7 +91,7 @@ export default function NumerosPage() {
           {numbers.data?.map((n) => {
             const st = STATUS[n.status] ?? STATUS.disconnected;
             return (
-              <div key={n.id} className={cn('rounded-2xl bg-panel border border-line p-5 space-y-4', !n.isActive && 'opacity-60')}>
+              <div key={n.id} className={cn('rounded-2xl bg-panel border border-line p-4 space-y-3', !n.isActive && 'opacity-60')}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-medium truncate">{n.label}</div>

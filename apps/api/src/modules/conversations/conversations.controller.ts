@@ -28,6 +28,9 @@ class SendDto {
   @IsOptional() @IsString() quotedExternalId?: string;
   @IsOptional() template?: any;
 }
+class NoteDto {
+  @IsString() @MaxLength(4096) text: string;
+}
 class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;
 }
@@ -43,6 +46,12 @@ export class ConversationsController {
   @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: ListDto) {
     return this.conversations.list(u.tenantId, u, q);
+  }
+
+  /** Nota interna (cadeado) — só equipe vê. */
+  @Post(':id/notes')
+  note(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: NoteDto) {
+    return this.conversations.note(u.tenantId, u, id, dto.text);
   }
 
   @Post(':id/claim')

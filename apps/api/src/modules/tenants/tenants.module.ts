@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsEmail, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { AuthService } from '../auth/auth.service';
@@ -21,6 +21,8 @@ class CreateAgentDto {
   @IsEmail() email: string;
   @IsString() @MaxLength(80) name: string;
   @IsString() @MinLength(8) password: string;
+  /** agent (padrão) ou manager */
+  @IsOptional() @IsIn(['agent', 'manager']) role?: 'agent' | 'manager';
 }
 class UpdateAgentDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
@@ -68,18 +70,20 @@ class TenantsController {
   }
 
   @Post('me/agents')
-  @Roles('tenant_admin', 'super_admin')
+  @Roles('tenant_admin', 'manager', 'super_admin')
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxAgents')
   async createAgent(@CurrentUser() u: AuthUser, @Body() dto: CreateAgentDto) {
+    // gerente só cria atendentes; admin cria atendentes e gerentes
+    const role = dto.role === 'manager' && u.role !== 'manager' ? 'manager' : 'agent';
     return this.prisma.user.create({
-      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role: 'agent', passwordHash: await this.auth.hashPassword(dto.password) },
+      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, passwordHash: await this.auth.hashPassword(dto.password) },
       select: { id: true, name: true, email: true, role: true },
     });
   }
 
   @Patch('me/agents/:id')
-  @Roles('tenant_admin', 'super_admin')
+  @Roles('tenant_admin', 'manager', 'super_admin')
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
     const { password, ...rest } = dto;
     const data = password ? { ...rest, passwordHash: await this.auth.hashPassword(password) } : rest;
@@ -87,7 +91,9 @@ class TenantsController {
     if (password || dto.isActive === false) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
-    return this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: 'agent' }, data, select: { id: true, name: true, isActive: true } });
+    // gerente não altera admins nem outros gerentes
+    const editable = u.role === 'manager' ? (['agent'] as const) : (['agent', 'manager'] as const);
+    return this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, isActive: true } });
   }
 }
 

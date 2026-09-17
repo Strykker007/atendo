@@ -58,7 +58,7 @@ function PlanoInner() {
       <PageHeader title="Plano e uso" subtitle={`Consumo de ${periodLabel}. Os contadores zeram no início de cada mês.`} />
 
       {/* Cartão do plano */}
-      <div className="rounded-2xl bg-panel border border-line p-5 flex flex-wrap items-center gap-6">
+      <div className="rounded-2xl bg-panel border border-line p-4 flex flex-wrap items-center gap-5">
         <div className="w-12 h-12 rounded-xl bg-accent-soft text-accent grid place-items-center"><CreditCard size={22} /></div>
         <div className="flex-1 min-w-40">
           <div className="text-xs text-muted">Plano atual</div>
@@ -169,7 +169,7 @@ function Meter({ icon, label, used, max, hard, overage, hint }: { icon: React.Re
   const pct = Math.min(100, Math.round(ratio * 100));
   const tone = ratio >= 1 ? 'bg-danger' : ratio >= 0.8 ? 'bg-warn' : 'bg-accent';
   return (
-    <div className="rounded-2xl bg-panel border border-line p-5 space-y-3">
+    <div className="rounded-2xl bg-panel border border-line p-4 space-y-2.5">
       <div className="flex items-center gap-2 text-sm font-medium"><span className="text-faint">{icon}</span>{label}</div>
       <div className="flex items-baseline gap-1">
         <span className="text-2xl font-semibold">{used.toLocaleString('pt-BR')}</span>

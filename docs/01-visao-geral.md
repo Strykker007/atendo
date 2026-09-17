@@ -9,8 +9,9 @@ O Atendo é um SaaS de atendimento ao cliente via WhatsApp. Você (dono do Atend
 | Role | Quem é | O que pode |
 |---|---|---|
 | `super_admin` | Você, dono do Atendo | Criar clientes, definir planos, ver margem de todos |
-| `tenant_admin` | Administrador do cliente | Gerenciar números, atendentes, tags, respostas rápidas, ver uso do plano |
-| `agent` | Atendente do cliente | Atender conversas, aplicar tags, usar respostas rápidas |
+| `tenant_admin` | Administrador do cliente | Tudo do gerente + números, plano/cobrança, criar gerentes |
+| `manager` | Gerente | Vê todas as conversas, transfere, orienta por **nota interna** (cadeado), gerencia tags, respostas rápidas e atendentes |
+| `agent` | Atendente do cliente | Atende as próprias conversas, aplica tags, usa respostas rápidas |
 
 Cada usuário pertence a um único tenant (exceto `super_admin`, que não pertence a nenhum). **Tudo** que um usuário vê é filtrado pelo `tenantId` do token dele — nunca por parâmetro da requisição.
 
@@ -48,6 +49,14 @@ O número é do **cliente**, não de um usuário: todas as atendentes do cliente
 | Marta **transfere** para Maria | some para Marta, aparece para Maria | Maria |
 | Marta **devolve à fila** | volta para *Aguardando* de todas | qualquer uma |
 | Encerrada | todas | ninguém (reabrir = quem reabriu assume) |
+
+### O cadeado (nota interna)
+
+Gerente/admin **não responde ao cliente** numa conversa que é de uma atendente — para isso transfere para si. O que ele tem é o **cadeado** na barra de mensagem:
+
+- Fechado (padrão): não envia nada.
+- Aberto: o campo vira âmbar "Nota interna para Maria — o cliente não vê". A nota entra no histórico com destaque (borda âmbar, "Nota interna · Gil · só a equipe vê"), chega na hora para a atendente, **nunca vai ao WhatsApp** e não conta no uso do plano.
+- Fechou o cadeado: volta a não enviar. O cadeado reseta ao trocar de conversa.
 
 Se duas clicarem em *Assumir* ao mesmo tempo, o banco garante que só uma ganha; a outra recebe "Marta já assumiu este atendimento" (ver [03 › Posse atômica](03-arquitetura.md#posse-do-atendimento)).
 

@@ -40,7 +40,7 @@ export default function EquipePage() {
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Equipe"
-        subtitle={<>Quem atende as conversas. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} atendentes.</>}</>}
+        subtitle={<>Atendentes atendem; gerentes veem tudo, transferem e orientam por nota interna. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} membros.</>}</>}
         action={isAdmin && <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo atendente</Button>}
       />
 
@@ -60,10 +60,10 @@ export default function EquipePage() {
                 <tr key={a.id} className={cn(!a.isActive && 'opacity-50')}>
                   <td className="px-5 py-3 font-medium">{a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}</td>
                   <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}</td>
-                  <td className="px-5 py-3"><span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-field text-muted' : 'bg-accent-soft text-accent')}>{a.role === 'agent' ? 'Atendente' : 'Admin'}</span></td>
+                  <td className="px-5 py-3"><span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{{ agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' }[a.role]}</span></td>
                   <td className="px-5 py-3 text-muted hidden md:table-cell">{a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
-                    {isAdmin && a.role === 'agent' && (
+                    {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
                       <>
                         <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>
                         <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-faint hover:text-danger' : 'text-accent')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
@@ -77,17 +77,29 @@ export default function EquipePage() {
         </div>
       )}
 
-      <CreateAgentModal open={creating} onClose={() => setCreating(false)} onSubmit={(b) => create.mutateAsync(b).then(() => { toast.ok('Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
+      <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then(() => { toast.ok(b.role === 'manager' ? 'Gerente criado' : 'Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
   );
 }
 
-function CreateAgentModal({ open, onClose, onSubmit, pending }: { open: boolean; onClose: () => void; onSubmit: (b: { name: string; email: string; password: string }) => void; pending: boolean }) {
-  const [f, setF] = useState({ name: '', email: '', password: '' });
+function CreateAgentModal({ open, onClose, onSubmit, pending, canCreateManager }: { open: boolean; onClose: () => void; onSubmit: (b: { name: string; email: string; password: string; role: 'agent' | 'manager' }) => void; pending: boolean; canCreateManager: boolean }) {
+  const [f, setF] = useState<{ name: string; email: string; password: string; role: 'agent' | 'manager' }>({ name: '', email: '', password: '', role: 'agent' });
   return (
-    <Modal open={open} onClose={onClose} title="Novo atendente" width="max-w-sm">
+    <Modal open={open} onClose={onClose} title="Novo membro da equipe" width="max-w-sm">
       <form onSubmit={(e) => { e.preventDefault(); onSubmit(f); }} className="space-y-4">
+        {canCreateManager && (
+          <Field label="Papel">
+            <div className="grid grid-cols-2 gap-2">
+              {(['agent', 'manager'] as const).map((r) => (
+                <button type="button" key={r} onClick={() => setF({ ...f, role: r })} className={cn('rounded-lg border px-3 py-2 text-left', f.role === r ? 'border-accent bg-accent-soft' : 'border-line hover:bg-field')}>
+                  <div className="text-sm font-semibold text-ink">{r === 'agent' ? 'Atendente' : 'Gerente'}</div>
+                  <div className="text-[11px] text-muted">{r === 'agent' ? 'Atende as próprias conversas' : 'Vê todas, transfere, orienta por nota interna'}</div>
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
         <Field label="Nome"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required autoFocus /></Field>
         <Field label="E-mail"><input type="email" className={inputCls} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></Field>
         <Field label="Senha inicial" hint="Mínimo 8 caracteres. Envie ao atendente por um canal seguro."><input type="text" className={inputCls} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} minLength={8} required /></Field>

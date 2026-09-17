@@ -120,6 +120,14 @@ Job diário (03:00 UTC, BillingProcessor)
 
 Fatura espelhada em `invoices` com `hostedUrl` (link do Stripe para pagar/baixar) — aparece na tabela de faturas em *Plano e uso*.
 
+### Financeiro (dono do Atendo)
+
+Tela *Financeiro (dono)* (`GET /billing/finance`), quatro abas:
+- **Visão geral** — MRR/ARR, clientes ativos/teste/cancelados, valor em atraso, margem estimada do mês; gráfico Faturado × Recebido × Custo por mês; MRR por plano; novos clientes por mês.
+- **Assinaturas** — cada cliente com plano, mensalidade, status, renovação, cancelamento agendado, carência.
+- **Faturas** — todas as faturas (espelho do Stripe) com link.
+- **Margem por cliente** — a tabela abaixo.
+
 ### Margem (dono do Atendo)
 
 `GET /billing/margin?period=YYYY-MM` (super_admin) e tela *Margem (dono)* no menu: por cliente, `receita (plano + excedente) − custo (Σ providerCost dos templates + Σ infraCostMonth dos números)`. Margem < 30% fica em laranja — é o sinal de plano mal precificado.

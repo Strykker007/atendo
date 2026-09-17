@@ -69,6 +69,7 @@ export type ConversationOrigin = (typeof ConversationOrigin)[keyof typeof Conver
 export const Role = {
   SUPER_ADMIN: 'super_admin', // dono do Atendo
   TENANT_ADMIN: 'tenant_admin', // admin do cliente
+  MANAGER: 'manager', // gerente: coordena atendentes
   AGENT: 'agent', // atendente
 } as const;
 export type Role = (typeof Role)[keyof typeof Role];

@@ -31,7 +31,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/tenants` | super_admin | Lista clientes com plano e contagens |
 | POST | `/tenants` | super_admin | Cria cliente + assinatura + admin |
 | GET | `/tenants/me/agents` | todos | Atendentes do meu tenant (todos podem listar para transferir) |
-| POST | `/tenants/me/agents` | tenant_admin | Cria atendente (respeita `maxAgents`) |
+| POST | `/tenants/me/agents` | tenant_admin, manager | Cria atendente (`role: agent`) ou gerente (`role: manager`, só admin); respeita `maxAgents` |
 | PATCH | `/tenants/me/agents/:id` | tenant_admin | Nome / ativo / `password` (redefine e revoga sessões) |
 | **Números** | | | |
 | GET | `/numbers` | todos | Números do tenant |
@@ -69,6 +69,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/billing/checkout` | tenant_admin | `{planId}` → `{url}` do Checkout (ou troca com proration se já assina) |
 | POST | `/billing/portal` | tenant_admin | `{url}` do Customer Portal |
 | GET | `/billing/margin?period=` | super_admin | Margem por cliente |
+| GET | `/billing/finance?months=` | super_admin | Financeiro completo: MRR/ARR, ativos/teste/pendentes/suspensos, em atraso, série mensal (faturado, recebido, atrasado, excedente, custo, novos, cancelados), por plano, assinaturas, faturas |
 | POST | `/billing/sync-plans` | super_admin | Cria Products/Prices no Stripe |
 | GET | `/billing/usage` | todos | Uso do mês (mensagens, templates, números, atendentes), limites, status, mensalidade, excedente, fim do período |
 | **Relatórios** | | | |

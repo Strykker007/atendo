@@ -20,6 +20,7 @@
 - Relatórios: construtor de parâmetros, gráfico (linha/barra/pizza), tabela, CSV, relatórios salvos
 - Posse do atendimento: assumir (atômico), transferir, devolver à fila; visão por atendente; admin vê todas
 - Cobrança Stripe: checkout, troca de plano com proration, portal do cliente, webhooks, excedente na fatura, suspensão por carência, faturas na tela, margem por cliente (super_admin)
+- Papel gerente; cadeado com notas internas; financeiro completo do dono (KPIs, série mensal, assinaturas, faturas, margem); densidade visual
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida

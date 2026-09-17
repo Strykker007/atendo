@@ -26,7 +26,7 @@ export class PlanLimitGuard implements CanActivate {
     const count =
       limit === 'maxNumbers'
         ? await this.prisma.whatsAppNumber.count({ where: { tenantId, isActive: true } })
-        : await this.prisma.user.count({ where: { tenantId, isActive: true, role: 'agent' } });
+        : await this.prisma.user.count({ where: { tenantId, isActive: true, role: { in: ['agent', 'manager'] } } });
     if (count >= Number(plan.limits[limit])) {
       throw new ForbiddenException(`Limite do plano atingido: ${limit} = ${plan.limits[limit]}. Faça upgrade.`);
     }

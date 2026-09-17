@@ -136,6 +136,7 @@ export class ConversationsService {
       orderBy: { createdAt: 'desc' },
       take,
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+      include: { author: { select: { name: true } } },
     });
     return rows.map((m) => this.present(m));
   }
@@ -288,14 +289,13 @@ export class ConversationsService {
     if (!quota.ok) throw new ForbiddenException(quota.reason);
 
     // Responder = assumir. Atômico: se outra atendente assumiu no meio tempo, falha com o nome dela.
-    // Admin pode responder conversa de outro atendente sem tomar a posse.
+    // Conversa de OUTRA pessoa: ninguém (nem admin) responde ao cliente por ela — admin/gerente usa
+    // nota interna (cadeado). Para atender, transfere para si.
     if (conv.assigneeId !== authorId) {
-      if (!conv.assigneeId || author.role === 'agent') {
-        const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, OR: [{ assigneeId: null }, { assigneeId: authorId }] }, data: { assigneeId: authorId, status: 'in_progress' } });
-        if (r.count === 0) {
-          const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
-          throw new ConflictException(`${owner?.assignee?.name ?? 'Outro atendente'} já assumiu este atendimento.`);
-        }
+      const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, OR: [{ assigneeId: null }, { assigneeId: authorId }] }, data: { assigneeId: authorId, status: 'in_progress' } });
+      if (r.count === 0) {
+        const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
+        throw new ConflictException(`${owner?.assignee?.name ?? 'Outro atendente'} está atendendo. Use uma nota interna ou transfira para você.`);
       }
     }
 
@@ -340,6 +340,21 @@ export class ConversationsService {
     await this.outbound.add('send', { messageId: m.id });
     this.gateway.emitMessage(tenantId, this.present(updated));
     return this.present(updated);
+  }
+
+  /**
+   * Nota interna ("cadeado"): admin/gerente orienta o atendente dentro da conversa.
+   * Fica no histórico com destaque, só a equipe vê, nunca vai ao WhatsApp, não conta no uso.
+   */
+  async note(tenantId: string, author: { id: string; role: string }, conversationId: string, text: string) {
+    if (author.role === 'agent') throw new ForbiddenException('Só gerentes e administradores enviam notas internas.');
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    const message = await this.prisma.message.create({
+      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text, authorId: author.id, internal: true },
+    });
+    this.gateway.emitMessage(tenantId, this.present(message));
+    return this.present(message);
   }
 
   async setStatus(tenantId: string, id: string, status: ConversationStatus, userId: string) {

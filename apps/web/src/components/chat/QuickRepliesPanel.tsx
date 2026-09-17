@@ -28,12 +28,12 @@ export function QuickRepliesPanel() {
 
   return (
     <>
-      <div className="h-14 px-4 flex items-center justify-between border-b border-line">
+      <div className="h-12 px-3.5 flex items-center justify-between border-b border-line">
         <span className="font-medium text-sm inline-flex items-center gap-2"><Zap size={16} className="text-accent" /> Respostas rápidas</span>
         <Link href="/configuracoes" className="text-faint hover:text-ink" title="Gerenciar respostas"><Settings2 size={18} /></Link>
       </div>
-      <div className="p-3 border-b border-line">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full rounded-lg bg-field px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40" />
+      <div className="p-2.5 border-b border-line">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full rounded-lg bg-field px-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin py-1">
         {folders.data?.map((f) => {

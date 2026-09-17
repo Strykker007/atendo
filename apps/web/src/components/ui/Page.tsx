@@ -3,8 +3,8 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
   return (
     <header className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="font-display text-xl font-semibold text-ink tracking-tight">{title}</h1>
-        {subtitle && <p className="text-sm text-muted">{subtitle}</p>}
+        <h1 className="font-display text-lg font-semibold text-ink tracking-tight">{title}</h1>
+        {subtitle && <p className="text-[13px] text-muted">{subtitle}</p>}
       </div>
       {action}
     </header>
@@ -14,7 +14,7 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
 export function PageShell({ children, width = 'max-w-5xl' }: { children: React.ReactNode; width?: string }) {
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className={`${width} mx-auto p-6 md:p-8 space-y-6`}>{children}</div>
+      <div className={`${width} mx-auto p-4 md:p-6 space-y-5`}>{children}</div>
     </div>
   );
 }

@@ -23,19 +23,19 @@ class TagsController {
   }
 
   @Post()
-  @Roles('tenant_admin', 'super_admin')
+  @Roles('tenant_admin', 'manager', 'super_admin')
   create(@CurrentUser() u: AuthUser, @Body() dto: TagDto) {
     return this.prisma.tag.create({ data: { tenantId: u.tenantId, ...dto } });
   }
 
   @Patch(':id')
-  @Roles('tenant_admin', 'super_admin')
+  @Roles('tenant_admin', 'manager', 'super_admin')
   update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<TagDto>) {
     return this.prisma.tag.update({ where: { id, tenantId: u.tenantId }, data: dto });
   }
 
   @Delete(':id')
-  @Roles('tenant_admin', 'super_admin')
+  @Roles('tenant_admin', 'manager', 'super_admin')
   remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.prisma.tag.delete({ where: { id, tenantId: u.tenantId } });
   }

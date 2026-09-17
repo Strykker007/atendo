@@ -10,7 +10,7 @@ import { useNav } from './NavigationProgress';
 import { useTheme, applyTheme } from '@/lib/theme';
 import { useConversationCounts, useMe } from '@/lib/hooks';
 
-const ADMIN_ITEM = { href: '/admin', label: 'Margem (dono)', icon: ShieldCheck };
+const ADMIN_ITEM = { href: '/admin', label: 'Financeiro (dono)', icon: ShieldCheck };
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
   { href: '/numeros', label: 'Números', icon: Smartphone },
@@ -51,8 +51,8 @@ export function Sidebar() {
   const waiting = counts.data?.waiting ?? 0;
 
   return (
-    <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-16' : 'w-56')}>
-      <div className={cn('h-14 flex items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
+    <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-14' : 'w-52')}>
+      <div className={cn('h-12 flex items-center gap-2.5 px-3.5', collapsed && 'justify-center px-0')}>
         <span className="w-7 h-7 rounded-lg bg-accent grid place-items-center text-white font-display font-bold text-sm shrink-0">A</span>
         {!collapsed && <span className="font-display font-semibold text-[17px] text-white tracking-tight">Atendo</span>}
       </div>
@@ -68,13 +68,13 @@ export function Sidebar() {
               title={badge ? `${label} · ${badge} aguardando` : label}
               onClick={() => { if (!path.startsWith(href)) setTarget(href); }}
               className={cn(
-                'relative flex items-center gap-3 mx-2 my-0.5 rounded-lg px-3 py-2 text-[13.5px] transition-colors',
+                'relative flex items-center gap-2.5 mx-2 my-px rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
                 active ? 'bg-side-on text-side-on-ink font-semibold' : 'text-side-ink hover:bg-white/5 hover:text-white',
                 target === href && pending && 'animate-pulse',
                 collapsed && 'justify-center px-0',
               )}
             >
-              <Icon size={18} className="shrink-0" />
+              <Icon size={17} className="shrink-0" />
               {!collapsed && <span className="truncate">{label}</span>}
               {badge !== null && (
                 <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-wait text-white', collapsed ? 'absolute -top-0.5 right-1' : 'ml-auto')}>{badge}</span>

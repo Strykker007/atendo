@@ -33,7 +33,7 @@ export class OutboundProcessor extends WorkerHost {
       where: { id: job.data.messageId },
       include: { conversation: { include: { contact: true } } },
     });
-    if (!message || message.status !== 'pending') return;
+    if (!message || message.status !== 'pending' || message.internal) return;
     // Já foi entregue ao provider numa tentativa anterior (ex.: falhou só a contabilidade):
     // NUNCA reenviar — o cliente receberia em dobro. Só conserta o status.
     if (message.externalId) {

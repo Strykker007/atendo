@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound } from 'lucide-react';
+import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, StickyNote } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
@@ -25,6 +25,12 @@ export function ChatPane() {
   const isAdmin = me.data ? me.data.role !== 'agent' : false;
   const mine = !!conv && conv.assignee?.id === me.data?.id;
   const ownedByOther = !!conv && !!conv.assignee && !mine;
+  // Cadeado: gerente/admin numa conversa de outra pessoa. Fechado = não envia nada.
+  // Aberto = manda NOTA INTERNA (só a equipe vê). Reseta ao trocar de conversa.
+  const [unlocked, setUnlocked] = useState(false);
+  useEffect(() => setUnlocked(false), [conversationId]);
+  const sendNote = useSendNote(conversationId);
+  const noteMode = isAdmin && ownedByOther;
   const tags = useTags();
   const messages = useMessages(conversationId);
   const send = useSendMessage(conversationId);
@@ -80,6 +86,17 @@ export function ChatPane() {
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     const t = text.trim();
+    if (noteMode) {
+      if (!unlocked || !t || sendNote.isPending) return;
+      setText('');
+      try {
+        await sendNote.mutateAsync(t);
+      } catch (err) {
+        setText(t);
+        toast.err(err);
+      }
+      return;
+    }
     if ((!t && !attachment) || send.isPending) return;
     const att = attachment;
     setText('');
@@ -102,11 +119,11 @@ export function ChatPane() {
   return (
     <>
       {/* Cabeçalho: contato, tags, ações de status */}
-      <header className="bg-panel border-b border-line px-3 py-2 flex items-center gap-2.5 min-w-0">
+      <header className="bg-panel border-b border-line px-3 py-1.5 flex items-center gap-2 min-w-0">
         <button className="md:hidden text-muted" onClick={() => setConversation(null)}>
           <ArrowLeft size={20} />
         </button>
-        <div className="w-10 h-10 rounded-xl grid place-items-center font-display font-semibold shrink-0" style={avatarStyle(conv.contact.phone)}>
+        <div className="w-9 h-9 rounded-lg grid place-items-center font-display font-semibold shrink-0" style={avatarStyle(conv.contact.phone)}>
           {initialOf(conv.contact.name ?? conv.contact.phone)}
         </div>
         <div className="min-w-0 flex-1">
@@ -170,7 +187,7 @@ export function ChatPane() {
       </div>
 
       {/* Mensagens */}
-      <div className="flex-1 overflow-y-auto chat-bg px-4 py-3 space-y-1.5 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto chat-bg px-4 py-2.5 space-y-1 scrollbar-thin">
         {messages.isLoading && (
           <div className="space-y-2 pt-2">
             {[60, 40, 75, 35].map((w, i) => (
@@ -183,7 +200,19 @@ export function ChatPane() {
       </div>
 
       {/* Composer */}
-      {ownedByOther && !isAdmin ? (
+      {noteMode ? (
+        <form onSubmit={submit} className={cn('border-t px-3 py-2 flex items-end gap-2 transition-colors', unlocked ? 'bg-warn-soft border-warn/40' : 'bg-field border-line')}>
+          <Button type="button" variant="ghost" className={cn('w-9 h-9 rounded-full p-0 border-0', unlocked ? 'bg-warn text-white hover:bg-warn' : 'bg-transparent text-muted')} onClick={() => setUnlocked((u) => !u)} title={unlocked ? 'Fechar cadeado (parar de enviar notas)' : 'Abrir cadeado para enviar nota interna ao atendente'} icon={unlocked ? <Unlock size={18} /> : <Lock size={18} />} />
+          {unlocked ? (
+            <>
+              <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())} rows={1} placeholder={`Nota interna para ${conv.assignee?.name} — o cliente não vê`} className="flex-1 resize-none max-h-40 rounded-xl bg-panel text-ink placeholder:text-warn-ink/60 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-warn/50" />
+              <Button type="submit" className="w-9 h-9 rounded-full p-0 bg-warn hover:bg-warn/90" disabled={!text.trim()} loading={sendNote.isPending} icon={<StickyNote size={18} />} title="Enviar nota interna" />
+            </>
+          ) : (
+            <div className="flex-1 text-sm text-muted py-2.5"><b className="text-ink">{conv.assignee?.name}</b> está atendendo. Abra o cadeado para mandar uma nota interna, ou transfira para você.</div>
+          )}
+        </form>
+      ) : ownedByOther && !isAdmin ? (
         <div className="bg-field border-t border-line px-4 py-3 text-sm text-muted flex items-center gap-2">
           <UserRound size={16} className="shrink-0" />
           <span className="flex-1"><b className="text-ink">{conv.assignee?.name}</b> está atendendo esta conversa. Peça a transferência ou aguarde a devolução à fila.</span>
@@ -201,7 +230,7 @@ export function ChatPane() {
       ) : conv.status === 'closed' ? (
         <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted text-center">Conversa encerrada. Reabra para responder.</div>
       ) : (
-        <form onSubmit={submit} className="bg-panel border-t border-line px-3 py-2 space-y-2">
+        <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
               {attachment.mimeType.startsWith('image/') ? <img src={attachment.url} alt="" className="w-12 h-12 rounded object-cover" /> : <FileText size={20} className="text-muted" />}
@@ -214,16 +243,16 @@ export function ChatPane() {
           )}
           <div className="flex items-end gap-2">
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept="image/*,audio/*,video/mp4,application/pdf,.doc,.docx,.xls,.xlsx" />
-          <Button type="button" variant="ghost" className="w-10 h-10 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => fileRef.current?.click()} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
+          <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => fileRef.current?.click()} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}
             rows={1}
             placeholder={attachment ? 'Legenda (opcional)' : 'Mensagem… (Enter envia)'}
-            className="flex-1 resize-none max-h-40 rounded-xl bg-field px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="flex-1 resize-none max-h-40 rounded-xl bg-field text-ink placeholder:text-faint px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent/40"
           />
-          <Button type="submit" className="w-10 h-10 rounded-full p-0" disabled={(!text.trim() && !attachment) || uploading} loading={send.isPending} icon={<Send size={18} />} title="Enviar" />
+          <Button type="submit" className="w-9 h-9 rounded-full p-0" disabled={(!text.trim() && !attachment) || uploading} loading={send.isPending} icon={<Send size={18} />} title="Enviar" />
           </div>
         </form>
       )}
@@ -234,9 +263,20 @@ export function ChatPane() {
 function Bubble({ m, canResend }: { m: Message; canResend: boolean }) {
   const out = m.direction === 'out';
   const resend = useResend();
+  if (m.internal) {
+    return (
+      <div className="flex justify-center my-1">
+        <div className="max-w-[80%] rounded-xl border border-warn/40 bg-warn-soft px-3 py-2 text-sm shadow-sm">
+          <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-warn-ink mb-0.5"><Lock size={11} /> Nota interna · {m.author?.name ?? 'gerente'} <span className="text-warn-ink/60 normal-case tracking-normal font-normal">· só a equipe vê</span></div>
+          <p className="whitespace-pre-wrap break-words text-ink">{m.text}</p>
+          <div className="text-[10px] text-warn-ink/70 text-right tnum font-mono mt-0.5">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={cn('flex', out ? 'justify-end' : 'justify-start')}>
-      <div className={cn('max-w-[75%] px-3 py-1.5 text-sm shadow-sm', out ? 'bg-chat-out text-chat-out-ink rounded-xl rounded-br-sm' : 'bg-chat-in text-chat-in-ink rounded-xl rounded-bl-sm')}>
+      <div className={cn('max-w-[72%] px-2.5 py-1.5 text-[13px] shadow-sm', out ? 'bg-chat-out text-chat-out-ink rounded-xl rounded-br-sm' : 'bg-chat-in text-chat-in-ink rounded-xl rounded-bl-sm')}>
         <MediaBody m={m} />
         {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
         <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>

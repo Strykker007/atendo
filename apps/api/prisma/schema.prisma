@@ -39,6 +39,8 @@ model Tenant {
 enum Role {
   super_admin
   tenant_admin
+  /// gerente: vê e coordena todos os atendimentos do tenant, gerencia tags/respostas/equipe; não mexe em números nem cobrança
+  manager
   agent
 }
 
@@ -231,6 +233,8 @@ model Message {
   quotedId       String?
   /// atendente que enviou (null = inbound)
   authorId       String?
+  /// Nota interna (cadeado): só a equipe vê, nunca vai ao WhatsApp nem conta no uso
+  internal       Boolean          @default(false)
   error          String?
   raw            Json?
   createdAt      DateTime         @default(now())

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { IsUUID } from 'class-validator';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { StripeService } from './stripe.service';
+import { FinanceService } from './finance.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { UsageService, periodOf } from './usage.service';
@@ -18,7 +19,15 @@ export class BillingController {
     private readonly usage: UsageService,
     private readonly prisma: PrismaService,
     private readonly stripe: StripeService,
+    private readonly finance: FinanceService,
   ) {}
+
+  /** Financeiro completo do dono: MRR, faturado/recebido/atrasado, custos, margem, por plano, série mensal. */
+  @Get('finance')
+  @Roles('super_admin')
+  financeOverview(@Query('months') months?: string) {
+    return this.finance.overview(Math.min(24, Math.max(1, Number(months) || 12)));
+  }
 
   /** Planos disponíveis para assinar (público dentro do app). */
   @Get('plans')
@@ -66,7 +75,7 @@ export class BillingController {
       this.usage.limits(user.tenantId),
       this.prisma.subscription.findUnique({ where: { tenantId: user.tenantId }, include: { plan: true } }),
       this.prisma.whatsAppNumber.count({ where: { tenantId: user.tenantId, isActive: true } }),
-      this.prisma.user.count({ where: { tenantId: user.tenantId, isActive: true, role: 'agent' } }),
+      this.prisma.user.count({ where: { tenantId: user.tenantId, isActive: true, role: { in: ['agent', 'manager'] } } }),
       this.prisma.usageCounter.findUnique({ where: { tenantId_period: { tenantId: user.tenantId, period: periodOf() } } }),
     ]);
     return {

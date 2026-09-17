@@ -22,6 +22,8 @@ export interface Conversation {
 export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
   text: string | null; mediaUrl: string | null; mediaMime: string | null; mediaName: string | null; createdAt: string; error?: string | null;
+  /** nota interna (cadeado): só a equipe vê */
+  internal?: boolean; authorId?: string | null; author?: { name: string } | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
 export type SendInput = { type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } };
@@ -91,6 +93,9 @@ export const useSendMessage = (conversationId: string | null) => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['usage'] }),
   });
 };
+
+export const useSendNote = (conversationId: string | null) =>
+  useMutation({ mutationFn: (text: string) => api<Message>(`/conversations/${conversationId}/notes`, { method: 'POST', body: JSON.stringify({ text }) }) });
 
 export const useResend = () =>
   useMutation({ mutationFn: ({ conversationId, messageId }: { conversationId: string; messageId: string }) => api<Message>(`/conversations/${conversationId}/messages/${messageId}/resend`, { method: 'POST' }) });
@@ -213,11 +218,12 @@ export const useDeleteTag = () => {
 };
 
 // ---- Equipe ----
-export interface Agent { id: string; name: string; email: string; role: 'tenant_admin' | 'agent' | 'super_admin'; isActive: boolean; lastLoginAt: string | null }
+export type Role = 'tenant_admin' | 'manager' | 'agent' | 'super_admin';
+export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null }
 export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
 export const useCreateAgent = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: { name: string; email: string; password: string }) => api<Agent>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+  return useMutation({ mutationFn: (b: { name: string; email: string; password: string; role?: 'agent' | 'manager' }) => api<Agent>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };
 export const useUpdateAgent = () => {
   const qc = useQueryClient();
@@ -272,3 +278,13 @@ export const useCheckout = () => useMutation({ mutationFn: (planId: string) => a
 export const usePortal = () => useMutation({ mutationFn: () => api<{ url: string }>('/billing/portal', { method: 'POST' }) });
 export interface MarginRow { tenantId: string; name: string; plan: string | null; status: string | null; revenue: number; overage: number; providerCost: number; infraCost: number; margin: number; marginPct: number; messagesSent: number; templatesSent: number }
 export const useMargin = (period?: string) => useQuery({ queryKey: ['margin', period], queryFn: () => api<MarginRow[]>(`/billing/margin${period ? `?period=${period}` : ''}`) });
+
+// ---- Financeiro (dono) ----
+export interface FinanceOverview {
+  now: { mrr: number; arr: number; activeTenants: number; trialing: number; pastDue: number; suspended: number; canceled: number; overdueAmount: number; monthCost: number; monthMargin: number };
+  byPlan: { plan: string; count: number; mrr: number }[];
+  series: { period: string; invoiced: number; received: number; overdue: number; overage: number; providerCost: number; infraCost: number; messagesSent: number; newTenants: number; canceled: number }[];
+  invoices: { id: string; tenant: string; period: string; total: number; overage: number; status: string; dueAt: string | null; paidAt: string | null; hostedUrl: string | null }[];
+  subscriptions: { tenant: string; plan: string; price: number; status: string; periodEnd: string; cancelAtPeriodEnd: boolean; graceUntil: string | null }[];
+}
+export const useFinance = (months = 12) => useQuery({ queryKey: ['finance', months], queryFn: () => api<FinanceOverview>(`/billing/finance?months=${months}`) });
