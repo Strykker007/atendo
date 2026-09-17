@@ -384,6 +384,7 @@ export class ConversationsService {
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     const message = await this.prisma.message.create({
       data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text, authorId: author.id, internal: true },
+      include: { author: { select: { name: true } } },
     });
     this.gateway.emitMessage(tenantId, this.present(message));
     return this.present(message);

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, StickyNote } from 'lucide-react';
+import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
@@ -221,7 +221,7 @@ export function ChatPane() {
           {unlocked ? (
             <>
               <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())} rows={1} placeholder={`Nota interna para ${conv.assignee?.name} — o cliente não vê`} className="flex-1 resize-none max-h-40 rounded-xl bg-panel text-ink placeholder:text-warn-ink/60 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-warn/50" />
-              <Button type="submit" className="w-9 h-9 rounded-full p-0 bg-warn hover:bg-warn/90" disabled={!text.trim()} loading={sendNote.isPending} icon={<StickyNote size={18} />} title="Enviar nota interna" />
+              <Button type="submit" className="w-9 h-9 rounded-full p-0 bg-warn hover:bg-warn/90" disabled={!text.trim()} loading={sendNote.isPending} icon={<Send size={18} />} title="Enviar nota interna" />
             </>
           ) : (
             <div className="flex-1 text-sm text-muted py-2.5"><b className="text-ink">{conv.assignee?.name}</b> está atendendo. Abra o cadeado para mandar uma nota interna, ou transfira para você.</div>

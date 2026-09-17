@@ -87,16 +87,28 @@ export const useMessages = (conversationId: string | null) =>
     queryFn: async () => (await api<Message[]>(`/conversations/${conversationId}/messages`)).reverse(),
   });
 
+/** Insere/atualiza uma mensagem no cache da conversa (mesma lógica do socket). */
+export function upsertMessageInCache(qc: ReturnType<typeof useQueryClient>, m: Message) {
+  qc.setQueryData<Message[]>(['messages', m.conversationId], (old) => {
+    if (!old) return old;
+    const i = old.findIndex((x) => x.id === m.id);
+    return i >= 0 ? old.map((x) => (x.id === m.id ? { ...x, ...m } : x)) : [...old, m];
+  });
+}
+
 export const useSendMessage = (conversationId: string | null) => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify(input) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['usage'] }),
+    // aparece na hora, mesmo se o socket estiver reconectando
+    onSuccess: (m) => { upsertMessageInCache(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); },
   });
 };
 
-export const useSendNote = (conversationId: string | null) =>
-  useMutation({ mutationFn: (text: string) => api<Message>(`/conversations/${conversationId}/notes`, { method: 'POST', body: JSON.stringify({ text }) }) });
+export const useSendNote = (conversationId: string | null) => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (text: string) => api<Message>(`/conversations/${conversationId}/notes`, { method: 'POST', body: JSON.stringify({ text }) }), onSuccess: (m) => upsertMessageInCache(qc, m) });
+};
 
 export const useResend = () =>
   useMutation({ mutationFn: ({ conversationId, messageId }: { conversationId: string; messageId: string }) => api<Message>(`/conversations/${conversationId}/messages/${messageId}/resend`, { method: 'POST' }) });
@@ -186,16 +198,10 @@ export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-
 export function useRealtime() {
   const qc = useQueryClient();
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token) return;
-    const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: { token }, withCredentials: true });
-    socket.on('message', (m: Message) => {
-      qc.setQueryData<Message[]>(['messages', m.conversationId], (old) => {
-        if (!old) return old;
-        const i = old.findIndex((x) => x.id === m.id);
-        return i >= 0 ? old.map((x) => (x.id === m.id ? m : x)) : [...old, m];
-      });
-    });
+    if (!getAccessToken()) return;
+    // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
+    const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: (cb) => cb({ token: getAccessToken() }), withCredentials: true, reconnectionDelayMax: 5000 });
+    socket.on('message', (m: Message) => upsertMessageInCache(qc, m));
     socket.on('conversation', (c: { id: string }) => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', c.id] });
