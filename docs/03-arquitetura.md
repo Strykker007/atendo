@@ -123,7 +123,7 @@ No front, `useRealtime()` aplica os eventos direto no cache do react-query.
 
 | Preocupação | Como tratamos |
 |---|---|
-| Isolamento entre clientes | Todo `where` inclui `tenantId` vindo do JWT (`@CurrentUser()`), nunca do body |
+| Isolamento entre clientes | Todo `where` inclui `tenantId` vindo do JWT (`@CurrentUser()`), nunca do body. O dono do sistema (`super_admin`, sem tenant) só acessa rotas marcadas `@NoTenantOk()` — `TenantGuard` devolve 403 nas demais |
 | Senhas | argon2id; verificação em hash fake quando e-mail não existe (evita enumeração por timing) |
 | Sessão | Access token JWT 15 min no header; refresh 30 d em cookie httpOnly/sameSite, **rotacionado a cada uso** e revogável |
 | Credenciais de provider | AES-256-GCM (`CryptoService`) com chave fora do banco (`ENCRYPTION_KEY`) |

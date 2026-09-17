@@ -25,6 +25,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           return;
         }
       }
+      // dono do sistema entra direto no Financeiro
+      try {
+        const me = await api<{ role: string }>('/auth/me');
+        if (me.role === 'super_admin' && (location.pathname === '/conversas' || location.pathname === '/')) router.replace('/admin');
+      } catch { /* segue */ }
       setReady(true);
     })();
   }, [router]);

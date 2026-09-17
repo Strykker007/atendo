@@ -2,11 +2,15 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
 import { env } from '../../config/env';
+import { TenantGuard } from './tenant.guard';
 import type { AuthUser } from './current-user.decorator';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwt: JwtService) {}
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly tenantGuard: TenantGuard,
+  ) {}
 
   async canActivate(ctx: ExecutionContext) {
     const req = ctx.switchToHttp().getRequest<Request & { user?: AuthUser }>();
@@ -15,9 +19,10 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const payload = await this.jwt.verifyAsync<AuthUser & { sub: string }>(token, { secret: env.JWT_ACCESS_SECRET });
       req.user = { id: payload.sub, tenantId: payload.tenantId, role: payload.role, email: payload.email, name: payload.name };
-      return true;
     } catch {
       throw new UnauthorizedException('Token inválido ou expirado');
     }
+    // dono do sistema (sem tenant) só entra em rotas marcadas com @NoTenantOk
+    return this.tenantGuard.canActivate(ctx);
   }
 }

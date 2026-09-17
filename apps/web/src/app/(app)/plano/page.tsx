@@ -46,6 +46,7 @@ function PlanoInner() {
       <SkeletonCards count={4} />
     </PageShell>
   );
+  if (me.data?.role === 'super_admin') return <PageShell><PageHeader title="Plano e uso" subtitle="Você é o dono do sistema — não tem plano. O financeiro de todos os clientes fica em Financeiro (dono)." /></PageShell>;
   if (!u.limits) return <PageShell><PageHeader title="Plano e uso" /><p className="text-sm text-muted">Este cliente não tem assinatura. Fale com o suporte.</p></PageShell>;
 
   const L = u.limits;

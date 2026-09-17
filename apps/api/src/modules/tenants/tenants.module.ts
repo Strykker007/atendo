@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AuthService } from '../auth/auth.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { NoTenantOk } from '../auth/tenant.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { BillingModule } from '../billing/billing.module';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
@@ -41,12 +42,14 @@ class TenantsController {
   ) {}
 
   @Get()
+  @NoTenantOk()
   @Roles('super_admin')
   list() {
     return this.prisma.tenant.findMany({ include: { subscription: { include: { plan: true } }, _count: { select: { numbers: true, users: true } } } });
   }
 
   @Post()
+  @NoTenantOk()
   @Roles('super_admin')
   async create(@Body() dto: CreateTenantDto) {
     const now = new Date();

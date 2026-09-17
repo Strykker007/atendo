@@ -59,7 +59,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 py-2">
-        {[...items, ...(me.data?.role === 'super_admin' ? [ADMIN_ITEM] : [])].map(({ href, label, icon: Icon }) => {
+        {(me.data?.role === 'super_admin' ? [ADMIN_ITEM, items[items.length - 1]] : items).map(({ href, label, icon: Icon }) => {
           const active = target ? target === href : path.startsWith(href);
           const badge = href === '/conversas' && waiting > 0 ? waiting : null;
           return (

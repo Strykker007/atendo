@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { IsUUID } from 'class-validator';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { NoTenantOk } from '../auth/tenant.guard';
 import { StripeService } from './stripe.service';
 import { FinanceService } from './finance.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -24,6 +25,7 @@ export class BillingController {
 
   /** Financeiro completo do dono: MRR, faturado/recebido/atrasado, custos, margem, por plano, série mensal. */
   @Get('finance')
+  @NoTenantOk()
   @Roles('super_admin')
   financeOverview(@Query('months') months?: string) {
     return this.finance.overview(Math.min(24, Math.max(1, Number(months) || 12)));
@@ -31,6 +33,7 @@ export class BillingController {
 
   /** Planos disponíveis para assinar (público dentro do app). */
   @Get('plans')
+  @NoTenantOk()
   plans() {
     return this.prisma.plan.findMany({ where: { isActive: true }, orderBy: { priceMonth: 'asc' }, select: { id: true, name: true, priceMonth: true, billingModel: true, limits: true, stripePriceId: true } });
   }
@@ -55,12 +58,14 @@ export class BillingController {
 
   /** Margem por cliente no período (dono do Atendo). */
   @Get('margin')
+  @NoTenantOk()
   @Roles('super_admin')
   margin(@Query('period') period?: string) {
     return this.stripe.margin(period || undefined);
   }
 
   @Post('sync-plans')
+  @NoTenantOk()
   @Roles('super_admin')
   async syncPlans() {
     await this.stripe.syncPlans();
@@ -69,7 +74,12 @@ export class BillingController {
 
   /** Uso do mês corrente vs limites do plano — alimenta o banner de 80%/100% no painel. */
   @Get('usage')
+  @NoTenantOk()
   async current(@CurrentUser() user: AuthUser) {
+    // dono do sistema não é cliente: não tem plano nem uso
+    if (!user.tenantId) {
+      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, numbers: 0, agents: 0, messagesIn: 0 }, limits: null, status: null, plan: null, priceMonth: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
+    }
     const [used, plan, sub, numbers, agents, counter] = await Promise.all([
       this.usage.current(user.tenantId),
       this.usage.limits(user.tenantId),

@@ -5,6 +5,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, type AuthUser } from './current-user.decorator';
+import { NoTenantOk } from './tenant.guard';
 import { env } from '../../config/env';
 
 class LoginDto {
@@ -54,6 +55,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @NoTenantOk()
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthUser) {
     return user;

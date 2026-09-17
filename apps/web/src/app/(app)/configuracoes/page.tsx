@@ -9,12 +9,14 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
+import { useMe, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
 
 type Reply = FolderT['replies'][number];
 
 /** Configurações do tenant. Por enquanto: respostas rápidas. Outras seções entram aqui. */
 export default function ConfiguracoesPage() {
+  const me = useMe();
+  const isOwner = me.data?.role === 'super_admin';
   const folders = useQuickReplies();
   const createFolder = useCreateFolder();
   const updateFolder = useUpdateFolder();
@@ -54,7 +56,7 @@ export default function ConfiguracoesPage() {
 
       <AppearanceSection />
 
-      <PageHeader
+      {isOwner ? null : <><PageHeader
         title="Respostas rápidas"
         subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Variáveis: <code className="bg-field px-1 rounded">{'{{contact.name}}'}</code> <code className="bg-field px-1 rounded">{'{{agent.name}}'}</code></>}
         action={<Button onClick={() => setFolderModal({ name: '' })} icon={<Plus size={16} />}>Nova pasta</Button>}
@@ -91,6 +93,8 @@ export default function ConfiguracoesPage() {
           </div>
         ))}
       </div>
+
+      </>}
 
       <Modal open={!!folderModal} onClose={() => setFolderModal(null)} title={folderModal?.id ? 'Renomear pasta' : 'Nova pasta'} width="max-w-sm">
         <form onSubmit={saveFolder} className="space-y-4">
