@@ -84,7 +84,7 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 |---|---|
 | `messages.upsert` | Mensagens de contatos (ignora `fromMe` e grupos `@g.us`) |
 | `messages.update` | Status: `SERVER_ACK`→sent, `DELIVERY_ACK`→delivered, `READ`→read |
-| `connection.update` | `open`→connected, `connecting`→pending_qr, resto→disconnected |
+| `connection.update` | `open`→connected, `connecting`→pending_qr, resto→disconnected. Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone do número é corrigido |
 | `qrcode.updated` | QR novo → painel atualiza pelo socket |
 
 ### Mídia

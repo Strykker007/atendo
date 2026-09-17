@@ -133,4 +133,8 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 
 **Testar sem celular** — dá para simular um webhook da Evolution: o corpo precisa de `instance` e `apikey` = HMAC-SHA256(`EVOLUTION_API_KEY`, instanceName). Exemplo em [04](04-providers-whatsapp.md#autenticação-do-webhook).
 
+**Mandei mensagem para o número conectado e nada apareceu** — veja `pnpm infra:logs` (serviço `evolution`). Se aparecer `Request failed with status code 413`, o corpo do webhook passou do limite da API (`useBodyParser` em `main.ts`, hoje 30 MB — a Evolution manda mídia em base64). Se aparecer `401`, é a autenticação do webhook (instância criada sem o token HMAC — exclua e recrie o número). Se não aparecer nada, a instância não está `open`: `curl localhost:8080/instance/fetchInstances -H "apikey: $EVOLUTION_API_KEY"`.
+
+**Escaneei o QR e o modal não mudou para "Conectado"** — o status chega por socket e, como reserva, o modal consulta a API a cada 3 s enquanto está aberto. Se mesmo assim não mudar, o webhook `connection.update` não está chegando (ver item acima).
+
 **QR expirou / status voltou para Desconectado** — normal, o QR vale ~40 s. Clique em *Conectar (QR)* de novo.

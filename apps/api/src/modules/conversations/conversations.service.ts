@@ -152,8 +152,14 @@ export class ConversationsService {
     this.gateway.emitMessage(m.conversation.tenantId, this.present(updated));
   }
 
-  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string }) {
-    await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status } });
+  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string }) {
+    // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
+    const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
+    await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...(phone && { phone }) } }).catch(async (err) => {
+      // conflito de unique (tenantId, phone): mantém o telefone antigo, só atualiza status
+      if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status } });
+      else throw err;
+    });
     this.gateway.emitNumber(number.tenantId, { id: number.id, status: c.status, qrCode: c.qrCode });
   }
 

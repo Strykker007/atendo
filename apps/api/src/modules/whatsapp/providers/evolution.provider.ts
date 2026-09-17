@@ -167,9 +167,11 @@ export class EvolutionProvider implements WhatsAppProvider {
         }
         break;
       }
-      case 'connection.update':
-        out.connection = { externalNumberId, status: this.mapConnection(data?.state) };
+      case 'connection.update': {
+        const phone = typeof data?.wuid === 'string' ? data.wuid.replace(/@.*$/, '') : undefined;
+        out.connection = { externalNumberId, status: this.mapConnection(data?.state), phone };
         break;
+      }
       case 'qrcode.updated':
         out.connection = { externalNumberId, status: NumberStatus.PENDING_QR, qrCode: data?.qrcode?.base64 };
         break;

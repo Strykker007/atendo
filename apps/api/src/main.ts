@@ -1,15 +1,19 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { env } from './config/env';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // webhooks precisam do corpo bruto para validar assinatura HMAC da Meta
     rawBody: true,
   });
+  // webhooks da Evolution podem vir com mídia em base64 — o padrão do Express (100kb) dava 413
+  app.useBodyParser('json', { limit: '30mb' });
+  app.useBodyParser('urlencoded', { limit: '30mb', extended: true });
 
   app.use(helmet());
   app.enableCors({ origin: env.WEB_ORIGIN, credentials: true });

@@ -1,4 +1,5 @@
 'use client';
+import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Modal, btnGhost } from '@/components/ui/Modal';
@@ -17,6 +18,13 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
   const number = numbers.data?.find((n) => n.id === numberId);
   const qr = live.data ?? initialQr;
   const connected = number?.status === 'connected';
+
+  // Segurança além do socket: enquanto o modal está aberto e não conectou, consulta a cada 3 s
+  useEffect(() => {
+    if (!numberId || connected) return;
+    const t = setInterval(() => qc.invalidateQueries({ queryKey: ['numbers'] }), 3000);
+    return () => clearInterval(t);
+  }, [numberId, connected, qc]);
 
   async function refresh() {
     if (!numberId) return;
