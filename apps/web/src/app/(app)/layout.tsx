@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { api, getAccessToken, setAccessToken } from '@/lib/api';
 import { useRealtime } from '@/lib/hooks';
+import { UsageBanner } from '@/components/layout/UsageBanner';
+import { Toaster } from '@/components/ui/Toast';
 
 /** Shell autenticado: menu lateral + área do módulo. */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -35,7 +37,11 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-screen flex overflow-hidden">
       <Sidebar />
-      <div className="flex-1 min-w-0 flex">{children}</div>
+      <div className="flex-1 min-w-0 flex flex-col">
+        <UsageBanner />
+        <div className="flex-1 min-h-0 flex">{children}</div>
+      </div>
+      <Toaster />
     </div>
   );
 }

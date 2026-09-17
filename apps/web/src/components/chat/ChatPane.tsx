@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useConversations, useMessages, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, type Message } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
@@ -52,7 +53,7 @@ export function ChatPane() {
       await send.mutateAsync(t);
     } catch (err) {
       setText(t);
-      alert(err instanceof Error ? err.message : 'Falha ao enviar');
+      toast.err(err);
     }
   }
 

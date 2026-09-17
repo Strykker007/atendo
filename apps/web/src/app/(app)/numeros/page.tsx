@@ -2,10 +2,12 @@
 import { useState } from 'react';
 import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui/Toast';
 import { useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, type NumberItem } from '@/lib/hooks';
 import { btnPrimary } from '@/components/ui/Modal';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
 import { QrModal } from '@/components/numbers/QrModal';
+import { ConfirmDialog } from '@/components/ui/Confirm';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   connected: { label: 'Conectado', cls: 'bg-brand' },
@@ -23,6 +25,7 @@ export default function NumerosPage() {
   const [creating, setCreating] = useState(false);
   const [switching, setSwitching] = useState<NumberItem | null>(null);
   const [qr, setQr] = useState<{ id: string; initial?: string } | null>(null);
+  const [deleting, setDeleting] = useState<NumberItem | null>(null);
 
   const max = usage.data?.limits?.maxNumbers as number | undefined;
   const count = numbers.data?.filter((n) => n.isActive).length ?? 0;
@@ -36,7 +39,7 @@ export default function NumerosPage() {
       const r = await connect.mutateAsync(n.id);
       if (n.provider === 'evolution') setQr({ id: n.id, initial: r.qrCode });
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Falha ao conectar');
+      toast.err(err);
     }
   }
 
@@ -94,7 +97,7 @@ export default function NumerosPage() {
                   )}
                   <Action icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)}>Trocar provider</Action>
                   <Action icon={<Power size={14} />} onClick={() => update.mutate({ id: n.id, isActive: !n.isActive })}>{n.isActive ? 'Desativar' : 'Ativar'}</Action>
-                  <Action icon={<Trash2 size={14} />} danger onClick={() => confirm(`Excluir "${n.label}"? As conversas deste número também serão removidas.`) && remove.mutate(n.id)}>Excluir</Action>
+                  <Action icon={<Trash2 size={14} />} danger onClick={() => setDeleting(n)}>Excluir</Action>
                 </div>
               </div>
             );
@@ -105,6 +108,15 @@ export default function NumerosPage() {
       <CreateNumberModal open={creating} onClose={() => setCreating(false)} onDone={afterConnect} />
       <SwitchProviderModal number={switching} onClose={() => setSwitching(null)} onDone={afterConnect} />
       <QrModal numberId={qr?.id ?? null} initialQr={qr?.initial} onClose={() => setQr(null)} />
+      <ConfirmDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title="Excluir número"
+        danger
+        confirmLabel="Excluir"
+        text={`"${deleting?.label}" será desconectado e todas as conversas dele serão removidas. Isso não pode ser desfeito.`}
+        onConfirm={() => deleting && remove.mutateAsync(deleting.id).then(() => toast.ok('Número excluído')).catch(toast.err)}
+      />
     </div>
   );
 }

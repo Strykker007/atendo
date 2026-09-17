@@ -41,9 +41,9 @@ export class AuthService {
     await this.prisma.refreshToken.updateMany({ where: { tokenHash: sha256(refreshToken) }, data: { revokedAt: new Date() } });
   }
 
-  private async issue(user: { id: string; tenantId: string | null; role: string; email: string }, meta: { userAgent?: string; ip?: string }) {
+  private async issue(user: { id: string; tenantId: string | null; role: string; email: string; name: string }, meta: { userAgent?: string; ip?: string }) {
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, tenantId: user.tenantId, role: user.role, email: user.email },
+      { sub: user.id, tenantId: user.tenantId, role: user.role, email: user.email, name: user.name },
       { secret: env.JWT_ACCESS_SECRET, expiresIn: env.JWT_ACCESS_TTL as any },
     );
     const refreshToken = randomBytes(48).toString('base64url');

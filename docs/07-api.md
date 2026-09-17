@@ -32,7 +32,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/tenants` | super_admin | Cria cliente + assinatura + admin |
 | GET | `/tenants/me/agents` | tenant_admin | Atendentes do meu tenant |
 | POST | `/tenants/me/agents` | tenant_admin | Cria atendente (respeita `maxAgents`) |
-| PATCH | `/tenants/me/agents/:id` | tenant_admin | Nome / ativo |
+| PATCH | `/tenants/me/agents/:id` | tenant_admin | Nome / ativo / `password` (redefine e revoga sessões) |
 | **Números** | | | |
 | GET | `/numbers` | todos | Números do tenant |
 | POST | `/numbers` | tenant_admin | Cria e conecta (respeita `maxNumbers`) |
@@ -55,7 +55,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST / PATCH / DELETE | `/quick-replies/folders[/:id]` | todos | Pastas |
 | POST / PATCH / DELETE | `/quick-replies[/:id]` | todos | Respostas |
 | **Billing** | | | |
-| GET | `/billing/usage` | todos | Uso do mês, limites e status da assinatura |
+| GET | `/billing/usage` | todos | Uso do mês (mensagens, templates, números, atendentes), limites, status, mensalidade, excedente, fim do período |
 | **Relatórios** | | | |
 | POST | `/reports/run` | todos | Executa um `ReportDefinition` |
 | GET / POST | `/reports/saved` | todos | Relatórios salvos |

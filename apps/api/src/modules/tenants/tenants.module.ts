@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsEmail, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { AuthService } from '../auth/auth.service';
@@ -21,6 +21,12 @@ class CreateAgentDto {
   @IsEmail() email: string;
   @IsString() @MaxLength(80) name: string;
   @IsString() @MinLength(8) password: string;
+}
+class UpdateAgentDto {
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  /** Redefinir senha do atendente */
+  @IsOptional() @IsString() @MinLength(8) password?: string;
 }
 
 /** Gestão de clientes (super_admin) e de atendentes (tenant_admin). */
@@ -74,8 +80,14 @@ class TenantsController {
 
   @Patch('me/agents/:id')
   @Roles('tenant_admin', 'super_admin')
-  updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: { name?: string; isActive?: boolean }) {
-    return this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: 'agent' }, data: dto, select: { id: true, name: true, isActive: true } });
+  async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
+    const { password, ...rest } = dto;
+    const data = password ? { ...rest, passwordHash: await this.auth.hashPassword(password) } : rest;
+    // revoga sessões ativas ao trocar senha ou desativar
+    if (password || dto.isActive === false) {
+      await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+    }
+    return this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: 'agent' }, data, select: { id: true, name: true, isActive: true } });
   }
 }
 

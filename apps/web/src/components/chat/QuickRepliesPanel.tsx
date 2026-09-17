@@ -1,8 +1,11 @@
 'use client';
 import { useState } from 'react';
-import { Folder, FolderOpen, Plus, Zap } from 'lucide-react';
+import { Folder, FolderOpen, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useQuickReplies } from '@/lib/hooks';
+import Link from 'next/link';
+import { useQuickReplies, useConversations, useMe } from '@/lib/hooks';
+import { useUI } from '@/lib/store';
+import { Settings2 } from 'lucide-react';
 
 /** Painel direito: sessões (pastas) com mensagens pré-configuradas. Clique insere no composer. */
 export function QuickRepliesPanel() {
@@ -10,14 +13,24 @@ export function QuickRepliesPanel() {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState('');
 
-  const insert = (body: string) => window.dispatchEvent(new CustomEvent('atendo:insert-text', { detail: body }));
+  const me = useMe();
+  const { conversationId, status, numberId, tagIds } = useUI();
+  const conv = useConversations({ status, numberId, tagIds }).data?.find((c) => c.id === conversationId);
+
+  /** Substitui {{contact.name}} / {{agent.name}} antes de mandar para o composer. */
+  const insert = (body: string) => {
+    const contactName = conv?.contact.name ?? conv?.contact.phone ?? '';
+    const agentName = me.data?.name ?? '';
+    const text = body.replace(/\{\{\s*contact\.name\s*\}\}/g, contactName).replace(/\{\{\s*agent\.name\s*\}\}/g, agentName);
+    window.dispatchEvent(new CustomEvent('atendo:insert-text', { detail: text }));
+  };
   const match = (s: string) => s.toLowerCase().includes(q.toLowerCase());
 
   return (
     <>
       <div className="h-14 px-4 flex items-center justify-between border-b border-surface-border">
         <span className="font-medium text-sm inline-flex items-center gap-2"><Zap size={16} className="text-brand" /> Respostas rápidas</span>
-        <button className="text-gray-400 hover:text-gray-600" title="Nova pasta"><Plus size={18} /></button>
+        <Link href="/configuracoes" className="text-gray-400 hover:text-gray-600" title="Gerenciar respostas"><Settings2 size={18} /></Link>
       </div>
       <div className="p-3 border-b border-surface-border">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full rounded-lg bg-surface-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40" />
@@ -44,7 +57,7 @@ export function QuickRepliesPanel() {
             </div>
           );
         })}
-        {folders.data?.length === 0 && <p className="p-6 text-sm text-gray-400 text-center">Crie uma pasta para organizar suas respostas.</p>}
+        {folders.data?.length === 0 && <p className="p-6 text-sm text-gray-400 text-center">Nenhuma resposta ainda. <Link href="/configuracoes" className="text-brand underline">Criar</Link></p>}
       </div>
     </>
   );

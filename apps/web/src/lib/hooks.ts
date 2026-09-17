@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken } from './api';
-import type { ConversationStatus } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string }
 export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string }
@@ -25,7 +25,17 @@ export interface Folder { id: string; name: string; replies: { id: string; title
 export const useNumbers = () => useQuery({ queryKey: ['numbers'], queryFn: () => api<NumberItem[]>('/numbers') });
 export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => api<Tag[]>('/tags') });
 export const useQuickReplies = () => useQuery({ queryKey: ['quick-replies'], queryFn: () => api<Folder[]>('/quick-replies') });
-export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<{ used: { messages: number; templates: number }; limits: any; plan: string | null }>('/billing/usage'), refetchInterval: 60_000 });
+export interface Usage {
+  period: string;
+  used: { messages: number; templates: number; numbers: number; agents: number; messagesIn: number };
+  limits: PlanLimits | null;
+  status: string | null;
+  plan: string | null;
+  priceMonth: number | null;
+  currentPeriodEnd: string | null;
+  overageAmount: number;
+}
+export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/billing/usage'), refetchInterval: 60_000 });
 
 export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string }) =>
   useQuery({
@@ -135,3 +145,41 @@ export function useRealtime() {
     };
   }, [qc]);
 }
+
+// ---- Tags (admin) ----
+export const useCreateTag = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (b: { name: string; color: string }) => api<Tag>('/tags', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
+};
+export const useUpdateTag = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; color?: string }) => api<Tag>(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
+};
+export const useDeleteTag = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api(`/tags/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
+};
+
+// ---- Equipe ----
+export interface Agent { id: string; name: string; email: string; role: 'tenant_admin' | 'agent' | 'super_admin'; isActive: boolean; lastLoginAt: string | null }
+export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
+export const useCreateAgent = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (b: { name: string; email: string; password: string }) => api<Agent>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+};
+export const useUpdateAgent = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; password?: string }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+};
+
+// ---- Respostas rápidas (admin) ----
+const invQR = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['quick-replies'] });
+export const useCreateFolder = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string }) => api('/quick-replies/folders', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
+export const useUpdateFolder = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; position?: number }) => api(`/quick-replies/folders/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
+export const useDeleteFolder = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/quick-replies/folders/${id}`, { method: 'DELETE' }), onSuccess: invQR(qc) }); };
+export const useCreateReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { folderId: string; title: string; body: string }) => api('/quick-replies', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
+export const useUpdateReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; title?: string; body?: string }) => api(`/quick-replies/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
+export const useDeleteReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/quick-replies/${id}`, { method: 'DELETE' }), onSuccess: invQR(qc) }); };
+
+/** Usuário logado (role, tenant) — para esconder ações de admin. */
+export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id: string; tenantId: string; role: Agent['role']; email: string; name: string }>('/auth/me'), staleTime: Infinity });
