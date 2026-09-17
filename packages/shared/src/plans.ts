@@ -15,6 +15,12 @@ export interface PlanLimits {
   hardLimit: boolean;
   /** dias de tolerância após falha de pagamento antes de suspender */
   graceDays: number;
+  /** Funcionalidades plugáveis liberadas neste plano (ex.: 'flows'). Ausente = nenhuma. */
+  features?: PlanFeature[];
 }
+
+export const PlanFeature = { FLOWS: 'flows' } as const;
+export type PlanFeature = (typeof PlanFeature)[keyof typeof PlanFeature];
+export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = { flows: 'Fluxos de automação' };
 
 export const USAGE_ALERT_THRESHOLDS = [0.8, 1.0] as const;

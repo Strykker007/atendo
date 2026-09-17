@@ -28,6 +28,7 @@ model Tenant {
   tags          Tag[]
   folders       QuickReplyFolder[]
   subscription  Subscription?
+  flows         Flow[]
   usage         MessageUsage[]
   usageCounters UsageCounter[]
   invoices      Invoice[]
@@ -185,6 +186,9 @@ model Conversation {
   assignee User?             @relation("assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   messages Message[]
   tags     ConversationTag[]
+  flowRuns FlowRun[]
+  /// execução de fluxo ativa (para marcar "em automação" na lista)
+  activeFlowRunId String?
 
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
   @@index([tenantId, origin])
@@ -309,6 +313,64 @@ model QuickReply {
 
   @@index([folderId])
   @@map("quick_replies")
+}
+
+// ============================================================
+// Fluxos de automação
+// ============================================================
+
+model Flow {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  /// FlowTrigger (packages/shared)
+  trigger     Json
+  /// FlowDefinition (packages/shared): nós + arestas
+  definition  Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  runs   FlowRun[]
+
+  @@index([tenantId])
+  @@map("flows")
+}
+
+enum FlowRunStatus {
+  running
+  waiting
+  done
+  stopped
+  failed
+}
+
+/// Uma execução de fluxo numa conversa. No máximo uma ativa (running/waiting) por conversa.
+model FlowRun {
+  id             String        @id @default(uuid())
+  tenantId       String
+  flowId         String
+  conversationId String
+  status         FlowRunStatus @default(running)
+  currentNodeId  String?
+  /// variáveis coletadas (Perguntar) e contexto
+  vars           Json          @default("{}")
+  /// tentativas inválidas no nó atual (menu/pergunta)
+  retries        Int           @default(0)
+  waitUntil      DateTime?
+  startedById    String?
+  error          String?
+  startedAt      DateTime      @default(now())
+  endedAt        DateTime?
+
+  flow         Flow         @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, status])
+  @@index([flowId, startedAt])
+  @@map("flow_runs")
 }
 
 // ============================================================

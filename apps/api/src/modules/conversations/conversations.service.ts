@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import type { ConversationOrigin, ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client';
+import type { Conversation, ConversationOrigin, ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client';
 import type { InboundMessage, StatusUpdate, NumberStatus, OutboundMessage } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -155,7 +155,7 @@ export class ConversationsService {
 
   // ---------- inbound (worker) ----------
 
-  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<Message | null> {
+  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean } | null> {
     // idempotência: o mesmo webhook pode chegar duas vezes
     const exists = await this.prisma.message.findUnique({ where: { externalId: msg.externalId } });
     if (exists) return null;
@@ -171,6 +171,7 @@ export class ConversationsService {
       where: { numberId: number.id, contactId: contact.id, status: { not: 'closed' } },
     });
     const origin = this.originOf(msg.referral);
+    const isNew = !conversation;
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
         data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
@@ -219,7 +220,36 @@ export class ConversationsService {
 
     this.gateway.emitMessage(number.tenantId, message);
     this.gateway.emitConversation(number.tenantId, conversation);
+    return { message, conversation, isNew };
+  }
+
+  /**
+   * Envio pelo sistema (fluxos de automação): sem autor humano, não assume a conversa,
+   * respeita quota e janela de 24h, passa pela mesma fila.
+   */
+  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string }) {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true } });
+    if (!conv || conv.status === 'closed') throw new BadRequestException('Conversa indisponível');
+    if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
+    if (conv.number.provider === 'meta') {
+      const inWindow = conv.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
+      if (!inWindow) throw new BadRequestException('Fora da janela de 24h da Meta');
+    }
+    const quota = await this.usage.canSend(conv.tenantId, 'messages');
+    if (!quota.ok) throw new ForbiddenException(quota.reason);
+    const message = await this.prisma.message.create({
+      data: { conversationId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text, mediaUrl: media?.key, mediaName: media?.name },
+    });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: (text ?? `[${media?.type}]`).slice(0, 120) } });
+    await this.outbound.add('send', { messageId: message.id });
+    this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
+  }
+
+  async setStatusSystem(conversationId: string, status: ConversationStatus) {
+    const conv = await this.prisma.conversation.update({ where: { id: conversationId }, data: { status, closedAt: status === 'closed' ? new Date() : null, ...(status === 'waiting' && { assigneeId: null }) } });
+    this.gateway.emitConversation(conv.tenantId, conv);
+    return conv;
   }
 
   private originOf(r?: InboundMessage['referral']) {

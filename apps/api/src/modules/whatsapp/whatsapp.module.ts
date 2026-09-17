@@ -12,6 +12,7 @@ import { QUEUE_INBOUND, QUEUE_OUTBOUND } from './queues';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { BillingModule } from '../billing/billing.module';
 import { AuthModule } from '../auth/auth.module';
+import { FlowsModule } from '../flows/flows.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AuthModule } from '../auth/auth.module';
     forwardRef(() => ConversationsModule),
     BillingModule,
     AuthModule,
+    forwardRef(() => FlowsModule),
   ],
   controllers: [NumbersController, WebhooksController],
   providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor],

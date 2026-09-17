@@ -1,0 +1,27 @@
+import { Module, forwardRef } from '@nestjs/common';
+import { BullModule, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job } from 'bullmq';
+import { FlowEngineService, QUEUE_FLOWS, type FlowResumeJob } from './flow-engine.service';
+import { FlowsController, FlowStopController } from './flows.controller';
+import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
+import { ConversationsModule } from '../conversations/conversations.module';
+
+/** Retoma runs em "Aguardar" quando o tempo vence. */
+@Processor(QUEUE_FLOWS)
+class FlowsProcessor extends WorkerHost {
+  constructor(private readonly engine: FlowEngineService) {
+    super();
+  }
+  async process(job: Job<FlowResumeJob>) {
+    if (job.name === 'resume') await this.engine.resume(job.data.runId);
+  }
+}
+
+@Module({
+  imports: [BullModule.registerQueue({ name: QUEUE_FLOWS }), AuthModule, BillingModule, forwardRef(() => ConversationsModule)],
+  controllers: [FlowsController, FlowStopController],
+  providers: [FlowEngineService, FlowsProcessor],
+  exports: [FlowEngineService],
+})
+export class FlowsModule {}
