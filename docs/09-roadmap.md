@@ -14,18 +14,18 @@
 - Telas de administração: Tags (CRUD), Equipe (criar, ativar/desativar, redefinir senha), Plano e uso (medidores, excedente, banner global 80/100%), Configurações (pastas e respostas rápidas)
 - Variáveis `{{contact.name}}` / `{{agent.name}}` substituídas ao inserir resposta rápida
 - Toasts e diálogos de confirmação próprios (sem `alert`/`confirm`)
+- Mídia: receber (download do provider → storage privado), exibir imagem/áudio/vídeo/documento, enviar com anexo e legenda; storage `local` (grátis) ou `s3` por env; URLs assinadas
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
 
-1. **Mídia** — baixar do provider ao receber, subir para S3/R2, exibir imagem/áudio/documento nas bolhas; upload no composer.
-2. **Origem do lead** — capturar `referral` da Meta (anúncio Click-to-WhatsApp) em `Conversation.origin` + tag automática; relatório "leads por campanha".
-3. **Relatórios (tela)** — construtor de parâmetros + Recharts + salvar relatório.
-4. **Alertas por e-mail** — provedor (Resend/SES) + template; banner no painel.
-5. **Fechamento de fatura + gateway** — Asaas ou Stripe (decisão pendente); webhook de pagamento; suspensão com grace.
-6. **Relatório de margem** (super_admin) — receita − custo por tenant.
-7. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
-8. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
-9. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
-10. **2FA** (TOTP) para admins.
-11. **Atribuição automática** de conversas (round-robin entre atendentes online).
+1. **Origem do lead** — capturar `referral` da Meta (anúncio Click-to-WhatsApp) em `Conversation.origin` + tag automática; relatório "leads por campanha".
+2. **Relatórios (tela)** — construtor de parâmetros + Recharts + salvar relatório.
+3. **Alertas por e-mail** — provedor (Resend/SES) + template; banner no painel.
+4. **Fechamento de fatura + gateway** — Asaas ou Stripe (decisão pendente); webhook de pagamento; suspensão com grace.
+5. **Relatório de margem** (super_admin) — receita − custo por tenant.
+6. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
+7. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
+8. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
+9. **2FA** (TOTP) para admins.
+10. **Atribuição automática** de conversas (round-robin entre atendentes online).

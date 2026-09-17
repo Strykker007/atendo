@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsArray, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ConversationStatus } from '@prisma/client';
@@ -17,6 +17,8 @@ class SendDto {
   @IsIn(['text', 'image', 'audio', 'video', 'document']) type: 'text' | 'image' | 'audio' | 'video' | 'document';
   @IsOptional() @IsString() @MaxLength(4096) text?: string;
   @IsOptional() media?: { url: string; mimeType?: string; fileName?: string; caption?: string };
+  /** chave devolvida por POST /uploads */
+  @IsOptional() @IsString() mediaKey?: string;
   @IsOptional() @IsString() quotedExternalId?: string;
   @IsOptional() template?: any;
 }
@@ -37,6 +39,11 @@ export class ConversationsController {
     return this.conversations.list(u.tenantId, q);
   }
 
+  @Get(':id')
+  one(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.one(u.tenantId, id);
+  }
+
   @Get(':id/messages')
   messages(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
     return this.conversations.messages(u.tenantId, id, cursor);
@@ -44,6 +51,8 @@ export class ConversationsController {
 
   @Post(':id/messages')
   send(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: SendDto) {
+    // mediaKey só pode apontar para o storage do próprio tenant
+    if (dto.mediaKey && !dto.mediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('mediaKey inválida');
     return this.conversations.send(u.tenantId, u.id, id, dto);
   }
 

@@ -89,7 +89,14 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 
 ### Mídia
 
-Hoje guardamos só o tipo/mime/caption. Baixar a mídia (`/chat/getBase64FromMediaMessage` na Evolution, `/media/:id` na Meta) e subir para um storage (S3/R2) está no roadmap.
+Os providers **nunca precisam de URL pública** do nosso storage:
+
+| Sentido | Meta | Evolution |
+|---|---|---|
+| Receber | `GET /{media-id}` devolve URL temporária; baixamos com o token | `POST /chat/getBase64FromMediaMessage/:instance` devolve base64 |
+| Enviar | Upload do binário em `POST /{phone_number_id}/media` → envia pelo `id` | `sendMedia` / `sendWhatsAppAudio` com o conteúdo em base64 |
+
+O `InboundProcessor` chama `provider.fetchMedia()` depois de gravar a mensagem; se falhar, a mensagem fica com `error = "Mídia indisponível: …"` e a UI mostra isso (a mensagem de texto nunca se perde por causa da mídia). O `OutboundProcessor` lê o arquivo do storage e passa como `MediaPayload` para `provider.send()`. Ver [03 — Arquitetura › Storage](03-arquitetura.md#storage-de-mídia).
 
 ## Adicionando um terceiro provider
 

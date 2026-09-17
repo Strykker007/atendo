@@ -51,6 +51,8 @@ Portas usadas (escolhidas para não colidir com outros projetos na mesma máquin
 | Redis | 6379 | `REDIS_URL` |
 | Evolution API | 8080 | `EVOLUTION_BASE_URL` |
 
+Mídia recebida/enviada fica em `apps/api/storage/` (driver `local`, grátis). Para produção troque `STORAGE_DRIVER=s3` e preencha as variáveis `S3_*` — ver [03](03-arquitetura.md#storage-de-mídia).
+
 ### 2. Infraestrutura
 
 ```bash
@@ -128,5 +130,7 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 **Evolution loga `401` chamando o webhook** — a API está rejeitando o webhook. Veja [04 — Providers](04-providers-whatsapp.md#autenticação-do-webhook). Acontece se a instância foi criada sem o token HMAC (instâncias antigas): exclua o número e crie de novo.
 
 **`This name "..." is already in use`** ao criar número — a instância já existe na Evolution com outro token. Delete-a: `curl -X DELETE localhost:8080/instance/delete/<nome> -H "apikey: $EVOLUTION_API_KEY"`.
+
+**Testar sem celular** — dá para simular um webhook da Evolution: o corpo precisa de `instance` e `apikey` = HMAC-SHA256(`EVOLUTION_API_KEY`, instanceName). Exemplo em [04](04-providers-whatsapp.md#autenticação-do-webhook).
 
 **QR expirou / status voltou para Desconectado** — normal, o QR vale ~40 s. Clique em *Conectar (QR)* de novo.

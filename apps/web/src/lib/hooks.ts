@@ -18,8 +18,10 @@ export interface Conversation {
 }
 export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
-  text: string | null; mediaUrl: string | null; createdAt: string; error?: string | null;
+  text: string | null; mediaUrl: string | null; mediaMime: string | null; mediaName: string | null; createdAt: string; error?: string | null;
 }
+export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
+export type SendInput = { type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } };
 export interface Folder { id: string; name: string; replies: { id: string; title: string; body: string }[] }
 
 export const useNumbers = () => useQuery({ queryKey: ['numbers'], queryFn: () => api<NumberItem[]>('/numbers') });
@@ -49,6 +51,9 @@ export const useConversations = (q: { status: ConversationStatus; numberId: stri
     },
   });
 
+export const useConversation = (id: string | null) =>
+  useQuery({ queryKey: ['conversation', id], enabled: !!id, queryFn: () => api<Conversation>(`/conversations/${id}`) });
+
 export const useMessages = (conversationId: string | null) =>
   useQuery({
     queryKey: ['messages', conversationId],
@@ -59,16 +64,37 @@ export const useMessages = (conversationId: string | null) =>
 export const useSendMessage = (conversationId: string | null) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (text: string) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ type: 'text', text }) }),
+    mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify(input) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['usage'] }),
   });
 };
 
+/** Upload multipart (não passa pelo helper `api` porque o Content-Type é do FormData). */
+export async function uploadFile(file: File): Promise<Upload> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/uploads`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${getAccessToken()}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Erro ${res.status}`);
+  return res.json();
+}
+
+export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'document' =>
+  mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'document';
+
+const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
+  qc.invalidateQueries({ queryKey: ['conversations'] });
+  qc.invalidateQueries({ queryKey: ['conversation', id] });
+};
 export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: ConversationStatus }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }),
+    onSuccess: (_, v) => invConv(qc, v.id),
   });
 };
 
@@ -76,7 +102,7 @@ export const useSetTags = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, tagIds }: { id: string; tagIds: string[] }) => api(`/conversations/${id}/tags`, { method: 'PATCH', body: JSON.stringify({ tagIds }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }),
+    onSuccess: (_, v) => invConv(qc, v.id),
   });
 };
 
@@ -134,7 +160,10 @@ export function useRealtime() {
         return i >= 0 ? old.map((x) => (x.id === m.id ? m : x)) : [...old, m];
       });
     });
-    socket.on('conversation', () => qc.invalidateQueries({ queryKey: ['conversations'] }));
+    socket.on('conversation', (c: { id: string }) => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['conversation', c.id] });
+    });
     socket.on('number', (n: { id: string; status: string; qrCode?: string }) => {
       if (n.qrCode) qc.setQueryData(['number-qr', n.id], n.qrCode);
       if (n.status === 'connected') qc.setQueryData(['number-qr', n.id], null);

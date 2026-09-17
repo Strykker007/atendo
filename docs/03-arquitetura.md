@@ -121,6 +121,23 @@ No front, `useRealtime()` aplica os eventos direto no cache do react-query.
 | Headers | helmet |
 | Input | `ValidationPipe` com `whitelist` + `forbidNonWhitelisted` — campo desconhecido = 400 |
 
+## Storage de mídia
+
+`StorageService` (`common/storage/`) com dois drivers escolhidos por `STORAGE_DRIVER`:
+
+| Driver | Quando | Config |
+|---|---|---|
+| `local` | Dev e enquanto não há produção — **grátis** | `STORAGE_LOCAL_DIR` (padrão `apps/api/storage`, ignorado pelo git) |
+| `s3` | Produção — Cloudflare R2, AWS S3, MinIO, qualquer S3-compatível | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` |
+
+Trocar de driver é só variável de ambiente; o código não muda.
+
+Regras:
+- O storage é **privado**. `Message.mediaUrl` guarda a **chave** (`media/<tenant>/<aaaa-mm>/<uuid>.<ext>`), não uma URL.
+- Ao sair para o navegador (HTTP ou socket), `ConversationsService.present()` troca a chave por uma **URL assinada** (`GET /media/*?exp&sig`, HMAC com `ENCRYPTION_KEY`, válida 1 h). `<img>`/`<audio>` não mandam header, por isso a autorização vai na query.
+- Upload do atendente: `POST /uploads` (multipart, campo `file`, até `MEDIA_MAX_MB`, tipos permitidos: imagem, áudio, vídeo mp4, pdf, office). Devolve a chave; o envio referencia `mediaKey`, que precisa começar com `media/<tenant do usuário>/` (checado no controller).
+- Providers recebem o binário (`MediaPayload`) — nunca a URL. Detalhes em [04](04-providers-whatsapp.md#mídia).
+
 ## O que ainda não está aqui (ver roadmap)
 
-Upload/download de mídia (hoje só guardamos URL/metadata), 2FA (campo existe, fluxo não), gateway de pagamento, e-mail de alerta, testes automatizados.
+2FA (campo existe, fluxo não), gateway de pagamento, e-mail de alerta, testes automatizados.

@@ -5,6 +5,8 @@ import type { ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client'
 import type { InboundMessage, StatusUpdate, NumberStatus, OutboundMessage } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
+import { StorageService } from '../../common/storage/storage.service';
+import type { Message } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 
@@ -16,8 +18,17 @@ export class ConversationsService {
     private readonly prisma: PrismaService,
     private readonly usage: UsageService,
     private readonly gateway: ConversationsGateway,
+    private readonly storage: StorageService,
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {}
+
+  /**
+   * Message.mediaUrl guarda a CHAVE no storage (privada). Antes de sair para o navegador
+   * (HTTP ou socket) vira uma URL assinada e temporária.
+   */
+  present(m: Message): Message {
+    return m.mediaUrl && !m.mediaUrl.startsWith('http') ? { ...m, mediaUrl: this.storage.signedUrl(m.mediaUrl) } : m;
+  }
 
   // ---------- leitura ----------
 
@@ -40,21 +51,41 @@ export class ConversationsService {
     });
   }
 
-  messages(tenantId: string, conversationId: string, cursor?: string, take = 50) {
-    return this.prisma.message.findMany({
+  one(tenantId: string, id: string) {
+    return this.prisma.conversation.findFirstOrThrow({
+      where: { id, tenantId },
+      include: { contact: true, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, provider: true } } },
+    });
+  }
+
+  async messages(tenantId: string, conversationId: string, cursor?: string, take = 50) {
+    const rows = await this.prisma.message.findMany({
       where: { conversationId, conversation: { tenantId } },
       orderBy: { createdAt: 'desc' },
       take,
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
     });
+    return rows.map((m) => this.present(m));
+  }
+
+  /** Download da mídia falhou de vez: registra para a UI não ficar em "carregando". */
+  async mediaFailed(messageId: string, tenantId: string, reason: string) {
+    const m = await this.prisma.message.update({ where: { id: messageId }, data: { error: `Mídia indisponível: ${reason}`.slice(0, 200) } });
+    this.gateway.emitMessage(tenantId, this.present(m));
+  }
+
+  /** Chamado pelo worker depois de baixar a mídia recebida. */
+  async attachMedia(messageId: string, tenantId: string, key: string, mimeType: string, fileName?: string) {
+    const m = await this.prisma.message.update({ where: { id: messageId }, data: { mediaUrl: key, mediaMime: mimeType, mediaName: fileName } });
+    this.gateway.emitMessage(tenantId, this.present(m));
   }
 
   // ---------- inbound (worker) ----------
 
-  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage) {
+  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<Message | null> {
     // idempotência: o mesmo webhook pode chegar duas vezes
     const exists = await this.prisma.message.findUnique({ where: { externalId: msg.externalId } });
-    if (exists) return;
+    if (exists) return null;
 
     const contact = await this.prisma.contact.upsert({
       where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } },
@@ -109,6 +140,7 @@ export class ConversationsService {
 
     this.gateway.emitMessage(number.tenantId, message);
     this.gateway.emitConversation(number.tenantId, conversation);
+    return message;
   }
 
   async applyStatus(st: StatusUpdate) {
@@ -117,7 +149,7 @@ export class ConversationsService {
     const order = ['pending', 'sent', 'delivered', 'read', 'failed'];
     if (order.indexOf(st.status) <= order.indexOf(m.status) && st.status !== 'failed') return; // não regride
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error } });
-    this.gateway.emitMessage(m.conversation.tenantId, updated);
+    this.gateway.emitMessage(m.conversation.tenantId, this.present(updated));
   }
 
   async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string }) {
@@ -127,7 +159,7 @@ export class ConversationsService {
 
   // ---------- outbound (API) ----------
 
-  async send(tenantId: string, authorId: string, conversationId: string, input: Omit<OutboundMessage, 'to'>) {
+  async send(tenantId: string, authorId: string, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string }) {
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
       include: { number: true },
@@ -151,7 +183,7 @@ export class ConversationsService {
         type: input.template ? 'template' : input.type,
         status: 'pending',
         text: input.text,
-        mediaUrl: input.media?.url,
+        mediaUrl: input.mediaKey ?? input.media?.url,
         mediaMime: input.media?.mimeType,
         mediaName: input.media?.fileName,
         quotedId: input.quotedExternalId,
@@ -172,9 +204,9 @@ export class ConversationsService {
     });
 
     await this.outbound.add('send', { messageId: message.id });
-    this.gateway.emitMessage(tenantId, message);
+    this.gateway.emitMessage(tenantId, this.present(message));
     this.gateway.emitConversation(tenantId, updatedConv);
-    return message;
+    return this.present(message);
   }
 
   async setStatus(tenantId: string, id: string, status: ConversationStatus, userId: string) {

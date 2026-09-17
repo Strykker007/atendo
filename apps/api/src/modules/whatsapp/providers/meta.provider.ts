@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { MessageStatus, MessageType, NumberStatus, BillingCategory } from '@atendo/shared';
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
-import type { NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { MediaPayload, NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 
 /** providerConfig (criptografado) de um número Meta */
 export interface MetaNumberConfig {
@@ -54,7 +54,7 @@ export class MetaProvider implements WhatsAppProvider {
     }
   }
 
-  async send(ctx: NumberContext, m: OutboundMessage): Promise<SendResult> {
+  async send(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
     const cfg = this.cfg(ctx);
     const body: Record<string, unknown> = { messaging_product: 'whatsapp', to: m.to };
     let billingCategory: BillingCategory = BillingCategory.SERVICE;
@@ -66,7 +66,12 @@ export class MetaProvider implements WhatsAppProvider {
     } else if (m.type === MessageType.TEXT) {
       body.type = 'text';
       body.text = { body: m.text ?? '' };
-    } else if (m.media) {
+    } else if (media) {
+      // sobe o binário para a Meta e envia pelo id — sem expor URL do nosso storage
+      const mediaId = await this.uploadMedia(cfg, media);
+      body.type = m.type;
+      body[m.type] = { id: mediaId, caption: m.media?.caption ?? m.text, filename: media.fileName };
+    } else if (m.media?.url) {
       body.type = m.type;
       body[m.type] = { link: m.media.url, caption: m.media.caption, filename: m.media.fileName };
     } else {
@@ -79,6 +84,28 @@ export class MetaProvider implements WhatsAppProvider {
       body: JSON.stringify(body),
     });
     return { externalId: res.messages[0].id, status: MessageStatus.SENT, billingCategory };
+  }
+
+  private async uploadMedia(cfg: MetaNumberConfig, media: MediaPayload): Promise<string> {
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', media.mimeType);
+    form.append('file', new Blob([new Uint8Array(media.data)], { type: media.mimeType }), media.fileName ?? 'file');
+    const res = await fetch(`${this.base}/${cfg.phoneNumberId}/media`, { method: 'POST', headers: { Authorization: `Bearer ${cfg.accessToken}` }, body: form });
+    const json = (await res.json()) as any;
+    if (!res.ok) throw new BadRequestException(json?.error?.message ?? 'Falha no upload de mídia para a Meta');
+    return json.id as string;
+  }
+
+  /** Meta: GET /{media-id} devolve uma URL temporária; baixamos com o mesmo token. */
+  async fetchMedia(ctx: NumberContext, msg: InboundMessage): Promise<MediaPayload | null> {
+    const id = msg.media?.providerMediaId;
+    if (!id) return null;
+    const cfg = this.cfg(ctx);
+    const meta = await this.graph<{ url: string; mime_type: string }>(cfg, id);
+    const res = await fetch(meta.url, { headers: { Authorization: `Bearer ${cfg.accessToken}` } });
+    if (!res.ok) throw new BadRequestException(`Download de mídia Meta falhou (${res.status})`);
+    return { data: Buffer.from(await res.arrayBuffer()), mimeType: meta.mime_type ?? msg.media?.mimeType ?? 'application/octet-stream', fileName: msg.media?.fileName };
   }
 
   async markRead(ctx: NumberContext, externalMessageId: string) {

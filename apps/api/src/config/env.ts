@@ -29,6 +29,14 @@ const schema = z.object({
   META_GRAPH_VERSION: z.string().default('v21.0'),
   META_APP_SECRET: z.string().optional().default(''),
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(1),
+  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  STORAGE_LOCAL_DIR: z.string().default('./storage'),
+  S3_ENDPOINT: z.string().optional().default(''),
+  S3_REGION: z.string().default('auto'),
+  S3_BUCKET: z.string().optional().default(''),
+  S3_ACCESS_KEY_ID: z.string().optional().default(''),
+  S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
+  MEDIA_MAX_MB: z.coerce.number().default(25),
 });
 
 const parsed = schema.safeParse(process.env);

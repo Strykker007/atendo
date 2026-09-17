@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Folder, FolderOpen, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
-import { useQuickReplies, useConversations, useMe } from '@/lib/hooks';
+import { useQuickReplies, useConversation, useMe } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 import { Settings2 } from 'lucide-react';
 
@@ -14,8 +14,8 @@ export function QuickRepliesPanel() {
   const [q, setQ] = useState('');
 
   const me = useMe();
-  const { conversationId, status, numberId, tagIds } = useUI();
-  const conv = useConversations({ status, numberId, tagIds }).data?.find((c) => c.id === conversationId);
+  const { conversationId } = useUI();
+  const conv = useConversation(conversationId).data;
 
   /** Substitui {{contact.name}} / {{agent.name}} antes de mandar para o composer. */
   const insert = (body: string) => {

@@ -14,7 +14,8 @@ interface UIState {
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
   setNumber: (id: string | null) => void;
-  setStatus: (s: ConversationStatus) => void;
+  /** keep = true mantém a conversa selecionada (usado ao responder) */
+  setStatus: (s: ConversationStatus, keep?: boolean) => void;
   setTags: (ids: string[]) => void;
   setConversation: (id: string | null) => void;
 }
@@ -31,7 +32,7 @@ export const useUI = create<UIState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
       setNumber: (numberId) => set({ numberId, conversationId: null }),
-      setStatus: (status) => set({ status, conversationId: null }),
+      setStatus: (status, keep) => set((s) => ({ status, conversationId: keep ? s.conversationId : null })),
       setTags: (tagIds) => set({ tagIds }),
       setConversation: (conversationId) => set({ conversationId }),
     }),

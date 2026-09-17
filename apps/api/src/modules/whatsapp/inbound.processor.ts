@@ -5,6 +5,7 @@ import { ProviderRegistry } from './providers/provider.registry';
 import { NumbersService } from './numbers.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { QUEUE_INBOUND, type InboundJob } from './queues';
+import { StorageService } from '../../common/storage/storage.service';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
 export class InboundProcessor extends WorkerHost {
@@ -14,6 +15,7 @@ export class InboundProcessor extends WorkerHost {
     private readonly registry: ProviderRegistry,
     private readonly numbers: NumbersService,
     private readonly conversations: ConversationsService,
+    private readonly storage: StorageService,
   ) {
     super();
   }
@@ -27,7 +29,23 @@ export class InboundProcessor extends WorkerHost {
         this.log.warn(`Mensagem para número desconhecido ${job.data.provider}:${msg.externalNumberId}`);
         continue;
       }
-      await this.conversations.ingestInbound(number, msg);
+      const saved = await this.conversations.ingestInbound(number, msg);
+      // mídia: baixa do provider e guarda no storage privado (falha aqui não perde a mensagem)
+      if (saved && msg.media) {
+        try {
+          const ctx = await this.numbers.context(number.id);
+          const media = await this.registry.get(job.data.provider).fetchMedia(ctx, msg);
+          if (media) {
+            const key = this.storage.makeKey(number.tenantId, media.mimeType, media.fileName);
+            await this.storage.put(key, media.data, media.mimeType);
+            await this.conversations.attachMedia(saved.id, number.tenantId, key, media.mimeType, media.fileName);
+          }
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          this.log.warn(`Mídia de ${msg.externalId} não baixada: ${reason}`);
+          await this.conversations.mediaFailed(saved.id, number.tenantId, reason);
+        }
+      }
     }
 
     for (const st of parsed.statuses) await this.conversations.applyStatus(st);

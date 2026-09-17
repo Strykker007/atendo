@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BillingCategory, MessageStatus, MessageType, NumberStatus } from '@atendo/shared';
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
-import type { NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { MediaPayload, NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 
 /** providerConfig de um número Evolution */
 export interface EvolutionNumberConfig {
@@ -76,7 +76,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     return this.mapConnection(r?.instance?.state);
   }
 
-  async send(ctx: NumberContext, m: OutboundMessage): Promise<SendResult> {
+  async send(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
     const name = this.instance(ctx);
     let r: any;
     if (m.type === MessageType.TEXT) {
@@ -84,22 +84,41 @@ export class EvolutionProvider implements WhatsAppProvider {
         method: 'POST',
         body: JSON.stringify({ number: m.to, text: m.text ?? '', quoted: m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined }),
       });
-    } else if (m.media) {
+    } else if (m.type === MessageType.AUDIO && media) {
+      // áudio como "mensagem de voz" (PTT), igual ao gravado no app
+      r = await this.api(`/message/sendWhatsAppAudio/${name}`, {
+        method: 'POST',
+        body: JSON.stringify({ number: m.to, audio: media.data.toString('base64') }),
+      });
+    } else if (media || m.media) {
+      // a Evolution aceita `media` como URL ou base64 — mandamos base64 para não expor o storage
       r = await this.api(`/message/sendMedia/${name}`, {
         method: 'POST',
         body: JSON.stringify({
           number: m.to,
           mediatype: m.type,
-          media: m.media.url,
-          mimetype: m.media.mimeType,
-          fileName: m.media.fileName,
-          caption: m.media.caption,
+          media: media ? media.data.toString('base64') : m.media?.url,
+          mimetype: media?.mimeType ?? m.media?.mimeType,
+          fileName: media?.fileName ?? m.media?.fileName,
+          caption: m.media?.caption ?? m.text,
         }),
       });
     } else {
       throw new BadRequestException(`Tipo não suportado pela Evolution: ${m.type}`);
     }
     return { externalId: r?.key?.id ?? crypto.randomUUID(), status: MessageStatus.SENT, billingCategory: BillingCategory.UNOFFICIAL };
+  }
+
+  /** Evolution descriptografa e devolve a mídia em base64 a partir da key da mensagem. */
+  async fetchMedia(ctx: NumberContext, msg: InboundMessage): Promise<MediaPayload | null> {
+    if (!msg.media) return null;
+    const raw = msg.raw as any;
+    const r = await this.api<any>(`/chat/getBase64FromMediaMessage/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ message: { key: raw?.key }, convertToMp4: false }),
+    });
+    if (!r?.base64) return null;
+    return { data: Buffer.from(r.base64, 'base64'), mimeType: r.mimetype ?? msg.media.mimeType ?? 'application/octet-stream', fileName: r.fileName ?? msg.media.fileName };
   }
 
   async markRead(ctx: NumberContext, externalMessageId: string) {

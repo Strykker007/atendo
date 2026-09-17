@@ -9,6 +9,12 @@ export interface NumberContext {
   config: Record<string, unknown>;
 }
 
+export interface MediaPayload {
+  data: Buffer;
+  mimeType: string;
+  fileName?: string;
+}
+
 export interface ParsedWebhook {
   messages: InboundMessage[];
   statuses: StatusUpdate[];
@@ -30,7 +36,13 @@ export interface WhatsAppProvider {
   destroy?(ctx: NumberContext): Promise<void>;
   getStatus(ctx: NumberContext): Promise<NumberStatus>;
 
-  send(ctx: NumberContext, message: OutboundMessage): Promise<SendResult>;
+  /**
+   * `media.data` (Buffer) é preenchido pelo OutboundProcessor a partir do storage —
+   * o provider nunca precisa de URL pública.
+   */
+  send(ctx: NumberContext, message: OutboundMessage, media?: MediaPayload): Promise<SendResult>;
+  /** Baixa a mídia de uma mensagem recebida (id/raw vêm do InboundMessage). */
+  fetchMedia(ctx: NumberContext, message: InboundMessage): Promise<MediaPayload | null>;
   markRead(ctx: NumberContext, externalMessageId: string): Promise<void>;
 
   /** Valida assinatura/autenticidade do webhook. Lança se inválido. */
