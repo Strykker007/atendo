@@ -10,7 +10,7 @@ const mono = IBM_Plex_Mono({ subsets: ['latin'], weight: ['500'], variable: '--f
 export const metadata: Metadata = { title: 'Atendo', description: 'Atendimento via WhatsApp' };
 
 /** Aplica o tema antes do primeiro paint para não piscar claro→escuro. */
-const themeScript = `(function(){try{var m=JSON.parse(localStorage.getItem('atendo-theme')||'{}').state?.mode||'system';var d=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark')}catch(e){}})()`;
+const themeScript = `(function(){try{var m=JSON.parse(localStorage.getItem('atendo-theme')||'{}').state?.mode||'light';var d=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark')}catch(e){}})()`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
