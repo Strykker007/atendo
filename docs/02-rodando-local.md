@@ -137,4 +137,6 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 
 **Escaneei o QR e o modal não mudou para "Conectado"** — o status chega por socket e, como reserva, o modal consulta a API a cada 3 s enquanto está aberto. Se mesmo assim não mudar, o webhook `connection.update` não está chegando (ver item acima).
 
+**Responder dá "Connection Closed"** e o log da Evolution repete `stream:error … conflict type=replaced` — a sessão do WhatsApp foi substituída (QR escaneado duas vezes, ou "Gerar novo QR" depois de já ter lido). Solução: no celular remova o dispositivo "Evolution/Chrome" em *Dispositivos conectados*; na Evolution apague a instância (`curl -X DELETE localhost:8080/instance/delete/<nome> -H "apikey: $EVOLUTION_API_KEY"`); em *Números* clique *Conectar (QR)* e escaneie **uma vez só**. O `connect()` do adapter já não reabre uma sessão que está `open`, então clicar de novo não causa mais isso.
+
 **QR expirou / status voltou para Desconectado** — normal, o QR vale ~40 s. Clique em *Conectar (QR)* de novo.

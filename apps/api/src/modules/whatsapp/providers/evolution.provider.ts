@@ -47,6 +47,11 @@ export class EvolutionProvider implements WhatsAppProvider {
 
   async connect(ctx: NumberContext) {
     const name = this.instance(ctx);
+    // Já conectado? Não mexe: chamar /connect numa sessão aberta cria uma segunda sessão
+    // e o WhatsApp derruba a primeira ("conflict: replaced") — envio passa a falhar.
+    const state = await this.api<any>(`/instance/connectionState/${name}`).catch(() => null);
+    if (state?.instance?.state === 'open') return { status: NumberStatus.CONNECTED };
+
     // cria se não existir; se já existe seguimos direto para o QR
     const created = await this.api<any>('/instance/create', {
       method: 'POST',
