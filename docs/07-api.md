@@ -54,6 +54,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/conversations/:id/messages/:messageId/resend` | todos | Reenvia mensagem com status `failed` |
 | PATCH | `/conversations/:id/status` | todos | `waiting | in_progress | closed` |
 | PATCH | `/conversations/:id/tags` | todos | `{tagIds: []}` substitui as tags |
+| PATCH | `/conversations/contacts/:contactId/tags` | todos | `{tagIds}` substitui as tags **do contato** (permanentes) |
 | POST | `/conversations/:id/read` | todos | Zera não-lidas |
 | **Tags** | | | |
 | GET | `/tags` | todos | Com contagem de conversas |

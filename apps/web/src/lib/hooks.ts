@@ -15,7 +15,7 @@ export interface Conversation {
   origin: ConversationOrigin; originData: LeadReferral | null;
   activeFlowRunId?: string | null;
   lastInboundAt: string | null; numberId: string;
-  contact: { id: string; name: string | null; phone: string };
+  contact: { id: string; name: string | null; phone: string; tags?: { tag: Tag }[] };
   tags: { tag: Tag }[];
   assignee: { id: string; name: string } | null;
   number: { id: string; label: string; provider?: 'meta' | 'evolution'; status?: string };
@@ -123,6 +123,14 @@ export const useSetStatus = () => {
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: ConversationStatus }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
     onSuccess: (_, v) => invConv(qc, v.id),
+  });
+};
+
+export const useSetContactTags = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contactId, tagIds }: { contactId: string; tagIds: string[] }) => api(`/conversations/contacts/${contactId}/tags`, { method: 'PATCH', body: JSON.stringify({ tagIds }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['conversations'] }); qc.invalidateQueries({ queryKey: ['conversation'] }); },
   });
 };
 

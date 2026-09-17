@@ -7,7 +7,7 @@ import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen,
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
@@ -38,6 +38,7 @@ export function ChatPane() {
   const send = useSendMessage(conversationId);
   const setStatus = useSetStatus();
   const setTags = useSetTags();
+  const setContactTags = useSetContactTags();
   const usage = useUsage();
   const [text, setText] = useState('');
   const [attachment, setAttachment] = useState<Upload | null>(null);
@@ -138,10 +139,6 @@ export function ChatPane() {
         <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
           <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
         </span>
-        <div className="hidden lg:block flex-1 min-w-[140px] max-w-72 relative">
-          {setTags.isPending && <span className="absolute -top-3 right-0 text-[10px] text-faint">salvando…</span>}
-          <TagPicker compact tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} placeholder="Adicionar tag" />
-        </div>
         {conv.status === 'waiting' && (
           <Button size="sm" icon={<Hand size={14} />} loading={claim.isPending} loadingText="Assumindo…" onClick={() => claim.mutateAsync(conv.id).then(() => { toast.ok('Você assumiu este atendimento'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Assumir atendimento">
             <span className="hidden sm:inline">Assumir</span>
@@ -192,9 +189,16 @@ export function ChatPane() {
         </div>
       )}
 
-      {/* Tags no mobile/tablet */}
-      <div className="lg:hidden bg-panel border-b border-line px-3 py-1.5">
-        <TagPicker compact tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} placeholder="Adicionar tag" />
+      {/* Tags: do atendimento (esta conversa) e da pessoa (valem para sempre) */}
+      <div className="bg-panel border-b border-line px-3 py-1 grid sm:grid-cols-2 gap-x-3 gap-y-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint shrink-0 w-14" title="Tags deste atendimento">Conversa</span>
+          <div className="flex-1 min-w-0"><TagPicker compact tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} placeholder="Adicionar tag" /></div>
+        </div>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint shrink-0 w-14" title="Tags da pessoa — valem em todas as conversas dela">📌 Contato</span>
+          <div className="flex-1 min-w-0"><TagPicker compact tags={tags.data ?? []} value={(conv.contact.tags ?? []).map((t) => t.tag.id)} onChange={(ids) => setContactTags.mutate({ contactId: conv.contact.id, tagIds: ids })} placeholder="Tag permanente" /></div>
+        </div>
       </div>
 
       {/* Mensagens */}

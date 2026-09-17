@@ -142,9 +142,24 @@ model Contact {
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
+  tags          ContactTag[]
 
   @@unique([tenantId, phone])
   @@map("contacts")
+}
+
+/// Tag "colada" na pessoa: vale para todas as conversas dela (ex.: comprador recorrente).
+model ContactTag {
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
+  @@map("contact_tags")
 }
 
 enum ConversationStatus {
@@ -265,6 +280,7 @@ model Tag {
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations ConversationTag[]
+  contacts      ContactTag[]
 
   @@unique([tenantId, name])
   @@map("tags")

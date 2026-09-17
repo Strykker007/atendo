@@ -19,7 +19,7 @@ class TagsController {
 
   @Get()
   list(@CurrentUser() u: AuthUser) {
-    return this.prisma.tag.findMany({ where: { tenantId: u.tenantId }, orderBy: { name: 'asc' }, include: { _count: { select: { conversations: true } } } });
+    return this.prisma.tag.findMany({ where: { tenantId: u.tenantId }, orderBy: { name: 'asc' }, include: { _count: { select: { conversations: true, contacts: true } } } });
   }
 
   @Post()

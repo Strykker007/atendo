@@ -139,12 +139,15 @@ function ConversationRow({ c, active, onClick, showNumber }: { c: Conversation; 
           <span className={cn('text-xs truncate', c.unreadCount > 0 ? 'text-ink' : 'text-muted')}>{c.lastMessagePreview ?? '—'}</span>
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
-        {(c.tags.length > 0 || showNumber || c.assignee || c.origin !== 'organic') && (
+        {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || showNumber || c.assignee || c.origin !== 'organic') && (
           <div className="flex flex-wrap items-center gap-1 mt-1">
             <OriginBadge origin={c.origin} data={c.originData} />
             {showNumber && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-field text-muted font-medium">{c.number.label}</span>}
             {c.tags.map(({ tag }) => (
               <span key={tag.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `color-mix(in srgb, ${tag.color} 18%, transparent)`, color: tag.color }}>{tag.name}</span>
+            ))}
+            {(c.contact.tags ?? []).map(({ tag }) => (
+              <span key={`c-${tag.id}`} title="Tag do contato (permanente)" className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border" style={{ borderColor: tag.color, color: tag.color }}>📌 {tag.name}</span>
             ))}
             {c.assignee && c.status === 'in_progress' && <span className="ml-auto text-[10px] text-faint truncate">↳ {c.assignee.name}</span>}
           </div>

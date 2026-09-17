@@ -106,6 +106,11 @@ export class ConversationsController {
     return this.conversations.setTags(u.tenantId, id, dto.tagIds);
   }
 
+  @Patch('contacts/:contactId/tags')
+  contactTags(@CurrentUser() u: AuthUser, @Param('contactId') contactId: string, @Body() dto: TagsDto) {
+    return this.conversations.setContactTags(u.tenantId, contactId, dto.tagIds);
+  }
+
   @Post(':id/read')
   read(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.conversations.markRead(u.tenantId, id);

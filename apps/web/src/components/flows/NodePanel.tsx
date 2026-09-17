@@ -111,7 +111,16 @@ export function NodePanel({ node, onChange, onDelete }: { node: FlowNode; onChan
               </select>
             </Field>
             {(node.data.kind === 'add_tag' || node.data.kind === 'remove_tag') && (
-              <Field label="Tag"><select className={inputCls} value={node.data.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}><option value="">Escolha…</option>{tags.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
+              <>
+                <Field label="Tag"><select className={inputCls} value={node.data.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}><option value="">Escolha…</option>{tags.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
+                <Field label="Aplicar em" hint="Contato = vale para sempre, em todas as conversas dessa pessoa (ex.: comprador recorrente)">
+                  <div className="grid grid-cols-2 gap-2">
+                    {([['conversation', 'Esta conversa'], ['contact', '📌 Contato']] as const).map(([v, l]) => (
+                      <button type="button" key={v} onClick={() => set({ scope: v })} className={`rounded-lg border px-3 py-1.5 text-sm ${(node.data.scope ?? 'conversation') === v ? 'border-accent bg-accent-soft text-ink' : 'border-line text-muted hover:bg-field'}`}>{l}</button>
+                    ))}
+                  </div>
+                </Field>
+              </>
             )}
             {(node.data.kind === 'assign' || node.data.kind === 'handoff') && (
               <Field label={node.data.kind === 'handoff' ? 'Atribuir a (opcional)' : 'Atendente'} hint={node.data.kind === 'handoff' ? 'Vazio = volta para a fila "Aguardando"' : undefined}>

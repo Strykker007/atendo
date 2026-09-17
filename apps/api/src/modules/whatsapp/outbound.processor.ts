@@ -66,6 +66,11 @@ export class OutboundProcessor extends WorkerHost {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.log.error(`Falha ao enviar ${message.id}: ${error}`);
+      // Sessão caiu por baixo ("Connection Closed"): reinicia a instância e deixa o retry do BullMQ tentar de novo
+      if (/connection closed/i.test(error) && provider.restart) {
+        this.log.warn(`Número ${ctx.numberId}: sessão zumbi, reiniciando instância`);
+        await provider.restart(ctx);
+      }
       if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
         const failed = await this.prisma.message.update({ where: { id: message.id }, data: { status: 'failed', error } });
         this.gateway.emitMessage(ctx.tenantId, this.conversations.present(failed));

@@ -44,6 +44,8 @@ export interface WhatsAppProvider {
   disconnect(ctx: NumberContext): Promise<void>;
   /** Remove definitivamente o número do provider (ex.: apaga a instância na Evolution). Opcional. */
   destroy?(ctx: NumberContext): Promise<void>;
+  /** Reinicia a sessão sem novo pareamento (Evolution: socket zumbi). Opcional. */
+  restart?(ctx: NumberContext): Promise<void>;
   getStatus(ctx: NumberContext): Promise<NumberStatus>;
 
   /**

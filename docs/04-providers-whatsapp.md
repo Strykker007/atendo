@@ -71,6 +71,10 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 
 **Webhook global:** no compose, `WEBHOOK_GLOBAL_URL=http://host.docker.internal:4000/webhooks/evolution`. Todas as instâncias mandam para lá; o campo `instance` do corpo diz qual número é.
 
+### Sessão zumbi ("Connection Closed")
+
+A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (típico depois de o host dormir). Todo envio devolve `428 Connection Closed`. Tratamento automático: o `OutboundProcessor` detecta a mensagem, chama `provider.restart()` (`POST /instance/restart/:name`) e deixa o retry do BullMQ reenviar. Além disso, um job a cada 5 min (`NumbersHealthProcessor`) confere o status real de cada número no provider e corrige o banco (a UI mostra "desconectado" e o botão de reconectar). Se nem o restart resolver, reinicie o container (`docker compose restart evolution`) — as sessões ficam no banco da Evolution e reconectam sem QR.
+
 ### Autenticação do webhook
 
 A Evolution **não** manda header de autenticação no webhook global; ela manda `apikey` **no corpo**, e esse valor é o token da instância. Então:

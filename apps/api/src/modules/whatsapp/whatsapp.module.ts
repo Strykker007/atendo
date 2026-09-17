@@ -9,6 +9,7 @@ import { WebhooksController } from './webhooks.controller';
 import { InboundProcessor } from './inbound.processor';
 import { OutboundProcessor } from './outbound.processor';
 import { QUEUE_INBOUND, QUEUE_OUTBOUND } from './queues';
+import { NumbersHealthScheduler, NumbersHealthProcessor, QUEUE_HEALTH } from './health.scheduler';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { BillingModule } from '../billing/billing.module';
 import { AuthModule } from '../auth/auth.module';
@@ -19,6 +20,7 @@ import { FlowsModule } from '../flows/flows.module';
     BullModule.registerQueue(
       { name: QUEUE_INBOUND, defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 2000 } } },
       { name: QUEUE_OUTBOUND, defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 3000 } } },
+      { name: QUEUE_HEALTH, defaultJobOptions: { removeOnComplete: 20, removeOnFail: 20 } },
     ),
     forwardRef(() => ConversationsModule),
     BillingModule,
@@ -26,7 +28,7 @@ import { FlowsModule } from '../flows/flows.module';
     forwardRef(() => FlowsModule),
   ],
   controllers: [NumbersController, WebhooksController],
-  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor],
+  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor],
   exports: [ProviderRegistry, NumbersService, BullModule],
 })
 export class WhatsAppModule {}

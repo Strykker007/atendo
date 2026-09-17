@@ -219,10 +219,14 @@ export class FlowEngineService {
     const d = node.data;
     switch (d.kind) {
       case 'add_tag':
-        if (d.tagId) await this.prisma.conversationTag.upsert({ where: { conversationId_tagId: { conversationId: run.conversationId, tagId: d.tagId } }, create: { conversationId: run.conversationId, tagId: d.tagId }, update: {} });
+        if (!d.tagId) break;
+        if (d.scope === 'contact') await this.prisma.contactTag.upsert({ where: { contactId_tagId: { contactId: run.conversation.contactId, tagId: d.tagId } }, create: { contactId: run.conversation.contactId, tagId: d.tagId }, update: {} });
+        else await this.prisma.conversationTag.upsert({ where: { conversationId_tagId: { conversationId: run.conversationId, tagId: d.tagId } }, create: { conversationId: run.conversationId, tagId: d.tagId }, update: {} });
         break;
       case 'remove_tag':
-        if (d.tagId) await this.prisma.conversationTag.deleteMany({ where: { conversationId: run.conversationId, tagId: d.tagId } });
+        if (!d.tagId) break;
+        if (d.scope === 'contact') await this.prisma.contactTag.deleteMany({ where: { contactId: run.conversation.contactId, tagId: d.tagId } });
+        else await this.prisma.conversationTag.deleteMany({ where: { conversationId: run.conversationId, tagId: d.tagId } });
         break;
       case 'assign':
         if (d.agentId) await this.prisma.conversation.update({ where: { id: run.conversationId }, data: { assigneeId: d.agentId, status: 'in_progress' } });
@@ -252,8 +256,10 @@ export class FlowEngineService {
         return (vars[d.varName ?? ''] ?? '').trim().toLowerCase() === (d.value ?? '').trim().toLowerCase();
       case 'var_contains':
         return (vars[d.varName ?? ''] ?? '').toLowerCase().includes((d.value ?? '').toLowerCase());
-      case 'has_tag':
-        return conv.tags.some((t) => t.tagId === d.tagId);
+      case 'has_tag': {
+        if (conv.tags.some((t) => t.tagId === d.tagId)) return true;
+        return !!(await this.prisma.contactTag.findFirst({ where: { contactId: conv.contactId, tagId: d.tagId ?? '' } }));
+      }
       case 'business_hours': {
         const h = d.hours ?? { start: '08:00', end: '18:00', days: [1, 2, 3, 4, 5] };
         const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));

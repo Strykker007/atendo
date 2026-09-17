@@ -54,14 +54,15 @@ export class ConversationsService {
       ...(q.origin && { origin: q.origin }),
       ...ownership,
       ...(q.numberId && { numberId: q.numberId }),
-      ...(q.tagIds?.length && { tags: { some: { tagId: { in: q.tagIds } } } }),
+      // tag da conversa OU tag do contato
+      ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
       ...(q.search && {
         contact: { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }] },
       }),
     };
     return this.prisma.conversation.findMany({
       where,
-      include: { contact: true, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true } } },
       orderBy: { lastMessageAt: 'desc' },
       take: q.take ?? 50,
       ...(q.cursor && { cursor: { id: q.cursor }, skip: 1 }),
@@ -126,7 +127,7 @@ export class ConversationsService {
   one(tenantId: string, id: string) {
     return this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: true, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, provider: true, status: true } } },
     });
   }
 
@@ -276,6 +277,7 @@ export class ConversationsService {
     if (!m) return;
     const order = ['pending', 'sent', 'delivered', 'read', 'failed'];
     if (order.indexOf(st.status) <= order.indexOf(m.status) && st.status !== 'failed') return; // não regride
+    if (st.status === 'failed' && (m.status === 'delivered' || m.status === 'read')) return; // já chegou: erro tardio é ruído
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error } });
     this.gateway.emitMessage(m.conversation.tenantId, this.present(updated));
   }
@@ -409,6 +411,18 @@ export class ConversationsService {
       this.prisma.conversationTag.createMany({ data: tagIds.map((tagId) => ({ conversationId: id, tagId })) }),
     ]);
     return this.prisma.conversation.findUnique({ where: { id }, include: { tags: { include: { tag: true } } } });
+  }
+
+  /** Tags da pessoa (valem para todas as conversas dela). */
+  async setContactTags(tenantId: string, contactId: string, tagIds: string[]) {
+    await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
+    await this.prisma.$transaction([
+      this.prisma.contactTag.deleteMany({ where: { contactId } }),
+      this.prisma.contactTag.createMany({ data: tagIds.map((tagId) => ({ contactId, tagId })) }),
+    ]);
+    const convs = await this.prisma.conversation.findMany({ where: { contactId } });
+    for (const c of convs) this.gateway.emitConversation(tenantId, c);
+    return this.prisma.contact.findUnique({ where: { id: contactId }, include: { tags: { include: { tag: true } } } });
   }
 
   async markRead(tenantId: string, id: string) {

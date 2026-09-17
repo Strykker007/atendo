@@ -68,7 +68,12 @@ Sempre visíveis acima da lista: **Aguardando · Em atendimento · Encerrado**. 
 
 ## Tags
 
-Criadas dinamicamente pelo admin do cliente em *Tags* (ex.: "lead com interesse", "comprador recorrente"). O atendente aplica no cabeçalho do chat. Elas alimentam:
+Criadas dinamicamente pelo admin do cliente em *Tags* (ex.: "lead com interesse", "comprador recorrente"). Existem em dois escopos, lado a lado abaixo do cabeçalho do chat:
+
+- **Conversa** — vale para este atendimento. Encerrou e o contato voltou, a nova conversa começa limpa. É o que os relatórios contam.
+- **📌 Contato** — cola na pessoa e aparece em todas as conversas dela (ex.: "comprador recorrente", "VIP"). Na lista aparece com 📌 e borda na cor da tag.
+
+Fluxos aplicam/removem tags nos dois escopos (bloco Ação → "Aplicar em: Esta conversa / 📌 Contato") e a condição "conversa tem a tag" considera ambos. O filtro por tag da lista também. Elas alimentam:
 
 - o filtro da lista de conversas;
 - os relatórios (ex.: "conversas por tag por semana").

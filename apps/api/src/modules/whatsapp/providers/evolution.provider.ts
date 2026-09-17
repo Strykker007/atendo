@@ -76,6 +76,14 @@ export class EvolutionProvider implements WhatsAppProvider {
     await this.api(`/instance/logout/${this.instance(ctx)}`, { method: 'DELETE' }).catch(() => undefined);
   }
 
+  /**
+   * Socket zumbi: a Evolution diz "open" mas o WebSocket com o WhatsApp morreu (comum depois
+   * de o host dormir) e todo envio dá "Connection Closed". Restart reconecta com as credenciais salvas.
+   */
+  async restart(ctx: NumberContext) {
+    await this.api(`/instance/restart/${this.instance(ctx)}`, { method: 'POST' }).catch(() => undefined);
+  }
+
   async destroy(ctx: NumberContext) {
     await this.disconnect(ctx);
     await this.api(`/instance/delete/${this.instance(ctx)}`, { method: 'DELETE' }).catch(() => undefined);

@@ -11,7 +11,7 @@ import { useTags, useCreateTag, useUpdateTag, useDeleteTag, useMe, type Tag } fr
 
 const PALETTE = ['#22c55e', '#f59e0b', '#6366f1', '#ec4899', '#0ea5e9', '#ef4444', '#8b5cf6', '#14b8a6', '#64748b', '#f97316'];
 
-type TagWithCount = Tag & { _count?: { conversations: number } };
+type TagWithCount = Tag & { _count?: { conversations: number; contacts: number } };
 
 export default function TagsPage() {
   const me = useMe();
@@ -53,7 +53,7 @@ export default function TagsPage() {
             <div key={t.id} className="flex items-center gap-3 px-5 py-3">
               <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: t.color }} />
               <span className="flex-1 font-medium text-sm">{t.name}</span>
-              <span className="text-xs text-faint">{t._count?.conversations ?? 0} conversa{(t._count?.conversations ?? 0) === 1 ? '' : 's'}</span>
+              <span className="text-xs text-faint tnum">{t._count?.conversations ?? 0} conversa{(t._count?.conversations ?? 0) === 1 ? '' : 's'} · 📌 {t._count?.contacts ?? 0} contato{(t._count?.contacts ?? 0) === 1 ? '' : 's'}</span>
               {isAdmin && (
                 <>
                   <button onClick={() => setEditing(t)} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={15} /></button>
