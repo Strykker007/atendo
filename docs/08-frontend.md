@@ -36,7 +36,7 @@ src/
 │       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha
 │       ├── plano/          medidores de uso, excedente, explicação do limite
 │       ├── configuracoes/  pastas e respostas rápidas (CRUD)
-│       └── relatorios/     (placeholder)
+│       └── relatorios/     construtor (métrica, agrupamento, período, filtros) + gráfico/tabela + CSV + salvos
 ├── components/
 │   ├── layout/Sidebar.tsx | UsageBanner.tsx (aviso global 80/100%, past_due, suspended)
 │   ├── chat/ConversationList | ChatPane | TagPicker | QuickRepliesPanel
@@ -116,6 +116,14 @@ Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `c
 - Seletor de número mostra **ponto de conexão** (verde/âmbar) e **badge do provider** (Oficial/QR).
 - Cabeçalho do chat: **pill de status** com a mesma cor da faixa.
 - Menu: item *Conversas* com badge laranja = quantas aguardando.
+
+## Relatórios (gráficos)
+
+`components/reports/ReportChart.tsx` (Recharts 3). Regras:
+- Agrupamento por tempo → linha (dias sem dado preenchidos com 0 em `fillTime`); por categoria → barras (horizontais quando há > 4 itens ou rótulos longos); pizza junta o excedente de 6 fatias em "Outros".
+- Uma escala só; grade discreta (`--grid`); tooltip por marca; tabela alternativa (ícone de tabela) e CSV.
+- Cores categóricas `--c1…--c6` em **ordem fixa**, validadas para daltonismo e contraste nos dois temas (script `validate_palette` do skill dataviz). Nunca gerar cor extra: além de 6, agrupar.
+- `XAxis`/`YAxis` precisam ser filhos **diretos** do chart — Fragment quebra a detecção do Recharts.
 
 ## Padrões
 

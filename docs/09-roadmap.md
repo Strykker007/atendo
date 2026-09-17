@@ -17,16 +17,16 @@
 - Mídia: receber (download do provider → storage privado), exibir imagem/áudio/vídeo/documento, enviar com anexo e legenda; storage `local` (grátis) ou `s3` por env; URLs assinadas
 - Origem do lead: referral de anúncio (Meta e Evolution) → `origin`/`originData`, tags automáticas, filtro e relatório por campanha
 - Tema claro (Semáforo) e escuro (Sala de controle) com tokens; seleção em Configurações
+- Relatórios: construtor de parâmetros, gráfico (linha/barra/pizza), tabela, CSV, relatórios salvos
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
 
-1. **Relatórios (tela)** — construtor de parâmetros + Recharts + salvar relatório.
-2. **Alertas por e-mail** — provedor (Resend/SES) + template; banner no painel.
-3. **Fechamento de fatura + gateway** — Asaas ou Stripe (decisão pendente); webhook de pagamento; suspensão com grace.
-4. **Relatório de margem** (super_admin) — receita − custo por tenant.
-5. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
-6. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
-7. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
-8. **2FA** (TOTP) para admins.
-9. **Atribuição automática** de conversas (round-robin entre atendentes online).
+1. **Alertas por e-mail** — provedor (Resend/SES) + template; banner no painel.
+2. **Fechamento de fatura + gateway** — **Stripe** (decidido em 2026-09-17); webhook de pagamento; suspensão com grace.
+3. **Relatório de margem** (super_admin) — receita − custo por tenant.
+4. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
+5. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
+6. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
+7. **2FA** (TOTP) para admins.
+8. **Atribuição automática** de conversas (round-robin entre atendentes online).

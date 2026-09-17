@@ -42,6 +42,10 @@
 
   --meta-soft: #e0e7ff; --meta-ink: #3730a3;
   --evo-soft: #fff3d6;  --evo-ink: #9a5b00;
+
+  /* gráficos: 6 cores categóricas em ordem fixa (validadas p/ daltonismo e contraste) */
+  --c1: #2f5bea; --c2: #d9730d; --c3: #158f6e; --c4: #7c5cff; --c5: #b5872a; --c6: #c2357f;
+  --grid: #e6eaf1;
 }
 
 .dark {
@@ -80,6 +84,9 @@
 
   --meta-soft: #2a1f3d; --meta-ink: #c4a8ff;
   --evo-soft: #3a2c0a;  --evo-ink: #fbbf24;
+
+  --c1: #3b82f6; --c2: #c97a22; --c3: #1d9c78; --c4: #8f78ff; --c5: #b08f38; --c6: #cc5c98;
+  --grid: #1f2634;
 }
 
 html, body { height: 100%; }

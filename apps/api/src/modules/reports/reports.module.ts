@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Module, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Module, Param, Post, UseGuards } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -42,6 +42,11 @@ class ReportsController {
   save(@CurrentUser() u: AuthUser, @Body() body: { name: string; definition: unknown }) {
     const definition = ReportDefinition.parse(body.definition);
     return this.prisma.savedReport.create({ data: { tenantId: u.tenantId, name: String(body.name).slice(0, 80), definition } });
+  }
+
+  @Delete('saved/:id')
+  remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.prisma.savedReport.delete({ where: { id, tenantId: u.tenantId } });
   }
 
   /** Conversas agrupadas. Parametrizado via Prisma.sql — sem concatenação de string do usuário. */
