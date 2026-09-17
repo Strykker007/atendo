@@ -45,6 +45,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/conversations/:id` | todos | Uma conversa (contato, tags, atendente, número) |
 | GET | `/conversations/:id/messages?cursor=` | todos | Mensagens (mais recentes primeiro, 50); `mediaUrl` já vem assinada |
 | POST | `/conversations/:id/messages` | todos | Envia: `{type:'text', text}` ou `{type:'image'|'audio'|'video'|'document', mediaKey, text?}` ou template |
+| POST | `/conversations/:id/messages/:messageId/resend` | todos | Reenvia mensagem com status `failed` |
 | PATCH | `/conversations/:id/status` | todos | `waiting | in_progress | closed` |
 | PATCH | `/conversations/:id/tags` | todos | `{tagIds: []}` substitui as tags |
 | POST | `/conversations/:id/read` | todos | Zera não-lidas |
@@ -111,7 +112,7 @@ Formato padrão do Nest: `{ statusCode, message, error }`. Códigos relevantes:
 
 | Código | Quando |
 |---|---|
-| 400 | Validação (campo inválido/desconhecido), janela 24h expirada, conversa encerrada |
+| 400 | Validação (campo inválido/desconhecido), janela 24h expirada, conversa encerrada, número desconectado |
 | 401 | Token ausente/expirado, webhook não autenticado |
 | 403 | Role insuficiente, limite do plano, assinatura suspensa |
 | 404 | Recurso de outro tenant ou inexistente (nunca revelamos qual) |

@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, FileText, Download, X } from 'lucide-react';
+import { Paperclip, FileText, Download, X, RefreshCw, WifiOff } from 'lucide-react';
+import Link from 'next/link';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useConversation, useMessages, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 
 export function ChatPane() {
@@ -60,6 +61,7 @@ export function ChatPane() {
   }
 
   const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
+  const numberOffline = conv.number.status && conv.number.status !== 'connected';
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -131,12 +133,18 @@ export function ChatPane() {
             ))}
           </div>
         )}
-        {messages.data?.map((m) => <Bubble key={m.id} m={m} />)}
+        {messages.data?.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} />)}
         <div ref={bottomRef} />
       </div>
 
       {/* Composer */}
-      {quotaHit ? (
+      {numberOffline ? (
+        <div className="bg-red-50 border-t border-red-200 px-4 py-3 text-sm text-red-800 flex items-center gap-2">
+          <WifiOff size={16} className="shrink-0" />
+          <span className="flex-1">O número <b>{conv.number.label}</b> está desconectado. Você continua recebendo, mas não consegue responder.</span>
+          <Link href="/numeros" className="underline font-medium whitespace-nowrap">Conectar</Link>
+        </div>
+      ) : quotaHit ? (
         <div className="bg-amber-50 border-t border-amber-200 px-4 py-3 text-sm text-amber-800">
           Limite de mensagens do plano <b>{usage.data?.plan}</b> atingido neste mês. Faça upgrade para continuar respondendo.
         </div>
@@ -177,8 +185,9 @@ export function ChatPane() {
   );
 }
 
-function Bubble({ m }: { m: Message }) {
+function Bubble({ m, canResend }: { m: Message; canResend: boolean }) {
   const out = m.direction === 'out';
+  const resend = useResend();
   return (
     <div className={cn('flex', out ? 'justify-end' : 'justify-start')}>
       <div className={cn('max-w-[75%] rounded-lg px-3 py-1.5 text-sm shadow-sm', out ? 'bg-[#d9fdd3]' : 'bg-white')}>
@@ -188,7 +197,16 @@ function Bubble({ m }: { m: Message }) {
           {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           {out && <StatusIcon status={m.status} />}
         </div>
-        {(m.status === 'failed' || (m.error && !m.mediaUrl)) && <p className="text-[10px] text-red-600 mt-0.5">{m.error ?? 'Falha ao enviar'}</p>}
+        {(m.status === 'failed' || (m.error && !m.mediaUrl)) && (
+          <p className="text-[10px] text-red-600 mt-0.5 flex items-center gap-2">
+            <span className="flex-1">{m.error ?? 'Falha ao enviar'}</span>
+            {m.status === 'failed' && canResend && (
+              <button onClick={() => resend.mutateAsync({ conversationId: m.conversationId, messageId: m.id }).catch(toast.err)} disabled={resend.isPending} className="inline-flex items-center gap-1 rounded bg-white/70 px-1.5 py-0.5 text-red-700 hover:bg-white">
+                <RefreshCw size={10} className={resend.isPending ? 'animate-spin' : ''} /> reenviar
+              </button>
+            )}
+          </p>
+        )}
       </div>
     </div>
   );

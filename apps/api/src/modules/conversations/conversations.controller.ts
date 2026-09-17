@@ -56,6 +56,11 @@ export class ConversationsController {
     return this.conversations.send(u.tenantId, u.id, id, dto);
   }
 
+  @Post(':id/messages/:messageId/resend')
+  resend(@CurrentUser() u: AuthUser, @Param('messageId') messageId: string) {
+    return this.conversations.resend(u.tenantId, messageId);
+  }
+
   @Patch(':id/status')
   status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
     return this.conversations.setStatus(u.tenantId, id, dto.status, u.id);

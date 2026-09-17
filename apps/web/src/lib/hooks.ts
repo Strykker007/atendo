@@ -14,7 +14,7 @@ export interface Conversation {
   contact: { id: string; name: string | null; phone: string };
   tags: { tag: Tag }[];
   assignee: { id: string; name: string } | null;
-  number: { id: string; label: string };
+  number: { id: string; label: string; provider?: 'meta' | 'evolution'; status?: string };
 }
 export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
@@ -68,6 +68,9 @@ export const useSendMessage = (conversationId: string | null) => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['usage'] }),
   });
 };
+
+export const useResend = () =>
+  useMutation({ mutationFn: ({ conversationId, messageId }: { conversationId: string; messageId: string }) => api<Message>(`/conversations/${conversationId}/messages/${messageId}/resend`, { method: 'POST' }) });
 
 /** Upload multipart (não passa pelo helper `api` porque o Content-Type é do FormData). */
 export async function uploadFile(file: File): Promise<Upload> {

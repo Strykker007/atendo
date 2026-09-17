@@ -54,7 +54,7 @@ export class ConversationsService {
   one(tenantId: string, id: string) {
     return this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: true, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, provider: true } } },
+      include: { contact: true, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, provider: true, status: true } } },
     });
   }
 
@@ -172,6 +172,9 @@ export class ConversationsService {
     });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para responder.');
+    if (conv.number.status !== 'connected') {
+      throw new BadRequestException(`O número "${conv.number.label}" está desconectado. Conecte-o em Números para responder.`);
+    }
 
     // Regra da Meta: fora da janela de 24h só sai template aprovado
     if (conv.number.provider === 'meta' && !input.template) {
@@ -213,6 +216,17 @@ export class ConversationsService {
     this.gateway.emitMessage(tenantId, this.present(message));
     this.gateway.emitConversation(tenantId, updatedConv);
     return this.present(message);
+  }
+
+  /** Reenvia uma mensagem que falhou: volta para pending e enfileira de novo. */
+  async resend(tenantId: string, messageId: string) {
+    const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
+    if (!m) throw new NotFoundException('Mensagem não encontrada ou não está com falha');
+    if (m.conversation.number.status !== 'connected') throw new BadRequestException(`O número "${m.conversation.number.label}" está desconectado.`);
+    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: 'pending', error: null } });
+    await this.outbound.add('send', { messageId: m.id });
+    this.gateway.emitMessage(tenantId, this.present(updated));
+    return this.present(updated);
   }
 
   async setStatus(tenantId: string, id: string, status: ConversationStatus, userId: string) {
