@@ -24,13 +24,13 @@
 - Fluxos de automação: editor visual (React Flow), motor (menu, pergunta com validação, condição, ação, aguardar, handoff), gatilhos manual/nova conversa/palavra-chave, aba Fluxos no chat, feature por plano
 - Dono: tela Clientes (criar, plano, status, ativar/desativar) e 'Entrar como' (impersonação com faixa e saída)
 - Infra: Dockerfiles (api/worker/web), compose de produção com Caddy/HTTPS, Socket.IO em cluster (Redis), /health, shards da Evolution, CI
+- Contas: convite por e-mail (equipe e admin de cliente), esqueci/redefinir/trocar senha; e-mails de alerta de plano, cobrança falhou e suspensão (Resend)
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
 
-1. **Alertas por e-mail** — provedor (Resend/SES) + template; banner no painel.
-2. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
-3. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
-4. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
-5. **2FA** (TOTP) para admins.
-6. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.
+1. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
+2. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
+3. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
+4. **2FA** (TOTP) para admins.
+5. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.

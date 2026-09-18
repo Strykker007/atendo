@@ -235,12 +235,15 @@ export const useDeleteTag = () => {
 
 // ---- Equipe ----
 export type Role = 'tenant_admin' | 'manager' | 'agent' | 'super_admin';
-export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null }
+export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null }
 export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
 export const useCreateAgent = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: { name: string; email: string; password: string; role?: 'agent' | 'manager' }) => api<Agent>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+  return useMutation({ mutationFn: (b: { name: string; email: string; password?: string; role?: 'agent' | 'manager' }) => api<Agent & { invited?: boolean }>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };
+export const useResendInvite = () => useMutation({ mutationFn: (id: string) => api(`/tenants/me/agents/${id}/resend-invite`, { method: 'POST' }) });
+export const useChangePassword = () => useMutation({ mutationFn: (b: { current: string; password: string }) => api('/auth/change-password', { method: 'POST', body: JSON.stringify(b) }) });
+
 export const useUpdateAgent = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; password?: string }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
@@ -327,7 +330,7 @@ export const useHasFeature = (feature: string) => { const u = useUsage(); return
 // ---- Clientes (dono) ----
 export interface TenantRow { id: string; name: string; slug: string; isActive: boolean; createdAt: string; subscription: { status: string; currentPeriodEnd: string; plan: { id: string; name: string; priceMonth: string } } | null; users: { email: string; name: string }[]; _count: { numbers: number; users: number; conversations: number } }
 export const useTenants = () => useQuery({ queryKey: ['tenants'], queryFn: () => api<TenantRow[]>('/tenants') });
-export const useCreateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; slug: string; planId: string; adminEmail: string; adminName: string; adminPassword: string }) => api('/tenants', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tenants'] }) }); };
+export const useCreateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; slug: string; planId: string; adminEmail: string; adminName: string; adminPassword?: string }) => api('/tenants', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tenants'] }) }); };
 export const useUpdateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) => api(`/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); } }); };
 export const useImpersonate = () => useMutation({ mutationFn: (tenantId: string) => api<{ accessToken: string; tenant: { id: string; name: string } }>(`/tenants/${tenantId}/impersonate`, { method: 'POST' }) });
 

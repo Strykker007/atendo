@@ -12,9 +12,10 @@ export class RedisIoAdapter extends IoAdapter {
   private adapterCtor?: ReturnType<typeof createAdapter>;
 
   async connect() {
+    // ioredis conecta sozinho ao instanciar; só esperamos ficar pronto
     const pub = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
     const sub = pub.duplicate();
-    await Promise.all([pub.connect?.(), sub.connect?.()].filter(Boolean));
+    await Promise.all([pub, sub].map((c) => new Promise<void>((res, rej) => { c.once('ready', () => res()); c.once('error', rej); })));
     this.adapterCtor = createAdapter(pub, sub);
   }
 

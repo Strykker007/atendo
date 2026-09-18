@@ -4,6 +4,8 @@ import { USAGE_ALERT_THRESHOLDS, type PlanLimits } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { PricingService } from './pricing.service';
+import { MailService } from '../../common/mail/mail.service';
+import { env } from '../../config/env';
 
 export const periodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: string) => `usage:${tenantId}:${period}:${metric}`;
@@ -20,7 +22,14 @@ export class UsageService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly pricing: PricingService,
+    private readonly mail: MailService,
   ) {}
+
+  /** E-mails dos admins do tenant (destinatários de alertas de plano e cobrança). */
+  async adminEmails(tenantId: string) {
+    const admins = await this.prisma.user.findMany({ where: { tenantId, isActive: true, role: 'tenant_admin' }, select: { email: true } });
+    return admins.map((a) => a.email);
+  }
 
   async record(input: {
     tenantId: string;
@@ -86,7 +95,30 @@ export class UsageService {
         const created = await this.prisma.usageAlert
           .create({ data: { tenantId, period, metric, threshold } })
           .catch(() => null); // unique => já enviado
-        if (created) this.log.warn(`[alerta] tenant ${tenantId} atingiu ${threshold * 100}% de ${metric}`); // TODO: e-mail + evento no painel
+        if (!created) continue;
+        this.log.warn(`[alerta] tenant ${tenantId} atingiu ${threshold * 100}% de ${metric}`);
+        const to = await this.adminEmails(tenantId);
+        if (!to.length) continue;
+        const what = metric === 'messages' ? 'mensagens enviadas' : 'templates';
+        const pct = Math.round(threshold * 100);
+        const blocked = threshold >= 1 && plan.limits.hardLimit;
+        this.mail.send({
+          to,
+          subject: blocked ? `Limite de ${what} do plano atingido — envio bloqueado` : `Você usou ${pct}% das ${what} do seu plano`,
+          text: blocked
+            ? `Seu plano atingiu o limite de ${included.toLocaleString('pt-BR')} ${what} neste mês e o envio foi bloqueado até o próximo ciclo.
+
+Para continuar respondendo agora, faça upgrade:
+
+${env.WEB_ORIGIN}/plano`
+            : `Seu plano já consumiu ${pct}% das ${included.toLocaleString('pt-BR')} ${what} incluídas neste mês (${used[metric].toLocaleString('pt-BR')} usadas).
+
+${plan.limits.hardLimit ? 'Ao chegar em 100% o envio será bloqueado até o próximo ciclo.' : 'Acima do incluído, o excedente é cobrado na próxima fatura.'}
+
+Veja o consumo e os planos:
+
+${env.WEB_ORIGIN}/plano`,
+        }).catch(() => undefined);
       }
     }
   }

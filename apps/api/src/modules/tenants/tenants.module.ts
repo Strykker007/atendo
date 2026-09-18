@@ -16,7 +16,8 @@ class CreateTenantDto {
   @IsUUID() planId: string;
   @IsEmail() adminEmail: string;
   @IsString() @MaxLength(80) adminName: string;
-  @IsString() @MinLength(8) adminPassword: string;
+  /** Sem senha = o admin recebe convite por e-mail para definir a dele */
+  @IsOptional() @IsString() @MinLength(8) adminPassword?: string;
 }
 class UpdateTenantDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
@@ -27,7 +28,8 @@ class UpdateTenantDto {
 class CreateAgentDto {
   @IsEmail() email: string;
   @IsString() @MaxLength(80) name: string;
-  @IsString() @MinLength(8) password: string;
+  /** Opcional: com senha = cria direto (modo antigo); sem senha = manda convite por e-mail */
+  @IsOptional() @IsString() @MinLength(8) password?: string;
   /** agent (padrão) ou manager */
   @IsOptional() @IsIn(['agent', 'manager']) role?: 'agent' | 'manager';
 }
@@ -91,21 +93,26 @@ class TenantsController {
     const now = new Date();
     const end = new Date(now);
     end.setMonth(end.getMonth() + 1);
-    return this.prisma.tenant.create({
+    const tenant = await this.prisma.tenant.create({
       data: {
         name: dto.name,
         slug: dto.slug,
         subscription: { create: { planId: dto.planId, status: 'trialing', currentPeriodStart: now, currentPeriodEnd: end } },
-        users: { create: { email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash: await this.auth.hashPassword(dto.adminPassword) } },
       },
       include: { subscription: true },
     });
+    if (dto.adminPassword) {
+      await this.prisma.user.create({ data: { tenantId: tenant.id, email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash: await this.auth.hashPassword(dto.adminPassword), passwordSetAt: new Date() } });
+    } else {
+      await this.auth.invite({ name: 'Equipe Atendo', tenantId: tenant.id }, { email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin' }, tenant.name);
+    }
+    return tenant;
   }
 
   /** Todos podem listar (precisam para transferir); só admin gerencia. */
   @Get('me/agents')
   agents(@CurrentUser() u: AuthUser) {
-    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true } });
+    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true } });
   }
 
   @Post('me/agents')
@@ -115,10 +122,27 @@ class TenantsController {
   async createAgent(@CurrentUser() u: AuthUser, @Body() dto: CreateAgentDto) {
     // gerente só cria atendentes; admin cria atendentes e gerentes
     const role = dto.role === 'manager' && u.role !== 'manager' ? 'manager' : 'agent';
+    if (!dto.password) {
+      const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
+      const user = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: dto.email, name: dto.name, role }, tenant.name);
+      return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true };
+    }
     return this.prisma.user.create({
-      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, passwordHash: await this.auth.hashPassword(dto.password) },
+      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, passwordHash: await this.auth.hashPassword(dto.password), passwordSetAt: new Date() },
       select: { id: true, name: true, email: true, role: true },
     });
+  }
+
+  /** Reenvia o convite (usuário que ainda não definiu senha). */
+  @Post('me/agents/:id/resend-invite')
+  @Roles('tenant_admin', 'manager', 'super_admin')
+  async resendInvite(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    const [target, tenant] = await Promise.all([
+      this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId } }),
+      this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } }),
+    ]);
+    await this.auth.sendInvite(target.id, u.name, tenant.name);
+    return { ok: true };
   }
 
   @Patch('me/agents/:id')

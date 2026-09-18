@@ -7,7 +7,8 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, type Agent } from '@/lib/hooks';
+import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, type Agent } from '@/lib/hooks';
+import { MailCheck, Send } from 'lucide-react';
 
 export default function EquipePage() {
   const me = useMe();
@@ -19,6 +20,8 @@ export default function EquipePage() {
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<Agent | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const resend = useResendInvite();
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   async function toggle(a: Agent) {
     setTogglingId(a.id);
@@ -61,8 +64,13 @@ export default function EquipePage() {
                   <td className="px-5 py-3 font-medium">{a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}</td>
                   <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}</td>
                   <td className="px-5 py-3"><span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{{ agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' }[a.role]}</span></td>
-                  <td className="px-5 py-3 text-muted hidden md:table-cell">{a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</td>
+                  <td className="px-5 py-3 text-muted hidden md:table-cell">
+                    {a.invitedAt && !a.passwordSetAt ? <span className="inline-flex items-center gap-1 text-xs rounded-full bg-warn-soft text-warn-ink px-2 py-0.5"><MailCheck size={12} /> convite pendente</span> : a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}
+                  </td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
+                    {isAdmin && a.invitedAt && !a.passwordSetAt && (
+                      <Button size="sm" variant="ghost" icon={<Send size={12} />} loading={resendingId === a.id} onClick={async () => { setResendingId(a.id); try { await resend.mutateAsync(a.id); toast.ok(`Convite reenviado para ${a.email}`); } catch (err) { toast.err(err); } finally { setResendingId(null); } }}>Reenviar convite</Button>
+                    )}
                     {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
                       <>
                         <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>
@@ -77,17 +85,18 @@ export default function EquipePage() {
         </div>
       )}
 
-      <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then(() => { toast.ok(b.role === 'manager' ? 'Gerente criado' : 'Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
+      <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then((r) => { toast.ok(r.invited ? `Convite enviado para ${b.email}` : (b.role === 'manager' ? 'Gerente criado' : 'Atendente criado')); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
   );
 }
 
-function CreateAgentModal({ open, onClose, onSubmit, pending, canCreateManager }: { open: boolean; onClose: () => void; onSubmit: (b: { name: string; email: string; password: string; role: 'agent' | 'manager' }) => void; pending: boolean; canCreateManager: boolean }) {
+function CreateAgentModal({ open, onClose, onSubmit, pending, canCreateManager }: { open: boolean; onClose: () => void; onSubmit: (b: { name: string; email: string; password?: string; role: 'agent' | 'manager' }) => void; pending: boolean; canCreateManager: boolean }) {
   const [f, setF] = useState<{ name: string; email: string; password: string; role: 'agent' | 'manager' }>({ name: '', email: '', password: '', role: 'agent' });
+  const [manual, setManual] = useState(false);
   return (
     <Modal open={open} onClose={onClose} title="Novo membro da equipe" width="max-w-sm">
-      <form onSubmit={(e) => { e.preventDefault(); onSubmit(f); }} className="space-y-4">
+      <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...f, password: manual ? f.password : undefined }); }} className="space-y-4">
         {canCreateManager && (
           <Field label="Papel">
             <div className="grid grid-cols-2 gap-2">
@@ -102,8 +111,13 @@ function CreateAgentModal({ open, onClose, onSubmit, pending, canCreateManager }
         )}
         <Field label="Nome"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required autoFocus /></Field>
         <Field label="E-mail"><input type="email" className={inputCls} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></Field>
-        <Field label="Senha inicial" hint="Mínimo 8 caracteres. Envie ao atendente por um canal seguro."><input type="text" className={inputCls} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} minLength={8} required /></Field>
-        <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText="Criando…">Criar</Button></div>
+        <label className="flex items-center gap-2 text-sm text-ink"><input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} /> Definir a senha agora (em vez de enviar convite por e-mail)</label>
+        {manual ? (
+          <Field label="Senha inicial" hint="Mínimo 8 caracteres. Envie por um canal seguro."><input type="text" className={inputCls} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} minLength={8} required /></Field>
+        ) : (
+          <p className="text-xs text-muted rounded-lg bg-field px-3 py-2">A pessoa recebe um e-mail com um link (válido por 3 dias) para criar a própria senha.</p>
+        )}
+        <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText={manual ? 'Criando…' : 'Enviando…'}>{manual ? 'Criar' : 'Enviar convite'}</Button></div>
       </form>
     </Modal>
   );

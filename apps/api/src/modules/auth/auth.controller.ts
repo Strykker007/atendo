@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { IsEmail, IsString, MinLength } from 'class-validator';
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
@@ -10,6 +10,17 @@ import { env } from '../../config/env';
 
 class LoginDto {
   @IsEmail() email: string;
+  @IsString() @MinLength(8) password: string;
+}
+class EmailDto {
+  @IsEmail() email: string;
+}
+class TokenPasswordDto {
+  @IsString() token: string;
+  @IsString() @MinLength(8) password: string;
+}
+class ChangePasswordDto {
+  @IsString() current: string;
   @IsString() @MinLength(8) password: string;
 }
 
@@ -52,6 +63,41 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.auth.logout(parseCookie(req.headers.cookie)[COOKIE] ?? '');
     res.clearCookie(COOKIE, { path: '/auth' });
+  }
+
+  /** Esqueci a senha — sempre 200 (não revela se o e-mail existe). */
+  @Post('forgot')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  async forgot(@Body() dto: EmailDto) {
+    await this.auth.forgotPassword(dto.email);
+    return { ok: true };
+  }
+
+  @Post('reset')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  async reset(@Body() dto: TokenPasswordDto) {
+    await this.auth.resetPassword(dto.token, dto.password);
+    return { ok: true };
+  }
+
+  @Post('accept-invite')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  async acceptInvite(@Body() dto: TokenPasswordDto) {
+    const u = await this.auth.acceptInvite(dto.token, dto.password);
+    return { ok: true, email: u.email };
+  }
+
+  @Post('change-password')
+  @HttpCode(200)
+  @NoTenantOk()
+  @UseGuards(JwtAuthGuard)
+  async changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
+    if (user.impersonatorId) throw new ForbiddenException('Dono entrando como cliente não troca a senha do cliente.');
+    await this.auth.changePassword(user.id, dto.current, dto.password);
+    return { ok: true };
   }
 
   @Get('me')

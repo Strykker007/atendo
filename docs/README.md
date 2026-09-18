@@ -13,5 +13,6 @@
 | [09 — Roadmap](09-roadmap.md) | Todos | O que está pronto e o que falta, em ordem |
 | [10 — Fluxos de automação](10-fluxos-de-automacao.md) | Dev / Cliente | Blocos, gatilhos, motor, editor, API |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
+| [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
 
 Convenção: código em inglês, comentários e documentação em português.

@@ -38,6 +38,7 @@
     "helmet": "^8.0.0",
     "ioredis": "^5.4.0",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.28.1",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.0",
     "stripe": "^22.6.2",

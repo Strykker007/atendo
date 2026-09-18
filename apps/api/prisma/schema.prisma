@@ -60,11 +60,36 @@ model User {
 
   tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   refreshTokens RefreshToken[]
+  authTokens    AuthToken[]
+  /// convite pendente: usuário existe mas ainda não definiu senha
+  invitedAt     DateTime?
+  passwordSetAt DateTime?
   assigned      Conversation[] @relation("assignee")
   messages      Message[]
 
   @@index([tenantId])
   @@map("users")
+}
+
+enum AuthTokenKind {
+  reset
+  invite
+}
+
+/// Tokens de uso único enviados por e-mail (esqueci a senha, convite). Só o hash fica no banco.
+model AuthToken {
+  id        String        @id @default(uuid())
+  userId    String
+  kind      AuthTokenKind
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind])
+  @@map("auth_tokens")
 }
 
 model RefreshToken {

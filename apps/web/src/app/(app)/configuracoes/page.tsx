@@ -9,7 +9,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useMe, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
+import { useMe, useChangePassword, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
 
 type Reply = FolderT['replies'][number];
 
@@ -55,6 +55,7 @@ export default function ConfiguracoesPage() {
       <PageHeader title="Configurações" subtitle="Aparência do painel e respostas rápidas da equipe." />
 
       <AppearanceSection />
+      {!me.data?.impersonatorId && <SecuritySection />}
 
       {isOwner ? null : <><PageHeader
         title="Respostas rápidas"
@@ -157,6 +158,28 @@ function AppearanceSection() {
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+/** Segurança: trocar a própria senha. */
+function SecuritySection() {
+  const change = useChangePassword();
+  const [f, setF] = useState({ current: '', password: '', confirm: '' });
+  const mismatch = f.confirm.length > 0 && f.password !== f.confirm;
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
+      <div>
+        <h2 className="font-display font-semibold text-ink">Segurança</h2>
+        <p className="text-sm text-muted">Troque a sua senha. As outras sessões abertas serão encerradas.</p>
+      </div>
+      <form onSubmit={(e) => { e.preventDefault(); if (mismatch) return; change.mutateAsync({ current: f.current, password: f.password }).then(() => { toast.ok('Senha alterada'); setF({ current: '', password: '', confirm: '' }); }).catch(toast.err); }} className="grid sm:grid-cols-3 gap-3 items-end">
+        <Field label="Senha atual"><input type="password" className={inputCls} value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} required autoComplete="current-password" /></Field>
+        <Field label="Nova senha" hint="mínimo 8"><input type="password" className={inputCls} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} minLength={8} required autoComplete="new-password" /></Field>
+        <Field label="Confirmar"><input type="password" className={inputCls} value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} required autoComplete="new-password" /></Field>
+        {mismatch && <p className="text-xs text-danger sm:col-span-3">As senhas não conferem.</p>}
+        <div className="sm:col-span-3"><Button type="submit" loading={change.isPending} loadingText="Salvando…" disabled={!f.current || !f.password || mismatch}>Alterar senha</Button></div>
+      </form>
     </section>
   );
 }

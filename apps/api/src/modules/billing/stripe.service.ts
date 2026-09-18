@@ -4,6 +4,7 @@ import type { InvoiceStatus, SubscriptionStatus } from '@prisma/client';
 import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService, periodOf } from './usage.service';
+import { MailService } from '../../common/mail/mail.service';
 
 /**
  * Integração com o Stripe.
@@ -24,6 +25,7 @@ export class StripeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly usage: UsageService,
+    private readonly mail: MailService,
   ) {}
 
   private get client(): Stripe {
@@ -189,13 +191,49 @@ export class StripeService {
       // pagou: se estava em carência/suspenso, volta a ativo
       await this.prisma.subscription.updateMany({ where: { tenantId: tenant.id, status: { in: ['past_due', 'suspended'] } }, data: { status: 'active', graceUntil: null } });
     }
+    if (inv.status === 'open' && inv.attempt_count && inv.attempt_count > 0) {
+      // tentativa de cobrança falhou: avisa com o link da fatura e a data-limite
+      const sub = await this.prisma.subscription.findUnique({ where: { tenantId: tenant.id }, include: { plan: true } });
+      const grace = sub?.graceUntil ? sub.graceUntil.toLocaleDateString('pt-BR') : `${(sub?.plan.limits as { graceDays?: number })?.graceDays ?? 5} dias`;
+      const to = await this.usage.adminEmails(tenant.id);
+      if (to.length) {
+        this.mail.send({
+          to,
+          subject: 'Não conseguimos cobrar a sua assinatura do Atendo',
+          text: `A cobrança de ${(inv.total / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} falhou.
+
+Atualize o cartão ou pague a fatura até ${grace} para não ter o envio de mensagens suspenso:
+
+${inv.hosted_invoice_url ?? env.WEB_ORIGIN + '/plano'}
+
+O recebimento de mensagens continua normal.`,
+        }).catch(() => undefined);
+      }
+    }
   }
 
   // ---------- Suspensão por carência (job diário) ----------
 
   async suspendOverdue() {
-    const r = await this.prisma.subscription.updateMany({ where: { status: 'past_due', graceUntil: { lt: new Date() } }, data: { status: 'suspended' } });
-    if (r.count) this.log.warn(`${r.count} assinatura(s) suspensa(s) por carência vencida`);
+    const overdue = await this.prisma.subscription.findMany({ where: { status: 'past_due', graceUntil: { lt: new Date() } } });
+    if (!overdue.length) return;
+    await this.prisma.subscription.updateMany({ where: { id: { in: overdue.map((s) => s.id) } }, data: { status: 'suspended' } });
+    this.log.warn(`${overdue.length} assinatura(s) suspensa(s) por carência vencida`);
+    for (const s of overdue) {
+      const to = await this.usage.adminEmails(s.tenantId);
+      if (!to.length) continue;
+      this.mail.send({
+        to,
+        subject: 'Assinatura do Atendo suspensa — envio de mensagens bloqueado',
+        text: `A carência para regularizar o pagamento terminou e a assinatura foi suspensa.
+
+Suas conversas continuam chegando, mas a equipe não consegue responder até o pagamento ser regularizado:
+
+${env.WEB_ORIGIN}/plano
+
+Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
+      }).catch(() => undefined);
+    }
   }
 
   // ---------- Sincronizar planos → Stripe (Products/Prices) ----------

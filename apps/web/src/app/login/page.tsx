@@ -42,6 +42,7 @@ export default function LoginPage() {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} className="mt-1 w-full rounded-lg border border-line px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent/40" />
         </label>
         {error && <p className="text-sm text-danger">{error}</p>}
+        <div className="text-right -mt-2"><a href="/esqueci-senha" className="text-xs text-accent-ink hover:underline">Esqueci minha senha</a></div>
         <Button type="submit" className="w-full" loading={loading} loadingText="Entrando…">Entrar</Button>
       </form>
     </main>

@@ -40,6 +40,8 @@ const schema = z.object({
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
   STRIPE_CURRENCY: z.string().default('brl'),
+  RESEND_API_KEY: z.string().optional().default(''),
+  MAIL_FROM: z.string().default('Atendo <no-reply@atendo.local>'),
 });
 
 const parsed = schema.safeParse(process.env);

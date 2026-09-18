@@ -95,7 +95,7 @@ function CreateTenantModal({ open, onClose }: { open: boolean; onClose: () => vo
   const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   return (
     <Modal open={open} onClose={onClose} title="Novo cliente">
-      <form onSubmit={(e) => { e.preventDefault(); create.mutateAsync({ ...f, planId: f.planId || (plans.data?.[0]?.id ?? '') }).then(() => { toast.ok('Cliente criado'); onClose(); }).catch(toast.err); }} className="space-y-4">
+      <form onSubmit={(e) => { e.preventDefault(); create.mutateAsync({ ...f, adminPassword: f.adminPassword || undefined, planId: f.planId || (plans.data?.[0]?.id ?? '') }).then(() => { toast.ok(f.adminPassword ? 'Cliente criado' : `Cliente criado — convite enviado para ${f.adminEmail}`); onClose(); }).catch(toast.err); }} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome da empresa"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, slug: slugify(e.target.value) })} required autoFocus /></Field>
           <Field label="Identificador" hint="letras, números e hífen"><input className={inputCls} value={f.slug} onChange={(e) => setF({ ...f, slug: slugify(e.target.value) })} required pattern="[a-z0-9-]{3,40}" /></Field>
@@ -108,7 +108,7 @@ function CreateTenantModal({ open, onClose }: { open: boolean; onClose: () => vo
           <Field label="Nome"><input className={inputCls} value={f.adminName} onChange={(e) => setF({ ...f, adminName: e.target.value })} required /></Field>
           <Field label="E-mail"><input type="email" className={inputCls} value={f.adminEmail} onChange={(e) => setF({ ...f, adminEmail: e.target.value })} required /></Field>
         </div>
-        <Field label="Senha inicial" hint="Mínimo 8 caracteres. Envie ao cliente por um canal seguro."><input type="text" className={inputCls} value={f.adminPassword} onChange={(e) => setF({ ...f, adminPassword: e.target.value })} minLength={8} required /></Field>
+        <Field label="Senha inicial (opcional)" hint="Vazio = o admin recebe um convite por e-mail para criar a própria senha."><input type="text" className={inputCls} value={f.adminPassword} onChange={(e) => setF({ ...f, adminPassword: e.target.value })} minLength={8} /></Field>
         <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" loading={create.isPending} loadingText="Criando…">Criar cliente</Button></div>
       </form>
     </Modal>
