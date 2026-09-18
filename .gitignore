@@ -10,3 +10,4 @@ coverage
 .DS_Store
 infra/volumes
 apps/api/storage
+.logs

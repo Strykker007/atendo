@@ -17,7 +17,10 @@
     "infra:logs": "docker compose -f infra/docker-compose.yml --env-file .env logs -f",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
     "stripe:sync": "pnpm --filter @atendo/api stripe:sync",
-    "db:migrate:create": "cd apps/api && sh scripts/create-migration.sh"
+    "db:migrate:create": "cd apps/api && sh scripts/create-migration.sh",
+    "up": "bash scripts/up.sh",
+    "down": "bash scripts/down.sh",
+    "logs": "tail -f .logs/api.log"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
