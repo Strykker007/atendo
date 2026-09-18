@@ -1,0 +1,14 @@
+# Troque pelos seus domínios. O Caddy emite e renova o certificado sozinho.
+app.seudominio.com.br {
+	reverse_proxy web:3000
+}
+
+api.seudominio.com.br {
+	# WebSocket (Socket.IO) passa normalmente pelo reverse_proxy
+	reverse_proxy api:4000 {
+		lb_policy round_robin
+	}
+	request_body {
+		max_size 40MB
+	}
+}

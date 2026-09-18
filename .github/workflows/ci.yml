@@ -1,0 +1,24 @@
+name: CI
+on: { push: { branches: [main] }, pull_request: {} }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 12 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @atendo/shared build
+      - run: pnpm --filter @atendo/api prisma generate
+      - run: pnpm typecheck
+      - run: pnpm --filter @atendo/api build
+  images:
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f apps/api/Dockerfile -t atendo/api:${{ github.sha }} .
+      - run: docker build -f apps/web/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://api.example.com --build-arg NEXT_PUBLIC_WS_URL=https://api.example.com -t atendo/web:${{ github.sha }} .

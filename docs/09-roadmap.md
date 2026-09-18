@@ -23,6 +23,7 @@
 - Papel gerente; cadeado com notas internas; financeiro completo do dono (KPIs, série mensal, assinaturas, faturas, margem); densidade visual
 - Fluxos de automação: editor visual (React Flow), motor (menu, pergunta com validação, condição, ação, aguardar, handoff), gatilhos manual/nova conversa/palavra-chave, aba Fluxos no chat, feature por plano
 - Dono: tela Clientes (criar, plano, status, ativar/desativar) e 'Entrar como' (impersonação com faixa e saída)
+- Infra: Dockerfiles (api/worker/web), compose de produção com Caddy/HTTPS, Socket.IO em cluster (Redis), /health, shards da Evolution, CI
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida

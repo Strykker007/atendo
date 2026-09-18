@@ -10,6 +10,12 @@ export interface EvolutionNumberConfig {
   instanceName: string;
   /** token da instância (Evolution gera um por instância) */
   instanceToken?: string;
+  /**
+   * Shard: qual servidor Evolution hospeda esta instância. Vazio = o padrão do .env.
+   * Com centenas de números, distribuímos entre vários servidores (cada instância Baileys custa ~100 MB de RAM).
+   */
+  baseUrl?: string;
+  apiKey?: string;
 }
 
 /**
@@ -20,10 +26,10 @@ export interface EvolutionNumberConfig {
 export class EvolutionProvider implements WhatsAppProvider {
   readonly kind = 'evolution' as const;
 
-  private async api<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${env.EVOLUTION_BASE_URL}${path}`, {
+  private async api<T>(path: string, init?: RequestInit, shard?: { baseUrl?: string; apiKey?: string }): Promise<T> {
+    const res = await fetch(`${shard?.baseUrl ?? env.EVOLUTION_BASE_URL}${path}`, {
       ...init,
-      headers: { apikey: env.EVOLUTION_API_KEY, 'Content-Type': 'application/json', ...init?.headers },
+      headers: { apikey: shard?.apiKey ?? env.EVOLUTION_API_KEY, 'Content-Type': 'application/json', ...init?.headers },
     });
     const json = (await res.json().catch(() => ({}))) as any;
     if (!res.ok) {
@@ -31,6 +37,11 @@ export class EvolutionProvider implements WhatsAppProvider {
       throw new BadRequestException(Array.isArray(raw) ? raw.join('; ') : String(raw));
     }
     return json as T;
+  }
+
+  private shard(ctx: NumberContext) {
+    const c = ctx.config as unknown as EvolutionNumberConfig;
+    return c.baseUrl ? { baseUrl: c.baseUrl, apiKey: c.apiKey } : undefined;
   }
 
   private instance(ctx: NumberContext) {
@@ -49,31 +60,31 @@ export class EvolutionProvider implements WhatsAppProvider {
     const name = this.instance(ctx);
     // Já conectado? Não mexe: chamar /connect numa sessão aberta cria uma segunda sessão
     // e o WhatsApp derruba a primeira ("conflict: replaced") — envio passa a falhar.
-    const state = await this.api<any>(`/instance/connectionState/${name}`).catch(() => null);
+    const state = await this.api<any>(`/instance/connectionState/${name}`, undefined, this.shard(ctx)).catch(() => null);
     if (state?.instance?.state === 'open') return { status: NumberStatus.CONNECTED };
     // 'close' = sessão caiu ou o celular removeu o dispositivo. O usuário pediu QR: descarta
     // as credenciais antigas para a Evolution gerar um pareamento novo em vez de tentar reconectar.
     if (state?.instance?.state === 'close') {
-      await this.api(`/instance/logout/${name}`, { method: 'DELETE' }).catch(() => undefined);
+      await this.api(`/instance/logout/${name}`, { method: 'DELETE' }, this.shard(ctx)).catch(() => undefined);
     }
 
     // cria se não existir; se já existe seguimos direto para o QR
     const created = await this.api<any>('/instance/create', {
       method: 'POST',
       body: JSON.stringify({ instanceName: name, token: this.instanceToken(name), integration: 'WHATSAPP-BAILEYS', qrcode: true, number: ctx.phone }),
-    }).catch((err: Error) => {
+    }, this.shard(ctx)).catch((err: Error) => {
       if (/already|in use|já/i.test(err.message)) return null;
       throw err;
     });
     if (created?.qrcode?.base64) return { status: NumberStatus.PENDING_QR, qrCode: created.qrcode.base64 };
 
-    const r = await this.api<any>(`/instance/connect/${name}`);
+    const r = await this.api<any>(`/instance/connect/${name}`, undefined, this.shard(ctx));
     if (r?.instance?.state === 'open') return { status: NumberStatus.CONNECTED };
     return { status: NumberStatus.PENDING_QR, qrCode: r?.base64 ?? r?.code };
   }
 
   async disconnect(ctx: NumberContext) {
-    await this.api(`/instance/logout/${this.instance(ctx)}`, { method: 'DELETE' }).catch(() => undefined);
+    await this.api(`/instance/logout/${this.instance(ctx)}`, { method: 'DELETE' }, this.shard(ctx)).catch(() => undefined);
   }
 
   /**
@@ -81,16 +92,16 @@ export class EvolutionProvider implements WhatsAppProvider {
    * de o host dormir) e todo envio dá "Connection Closed". Restart reconecta com as credenciais salvas.
    */
   async restart(ctx: NumberContext) {
-    await this.api(`/instance/restart/${this.instance(ctx)}`, { method: 'POST' }).catch(() => undefined);
+    await this.api(`/instance/restart/${this.instance(ctx)}`, { method: 'POST' }, this.shard(ctx)).catch(() => undefined);
   }
 
   async destroy(ctx: NumberContext) {
     await this.disconnect(ctx);
-    await this.api(`/instance/delete/${this.instance(ctx)}`, { method: 'DELETE' }).catch(() => undefined);
+    await this.api(`/instance/delete/${this.instance(ctx)}`, { method: 'DELETE' }, this.shard(ctx)).catch(() => undefined);
   }
 
   async getStatus(ctx: NumberContext) {
-    const r = await this.api<any>(`/instance/connectionState/${this.instance(ctx)}`).catch(() => null);
+    const r = await this.api<any>(`/instance/connectionState/${this.instance(ctx)}`, undefined, this.shard(ctx)).catch(() => null);
     return this.mapConnection(r?.instance?.state);
   }
 
@@ -101,13 +112,13 @@ export class EvolutionProvider implements WhatsAppProvider {
       r = await this.api(`/message/sendText/${name}`, {
         method: 'POST',
         body: JSON.stringify({ number: m.to, text: m.text ?? '', quoted: m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined }),
-      });
+      }, this.shard(ctx));
     } else if (m.type === MessageType.AUDIO && media) {
       // áudio como "mensagem de voz" (PTT), igual ao gravado no app
       r = await this.api(`/message/sendWhatsAppAudio/${name}`, {
         method: 'POST',
         body: JSON.stringify({ number: m.to, audio: media.data.toString('base64') }),
-      });
+      }, this.shard(ctx));
     } else if (media || m.media) {
       // a Evolution aceita `media` como URL ou base64 — mandamos base64 para não expor o storage
       r = await this.api(`/message/sendMedia/${name}`, {
@@ -120,7 +131,7 @@ export class EvolutionProvider implements WhatsAppProvider {
           fileName: media?.fileName ?? m.media?.fileName,
           caption: m.media?.caption ?? m.text,
         }),
-      });
+      }, this.shard(ctx));
     } else {
       throw new BadRequestException(`Tipo não suportado pela Evolution: ${m.type}`);
     }
@@ -134,7 +145,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     const r = await this.api<any>(`/chat/getBase64FromMediaMessage/${this.instance(ctx)}`, {
       method: 'POST',
       body: JSON.stringify({ message: { key: raw?.key }, convertToMp4: false }),
-    });
+    }, this.shard(ctx));
     if (!r?.base64) return null;
     return { data: Buffer.from(r.base64, 'base64'), mimeType: r.mimetype ?? msg.media.mimeType ?? 'application/octet-stream', fileName: r.fileName ?? msg.media.fileName };
   }
@@ -143,7 +154,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     await this.api(`/chat/markMessageAsRead/${this.instance(ctx)}`, {
       method: 'POST',
       body: JSON.stringify({ readMessages: [{ id: externalMessageId }] }),
-    }).catch(() => undefined);
+    }, this.shard(ctx)).catch(() => undefined);
   }
 
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer) {

@@ -13,6 +13,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { MediaModule } from './modules/media/media.module';
 import { FlowsModule } from './modules/flows/flows.module';
+import { HealthController } from './modules/health.controller';
 import { env } from './config/env';
 
 @Module({
@@ -31,6 +32,7 @@ import { env } from './config/env';
     MediaModule,
     FlowsModule,
   ],
+  controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
