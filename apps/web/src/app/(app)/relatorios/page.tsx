@@ -9,7 +9,9 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel } from '@/components/reports/ReportChart';
-import { useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
+import { SkeletonCards } from '@/components/ui/Skeleton';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
@@ -25,6 +27,9 @@ const TIME_GROUPS = ['day', 'week', 'month'];
 export default function RelatoriosPage() {
   const [def, setDef] = useState<ReportDefinition>(DEFAULT);
   const [result, setResult] = useState<ReportResult | null>(null);
+  const [range, setRange] = useState<[string, string]>(PRESETS[1].range());
+  const [showBuilder, setShowBuilder] = useState(false);
+  const overview = useReportOverview(range[0], range[1]);
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<SavedReport | null>(null);
@@ -45,7 +50,6 @@ export default function RelatoriosPage() {
       toast.err(err);
     }
   }
-  useEffect(() => { execute(DEFAULT); /* primeira carga */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // agrupamento por tempo → linha; por categoria → barra (o usuário pode trocar depois no resultado)
   useEffect(() => {
@@ -67,9 +71,47 @@ export default function RelatoriosPage() {
 
   return (
     <PageShell width="max-w-6xl">
-      <PageHeader title="Relatórios" subtitle="Escolha o que medir e como agrupar. Tudo sai das conversas, mensagens e tags reais." />
+      <PageHeader
+        title="Relatórios"
+        subtitle="Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais."
+        action={
+          <div className="flex flex-wrap gap-1">
+            {PRESETS.map((p) => { const r = p.range(); const on = r[0] === range[0] && r[1] === range[1]; return <button key={p.label} onClick={() => setRange(r)} className={cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>{p.label}</button>; })}
+          </div>
+        }
+      />
 
-      <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
+      {/* ---------- Visão pronta ---------- */}
+      {overview.isLoading && <SkeletonCards count={4} />}
+      {overview.data && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Kpi icon={<MessageSquare size={15} />} label="Conversas no período" value={overview.data.kpis.conversations.toLocaleString('pt-BR')} sub={`${overview.data.kpis.messagesIn.toLocaleString('pt-BR')} recebidas · ${overview.data.kpis.messagesOut.toLocaleString('pt-BR')} enviadas`} />
+            <Kpi icon={<Inbox size={15} />} label="Na fila agora" value={String(overview.data.kpis.waitingNow)} sub={`${overview.data.kpis.inProgressNow} em atendimento`} tone={overview.data.kpis.waitingNow > 5 ? 'warn' : undefined} />
+            <Kpi icon={<Clock size={15} />} label="1ª resposta (média)" value={overview.data.kpis.avgFirstResponseMin != null ? fmtMin(overview.data.kpis.avgFirstResponseMin) : '—'} sub="do contato escrever até a equipe responder" tone={overview.data.kpis.avgFirstResponseMin != null && overview.data.kpis.avgFirstResponseMin > 30 ? 'warn' : undefined} />
+            <Kpi icon={<CheckCircle2 size={15} />} label="Encerradas" value={`${Math.round(overview.data.kpis.closeRate * 100)}%`} sub={`${overview.data.kpis.closed} de ${overview.data.kpis.conversations}`} />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card title="Conversas por dia" hint="Quando a demanda chega"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
+            <Card title="Atendimentos por atendente" hint="Quem está absorvendo a fila"><ReportChart def={{ metric: 'conversations', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byAgent} height={220} /></Card>
+            <Card title="De onde vêm os leads" hint="Orgânico × anúncio × link"><ReportChart def={{ metric: 'conversations', groupBy: 'origin', from: range[0], to: range[1], filters: {}, chart: 'pie' }} series={overview.data.series.byOrigin} height={220} /></Card>
+            <Card title={overview.data.series.byCampaign.length ? 'Leads por campanha (anúncio)' : 'Tags mais usadas'} hint={overview.data.series.byCampaign.length ? 'Qual anúncio está trazendo conversa' : 'Como a equipe está classificando'}>
+              <ReportChart def={{ metric: 'conversations', groupBy: overview.data.series.byCampaign.length ? 'campaign' : 'tag', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byCampaign.length ? overview.data.series.byCampaign : overview.data.series.byTag} height={220} />
+            </Card>
+          </div>
+        </>
+      )}
+
+      {/* ---------- Construtor ---------- */}
+      <button onClick={() => setShowBuilder((v) => !v)} className="w-full flex items-center gap-2 rounded-2xl border border-dashed border-line bg-panel px-4 py-3 text-sm text-ink hover:bg-field">
+        <SlidersHorizontal size={16} className="text-muted" />
+        <span className="font-medium flex-1 text-left">Relatório personalizado</span>
+        <span className="text-xs text-muted hidden sm:inline">escolha métrica, agrupamento, filtros; salve e exporte</span>
+        {showBuilder ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
+      </button>
+
+      <div className={cn('grid gap-5 lg:grid-cols-[300px_1fr]', !showBuilder && 'hidden')}>
         {/* ---------- Construtor ---------- */}
         <aside className="space-y-4">
           <section className="rounded-2xl bg-panel border border-line p-4 space-y-4">
@@ -182,6 +224,25 @@ export default function RelatoriosPage() {
     </PageShell>
   );
 }
+
+function Kpi({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub?: string; tone?: 'warn' }) {
+  return (
+    <div className="rounded-2xl bg-panel border border-line p-4">
+      <div className="flex items-center gap-1.5 text-xs text-muted">{icon}{label}</div>
+      <div className={cn('text-2xl font-semibold tnum mt-1', tone === 'warn' ? 'text-warn' : 'text-ink')}>{value}</div>
+      {sub && <div className="text-[11px] text-faint mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-4">
+      <div className="mb-1"><h3 className="font-display font-semibold text-ink text-sm">{title}</h3>{hint && <p className="text-[11px] text-muted">{hint}</p>}</div>
+      {children}
+    </section>
+  );
+}
+const fmtMin = (m: number) => (m < 60 ? `${m.toFixed(0)} min` : `${(m / 60).toFixed(1)} h`);
 
 function SaveModal({ open, onClose, onSubmit, pending }: { open: boolean; onClose: () => void; onSubmit: (name: string) => void; pending: boolean }) {
   const [name, setName] = useState('');

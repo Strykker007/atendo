@@ -21,8 +21,9 @@ export function fillTime(def: ReportDefinition, series: { label: string; value: 
   if (!['day', 'week', 'month'].includes(def.groupBy)) return series;
   const map = new Map(series.map((s) => [s.label, s.value]));
   const out: { label: string; value: number }[] = [];
-  const d = new Date(def.from + 'T00:00:00Z');
-  const end = new Date(def.to + 'T00:00:00Z');
+  // from/to podem vir como 'YYYY-MM-DD' (builder) ou ISO completo (resposta da API)
+  const d = new Date(String(def.from).slice(0, 10) + 'T00:00:00Z');
+  const end = new Date(String(def.to).slice(0, 10) + 'T00:00:00Z');
   if (def.groupBy === 'week') { const dow = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - dow); } // segunda
   if (def.groupBy === 'month') d.setUTCDate(1);
   let guard = 0;
@@ -55,21 +56,21 @@ function TooltipBox({ active, payload, label, metric }: { active?: boolean; payl
 }
 
 /** Gráfico do relatório. Uma escala, marcas finas, grade discreta, tooltip por marca. */
-export function ReportChart({ def, series }: { def: ReportDefinition; series: { label: string; value: number }[] }) {
+export function ReportChart({ def, series, height = 320 }: { def: ReportDefinition; series: { label: string; value: number }[]; height?: number }) {
   const isTime = def.groupBy === 'day' || def.groupBy === 'week' || def.groupBy === 'month';
   let data = fillTime(def, series).map((s) => ({ name: fmtLabel(def.groupBy, s.label), value: s.value }));
   if (def.chart === 'pie' && data.length > MAX_SLICES) {
     const sorted = [...data].sort((a, b) => b.value - a.value);
     data = [...sorted.slice(0, MAX_SLICES - 1), { name: 'Outros', value: sorted.slice(MAX_SLICES - 1).reduce((a, b) => a + b.value, 0) }];
   }
-  if (data.length === 0) return <div className="h-72 grid place-items-center text-sm text-muted">Sem dados no período.</div>;
+  if (data.length === 0 || data.every((d) => d.value === 0)) return <div className="grid place-items-center text-sm text-muted" style={{ height }}>Sem dados no período.</div>;
 
   const axisTick = { fill: 'var(--muted)', fontSize: 11 };
   const margin = { top: 8, right: 12, left: 0, bottom: 4 };
 
   if (def.chart === 'pie') {
     return (
-      <ResponsiveContainer width="100%" height={320}>
+      <ResponsiveContainer width="100%" height={height}>
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={2} stroke="var(--panel)" strokeWidth={2}>
             {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
@@ -82,7 +83,7 @@ export function ReportChart({ def, series }: { def: ReportDefinition; series: { 
   }
   if (def.chart === 'line') {
     return (
-      <ResponsiveContainer width="100%" height={320}>
+      <ResponsiveContainer width="100%" height={height}>
         <LineChart data={data} margin={margin}>
           <CartesianGrid vertical={false} stroke="var(--grid)" />
           <XAxis dataKey="name" tick={axisTick} axisLine={{ stroke: 'var(--line)' }} tickLine={false} minTickGap={24} />
@@ -97,7 +98,7 @@ export function ReportChart({ def, series }: { def: ReportDefinition; series: { 
   const horizontal = !isTime && (data.length > 4 || data.some((d) => d.name.length > 14));
   const short = (n: string) => (n.length > 28 ? n.slice(0, 27) + '…' : n);
   return (
-    <ResponsiveContainer width="100%" height={Math.max(320, horizontal ? data.length * 34 + 40 : 0)}>
+    <ResponsiveContainer width="100%" height={Math.max(height, horizontal ? data.length * 34 + 40 : 0)}>
       <BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'} margin={margin} barCategoryGap="28%">
         <CartesianGrid vertical={horizontal} horizontal={!horizontal} stroke="var(--grid)" />
         {/* Recharts só reconhece XAxis/YAxis como filhos diretos — nada de Fragment aqui */}

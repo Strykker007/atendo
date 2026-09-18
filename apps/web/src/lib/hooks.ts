@@ -330,3 +330,11 @@ export const useTenants = () => useQuery({ queryKey: ['tenants'], queryFn: () =>
 export const useCreateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; slug: string; planId: string; adminEmail: string; adminName: string; adminPassword: string }) => api('/tenants', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tenants'] }) }); };
 export const useUpdateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) => api(`/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); } }); };
 export const useImpersonate = () => useMutation({ mutationFn: (tenantId: string) => api<{ accessToken: string; tenant: { id: string; name: string } }>(`/tenants/${tenantId}/impersonate`, { method: 'POST' }) });
+
+// ---- Relatórios: visão pronta ----
+export interface ReportOverview {
+  period: { from: string; to: string };
+  kpis: { conversations: number; closed: number; closeRate: number; waitingNow: number; inProgressNow: number; messagesIn: number; messagesOut: number; avgFirstResponseMin: number | null };
+  series: Record<'byDay' | 'byAgent' | 'byOrigin' | 'byCampaign' | 'byTag' | 'byStatus', { label: string; value: number }[]>;
+}
+export const useReportOverview = (from: string, to: string) => useQuery({ queryKey: ['report-overview', from, to], queryFn: () => api<ReportOverview>(`/reports/overview?from=${from}&to=${to}`) });

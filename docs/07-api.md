@@ -76,6 +76,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/billing/sync-plans` | super_admin | Cria Products/Prices no Stripe |
 | GET | `/billing/usage` | todos | Uso do mês (mensagens, templates, números, atendentes), limites, status, mensalidade, excedente, fim do período |
 | **Relatórios** | | | |
+| GET | `/reports/overview?from=&to=` | todos | Visão pronta: KPIs (conversas, fila agora, 1ª resposta média, % encerradas, msgs in/out) + séries por dia/atendente/origem/campanha/tag/status |
 | POST | `/reports/run` | todos | Executa um `ReportDefinition` |
 | GET / POST / DELETE | `/reports/saved[/:id]` | todos | Relatórios salvos |
 | **Webhooks** (sem auth de usuário) | | | |

@@ -38,7 +38,7 @@ src/
 │       ├── configuracoes/  aparência + pastas e respostas rápidas (CRUD)
 │       ├── admin/          Financeiro do dono (KPIs, série, assinaturas, faturas, margem)
 │       ├── clientes/       Clientes do dono: criar, plano/status, ativar, Entrar como
-│       └── relatorios/     construtor (métrica, agrupamento, período, filtros) + gráfico/tabela + CSV + salvos
+│       └── relatorios/     abre com visão pronta (KPIs + 4 gráficos do período); 'Relatório personalizado' expande o construtor (métrica, agrupamento, filtros, tabela, CSV, salvos)
 ├── components/
 │   ├── layout/Sidebar.tsx | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')
 │   ├── chat/ConversationList | ChatPane | TagPicker | QuickRepliesPanel

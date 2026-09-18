@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Module, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Module, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -31,6 +31,48 @@ class ReportsController {
   async run(@CurrentUser() u: AuthUser, @Body() body: unknown) {
     const def = ReportDefinition.parse(body);
     return { definition: def, series: await this.query(u.tenantId, def) };
+  }
+
+  /**
+   * Visão pronta do período: indicadores + séries mais usadas, numa chamada só.
+   * É o que a tela de Relatórios abre por padrão.
+   */
+  @Get('overview')
+  async overview(@CurrentUser() u: AuthUser, @Query('from') fromQ?: string, @Query('to') toQ?: string) {
+    const to = toQ ? new Date(toQ) : new Date(Date.now() + 86_400_000);
+    const from = fromQ ? new Date(fromQ) : new Date(Date.now() - 29 * 86_400_000);
+    const base = { from, to, filters: {}, chart: 'bar' as const };
+    const t = u.tenantId;
+    const [total, closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus] = await Promise.all([
+      this.prisma.conversation.count({ where: { tenantId: t, createdAt: { gte: from, lt: to } } }),
+      this.prisma.conversation.count({ where: { tenantId: t, createdAt: { gte: from, lt: to }, status: 'closed' } }),
+      this.prisma.conversation.count({ where: { tenantId: t, status: 'waiting' } }),
+      this.prisma.conversation.count({ where: { tenantId: t, status: 'in_progress' } }),
+      this.prisma.message.count({ where: { direction: 'in', createdAt: { gte: from, lt: to }, conversation: { tenantId: t } } }),
+      this.prisma.message.count({ where: { direction: 'out', internal: false, createdAt: { gte: from, lt: to }, conversation: { tenantId: t } } }),
+      this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }),
+      this.query(t, { ...base, metric: 'conversations', groupBy: 'day' }),
+      this.query(t, { ...base, metric: 'conversations', groupBy: 'agent' }),
+      this.query(t, { ...base, metric: 'conversations', groupBy: 'origin' }),
+      this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }),
+      this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }),
+      this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }),
+    ]);
+    const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
+    return {
+      period: { from, to },
+      kpis: {
+        conversations: total,
+        closed,
+        closeRate: total ? closed / total : 0,
+        waitingNow,
+        inProgressNow,
+        messagesIn: msgsIn,
+        messagesOut: msgsOut,
+        avgFirstResponseMin: respVals.length ? respVals.reduce((a, b) => a + b, 0) / respVals.length : null,
+      },
+      series: { byDay, byAgent, byOrigin, byCampaign: byCampaign.filter((c) => c.label !== '(orgânico)'), byTag: byTag.filter((c) => c.label !== '(sem tag)').sort((a, b) => b.value - a.value).slice(0, 8), byStatus },
+    };
   }
 
   @Get('saved')
