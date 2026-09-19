@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2 } from 'lucide-react';
+import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -17,6 +17,7 @@ const OWNER_ITEMS = [
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
   { href: '/numeros', label: 'Números', icon: Smartphone },
+  { href: '/agenda', label: 'Agenda', icon: CalendarDays },
   { href: '/fluxos', label: 'Fluxos', icon: Workflow },
   { href: '/tags', label: 'Tags', icon: Tags },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3 },

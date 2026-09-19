@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock } from 'lucide-react';
+import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus } from 'lucide-react';
+import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
@@ -33,6 +34,9 @@ export function ChatPane() {
   const noteMode = isAdmin && ownedByOther;
   const activeRun = useActiveRun(conversationId);
   const stopFlow = useStopFlow();
+  const sched = useHasFeature('scheduling');
+  const [scheduling, setScheduling] = useState(false);
+  const card = useContactCard(conv?.contact.id ?? null, sched.has);
   const tags = useTags();
   const messages = useMessages(conversationId);
   const send = useSendMessage(conversationId);
@@ -139,6 +143,9 @@ export function ChatPane() {
         <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
           <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
         </span>
+        {sched.has && (
+          <Button size="sm" variant="ghost" icon={<CalendarPlus size={14} />} onClick={() => setScheduling(true)} title="Agendar horário para este cliente"><span className="hidden sm:inline">Agendar</span></Button>
+        )}
         {conv.status === 'waiting' && (
           <Button size="sm" icon={<Hand size={14} />} loading={claim.isPending} loadingText="Assumindo…" onClick={() => claim.mutateAsync(conv.id).then(() => { toast.ok('Você assumiu este atendimento'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Assumir atendimento">
             <span className="hidden sm:inline">Assumir</span>
@@ -180,6 +187,14 @@ export function ChatPane() {
         </button>
       </header>
 
+      {/* Ficha de agendamento do contato */}
+      {sched.has && card.data && (card.data.upcoming.length > 0 || card.data.visits > 0) && (
+        <div className="bg-panel border-b border-line px-3 py-1 text-[11.5px] text-muted flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <span>💈 {card.data.visits} visita{card.data.visits === 1 ? '' : 's'}{card.data.last ? ` · última ${new Date(card.data.last.startAt).toLocaleDateString('pt-BR')} (${card.data.last.service.name})` : ''}</span>
+          {card.data.upcoming.map((a) => <span key={a.id} className="text-ink">Próximo: <b>{new Date(a.startAt).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b> · {a.service.name} com {a.professional.name}{a.status === 'confirmed' ? ' ✅' : ''}</span>)}
+        </div>
+      )}
+
       {/* Fluxo de automação rodando */}
       {activeRun.data && (
         <div className="bg-accent-soft border-b border-accent/20 px-3 py-1.5 text-xs text-accent-ink flex items-center gap-2">
@@ -213,6 +228,8 @@ export function ChatPane() {
         {messages.data?.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} />)}
         <div ref={bottomRef} />
       </div>
+
+      <AppointmentModal open={scheduling} onClose={() => setScheduling(false)} contact={conv.contact} conversationId={conv.id} />
 
       {/* Composer */}
       {noteMode ? (

@@ -82,6 +82,7 @@ export function collectFlowVars(nodes: { id: string; type: string; data: Record<
       out.push({ key: n.data.varName, label: `Resposta de "${String(n.data.text ?? '').slice(0, 40) || 'Perguntar'}"`, source: 'question' });
     }
     if (n.type === 'menu') out.push({ key: `menu_${n.id}`, label: `Opção escolhida em "${String(n.data.text ?? '').slice(0, 40) || 'Menu'}"`, source: 'menu' });
+    if (n.type === 'schedule') out.push({ key: 'agendamento', label: 'Horário agendado (bloco Agendar)', source: 'action' }, { key: 'servico', label: 'Serviço agendado', source: 'action' }, { key: 'profissional', label: 'Profissional agendado', source: 'action' });
     if (n.type === 'action' && n.data.kind === 'set_var' && typeof n.data.varName === 'string' && n.data.varName) {
       out.push({ key: n.data.varName, label: `Definida pela ação (valor: "${String(n.data.value ?? '').slice(0, 30)}")`, source: 'action' });
     }

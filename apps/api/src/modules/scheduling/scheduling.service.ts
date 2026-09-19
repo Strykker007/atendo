@@ -74,6 +74,7 @@ export class SchedulingService {
       select: { startAt: true, endAt: true },
     });
     const slots: Slot[] = [];
+    const notBefore = new Date(Math.max(from.getTime(), Date.now())); // nunca oferece horário no passado
     const durMs = service.durationMin * 60_000;
     const stepMs = settings.slotMinutes * 60_000;
     // percorre dia a dia no fuso do tenant
@@ -86,7 +87,7 @@ export class SchedulingService {
         while (cursor.getTime() + durMs <= end.getTime() && slots.length < limit) {
           const s = cursor, e = new Date(cursor.getTime() + durMs);
           const collides = busy.some((b) => b.startAt < e && b.endAt > s);
-          if (s > from && !collides) slots.push({ startAt: s, endAt: e, label: toLocal(s, tz).label });
+          if (s > notBefore && !collides) slots.push({ startAt: s, endAt: e, label: toLocal(s, tz).label });
           cursor = new Date(cursor.getTime() + stepMs);
         }
       }

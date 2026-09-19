@@ -3,7 +3,7 @@ import { Trash2, Plus, X } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META } from './nodes';
-import { useTags, useAgents } from '@/lib/hooks';
+import { useTags, useAgents, useServices, useProfessionals, useHasFeature } from '@/lib/hooks';
 import { TextWithVars, type FlowVar } from './TextWithVars';
 import type { FlowNode } from '@atendo/shared';
 
@@ -11,6 +11,9 @@ import type { FlowNode } from '@atendo/shared';
 export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; onChange: (data: FlowNode['data']) => void; onDelete: () => void; vars: FlowVar[] }) {
   const tags = useTags();
   const agents = useAgents();
+  const sched = useHasFeature('scheduling');
+  const services = useServices();
+  const pros = useProfessionals();
   const m = NODE_META[node.type];
   const set = (patch: Record<string, unknown>) => onChange({ ...(node.data as object), ...patch } as FlowNode['data']);
 
@@ -150,6 +153,23 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               <Field label="Status"><select className={inputCls} value={node.data.status ?? 'waiting'} onChange={(e) => set({ status: e.target.value })}><option value="waiting">Aguardando</option><option value="in_progress">Em atendimento</option><option value="closed">Encerrado</option></select></Field>
             )}
           </>
+        )}
+
+        {node.type === 'schedule' && (
+          !sched.has && !sched.loading ? <p className="text-sm text-muted rounded-lg bg-warn-soft px-3 py-2">Agendamento não está incluído no plano deste cliente. O bloco será ignorado (saída "Não conseguiu").</p> : (
+          <>
+            <Field label="Texto de abertura (opcional)"><TextWithVars value={node.data.intro ?? ''} onChange={(v) => set({ intro: v })} vars={vars} placeholder="Vamos agendar! Qual serviço você quer?" /></Field>
+            <Field label="Serviço" hint="Fixo = não pergunta ao contato">
+              <select className={inputCls} value={node.data.serviceId ?? ''} onChange={(e) => set({ serviceId: e.target.value || undefined })}><option value="">Perguntar ao contato</option>{services.data?.filter((s) => s.isActive).map((s) => <option key={s.id} value={s.id}>{s.name} ({s.durationMin} min)</option>)}</select>
+            </Field>
+            <Field label="Profissional" hint="Fixo = não pergunta (com um só cadastrado, também não pergunta)">
+              <select className={inputCls} value={node.data.professionalId ?? ''} onChange={(e) => set({ professionalId: e.target.value || undefined })}><option value="">Perguntar ao contato</option>{pros.data?.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            </Field>
+            <Field label="Horários mostrados por vez"><input type="number" min={2} max={12} className={inputCls} value={node.data.maxSlots} onChange={(e) => set({ maxSlots: Number(e.target.value) })} /></Field>
+            <Field label="Mensagem de confirmação" hint="Pode usar {{servico}}, {{profissional}}, {{horario}}"><TextWithVars value={node.data.confirmText ?? ''} onChange={(v) => set({ confirmText: v })} vars={vars} placeholder="Agendado! {{servico}} com {{profissional}} em {{horario}}. Te lembro um dia antes. 💈" /></Field>
+            <p className="text-[11px] text-muted">Depois de agendar, as variáveis <code className="font-mono bg-field rounded px-1">{'{{agendamento}}'}</code>, <code className="font-mono bg-field rounded px-1">{'{{servico}}'}</code> e <code className="font-mono bg-field rounded px-1">{'{{profissional}}'}</code> ficam disponíveis. O contato pode responder "cancelar" a qualquer momento.</p>
+          </>
+          )
         )}
 
         {node.type === 'wait' && <Field label="Minutos"><input type="number" min={1} className={inputCls} value={node.data.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} /></Field>}

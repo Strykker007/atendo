@@ -25,6 +25,7 @@
 - Dono: tela Clientes (criar, plano, status, ativar/desativar) e 'Entrar como' (impersonação com faixa e saída)
 - Infra: Dockerfiles (api/worker/web), compose de produção com Caddy/HTTPS, Socket.IO em cluster (Redis), /health, shards da Evolution, CI
 - Contas: convite por e-mail (equipe e admin de cliente), esqueci/redefinir/trocar senha; e-mails de alerta de plano, cobrança falhou e suspensão (Resend)
+- Agendamento (plugável): profissionais com horários, serviços, agenda por dia, marcação pelo WhatsApp (bloco no fluxo), pelo chat e pela agenda, lembretes ao cliente (1 confirma / 2 remarca) e aviso ao profissional com histórico do cliente
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
