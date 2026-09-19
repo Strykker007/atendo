@@ -14,6 +14,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { MediaModule } from './modules/media/media.module';
 import { FlowsModule } from './modules/flows/flows.module';
 import { HealthController } from './modules/health.controller';
+import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { env } from './config/env';
 
 @Module({
@@ -31,6 +32,7 @@ import { env } from './config/env';
     ReportsModule,
     MediaModule,
     FlowsModule,
+    SchedulingModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

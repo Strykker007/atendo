@@ -14,6 +14,7 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { BillingModule } from '../billing/billing.module';
 import { AuthModule } from '../auth/auth.module';
 import { FlowsModule } from '../flows/flows.module';
+import { SchedulingModule } from '../scheduling/scheduling.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { FlowsModule } from '../flows/flows.module';
     BillingModule,
     AuthModule,
     forwardRef(() => FlowsModule),
+    forwardRef(() => SchedulingModule),
   ],
   controllers: [NumbersController, WebhooksController],
   providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor],

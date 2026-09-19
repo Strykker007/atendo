@@ -22,10 +22,10 @@ Depois de reiniciar o Mac, rode `colima start` de novo antes de subir a infra.
 ## Dia a dia (depois da primeira instalação)
 
 ```bash
-cd ~/Projetos/atendo && pnpm up
+cd ~/Projetos/atendo && pnpm start:all
 ```
 
-Sobe Docker (Colima), infra, migrations, API e web, e imprime os endereços. `pnpm down` para tudo (dados ficam). `pnpm logs` mostra o log da API. Depois de reiniciar o Mac é só `pnpm up` de novo.
+Sobe Docker (Colima), infra, migrations, API e web, e imprime os endereços. `pnpm stop:all` para tudo (dados ficam). `pnpm logs` mostra o log da API. Depois de reiniciar o Mac é só `pnpm start:all` de novo.
 
 ## Passo a passo (primeira vez)
 

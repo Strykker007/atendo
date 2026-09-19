@@ -247,6 +247,39 @@ export class ConversationsService {
     return message;
   }
 
+  /** Número do tenant usado para mensagens do sistema (lembretes): o preferido nas configurações ou o primeiro conectado. */
+  private async systemNumber(tenantId: string, preferredId?: string | null) {
+    const n = (preferredId && (await this.prisma.whatsAppNumber.findFirst({ where: { id: preferredId, tenantId, status: 'connected', isActive: true } })))
+      || (await this.prisma.whatsAppNumber.findFirst({ where: { tenantId, status: 'connected', isActive: true }, orderBy: { createdAt: 'asc' } }));
+    if (!n) throw new BadRequestException('Nenhum número conectado para enviar');
+    return n;
+  }
+
+  /** Manda uma mensagem do sistema para um contato: reaproveita a conversa aberta ou cria uma. */
+  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null }) {
+    const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
+    let conv = await this.prisma.conversation.findFirst({ where: { contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' } });
+    if (!conv) {
+      const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
+      conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
+    }
+    return this.sendAsSystem(conv.id, text);
+  }
+
+  /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */
+  async sendToPhone(tenantId: string, phone: string, text: string, opts?: { closeAfter?: boolean; contactName?: string; preferredNumberId?: string | null }) {
+    const clean = phone.replace(/\D/g, '');
+    const contact = await this.prisma.contact.upsert({ where: { tenantId_phone: { tenantId, phone: clean } }, create: { tenantId, phone: clean, name: opts?.contactName }, update: {} });
+    const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
+    let conv = await this.prisma.conversation.findFirst({ where: { contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } });
+    if (!conv) conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
+    // conversa fechada: sendAsSystem exige aberta → abre, envia, fecha de novo (não polui a fila)
+    if (conv.status === 'closed') await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'in_progress' } });
+    const m = await this.sendAsSystem(conv.id, text);
+    if (opts?.closeAfter !== false) await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date() } });
+    return m;
+  }
+
   async setStatusSystem(conversationId: string, status: ConversationStatus) {
     const conv = await this.prisma.conversation.update({ where: { id: conversationId }, data: { status, closedAt: status === 'closed' ? new Date() : null, ...(status === 'waiting' && { assigneeId: null }) } });
     this.gateway.emitConversation(conv.tenantId, conv);

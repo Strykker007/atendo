@@ -19,8 +19,8 @@ export interface PlanLimits {
   features?: PlanFeature[];
 }
 
-export const PlanFeature = { FLOWS: 'flows' } as const;
+export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling' } as const;
 export type PlanFeature = (typeof PlanFeature)[keyof typeof PlanFeature];
-export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = { flows: 'Fluxos de automação' };
+export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = { flows: 'Fluxos de automação', scheduling: 'Agendamento' };
 
 export const USAGE_ALERT_THRESHOLDS = [0.8, 1.0] as const;

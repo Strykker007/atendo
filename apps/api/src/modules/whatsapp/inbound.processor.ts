@@ -7,6 +7,7 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { QUEUE_INBOUND, type InboundJob } from './queues';
 import { StorageService } from '../../common/storage/storage.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
+import { SchedulingService } from '../scheduling/scheduling.service';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
 export class InboundProcessor extends WorkerHost {
@@ -18,6 +19,7 @@ export class InboundProcessor extends WorkerHost {
     private readonly conversations: ConversationsService,
     private readonly storage: StorageService,
     private readonly flows: FlowEngineService,
+    private readonly scheduling: SchedulingService,
   ) {
     super();
   }
@@ -35,7 +37,9 @@ export class InboundProcessor extends WorkerHost {
       const saved = result?.message;
       // automação: avança fluxo ativo ou avalia gatilhos (nunca derruba a ingestão)
       if (result) {
-        await this.flows.onInbound(number, result.conversation, result.message, result.isNew).catch((err) => this.log.error(`fluxo: ${err instanceof Error ? err.message : err}`));
+        // "1"/"2" em resposta a lembrete de agendamento tem prioridade sobre fluxos
+        const handled = await this.scheduling.onInbound(number.tenantId, result.conversation.contactId, result.conversation.id, result.message.text ?? '').catch((err) => { this.log.error(`agenda: ${err instanceof Error ? err.message : err}`); return false; });
+        if (!handled) await this.flows.onInbound(number, result.conversation, result.message, result.isNew).catch((err) => this.log.error(`fluxo: ${err instanceof Error ? err.message : err}`));
       }
       // mídia: baixa do provider e guarda no storage privado (falha aqui não perde a mensagem)
       if (saved && msg.media) {

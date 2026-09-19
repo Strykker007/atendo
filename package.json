@@ -18,13 +18,13 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
     "stripe:sync": "pnpm --filter @atendo/api stripe:sync",
     "db:migrate:create": "cd apps/api && sh scripts/create-migration.sh",
-    "up": "bash scripts/up.sh",
-    "down": "bash scripts/down.sh",
-    "logs": "tail -f .logs/api.log"
+    "logs": "tail -f .logs/api.log",
+    "start:all": "bash scripts/up.sh",
+    "stop:all": "bash scripts/down.sh"
   },
   "devDependencies": {
-    "prettier": "^3.3.3",
-    "turbo": "^2.1.0",
-    "typescript": "^5.6.0"
+    "prettier": "^3.9.8",
+    "turbo": "^2.10.13",
+    "typescript": "^5.9.3"
   }
 }
