@@ -6,6 +6,7 @@ import { FlowsController, FlowStopController } from './flows.controller';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { SchedulingModule } from '../scheduling/scheduling.module';
 
 /** Retoma runs em "Aguardar" quando o tempo vence. */
 @Processor(QUEUE_FLOWS)
@@ -19,7 +20,7 @@ class FlowsProcessor extends WorkerHost {
 }
 
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUE_FLOWS }), AuthModule, BillingModule, forwardRef(() => ConversationsModule)],
+  imports: [BullModule.registerQueue({ name: QUEUE_FLOWS }), AuthModule, BillingModule, forwardRef(() => ConversationsModule), forwardRef(() => SchedulingModule)],
   controllers: [FlowsController, FlowStopController],
   providers: [FlowEngineService, FlowsProcessor],
   exports: [FlowEngineService],

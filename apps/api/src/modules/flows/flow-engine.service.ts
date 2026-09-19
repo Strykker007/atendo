@@ -6,6 +6,8 @@ import type { FlowDefinition, FlowNode, FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { SchedulingService } from '../scheduling/scheduling.service';
+import { Inject, forwardRef } from '@nestjs/common';
 
 export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
@@ -25,6 +27,7 @@ export class FlowEngineService {
     private readonly prisma: PrismaService,
     private readonly conversations: ConversationsService,
     private readonly gateway: ConversationsGateway,
+    @Inject(forwardRef(() => SchedulingService)) private readonly scheduling: SchedulingService,
     @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowResumeJob>,
   ) {}
 
@@ -153,6 +156,13 @@ export class FlowEngineService {
           case 'end':
             if (node.data.closeConversation) await this.conversations.setStatusSystem(run.conversationId, 'closed');
             return this.finish(runId, 'done');
+          case 'schedule': {
+            // mini-máquina: serviço → profissional → horário → confirma. Estado em vars._sched
+            const st = await this.scheduleStep(runId, node, run.conversationId, run.tenantId, vars, undefined);
+            if (st === 'wait') { await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } }); return; }
+            await this.goNext(runId, def, node.id, st);
+            continue;
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -195,7 +205,113 @@ export class FlowEngineService {
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
       return this.next(run.id, chosen.id);
     }
+    if (node.type === 'schedule') {
+      const st = await this.scheduleStep(run.id, node, run.conversationId, run.tenantId, run.vars as Record<string, string>, answer);
+      if (st === 'wait') return; // continua esperando
+      await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'running' } });
+      return this.next(run.id, st);
+    }
     // nó 'wait' recebendo mensagem: ignora, continua esperando o tempo
+  }
+
+  /**
+   * Passo do agendamento. Devolve 'wait' (mandou pergunta, espera resposta), 'done' (agendou)
+   * ou 'fallback' (não conseguiu / desistiu). O estado fica em vars._sched (JSON).
+   */
+  private async scheduleStep(runId: string, node: Extract<FlowNode, { type: 'schedule' }>, conversationId: string, tenantId: string, vars: Record<string, string>, answer?: string): Promise<'wait' | 'done' | 'fallback'> {
+    type S = { step: 'service' | 'pro' | 'slot' | 'confirm'; serviceId?: string; professionalId?: string; services?: { id: string; name: string }[]; pros?: { id: string; name: string }[]; slots?: { startAt: string; label: string }[]; chosen?: { startAt: string; label: string } };
+    const state: S = vars._sched ? JSON.parse(vars._sched) : { step: 'service' };
+    const save = async (s: S) => { await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, _sched: JSON.stringify(s) } } }); };
+    const send = (t: string) => this.send(conversationId, t);
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
+    const pick = <T,>(list: T[], a?: string) => { const i = Number((a ?? '').trim()) - 1; return Number.isInteger(i) && list[i] ? list[i] : undefined; };
+    const menu = (items: { name: string }[]) => items.map((x, i) => `${i + 1} - ${x.name}`).join('\n');
+    const cancelWords = /^(cancelar|sair|desistir|não|nao|parar)$/i;
+    if (answer && cancelWords.test(answer.trim())) { await send('Tudo bem, agendamento cancelado. Se precisar, é só chamar.'); return 'fallback'; }
+
+    // 1) serviço
+    if (state.step === 'service') {
+      if (node.data.serviceId) { state.serviceId = node.data.serviceId; state.step = 'pro'; }
+      else if (!state.services) {
+        const services = await this.prisma.service.findMany({ where: { tenantId, isActive: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] });
+        if (!services.length) { await send('Ainda não há serviços cadastrados para agendar.'); return 'fallback'; }
+        state.services = services.map((s) => ({ id: s.id, name: `${s.name} (${s.durationMin} min${Number(s.price) ? `, R$ ${Number(s.price).toFixed(0)}` : ''})` }));
+        await save(state);
+        await send(`${node.data.intro ?? 'Vamos agendar! Qual serviço você quer?'}\n\n${menu(state.services)}`);
+        return 'wait';
+      } else {
+        const c = pick(state.services, answer);
+        if (!c) { await send(`Não entendi. Responda com o número do serviço:\n\n${menu(state.services)}`); return 'wait'; }
+        state.serviceId = c.id; state.step = 'pro';
+      }
+    }
+    // 2) profissional
+    if (state.step === 'pro') {
+      if (node.data.professionalId) { state.professionalId = node.data.professionalId; state.step = 'slot'; }
+      else if (!state.pros) {
+        const pros = await this.prisma.professional.findMany({ where: { tenantId, isActive: true }, orderBy: { name: 'asc' } });
+        if (!pros.length) { await send('Ainda não há profissionais cadastrados.'); return 'fallback'; }
+        if (pros.length === 1) { state.professionalId = pros[0].id; state.step = 'slot'; }
+        else {
+          state.pros = pros.map((p) => ({ id: p.id, name: p.name }));
+          await save(state);
+          await send(`Com quem você prefere?\n\n${menu(state.pros)}`);
+          return 'wait';
+        }
+      } else {
+        const c = pick(state.pros, answer);
+        if (!c) { await send(`Responda com o número do profissional:\n\n${menu(state.pros)}`); return 'wait'; }
+        state.professionalId = c.id; state.step = 'slot';
+      }
+    }
+    // 3) horário
+    if (state.step === 'slot') {
+      if (!state.slots) {
+        const slots = await this.scheduling.availability(tenantId, state.professionalId!, state.serviceId!, new Date(), undefined, Math.max(1, node.data.maxSlots || 6));
+        if (!slots.length) { await send('Não encontrei horários livres nos próximos dias. Vou chamar alguém para te ajudar.'); return 'fallback'; }
+        state.slots = slots.map((s) => ({ startAt: s.startAt.toISOString(), label: s.label }));
+        await save(state);
+        await send(`Estes são os próximos horários livres:\n\n${state.slots.map((s, i) => `${i + 1} - ${s.label}`).join('\n')}\n\nResponda com o número (ou "mais" para ver outros).`);
+        return 'wait';
+      }
+      if (/^mais$/i.test((answer ?? '').trim())) {
+        const last = new Date(state.slots[state.slots.length - 1].startAt);
+        const more = await this.scheduling.availability(tenantId, state.professionalId!, state.serviceId!, last, undefined, Math.max(1, node.data.maxSlots || 6));
+        if (!more.length) { await send('Não há mais horários nos próximos dias. Escolha um dos anteriores ou responda "cancelar".'); return 'wait'; }
+        state.slots = more.map((s) => ({ startAt: s.startAt.toISOString(), label: s.label }));
+        await save(state);
+        await send(state.slots.map((s, i) => `${i + 1} - ${s.label}`).join('\n'));
+        return 'wait';
+      }
+      const c = pick(state.slots, answer);
+      if (!c) { await send('Responda com o número do horário, "mais" para outros ou "cancelar".'); return 'wait'; }
+      state.chosen = c; state.step = 'confirm';
+      const svc = await this.prisma.service.findUniqueOrThrow({ where: { id: state.serviceId! } });
+      const pro = await this.prisma.professional.findUniqueOrThrow({ where: { id: state.professionalId! } });
+      await save(state);
+      await send(`Confirmar *${svc.name}* com *${pro.name}* em *${c.label}*?\n\n1 - Sim, confirmar\n2 - Escolher outro horário`);
+      return 'wait';
+    }
+    // 4) confirmação
+    if (state.step === 'confirm') {
+      const a = (answer ?? '').trim();
+      if (a === '2') { state.step = 'slot'; state.slots = undefined; state.chosen = undefined; await save(state); return this.scheduleStep(runId, node, conversationId, tenantId, { ...vars, _sched: JSON.stringify(state) }, undefined); }
+      if (a !== '1' && !/^(sim|s|ok|confirmar)$/i.test(a)) { await send('Responda 1 para confirmar ou 2 para escolher outro horário.'); return 'wait'; }
+      try {
+        const appt = await this.scheduling.create(tenantId, { professionalId: state.professionalId!, serviceId: state.serviceId!, contactId: conv.contactId, startAt: new Date(state.chosen!.startAt), conversationId, source: 'flow' });
+        const text = (node.data.confirmText ?? 'Agendado! {{servico}} com {{profissional}} em {{horario}}. Te lembro um dia antes. 💈')
+          .replace('{{servico}}', appt.service.name).replace('{{profissional}}', appt.professional.name).replace('{{horario}}', state.chosen!.label);
+        await send(text);
+        await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, _sched: undefined, agendamento: state.chosen!.label, servico: appt.service.name, profissional: appt.professional.name } } });
+        return 'done';
+      } catch (err) {
+        // horário ocupado no meio tempo → oferece de novo
+        state.step = 'slot'; state.slots = undefined; await save(state);
+        await send(`${err instanceof Error ? err.message : 'Esse horário não está mais disponível.'}`);
+        return this.scheduleStep(runId, node, conversationId, tenantId, { ...vars, _sched: JSON.stringify(state) }, undefined);
+      }
+    }
+    return 'fallback';
   }
 
   private async retry(run: FlowRun, maxRetries: number, invalidText: string, fallbackHandle?: string) {

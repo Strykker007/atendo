@@ -2,7 +2,7 @@
  * Definição de um fluxo de automação (o que o editor salva e o motor executa).
  * Um fluxo é um grafo: nós + arestas. Cada nó tem um tipo e dados próprios.
  */
-export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end';
+export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end' | 'schedule';
 
 export interface FlowNodeBase<T extends FlowNodeType, D> {
   id: string;
@@ -20,8 +20,13 @@ export type ConditionNode = FlowNodeBase<'condition', { kind: 'var_equals' | 'va
 export type ActionNode = FlowNodeBase<'action', { kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var'; tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed'; /** set_var */ varName?: string; value?: string }>;
 export type WaitNode = FlowNodeBase<'wait', { minutes: number }>;
 export type EndNode = FlowNodeBase<'end', { closeConversation: boolean }>;
+/**
+ * Agendar pelo WhatsApp: pergunta serviço → profissional → horário → confirma e cria o agendamento.
+ * serviceId/professionalId fixos pulam a pergunta. Saídas: 'done' (agendou) e 'fallback' (desistiu/erro).
+ */
+export type ScheduleNode = FlowNodeBase<'schedule', { intro?: string; serviceId?: string; professionalId?: string; maxSlots: number; confirmText?: string }>;
 
-export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode;
+export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode;
 
 /** sourceHandle: menu → id da opção ou 'fallback'; condition → 'yes' | 'no'; demais → undefined */
 export interface FlowEdge {
@@ -52,4 +57,5 @@ export const FLOW_NODE_LABEL: Record<FlowNodeType, string> = {
   action: 'Ação',
   wait: 'Aguardar',
   end: 'Fim',
+  schedule: 'Agendar horário',
 };
