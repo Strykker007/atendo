@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import { ProviderForm, toConfig, useProviderState } from './ProviderForm';
 import { useCreateNumber, useSwitchProvider, type NumberItem } from '@/lib/hooks';
 
@@ -18,7 +19,7 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
     e.preventDefault();
     setError(null);
     try {
-      const r = await create.mutateAsync({ phone: phone.replace(/\D/g, ''), label, provider: ps.provider, config: toConfig(ps.provider, ps.config) });
+      const r = await create.mutateAsync({ phone, label, provider: ps.provider, config: toConfig(ps.provider, ps.config) });
       onDone({ id: r.id, qrCode: r.qrCode, provider: ps.provider });
       onClose();
     } catch (err) {
@@ -31,7 +32,7 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
       <form onSubmit={submit} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome (como aparece no painel)"><input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Vendas, Suporte…" required /></Field>
-          <Field label="Telefone com DDI" hint="Ex.: 5511999998888"><input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="55…" required /></Field>
+          <Field label="Telefone do WhatsApp"><PhoneInput value={phone} onChange={setPhone} required /></Field>
         </div>
         <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} />
         {error && <p className="text-sm text-danger">{error}</p>}

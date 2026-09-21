@@ -7,6 +7,7 @@ import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
+import { PhoneInput, formatPhone } from '@/components/ui/PhoneInput';
 import { toast } from '@/components/ui/Toast';
 import { useProfessionals, useServices, useSaveProfessional, useDeleteProfessional, useSaveService, useDeleteService, useSchedulingSettings, useUpdateSchedulingSettings, useNumbers, type Professional, type ServiceItem, type WorkingHour } from '@/lib/hooks';
 
@@ -38,7 +39,7 @@ export default function ConfigurarAgendaPage() {
             {pros.data?.map((p) => (
               <li key={p.id} className={cn('px-4 py-3 flex items-center gap-3', !p.isActive && 'opacity-50')}>
                 <span className="w-3 h-3 rounded-full shrink-0" style={{ background: p.color }} />
-                <div className="min-w-0 flex-1"><div className="text-sm font-medium text-ink">{p.name}{!p.isActive && <span className="text-xs text-muted"> · inativo</span>}</div><div className="text-xs text-muted">{p.phone ? `WhatsApp +${p.phone}` : <span className="text-warn">sem WhatsApp — não recebe o aviso do próximo cliente</span>} · {new Set(p.hours.map((h) => h.weekday)).size} dias/semana</div></div>
+                <div className="min-w-0 flex-1"><div className="text-sm font-medium text-ink">{p.name}{!p.isActive && <span className="text-xs text-muted"> · inativo</span>}</div><div className="text-xs text-muted">{p.phone ? `WhatsApp ${formatPhone(p.phone)}` : <span className="text-warn">sem WhatsApp — não recebe o aviso do próximo cliente</span>} · {new Set(p.hours.map((h) => h.weekday)).size} dias/semana</div></div>
                 <button onClick={() => setProModal(p)} className="text-faint hover:text-ink p-1"><Pencil size={15} /></button>
                 {p.isActive && <button onClick={() => setConfirm({ kind: 'pro', id: p.id, name: p.name })} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
               </li>
@@ -95,7 +96,7 @@ function ProfessionalModal({ value, onClose, onSave, pending }: { value: Partial
       <form onSubmit={(e) => { e.preventDefault(); onSave(f); }} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome"><input className={inputCls} value={f.name ?? ''} onChange={(e) => setF({ ...f, name: e.target.value })} required autoFocus /></Field>
-          <Field label="WhatsApp (com DDI)" hint="recebe o aviso do próximo cliente"><input className={inputCls} value={f.phone ?? ''} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="5511999998888" /></Field>
+          <Field label="WhatsApp" hint="recebe o aviso do próximo cliente"><PhoneInput value={f.phone ?? ''} onChange={(d) => setF({ ...f, phone: d })} /></Field>
         </div>
         <Field label="Cor na agenda"><div className="flex gap-2">{PALETTE.map((c) => <button type="button" key={c} onClick={() => setF({ ...f, color: c })} className="w-7 h-7 rounded-full" style={{ background: c, boxShadow: f.color === c ? `0 0 0 2px var(--panel), 0 0 0 4px ${c}` : undefined }} />)}</div></Field>
         <Field label="Horários de trabalho" hint="Marque os dias e ajuste os intervalos (o robô só oferece horários dentro deles)">
