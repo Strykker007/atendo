@@ -59,7 +59,28 @@ export class MetaProvider implements WhatsAppProvider {
     const body: Record<string, unknown> = { messaging_product: 'whatsapp', to: m.to };
     let billingCategory: BillingCategory = BillingCategory.SERVICE;
 
-    if (m.template) {
+    if (m.interactive && m.interactive.options.length) {
+      const opts = m.interactive.options.slice(0, 10);
+      body.type = 'interactive';
+      const text = { text: (m.text ?? '').slice(0, 1024) };
+      if (opts.length <= 3) {
+        body.interactive = {
+          type: 'button',
+          ...(m.interactive.header && { header: { type: 'text', text: m.interactive.header.slice(0, 60) } }),
+          body: text,
+          ...(m.interactive.footer && { footer: { text: m.interactive.footer.slice(0, 60) } }),
+          action: { buttons: opts.map((o) => ({ type: 'reply', reply: { id: o.id.slice(0, 256), title: o.title.slice(0, 20) } })) },
+        };
+      } else {
+        body.interactive = {
+          type: 'list',
+          ...(m.interactive.header && { header: { type: 'text', text: m.interactive.header.slice(0, 60) } }),
+          body: text,
+          ...(m.interactive.footer && { footer: { text: m.interactive.footer.slice(0, 60) } }),
+          action: { button: (m.interactive.listButton ?? 'Ver opções').slice(0, 20), sections: [{ title: 'Opções', rows: opts.map((o) => ({ id: o.id.slice(0, 200), title: o.title.slice(0, 24), ...(o.description && { description: o.description.slice(0, 72) }) })) }] },
+        };
+      }
+    } else if (m.template) {
       body.type = 'template';
       body.template = { name: m.template.name, language: { code: m.template.language }, components: m.template.components };
       billingCategory = m.template.category;
@@ -148,7 +169,9 @@ export class MetaProvider implements WhatsAppProvider {
   }
 
   private toInbound(msg: any, externalNumberId: string, contactName?: string): InboundMessage {
-    const type = (Object.values(MessageType) as string[]).includes(msg.type) ? (msg.type as MessageType) : MessageType.UNKNOWN;
+    // resposta a botão/lista: chega como type 'interactive' com o id e o título escolhidos
+    const reply = msg.type === 'interactive' ? (msg.interactive?.button_reply ?? msg.interactive?.list_reply) : undefined;
+    const type = reply ? MessageType.TEXT : (Object.values(MessageType) as string[]).includes(msg.type) ? (msg.type as MessageType) : MessageType.UNKNOWN;
     const mediaObj = msg[msg.type];
     return {
       provider: 'meta',
@@ -157,7 +180,8 @@ export class MetaProvider implements WhatsAppProvider {
       from: msg.from,
       contactName,
       type,
-      text: msg.text?.body ?? mediaObj?.caption,
+      text: reply?.title ?? msg.text?.body ?? mediaObj?.caption,
+      interactiveReplyId: reply?.id,
       media:
         mediaObj?.id !== undefined
           ? { providerMediaId: mediaObj.id, mimeType: mediaObj.mime_type, fileName: mediaObj.filename, caption: mediaObj.caption }

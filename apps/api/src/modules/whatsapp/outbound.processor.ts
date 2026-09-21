@@ -44,12 +44,14 @@ export class OutboundProcessor extends WorkerHost {
 
     const ctx = await this.numbers.context(message.conversation.numberId);
     const provider = this.registry.get(ctx.provider);
-    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template'] };
+    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string };
 
     const outbound: OutboundMessage = {
       to: message.conversation.contact.phone,
       type: message.type as MessageType,
-      text: message.text ?? undefined,
+      // interativo: o provider recebe o corpo original + opções (o texto numerado é só para o histórico)
+      text: raw.interactive ? raw.body : (message.text ?? undefined),
+      interactive: raw.interactive,
       media: message.mediaUrl ? { url: message.mediaUrl, mimeType: message.mediaMime ?? undefined, fileName: message.mediaName ?? undefined, caption: message.text ?? undefined } : undefined,
       quotedExternalId: message.quotedId ?? undefined,
       template: raw.template,

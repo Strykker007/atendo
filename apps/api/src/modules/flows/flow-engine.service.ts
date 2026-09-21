@@ -130,12 +130,13 @@ export class FlowEngineService {
             await this.goNext(runId, def, node.id);
             continue;
           case 'question':
-          case 'menu': {
-            const text = node.type === 'menu' ? this.menuText(node.data.text, node.data.options) : node.data.text;
-            await this.send(run.conversationId, this.interpolate(text, ctx));
+            await this.send(run.conversationId, this.interpolate(node.data.text, ctx));
             await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
             return; // espera resposta do contato
-          }
+          case 'menu':
+            await this.sendMenu(run.conversationId, this.interpolate(node.data.text, ctx), node.data.options.map((o) => ({ id: o.id, title: o.label })));
+            await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
+            return;
           case 'condition': {
             const yes = await this.evaluate(node, run.conversation, vars);
             await this.goNext(runId, def, node.id, yes ? 'yes' : 'no');
@@ -188,6 +189,7 @@ export class FlowEngineService {
     const { def, node } = await this.load(run.id);
     if (!node) return this.finish(run.id, 'failed', 'nó atual inexistente');
     const answer = (message.text ?? '').trim();
+    const replyId = (message.raw as { interactiveReplyId?: string } | null)?.interactiveReplyId;
 
     if (node.type === 'question') {
       if (!this.valid(answer, node.data.validation)) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Não entendi. Pode repetir?');
@@ -196,17 +198,14 @@ export class FlowEngineService {
       return this.next(run.id, undefined);
     }
     if (node.type === 'menu') {
-      const idx = Number(answer) - 1;
-      const byNumber = Number.isInteger(idx) ? node.data.options[idx] : undefined;
-      const byText = node.data.options.find((o) => o.label.toLowerCase() === answer.toLowerCase() || answer.toLowerCase().includes(o.label.toLowerCase()));
-      const chosen = byNumber ?? byText;
+      const chosen = this.choose(node.data.options.map((o) => ({ id: o.id, title: o.label })), answer, replyId);
       if (!chosen) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Opção inválida. Responda com o número da opção.', 'fallback');
-      const vars = { ...(run.vars as Record<string, string>), [`menu_${node.id}`]: chosen.label };
+      const vars = { ...(run.vars as Record<string, string>), [`menu_${node.id}`]: chosen.title };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
       return this.next(run.id, chosen.id);
     }
     if (node.type === 'schedule') {
-      const st = await this.scheduleStep(run.id, node, run.conversationId, run.tenantId, run.vars as Record<string, string>, answer);
+      const st = await this.scheduleStep(run.id, node, run.conversationId, run.tenantId, run.vars as Record<string, string>, answer, replyId);
       if (st === 'wait') return; // continua esperando
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'running' } });
       return this.next(run.id, st);
@@ -218,14 +217,14 @@ export class FlowEngineService {
    * Passo do agendamento. Devolve 'wait' (mandou pergunta, espera resposta), 'done' (agendou)
    * ou 'fallback' (não conseguiu / desistiu). O estado fica em vars._sched (JSON).
    */
-  private async scheduleStep(runId: string, node: Extract<FlowNode, { type: 'schedule' }>, conversationId: string, tenantId: string, vars: Record<string, string>, answer?: string): Promise<'wait' | 'done' | 'fallback'> {
+  private async scheduleStep(runId: string, node: Extract<FlowNode, { type: 'schedule' }>, conversationId: string, tenantId: string, vars: Record<string, string>, answer?: string, replyId?: string): Promise<'wait' | 'done' | 'fallback'> {
     type S = { step: 'service' | 'pro' | 'slot' | 'confirm'; serviceId?: string; professionalId?: string; services?: { id: string; name: string }[]; pros?: { id: string; name: string }[]; slots?: { startAt: string; label: string }[]; chosen?: { startAt: string; label: string } };
     const state: S = vars._sched ? JSON.parse(vars._sched) : { step: 'service' };
     const save = async (s: S) => { await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, _sched: JSON.stringify(s) } } }); };
     const send = (t: string) => this.send(conversationId, t);
     const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
-    const pick = <T,>(list: T[], a?: string) => { const i = Number((a ?? '').trim()) - 1; return Number.isInteger(i) && list[i] ? list[i] : undefined; };
-    const menu = (items: { name: string }[]) => items.map((x, i) => `${i + 1} - ${x.name}`).join('\n');
+    const pick = <T extends { id: string; name: string }>(list: T[], a?: string) => this.choose(list.map((x) => ({ ...x, title: x.name })), a ?? '', replyId) as T | undefined;
+    const asOpts = (items: { id: string; name: string }[]) => items.map((x) => ({ id: x.id, title: x.name.slice(0, 24), description: x.name.length > 24 ? x.name : undefined }));
     const cancelWords = /^(cancelar|sair|desistir|não|nao|parar)$/i;
     if (answer && cancelWords.test(answer.trim())) { await send('Tudo bem, agendamento cancelado. Se precisar, é só chamar.'); return 'fallback'; }
 
@@ -237,11 +236,11 @@ export class FlowEngineService {
         if (!services.length) { await send('Ainda não há serviços cadastrados para agendar.'); return 'fallback'; }
         state.services = services.map((s) => ({ id: s.id, name: `${s.name} (${s.durationMin} min${Number(s.price) ? `, R$ ${Number(s.price).toFixed(0)}` : ''})` }));
         await save(state);
-        await send(`${node.data.intro ?? 'Vamos agendar! Qual serviço você quer?'}\n\n${menu(state.services)}`);
+        await this.sendMenu(conversationId, node.data.intro ?? 'Vamos agendar! Qual serviço você quer?', asOpts(state.services), 'Ver serviços');
         return 'wait';
       } else {
         const c = pick(state.services, answer);
-        if (!c) { await send(`Não entendi. Responda com o número do serviço:\n\n${menu(state.services)}`); return 'wait'; }
+        if (!c) { await this.sendMenu(conversationId, 'Não entendi. Escolha o serviço:', asOpts(state.services), 'Ver serviços'); return 'wait'; }
         state.serviceId = c.id; state.step = 'pro';
       }
     }
@@ -255,12 +254,12 @@ export class FlowEngineService {
         else {
           state.pros = pros.map((p) => ({ id: p.id, name: p.name }));
           await save(state);
-          await send(`Com quem você prefere?\n\n${menu(state.pros)}`);
+          await this.sendMenu(conversationId, 'Com quem você prefere?', asOpts(state.pros), 'Ver profissionais');
           return 'wait';
         }
       } else {
         const c = pick(state.pros, answer);
-        if (!c) { await send(`Responda com o número do profissional:\n\n${menu(state.pros)}`); return 'wait'; }
+        if (!c) { await this.sendMenu(conversationId, 'Escolha o profissional:', asOpts(state.pros), 'Ver profissionais'); return 'wait'; }
         state.professionalId = c.id; state.step = 'slot';
       }
     }
@@ -271,7 +270,7 @@ export class FlowEngineService {
         if (!slots.length) { await send('Não encontrei horários livres nos próximos dias. Vou chamar alguém para te ajudar.'); return 'fallback'; }
         state.slots = slots.map((s) => ({ startAt: s.startAt.toISOString(), label: s.label }));
         await save(state);
-        await send(`Estes são os próximos horários livres:\n\n${state.slots.map((s, i) => `${i + 1} - ${s.label}`).join('\n')}\n\nResponda com o número (ou "mais" para ver outros).`);
+        await this.sendMenu(conversationId, 'Estes são os próximos horários livres. Escolha um (ou responda "mais" para ver outros):', [...state.slots.map((s) => ({ id: s.startAt, title: s.label })), { id: '__more', title: 'Ver mais horários' }], 'Ver horários');
         return 'wait';
       }
       if (/^mais$/i.test((answer ?? '').trim())) {
@@ -280,23 +279,24 @@ export class FlowEngineService {
         if (!more.length) { await send('Não há mais horários nos próximos dias. Escolha um dos anteriores ou responda "cancelar".'); return 'wait'; }
         state.slots = more.map((s) => ({ startAt: s.startAt.toISOString(), label: s.label }));
         await save(state);
-        await send(state.slots.map((s, i) => `${i + 1} - ${s.label}`).join('\n'));
+        await this.sendMenu(conversationId, 'Mais horários:', [...state.slots.map((s) => ({ id: s.startAt, title: s.label })), { id: '__more', title: 'Ver mais horários' }], 'Ver horários');
         return 'wait';
       }
-      const c = pick(state.slots, answer);
-      if (!c) { await send('Responda com o número do horário, "mais" para outros ou "cancelar".'); return 'wait'; }
-      state.chosen = c; state.step = 'confirm';
+      if (replyId === '__more' || Number(answer) === state.slots.length + 1) return this.scheduleStep(runId, node, conversationId, tenantId, vars, 'mais', undefined);
+      const c = this.choose(state.slots.map((s) => ({ id: s.startAt, title: s.label })), answer ?? '', replyId);
+      if (!c) { await send('Escolha um dos horários, responda "mais" para outros ou "cancelar".'); return 'wait'; }
+      state.chosen = { startAt: c.id, label: c.title }; state.step = 'confirm';
       const svc = await this.prisma.service.findUniqueOrThrow({ where: { id: state.serviceId! } });
       const pro = await this.prisma.professional.findUniqueOrThrow({ where: { id: state.professionalId! } });
       await save(state);
-      await send(`Confirmar *${svc.name}* com *${pro.name}* em *${c.label}*?\n\n1 - Sim, confirmar\n2 - Escolher outro horário`);
+      await this.sendMenu(conversationId, `Confirmar *${svc.name}* com *${pro.name}* em *${c.title}*?`, [{ id: 'yes', title: 'Sim, confirmar' }, { id: 'other', title: 'Outro horário' }]);
       return 'wait';
     }
     // 4) confirmação
     if (state.step === 'confirm') {
-      const a = (answer ?? '').trim();
+      const a = replyId === 'yes' ? '1' : replyId === 'other' ? '2' : (answer ?? '').trim();
       if (a === '2') { state.step = 'slot'; state.slots = undefined; state.chosen = undefined; await save(state); return this.scheduleStep(runId, node, conversationId, tenantId, { ...vars, _sched: JSON.stringify(state) }, undefined); }
-      if (a !== '1' && !/^(sim|s|ok|confirmar)$/i.test(a)) { await send('Responda 1 para confirmar ou 2 para escolher outro horário.'); return 'wait'; }
+      if (a !== '1' && !/^(sim|s|ok|confirmar)$/i.test(a)) { await this.sendMenu(conversationId, 'Confirma o horário?', [{ id: 'yes', title: 'Sim, confirmar' }, { id: 'other', title: 'Outro horário' }]); return 'wait'; }
       try {
         const appt = await this.scheduling.create(tenantId, { professionalId: state.professionalId!, serviceId: state.serviceId!, contactId: conv.contactId, startAt: new Date(state.chosen!.startAt), conversationId, source: 'flow' });
         const text = (node.data.confirmText ?? 'Agendado! {{servico}} com {{profissional}} em {{horario}}. Te lembro um dia antes. 💈')
@@ -326,7 +326,9 @@ export class FlowEngineService {
       return;
     }
     await this.prisma.flowRun.update({ where: { id: run.id }, data: { retries } });
-    await this.send(run.conversationId, invalidText);
+    const { node: cur } = await this.load(run.id);
+    if (cur?.type === 'menu') await this.sendMenu(run.conversationId, invalidText, cur.data.options.map((o) => ({ id: o.id, title: o.label })));
+    else await this.send(run.conversationId, invalidText);
   }
 
   // ---------- nós ----------
@@ -403,9 +405,6 @@ export class FlowEngineService {
     return true;
   }
 
-  private menuText(text: string, options: { label: string }[]) {
-    return `${text}\n\n${options.map((o, i) => `${i + 1} - ${o.label}`).join('\n')}`;
-  }
 
   /** {{contact.name}}, {{contact.phone}}, {{nome_da_variavel}} */
   private interpolate(text: string, ctx: { contact: { name: string | null; phone: string }; vars: Record<string, string> }) {
@@ -419,6 +418,20 @@ export class FlowEngineService {
   private async send(conversationId: string, text?: string, media?: { mediaKey?: string; mediaType?: 'image' | 'document' | 'audio' | 'video'; mediaName?: string }) {
     if (!text && !media?.mediaKey) return;
     await this.conversations.sendAsSystem(conversationId, text, media?.mediaKey ? { key: media.mediaKey, type: media.mediaType ?? 'document', name: media.mediaName } : undefined);
+  }
+
+  /** Pergunta com opções: botões/lista na Meta, lista numerada na Evolution. */
+  private async sendMenu(conversationId: string, text: string, options: { id: string; title: string; description?: string }[], listButton?: string) {
+    await this.conversations.sendAsSystem(conversationId, text, undefined, { options, listButton });
+  }
+
+  /** Resolve a escolha do contato: id do botão, número da opção ou texto parecido. */
+  private choose<T extends { id: string; title: string }>(options: T[], answer: string, replyId?: string): T | undefined {
+    if (replyId) { const byId = options.find((o) => o.id === replyId); if (byId) return byId; }
+    const a = answer.trim().toLowerCase();
+    const idx = Number(a) - 1;
+    if (Number.isInteger(idx) && options[idx]) return options[idx];
+    return options.find((o) => o.title.toLowerCase() === a) ?? options.find((o) => a.length >= 3 && o.title.toLowerCase().includes(a));
   }
 
   private async finish(runId: string, status: 'done' | 'failed' | 'stopped', error?: string) {

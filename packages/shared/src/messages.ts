@@ -15,6 +15,8 @@ export interface InboundMessage {
   media?: { url?: string; mimeType?: string; fileName?: string; caption?: string; providerMediaId?: string };
   location?: { lat: number; lng: number; name?: string };
   quotedExternalId?: string;
+  /** id da opção escolhida num menu interativo (botão/lista), quando o provider informa */
+  interactiveReplyId?: string;
   /** De onde o lead veio, quando o provider informa (anúncio Click-to-WhatsApp, link com contexto). */
   referral?: LeadReferral;
   timestamp: Date;
@@ -45,6 +47,20 @@ export interface OutboundMessage {
   quotedExternalId?: string;
   /** Somente Meta: template aprovado. Obrigatório fora da janela de 24h. */
   template?: { name: string; language: string; components?: unknown[]; category: BillingCategory };
+  /**
+   * Menu interativo (botões ou lista). Provider que não suporta (Evolution) converte para
+   * texto numerado; a resposta do contato pode vir como id da opção ou como número/texto.
+   */
+  interactive?: InteractiveMenu;
+}
+
+export interface InteractiveMenu {
+  /** até 3 opções → botões; mais → lista */
+  options: { id: string; title: string; description?: string }[];
+  /** texto do botão que abre a lista (Meta) */
+  listButton?: string;
+  header?: string;
+  footer?: string;
 }
 
 export interface SendResult {

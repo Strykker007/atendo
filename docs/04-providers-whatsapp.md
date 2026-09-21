@@ -71,6 +71,17 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 
 **Webhook global:** no compose, `WEBHOOK_GLOBAL_URL=http://host.docker.internal:4000/webhooks/evolution`. Todas as instâncias mandam para lá; o campo `instance` do corpo diz qual número é.
 
+### Menus interativos (botões e listas)
+
+`OutboundMessage.interactive` = `{ options: [{id, title, description?}], listButton?, header?, footer? }`. O motor de fluxos (Menu, Agendar, confirmações) e os lembretes de agenda usam isso.
+
+| Provider | Como sai | Como volta |
+|---|---|---|
+| **Meta** | até 3 opções → **botões**; 4–10 → **lista** (`interactive.type = list`) | `messages[].type = 'interactive'` com `button_reply`/`list_reply` → `InboundMessage.interactiveReplyId` + `text` = título |
+| **Evolution** | texto + **lista numerada** ("1 - Corte", "2 - Barba") — botões não são confiáveis em contas não-oficiais desde 2022 (muitos aparelhos não renderizam) | número, ou texto da opção |
+
+O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineService.choose`). Assim o mesmo fluxo funciona nos dois providers e ganha botões de verdade quando o cliente migra para a Meta. No histórico do painel a mensagem interativa aparece como texto + opções numeradas.
+
 ### Sessão zumbi ("Connection Closed")
 
 A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (típico depois de o host dormir). Todo envio devolve `428 Connection Closed`. Tratamento automático: o `OutboundProcessor` detecta a mensagem, chama `provider.restart()` (`POST /instance/restart/:name`) e deixa o retry do BullMQ reenviar. Além disso, um job a cada 5 min (`NumbersHealthProcessor`) confere o status real de cada número no provider e corrige o banco (a UI mostra "desconectado" e o botão de reconectar). Se nem o restart resolver, reinicie o container (`docker compose restart evolution`) — as sessões ficam no banco da Evolution e reconectam sem QR.

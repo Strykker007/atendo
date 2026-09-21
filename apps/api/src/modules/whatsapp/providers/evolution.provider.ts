@@ -108,10 +108,12 @@ export class EvolutionProvider implements WhatsAppProvider {
   async send(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
     const name = this.instance(ctx);
     let r: any;
-    if (m.type === MessageType.TEXT) {
+    if (m.type === MessageType.TEXT || m.interactive) {
+      // Botões/listas não funcionam de forma confiável em contas não-oficiais: vira lista numerada
+      const text = m.interactive?.options.length ? `${m.text ?? ''}\n\n${m.interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : (m.text ?? '');
       r = await this.api(`/message/sendText/${name}`, {
         method: 'POST',
-        body: JSON.stringify({ number: m.to, text: m.text ?? '', quoted: m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined }),
+        body: JSON.stringify({ number: m.to, text, quoted: m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined }),
       }, this.shard(ctx));
     } else if (m.type === MessageType.AUDIO && media) {
       // áudio como "mensagem de voz" (PTT), igual ao gravado no app

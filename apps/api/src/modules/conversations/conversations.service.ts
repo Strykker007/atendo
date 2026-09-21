@@ -228,7 +228,7 @@ export class ConversationsService {
    * Envio pelo sistema (fluxos de automação): sem autor humano, não assume a conversa,
    * respeita quota e janela de 24h, passa pela mesma fila.
    */
-  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string }) {
+  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string }, interactive?: import('@atendo/shared').InteractiveMenu) {
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true } });
     if (!conv || conv.status === 'closed') throw new BadRequestException('Conversa indisponível');
     if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
@@ -238,10 +238,12 @@ export class ConversationsService {
     }
     const quota = await this.usage.canSend(conv.tenantId, 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
+    // no histórico do painel a mensagem interativa aparece como texto + opções numeradas
+    const shown = interactive?.options.length ? `${text ?? ''}\n\n${interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : text;
     const message = await this.prisma.message.create({
-      data: { conversationId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text, mediaUrl: media?.key, mediaName: media?.name },
+      data: { conversationId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, raw: interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : undefined },
     });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: (text ?? `[${media?.type}]`).slice(0, 120) } });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: (shown ?? `[${media?.type}]`).slice(0, 120) } });
     await this.outbound.add('send', { messageId: message.id });
     this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
