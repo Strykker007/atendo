@@ -76,8 +76,8 @@ export default function ConfigurarAgendaPage() {
         </section>
       )}
 
-      <ProfessionalModal value={proModal} onClose={() => setProModal(null)} onSave={(p) => savePro.mutateAsync(p).then(() => { toast.ok('Profissional salvo'); setProModal(null); }).catch(toast.err)} pending={savePro.isPending} />
-      <ServiceModal value={svcModal} onClose={() => setSvcModal(null)} onSave={(s) => saveSvc.mutateAsync(s).then(() => { toast.ok('Serviço salvo'); setSvcModal(null); }).catch(toast.err)} pending={saveSvc.isPending} />
+      <ProfessionalModal value={proModal} onClose={() => setProModal(null)} onSave={(p) => savePro.mutateAsync({ id: p.id, name: p.name, phone: p.phone ?? undefined, color: p.color, isActive: p.isActive, hours: p.hours.map((h) => ({ weekday: h.weekday, start: h.start, end: h.end })) }).then(() => { toast.ok('Profissional salvo'); setProModal(null); }).catch(toast.err)} pending={savePro.isPending} />
+      <ServiceModal value={svcModal} onClose={() => setSvcModal(null)} onSave={(s) => saveSvc.mutateAsync({ id: s.id, name: s.name, durationMin: s.durationMin, price: s.price, isActive: s.isActive }).then(() => { toast.ok('Serviço salvo'); setSvcModal(null); }).catch(toast.err)} pending={saveSvc.isPending} />
       <ConfirmDialog open={!!confirm} onClose={() => setConfirm(null)} title={confirm?.kind === 'pro' ? 'Desativar profissional' : 'Desativar serviço'} danger confirmLabel="Desativar" text={`"${confirm?.name}" deixa de aparecer para novos agendamentos. O histórico é mantido.`} onConfirm={async () => { if (!confirm) return; try { await (confirm.kind === 'pro' ? delPro : delSvc).mutateAsync(confirm.id); toast.ok('Desativado'); } catch (err) { toast.err(err); throw err; } }} />
     </PageShell>
   );

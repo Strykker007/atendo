@@ -17,9 +17,24 @@ class ProfessionalDto {
   /** [{weekday:1,start:"09:00",end:"18:00"}, …] — substitui todos */
   @IsOptional() @IsArray() hours?: { weekday: number; start: string; end: string }[];
 }
+/** Edição: todos opcionais, mas com validação (Partial<> desligaria o ValidationPipe). */
+class UpdateProfessionalDto {
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  @IsOptional() @Matches(/^(\+?[1-9]\d{7,14})?$/) phone?: string;
+  @IsOptional() @IsUUID() userId?: string;
+  @IsOptional() @IsHexColor() color?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsArray() hours?: { weekday: number; start: string; end: string }[];
+}
 class ServiceDto {
   @IsString() @MaxLength(80) name: string;
   @IsInt() @Min(5) durationMin: number;
+  @IsOptional() price?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+}
+class UpdateServiceDto {
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  @IsOptional() @IsInt() @Min(5) durationMin?: number;
   @IsOptional() price?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -77,16 +92,16 @@ export class SchedulingController {
   @Roles('tenant_admin', 'manager', 'super_admin')
   createProfessional(@CurrentUser() u: AuthUser, @Body() dto: ProfessionalDto) {
     const { hours, phone, ...rest } = dto;
-    return this.prisma.professional.create({ data: { tenantId: u.tenantId, ...rest, phone: phone?.replace(/^\+/, ''), hours: { create: hours ?? [] } }, include: { hours: true } });
+    return this.prisma.professional.create({ data: { tenantId: u.tenantId, ...rest, phone: phone?.replace(/^\+/, '') || null, hours: { create: (hours ?? []).map((h) => ({ weekday: h.weekday, start: h.start, end: h.end })) } }, include: { hours: true } });
   }
   @Patch('professionals/:id')
   @Roles('tenant_admin', 'manager', 'super_admin')
-  async updateProfessional(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<ProfessionalDto>) {
+  async updateProfessional(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateProfessionalDto) {
     await this.prisma.professional.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     const { hours, phone, ...rest } = dto;
     return this.prisma.professional.update({
       where: { id },
-      data: { ...rest, ...(phone !== undefined && { phone: phone?.replace(/^\+/, '') || null }), ...(hours && { hours: { deleteMany: {}, create: hours } }) },
+      data: { ...rest, ...(phone !== undefined && { phone: phone?.replace(/^\+/, '') || null }), ...(hours && { hours: { deleteMany: {}, create: hours.map((h) => ({ weekday: h.weekday, start: h.start, end: h.end })) } }) },
       include: { hours: true },
     });
   }
@@ -110,7 +125,7 @@ export class SchedulingController {
   }
   @Patch('services/:id')
   @Roles('tenant_admin', 'manager', 'super_admin')
-  async updateService(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<ServiceDto>) {
+  async updateService(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateServiceDto) {
     await this.prisma.service.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     return this.prisma.service.update({ where: { id }, data: dto });
   }
