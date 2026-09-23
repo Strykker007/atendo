@@ -134,3 +134,19 @@ Formato padrão do Nest: `{ statusCode, message, error }`. Códigos relevantes:
 | 409 | Outra atendente já assumiu a conversa |
 | 404 | Recurso de outro tenant ou inexistente (nunca revelamos qual) |
 | 429 | Throttling |
+
+
+## IA (copiloto)
+
+Exigem login e a feature `ai_copilot`. Ver [15](15-ia.md).
+
+| Método | Rota | O que faz |
+|---|---|---|
+| GET | `/ai/status` | `{ available }` — se há fornecedor de IA configurado no ambiente |
+| GET | `/ai/usage` | consumo do mês: interações, custo em BRL e quebra por tipo |
+| POST | `/ai/suggest` | `{ conversationId }` → `{ text }` — sugestão de resposta (não envia nada) |
+| POST | `/ai/rewrite` | `{ text, tone, conversationId? }` → `{ text }` — tons: `formal`, `friendly`, `short`, `clear` |
+| POST | `/ai/summary` | `{ conversationId }` → `{ text }` — resumo em tópicos |
+
+`503` = sem fornecedor configurado. `403` = sem a feature no plano, sem quota ou teto de
+gasto atingido (a mensagem diz qual).

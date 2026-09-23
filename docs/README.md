@@ -16,5 +16,6 @@
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
 | [13 — Agendamento](13-agendamento.md) | Dev / Cliente | Profissionais, serviços, agenda, marcação pelo WhatsApp, lembretes ao cliente e ao profissional |
 | [14 — Qualidade e observabilidade](14-qualidade-e-observabilidade.md) | Dev / Ops | Testes automatizados, logs estruturados, erros e rastreio em produção |
+| [15 — IA](15-ia.md) | Dev / Negócio | Copiloto do atendente, bloco de IA nos fluxos, guarda-corpos, custo e cobrança por interação |
 
 Convenção: código em inglês, comentários e documentação em português.

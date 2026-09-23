@@ -12,6 +12,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
   const tags = useTags();
   const agents = useAgents();
   const sched = useHasFeature('scheduling');
+  const aiFeature = useHasFeature('ai_flows');
   const services = useServices();
   const pros = useProfessionals();
   const m = NODE_META[node.type];
@@ -168,6 +169,48 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
             <Field label="Horários mostrados por vez"><input type="number" min={2} max={12} className={inputCls} value={node.data.maxSlots} onChange={(e) => set({ maxSlots: Number(e.target.value) })} /></Field>
             <Field label="Mensagem de confirmação" hint="Pode usar {{servico}}, {{profissional}}, {{horario}}"><TextWithVars value={node.data.confirmText ?? ''} onChange={(v) => set({ confirmText: v })} vars={vars} placeholder="Agendado! {{servico}} com {{profissional}} em {{horario}}. Te lembro um dia antes. 💈" /></Field>
             <p className="text-[11px] text-muted">Depois de agendar, as variáveis <code className="font-mono bg-field rounded px-1">{'{{agendamento}}'}</code>, <code className="font-mono bg-field rounded px-1">{'{{servico}}'}</code> e <code className="font-mono bg-field rounded px-1">{'{{profissional}}'}</code> ficam disponíveis. O contato pode responder "cancelar" a qualquer momento.</p>
+          </>
+          )
+        )}
+
+        {node.type === 'ai' && (
+          !aiFeature.has && !aiFeature.loading ? <p className="text-sm text-muted rounded-lg bg-warn-soft px-3 py-2">IA nos fluxos não está incluída no plano deste cliente. O bloco será ignorado (saída "Não conseguiu").</p> : (
+          <>
+            <Field label="O que a IA faz aqui">
+              <select className={inputCls} value={node.data.mode} onChange={(e) => set({ mode: e.target.value, labels: e.target.value === 'classify' && !node.data.labels?.length ? [{ id: crypto.randomUUID().slice(0, 8), label: 'Quer agendar' }, { id: crypto.randomUUID().slice(0, 8), label: 'Perguntou preço' }] : node.data.labels })}>
+                <option value="answer">Responder o contato</option>
+                <option value="classify">Classificar a mensagem (escolher o caminho)</option>
+              </select>
+            </Field>
+            <Field label="Instruções do negócio" hint="Quem é você, o que pode e o que não pode responder">
+              <TextWithVars value={node.data.instructions} onChange={(v) => set({ instructions: v })} vars={vars} placeholder="Você atende a Barbearia do Carlos. Só fale de cortes, barba e horários. Nunca prometa desconto." />
+            </Field>
+            {node.data.mode === 'answer' ? (
+              <>
+                <Field label="Base de conhecimento" hint="Única fonte de fatos: preços, endereço, horários, regras. Se não estiver aqui, a IA diz que vai verificar.">
+                  <textarea className={inputCls} rows={7} value={node.data.knowledge ?? ''} onChange={(e) => set({ knowledge: e.target.value })} placeholder={'Corte: R$ 45 (30 min)\nBarba: R$ 30\nEndereço: Rua X, 100\nFuncionamento: terça a sábado, 9h às 19h'} />
+                </Field>
+                <Field label="Guardar a resposta numa variável (opcional)">
+                  <input className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: e.target.value.replace(/[^\w]/g, '_').toLowerCase() || undefined })} placeholder="resposta_ia" />
+                </Field>
+              </>
+            ) : (
+              <Field label="Rótulos" hint="Cada rótulo vira uma saída do bloco">
+                <div className="space-y-1.5">
+                  {(node.data.labels ?? []).map((l) => (
+                    <div key={l.id} className="flex items-center gap-1.5">
+                      <input className={inputCls} value={l.label} onChange={(e) => set({ labels: (node.data.labels ?? []).map((x) => (x.id === l.id ? { ...x, label: e.target.value } : x)) })} />
+                      <button onClick={() => set({ labels: (node.data.labels ?? []).filter((x) => x.id !== l.id) })} className="text-faint hover:text-danger p-1"><X size={14} /></button>
+                    </div>
+                  ))}
+                  <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => set({ labels: [...(node.data.labels ?? []), { id: crypto.randomUUID().slice(0, 8), label: '' }] })}>Rótulo</Button>
+                </div>
+              </Field>
+            )}
+            <Field label="Mensagem quando a IA não conseguir" hint="Enviada antes de seguir pela saída 'Não conseguiu'">
+              <TextWithVars multiline={false} value={node.data.fallbackText ?? ''} onChange={(v) => set({ fallbackText: v })} vars={vars} placeholder="Vou verificar isso com um atendente, um momento." />
+            </Field>
+            <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">A saída <b>Não conseguiu</b> é obrigatória e deve levar a um humano: ela é usada quando a IA está indisponível, sem quota ou fora do que sabe responder. Cada chamada consome uma <b>interação de IA</b> do plano.</p>
           </>
           )
         )}

@@ -15,6 +15,14 @@ export function validateDefinition(def: FlowDefinition) {
     if (n.type === 'question' && (!n.data.text || !n.data.varName)) errors.push(`"Perguntar" (${n.id}) precisa de texto e nome da variável.`);
     if (n.type === 'menu' && (!n.data.text || !n.data.options?.length)) errors.push(`"Menu" (${n.id}) precisa de texto e ao menos uma opção.`);
     if (n.type === 'start' && !def.edges.some((e) => e.source === n.id)) errors.push('O nó "Início" não está conectado a nada.');
+    if (n.type === 'ai') {
+      if (!n.data.instructions?.trim()) errors.push(`"IA" (${n.id}) precisa das instruções do negócio.`);
+      if (n.data.mode === 'classify' && !n.data.labels?.length) errors.push(`"IA" (${n.id}) em modo classificar precisa de pelo menos um rótulo.`);
+      // sem saída de fallback, uma indisponibilidade da IA deixaria o contato sem resposta
+      if (!def.edges.some((e) => e.source === n.id && e.sourceHandle === 'fallback')) {
+        errors.push(`"IA" (${n.id}) precisa da saída "Não conseguiu" conectada — é ela que entrega para um humano quando a IA falha.`);
+      }
+    }
   }
   if (errors.length) throw new BadRequestException(errors.join(' '));
 }

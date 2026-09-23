@@ -54,6 +54,10 @@ provider_pricing (global, sem tenant)
 
 **message_usage** — ledger, uma linha por mensagem. Ver [05](05-planos-e-cobranca.md).
 
+**ai_usage** — ledger de IA, uma linha por chamada ao modelo (`kind`, modelo, tokens de
+entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` quando falhou).
+É o que permite saber a margem da IA e aplicar o teto de gasto. Ver [15](15-ia.md).
+
 **usage_counters** — agregado mensal reconciliado (`tenantId + period` únicos).
 
 **usage_alerts** — quais alertas já disparamos (única por tenant/período/métrica/threshold).

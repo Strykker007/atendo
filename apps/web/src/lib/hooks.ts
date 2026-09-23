@@ -367,3 +367,19 @@ export const useAvailability = (professionalId: string | null, serviceId: string
 export const useCreateAppointment = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { professionalId: string; serviceId: string; contactId: string; startAt: string; conversationId?: string; notes?: string }) => api<Appointment>('/scheduling/appointments', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invSched(qc) }); };
 export const useUpdateAppointment = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; status?: AppointmentStatus; startAt?: string; professionalId?: string; serviceId?: string; notes?: string }) => api<Appointment>(`/scheduling/appointments/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invSched(qc) }); };
 export const useContactCard = (contactId: string | null, enabled = true) => useQuery({ queryKey: ['contact-card', contactId], enabled: !!contactId && enabled, queryFn: () => api<ContactCard>(`/scheduling/contacts/${contactId}`), retry: false });
+
+// ---- IA ----
+export type RewriteTone = 'formal' | 'friendly' | 'short' | 'clear';
+export interface AiUsageSummary { period: string; interactions: number; costBrl: number; byKind: { kind: string; count: number; costBrl: number; tokensIn: number; tokensOut: number }[] }
+
+/** IA configurada neste ambiente? Sem chave, o front esconde os botões em vez de dar erro. */
+export const useAiStatus = () => {
+  const feature = useHasFeature('ai_copilot');
+  const q = useQuery({ queryKey: ['ai-status'], enabled: feature.has, retry: false, staleTime: 5 * 60_000, queryFn: () => api<{ available: boolean }>('/ai/status') });
+  return { enabled: feature.has && !!q.data?.available };
+};
+export const useAiUsage = () => useQuery({ queryKey: ['ai-usage'], queryFn: () => api<AiUsageSummary>('/ai/usage'), retry: false });
+const invAi = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['ai-usage'] });
+export const useAiSuggest = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ text: string }>('/ai/suggest', { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: invAi(qc) }); };
+export const useAiRewrite = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { text: string; tone: RewriteTone; conversationId?: string }) => api<{ text: string }>('/ai/rewrite', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invAi(qc) }); };
+export const useAiSummary = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ text: string }>('/ai/summary', { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: invAi(qc) }); };

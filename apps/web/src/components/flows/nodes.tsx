@@ -1,6 +1,6 @@
 'use client';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Play, MessageSquare, HelpCircle, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock } from 'lucide-react';
+import { Play, MessageSquare, HelpCircle, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FlowNode, FlowNodeType } from '@atendo/shared';
 
@@ -15,6 +15,7 @@ export const NODE_META: Record<FlowNodeType, { icon: React.ReactNode; color: str
   wait: { icon: <Clock size={13} />, color: 'bg-done text-white', label: 'Aguardar', hint: 'Pausa de X minutos' },
   end: { icon: <Flag size={13} />, color: 'bg-danger text-white', label: 'Fim', hint: 'Encerra o fluxo' },
   schedule: { icon: <CalendarClock size={13} />, color: 'bg-c3 text-white', label: 'Agendar horário', hint: 'Serviço → profissional → horário → confirma' },
+  ai: { icon: <Sparkles size={13} />, color: 'bg-c1 text-white', label: 'IA', hint: 'Responde com suas instruções ou classifica a mensagem' },
 };
 
 const handleCls = '!w-2.5 !h-2.5 !bg-panel !border-2 !border-line-strong hover:!border-accent';
@@ -135,7 +136,36 @@ export function ScheduleNodeView({ data, selected }: P) {
   );
 }
 
-export const nodeTypes = { schedule: ScheduleNodeView, start: StartNodeView, message: MessageNodeView, question: QuestionNodeView, menu: MenuNodeView, condition: ConditionNodeView, action: ActionNodeView, wait: WaitNodeView, end: EndNodeView };
+export function AiNodeView({ data, selected }: P) {
+  const d = data as { mode?: 'answer' | 'classify'; instructions?: string; knowledge?: string; labels?: { id: string; label: string }[] };
+  const classify = d.mode === 'classify';
+  return (
+    <Shell type="ai" selected={selected} summary={d.instructions || ''}>
+      <Handle type="target" position={Position.Top} className={handleCls} />
+      {classify ? (
+        <div className="px-2 pb-2 space-y-1">
+          {(d.labels ?? []).map((l) => (
+            <div key={l.id} className="relative flex items-center gap-1.5 rounded-md bg-field px-2 py-1 text-[11px] text-ink">
+              <span className="truncate">{l.label || '(rótulo)'}</span>
+              <Handle type="source" position={Position.Right} id={l.id} className={cn(handleCls, '!-right-3')} />
+            </div>
+          ))}
+          <div className="relative flex items-center rounded-md border border-dashed border-line px-2 py-1 text-[10.5px] text-faint">
+            Não conseguiu
+            <Handle type="source" position={Position.Right} id="fallback" className={cn(handleCls, '!-right-3')} />
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-between px-3 pb-2 text-[10.5px] font-semibold">
+          <span className="relative text-ok pr-2">Respondeu<Handle type="source" position={Position.Bottom} id="done" className={cn(handleCls, '!left-4')} /></span>
+          <span className="relative text-danger pl-2">Não conseguiu<Handle type="source" position={Position.Bottom} id="fallback" className={cn(handleCls, '!left-auto !right-4')} /></span>
+        </div>
+      )}
+    </Shell>
+  );
+}
+
+export const nodeTypes = { ai: AiNodeView, schedule: ScheduleNodeView, start: StartNodeView, message: MessageNodeView, question: QuestionNodeView, menu: MenuNodeView, condition: ConditionNodeView, action: ActionNodeView, wait: WaitNodeView, end: EndNodeView };
 
 /** Dados iniciais de um bloco novo. */
 export function defaultData(type: FlowNodeType): FlowNode['data'] {
@@ -149,5 +179,6 @@ export function defaultData(type: FlowNodeType): FlowNode['data'] {
     case 'wait': return { minutes: 5 };
     case 'end': return { closeConversation: false };
     case 'schedule': return { maxSlots: 6 };
+    case 'ai': return { mode: 'answer', instructions: '', knowledge: '', fallbackText: 'Vou verificar isso com um atendente, um momento.' };
   }
 }

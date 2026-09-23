@@ -14,7 +14,7 @@ import { collectFlowVars, SYSTEM_VARS } from './TextWithVars';
 import { useNumbers, useFlowRuns, type Flow } from '@/lib/hooks';
 import type { FlowDefinition, FlowNode, FlowNodeType, FlowTrigger } from '@atendo/shared';
 
-const PALETTE: FlowNodeType[] = ['message', 'question', 'menu', 'condition', 'action', 'schedule', 'wait', 'end'];
+const PALETTE: FlowNodeType[] = ['message', 'question', 'menu', 'ai', 'condition', 'action', 'schedule', 'wait', 'end'];
 const EMPTY: FlowDefinition = { nodes: [{ id: 'start', type: 'start', position: { x: 250, y: 40 }, data: {} as never }], edges: [] };
 
 /** Editor visual de fluxo: paleta à esquerda, canvas no meio, propriedades à direita. */

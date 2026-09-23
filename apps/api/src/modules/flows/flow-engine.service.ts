@@ -9,6 +9,7 @@ import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { choose, interpolate, validAnswer } from './answer';
+import { AiService } from '../ai/ai.service';
 
 export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
@@ -29,6 +30,7 @@ export class FlowEngineService {
     private readonly conversations: ConversationsService,
     private readonly gateway: ConversationsGateway,
     @Inject(forwardRef(() => SchedulingService)) private readonly scheduling: SchedulingService,
+    private readonly ai: AiService,
     @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowResumeJob>,
   ) {}
 
@@ -158,6 +160,10 @@ export class FlowEngineService {
           case 'end':
             if (node.data.closeConversation) await this.conversations.setStatusSystem(run.conversationId, 'closed');
             return this.finish(runId, 'done');
+          case 'ai': {
+            await this.goNext(runId, def, node.id, await this.aiStep(run, node, ctx));
+            continue;
+          }
           case 'schedule': {
             // mini-máquina: serviço → profissional → horário → confirma. Estado em vars._sched
             const st = await this.scheduleStep(runId, node, run.conversationId, run.tenantId, vars, undefined);
@@ -212,6 +218,66 @@ export class FlowEngineService {
       return this.next(run.id, st);
     }
     // nó 'wait' recebendo mensagem: ignora, continua esperando o tempo
+  }
+
+  /**
+   * Nó de IA. Devolve a saída a seguir: 'done' (respondeu), o id do rótulo (classificou)
+   * ou 'fallback'. **Nunca lança**: se a IA falhar, o fluxo segue pelo fallback e o
+   * contato é entregue a um humano em vez de ficar sem resposta.
+   */
+  private async aiStep(
+    run: FlowRun & { conversation: Conversation & { contact: { name: string | null; phone: string } } },
+    node: Extract<FlowNode, { type: 'ai' }>,
+    ctx: { contact: { name: string | null; phone: string }; vars: Record<string, string> },
+  ): Promise<string> {
+    try {
+      await this.ai.assertFeature(run.tenantId, 'ai_flows');
+      const last = await this.prisma.message.findFirst({
+        where: { conversationId: run.conversationId, direction: 'in' },
+        orderBy: { createdAt: 'desc' },
+        select: { text: true },
+      });
+
+      if (node.data.mode === 'classify') {
+        const labels = node.data.labels ?? [];
+        if (!last?.text?.trim() || !labels.length) return 'fallback';
+        const answer = await this.ai.flowClassify({
+          tenantId: run.tenantId,
+          conversationId: run.conversationId,
+          instructions: node.data.instructions,
+          labels,
+          text: last.text,
+        });
+        // o modelo responde o id; aceitamos também o rótulo por extenso
+        const chosen = choose(labels.map((l) => ({ id: l.id, title: l.label })), answer);
+        return chosen?.id ?? 'fallback';
+      }
+
+      const history = await this.prisma.message.findMany({
+        where: { conversationId: run.conversationId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: { direction: true, text: true, internal: true },
+      });
+      const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: run.tenantId }, select: { name: true } });
+      const text = await this.ai.flowAnswer({
+        tenantId: run.tenantId,
+        conversationId: run.conversationId,
+        businessName: tenant.name,
+        instructions: interpolate(node.data.instructions, ctx),
+        knowledge: node.data.knowledge,
+        history: [...history].reverse(),
+      });
+      await this.send(run.conversationId, text);
+      if (node.data.varName) {
+        await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars: { ...ctx.vars, [node.data.varName]: text } } });
+      }
+      return 'done';
+    } catch (err) {
+      this.log.warn(`IA no fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
+      if (node.data.fallbackText) await this.send(run.conversationId, node.data.fallbackText).catch(() => undefined);
+      return 'fallback';
+    }
   }
 
   /**

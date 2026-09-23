@@ -26,13 +26,14 @@
 - Infra: Dockerfiles (api/worker/web), compose de produção com Caddy/HTTPS, Socket.IO em cluster (Redis), /health, shards da Evolution, CI
 - Contas: convite por e-mail (equipe e admin de cliente), esqueci/redefinir/trocar senha; e-mails de alerta de plano, cobrança falhou e suspensão (Resend)
 - Agendamento (plugável): profissionais com horários, serviços, agenda por dia, marcação pelo WhatsApp (bloco no fluxo), pelo chat e pela agenda, lembretes ao cliente (1 confirma / 2 remarca) e aviso ao profissional com histórico do cliente
-- Testes: 125 testes unitários (Vitest) nos pontos de risco — adapters Meta/Evolution, fuso e disponibilidade da agenda, interpretação de resposta em fluxos, quota/excedente, DSL de relatórios, logger e contexto; `pnpm test` no CI
+- Testes: 151 testes unitários (Vitest) nos pontos de risco — adapters Meta/Evolution, fuso e disponibilidade da agenda, interpretação de resposta em fluxos, quota/excedente, DSL de relatórios, logger e contexto, quota e prompts de IA; `pnpm test` no CI
 - Observabilidade: log estruturado (JSON em produção), `requestId` por requisição no cabeçalho e nas respostas de erro, log de acesso com duração, filtro global de exceções, contexto e falhas de job nas filas, Sentry opcional
+- IA (plugável): copiloto do atendente (sugerir resposta, reescrever em 4 tons, resumir a conversa — sempre com o humano enviando) e bloco de IA no editor de fluxos (responder com base de conhecimento ou classificar para rotear); adapters Anthropic/OpenAI trocáveis por config, ledger `ai_usage`, cobrança por interação com excedente e teto de gasto
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
 
-1. **IA** — em três etapas, da menor para a maior exposição: bloco de IA no editor de fluxos, copiloto do atendente (sugerir/reescrever/resumir, sempre com o humano aprovando) e agente autônomo com base de conhecimento do cliente. Cobrança por "interações de IA" incluídas no plano + excedente, com teto de gasto por tenant.
+1. **IA, etapa 3** — agente autônomo: base de conhecimento por arquivo (PDF/planilha) com busca vetorial no `pgvector`, resposta fora do fluxo em toda conversa nova e handoff por confiança. As etapas 1 e 2 (bloco de IA no fluxo e copiloto) estão prontas — ver [15](15-ia.md).
 2. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
 3. **Validar com credencial real** — Meta (WABA de teste), Stripe (chaves de teste) e Resend nunca rodaram fora do simulado. É o maior risco em aberto.
 4. **Testes de integração** — e2e de receber → responder com banco e fila de verdade (os atuais são unitários e offline).

@@ -2,7 +2,7 @@
  * Definição de um fluxo de automação (o que o editor salva e o motor executa).
  * Um fluxo é um grafo: nós + arestas. Cada nó tem um tipo e dados próprios.
  */
-export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end' | 'schedule';
+export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end' | 'schedule' | 'ai';
 
 export interface FlowNodeBase<T extends FlowNodeType, D> {
   id: string;
@@ -26,9 +26,32 @@ export type EndNode = FlowNodeBase<'end', { closeConversation: boolean }>;
  */
 export type ScheduleNode = FlowNodeBase<'schedule', { intro?: string; serviceId?: string; professionalId?: string; maxSlots: number; confirmText?: string }>;
 
-export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode;
+/**
+ * IA no fluxo. Dois modos:
+ * - `answer`: responde a última mensagem do contato com base nas instruções e na base de
+ *   conhecimento do cliente. Saídas: 'done' e 'fallback' (IA indisponível, sem quota ou erro).
+ * - `classify`: escolhe um dos rótulos e sai por ele. Saídas: um id por rótulo + 'fallback'.
+ *
+ * A IA **nunca** inventa: o prompt manda dizer que vai verificar quando a informação não
+ * estiver na base. Por isso todo nó de IA deve ter a saída 'fallback' ligada a um humano.
+ */
+export type AiNode = FlowNodeBase<'ai', {
+  mode: 'answer' | 'classify';
+  /** quem é o negócio e o que a IA pode ou não fazer */
+  instructions: string;
+  /** answer: única fonte de fatos (FAQ, preços, endereço) */
+  knowledge?: string;
+  /** answer: guarda a resposta nesta variável além de enviar */
+  varName?: string;
+  /** classify: rótulos que viram as saídas do nó */
+  labels?: { id: string; label: string }[];
+  /** mensagem enviada quando a IA não puder responder */
+  fallbackText?: string;
+}>;
 
-/** sourceHandle: menu → id da opção ou 'fallback'; condition → 'yes' | 'no'; demais → undefined */
+export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode | AiNode;
+
+/** sourceHandle: menu → id da opção ou 'fallback'; condition → 'yes' | 'no'; ai → 'done'/id do rótulo ou 'fallback'; demais → undefined */
 export interface FlowEdge {
   id: string;
   source: string;
@@ -58,4 +81,5 @@ export const FLOW_NODE_LABEL: Record<FlowNodeType, string> = {
   wait: 'Aguardar',
   end: 'Fim',
   schedule: 'Agendar horário',
+  ai: 'IA',
 };

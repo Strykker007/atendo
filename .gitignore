@@ -11,3 +11,4 @@ coverage
 infra/volumes
 apps/api/storage
 .logs
+apps/web/tsconfig.tsbuildinfo

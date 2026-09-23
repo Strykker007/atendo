@@ -5,6 +5,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { FlowsModule } from './modules/flows/flows.module';
 import { SchedulingModule } from './modules/scheduling/scheduling.module';
+import { AiModule } from './modules/ai/ai.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { env } from './config/env';
 
@@ -17,6 +18,7 @@ import { env } from './config/env';
     BillingModule,
     FlowsModule,
     SchedulingModule,
+    AiModule,
   ],
 })
 export class WorkerModule {}

@@ -8,11 +8,13 @@ import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen,
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
+import { useAiStatus } from '@/lib/hooks';
 import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
 import { OriginBadge } from './OriginBadge';
+import { CopilotBar, SummaryButton } from './Copilot';
 
 export function ChatPane() {
   const { conversationId, setConversation, status, setStatus: setFilterStatus, rightPanelOpen, toggleRightPanel } = useUI();
@@ -35,6 +37,7 @@ export function ChatPane() {
   const activeRun = useActiveRun(conversationId);
   const stopFlow = useStopFlow();
   const sched = useHasFeature('scheduling');
+  const ai = useAiStatus();
   const [scheduling, setScheduling] = useState(false);
   const card = useContactCard(conv?.contact.id ?? null, sched.has);
   const tags = useTags();
@@ -173,6 +176,7 @@ export function ChatPane() {
             )}
           </div>
         )}
+        {ai.enabled && <SummaryButton conversationId={conv.id} />}
         {conv.status !== 'closed' ? (
           <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'closed' }).then(() => toast.ok('Atendimento encerrado')).catch(toast.err)} title="Encerrar atendimento">
             <span className="hidden sm:inline">Encerrar</span>
@@ -273,6 +277,7 @@ export function ChatPane() {
               <button type="button" onClick={() => setAttachment(null)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
           )}
+          {ai.enabled && !noteMode && <CopilotBar conversationId={conv.id} text={text} onText={setText} />}
           <div className="flex items-end gap-2">
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept="image/*,audio/*,video/mp4,application/pdf,.doc,.docx,.xls,.xlsx" />
           <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => fileRef.current?.click()} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />

@@ -1,9 +1,9 @@
 'use client';
-import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle } from 'lucide-react';
+import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
-import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe } from '@/lib/hooks';
+import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useSearchParams } from 'next/navigation';
@@ -97,6 +97,7 @@ function PlanoInner() {
         <Meter icon={<FileText size={18} />} label="Templates (Meta)" used={u.used.templates} max={L.includedTemplatesMonth} hard={L.hardLimit} overage={L.overagePricePerTemplate} hint="Só mensagens ativas pela API oficial custam template" />
         <Meter icon={<Smartphone size={18} />} label="Números" used={u.used.numbers} max={L.maxNumbers} hard />
         <Meter icon={<Users size={18} />} label="Atendentes" used={u.used.agents} max={L.maxAgents} hard />
+        <AiMeter limits={L} />
       </div>
 
       <div className="rounded-2xl bg-panel border border-line p-5 text-sm text-muted space-y-1">
@@ -162,6 +163,28 @@ function PlanoInner() {
         </section>
       )}
     </PageShell>
+  );
+}
+
+/** Consumo de IA. Só aparece quando o plano tem alguma funcionalidade de IA. */
+function AiMeter({ limits }: { limits: { includedAiInteractionsMonth?: number; overagePricePerAiInteraction?: number | null; aiMonthlyCostCap?: number; features?: string[] } }) {
+  const copilot = useHasFeature('ai_copilot');
+  const flows = useHasFeature('ai_flows');
+  const ai = useAiUsage();
+  if (!copilot.has && !flows.has) return null;
+  const included = limits.includedAiInteractionsMonth ?? 0;
+  const cap = limits.aiMonthlyCostCap ?? 0;
+  const custo = ai.data?.costBrl ?? 0;
+  return (
+    <Meter
+      icon={<Sparkles size={18} />}
+      label="Interações de IA"
+      used={ai.data?.interactions ?? 0}
+      max={included}
+      hard={limits.overagePricePerAiInteraction == null}
+      overage={limits.overagePricePerAiInteraction}
+      hint={`Sugestão, reescrita, resumo e resposta da IA nos fluxos${cap ? ` · teto de gasto ${brl(cap)}/mês (${brl(custo)} usados)` : ''}`}
+    />
   );
 }
 

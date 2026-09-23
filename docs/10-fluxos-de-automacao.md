@@ -20,6 +20,7 @@ Onde aparece:
 | **Condição** | Variável igual/contém · conversa tem tag · dentro do horário comercial (fuso São Paulo) | `yes` / `no` |
 | **Ação** | **Definir variável** · aplicar/remover tag (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **entregar para humano** (encerra o fluxo; opcionalmente já atribui) | 1 (handoff: nenhuma) |
 | **Agendar horário** | Serviço → profissional → horário → confirma; cria o agendamento (ver [13](13-agendamento.md)). Exige feature `scheduling` | `done` / `fallback` |
+| **IA** | Responde o contato com as instruções e a base de conhecimento do cliente, ou classifica a mensagem para escolher o caminho. Exige feature `ai_flows` (ver [15](15-ia.md)) | `done` / um por rótulo, + `fallback` (**obrigatório**) |
 | **Aguardar** | Pausa de N minutos (job BullMQ com delay) | 1 |
 | **Fim** | Encerra o fluxo; opcionalmente encerra a conversa | 0 |
 

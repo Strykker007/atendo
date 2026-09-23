@@ -41,6 +41,17 @@ const schema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
   STRIPE_CURRENCY: z.string().default('brl'),
   RESEND_API_KEY: z.string().optional().default(''),
+  // ---- IA ----
+  /** none = IA desligada (o front esconde os recursos) */
+  AI_PROVIDER: z.enum(['none', 'anthropic', 'openai']).default('none'),
+  AI_API_KEY: z.string().optional().default(''),
+  /** vazio = modelo padrão do adapter (o mais barato) */
+  AI_MODEL: z.string().optional().default(''),
+  AI_MAX_TOKENS: z.coerce.number().min(32).max(4000).default(400),
+  /** o contato está esperando no WhatsApp: melhor falhar rápido e cair no humano */
+  AI_TIMEOUT_MS: z.coerce.number().min(1000).max(60_000).default(20_000),
+  /** conversão do preço do fornecedor (USD) para o que você cobra (BRL) */
+  USD_BRL_RATE: z.coerce.number().positive().default(5.5),
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
   /** json = uma linha JSON por evento (produção/agregador); pretty = legível no terminal */
   LOG_FORMAT: z.enum(['json', 'pretty']).default(process.env.NODE_ENV === 'production' ? 'json' : 'pretty'),

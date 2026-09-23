@@ -132,3 +132,19 @@ Tela *Financeiro (dono)* (`GET /billing/finance`), quatro abas:
 ### Margem (dono do Atendo)
 
 `GET /billing/margin?period=YYYY-MM` (super_admin) e tela *Margem (dono)* no menu: por cliente, `receita (plano + excedente) − custo (Σ providerCost dos templates + Σ infraCostMonth dos números)`. Margem < 30% fica em laranja — é o sinal de plano mal precificado.
+
+
+## IA: cobrança por interação
+
+A IA tem ledger próprio (`ai_usage`) e contadores próprios, pelo mesmo motivo das
+mensagens: sem medir, não dá para saber se dá lucro.
+
+O cliente compra **interações de IA**, não token — uma interação é uma chamada ao modelo
+(sugestão, reescrita, resumo ou resposta do robô). Em `PlanLimits`:
+`includedAiInteractionsMonth`, `overagePricePerAiInteraction` e `aiMonthlyCostCap`.
+
+O `aiMonthlyCostCap` é um **teto de custo real em BRL** e corta o uso mesmo de quem está
+pagando excedente. Mensagem tem custo previsível por unidade; IA não — um fluxo mal montado
+pode chamar o modelo em loop. A quota protege o cliente de fatura surpresa; o teto protege você.
+
+Detalhes, tabela de preços por modelo e como calibrar o preço: [15](15-ia.md).
