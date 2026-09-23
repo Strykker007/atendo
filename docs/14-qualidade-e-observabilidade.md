@@ -48,4 +48,76 @@ O `pnpm typecheck` também cobre `test/` — teste que não compila quebra o CI.
 
 ## Observabilidade
 
-_(seção escrita junto com a implementação — ver abaixo)_
+Objetivo: **quando algo quebrar na casa do cliente, você descobrir antes dele ligar** — e,
+quando ele ligar, conseguir achar exatamente o que aconteceu.
+
+### Log estruturado
+
+`common/observability/app-logger.ts` substitui o logger padrão do Nest nos dois processos
+(API e worker). Todo `new Logger(...)` que já existia no código passa por ele sem mudança.
+
+- `LOG_FORMAT=json` (padrão em produção): **uma linha JSON por evento**, pronta para
+  Loki/Datadog/CloudWatch — `time`, `level`, `msg`, `context`, `requestId`, `tenantId`,
+  `userId`, `job`, `stack` e o que mais for passado como objeto.
+- `LOG_FORMAT=pretty` (padrão fora de produção): linha legível e colorida no terminal.
+- `LOG_LEVEL` = `debug` | `log` | `warn` | `error`.
+- `error`/`warn` saem em **stderr**, o resto em **stdout** (o Docker separa os dois).
+
+### requestId: o fio que liga tudo
+
+`RequestContextMiddleware` abre um `AsyncLocalStorage` por requisição:
+
+- aceita o `x-request-id` de quem chamou (proxy, outro serviço) ou gera um;
+- **devolve no cabeçalho `x-request-id`** e **no corpo de toda resposta de erro**;
+- todo log daquela requisição sai com o mesmo `requestId` — sem precisar passá-lo adiante.
+
+Na prática: o cliente manda o print do erro, você procura o `requestId` no log e vê a
+requisição inteira, com tenant, usuário e a exceção.
+
+Depois dos guards, `HttpLoggingInterceptor` completa o contexto com `tenantId`/`userId` e
+escreve uma linha por requisição atendida com método, rota, status e duração. `/health`
+(chamado pelo Docker a cada 15s) fica em `debug` para não poluir.
+
+### Erros
+
+`AllExceptionsFilter` é o último filtro: nenhum erro sai sem log.
+
+- **4xx** (validação, permissão) → `warn`; são esperados.
+- **5xx** → `error` com stack e envio ao Sentry.
+- A resposta preserva o formato do Nest e acrescenta `requestId`.
+
+`uncaughtException` e `unhandledRejection` registram, avisam o Sentry, aguardam o envio e
+**encerram o processo** — deixar de pé um processo em estado desconhecido é pior do que
+o Docker reiniciar.
+
+### Filas
+
+`TrackedWorkerHost` é a base de todos os processors (entrada, saída, fluxos, lembretes,
+cobrança, saúde dos números). Quem herda implementa `handle` no lugar de `process`. Ele:
+
+- abre um contexto por job (`job.queue`, `job.name`, `job.id`) — o log do job sai
+  identificado, e processors enriquecem com `tenantId` assim que o descobrem;
+- mede a duração;
+- **loga toda falha** com a tentativa atual e se ainda haverá retry — sem isto o BullMQ
+  engole o erro e um envio que falhou simplesmente some;
+- reporta ao Sentry **só na última tentativa**: erro transitório que o retry resolveu não é incidente.
+
+### Sentry
+
+Opcional e desligado por padrão: sem `SENTRY_DSN` nada é enviado e o projeto roda igual.
+Com DSN, cada erro vai com `requestId`, `tenantId`, usuário e o job de origem.
+`sendDefaultPii: false` — corpo e cabeçalhos **não** são enviados, porque passam token de
+provider e dados do contato.
+
+Variáveis: `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE` (0 a 1, deixe 0 até precisar),
+`APP_VERSION` (agrupa erros por release).
+
+### Saúde
+
+`GET /health` já verifica Postgres e Redis e é o healthcheck do Docker (a cada 15s).
+
+### O que ainda falta
+
+- Métricas (profundidade das filas, taxa de falha de envio por número) num endpoint
+  Prometheus — hoje isso só aparece no log.
+- Alerta ativo (e-mail/WhatsApp para você) quando uma fila acumula ou um número cai.

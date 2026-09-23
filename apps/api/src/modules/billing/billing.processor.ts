@@ -1,19 +1,20 @@
-import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
+import { Processor, InjectQueue } from '@nestjs/bullmq';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { UsageService } from './usage.service';
 import { StripeService } from './stripe.service';
 import { QUEUE_BILLING } from '../whatsapp/queues';
+import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 
 @Processor(QUEUE_BILLING)
-export class BillingProcessor extends WorkerHost {
+export class BillingProcessor extends TrackedWorkerHost {
   constructor(
     private readonly usage: UsageService,
     private readonly stripe: StripeService,
   ) {
-    super();
+    super(QUEUE_BILLING);
   }
-  async process(job: Job) {
+  protected async handle(job: Job) {
     if (job.name === 'reconcile') {
       await this.usage.reconcile();
       // carência vencida sem pagamento → suspende (envio bloqueado, recebimento continua)

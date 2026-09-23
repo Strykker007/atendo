@@ -1,5 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Processor } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { ProviderRegistry } from './providers/provider.registry';
 import { NumbersService } from './numbers.service';
@@ -8,11 +7,11 @@ import { QUEUE_INBOUND, type InboundJob } from './queues';
 import { StorageService } from '../../common/storage/storage.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
+import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
+import { enrichContext } from '../../common/observability/request-context';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
-export class InboundProcessor extends WorkerHost {
-  private readonly log = new Logger(InboundProcessor.name);
-
+export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
   constructor(
     private readonly registry: ProviderRegistry,
     private readonly numbers: NumbersService,
@@ -21,10 +20,10 @@ export class InboundProcessor extends WorkerHost {
     private readonly flows: FlowEngineService,
     private readonly scheduling: SchedulingService,
   ) {
-    super();
+    super(QUEUE_INBOUND);
   }
 
-  async process(job: Job<InboundJob>) {
+  protected async handle(job: Job<InboundJob>) {
     const parsed = this.registry.get(job.data.provider).parseWebhook(job.data.body);
 
     for (const msg of parsed.messages) {
@@ -33,6 +32,7 @@ export class InboundProcessor extends WorkerHost {
         this.log.warn(`Mensagem para número desconhecido ${job.data.provider}:${msg.externalNumberId}`);
         continue;
       }
+      enrichContext({ tenantId: number.tenantId }); // daqui para a frente o log sai com o tenant
       const result = await this.conversations.ingestInbound(number, msg);
       const saved = result?.message;
       // automação: avança fluxo ativo ou avalia gatilhos (nunca derruba a ingestão)

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { InjectQueue, Processor } from '@nestjs/bullmq';
+import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { Job, Queue } from 'bullmq';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { NumbersService } from './numbers.service';
@@ -18,17 +19,16 @@ export class NumbersHealthScheduler implements OnModuleInit {
 }
 
 @Processor(QUEUE_HEALTH)
-export class NumbersHealthProcessor extends WorkerHost {
-  private readonly log = new Logger(NumbersHealthProcessor.name);
+export class NumbersHealthProcessor extends TrackedWorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly numbers: NumbersService,
     private readonly registry: ProviderRegistry,
     private readonly gateway: ConversationsGateway,
   ) {
-    super();
+    super(QUEUE_HEALTH);
   }
-  async process(_job: Job) {
+  protected async handle(_job: Job) {
     const list = await this.prisma.whatsAppNumber.findMany({ where: { isActive: true, status: { not: 'pending_qr' } } });
     for (const n of list) {
       try {

@@ -26,12 +26,16 @@
 - Infra: Dockerfiles (api/worker/web), compose de produção com Caddy/HTTPS, Socket.IO em cluster (Redis), /health, shards da Evolution, CI
 - Contas: convite por e-mail (equipe e admin de cliente), esqueci/redefinir/trocar senha; e-mails de alerta de plano, cobrança falhou e suspensão (Resend)
 - Agendamento (plugável): profissionais com horários, serviços, agenda por dia, marcação pelo WhatsApp (bloco no fluxo), pelo chat e pela agenda, lembretes ao cliente (1 confirma / 2 remarca) e aviso ao profissional com histórico do cliente
+- Testes: 120 testes unitários (Vitest) nos pontos de risco — adapters Meta/Evolution, fuso e disponibilidade da agenda, interpretação de resposta em fluxos, quota/excedente, DSL de relatórios, logger e contexto; `pnpm test` no CI
+- Observabilidade: log estruturado (JSON em produção), `requestId` por requisição no cabeçalho e nas respostas de erro, log de acesso com duração, filtro global de exceções, contexto e falhas de job nas filas, Sentry opcional
 - Documentação (esta pasta)
 
 ## Próximos, em ordem sugerida
 
-1. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
-2. **Testes** — unit nos adapters (parseWebhook com payloads reais gravados), e2e do fluxo enviar/receber.
-3. **Produção** — Dockerfile da API/worker/web, `migrate deploy`, HTTPS, variáveis, observabilidade (logs estruturados, Sentry).
-4. **2FA** (TOTP) para admins.
-5. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.
+1. **IA** — em três etapas, da menor para a maior exposição: bloco de IA no editor de fluxos, copiloto do atendente (sugerir/reescrever/resumir, sempre com o humano aprovando) e agente autônomo com base de conhecimento do cliente. Cobrança por "interações de IA" incluídas no plano + excedente, com teto de gasto por tenant.
+2. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
+3. **Validar com credencial real** — Meta (WABA de teste), Stripe (chaves de teste) e Resend nunca rodaram fora do simulado. É o maior risco em aberto.
+4. **Testes de integração** — e2e de receber → responder com banco e fila de verdade (os atuais são unitários e offline).
+5. **Métricas e alerta** — profundidade das filas e falhas de envio num endpoint Prometheus; alerta ativo quando uma fila acumula ou um número cai.
+6. **2FA** (TOTP) para admins.
+7. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.

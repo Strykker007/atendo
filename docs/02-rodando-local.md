@@ -25,7 +25,7 @@ Depois de reiniciar o Mac, rode `colima start` de novo antes de subir a infra.
 cd ~/Projetos/atendo && pnpm start:all
 ```
 
-Sobe Docker (Colima), infra, migrations, API e web, e imprime os endereços. `pnpm stop:all` para tudo (dados ficam). `pnpm logs` mostra o log da API. Depois de reiniciar o Mac é só `pnpm start:all` de novo.
+Sobe Docker (Colima), infra, migrations, API e web, e imprime os endereços. `pnpm stop:all` para tudo (dados ficam). `pnpm logs` mostra o log da API (em dev sai legível; em produção, uma linha JSON por evento — [docs/14](14-qualidade-e-observabilidade.md)). Depois de reiniciar o Mac é só `pnpm start:all` de novo.
 
 ## Passo a passo (primeira vez)
 
@@ -117,7 +117,8 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 
 | Comando | Faz |
 |---|---|
-| `pnpm typecheck` | Checa tipos em todos os pacotes |
+| `pnpm typecheck` | Checa tipos em todos os pacotes (inclui `apps/api/test`) |
+| `pnpm test` | Testes unitários da API — não precisa de banco, Redis nem rede ([docs/14](14-qualidade-e-observabilidade.md)) |
 | `pnpm build` | Build de tudo |
 | `pnpm db:studio` | Prisma Studio (navegar no banco) |
 | `pnpm db:generate` | Regenera o Prisma Client após mudar o schema |

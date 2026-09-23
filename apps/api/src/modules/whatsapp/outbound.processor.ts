@@ -1,5 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Processor } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ProviderRegistry } from './providers/provider.registry';
@@ -10,12 +9,12 @@ import { QUEUE_OUTBOUND, type OutboundJob } from './queues';
 import type { OutboundMessage, MessageType } from '@atendo/shared';
 import { StorageService } from '../../common/storage/storage.service';
 import { ConversationsService } from '../conversations/conversations.service';
+import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
+import { enrichContext } from '../../common/observability/request-context';
 
 /** Envia mensagens já persistidas como `pending`. Retry com backoff fica a cargo do BullMQ. */
 @Processor(QUEUE_OUTBOUND, { concurrency: 20 })
-export class OutboundProcessor extends WorkerHost {
-  private readonly log = new Logger(OutboundProcessor.name);
-
+export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: ProviderRegistry,
@@ -25,15 +24,16 @@ export class OutboundProcessor extends WorkerHost {
     private readonly storage: StorageService,
     private readonly conversations: ConversationsService,
   ) {
-    super();
+    super(QUEUE_OUTBOUND);
   }
 
-  async process(job: Job<OutboundJob>) {
+  protected async handle(job: Job<OutboundJob>) {
     const message = await this.prisma.message.findUnique({
       where: { id: job.data.messageId },
       include: { conversation: { include: { contact: true } } },
     });
     if (!message || message.status !== 'pending' || message.internal) return;
+    enrichContext({ tenantId: message.conversation.tenantId });
     // Já foi entregue ao provider numa tentativa anterior (ex.: falhou só a contabilidade):
     // NUNCA reenviar — o cliente receberia em dobro. Só conserta o status.
     if (message.externalId) {

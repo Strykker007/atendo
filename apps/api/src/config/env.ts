@@ -41,6 +41,14 @@ const schema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
   STRIPE_CURRENCY: z.string().default('brl'),
   RESEND_API_KEY: z.string().optional().default(''),
+  LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
+  /** json = uma linha JSON por evento (produção/agregador); pretty = legível no terminal */
+  LOG_FORMAT: z.enum(['json', 'pretty']).default(process.env.NODE_ENV === 'production' ? 'json' : 'pretty'),
+  /** vazio = Sentry desligado; o projeto roda igual */
+  SENTRY_DSN: z.string().optional().default(''),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+  /** versão/commit que está no ar — agrupa os erros por release no Sentry */
+  APP_VERSION: z.string().optional().default(''),
   MAIL_FROM: z.string().default('Atendo <no-reply@atendo.local>'),
 });
 

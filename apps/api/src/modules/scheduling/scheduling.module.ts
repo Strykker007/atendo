@@ -1,5 +1,6 @@
 import { Injectable, Module, OnModuleInit, forwardRef } from '@nestjs/common';
-import { BullModule, InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { BullModule, InjectQueue, Processor } from '@nestjs/bullmq';
+import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { Job, Queue } from 'bullmq';
 import { SchedulingService } from './scheduling.service';
 import { SchedulingController } from './scheduling.controller';
@@ -18,11 +19,11 @@ class RemindersScheduler implements OnModuleInit {
   }
 }
 @Processor(QUEUE_SCHEDULING)
-class RemindersProcessor extends WorkerHost {
+class RemindersProcessor extends TrackedWorkerHost {
   constructor(private readonly scheduling: SchedulingService) {
-    super();
+    super(QUEUE_SCHEDULING);
   }
-  async process(_job: Job) {
+  protected async handle(_job: Job) {
     await this.scheduling.runReminders();
   }
 }

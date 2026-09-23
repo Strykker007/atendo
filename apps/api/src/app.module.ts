@@ -3,6 +3,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { BullModule } from '@nestjs/bullmq';
 import { CoreModule } from './common/core.module';
+import { ObservabilityModule } from './common/observability/observability.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
@@ -20,6 +21,7 @@ import { env } from './config/env';
 @Module({
   imports: [
     CoreModule,
+    ObservabilityModule,
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     BullModule.forRoot({ connection: { url: env.REDIS_URL } }),
     AuthModule,
