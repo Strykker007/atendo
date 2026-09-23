@@ -15,5 +15,6 @@
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
 | [13 — Agendamento](13-agendamento.md) | Dev / Cliente | Profissionais, serviços, agenda, marcação pelo WhatsApp, lembretes ao cliente e ao profissional |
+| [14 — Qualidade e observabilidade](14-qualidade-e-observabilidade.md) | Dev / Ops | Testes automatizados, logs estruturados, erros e rastreio em produção |
 
 Convenção: código em inglês, comentários e documentação em português.

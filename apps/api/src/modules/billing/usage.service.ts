@@ -6,6 +6,7 @@ import { RedisService } from '../../common/redis/redis.service';
 import { PricingService } from './pricing.service';
 import { MailService } from '../../common/mail/mail.service';
 import { env } from '../../config/env';
+import { decideCanSend, type QuotaDecision, type QuotaKind } from './quota';
 
 export const periodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: string) => `usage:${tenantId}:${period}:${metric}`;
@@ -68,18 +69,10 @@ export class UsageService {
   }
 
   /** Verifica se o tenant pode enviar mais uma mensagem/template. */
-  async canSend(tenantId: string, kind: 'messages' | 'templates'): Promise<{ ok: boolean; reason?: string }> {
+  async canSend(tenantId: string, kind: QuotaKind): Promise<QuotaDecision> {
     const plan = await this.limits(tenantId);
-    if (!plan) return { ok: false, reason: 'Sem assinatura ativa' };
-    if (plan.status === 'suspended' || plan.status === 'canceled') return { ok: false, reason: 'Assinatura suspensa' };
-
-    const used = await this.current(tenantId);
-    const included = kind === 'messages' ? plan.limits.includedMessagesMonth : plan.limits.includedTemplatesMonth;
-    const overage = kind === 'messages' ? plan.limits.overagePricePerMessage : plan.limits.overagePricePerTemplate;
-
-    if (used[kind] < included) return { ok: true };
-    if (!plan.limits.hardLimit && overage !== null) return { ok: true }; // cobra excedente
-    return { ok: false, reason: `Limite de ${kind === 'messages' ? 'mensagens' : 'templates'} do plano atingido (${included}/mês)` };
+    if (!plan) return decideCanSend(null, { messages: 0, templates: 0 }, kind);
+    return decideCanSend(plan, await this.current(tenantId), kind);
   }
 
   private async checkAlerts(tenantId: string, period: string) {

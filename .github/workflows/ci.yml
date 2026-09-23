@@ -13,6 +13,7 @@ jobs:
       - run: pnpm --filter @atendo/shared build
       - run: pnpm --filter @atendo/api prisma generate
       - run: pnpm typecheck
+      - run: pnpm test
       - run: pnpm --filter @atendo/api build
   images:
     needs: check

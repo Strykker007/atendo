@@ -8,6 +8,7 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
+import { choose, interpolate, validAnswer } from './answer';
 
 export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
@@ -126,15 +127,15 @@ export class FlowEngineService {
             await this.goNext(runId, def, node.id);
             continue;
           case 'message':
-            await this.send(run.conversationId, node.data.text ? this.interpolate(node.data.text, ctx) : undefined, node.data);
+            await this.send(run.conversationId, node.data.text ? interpolate(node.data.text, ctx) : undefined, node.data);
             await this.goNext(runId, def, node.id);
             continue;
           case 'question':
-            await this.send(run.conversationId, this.interpolate(node.data.text, ctx));
+            await this.send(run.conversationId, interpolate(node.data.text, ctx));
             await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
             return; // espera resposta do contato
           case 'menu':
-            await this.sendMenu(run.conversationId, this.interpolate(node.data.text, ctx), node.data.options.map((o) => ({ id: o.id, title: o.label })));
+            await this.sendMenu(run.conversationId, interpolate(node.data.text, ctx), node.data.options.map((o) => ({ id: o.id, title: o.label })));
             await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
             return;
           case 'condition': {
@@ -192,13 +193,13 @@ export class FlowEngineService {
     const replyId = (message.raw as { interactiveReplyId?: string } | null)?.interactiveReplyId;
 
     if (node.type === 'question') {
-      if (!this.valid(answer, node.data.validation)) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Não entendi. Pode repetir?');
+      if (!validAnswer(answer, node.data.validation)) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Não entendi. Pode repetir?');
       const vars = { ...(run.vars as Record<string, string>), [node.data.varName]: answer };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
       return this.next(run.id, undefined);
     }
     if (node.type === 'menu') {
-      const chosen = this.choose(node.data.options.map((o) => ({ id: o.id, title: o.label })), answer, replyId);
+      const chosen = choose(node.data.options.map((o) => ({ id: o.id, title: o.label })), answer, replyId);
       if (!chosen) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Opção inválida. Responda com o número da opção.', 'fallback');
       const vars = { ...(run.vars as Record<string, string>), [`menu_${node.id}`]: chosen.title };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
@@ -223,7 +224,7 @@ export class FlowEngineService {
     const save = async (s: S) => { await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, _sched: JSON.stringify(s) } } }); };
     const send = (t: string) => this.send(conversationId, t);
     const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } });
-    const pick = <T extends { id: string; name: string }>(list: T[], a?: string) => this.choose(list.map((x) => ({ ...x, title: x.name })), a ?? '', replyId) as T | undefined;
+    const pick = <T extends { id: string; name: string }>(list: T[], a?: string) => choose(list.map((x) => ({ ...x, title: x.name })), a ?? '', replyId) as T | undefined;
     const asOpts = (items: { id: string; name: string }[]) => items.map((x) => ({ id: x.id, title: x.name.slice(0, 24), description: x.name.length > 24 ? x.name : undefined }));
     const cancelWords = /^(cancelar|sair|desistir|não|nao|parar)$/i;
     if (answer && cancelWords.test(answer.trim())) { await send('Tudo bem, agendamento cancelado. Se precisar, é só chamar.'); return 'fallback'; }
@@ -283,7 +284,7 @@ export class FlowEngineService {
         return 'wait';
       }
       if (replyId === '__more' || Number(answer) === state.slots.length + 1) return this.scheduleStep(runId, node, conversationId, tenantId, vars, 'mais', undefined);
-      const c = this.choose(state.slots.map((s) => ({ id: s.startAt, title: s.label })), answer ?? '', replyId);
+      const c = choose(state.slots.map((s) => ({ id: s.startAt, title: s.label })), answer ?? '', replyId);
       if (!c) { await send('Escolha um dos horários, responda "mais" para outros ou "cancelar".'); return 'wait'; }
       state.chosen = { startAt: c.id, label: c.title }; state.step = 'confirm';
       const svc = await this.prisma.service.findUniqueOrThrow({ where: { id: state.serviceId! } });
@@ -358,7 +359,7 @@ export class FlowEngineService {
       case 'set_var': {
         if (!d.varName) break;
         const vars = { ...(run.vars as Record<string, string>) };
-        vars[d.varName] = this.interpolate(d.value ?? '', { contact: run.conversation.contact, vars });
+        vars[d.varName] = interpolate(d.value ?? '', { contact: run.conversation.contact, vars });
         await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
         return false;
       }
@@ -397,24 +398,6 @@ export class FlowEngineService {
     return false;
   }
 
-  private valid(answer: string, validation: 'none' | 'email' | 'phone' | 'number') {
-    if (!answer) return false;
-    if (validation === 'email') return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answer);
-    if (validation === 'phone') return answer.replace(/\D/g, '').length >= 10;
-    if (validation === 'number') return !Number.isNaN(Number(answer.replace(',', '.')));
-    return true;
-  }
-
-
-  /** {{contact.name}}, {{contact.phone}}, {{nome_da_variavel}} */
-  private interpolate(text: string, ctx: { contact: { name: string | null; phone: string }; vars: Record<string, string> }) {
-    return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => {
-      if (key === 'contact.name') return ctx.contact.name ?? '';
-      if (key === 'contact.phone') return ctx.contact.phone;
-      return ctx.vars[key] ?? '';
-    });
-  }
-
   private async send(conversationId: string, text?: string, media?: { mediaKey?: string; mediaType?: 'image' | 'document' | 'audio' | 'video'; mediaName?: string }) {
     if (!text && !media?.mediaKey) return;
     await this.conversations.sendAsSystem(conversationId, text, media?.mediaKey ? { key: media.mediaKey, type: media.mediaType ?? 'document', name: media.mediaName } : undefined);
@@ -423,15 +406,6 @@ export class FlowEngineService {
   /** Pergunta com opções: botões/lista na Meta, lista numerada na Evolution. */
   private async sendMenu(conversationId: string, text: string, options: { id: string; title: string; description?: string }[], listButton?: string) {
     await this.conversations.sendAsSystem(conversationId, text, undefined, { options, listButton });
-  }
-
-  /** Resolve a escolha do contato: id do botão, número da opção ou texto parecido. */
-  private choose<T extends { id: string; title: string }>(options: T[], answer: string, replyId?: string): T | undefined {
-    if (replyId) { const byId = options.find((o) => o.id === replyId); if (byId) return byId; }
-    const a = answer.trim().toLowerCase();
-    const idx = Number(a) - 1;
-    if (Number.isInteger(idx) && options[idx]) return options[idx];
-    return options.find((o) => o.title.toLowerCase() === a) ?? options.find((o) => a.length >= 3 && o.title.toLowerCase().includes(a));
   }
 
   private async finish(runId: string, status: 'done' | 'failed' | 'stopped', error?: string) {

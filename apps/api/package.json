@@ -5,13 +5,14 @@
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
-    "start": "node dist/main.js",
-    "worker": "node dist/worker.js",
+    "start": "node dist/src/main.js",
+    "worker": "node dist/src/worker.js",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prisma": "prisma",
-    "stripe:sync": "tsx scripts/stripe-sync.ts"
+    "stripe:sync": "tsx scripts/stripe-sync.ts",
+    "test:watch": "vitest"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

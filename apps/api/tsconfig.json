@@ -10,5 +10,11 @@
     "strictPropertyInitialization": false,
     "declaration": false
   },
-  "include": ["src", "prisma/seed.ts", "scripts/*.ts"]
+  "include": [
+    "src",
+    "test",
+    "vitest.config.ts",
+    "prisma/seed.ts",
+    "scripts/*.ts"
+  ]
 }
