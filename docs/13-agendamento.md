@@ -8,14 +8,14 @@ Funcionalidade **plugável no plano** (`features: ['scheduling']` — Pro e Busi
 |---|---|
 | **Profissional** | Quem atende (barbeiro). Tem **horários de trabalho** por dia da semana (vários intervalos = pausas), cor na agenda e **WhatsApp** (recebe o aviso do próximo cliente) |
 | **Serviço** | Nome, **duração** (define o tamanho do horário) e preço |
-| **Agendamento** | Contato + profissional + serviço + início/fim. Status: `scheduled` → `confirmed` (cliente respondeu 1) → `done` / `no_show`; ou `canceled`. `source`: `flow` (robô), `panel` (chat/agenda) |
+| **Agendamento** | Contato + profissional + serviço + início/fim. Status: `scheduled` → `confirmed` (cliente confirmou no lembrete) → `done` / `no_show`; ou `canceled`. `source`: `flow` (robô), `panel` (chat/agenda) |
 | **Preferências** | Intervalo dos horários (30 min), lembretes ao cliente (`[1440, 60]` min antes), aviso ao profissional (15 min), número que envia, fuso (`America/Sao_Paulo`), dias à frente que o robô oferece (7) |
 
 Serviço e profissional são **obrigatórios** em toda marcação (dá duração certa e relatório).
 
 ## Três formas de marcar, uma agenda
 
-1. **Pelo WhatsApp (robô)** — bloco **Agendar horário** no editor de fluxos: pergunta o serviço (menu numerado), o profissional (pula se só houver um ou se estiver fixo no bloco), mostra os próximos horários livres ("mais" para ver outros), confirma (1/2) e cria. Saídas: *Agendou* / *Não conseguiu*. O contato pode responder "cancelar". Depois disso ficam disponíveis `{{agendamento}}`, `{{servico}}`, `{{profissional}}`.
+1. **Pelo WhatsApp (robô)** — bloco **Agendar horário** no editor de fluxos: pergunta o serviço (menu numerado), o profissional (pula se só houver um ou se estiver fixo no bloco), mostra os próximos horários livres ("mais" para ver outros), confirma (botão ou 1/2) e cria. Saídas: *Agendou* / *Não conseguiu*. O contato pode responder "cancelar". Depois disso ficam disponíveis `{{agendamento}}`, `{{servico}}`, `{{profissional}}`.
 2. **Pelo chat** — botão **Agendar** no cabeçalho da conversa (contato já preenchido).
 3. **Pela Agenda** — botão *Agendar* com busca de contato (só quem já conversou).
 
@@ -25,11 +25,16 @@ Todas usam a mesma disponibilidade: dentro dos horários de trabalho, passo = in
 
 | Para | Quando | Texto |
 |---|---|---|
-| Cliente (véspera) | 1440 min antes | "Você tem *Corte* com Carlos marcado para seg. 21/09 09:00. Responda **1** para confirmar ou **2** para remarcar." |
+| Cliente (véspera) | 1440 min antes | "Você tem *Corte* com Carlos marcado para seg. 21/09 09:00. Posso confirmar?" + opções **Confirmar** / **Remarcar** |
 | Cliente (perto) | 60 min antes | "Lembrete: seu horário … é hoje às 09:00" |
 | **Profissional** | 15 min antes | "💈 Próximo: *Bruno* às 09:00 — Corte + barba (45 min). Cliente há 3 visitas, última em 02/09 (Corte). Obs.: … ✅ Confirmado pelo cliente." |
 
-Resposta ao lembrete (`SchedulingService.onInbound`, roda **antes** dos fluxos): **1** → `confirmed` + mensagem de confirmação; **2** → marca "pediu remarcação", avisa o cliente, devolve a conversa para a fila com **nota interna** para a equipe remarcar pela Agenda.
+Resposta ao lembrete (`SchedulingService.onInbound`, roda **antes** dos fluxos): **Confirmar** → `confirmed` + mensagem de confirmação; **Remarcar** → marca "pediu remarcação", avisa o cliente, devolve a conversa para a fila com **nota interna** para a equipe remarcar pela Agenda.
+
+Vale tanto o toque no botão (Meta) quanto **1**/**2** ou a palavra exata (Evolution). A leitura é
+deliberadamente estrita (`reminder-reply.ts`), porque roda em **toda** mensagem recebida: um
+"bom dia" ou um "quero remarcar meu horário" **não** contam como resposta — quem cuida
+desses casos é o atendente ou um fluxo.
 
 O aviso ao profissional vai pelo número da barbearia para o WhatsApp dele (`sendToPhone`): cria um contato/conversa para ele que fica **encerrada** (não polui a fila). Sem WhatsApp cadastrado, não há aviso (a tela mostra isso em laranja).
 

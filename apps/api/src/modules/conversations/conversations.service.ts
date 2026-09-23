@@ -195,7 +195,9 @@ export class ConversationsService {
         mediaName: msg.media?.fileName,
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
-        raw: msg.raw as Prisma.InputJsonValue,
+        // guarda o payload do provider + o id da opção já traduzido: é assim que o motor de
+        // fluxos e os lembretes sabem em qual botão o contato tocou, sem conhecer Meta/Evolution
+        raw: { ...(msg.raw as object), ...(msg.interactiveReplyId ? { interactiveReplyId: msg.interactiveReplyId } : {}) } as Prisma.InputJsonValue,
         createdAt: msg.timestamp,
       },
     });
@@ -258,14 +260,14 @@ export class ConversationsService {
   }
 
   /** Manda uma mensagem do sistema para um contato: reaproveita a conversa aberta ou cria uma. */
-  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null }) {
+  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
     let conv = await this.prisma.conversation.findFirst({ where: { contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' } });
     if (!conv) {
       const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
       conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
     }
-    return this.sendAsSystem(conv.id, text);
+    return this.sendAsSystem(conv.id, text, undefined, opts?.interactive);
   }
 
   /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */

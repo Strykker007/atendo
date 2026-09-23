@@ -5,8 +5,10 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { TZ_DEFAULT, toLocal } from './time';
 import { computeSlots, type Slot } from './slots';
+import { REMINDER_OPTIONS, reminderChoice } from './reminder-reply';
 
 export type { Slot };
+
 
 @Injectable()
 export class SchedulingService {
@@ -152,10 +154,17 @@ export class SchedulingService {
   private async sendClientReminder(a: Prisma.AppointmentGetPayload<{ include: { contact: true; service: true; professional: true } }>, tz: string, minutesBefore: number) {
     const when = toLocal(a.startAt, tz);
     const soon = minutesBefore <= 120;
-    const text = soon
-      ? `Olá ${a.contact.name ?? ''}! Lembrete: seu horário de *${a.service.name}* com ${a.professional.name} é hoje às ${when.hm}. Até já! 💈`
-      : `Olá ${a.contact.name ?? ''}! Você tem *${a.service.name}* com ${a.professional.name} marcado para ${when.label}.\n\nResponda *1* para confirmar ou *2* para remarcar.`;
-    await this.conversations.sendToContact(a.tenantId, a.contactId, text);
+    if (soon) {
+      // lembrete de última hora: só avisa, não pede resposta
+      await this.conversations.sendToContact(a.tenantId, a.contactId, `Olá ${a.contact.name ?? ''}! Lembrete: seu horário de *${a.service.name}* com ${a.professional.name} é hoje às ${when.hm}. Até já! 💈`);
+      return;
+    }
+    await this.conversations.sendToContact(
+      a.tenantId,
+      a.contactId,
+      `Olá ${a.contact.name ?? ''}! Você tem *${a.service.name}* com ${a.professional.name} marcado para ${when.label}.\n\nPosso confirmar?`,
+      { interactive: { options: REMINDER_OPTIONS } },
+    );
   }
 
   private async sendProReminder(a: Prisma.AppointmentGetPayload<{ include: { contact: true; service: true; professional: true } }>, tz: string) {
@@ -166,10 +175,13 @@ export class SchedulingService {
     await this.conversations.sendToPhone(a.tenantId, a.professional.phone!, text, { closeAfter: true, contactName: a.professional.name });
   }
 
-  /** Resposta do cliente ao lembrete ("1" confirma, "2" remarcar). Chamado pelo InboundProcessor. */
-  async onInbound(tenantId: string, contactId: string, conversationId: string, text: string) {
-    const t = text.trim();
-    if (t !== '1' && t !== '2') return false;
+  /**
+   * Resposta do cliente ao lembrete: botão Confirmar/Remarcar, "1"/"2" ou o texto.
+   * Chamado pelo InboundProcessor antes dos fluxos.
+   */
+  async onInbound(tenantId: string, contactId: string, conversationId: string, text: string, replyId?: string) {
+    const choice = reminderChoice(text, replyId);
+    if (!choice) return false;
     const a = await this.prisma.appointment.findFirst({
       where: { tenantId, contactId, status: 'scheduled', startAt: { gt: new Date() }, NOT: { clientRemindersSent: { equals: [] } } },
       orderBy: { startAt: 'asc' },
@@ -178,7 +190,7 @@ export class SchedulingService {
     if (!a) return false;
     const settings = await this.settings(tenantId);
     const when = toLocal(a.startAt, settings.timezone || TZ_DEFAULT);
-    if (t === '1') {
+    if (choice === 'confirm') {
       await this.prisma.appointment.update({ where: { id: a.id }, data: { status: 'confirmed' } });
       await this.conversations.sendAsSystem(conversationId, `Confirmado! ${a.service.name} com ${a.professional.name}, ${when.label}. Até lá! 💈`);
     } else {

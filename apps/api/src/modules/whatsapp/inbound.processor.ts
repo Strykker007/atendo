@@ -38,7 +38,7 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       // automação: avança fluxo ativo ou avalia gatilhos (nunca derruba a ingestão)
       if (result) {
         // "1"/"2" em resposta a lembrete de agendamento tem prioridade sobre fluxos
-        const handled = await this.scheduling.onInbound(number.tenantId, result.conversation.contactId, result.conversation.id, result.message.text ?? '').catch((err) => { this.log.error(`agenda: ${err instanceof Error ? err.message : err}`); return false; });
+        const handled = await this.scheduling.onInbound(number.tenantId, result.conversation.contactId, result.conversation.id, result.message.text ?? '', msg.interactiveReplyId).catch((err) => { this.log.error(`agenda: ${err instanceof Error ? err.message : err}`); return false; });
         if (!handled) await this.flows.onInbound(number, result.conversation, result.message, result.isNew).catch((err) => this.log.error(`fluxo: ${err instanceof Error ? err.message : err}`));
       }
       // mídia: baixa do provider e guarda no storage privado (falha aqui não perde a mensagem)

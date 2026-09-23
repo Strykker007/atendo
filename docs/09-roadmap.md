@@ -26,7 +26,7 @@
 - Infra: Dockerfiles (api/worker/web), compose de produção com Caddy/HTTPS, Socket.IO em cluster (Redis), /health, shards da Evolution, CI
 - Contas: convite por e-mail (equipe e admin de cliente), esqueci/redefinir/trocar senha; e-mails de alerta de plano, cobrança falhou e suspensão (Resend)
 - Agendamento (plugável): profissionais com horários, serviços, agenda por dia, marcação pelo WhatsApp (bloco no fluxo), pelo chat e pela agenda, lembretes ao cliente (1 confirma / 2 remarca) e aviso ao profissional com histórico do cliente
-- Testes: 120 testes unitários (Vitest) nos pontos de risco — adapters Meta/Evolution, fuso e disponibilidade da agenda, interpretação de resposta em fluxos, quota/excedente, DSL de relatórios, logger e contexto; `pnpm test` no CI
+- Testes: 125 testes unitários (Vitest) nos pontos de risco — adapters Meta/Evolution, fuso e disponibilidade da agenda, interpretação de resposta em fluxos, quota/excedente, DSL de relatórios, logger e contexto; `pnpm test` no CI
 - Observabilidade: log estruturado (JSON em produção), `requestId` por requisição no cabeçalho e nas respostas de erro, log de acesso com duração, filtro global de exceções, contexto e falhas de job nas filas, Sentry opcional
 - Documentação (esta pasta)
 
