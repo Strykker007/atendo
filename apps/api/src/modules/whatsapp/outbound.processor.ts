@@ -1,4 +1,5 @@
 import { Processor } from '@nestjs/bullmq';
+import { DelayedError, UnrecoverableError } from 'bullmq';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ProviderRegistry } from './providers/provider.registry';
@@ -11,6 +12,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { enrichContext } from '../../common/observability/request-context';
+import { SendPacer } from './send-pacer';
 
 /** Envia mensagens já persistidas como `pending`. Retry com backoff fica a cargo do BullMQ. */
 @Processor(QUEUE_OUTBOUND, { concurrency: 20 })
@@ -23,11 +25,12 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     private readonly gateway: ConversationsGateway,
     private readonly storage: StorageService,
     private readonly conversations: ConversationsService,
+    private readonly pacer: SendPacer,
   ) {
     super(QUEUE_OUTBOUND);
   }
 
-  protected async handle(job: Job<OutboundJob>) {
+  protected async handle(job: Job<OutboundJob>, token?: string) {
     const message = await this.prisma.message.findUnique({
       where: { id: job.data.messageId },
       include: { conversation: { include: { contact: true } } },
@@ -44,6 +47,32 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
 
     const ctx = await this.numbers.context(message.conversation.numberId);
     const provider = this.registry.get(ctx.provider);
+
+    // ---- proteção do número (bloqueio/banimento) ----
+    const num = await this.prisma.whatsAppNumber.findUniqueOrThrow({
+      where: { id: message.conversation.numberId },
+      select: { id: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true },
+    });
+    const day = await this.pacer.dailyStatus(num);
+    if (!day.ok) {
+      // teto do dia: não adianta tentar de novo hoje, então nada de retry
+      this.log.warn(`Número ${num.id}: ${day.reason}`, { sent: day.sent, limit: day.limit });
+      const blocked = await this.prisma.message.update({ where: { id: message.id }, data: { status: 'failed', error: day.reason } });
+      this.gateway.emitMessage(ctx.tenantId, this.conversations.present(blocked));
+      throw new UnrecoverableError(day.reason!);
+    }
+    // reserva a vaga uma única vez; nas reentradas o job já tem a dele
+    if (!job.data.pacedUntil) {
+      const wait = await this.pacer.reserve(num.id, num.sendDelay);
+      if (wait > 0) {
+        const until = Date.now() + wait;
+        this.log.debug(`Envio ${message.id} adiado ${Math.round(wait / 1000)}s (perfil ${num.sendDelay})`);
+        // devolve o job para a fila com atraso em vez de segurar o worker parado
+        await job.updateData({ ...job.data, pacedUntil: until });
+        await job.moveToDelayed(until, token);
+        throw new DelayedError();
+      }
+    }
     const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string };
 
     const outbound: OutboundMessage = {
@@ -86,6 +115,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       where: { id: message.id },
       data: { status: result.status, externalId: result.externalId, error: null },
     });
+    await this.pacer.countSend(num.id).catch(() => undefined);
     this.gateway.emitMessage(ctx.tenantId, this.conversations.present(updated));
     try {
       await this.usage.record({

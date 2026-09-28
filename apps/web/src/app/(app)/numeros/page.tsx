@@ -7,6 +7,7 @@ import { useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsag
 import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
+import { SendingCard } from '@/components/numbers/SendingCard';
 import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 
@@ -108,6 +109,8 @@ export default function NumerosPage() {
                   <span className="text-ink">{st.label}</span>
                   {!n.isActive && <span className="text-xs text-faint">· desativado</span>}
                 </div>
+
+                {n.isActive && <SendingCard number={n} />}
 
                 <div className="flex flex-wrap gap-2">
                   {n.provider === 'evolution' && n.status !== 'connected' && (

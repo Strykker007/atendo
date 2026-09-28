@@ -21,19 +21,10 @@ Serve para decidir o que construir antes de colocar um cliente pagante no ar.
 
 Ordenado por **risco de perder o cliente**, não por esforço.
 
-### 1. Anti-banimento no envio (crítico)
+### 1. Anti-banimento no envio — **FEITO** (2026-09-28)
 
-Hoje a fila de saída dispara com concorrência 20 e **sem nenhum intervalo**. Num disparo
-ou num fluxo com várias mensagens, o número não oficial manda tudo em rajada — é o padrão
-clássico que o WhatsApp pune com bloqueio ou banimento.
-
-O documento pede duas proteções, e as duas fazem falta:
-
-- **Atraso entre envios**, configurável e com variação aleatória (rápido 1–7s, curto 7–25s,
-  médio 25–60s, longo 60–250s), mais **teto diário** por número.
-- **Aquecimento ao conectar o QR**: número recém-conectado não pode sair disparando.
-
-Sem isso, o primeiro cliente perde o número dele — e o problema não é dele, é nosso.
+Intervalo aleatório entre envios por faixa, teto diário por número e aquecimento
+automático de número novo. Configurável na tela Números. Ver [04](04-providers-whatsapp.md).
 
 ### 2. Transmissão / disparo em massa
 

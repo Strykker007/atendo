@@ -326,9 +326,12 @@ export class ConversationsService {
     if (c.loggedOut) this.log.warn(`Número ${number.label} (${number.phone}) foi desconectado pelo celular (dispositivo removido)`);
     // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
     const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
-    await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...(phone && { phone }) } }).catch(async (err) => {
+    // primeira conexão: começa o aquecimento — número novo com volume alto é banido rápido
+    const warmup = c.status === 'connected' && !number.warmupStartedAt ? { warmupStartedAt: new Date() } : {};
+    if (warmup.warmupStartedAt) this.log.log(`Número ${number.label} conectou pela primeira vez: aquecimento iniciado`);
+    await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...(phone && { phone }) } }).catch(async (err) => {
       // conflito de unique (tenantId, phone): mantém o telefone antigo, só atualiza status
-      if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status } });
+      if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup } });
       else throw err;
     });
     this.gateway.emitNumber(number.tenantId, { id: number.id, status: c.status, qrCode: c.qrCode });

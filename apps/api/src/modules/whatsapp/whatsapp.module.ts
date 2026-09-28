@@ -9,6 +9,7 @@ import { WebhooksController } from './webhooks.controller';
 import { InboundProcessor } from './inbound.processor';
 import { OutboundProcessor } from './outbound.processor';
 import { QUEUE_INBOUND, QUEUE_OUTBOUND } from './queues';
+import { SendPacer } from './send-pacer';
 import { NumbersHealthScheduler, NumbersHealthProcessor, QUEUE_HEALTH } from './health.scheduler';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { BillingModule } from '../billing/billing.module';
@@ -30,7 +31,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
     forwardRef(() => SchedulingModule),
   ],
   controllers: [NumbersController, WebhooksController],
-  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor],
+  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor, SendPacer],
   exports: [ProviderRegistry, NumbersService, BullModule],
 })
 export class WhatsAppModule {}

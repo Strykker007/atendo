@@ -6,7 +6,9 @@ import { api, getAccessToken } from './api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string }
-export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string }
+export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
+export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; warmupStartedAt: string | null }
+export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
 export interface LeadReferral { sourceType: string; sourceId?: string; sourceUrl?: string; headline?: string; body?: string; ctwaClid?: string; mediaUrl?: string }
@@ -183,10 +185,12 @@ export const useConnectNumber = () => {
 export const useUpdateNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; label?: string; isActive?: boolean }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; label?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };
+/** Quanto o número já enviou hoje e qual o teto vigente (com aquecimento). */
+export const useSendingStatus = (id: string | null) => useQuery({ queryKey: ['sending', id], enabled: !!id, refetchInterval: 60_000, queryFn: () => api<SendingStatus>(`/numbers/${id}/sending`) });
 export const useDeleteNumber = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/numbers/${id}`, { method: 'DELETE' }), onSuccess: invalidateNumbers(qc) });

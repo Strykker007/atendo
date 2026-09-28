@@ -1,5 +1,5 @@
 import { WorkerHost } from '@nestjs/bullmq';
-import type { Job } from 'bullmq';
+import { DelayedError, type Job } from 'bullmq';
 import { AppLogger } from './app-logger';
 import { runWithContext } from './request-context';
 import { captureError } from './sentry';
@@ -19,14 +19,16 @@ export abstract class TrackedWorkerHost<T = unknown, R = unknown> extends Worker
     this.log = new AppLogger(new.target.name);
   }
 
-  async process(job: Job<T>): Promise<R> {
+  async process(job: Job<T>, token?: string): Promise<R> {
     return runWithContext({ job: { queue: this.queue, name: job.name, id: job.id } }, async () => {
       const started = Date.now();
       try {
-        const result = await this.handle(job);
+        const result = await this.handle(job, token);
         this.log.debug(`${this.queue}:${job.name} ok`, { durationMs: Date.now() - started, attempt: job.attemptsMade + 1 });
         return result;
       } catch (err) {
+        // job reagendado de propósito (ritmo de envio): não é falha
+        if (err instanceof DelayedError) throw err;
         const last = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
         this.log.error(
           `${this.queue}:${job.name} falhou (tentativa ${job.attemptsMade + 1}${last ? ', última' : ''})`,
@@ -40,5 +42,5 @@ export abstract class TrackedWorkerHost<T = unknown, R = unknown> extends Worker
     });
   }
 
-  protected abstract handle(job: Job<T>): Promise<R>;
+  protected abstract handle(job: Job<T>, token?: string): Promise<R>;
 }

@@ -141,3 +141,29 @@ Na UI: chip laranja "Anúncio" na lista e no cabeçalho (com o título e link pa
 4. Adicione a opção no `ProviderForm` do front.
 
 Nada mais precisa mudar.
+
+
+## Proteção contra bloqueio e banimento
+
+O WhatsApp pune padrão de robô no número **não oficial**: rajada de mensagens, intervalo
+sempre igual e volume alto num número recém-conectado. Três defesas, configuradas por
+número na tela **Números**:
+
+| Defesa | Como funciona |
+|---|---|
+| **Intervalo entre envios** | Faixas `instant` (só oficial), `fast` 1–7s, `short` 7–25s (padrão), `medium` 25–60s, `long` 60–250s. O valor é **sorteado dentro da faixa a cada envio** — intervalo fixo é assinatura de robô |
+| **Teto diário** | Máximo de envios por dia por número (0 = sem teto). Ao atingir, a mensagem falha com motivo claro e **sem retry** — não adianta tentar de novo hoje |
+| **Aquecimento** | Número novo começa em 20 envios/dia e dobra a cada dia por 7 dias, até o teto configurado. Começa sozinho na primeira conexão |
+
+Implementação: `sending-policy.ts` (puro e testado) decide faixa, teto e rampa;
+`SendPacer` reserva a vaga do próximo envio no Redis com **script Lua atômico** — com
+vários workers, ler e gravar em duas etapas faria dois jobs disparem juntos, que é
+exatamente a rajada que se quer evitar.
+
+Quando um envio precisa esperar, o job volta para a fila com atraso (`moveToDelayed`) em
+vez de segurar o worker parado. A vaga é reservada **uma vez só** e guardada em
+`pacedUntil` no job: sem isso, cada reentrada reservaria uma vaga nova e o job se
+empurraria para frente indefinidamente, sem nunca enviar.
+
+Envio que falha no provider **não** conta no teto do dia — o teto é sobre o que realmente
+saiu.

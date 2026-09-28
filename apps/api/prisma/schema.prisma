@@ -122,6 +122,15 @@ enum WhatsAppProvider {
   evolution
 }
 
+/// Faixas de atraso entre envios. Rajada é o padrão que o WhatsApp pune no não-oficial.
+enum SendDelayProfile {
+  instant
+  fast
+  short
+  medium
+  long
+}
+
 enum NumberStatus {
   connected
   pending_qr
@@ -143,6 +152,13 @@ model WhatsAppNumber {
   status         NumberStatus @default(disconnected)
   /// Rateio de infra por mês, usado só no relatório de margem (Evolution)
   infraCostMonth Decimal      @default(0) @db.Decimal(10, 2)
+  // ---- proteção contra bloqueio/banimento (só faz sentido no não-oficial) ----
+  /// intervalo entre envios deste número; `instant` só para a API oficial
+  sendDelay      SendDelayProfile @default(short)
+  /// teto de envios por dia. 0 = sem teto (use só na oficial)
+  sendDailyLimit Int          @default(1000)
+  /// quando o número conectou pela primeira vez — número novo sobe o volume aos poucos
+  warmupStartedAt DateTime?
   isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
