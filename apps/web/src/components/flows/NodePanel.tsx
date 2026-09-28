@@ -190,6 +190,18 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                 <Field label="Base de conhecimento" hint="Única fonte de fatos: preços, endereço, horários, regras. Se não estiver aqui, a IA diz que vai verificar.">
                   <textarea className={inputCls} rows={7} value={node.data.knowledge ?? ''} onChange={(e) => set({ knowledge: e.target.value })} placeholder={'Corte: R$ 45 (30 min)\nBarba: R$ 30\nEndereço: Rua X, 100\nFuncionamento: terça a sábado, 9h às 19h'} />
                 </Field>
+                <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3 space-y-2">
+                  <label className="flex items-center gap-2 text-ink text-[13px]">
+                    <input type="checkbox" checked={node.data.keepTalking ?? false} onChange={(e) => set({ keepTalking: e.target.checked })} />
+                    Continuar conversando
+                  </label>
+                  <p className="text-[11.5px] text-muted">Desmarcado, a IA responde <b>uma vez</b> e o fluxo segue. Marcado, ela continua respondendo o contato até o limite abaixo — é o que faz a IA <i>atender</i> de verdade.</p>
+                  {node.data.keepTalking && (
+                    <Field label="Máximo de respostas" hint="Ao atingir, o fluxo segue pela saída 'Respondeu' (leve para um humano). É o freio de custo.">
+                      <input type="number" min={1} max={30} className={inputCls} value={node.data.maxTurns ?? 10} onChange={(e) => set({ maxTurns: Number(e.target.value) })} />
+                    </Field>
+                  )}
+                </div>
                 <Field label="Guardar a resposta numa variável (opcional)">
                   <input className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: e.target.value.replace(/[^\w]/g, '_').toLowerCase() || undefined })} placeholder="resposta_ia" />
                 </Field>

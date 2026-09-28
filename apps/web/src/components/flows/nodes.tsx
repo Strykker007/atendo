@@ -137,7 +137,7 @@ export function ScheduleNodeView({ data, selected }: P) {
 }
 
 export function AiNodeView({ data, selected }: P) {
-  const d = data as { mode?: 'answer' | 'classify'; instructions?: string; knowledge?: string; labels?: { id: string; label: string }[] };
+  const d = data as { mode?: 'answer' | 'classify'; instructions?: string; knowledge?: string; labels?: { id: string; label: string }[]; keepTalking?: boolean; maxTurns?: number };
   const classify = d.mode === 'classify';
   return (
     <Shell type="ai" selected={selected} summary={d.instructions || ''}>
@@ -157,7 +157,7 @@ export function AiNodeView({ data, selected }: P) {
         </div>
       ) : (
         <div className="flex justify-between px-3 pb-2 text-[10.5px] font-semibold">
-          <span className="relative text-ok pr-2">Respondeu<Handle type="source" position={Position.Bottom} id="done" className={cn(handleCls, '!left-4')} /></span>
+          <span className="relative text-ok pr-2">{d.keepTalking ? `Após ${d.maxTurns ?? 10} respostas` : 'Respondeu'}<Handle type="source" position={Position.Bottom} id="done" className={cn(handleCls, '!left-4')} /></span>
           <span className="relative text-danger pl-2">Não conseguiu<Handle type="source" position={Position.Bottom} id="fallback" className={cn(handleCls, '!left-auto !right-4')} /></span>
         </div>
       )}
@@ -179,6 +179,6 @@ export function defaultData(type: FlowNodeType): FlowNode['data'] {
     case 'wait': return { minutes: 5 };
     case 'end': return { closeConversation: false };
     case 'schedule': return { maxSlots: 6 };
-    case 'ai': return { mode: 'answer', instructions: '', knowledge: '', fallbackText: 'Vou verificar isso com um atendente, um momento.' };
+    case 'ai': return { mode: 'answer', instructions: '', knowledge: '', fallbackText: 'Vou verificar isso com um atendente, um momento.', keepTalking: true, maxTurns: 10 };
   }
 }

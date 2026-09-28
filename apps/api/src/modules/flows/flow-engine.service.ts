@@ -9,6 +9,7 @@ import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { choose, interpolate, validAnswer } from './answer';
+import { afterAiAnswer } from './ai-turns';
 import { AiService } from '../ai/ai.service';
 
 export const QUEUE_FLOWS = 'flows';
@@ -161,7 +162,13 @@ export class FlowEngineService {
             if (node.data.closeConversation) await this.conversations.setStatusSystem(run.conversationId, 'closed');
             return this.finish(runId, 'done');
           case 'ai': {
-            await this.goNext(runId, def, node.id, await this.aiStep(run, node, ctx));
+            const out = await this.aiStep(run, node, ctx);
+            if (out === 'wait') {
+              // modo conversa: fica no mesmo nó esperando a próxima mensagem do contato
+              await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
+              return;
+            }
+            await this.goNext(runId, def, node.id, out);
             continue;
           }
           case 'schedule': {
@@ -210,6 +217,13 @@ export class FlowEngineService {
       const vars = { ...(run.vars as Record<string, string>), [`menu_${node.id}`]: chosen.title };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
       return this.next(run.id, chosen.id);
+    }
+    if (node.type === 'ai') {
+      const vars = run.vars as Record<string, string>;
+      const out = await this.aiStep(run as never, node, { contact: { name: null, phone: '' }, vars });
+      if (out === 'wait') return; // continua conversando
+      await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'running' } });
+      return this.next(run.id, out);
     }
     if (node.type === 'schedule') {
       const st = await this.scheduleStep(run.id, node, run.conversationId, run.tenantId, run.vars as Record<string, string>, answer, replyId);
@@ -269,10 +283,18 @@ export class FlowEngineService {
         history: [...history].reverse(),
       });
       await this.send(run.conversationId, text);
-      if (node.data.varName) {
-        await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars: { ...ctx.vars, [node.data.varName]: text } } });
+
+      // modo conversa: responde e espera a próxima mensagem, até o limite de turnos
+      const turns = Number(ctx.vars._aiTurns ?? 0) + 1;
+      const vars: Record<string, string> = { ...ctx.vars, _aiTurns: String(turns) };
+      if (node.data.varName) vars[node.data.varName] = text;
+      await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
+
+      const outcome = afterAiAnswer(turns, node.data);
+      if (outcome === 'done' && node.data.keepTalking) {
+        this.log.log(`IA atingiu o limite de ${turns} respostas no fluxo ${run.flowId}; seguindo pela saída normal`);
       }
-      return 'done';
+      return outcome;
     } catch (err) {
       this.log.warn(`IA no fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
       if (node.data.fallbackText) await this.send(run.conversationId, node.data.fallbackText).catch(() => undefined);

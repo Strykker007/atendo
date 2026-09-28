@@ -47,6 +47,17 @@ export type AiNode = FlowNodeBase<'ai', {
   labels?: { id: string; label: string }[];
   /** mensagem enviada quando a IA não puder responder */
   fallbackText?: string;
+  /**
+   * answer: continua conversando (responde, espera a próxima mensagem do contato, responde
+   * de novo) em vez de responder uma vez só. Sem isto o bloco é de tiro único e o contato
+   * fica sem resposta na segunda pergunta.
+   */
+  keepTalking?: boolean;
+  /**
+   * answer + keepTalking: quantas respostas no máximo antes de entregar para humano.
+   * É o freio de custo — sem limite, uma conversa sozinha consome interações sem parar.
+   */
+  maxTurns?: number;
 }>;
 
 export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode | AiNode;
