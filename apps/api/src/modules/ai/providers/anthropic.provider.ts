@@ -1,8 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { env } from '../../../config/env';
 import type { AiCompletion, AiProvider, AiRequest } from '../ai.types';
+import { baseUrlOr } from './base-url';
 
-/** Anthropic Messages API. Docs: https://docs.anthropic.com/en/api/messages */
+const baseUrl = () => baseUrlOr('https://api.anthropic.com');
+
+/**
+ * Anthropic Messages API. `AI_BASE_URL` permite apontar para um proxy compatível.
+ * Docs: https://docs.anthropic.com/en/api/messages
+ */
 @Injectable()
 export class AnthropicProvider implements AiProvider {
   readonly kind = 'anthropic';
@@ -10,7 +16,7 @@ export class AnthropicProvider implements AiProvider {
 
   async complete(req: AiRequest): Promise<AiCompletion> {
     const model = req.model || this.defaultModel;
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`${baseUrl()}/v1/messages`, {
       method: 'POST',
       signal: AbortSignal.timeout(req.timeoutMs),
       headers: { 'x-api-key': env.AI_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },

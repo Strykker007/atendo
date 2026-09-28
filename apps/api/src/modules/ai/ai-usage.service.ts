@@ -1,11 +1,23 @@
 import { Injectable } from '@nestjs/common';
 import type { AiTaskKind } from '@prisma/client';
 import { aiCostUsd } from '@atendo/shared';
+import { isLocalEndpoint } from './providers/base-url';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { env } from '../../config/env';
 import { AppLogger } from '../../common/observability/app-logger';
 import type { AiUsageSnapshot } from './ai-quota';
+
+/**
+ * Custo de uma chamada em USD. Ordem: endpoint local = 0 → preço do ambiente (endpoint
+ * alternativo) → tabela por modelo (que assume o mais caro quando não conhece).
+ */
+export function costOf(model: string, tokensIn: number, tokensOut: number) {
+  if (isLocalEndpoint()) return 0;
+  const { AI_PRICE_IN_PER_1K: i, AI_PRICE_OUT_PER_1K: o } = env;
+  if (i !== undefined || o !== undefined) return (tokensIn / 1000) * (i ?? 0) + (tokensOut / 1000) * (o ?? 0);
+  return aiCostUsd(model, tokensIn, tokensOut);
+}
 
 export const aiPeriodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: 'count' | 'cost') => `ai:${tenantId}:${period}:${metric}`;
@@ -36,7 +48,7 @@ export class AiUsageService {
     latencyMs?: number;
     error?: string;
   }) {
-    const costUsd = input.error ? 0 : aiCostUsd(input.model, input.tokensIn, input.tokensOut);
+    const costUsd = input.error ? 0 : costOf(input.model, input.tokensIn, input.tokensOut);
     const costBrl = costUsd * env.USD_BRL_RATE;
     await this.prisma.aiUsage.create({ data: { ...input, costUsd, costBrl } });
     if (input.error) return { costUsd, costBrl };

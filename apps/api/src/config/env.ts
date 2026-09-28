@@ -45,6 +45,11 @@ const schema = z.object({
   /** none = IA desligada (o front esconde os recursos) */
   AI_PROVIDER: z.enum(['none', 'anthropic', 'openai']).default('none'),
   AI_API_KEY: z.string().optional().default(''),
+  /**
+   * Endpoint alternativo compatível com o formato do provider escolhido. Vazio = o oficial.
+   * Destrava Ollama (local, grátis), Gemini, Groq, OpenRouter e afins sem mexer no código.
+   */
+  AI_BASE_URL: z.string().optional().default(''),
   /** vazio = modelo padrão do adapter (o mais barato) */
   AI_MODEL: z.string().optional().default(''),
   AI_MAX_TOKENS: z.coerce.number().min(32).max(4000).default(400),
@@ -52,6 +57,13 @@ const schema = z.object({
   AI_TIMEOUT_MS: z.coerce.number().min(1000).max(60_000).default(20_000),
   /** conversão do preço do fornecedor (USD) para o que você cobra (BRL) */
   USD_BRL_RATE: z.coerce.number().positive().default(5.5),
+  /**
+   * Preço por 1.000 tokens (USD) quando o modelo não está em AI_MODEL_PRICE — caso de
+   * endpoint alternativo. Sem isto, um modelo desconhecido assume o mais caro da tabela
+   * (proposital: nunca subestimar custo) e estouraria o teto de gasto cedo demais.
+   */
+  AI_PRICE_IN_PER_1K: z.coerce.number().min(0).optional(),
+  AI_PRICE_OUT_PER_1K: z.coerce.number().min(0).optional(),
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
   /** json = uma linha JSON por evento (produção/agregador); pretty = legível no terminal */
   LOG_FORMAT: z.enum(['json', 'pretty']).default(process.env.NODE_ENV === 'production' ? 'json' : 'pretty'),

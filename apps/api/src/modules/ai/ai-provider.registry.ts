@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { env } from '../../config/env';
 import type { AiProvider } from './ai.types';
+import { isLocalEndpoint } from './providers/base-url';
 import { AnthropicProvider } from './providers/anthropic.provider';
 import { OpenAiProvider } from './providers/openai.provider';
 
@@ -15,9 +16,9 @@ export class AiProviderRegistry {
     private readonly openai: OpenAiProvider,
   ) {}
 
-  /** true quando há fornecedor e chave configurados. */
+  /** true quando há fornecedor e chave — endpoint local (Ollama) dispensa chave. */
   get configured() {
-    return env.AI_PROVIDER !== 'none' && !!env.AI_API_KEY;
+    return env.AI_PROVIDER !== 'none' && (!!env.AI_API_KEY || isLocalEndpoint());
   }
 
   get(): AiProvider {

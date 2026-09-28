@@ -1,8 +1,15 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { env } from '../../../config/env';
 import type { AiCompletion, AiProvider, AiRequest } from '../ai.types';
+import { baseUrlOr } from './base-url';
 
-/** OpenAI Chat Completions. Docs: https://platform.openai.com/docs/api-reference/chat */
+const baseUrl = () => baseUrlOr('https://api.openai.com/v1');
+
+/**
+ * Chat Completions no formato da OpenAI. `AI_BASE_URL` aponta para qualquer endpoint
+ * compatível (Ollama local, Groq, OpenRouter, Gemini no modo compatível).
+ * Docs: https://platform.openai.com/docs/api-reference/chat
+ */
 @Injectable()
 export class OpenAiProvider implements AiProvider {
   readonly kind = 'openai';
@@ -10,7 +17,7 @@ export class OpenAiProvider implements AiProvider {
 
   async complete(req: AiRequest): Promise<AiCompletion> {
     const model = req.model || this.defaultModel;
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch(`${baseUrl()}/chat/completions`, {
       method: 'POST',
       signal: AbortSignal.timeout(req.timeoutMs),
       headers: { Authorization: `Bearer ${env.AI_API_KEY}`, 'content-type': 'application/json' },
