@@ -90,14 +90,18 @@ export class AiUsageService {
   async summary(tenantId: string, period = aiPeriodOf()) {
     const [y, m] = period.split('-').map(Number);
     const where = { tenantId, occurredAt: { gte: new Date(Date.UTC(y, m - 1, 1)), lt: new Date(Date.UTC(y, m, 1)) } };
-    const [byKind, total] = await Promise.all([
-      this.prisma.aiUsage.groupBy({ by: ['kind'], where, _count: { _all: true }, _sum: { costBrl: true, tokensIn: true, tokensOut: true } }),
-      this.prisma.aiUsage.aggregate({ where: { ...where, error: null }, _count: { _all: true }, _sum: { costBrl: true } }),
+    // só chamadas bem-sucedidas contam como interação; as que falharam entram em `failed`
+    const ok = { ...where, error: null };
+    const [byKind, total, failed] = await Promise.all([
+      this.prisma.aiUsage.groupBy({ by: ['kind'], where: ok, _count: { _all: true }, _sum: { costBrl: true, tokensIn: true, tokensOut: true } }),
+      this.prisma.aiUsage.aggregate({ where: ok, _count: { _all: true }, _sum: { costBrl: true } }),
+      this.prisma.aiUsage.count({ where: { ...where, NOT: { error: null } } }),
     ]);
     return {
       period,
       interactions: total._count._all,
       costBrl: Number(total._sum.costBrl ?? 0),
+      failed,
       byKind: byKind.map((k) => ({ kind: k.kind, count: k._count._all, costBrl: Number(k._sum.costBrl ?? 0), tokensIn: k._sum.tokensIn ?? 0, tokensOut: k._sum.tokensOut ?? 0 })),
     };
   }

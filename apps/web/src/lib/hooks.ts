@@ -370,7 +370,7 @@ export const useContactCard = (contactId: string | null, enabled = true) => useQ
 
 // ---- IA ----
 export type RewriteTone = 'formal' | 'friendly' | 'short' | 'clear';
-export interface AiUsageSummary { period: string; interactions: number; costBrl: number; byKind: { kind: string; count: number; costBrl: number; tokensIn: number; tokensOut: number }[] }
+export interface AiUsageSummary { period: string; interactions: number; costBrl: number; failed: number; byKind: { kind: string; count: number; costBrl: number; tokensIn: number; tokensOut: number }[] }
 
 /** IA configurada neste ambiente? Sem chave, o front esconde os botões em vez de dar erro. */
 export const useAiStatus = () => {

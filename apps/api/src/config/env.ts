@@ -11,6 +11,13 @@ for (const candidate of [resolve(process.cwd(), '.env'), resolve(process.cwd(), 
   }
 }
 
+/**
+ * Número opcional. `VAR=` no .env chega como string vazia, e `z.coerce.number()` a
+ * converteria em **0** — para preço de IA isso significaria "de graça" e zeraria o custo
+ * no ledger sem ninguém perceber. Vazio tem que virar "não informado".
+ */
+const optionalNumber = z.preprocess((v) => (v === '' || v === undefined ? undefined : v), z.coerce.number().min(0).optional());
+
 // Valida o ambiente na subida. Falha cedo e com mensagem clara em vez de quebrar em runtime.
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -62,8 +69,8 @@ const schema = z.object({
    * endpoint alternativo. Sem isto, um modelo desconhecido assume o mais caro da tabela
    * (proposital: nunca subestimar custo) e estouraria o teto de gasto cedo demais.
    */
-  AI_PRICE_IN_PER_1K: z.coerce.number().min(0).optional(),
-  AI_PRICE_OUT_PER_1K: z.coerce.number().min(0).optional(),
+  AI_PRICE_IN_PER_1K: optionalNumber,
+  AI_PRICE_OUT_PER_1K: optionalNumber,
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
   /** json = uma linha JSON por evento (produção/agregador); pretty = legível no terminal */
   LOG_FORMAT: z.enum(['json', 'pretty']).default(process.env.NODE_ENV === 'production' ? 'json' : 'pretty'),

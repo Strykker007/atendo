@@ -69,4 +69,19 @@ describe('custo por endpoint', () => {
     const { aiCostUsd } = await import('@atendo/shared');
     expect(m.costOf('gpt-4o-mini', 1000, 1000)).toBe(aiCostUsd('gpt-4o-mini', 1000, 1000));
   });
+
+  it('AI_PRICE vazio no .env NÃO significa de graça — senão o ledger zera o custo calado', async () => {
+    // `VAR=` chega como string vazia; sem tratamento, z.coerce.number() viraria 0
+    const m = await withEnv({ AI_BASE_URL: '', AI_PRICE_IN_PER_1K: '', AI_PRICE_OUT_PER_1K: '' });
+    restore = m.restore;
+    const { aiCostUsd } = await import('@atendo/shared');
+    expect(m.costOf('claude-haiku-4-5-20251001', 1000, 1000)).toBe(aiCostUsd('claude-haiku-4-5-20251001', 1000, 1000));
+    expect(m.costOf('claude-haiku-4-5-20251001', 1000, 1000)).toBeGreaterThan(0);
+  });
+
+  it('preço zero explícito continua sendo zero (modelo cortesia)', async () => {
+    const m = await withEnv({ AI_BASE_URL: 'https://api.groq.com/openai/v1', AI_PRICE_IN_PER_1K: '0', AI_PRICE_OUT_PER_1K: '0' });
+    restore = m.restore;
+    expect(m.costOf('llama-3.3-70b', 10_000, 10_000)).toBe(0);
+  });
 });

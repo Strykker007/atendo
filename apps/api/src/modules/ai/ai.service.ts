@@ -7,7 +7,7 @@ import { UsageService } from '../billing/usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
 import { AiUsageService } from './ai-usage.service';
 import { decideCanUseAi } from './ai-quota';
-import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, suggestSystemPrompt, summarySystemPrompt, toMessages } from './prompts';
+import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, suggestSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from './prompts';
 import type { AiMessage } from './ai.types';
 import { env } from '../../config/env';
 
@@ -107,15 +107,15 @@ export class AiService {
   /** Sugere a próxima resposta. O atendente revisa e envia — a IA nunca envia sozinha aqui. */
   async suggest(tenantId: string, conversationId: string, agent: { id: string; name: string }) {
     const { conv, history } = await this.conversationContext(tenantId, conversationId);
-    const messages = toMessages(history);
-    if (!messages.length) throw new BadRequestException('A conversa ainda não tem mensagens do cliente.');
+    const transcript = toTranscript(history);
+    if (!transcript) throw new BadRequestException('A conversa ainda não tem mensagens para a IA ler.');
     return this.run({
       tenantId,
       kind: 'suggest',
       conversationId,
       userId: agent.id,
       system: suggestSystemPrompt({ businessName: conv.tenant.name, agentName: agent.name }),
-      messages,
+      messages: [transcriptMessage(transcript, 'Escreva a próxima mensagem do ATENDIMENTO.')],
       temperature: 0.4,
     });
   }
@@ -138,15 +138,15 @@ export class AiService {
   /** Resumo para quem vai assumir a conversa. */
   async summary(tenantId: string, conversationId: string, agentId: string) {
     const { history } = await this.conversationContext(tenantId, conversationId);
-    const messages = toMessages(history);
-    if (messages.length < 2) throw new BadRequestException('Conversa curta demais para resumir.');
+    const transcript = toTranscript(history);
+    if (transcript.split('\n').length < 2) throw new BadRequestException('Conversa curta demais para resumir.');
     return this.run({
       tenantId,
       kind: 'summary',
       conversationId,
       userId: agentId,
       system: summarySystemPrompt(),
-      messages,
+      messages: [transcriptMessage(transcript, 'Resuma esta conversa.')],
       temperature: 0.2,
     });
   }

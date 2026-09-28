@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aiCostUsd, priceOf } from '@atendo/shared';
-import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, summarySystemPrompt, toMessages } from '../src/modules/ai/prompts';
+import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from '../src/modules/ai/prompts';
 
 describe('toMessages — o que é enviado ao modelo', () => {
   it('traduz direção em papel', () => {
@@ -101,5 +101,49 @@ describe('custo da IA', () => {
 
   it('sem tokens, sem custo', () => {
     expect(aiCostUsd('gpt-4o-mini', 0, 0)).toBe(0);
+  });
+});
+
+
+describe('toTranscript — formato usado pelo copiloto', () => {
+  const conversa = [
+    { direction: 'in' as const, text: 'quanto custa o corte?' },
+    { direction: 'out' as const, text: 'R$ 45' },
+    { direction: 'out' as const, text: 'Quer marcar?' },
+    { direction: 'out' as const, text: 'Qualquer coisa é só chamar!' },
+  ];
+
+  it('funciona quando a conversa termina com mensagens NOSSAS', () => {
+    // era o bug: como turnos alternados, o último turno virava "assistant" e o modelo,
+    // entendendo que devia continuar a própria fala, devolvia vazio
+    expect(toMessages(conversa).at(-1)?.role).toBe('assistant');
+    expect(toTranscript(conversa)).toBe('CLIENTE: quanto custa o corte?\nATENDIMENTO: R$ 45\nATENDIMENTO: Quer marcar?\nATENDIMENTO: Qualquer coisa é só chamar!');
+  });
+
+  it('identifica quem falou em cada linha', () => {
+    expect(toTranscript([{ direction: 'in', text: 'oi' }])).toBe('CLIENTE: oi');
+    expect(toTranscript([{ direction: 'out', text: 'olá' }])).toBe('ATENDIMENTO: olá');
+  });
+
+  it('também não inclui nota interna', () => {
+    expect(toTranscript([{ direction: 'in', text: 'oi' }, { direction: 'out', text: 'cliente reclamão', internal: true }])).toBe('CLIENTE: oi');
+  });
+
+  it('respeita os mesmos limites de histórico e tamanho', () => {
+    const longa = Array.from({ length: 40 }, (_, i) => ({ direction: 'in' as const, text: `m${i}` }));
+    expect(toTranscript(longa).split('\n')).toHaveLength(HISTORY_LIMIT);
+    expect(toTranscript([{ direction: 'in', text: 'x'.repeat(5000) }]).length).toBeLessThanOrEqual(620);
+  });
+
+  it('conversa vazia vira string vazia (o serviço recusa antes de gastar)', () => {
+    expect(toTranscript([{ direction: 'out', text: null }])).toBe('');
+  });
+
+  it('transcriptMessage delimita a conversa e vai como turno do usuário', () => {
+    const m = transcriptMessage('CLIENTE: oi', 'Resuma esta conversa.');
+    expect(m.role).toBe('user');
+    expect(m.content).toContain('<conversa>');
+    expect(m.content).toContain('</conversa>');
+    expect(m.content.endsWith('Resuma esta conversa.')).toBe(true);
   });
 });
