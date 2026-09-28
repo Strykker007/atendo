@@ -4,6 +4,7 @@ import { MessageStatus, MessageType, NumberStatus, BillingCategory } from '@aten
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
 import type { MediaPayload, NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import { describeProviderError } from './provider-error';
 
 /** providerConfig (criptografado) de um número Meta */
 export interface MetaNumberConfig {
@@ -31,7 +32,7 @@ export class MetaProvider implements WhatsAppProvider {
       headers: { Authorization: `Bearer ${cfg.accessToken}`, 'Content-Type': 'application/json', ...init?.headers },
     });
     const json = (await res.json()) as any;
-    if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta API ${res.status}`);
+    if (!res.ok) throw new BadRequestException(describeProviderError(json?.error, `Meta API ${res.status}`));
     return json as T;
   }
 
@@ -114,7 +115,7 @@ export class MetaProvider implements WhatsAppProvider {
     form.append('file', new Blob([new Uint8Array(media.data)], { type: media.mimeType }), media.fileName ?? 'file');
     const res = await fetch(`${this.base}/${cfg.phoneNumberId}/media`, { method: 'POST', headers: { Authorization: `Bearer ${cfg.accessToken}` }, body: form });
     const json = (await res.json()) as any;
-    if (!res.ok) throw new BadRequestException(json?.error?.message ?? 'Falha no upload de mídia para a Meta');
+    if (!res.ok) throw new BadRequestException(describeProviderError(json?.error, 'Falha no upload de mídia para a Meta'));
     return json.id as string;
   }
 

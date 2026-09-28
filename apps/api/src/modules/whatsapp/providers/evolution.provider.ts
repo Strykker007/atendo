@@ -4,6 +4,7 @@ import { BillingCategory, MessageStatus, MessageType, NumberStatus } from '@aten
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
 import type { MediaPayload, NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import { describeProviderError } from './provider-error';
 
 /** providerConfig de um número Evolution */
 export interface EvolutionNumberConfig {
@@ -33,8 +34,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     });
     const json = (await res.json().catch(() => ({}))) as any;
     if (!res.ok) {
-      const raw = json?.response?.message ?? json?.message ?? `Evolution ${res.status}`;
-      throw new BadRequestException(Array.isArray(raw) ? raw.join('; ') : String(raw));
+      throw new BadRequestException(describeProviderError(json?.response?.message ?? json?.message ?? json, `Evolution ${res.status}`));
     }
     return json as T;
   }

@@ -119,7 +119,7 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 |---|---|
 | `pnpm typecheck` | Checa tipos em todos os pacotes (inclui `apps/api/test`) |
 | `pnpm test` | Testes unitários da API — não precisa de banco, Redis nem rede ([docs/14](14-qualidade-e-observabilidade.md)) |
-| `pnpm build` | Build de tudo |
+| `pnpm build` | Build de tudo (a web compila em `.next-build`, separada do `.next` do `pnpm dev` — antes um build derrubava o servidor de desenvolvimento em execução) |
 | `pnpm db:studio` | Prisma Studio (navegar no banco) |
 | `pnpm db:generate` | Regenera o Prisma Client após mudar o schema |
 | `pnpm infra:logs` | Logs dos containers (útil para ver a Evolution) |
@@ -143,6 +143,12 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 **`This name "..." is already in use`** ao criar número — a instância já existe na Evolution com outro token. Delete-a: `curl -X DELETE localhost:8080/instance/delete/<nome> -H "apikey: $EVOLUTION_API_KEY"`.
 
 **Testar sem celular** — dá para simular um webhook da Evolution: o corpo precisa de `instance` e `apikey` = HMAC-SHA256(`EVOLUTION_API_KEY`, instanceName). Exemplo em [04](04-providers-whatsapp.md#autenticação-do-webhook).
+
+**A web responde 500 / `Cannot find module './431.js'` / `__webpack_modules__[moduleId] is not a function`** — cache do Next corrompido (acontece depois de muitos dias de hot reload). Pare a web, apague o cache e suba de novo:
+
+```bash
+lsof -iTCP:3000 -sTCP:LISTEN -t | xargs kill; rm -rf apps/web/.next; pnpm start:all
+```
 
 **Mandei mensagem para o número conectado e nada apareceu** — veja `pnpm infra:logs` (serviço `evolution`). Se aparecer `Request failed with status code 413`, o corpo do webhook passou do limite da API (`useBodyParser` em `main.ts`, hoje 30 MB — a Evolution manda mídia em base64). Se aparecer `401`, é a autenticação do webhook (instância criada sem o token HMAC — exclua e recrie o número). Se não aparecer nada, a instância não está `open`: `curl localhost:8080/instance/fetchInstances -H "apikey: $EVOLUTION_API_KEY"`.
 
