@@ -10,6 +10,7 @@ import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { choose, interpolate, validAnswer } from './answer';
 import { afterAiAnswer } from './ai-turns';
+import { onScheduleMiss } from './schedule-misses';
 import { AiService } from '../ai/ai.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { isOpenAt } from '../tenants/business-hours';
@@ -364,7 +365,7 @@ export class FlowEngineService {
    * ou 'fallback' (não conseguiu / desistiu). O estado fica em vars._sched (JSON).
    */
   private async scheduleStep(runId: string, node: Extract<FlowNode, { type: 'schedule' }>, conversationId: string, tenantId: string, vars: Record<string, string>, answer?: string, replyId?: string): Promise<'wait' | 'done' | 'fallback'> {
-    type S = { step: 'service' | 'pro' | 'slot' | 'confirm'; serviceId?: string; professionalId?: string; services?: { id: string; name: string }[]; pros?: { id: string; name: string }[]; slots?: { startAt: string; label: string }[]; chosen?: { startAt: string; label: string } };
+    type S = { step: 'service' | 'pro' | 'slot' | 'confirm'; serviceId?: string; professionalId?: string; services?: { id: string; name: string }[]; pros?: { id: string; name: string }[]; slots?: { startAt: string; label: string }[]; chosen?: { startAt: string; label: string }; misses?: number };
     const state: S = vars._sched ? JSON.parse(vars._sched) : { step: 'service' };
     const save = async (s: S) => { await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, _sched: JSON.stringify(s) } } }); };
     const send = (t: string) => this.send(conversationId, t);
@@ -373,6 +374,22 @@ export class FlowEngineService {
     const asOpts = (items: { id: string; name: string }[]) => items.map((x) => ({ id: x.id, title: x.name.slice(0, 24), description: x.name.length > 24 ? x.name : undefined }));
     const cancelWords = /^(cancelar|sair|desistir|não|nao|parar)$/i;
     if (answer && cancelWords.test(answer.trim())) { await send('Tudo bem, agendamento cancelado. Se precisar, é só chamar.'); return 'fallback'; }
+
+    /**
+     * Resposta não entendida. Repetir o menu para sempre deixa o contato preso ouvindo
+     * "não entendi" — depois de algumas tentativas, entrega para um humano.
+     */
+    const naoEntendi = async (repetir: () => Promise<void>): Promise<'wait' | 'fallback'> => {
+      const r = onScheduleMiss(state.misses ?? 0);
+      state.misses = r.misses;
+      if (r.action === 'handoff') {
+        await send('Vou chamar um atendente para te ajudar com o agendamento, um momento.');
+        return 'fallback';
+      }
+      await save(state);
+      await repetir();
+      return 'wait';
+    };
 
     // 1) serviço
     if (state.step === 'service') {
@@ -386,8 +403,8 @@ export class FlowEngineService {
         return 'wait';
       } else {
         const c = pick(state.services, answer);
-        if (!c) { await this.sendMenu(conversationId, 'Não entendi. Escolha o serviço:', asOpts(state.services), 'Ver serviços'); return 'wait'; }
-        state.serviceId = c.id; state.step = 'pro';
+        if (!c) return naoEntendi(() => this.sendMenu(conversationId, 'Não entendi. Escolha o serviço:', asOpts(state.services!), 'Ver serviços'));
+        state.serviceId = c.id; state.step = 'pro'; state.misses = 0;
       }
     }
     // 2) profissional
@@ -405,8 +422,8 @@ export class FlowEngineService {
         }
       } else {
         const c = pick(state.pros, answer);
-        if (!c) { await this.sendMenu(conversationId, 'Escolha o profissional:', asOpts(state.pros), 'Ver profissionais'); return 'wait'; }
-        state.professionalId = c.id; state.step = 'slot';
+        if (!c) return naoEntendi(() => this.sendMenu(conversationId, 'Escolha o profissional:', asOpts(state.pros!), 'Ver profissionais'));
+        state.professionalId = c.id; state.step = 'slot'; state.misses = 0;
       }
     }
     // 3) horário
@@ -430,8 +447,8 @@ export class FlowEngineService {
       }
       if (replyId === '__more' || Number(answer) === state.slots.length + 1) return this.scheduleStep(runId, node, conversationId, tenantId, vars, 'mais', undefined);
       const c = choose(state.slots.map((s) => ({ id: s.startAt, title: s.label })), answer ?? '', replyId);
-      if (!c) { await send('Escolha um dos horários, responda "mais" para outros ou "cancelar".'); return 'wait'; }
-      state.chosen = { startAt: c.id, label: c.title }; state.step = 'confirm';
+      if (!c) return naoEntendi(() => send('Escolha um dos horários, responda "mais" para outros ou "cancelar".'));
+      state.chosen = { startAt: c.id, label: c.title }; state.step = 'confirm'; state.misses = 0;
       const svc = await this.prisma.service.findUniqueOrThrow({ where: { id: state.serviceId! } });
       const pro = await this.prisma.professional.findUniqueOrThrow({ where: { id: state.professionalId! } });
       await save(state);
@@ -442,7 +459,9 @@ export class FlowEngineService {
     if (state.step === 'confirm') {
       const a = replyId === 'yes' ? '1' : replyId === 'other' ? '2' : (answer ?? '').trim();
       if (a === '2') { state.step = 'slot'; state.slots = undefined; state.chosen = undefined; await save(state); return this.scheduleStep(runId, node, conversationId, tenantId, { ...vars, _sched: JSON.stringify(state) }, undefined); }
-      if (a !== '1' && !/^(sim|s|ok|confirmar)$/i.test(a)) { await this.sendMenu(conversationId, 'Confirma o horário?', [{ id: 'yes', title: 'Sim, confirmar' }, { id: 'other', title: 'Outro horário' }]); return 'wait'; }
+      if (a !== '1' && !/^(sim|s|ok|confirmar)$/i.test(a)) {
+        return naoEntendi(() => this.sendMenu(conversationId, 'Confirma o horário?', [{ id: 'yes', title: 'Sim, confirmar' }, { id: 'other', title: 'Outro horário' }]));
+      }
       try {
         const appt = await this.scheduling.create(tenantId, { professionalId: state.professionalId!, serviceId: state.serviceId!, contactId: conv.contactId, startAt: new Date(state.chosen!.startAt), conversationId, source: 'flow' });
         const text = (node.data.confirmText ?? 'Agendado! {{servico}} com {{profissional}} em {{horario}}. Te lembro um dia antes. 💈')
