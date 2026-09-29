@@ -124,7 +124,7 @@ O Caddy emite o certificado HTTPS sozinho, desde que o DNS já aponte para o ser
 |---|---|---|
 | ✅ | **Backup automático do Postgres**, testado com restauração | feito — ver abaixo |
 | ✅ | **Backup do volume da Evolution** | feito — ver abaixo |
-| 🟡 | **Stripe exercitado ponta a ponta** em modo teste | caminho feliz verificado; falha de pagamento ainda não — ver abaixo |
+| ✅ | **Stripe exercitado ponta a ponta** em modo teste | feito — caminho feliz e falha de pagamento |
 | ⬜ | **Resend com domínio verificado** | Cliente não recebe convite nem redefinição de senha |
 | ⬜ | **Sentry ligado** (`SENTRY_DSN`) | Erro em produção só aparece quando o cliente reclama |
 | ⬜ | **Alerta de número caído** | A sessão cai de madrugada e ninguém percebe até de manhã |
@@ -193,11 +193,23 @@ Com chave de teste e `stripe listen`:
 | Assinatura no banco | `active`, plano Starter, ciclo até 29/10 |
 | Fatura | R$ 97,00, status `paid`, com link do Stripe |
 
-### Ainda não verificado
+### Falha de pagamento → carência → suspensão → reativação
 
-**Falha de pagamento → carência → suspensão.** Forçar uma recusa real exige *test clock* do
-Stripe (simular a renovação do mês seguinte); tentar por fatura avulsa não reproduz o
-caminho real. É o próximo teste, e é importante: é o que protege você de atender de graça.
+Verificado com **test clock** do Stripe (adianta o relógio para provocar a renovação):
+
+| Passo | Resultado |
+|---|---|
+| Assina com cartão bom | `active` |
+| Cliente troca para um cartão que recusa, relógio avança 1 mês | renovação falha → **`past_due`**, carência de 5 dias gravada, e-mail "a cobrança falhou" disparado |
+| Carência vence e o job diário roda | **`suspended`**, e-mail de suspensão disparado |
+| Cliente atualiza o cartão e paga a fatura | volta a **`active`**, carência limpa |
+
+> Ao testar, **nunca** mande número de cartão cru para a API do Stripe, nem em modo teste:
+> ele recusa e dispara um alerta de segurança para o dono da conta. Use os tokens de teste
+> (`tok_visa`, `tok_chargeCustomerFail`).
+
+Um detalhe que só apareceu aqui: cada tentativa de cobrança gera uma fatura, então o mês
+teve quatro. Foi o que revelou o bug de faturas colidindo por período (abaixo).
 
 ### Dois problemas encontrados e corrigidos
 
