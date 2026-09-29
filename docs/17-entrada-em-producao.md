@@ -96,6 +96,8 @@ então dá para estrear sem e-mail e configurar depois.
 
 - **Servidor**: VPS Linux com Docker. Para começar (até ~50 clientes), 4 vCPU / 8 GB / 80 GB
   SSD resolve. Cada instância Evolution consome ~100 MB de RAM — ver [11](11-infra-producao.md).
+  Opções: Hetzner (melhor preço), DigitalOcean/Vultr (região em São Paulo) ou **Oracle Cloud
+  Always Free** (ver abaixo).
 - **Domínio** e acesso ao DNS.
 - **Registros DNS** apontando para o IP do servidor:
   - `app.seudominio.com.br` → painel
@@ -248,3 +250,32 @@ segunda fatura do ciclo sobrescrevia a primeira — acontece sempre que o client
 plano no meio do mês** (o Stripe emite uma fatura de proration). No teste, três faturas de
 setembro viraram uma só, e a de R$ 97 paga foi substituída. Agora cada fatura do Stripe é
 uma linha, identificada pelo `externalId`.
+
+
+---
+
+## 8. Oracle Cloud Always Free — viável para começar
+
+A camada gratuita da Oracle dá **4 cores ARM (A1.Flex) + 24 GB de RAM + 200 GB**, o que é
+mais do que o servidor pago sugerido acima. Tecnicamente funciona: **todas as imagens que
+usamos têm `arm64`**, incluindo `evoapicloud/evolution-api` — verificado em 2026-09-29 com
+`docker manifest inspect`. O compose constrói na própria máquina, então não há nada a mudar.
+
+### O que aceitar junto
+
+| Risco | Como conviver |
+|---|---|
+| **Sem SLA** — recurso gratuito, a Oracle não deve disponibilidade a você | backup remoto + deploy automatizado: se cair, sobe em outro provedor e restaura |
+| **Capacidade ARM escassa** em algumas regiões | se a instância já existe, o problema já passou |
+| **Recuperação de instâncias ociosas** em contas somente-free | **converter a conta para Pay As You Go**: o Always Free continua gratuito e a recuperação deixa de valer |
+
+### Regras para usar gratuito com cliente pagante
+
+1. **`BACKUP_REMOTE` configurado** — em servidor gratuito isso deixa de ser recomendação.
+   O backup precisa estar fora da máquina que pode sumir.
+2. **Conta em Pay As You Go**, mesmo sem gastar nada.
+3. **Migrar quando a receita justificar** — com 3 ou 4 clientes, um servidor pago custa uma
+   fração da receita e traz SLA.
+
+Com o backup automatizado e o `prepare-prod.sh`, o custo de trocar de provedor é de menos de
+uma hora. É isso que torna o risco do gratuito aceitável no começo — e não o contrário.
