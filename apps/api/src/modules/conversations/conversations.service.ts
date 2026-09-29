@@ -340,9 +340,16 @@ export class ConversationsService {
     if (c.loggedOut) this.log.warn(`Número ${number.label} (${number.phone}) foi desconectado pelo celular (dispositivo removido)`);
     // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
     const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
-    // primeira conexão: começa o aquecimento — número novo com volume alto é banido rápido
-    const warmup = c.status === 'connected' && !number.warmupStartedAt ? { warmupStartedAt: new Date() } : {};
-    if (warmup.warmupStartedAt) this.log.log(`Número ${number.label} conectou pela primeira vez: aquecimento iniciado`);
+    // Aquecimento só para número REALMENTE novo: se já enviou alguma vez, é uma linha
+    // estabelecida e limitá-la a 20 envios/dia quebraria o atendimento do cliente.
+    let warmup: { warmupStartedAt?: Date } = {};
+    if (c.status === 'connected' && !number.warmupStartedAt) {
+      const jaEnviou = await this.prisma.messageUsage.findFirst({ where: { numberId: number.id, direction: 'out' }, select: { id: true } });
+      if (!jaEnviou) {
+        warmup = { warmupStartedAt: new Date() };
+        this.log.log(`Número ${number.label} conectou pela primeira vez: aquecimento iniciado`);
+      }
+    }
     await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...(phone && { phone }) } }).catch(async (err) => {
       // conflito de unique (tenantId, phone): mantém o telefone antigo, só atualiza status
       if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup } });

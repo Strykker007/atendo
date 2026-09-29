@@ -73,3 +73,12 @@ describe('withinDailyLimit', () => {
     expect(withinDailyLimit(999_999, 0).ok).toBe(true);
   });
 });
+
+describe('aquecimento não pode pegar número já estabelecido', () => {
+  it('sem warmupStartedAt, o teto é o configurado — nenhuma surpresa de 20/dia', () => {
+    // regressão: o número do cliente, ativo há semanas, passou a ser tratado como novo e
+    // teria travado em 20 envios no dia
+    expect(dailyLimit({ configured: 1000, warmupStartedAt: null })).toBe(1000);
+    expect(dailyLimit({ configured: 1000, warmupStartedAt: undefined })).toBe(1000);
+  });
+});
