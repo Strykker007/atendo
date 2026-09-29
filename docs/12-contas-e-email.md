@@ -48,3 +48,28 @@ Todos em texto simples + HTML mínimo (link vira botão). Falha de envio nunca d
 | POST | `/tenants/me/agents` sem `password` | Cria + convite; com `password` cria direto |
 | POST | `/tenants/me/agents/:id/resend-invite` | |
 | POST | `/tenants` sem `adminPassword` | Cria cliente + convite ao admin |
+
+
+## Funcionar sem e-mail configurado
+
+O convite **não depende de e-mail**. Ao criar um atendente sem senha, a API devolve o
+`inviteLink`, e a tela de Equipe tem **"Copiar link do convite"** — o admin manda por
+WhatsApp. O link vale 3 dias e gerar um novo invalida o anterior.
+
+Isso existe porque e-mail é uma dependência externa que atrasa a entrada de um cliente
+(precisa de domínio verificado) e, mesmo configurado, cai em spam. Com o link, o cliente
+cadastra a equipe dele no primeiro dia.
+
+| Caminho | Precisa de e-mail? |
+|---|---|
+| Criar atendente e mandar o link do convite | não |
+| Admin definir a senha do atendente direto (Equipe → Redefinir senha) | não |
+| Usuário recuperar a própria senha ("esqueci minha senha") | **sim** |
+| Alertas de plano, cobrança falhou e suspensão | **sim** |
+
+Sem e-mail, quem esquece a senha depende de um admin redefinir. Para um cliente pequeno
+isso se resolve; conforme a operação cresce, configure o Resend ([17](17-entrada-em-producao.md)).
+
+> `passwordSetAt` é o que libera o login de quem foi convidado. Definir a senha pelo painel
+> passou a marcá-lo — antes o usuário continuava travado na mensagem "use o link do convite",
+> mesmo com senha definida pelo admin.

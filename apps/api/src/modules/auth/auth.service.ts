@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Logger, BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'node:crypto';
@@ -16,6 +16,7 @@ const ttlMs = (ttl: string) => {
 
 @Injectable()
 export class AuthService {
+  private readonly log = new Logger(AuthService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -75,14 +76,27 @@ Se não foi você, ignore este e-mail — nada muda.`,
     const user = await this.prisma.user.create({
       data: { tenantId: inviter.tenantId, email: data.email, name: data.name, role: data.role, passwordHash: await this.hashPassword(randomBytes(24).toString('base64url')), invitedAt: new Date() },
     });
-    await this.sendInvite(user.id, inviter.name, tenantName);
-    return user;
+    // o e-mail é melhor esforço: sem provedor configurado, o admin usa o link copiável
+    const link = await this.sendInvite(user.id, inviter.name, tenantName).catch((err) => {
+      this.log.warn(`Convite por e-mail não enviado para ${data.email}: ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
+    return { user, link };
+  }
+
+  /**
+   * Gera o link de convite **sem enviar e-mail**. Existe porque o convite não pode depender
+   * de e-mail configurado: sem isto, um cliente sem provedor de e-mail não consegue cadastrar
+   * a própria equipe. O admin copia o link e manda pelo WhatsApp.
+   */
+  async inviteLink(userId: string, ttlHours = 72) {
+    const raw = await this.issueToken(userId, 'invite', ttlHours);
+    return { link: `${env.WEB_ORIGIN}/convite?token=${raw}`, expiresInHours: ttlHours };
   }
 
   async sendInvite(userId: string, inviterName: string, tenantName: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    const raw = await this.issueToken(user.id, 'invite', 72);
-    const link = `${env.WEB_ORIGIN}/convite?token=${raw}`;
+    const { link } = await this.inviteLink(user.id);
     await this.mail.send({
       to: user.email,
       subject: `${inviterName} convidou você para a equipe de ${tenantName} no Atendo`,
@@ -96,6 +110,7 @@ ${link}
 
 Seu login será: ${user.email}`,
     });
+    return link;
   }
 
   async acceptInvite(token: string, password: string) {

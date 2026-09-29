@@ -245,9 +245,11 @@ export interface Agent { id: string; name: string; email: string; role: Role; is
 export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
 export const useCreateAgent = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: { name: string; email: string; password?: string; role?: 'agent' | 'manager' }) => api<Agent & { invited?: boolean }>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+  return useMutation({ mutationFn: (b: { name: string; email: string; password?: string; role?: 'agent' | 'manager' }) => api<Agent & { invited?: boolean; inviteLink?: string; emailSent?: boolean }>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };
-export const useResendInvite = () => useMutation({ mutationFn: (id: string) => api(`/tenants/me/agents/${id}/resend-invite`, { method: 'POST' }) });
+export const useResendInvite = () => useMutation({ mutationFn: (id: string) => api<{ ok: boolean; emailSent: boolean; inviteLink: string }>(`/tenants/me/agents/${id}/resend-invite`, { method: 'POST' }) });
+/** Link de convite para mandar por WhatsApp — não depende de e-mail configurado. */
+export const useInviteLink = () => useMutation({ mutationFn: (id: string) => api<{ link: string; expiresInHours: number }>(`/tenants/me/agents/${id}/invite-link`, { method: 'POST' }) });
 export const useChangePassword = () => useMutation({ mutationFn: (b: { current: string; password: string }) => api('/auth/change-password', { method: 'POST', body: JSON.stringify(b) }) });
 
 export const useUpdateAgent = () => {

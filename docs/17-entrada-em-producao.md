@@ -80,9 +80,9 @@ META_WEBHOOK_VERIFY_TOKEN=...  # string que você inventa e repete no painel da 
 
 ## 3. Resend (e-mails)
 
-Convite de equipe, esqueci a senha, alerta de plano e aviso de cobrança dependem disto.
-Sem chave, os e-mails só aparecem no log — o que em produção significa **cliente sem
-convite e sem recuperação de senha**.
+Esqueci a senha, alerta de plano e aviso de cobrança dependem disto. **O convite não**: a
+tela de Equipe gera um link copiável para mandar por WhatsApp ([12](12-contas-e-email.md)),
+então dá para estrear sem e-mail e configurar depois.
 
 1. Conta em `resend.com`, chave `re_…`.
 2. **Domínio verificado** (registros SPF/DKIM no DNS). Sem isso a entrega cai em spam.
@@ -125,7 +125,7 @@ O Caddy emite o certificado HTTPS sozinho, desde que o DNS já aponte para o ser
 | ✅ | **Backup automático do Postgres**, testado com restauração | feito — ver abaixo |
 | ✅ | **Backup do volume da Evolution** | feito — ver abaixo |
 | ✅ | **Stripe exercitado ponta a ponta** em modo teste | feito — caminho feliz e falha de pagamento |
-| ⬜ | **Resend com domínio verificado** | Cliente não recebe convite nem redefinição de senha |
+| 🟡 | **Resend com domínio verificado** | deixou de ser bloqueador: o convite tem link copiável ([12](12-contas-e-email.md)). Ainda necessário para "esqueci minha senha" e avisos de cobrança |
 | ⬜ | **Sentry ligado** (`SENTRY_DSN`) | Erro em produção só aparece quando o cliente reclama |
 | ⬜ | **Alerta de número caído** | A sessão cai de madrugada e ninguém percebe até de manhã |
 

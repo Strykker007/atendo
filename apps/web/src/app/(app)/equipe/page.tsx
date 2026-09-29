@@ -7,8 +7,8 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, type Agent } from '@/lib/hooks';
-import { MailCheck, Send } from 'lucide-react';
+import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, type Agent } from '@/lib/hooks';
+import { MailCheck, Send, Link as LinkIcon } from 'lucide-react';
 
 export default function EquipePage() {
   const me = useMe();
@@ -21,6 +21,9 @@ export default function EquipePage() {
   const [resetting, setResetting] = useState<Agent | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const resend = useResendInvite();
+  const inviteLink = useInviteLink();
+  const [linkId, setLinkId] = useState<string | null>(null);
+  const [link, setLink] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
 
   async function toggle(a: Agent) {
@@ -69,7 +72,27 @@ export default function EquipePage() {
                   </td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
                     {isAdmin && a.invitedAt && !a.passwordSetAt && (
-                      <Button size="sm" variant="ghost" icon={<Send size={12} />} loading={resendingId === a.id} onClick={async () => { setResendingId(a.id); try { await resend.mutateAsync(a.id); toast.ok(`Convite reenviado para ${a.email}`); } catch (err) { toast.err(err); } finally { setResendingId(null); } }}>Reenviar convite</Button>
+                      <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<LinkIcon size={12} />}
+                        loading={linkId === a.id}
+                        title="Gera um link para você mandar pelo WhatsApp — não depende de e-mail"
+                        onClick={async () => {
+                          setLinkId(a.id);
+                          try {
+                            const r = await inviteLink.mutateAsync(a.id);
+                            setLink(r.link);
+                            try { await navigator.clipboard.writeText(r.link); toast.ok('Link copiado — mande para o atendente'); }
+                            catch { toast.ok('Link gerado abaixo'); }
+                          } catch (err) { toast.err(err); } finally { setLinkId(null); }
+                        }}
+                      >
+                        Copiar link do convite
+                      </Button>
+                      <Button size="sm" variant="ghost" icon={<Send size={12} />} loading={resendingId === a.id} onClick={async () => { setResendingId(a.id); try { const r = await resend.mutateAsync(a.id); if (r.emailSent) toast.ok(`Convite reenviado para ${a.email}`); else { setLink(r.inviteLink); toast.ok('E-mail não configurado — use o link do convite'); } } catch (err) { toast.err(err); } finally { setResendingId(null); } }}>Reenviar por e-mail</Button>
+                      </>
                     )}
                     {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
                       <>
@@ -85,7 +108,19 @@ export default function EquipePage() {
         </div>
       )}
 
-      <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then((r) => { toast.ok(r.invited ? `Convite enviado para ${b.email}` : (b.role === 'manager' ? 'Gerente criado' : 'Atendente criado')); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
+      {link && (
+        <div className="rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-medium text-accent-ink"><LinkIcon size={14} /> Link do convite (vale 3 dias)</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="flex-1 min-w-0 truncate rounded-lg bg-panel border border-line px-2.5 py-1.5 text-[11.5px] font-mono">{link}</code>
+            <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(link).then(() => toast.ok('Copiado')).catch(() => undefined)}>Copiar</Button>
+            <Button size="sm" variant="ghost" onClick={() => setLink(null)}>Fechar</Button>
+          </div>
+          <p className="text-[11.5px] text-muted">Mande por WhatsApp. Ao abrir, o atendente define a própria senha. Gerar um link novo invalida este.</p>
+        </div>
+      )}
+
+      <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ?? null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Atendente criado — mande o link do convite'); } else toast.ok(b.role === 'manager' ? 'Gerente criado' : 'Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
   );

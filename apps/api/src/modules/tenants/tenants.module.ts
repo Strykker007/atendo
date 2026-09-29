@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
@@ -126,8 +126,10 @@ class TenantsController {
     const role = dto.role === 'manager' && u.role !== 'manager' ? 'manager' : 'agent';
     if (!dto.password) {
       const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
-      const user = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: dto.email, name: dto.name, role }, tenant.name);
-      return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true };
+      const { user, link } = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: dto.email, name: dto.name, role }, tenant.name);
+      // devolve o link mesmo quando o e-mail saiu: e-mail cai em spam e some
+      const invite = link ?? (await this.auth.inviteLink(user.id)).link;
+      return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true, inviteLink: invite, emailSent: !!link };
     }
     return this.prisma.user.create({
       data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, passwordHash: await this.auth.hashPassword(dto.password), passwordSetAt: new Date() },
@@ -143,15 +145,31 @@ class TenantsController {
       this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId } }),
       this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } }),
     ]);
-    await this.auth.sendInvite(target.id, u.name, tenant.name);
-    return { ok: true };
+    const link = await this.auth.sendInvite(target.id, u.name, tenant.name).catch(() => null);
+    return { ok: true, emailSent: !!link, inviteLink: link ?? (await this.auth.inviteLink(target.id)).link };
+  }
+
+  /**
+   * Link de convite para o admin mandar pelo canal que quiser (WhatsApp, por exemplo).
+   * Gerar um novo invalida o anterior.
+   */
+  @Post('me/agents/:id/invite-link')
+  @Roles('tenant_admin', 'manager', 'super_admin')
+  async inviteLink(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    const target = await this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { id: true, passwordSetAt: true } });
+    if (target.passwordSetAt) throw new BadRequestException('Este usuário já definiu a senha. Para trocar, use "Redefinir senha".');
+    return this.auth.inviteLink(target.id);
   }
 
   @Patch('me/agents/:id')
   @Roles('tenant_admin', 'manager', 'super_admin')
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
     const { password, ...rest } = dto;
-    const data = password ? { ...rest, passwordHash: await this.auth.hashPassword(password) } : rest;
+    // `passwordSetAt` é o que libera o login de quem foi convidado: sem isto, definir a
+    // senha pelo painel não adiantava nada e o usuário continuava travado no convite
+    const data = password
+      ? { ...rest, passwordHash: await this.auth.hashPassword(password), passwordSetAt: new Date() }
+      : rest;
     // revoga sessões ativas ao trocar senha ou desativar
     if (password || dto.isActive === false) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
