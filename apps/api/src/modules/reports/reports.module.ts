@@ -11,7 +11,7 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
  * Nunca recebe SQL do usuário; só dimensões/métricas de uma lista fechada.
  */
 export const ReportDefinition = z.object({
-  metric: z.enum(['conversations', 'messages_in', 'messages_out', 'avg_first_response_min']),
+  metric: z.enum(['conversations', 'messages_in', 'messages_out', 'avg_first_response_min', 'revenue', 'won', 'lost', 'win_rate']),
   groupBy: z.enum(['day', 'week', 'month', 'tag', 'status', 'number', 'agent', 'origin', 'campaign']),
   from: z.coerce.date(),
   to: z.coerce.date(),
@@ -43,7 +43,7 @@ class ReportsController {
     const from = fromQ ? new Date(fromQ) : new Date(Date.now() - 29 * 86_400_000);
     const base = { from, to, filters: {}, chart: 'bar' as const };
     const t = u.tenantId;
-    const [total, closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus] = await Promise.all([
+    const [total, closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, won, lost] = await Promise.all([
       this.prisma.conversation.count({ where: { tenantId: t, createdAt: { gte: from, lt: to } } }),
       this.prisma.conversation.count({ where: { tenantId: t, createdAt: { gte: from, lt: to }, status: 'closed' } }),
       this.prisma.conversation.count({ where: { tenantId: t, status: 'waiting' } }),
@@ -57,6 +57,8 @@ class ReportsController {
       this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }),
       this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }),
       this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }),
+      this.prisma.conversation.aggregate({ where: { tenantId: t, outcomeAt: { gte: from, lt: to }, outcome: 'won' }, _count: { _all: true }, _sum: { outcomeValue: true } }),
+      this.prisma.conversation.count({ where: { tenantId: t, outcomeAt: { gte: from, lt: to }, outcome: 'lost' } }),
     ]);
     const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
     return {
@@ -70,6 +72,10 @@ class ReportsController {
         messagesIn: msgsIn,
         messagesOut: msgsOut,
         avgFirstResponseMin: respVals.length ? respVals.reduce((a, b) => a + b, 0) / respVals.length : null,
+        won: won._count._all,
+        lost,
+        revenue: Number(won._sum.outcomeValue ?? 0),
+        winRate: won._count._all + lost > 0 ? won._count._all / (won._count._all + lost) : null,
       },
       series: { byDay, byAgent, byOrigin, byCampaign: byCampaign.filter((c) => c.label !== '(orgânico)'), byTag: byTag.filter((c) => c.label !== '(sem tag)').sort((a, b) => b.value - a.value).slice(0, 8), byStatus },
     };
@@ -110,6 +116,13 @@ class ReportsController {
       messages_in: Prisma.sql`count(m.id) filter (where m.direction = 'in')`,
       messages_out: Prisma.sql`count(m.id) filter (where m.direction = 'out')`,
       avg_first_response_min: Prisma.sql`avg(extract(epoch from (fr.first_out - c."createdAt")) / 60)`,
+      // desfecho registrado no encerramento — é o que transforma o painel em relatório de vendas
+      revenue: Prisma.sql`coalesce(sum(distinct c."outcomeValue"), 0)`,
+      won: Prisma.sql`count(distinct c.id) filter (where c.outcome = 'won')`,
+      lost: Prisma.sql`count(distinct c.id) filter (where c.outcome = 'lost')`,
+      win_rate: Prisma.sql`case when count(distinct c.id) filter (where c.outcome <> 'none') = 0 then 0
+        else count(distinct c.id) filter (where c.outcome = 'won')::float
+             / count(distinct c.id) filter (where c.outcome <> 'none') end`,
     }[d.metric];
 
     const filters: Prisma.Sql[] = [Prisma.sql`c."tenantId" = ${tenantId}`, Prisma.sql`c."createdAt" >= ${d.from}`, Prisma.sql`c."createdAt" < ${d.to}`];

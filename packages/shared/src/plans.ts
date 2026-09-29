@@ -1,12 +1,25 @@
 export const BillingModel = { FIXED: 'fixed', USAGE: 'usage', HYBRID: 'hybrid' } as const;
 export type BillingModel = (typeof BillingModel)[keyof typeof BillingModel];
 
+/** Unidade cobrada do cliente. Mensagem é previsível; conversa é como a Meta cobra. */
+export const BillingUnit = { MESSAGES: 'messages', CONVERSATIONS: 'conversations' } as const;
+export type BillingUnit = (typeof BillingUnit)[keyof typeof BillingUnit];
+export const BILLING_UNIT_LABEL: Record<BillingUnit, string> = { messages: 'mensagens enviadas', conversations: 'conversas' };
+
 /** Limites de um plano. Vive em jsonb para você criar planos sem migration. */
 export interface PlanLimits {
   maxNumbers: number;
   maxAgents: number;
+  /**
+   * Qual unidade conta para a quota deste plano. Ausente = `messages` (planos antigos).
+   * O ledger registra **as duas** sempre; isto decide qual limita e qual vira excedente.
+   */
+  billingUnit?: BillingUnit;
   /** mensagens ENVIADAS incluídas/mês (o que gera custo/infra) */
   includedMessagesMonth: number;
+  /** conversas incluídas/mês — uma conversa é uma janela de 24h com o mesmo contato */
+  includedConversationsMonth?: number;
+  overagePricePerConversation?: number | null;
   /** templates Meta incluídos/mês — nunca ilimitado em plano fixo */
   includedTemplatesMonth: number;
   /** null = bloqueia ao estourar; número = cobra excedente por mensagem */

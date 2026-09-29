@@ -125,6 +125,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
         provider: ctx.provider,
         direction: 'out',
         billingCategory: result.billingCategory,
+        contactId: message.conversation.contactId,
       });
     } catch (err) {
       this.log.error(`Uso não registrado para ${message.id} (mensagem foi entregue): ${err instanceof Error ? err.message : err}`);

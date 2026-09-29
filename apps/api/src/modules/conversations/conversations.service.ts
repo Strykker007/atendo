@@ -1,7 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import type { Conversation, ConversationOrigin, ConversationStatus, Prisma, WhatsAppNumber } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { Conversation, ConversationOrigin, ConversationOutcome, ConversationStatus, WhatsAppNumber } from '@prisma/client';
 import type { InboundMessage, StatusUpdate, NumberStatus, OutboundMessage } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -231,6 +232,7 @@ export class ConversationsService {
       provider: number.provider,
       direction: 'in',
       billingCategory: number.provider === 'meta' ? 'service' : 'unofficial',
+      contactId: contact.id,
     });
 
     this.gateway.emitMessage(number.tenantId, message);
@@ -442,7 +444,27 @@ export class ConversationsService {
     return this.present(message);
   }
 
-  async setStatus(tenantId: string, id: string, status: ConversationStatus, userId: string) {
+  async setStatus(
+    tenantId: string,
+    id: string,
+    status: ConversationStatus,
+    userId: string,
+    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string },
+  ) {
+    // o desfecho só faz sentido ao encerrar; reabrir limpa, porque o atendimento continua
+    const desfecho =
+      status !== 'closed'
+        ? { outcome: 'none' as const, outcomeValue: null, outcomeReason: null, outcomeAt: null, outcomeById: null }
+        : outcome && outcome.outcome !== 'none'
+          ? {
+              outcome: outcome.outcome,
+              outcomeValue: outcome.outcome === 'won' && outcome.value != null ? new Prisma.Decimal(outcome.value) : null,
+              outcomeReason: outcome.outcome === 'lost' ? (outcome.reason?.trim() || null) : null,
+              outcomeAt: new Date(),
+              outcomeById: userId,
+            }
+          : {};
+
     const conv = await this.prisma.conversation.update({
       where: { id, tenantId },
       data: {
@@ -451,6 +473,7 @@ export class ConversationsService {
         // reabrir em "in_progress" = quem reabriu assume; reabrir em "waiting" = volta para a fila
         ...(status === 'in_progress' && { assigneeId: userId }),
         ...(status === 'waiting' && { assigneeId: null }),
+        ...desfecho,
       },
     });
     this.gateway.emitConversation(tenantId, conv);

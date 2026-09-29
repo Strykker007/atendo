@@ -48,11 +48,11 @@ não de um módulo. A agenda passou a ler de lá.
 Boas-vindas, conversa finalizada e resposta padrão (com período de inatividade), mais o
 aviso de fora do expediente. Em **Configurações → Fluxos padrão**. Ver [10](10-fluxos-de-automacao.md).
 
-### 5. Encerramento com resultado
+### 5. Encerramento com resultado — **FEITO** (2026-09-28)
 
-Ao encerrar, poder escolher um fluxo de finalização e **registrar o desfecho**: comprou
-(com valor) ou não comprou (com motivo). É o que transforma o relatório de conversas num
-relatório de vendas — e é o argumento de renovação do cliente.
+Ao encerrar, o atendente registra comprou (com valor) ou não comprou (com motivo), e pode
+disparar um fluxo de finalização. Relatórios ganharam faturamento, taxa de conversão e as
+métricas `revenue`/`won`/`lost`/`win_rate`.
 
 ### 6. Distribuição automática (call center)
 
@@ -90,11 +90,10 @@ Não existe.
 Hoje mensagens de grupo são descartadas na entrada. O documento pede liberar grupos
 específicos.
 
-### 14. Cobrança por conversa e vencimento aberto
+### 14. Cobrança por conversa — **FEITO** (2026-09-28); vencimento aberto pendente
 
-O ledger conta **mensagens**; o documento fala em **conversas** ("até 5000, depois sobe o
-plano"). São unidades diferentes e mudam o preço. Também pede carência de 3 dias antes de
-faturar o cliente novo.
+O ledger passou a registrar **conversa e mensagem**, e `PlanLimits.billingUnit` escolhe qual
+limita o plano. Falta ainda a carência de 3 dias antes de faturar o cliente novo.
 
 ### 15. Blocos e ações que a referência tem e nós não
 

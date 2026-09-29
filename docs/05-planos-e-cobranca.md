@@ -148,3 +148,28 @@ pagando excedente. Mensagem tem custo previsível por unidade; IA não — um fl
 pode chamar o modelo em loop. A quota protege o cliente de fatura surpresa; o teto protege você.
 
 Detalhes, tabela de preços por modelo e como calibrar o preço: [15](15-ia.md).
+
+
+## Unidade de cobrança: conversa ou mensagem
+
+O ledger registra **as duas** sempre; `PlanLimits.billingUnit` decide qual **limita** o
+plano e qual gera excedente. Ausente = `messages` (planos criados antes da opção).
+
+| Unidade | O que conta | Quando usar |
+|---|---|---|
+| `messages` | cada mensagem **enviada** | custo previsível por unidade; bom para quem manda pouco e recebe muito |
+| `conversations` | uma **janela de 24h** com o mesmo contato no mesmo número | é como a Meta cobra; bom para atendimento, onde uma conversa tem dezenas de mensagens |
+
+Template tem limite próprio nas duas unidades.
+
+A janela de conversa é aberta no `conversation_usage` quando chega ou sai a primeira
+mensagem daquele contato e não há janela aberta. A trava é um `SET NX` no Redis com TTL de
+24h: **atômica**, porque duas mensagens simultâneas do mesmo contato não podem abrir duas
+janelas e cobrar em dobro. O ledger no Postgres continua sendo a fonte da verdade, e a
+reconciliação diária reconstrói o contador a partir dele.
+
+## Resultado do atendimento
+
+Ao encerrar, o atendente registra **comprou** (com valor) ou **não comprou** (com motivo).
+Isso alimenta os indicadores de venda em Relatórios — faturamento, taxa de conversão e onde
+o negócio se perde — e as métricas `revenue`, `won`, `lost` e `win_rate` no construtor.

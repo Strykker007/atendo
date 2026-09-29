@@ -93,7 +93,11 @@ function PlanoInner() {
 
       {/* Medidores */}
       <div className="grid gap-4 md:grid-cols-2">
-        <Meter icon={<MessageSquare size={18} />} label="Mensagens enviadas" used={u.used.messages} max={L.includedMessagesMonth} hard={L.hardLimit} overage={L.overagePricePerMessage} hint={`${u.used.messagesIn.toLocaleString('pt-BR')} recebidas (não contam no limite)`} />
+        {(L.billingUnit ?? 'messages') === 'conversations' ? (
+          <Meter icon={<MessageSquare size={18} />} label="Conversas" used={u.used.conversations ?? 0} max={L.includedConversationsMonth ?? 0} hard={L.hardLimit} overage={L.overagePricePerConversation} hint="Uma conversa = uma janela de 24h com o mesmo contato. Seu plano é cobrado por conversa; as mensagens dentro dela não contam." />
+        ) : (
+          <Meter icon={<MessageSquare size={18} />} label="Mensagens enviadas" used={u.used.messages} max={L.includedMessagesMonth} hard={L.hardLimit} overage={L.overagePricePerMessage} hint={`${u.used.messagesIn.toLocaleString('pt-BR')} recebidas (não contam no limite) · ${(u.used.conversations ?? 0).toLocaleString('pt-BR')} conversas no mês`} />
+        )}
         <Meter icon={<FileText size={18} />} label="Templates (Meta)" used={u.used.templates} max={L.includedTemplatesMonth} hard={L.hardLimit} overage={L.overagePricePerTemplate} hint="Só mensagens ativas pela API oficial custam template" />
         <Meter icon={<Smartphone size={18} />} label="Números" used={u.used.numbers} max={L.maxNumbers} hard />
         <Meter icon={<Users size={18} />} label="Atendentes" used={u.used.agents} max={L.maxAgents} hard />

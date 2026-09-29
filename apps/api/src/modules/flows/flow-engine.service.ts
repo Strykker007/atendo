@@ -60,6 +60,21 @@ export class FlowEngineService {
     return run;
   }
 
+  /**
+   * Fluxo escolhido no encerramento (pesquisa de satisfação, pós-venda). A conversa acabou
+   * de ser fechada, então reabre em "encerrado→aguardando" só se o fluxo realmente falar —
+   * `sendAsSystem` recusa conversa fechada, e travar o encerramento por causa disso seria pior.
+   */
+  async startOnClose(tenantId: string, conversationId: string, flowId: string) {
+    const flow = await this.prisma.flow.findFirst({ where: { id: flowId, tenantId, isActive: true } });
+    if (!flow) {
+      this.log.warn(`Fluxo de encerramento ${flowId} não existe ou está inativo`);
+      return null;
+    }
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'waiting' } });
+    return this.start(flow.id, conversationId);
+  }
+
   /** Para o fluxo ativo da conversa (botão "Parar" ou handoff). */
   async stop(conversationId: string, reason = 'parado pelo atendente') {
     const active = await this.prisma.flowRun.findFirst({ where: { conversationId, status: { in: ['running', 'waiting'] } } });

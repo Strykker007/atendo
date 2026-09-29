@@ -1,8 +1,9 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { ConversationOrigin, ConversationStatus } from '@prisma/client';
+import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService } from './conversations.service';
+import { FlowEngineService } from '../flows/flow-engine.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
@@ -33,6 +34,12 @@ class NoteDto {
 }
 class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;
+  /** desfecho do atendimento, só no encerramento */
+  @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
+  @IsOptional() @IsNumber() @Min(0) @Max(9_999_999) value?: number;
+  @IsOptional() @IsString() @MaxLength(200) reason?: string;
+  /** fluxo disparado ao encerrar (pesquisa de satisfação, pós-venda…) */
+  @IsOptional() @IsUUID() flowId?: string;
 }
 class TagsDto {
   @IsArray() @IsUUID('4', { each: true }) tagIds: string[];
@@ -41,7 +48,7 @@ class TagsDto {
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
 export class ConversationsController {
-  constructor(private readonly conversations: ConversationsService) {}
+  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService) {}
 
   @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: ListDto) {
@@ -97,8 +104,13 @@ export class ConversationsController {
   }
 
   @Patch(':id/status')
-  status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
-    return this.conversations.setStatus(u.tenantId, id, dto.status, u.id);
+  async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
+    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason } : undefined);
+    // fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar)
+    if (dto.status === 'closed' && dto.flowId) {
+      await this.flows.startOnClose(u.tenantId, id, dto.flowId).catch(() => undefined);
+    }
+    return conv;
   }
 
   @Patch(':id/tags')

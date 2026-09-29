@@ -7,9 +7,10 @@ import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { QUEUE_OUTBOUND } from '../whatsapp/queues';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { FlowsModule } from '../flows/flows.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUE_OUTBOUND }), AuthModule, BillingModule, forwardRef(() => WhatsAppModule)],
+  imports: [BullModule.registerQueue({ name: QUEUE_OUTBOUND }), AuthModule, BillingModule, forwardRef(() => WhatsAppModule), forwardRef(() => FlowsModule)],
   controllers: [ConversationsController],
   providers: [ConversationsService, ConversationsGateway],
   exports: [ConversationsService, ConversationsGateway],

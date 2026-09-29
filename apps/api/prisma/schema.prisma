@@ -255,6 +255,13 @@ enum ConversationStatus {
   closed
 }
 
+/// Desfecho do atendimento, registrado no encerramento. Base do relatório de vendas.
+enum ConversationOutcome {
+  none
+  won
+  lost
+}
+
 enum ConversationOrigin {
   organic
   ad
@@ -279,6 +286,14 @@ model Conversation {
   lastMessagePreview String?
   unreadCount    Int       @default(0)
   closedAt       DateTime?
+  // ---- resultado do atendimento (registrado ao encerrar) ----
+  outcome        ConversationOutcome @default(none)
+  /// valor da venda quando `won`
+  outcomeValue   Decimal?  @db.Decimal(12, 2)
+  /// motivo quando `lost` — é o que mostra onde se perde negócio
+  outcomeReason  String?
+  outcomeAt      DateTime?
+  outcomeById    String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -739,6 +754,22 @@ model MessageUsage {
   @@map("message_usage")
 }
 
+/// Ledger de conversas cobráveis: uma linha por janela de 24h com o mesmo contato no mesmo
+/// número. Existe porque "conversa" e "mensagem" são unidades diferentes e o plano escolhe
+/// qual limita — mas as duas são sempre registradas.
+model ConversationUsage {
+  id        String   @id @default(uuid())
+  tenantId  String
+  numberId  String
+  contactId String
+  /// início da janela de 24h
+  startedAt DateTime @default(now())
+
+  @@index([tenantId, startedAt])
+  @@unique([numberId, contactId, startedAt])
+  @@map("conversation_usage")
+}
+
 /// Agregado mensal reconciliado a partir do ledger (Redis é só cache disto).
 model UsageCounter {
   id             String   @id @default(uuid())
@@ -747,6 +778,8 @@ model UsageCounter {
   messagesSent   Int      @default(0)
   messagesIn     Int      @default(0)
   templatesSent  Int      @default(0)
+  /// janelas de 24h com contatos distintos — a outra unidade cobrável
+  conversations  Int      @default(0)
   providerCost   Decimal  @default(0) @db.Decimal(12, 5)
   overageAmount  Decimal  @default(0) @db.Decimal(12, 2)
   reconciledAt   DateTime @default(now())

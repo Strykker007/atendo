@@ -15,6 +15,7 @@ import { STATUS_META } from './ConversationList';
 import { avatarStyle, initialOf } from '@/lib/avatar';
 import { OriginBadge } from './OriginBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
+import { CloseModal } from './CloseModal';
 
 export function ChatPane() {
   const { conversationId, setConversation, status, setStatus: setFilterStatus, rightPanelOpen, toggleRightPanel } = useUI();
@@ -39,6 +40,7 @@ export function ChatPane() {
   const sched = useHasFeature('scheduling');
   const ai = useAiStatus();
   const [scheduling, setScheduling] = useState(false);
+  const [closing, setClosing] = useState(false);
   const card = useContactCard(conv?.contact.id ?? null, sched.has);
   const tags = useTags();
   const messages = useMessages(conversationId);
@@ -178,7 +180,7 @@ export function ChatPane() {
         )}
         {ai.enabled && <SummaryButton conversationId={conv.id} />}
         {conv.status !== 'closed' ? (
-          <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'closed' }).then(() => toast.ok('Atendimento encerrado')).catch(toast.err)} title="Encerrar atendimento">
+          <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
             <span className="hidden sm:inline">Encerrar</span>
           </Button>
         ) : (
@@ -233,6 +235,7 @@ export function ChatPane() {
         <div ref={bottomRef} />
       </div>
 
+      {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} />}
       <AppointmentModal open={scheduling} onClose={() => setScheduling(false)} contact={conv.contact} conversationId={conv.id} />
 
       {/* Composer */}

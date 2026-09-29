@@ -11,6 +11,7 @@ export interface NumberItem { id: string; phone: string; label: string; provider
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
+export type ConversationOutcome = 'none' | 'won' | 'lost';
 export interface LeadReferral { sourceType: string; sourceId?: string; sourceUrl?: string; headline?: string; body?: string; ctwaClid?: string; mediaUrl?: string }
 export interface Conversation {
   id: string; status: ConversationStatus; unreadCount: number; lastMessageAt: string | null; lastMessagePreview: string | null;
@@ -41,7 +42,7 @@ export interface Usage {
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
   planId: string | null;
-  used: { messages: number; templates: number; numbers: number; agents: number; messagesIn: number };
+  used: { messages: number; templates: number; numbers: number; agents: number; messagesIn: number; conversations: number };
   limits: PlanLimits | null;
   status: string | null;
   plan: string | null;
@@ -135,7 +136,7 @@ export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'docume
 export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: ConversationStatus }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; reason?: string; flowId?: string }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: (_, v) => invConv(qc, v.id),
   });
 };
@@ -342,7 +343,7 @@ export const useImpersonate = () => useMutation({ mutationFn: (tenantId: string)
 // ---- Relatórios: visão pronta ----
 export interface ReportOverview {
   period: { from: string; to: string };
-  kpis: { conversations: number; closed: number; closeRate: number; waitingNow: number; inProgressNow: number; messagesIn: number; messagesOut: number; avgFirstResponseMin: number | null };
+  kpis: { conversations: number; closed: number; closeRate: number; waitingNow: number; inProgressNow: number; messagesIn: number; messagesOut: number; avgFirstResponseMin: number | null; won: number; lost: number; revenue: number; winRate: number | null };
   series: Record<'byDay' | 'byAgent' | 'byOrigin' | 'byCampaign' | 'byTag' | 'byStatus', { label: string; value: number }[]>;
 }
 export const useReportOverview = (from: string, to: string) => useQuery({ queryKey: ['report-overview', from, to], queryFn: () => api<ReportOverview>(`/reports/overview?from=${from}&to=${to}`) });

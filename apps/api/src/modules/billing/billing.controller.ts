@@ -78,7 +78,7 @@ export class BillingController {
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, numbers: 0, agents: 0, messagesIn: 0 }, limits: null, status: null, plan: null, priceMonth: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
+      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, messagesIn: 0 }, limits: null, status: null, plan: null, priceMonth: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
     }
     const [used, plan, sub, numbers, agents, counter] = await Promise.all([
       this.usage.current(user.tenantId),
