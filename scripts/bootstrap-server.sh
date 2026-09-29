@@ -10,6 +10,28 @@ set -euo pipefail
 
 log() { echo; echo "▶ $*"; }
 
+# Este script mexe em iptables, swap e timedatectl: só faz sentido no servidor Linux.
+# Rodá-lo no Mac de desenvolvimento não quebra nada, mas pede sudo à toa e confunde.
+if [ "$(uname -s)" != "Linux" ]; then
+  cat <<'TXT'
+✋ Este script é para o SERVIDOR (Ubuntu/Linux), não para a sua máquina.
+
+   Conecte no servidor primeiro:
+     ssh ubuntu@IP_DA_INSTANCIA
+
+   E rode lá dentro:
+     bash scripts/bootstrap-server.sh
+
+   Para subir o Atendo AQUI no seu Mac, use:  pnpm start:all
+TXT
+  exit 1
+fi
+
+if [ ! -r /etc/os-release ] || ! grep -qiE 'ubuntu|debian' /etc/os-release; then
+  echo "⚠  Distribuição não reconhecida — o script assume Ubuntu/Debian (apt)."
+  echo "   Siga por conta própria ou instale Docker manualmente."
+fi
+
 log "Docker"
 if command -v docker >/dev/null 2>&1; then
   echo "  já instalado: $(docker --version)"
