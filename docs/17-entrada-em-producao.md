@@ -104,12 +104,37 @@ então dá para estrear sem e-mail e configurar depois.
 
 ### O que roda no servidor
 
+Um comando prepara tudo o que não depende de terceiros — segredos aleatórios, URLs e os
+domínios no Caddy:
+
 ```bash
-cp .env.production.example .env.production      # preencher TUDO
-# segredos: openssl rand -base64 32   (JWT_*, ENCRYPTION_KEY, EVOLUTION_API_KEY, senhas)
-# domínios em infra/Caddyfile
-docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build
+bash scripts/prepare-prod.sh seudominio.com.br
 ```
+
+Ele gera `.env.production` (modo 600) e acerta `infra/Caddyfile` para
+`app.seudominio.com.br` e `api.seudominio.com.br`. Não sobrescreve se o arquivo já existir.
+
+Depois é só preencher as chaves de terceiros (Stripe, Resend, IA, backup) e subir:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec api npx prisma db seed
+```
+
+> **Guarde o `.env.production`.** Perder a `ENCRYPTION_KEY` torna ilegíveis as credenciais
+> dos números já cadastrados — todos precisariam ser reconectados por QR.
+
+### Ordem que funciona
+
+1. Contratar servidor e domínio
+2. Apontar no DNS: `app.` e `api.` → IP do servidor (registro A). **Espere propagar** — o
+   Caddy só emite o certificado quando o domínio já resolve para o servidor
+3. Instalar Docker no servidor e clonar o repositório
+4. `bash scripts/prepare-prod.sh seudominio.com.br`
+5. Preencher as chaves de terceiros
+6. Subir e rodar o seed
+7. Entrar como dono, criar o cliente, conectar o número dele por QR
+8. Configurar webhook do Stripe para `https://api.seudominio.com.br/webhooks/stripe`
 
 O Caddy emite o certificado HTTPS sozinho, desde que o DNS já aponte para o servidor.
 
