@@ -831,7 +831,10 @@ model Invoice {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, period])
+  // Um ciclo pode ter MAIS DE UMA fatura no Stripe (proration ao trocar de plano, cobrança
+  // avulsa). Chavear por período fazia a segunda sobrescrever a primeira e sumir com o
+  // histórico do cliente — a identidade é o id da fatura no Stripe (`externalId`).
+  @@index([tenantId, period])
   @@map("invoices")
 }
 

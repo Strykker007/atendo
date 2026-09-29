@@ -124,7 +124,7 @@ O Caddy emite o certificado HTTPS sozinho, desde que o DNS já aponte para o ser
 |---|---|---|
 | ✅ | **Backup automático do Postgres**, testado com restauração | feito — ver abaixo |
 | ✅ | **Backup do volume da Evolution** | feito — ver abaixo |
-| ⬜ | **Stripe exercitado ponta a ponta** em modo teste | Descobrir que a cobrança não fecha com cliente já dentro |
+| 🟡 | **Stripe exercitado ponta a ponta** em modo teste | caminho feliz verificado; falha de pagamento ainda não — ver abaixo |
 | ⬜ | **Resend com domínio verificado** | Cliente não recebe convite nem redefinição de senha |
 | ⬜ | **Sentry ligado** (`SENTRY_DSN`) | Erro em produção só aparece quando o cliente reclama |
 | ⬜ | **Alerta de número caído** | A sessão cai de madrugada e ninguém percebe até de manhã |
@@ -177,3 +177,37 @@ credencial criptografada do número vieram íntegros.
 
 **Faça este teste de novo depois do primeiro deploy**, com os dados reais: backup que nunca
 foi restaurado não é backup.
+
+
+---
+
+## 7. Stripe — o que já foi verificado (2026-09-29)
+
+Com chave de teste e `stripe listen`:
+
+| Passo | Resultado |
+|---|---|
+| `pnpm stripe:sync` | criou Product + Price dos 3 planos e gravou o `stripePriceId` |
+| Checkout do plano Starter com cartão `4242…` | assinatura criada, `customer` gravado no tenant |
+| Webhooks | 5 eventos recebidos e processados (200) |
+| Assinatura no banco | `active`, plano Starter, ciclo até 29/10 |
+| Fatura | R$ 97,00, status `paid`, com link do Stripe |
+
+### Ainda não verificado
+
+**Falha de pagamento → carência → suspensão.** Forçar uma recusa real exige *test clock* do
+Stripe (simular a renovação do mês seguinte); tentar por fatura avulsa não reproduz o
+caminho real. É o próximo teste, e é importante: é o que protege você de atender de graça.
+
+### Dois problemas encontrados e corrigidos
+
+**`pnpm stripe:sync` nunca teria funcionado.** Rodava com `tsx`, que não emite
+`design:paramtypes` — sem esses metadados a injeção de dependência do Nest não resolve nada
+e o contexto nem sobe. Passou a compilar com `tsc` numa pasta própria (`.scripts-build`),
+separada do `dist` do watcher, pelo mesmo motivo do `.next-build` da web.
+
+**Faturas eram uma por mês por cliente.** A tabela tinha `unique(tenantId, period)` e a
+segunda fatura do ciclo sobrescrevia a primeira — acontece sempre que o cliente **troca de
+plano no meio do mês** (o Stripe emite uma fatura de proration). No teste, três faturas de
+setembro viraram uma só, e a de R$ 97 paga foi substituída. Agora cada fatura do Stripe é
+uma linha, identificada pelo `externalId`.

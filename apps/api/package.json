@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prisma": "prisma",
-    "stripe:sync": "tsx scripts/stripe-sync.ts",
+    "stripe:sync": "tsc -p tsconfig.build.json --outDir .scripts-build && node .scripts-build/scripts/stripe-sync.js",
     "test:watch": "vitest"
   },
   "prisma": {

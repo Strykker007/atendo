@@ -182,10 +182,6 @@ export class StripeService {
       where: { externalId: inv.id },
       create: { tenantId: tenant.id, period, externalId: inv.id, baseAmount: inv.subtotal / 100 - overageAmount, overageAmount, totalAmount: inv.total / 100, currency: inv.currency.toUpperCase(), status, hostedUrl: inv.hosted_invoice_url ?? null, dueAt: inv.due_date ? new Date(inv.due_date * 1000) : null, paidAt: inv.status === 'paid' ? new Date() : null },
       update: { status, totalAmount: inv.total / 100, overageAmount, baseAmount: inv.subtotal / 100 - overageAmount, hostedUrl: inv.hosted_invoice_url ?? null, paidAt: inv.status === 'paid' ? new Date() : null },
-    }).catch(async (e) => {
-      // unique (tenantId, period): ciclo com mais de uma fatura (ex.: proration) — atualiza a do período
-      if (String(e?.code) === 'P2002') await this.prisma.invoice.updateMany({ where: { tenantId: tenant.id, period }, data: { status, totalAmount: inv.total / 100, externalId: inv.id, hostedUrl: inv.hosted_invoice_url ?? null } });
-      else throw e;
     });
     if (inv.status === 'paid') {
       // pagou: se estava em carência/suspenso, volta a ativo
