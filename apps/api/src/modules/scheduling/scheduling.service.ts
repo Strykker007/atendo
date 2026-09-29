@@ -3,7 +3,8 @@ import type { AppointmentStatus, AppointmentSource, Prisma } from '@prisma/clien
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
-import { TZ_DEFAULT, toLocal } from './time';
+import { TZ_DEFAULT, toLocal } from '../../common/time';
+import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { computeSlots, type Slot } from './slots';
 import { REMINDER_OPTIONS, reminderChoice } from './reminder-reply';
 
@@ -18,12 +19,18 @@ export class SchedulingService {
     private readonly prisma: PrismaService,
     private readonly conversations: ConversationsService,
     private readonly gateway: ConversationsGateway,
+    private readonly tenantSettings: TenantSettingsService,
   ) {}
 
   // ---------- preferências ----------
 
   async settings(tenantId: string) {
-    return this.prisma.schedulingSettings.upsert({ where: { tenantId }, create: { tenantId }, update: {} });
+    const [s, timezone] = await Promise.all([
+      this.prisma.schedulingSettings.upsert({ where: { tenantId }, create: { tenantId }, update: {} }),
+      this.tenantSettings.timezone(tenantId),
+    ]);
+    // o fuso é do cliente (Configurações), não do módulo de agendamento
+    return { ...s, timezone };
   }
 
   // ---------- disponibilidade ----------
@@ -124,7 +131,7 @@ export class SchedulingService {
     const now = Date.now();
     const settingsList = await this.prisma.schedulingSettings.findMany();
     for (const s of settingsList) {
-      const tz = s.timezone || TZ_DEFAULT;
+      const tz = (await this.tenantSettings.timezone(s.tenantId)) || TZ_DEFAULT;
       const clientMins = (s.clientReminderMinutes as number[]) ?? [];
       const maxWindow = Math.max(s.proReminderMinutes, ...clientMins, 0);
       const upcoming = await this.prisma.appointment.findMany({

@@ -1,4 +1,4 @@
-import { localToUtc, toLocal } from './time';
+import { localToUtc, toLocal } from '../../common/time';
 
 export interface Slot {
   startAt: Date;

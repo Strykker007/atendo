@@ -11,6 +11,8 @@ import { Inject, forwardRef } from '@nestjs/common';
 import { choose, interpolate, validAnswer } from './answer';
 import { afterAiAnswer } from './ai-turns';
 import { AiService } from '../ai/ai.service';
+import { TenantSettingsService } from '../tenants/tenant-settings.service';
+import { isOpenAt } from '../tenants/business-hours';
 
 export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
@@ -32,6 +34,7 @@ export class FlowEngineService {
     private readonly gateway: ConversationsGateway,
     @Inject(forwardRef(() => SchedulingService)) private readonly scheduling: SchedulingService,
     private readonly ai: AiService,
+    private readonly tenantSettings: TenantSettingsService,
     @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowResumeJob>,
   ) {}
 
@@ -475,12 +478,15 @@ export class FlowEngineService {
         return !!(await this.prisma.contactTag.findFirst({ where: { contactId: conv.contactId, tagId: d.tagId ?? '' } }));
       }
       case 'business_hours': {
-        const h = d.hours ?? { start: '08:00', end: '18:00', days: [1, 2, 3, 4, 5] };
-        const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-        const hm = now.getHours() * 60 + now.getMinutes();
-        const [sh, sm] = h.start.split(':').map(Number);
-        const [eh, em] = h.end.split(':').map(Number);
-        return h.days.includes(now.getDay()) && hm >= sh * 60 + sm && hm < eh * 60 + em;
+        const tenant = await this.tenantSettings.get(conv.tenantId);
+        // sem horário no bloco, vale o expediente configurado em Configurações — inclusive
+        // a chave "atendimento ativo", que fecha tudo em feriado/férias
+        if (!d.hours) {
+          return isOpenAt({ now: new Date(), timezone: tenant.timezone, hours: tenant.hours, attendanceActive: tenant.attendanceActive });
+        }
+        // horário próprio do bloco (sobrepõe o do cliente), mas sempre no fuso dele
+        const hours = d.hours.days.map((weekday) => ({ weekday, start: d.hours!.start, end: d.hours!.end }));
+        return isOpenAt({ now: new Date(), timezone: tenant.timezone, hours, attendanceActive: tenant.attendanceActive });
       }
     }
     return false;

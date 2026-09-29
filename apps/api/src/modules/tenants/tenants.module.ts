@@ -8,6 +8,8 @@ import { Roles, RolesGuard } from '../auth/roles.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { BillingModule } from '../billing/billing.module';
+import { TenantSettingsService } from './tenant-settings.service';
+import { TenantSettingsController } from './tenant-settings.controller';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 
 class CreateTenantDto {
@@ -160,5 +162,10 @@ class TenantsController {
   }
 }
 
-@Module({ imports: [AuthModule, BillingModule], controllers: [TenantsController] })
+@Module({
+  imports: [AuthModule, BillingModule],
+  controllers: [TenantsController, TenantSettingsController],
+  providers: [TenantSettingsService],
+  exports: [TenantSettingsService],
+})
 export class TenantsModule {}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeSlots, type ComputeSlotsInput } from '../src/modules/scheduling/slots';
-import { TZ_DEFAULT } from '../src/modules/scheduling/time';
+import { TZ_DEFAULT } from '../src/common/time';
 
 // Terça, 22/09/2026. "Agora" é bem antes do expediente para não cortar horários sem querer.
 const NOW = new Date('2026-09-22T09:00:00Z'); // 06:00 em São Paulo

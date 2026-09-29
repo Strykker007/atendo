@@ -387,3 +387,14 @@ const invAi = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQuer
 export const useAiSuggest = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ text: string }>('/ai/suggest', { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: invAi(qc) }); };
 export const useAiRewrite = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { text: string; tone: RewriteTone; conversationId?: string }) => api<{ text: string }>('/ai/rewrite', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invAi(qc) }); };
 export const useAiSummary = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ text: string }>('/ai/summary', { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: invAi(qc) }); };
+
+// ---- Configurações do cliente (fuso, expediente) ----
+export interface BusinessHour { weekday: number; start: string; end: string }
+export interface TenantSettings {
+  tenantId: string; timezone: string; attendanceActive: boolean; outsideHoursText: string | null;
+  hours: (BusinessHour & { id: string })[]; isOpenNow: boolean; suggested: BusinessHour[];
+}
+export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
+const invSettings = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['tenant-settings'] });
+export const useUpdateTenantSettings = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { timezone?: string; attendanceActive?: boolean; outsideHoursText?: string }) => api('/settings', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invSettings(qc) }); };
+export const useSetBusinessHours = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (hours: BusinessHour[]) => api('/settings/business-hours', { method: 'PUT', body: JSON.stringify({ hours }) }), onSuccess: invSettings(qc) }); };

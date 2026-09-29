@@ -8,6 +8,7 @@ import { BillingModule } from '../billing/billing.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 import { AiModule } from '../ai/ai.module';
+import { TenantsModule } from '../tenants/tenants.module';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 
 /** Retoma runs em "Aguardar" quando o tempo vence. */
@@ -22,7 +23,7 @@ class FlowsProcessor extends TrackedWorkerHost<FlowResumeJob> {
 }
 
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUE_FLOWS }), AuthModule, BillingModule, forwardRef(() => ConversationsModule), forwardRef(() => SchedulingModule), AiModule],
+  imports: [BullModule.registerQueue({ name: QUEUE_FLOWS }), AuthModule, BillingModule, forwardRef(() => ConversationsModule), forwardRef(() => SchedulingModule), AiModule, TenantsModule],
   controllers: [FlowsController, FlowStopController],
   providers: [FlowEngineService, FlowsProcessor],
   exports: [FlowEngineService],

@@ -38,6 +38,8 @@ model Tenant {
   invoices      Invoice[]
   alerts        UsageAlert[]
   aiUsage       AiUsage[]
+  settings      TenantSettings?
+  businessHours BusinessHour[]
 
   @@map("tenants")
 }
@@ -111,6 +113,36 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+/// Configurações gerais do cliente. Fuso vive aqui (é do negócio, não de um módulo).
+model TenantSettings {
+  tenantId String @id
+  timezone String @default("America/Sao_Paulo")
+  /// desliga o atendimento inteiro sem precisar mexer em horário (feriado, férias)
+  attendanceActive Boolean @default(true)
+  /// mensagem automática enviada uma vez quando chega mensagem fora do horário
+  outsideHoursText String?
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_settings")
+}
+
+/// Expediente do cliente por dia da semana (0 = domingo). Sem linha = fechado naquele dia.
+model BusinessHour {
+  id       String @id @default(uuid())
+  tenantId String
+  weekday  Int
+  /// "HH:MM" no fuso do tenant
+  start    String
+  end      String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, weekday])
+  @@map("business_hours")
 }
 
 // ============================================================
@@ -453,7 +485,6 @@ model SchedulingSettings {
   proReminderMinutes Int @default(15)
   /// número do WhatsApp que envia lembretes (null = primeiro conectado)
   numberId String?
-  timezone String @default("America/Sao_Paulo")
   /// quantos dias à frente o robô oferece horários
   daysAhead Int @default(7)
 

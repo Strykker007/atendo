@@ -93,3 +93,14 @@ pnpm db:migrate        # cria migration + aplica + regenera client
 ```
 
 Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
+
+
+## Configurações do cliente
+
+**tenant_settings** — fuso horário do cliente (usado pela agenda, pelos fluxos e pelos
+relatórios), chave `attendanceActive` (feriado/férias: fecha tudo sem mexer nos horários) e
+texto de fora do expediente.
+
+**business_hours** — uma linha por intervalo de atendimento (`weekday` 0 = domingo, `start`
+e `end` em "HH:MM" no fuso do cliente). Vários intervalos no mesmo dia cobrem o almoço.
+Dia sem linha = fechado; nenhum intervalo cadastrado = sempre aberto.

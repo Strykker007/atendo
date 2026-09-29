@@ -91,3 +91,11 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 - Sem "ir para outro fluxo" nem sub-fluxos.
 - Sem teste/simulação dentro do editor (usar uma conversa de teste).
 - Estatísticas por bloco (onde os contatos abandonam) — futuro.
+
+
+## Condição "horário comercial"
+
+Sem horário preenchido no bloco, ela usa o expediente configurado em **Configurações →
+Horário de funcionamento**, inclusive a chave *Desativar atendimento*. Preenchendo o
+horário no bloco, ele sobrepõe o do cliente — mas a avaliação continua no **fuso do
+cliente**, nunca no do servidor.

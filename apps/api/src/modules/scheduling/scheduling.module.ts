@@ -4,6 +4,7 @@ import { TrackedWorkerHost } from '../../common/observability/tracked-worker.hos
 import { Job, Queue } from 'bullmq';
 import { SchedulingService } from './scheduling.service';
 import { SchedulingController } from './scheduling.controller';
+import { TenantsModule } from '../tenants/tenants.module';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { ConversationsModule } from '../conversations/conversations.module';
@@ -29,7 +30,7 @@ class RemindersProcessor extends TrackedWorkerHost {
 }
 
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUE_SCHEDULING, defaultJobOptions: { removeOnComplete: 50, removeOnFail: 50 } }), AuthModule, BillingModule, forwardRef(() => ConversationsModule)],
+  imports: [BullModule.registerQueue({ name: QUEUE_SCHEDULING, defaultJobOptions: { removeOnComplete: 50, removeOnFail: 50 } }), AuthModule, BillingModule, TenantsModule, forwardRef(() => ConversationsModule)],
   controllers: [SchedulingController],
   providers: [SchedulingService, RemindersScheduler, RemindersProcessor],
   exports: [SchedulingService],

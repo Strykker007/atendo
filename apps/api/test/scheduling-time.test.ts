@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { localToUtc, partsIn, toLocal, tzOffsetMs, TZ_DEFAULT } from '../src/modules/scheduling/time';
+import { localToUtc, partsIn, toLocal, tzOffsetMs, TZ_DEFAULT } from '../src/common/time';
 
 const SP = TZ_DEFAULT;
 

@@ -32,11 +32,16 @@ Não existe. O documento pede envio por lista, por etiqueta e por contatos selec
 com atraso configurável, restrição a horário comercial e teto diário. É provavelmente a
 funcionalidade mais vendável da lista, e depende do item 1 para não queimar o número.
 
-### 3. Horário de funcionamento do tenant
+### 3. Horário de funcionamento do tenant — **FEITO** (2026-09-28)
 
-Hoje "horário comercial" só existe **dentro** de um bloco de condição, com valor digitado
-em cada fluxo. Falta a configuração do tenant: aberto/fechado por dia da semana com hora
-inicial e final, usada por fluxos, disparos e pela resposta automática de fora do horário.
+Em **Configurações → Horário de funcionamento**: intervalos por dia da semana (vários por
+dia, para almoço), fuso do cliente e a chave **Desativar atendimento** para feriado/férias.
+A condição "horário comercial" dos fluxos passa a usar essa configuração quando o bloco não
+tem horário próprio. Sem nenhum intervalo cadastrado, considera-se sempre aberto — cliente
+que não configurou não pode ficar com o atendimento travado.
+
+O fuso saiu de `scheduling_settings` e virou do cliente (`tenant_settings`): é do negócio,
+não de um módulo. A agenda passou a ler de lá.
 
 ### 4. Fluxos padrão do tenant
 

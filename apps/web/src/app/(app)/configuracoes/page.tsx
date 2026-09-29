@@ -9,6 +9,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
+import { BusinessHoursSection } from '@/components/settings/BusinessHoursSection';
 import { useMe, useChangePassword, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
 
 type Reply = FolderT['replies'][number];
@@ -55,6 +56,7 @@ export default function ConfiguracoesPage() {
       <PageHeader title="Configurações" subtitle="Aparência do painel e respostas rápidas da equipe." />
 
       <AppearanceSection />
+      {!isOwner && <BusinessHoursSection />}
       {!me.data?.impersonatorId && <SecuritySection />}
 
       {isOwner ? null : <><PageHeader
