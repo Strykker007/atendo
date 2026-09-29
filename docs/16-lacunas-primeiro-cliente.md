@@ -43,11 +43,10 @@ que não configurou não pode ficar com o atendimento travado.
 O fuso saiu de `scheduling_settings` e virou do cliente (`tenant_settings`): é do negócio,
 não de um módulo. A agenda passou a ler de lá.
 
-### 4. Fluxos padrão do tenant
+### 4. Fluxos padrão do tenant — **FEITO** (2026-09-28)
 
-Temos gatilho de conversa nova e de palavra-chave. Faltam os outros dois do documento:
-**resposta padrão** (qualquer mensagem que não casa com palavra-chave, após N horas de
-inatividade) e **conversa finalizada** (cliente volta a escrever depois de encerrado).
+Boas-vindas, conversa finalizada e resposta padrão (com período de inatividade), mais o
+aviso de fora do expediente. Em **Configurações → Fluxos padrão**. Ver [10](10-fluxos-de-automacao.md).
 
 ### 5. Encerramento com resultado
 

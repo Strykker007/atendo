@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Patch, Put, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
@@ -21,6 +21,11 @@ class SettingsDto {
   @IsOptional() @IsString() @MaxLength(64) timezone?: string;
   @IsOptional() @IsBoolean() attendanceActive?: boolean;
   @IsOptional() @IsString() @MaxLength(600) outsideHoursText?: string;
+  // fluxos padrão: null limpa a configuração
+  @IsOptional() @IsUUID() welcomeFlowId?: string | null;
+  @IsOptional() @IsUUID() closedFlowId?: string | null;
+  @IsOptional() @IsUUID() defaultFlowId?: string | null;
+  @IsOptional() @IsInt() @Min(0) @Max(720) defaultFlowInactivityHours?: number;
 }
 
 /** Configurações do cliente: fuso, expediente e chave de atendimento ativo. */

@@ -123,6 +123,14 @@ model TenantSettings {
   attendanceActive Boolean @default(true)
   /// mensagem automática enviada uma vez quando chega mensagem fora do horário
   outsideHoursText String?
+  // ---- fluxos padrão do cliente (configurados uma vez, valem para todos os números) ----
+  /// primeira mensagem de um contato novo
+  welcomeFlowId String?
+  /// contato escreve de novo depois de o atendimento ter sido encerrado
+  closedFlowId String?
+  /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
+  defaultFlowId String?
+  defaultFlowInactivityHours Int @default(24)
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)

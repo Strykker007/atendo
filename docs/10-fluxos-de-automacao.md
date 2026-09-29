@@ -99,3 +99,24 @@ Sem horário preenchido no bloco, ela usa o expediente configurado em **Configur
 Horário de funcionamento**, inclusive a chave *Desativar atendimento*. Preenchendo o
 horário no bloco, ele sobrepõe o do cliente — mas a avaliação continua no **fuso do
 cliente**, nunca no do servidor.
+
+
+## Fluxos padrão do cliente
+
+Configurados uma vez em **Configurações → Fluxos padrão** e válidos para todos os números,
+sem precisar criar gatilho em cada fluxo. Rodam **depois** dos gatilhos próprios: uma
+palavra-chave configurada sempre ganha do padrão.
+
+| Fluxo padrão | Quando dispara |
+|---|---|
+| **Boas-vindas** | primeira mensagem de um contato que nunca conversou |
+| **Conversa finalizada** | contato volta a escrever depois de o atendimento ter sido encerrado |
+| **Resposta padrão** | qualquer mensagem que não casou com palavra-chave, **e só após o período de inatividade** (padrão 24h) |
+
+O período de inatividade da resposta padrão existe para o robô **não falar por cima do
+atendente**: sem ele, cada mensagem de uma conversa em andamento dispararia o fluxo. `0`
+responde sempre.
+
+Quando nada disso assume e o cliente está **fora do expediente** ([Configurações](16-lacunas-primeiro-cliente.md)),
+o sistema envia o *aviso de fora do expediente*, se configurado — **uma vez por conversa**.
+Repetir a cada mensagem é a forma mais rápida de irritar quem está esperando.

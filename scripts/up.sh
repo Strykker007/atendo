@@ -14,9 +14,13 @@ for i in $(seq 1 30); do docker compose -f infra/docker-compose.yml --env-file .
 echo "▶ Migrations…"
 pnpm --filter @atendo/api prisma migrate deploy >/dev/null 2>&1 || true
 
-# derruba resquícios de execuções anteriores nas portas
-for p in 4000 3000; do lsof -iTCP:$p -sTCP:LISTEN -t 2>/dev/null | xargs -I{} kill {} 2>/dev/null || true; done
-sleep 1
+# Derruba resquícios de execuções anteriores. Matar só quem escuta a porta não basta: o
+# processo do watcher (nest/next) sobrevive e vários deles brigam pelo mesmo dist/.next,
+# produzindo erros de compilação que não existem no código.
+pkill -f "nest.js start" 2>/dev/null || true
+pkill -f "next-server|next dev" 2>/dev/null || true
+for p in 4000 3000; do lsof -iTCP:$p -sTCP:LISTEN -t 2>/dev/null | xargs -I{} kill -9 {} 2>/dev/null || true; done
+sleep 2
 
 echo "▶ API (:4000) e web (:3000)…"
 mkdir -p .logs

@@ -144,6 +144,12 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 
 **Testar sem celular** — dá para simular um webhook da Evolution: o corpo precisa de `instance` e `apikey` = HMAC-SHA256(`EVOLUTION_API_KEY`, instanceName). Exemplo em [04](04-providers-whatsapp.md#autenticação-do-webhook).
 
+**Erros de compilação que não existem no código** (`Cannot find global type 'Boolean'`, arquivos "não encontrados" que estão lá) — há mais de um watcher rodando e eles brigam pelo mesmo `dist`/`.next`. Matar pela porta não resolve: o processo do watcher não escuta porta nenhuma.
+
+```bash
+pkill -f "nest.js start"; pkill -f "next-server|next dev"; pnpm start:all
+```
+
 **A web responde 500 / `Cannot find module './431.js'` / `__webpack_modules__[moduleId] is not a function`** — cache do Next corrompido (acontece depois de muitos dias de hot reload). Pare a web, apague o cache e suba de novo:
 
 ```bash

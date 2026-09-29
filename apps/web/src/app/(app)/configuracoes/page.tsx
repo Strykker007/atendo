@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { BusinessHoursSection } from '@/components/settings/BusinessHoursSection';
+import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import { useMe, useChangePassword, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
 
 type Reply = FolderT['replies'][number];
@@ -57,6 +58,7 @@ export default function ConfiguracoesPage() {
 
       <AppearanceSection />
       {!isOwner && <BusinessHoursSection />}
+      {!isOwner && <DefaultFlowsSection />}
       {!me.data?.impersonatorId && <SecuritySection />}
 
       {isOwner ? null : <><PageHeader

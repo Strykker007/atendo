@@ -156,7 +156,7 @@ export class ConversationsService {
 
   // ---------- inbound (worker) ----------
 
-  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean } | null> {
+  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null } | null> {
     // idempotência: o mesmo webhook pode chegar duas vezes
     const exists = await this.prisma.message.findUnique({ where: { externalId: msg.externalId } });
     if (exists) return null;
@@ -173,6 +173,18 @@ export class ConversationsService {
     });
     const origin = this.originOf(msg.referral);
     const isNew = !conversation;
+    // contexto para os fluxos padrão do cliente: é a primeira vez desta pessoa, ou ela
+    // está voltando depois de um atendimento encerrado?
+    const anterior = await this.prisma.conversation.findFirst({
+      where: { tenantId: number.tenantId, contactId: contact.id },
+      orderBy: { lastMessageAt: 'desc' },
+      select: { id: true, status: true, lastMessageAt: true },
+    });
+    const isNewContact = !anterior;
+    const returningAfterClosed = isNew && !!anterior && anterior.status === 'closed';
+    const hoursSinceLastMessage = anterior?.lastMessageAt
+      ? (msg.timestamp.getTime() - anterior.lastMessageAt.getTime()) / 3_600_000
+      : null;
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
         data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
@@ -223,7 +235,7 @@ export class ConversationsService {
 
     this.gateway.emitMessage(number.tenantId, message);
     this.gateway.emitConversation(number.tenantId, conversation);
-    return { message, conversation, isNew };
+    return { message, conversation, isNew, isNewContact, returningAfterClosed, hoursSinceLastMessage };
   }
 
   /**

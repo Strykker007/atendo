@@ -13,6 +13,7 @@ import { afterAiAnswer } from './ai-turns';
 import { AiService } from '../ai/ai.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { isOpenAt } from '../tenants/business-hours';
+import { pickDefaultFlow, type InboundSituation } from './default-flows';
 
 export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
@@ -72,7 +73,7 @@ export class FlowEngineService {
    * Chamado pelo InboundProcessor para toda mensagem recebida.
    * 1) run ativo esperando → entrega a resposta. 2) senão, avalia gatilhos (nova conversa / palavra-chave).
    */
-  async onInbound(number: WhatsAppNumber, conversation: Conversation, message: Message, isNewConversation: boolean) {
+  async onInbound(number: WhatsAppNumber, conversation: Conversation, message: Message, isNewConversation: boolean, situation?: InboundSituation) {
     const active = await this.prisma.flowRun.findFirst({ where: { conversationId: conversation.id, status: { in: ['running', 'waiting'] } } });
     if (active) {
       if (active.status === 'waiting') await this.deliverAnswer(active, message);
@@ -87,6 +88,44 @@ export class FlowEngineService {
       if (t.type === 'new_conversation' && isNewConversation) return void (await this.start(f.id, conversation.id));
       if (t.type === 'keyword' && t.keywords?.some((k) => text.includes(k.toLowerCase()))) return void (await this.start(f.id, conversation.id));
     }
+
+    // nenhum gatilho próprio casou: cai nos fluxos padrão do cliente
+    if (!situation) return;
+    const settings = await this.tenantSettings.get(number.tenantId);
+    const chosen = pickDefaultFlow(situation, settings);
+    if (chosen) {
+      const flow = flows.find((f) => f.id === chosen.flowId);
+      // fluxo apagado ou desativado: não trava a conversa, só registra
+      if (!flow) {
+        this.log.warn(`Fluxo padrão (${chosen.kind}) do tenant ${number.tenantId} não existe ou está inativo`);
+        return;
+      }
+      return void (await this.start(flow.id, conversation.id));
+    }
+
+    // fora do expediente, sem fluxo configurado: ao menos avisa, uma vez por conversa
+    await this.outsideHoursNotice(number.tenantId, conversation, settings);
+  }
+
+  /**
+   * Aviso automático de fora do expediente. Enviado **uma vez por conversa**: repetir a
+   * cada mensagem do contato é a forma mais rápida de irritar quem está esperando.
+   */
+  private async outsideHoursNotice(
+    tenantId: string,
+    conversation: Conversation,
+    settings: { timezone: string; attendanceActive: boolean; outsideHoursText: string | null; hours: { weekday: number; start: string; end: string }[] },
+  ) {
+    if (!settings.outsideHoursText?.trim()) return;
+    if (isOpenAt({ now: new Date(), timezone: settings.timezone, hours: settings.hours, attendanceActive: settings.attendanceActive })) return;
+    const jaAvisado = await this.prisma.message.findFirst({
+      where: { conversationId: conversation.id, direction: 'out', text: settings.outsideHoursText },
+      select: { id: true },
+    });
+    if (jaAvisado) return;
+    await this.conversations.sendAsSystem(conversation.id, settings.outsideHoursText).catch((err) => {
+      this.log.warn(`Aviso de fora do expediente não enviado: ${err instanceof Error ? err.message : err}`);
+    });
   }
 
   /** Job de "Aguardar" venceu. */
