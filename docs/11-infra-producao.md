@@ -80,7 +80,13 @@ Depois: `pnpm stripe:sync` com as chaves de produção; webhook do Stripe em `ht
 
 ## O que ainda falta para "dormir tranquilo"
 
-- Observabilidade: logs estruturados (pino) + Sentry + métricas das filas (Bull Board).
-- Backups automatizados e testados (Postgres + volumes Evolution + R2 é durável por si).
-- Balanceamento automático de shards da Evolution e monitor de instâncias caídas (o health job já corrige status; falta alertar).
-- Testes automatizados nos adapters e no motor de fluxos.
+- **Backups automatizados e testados** (Postgres + volume da Evolution). É o maior buraco
+  antes de um cliente pagante — ver [17](17-entrada-em-producao.md).
+- Alerta ativo de número caído e de fila acumulada (o health job corrige o status, mas
+  ninguém é avisado) e métricas das filas.
+- Balanceamento automático de shards da Evolution.
+- Testes de integração ponta a ponta (os atuais são unitários e offline).
+
+Já resolvidos: observabilidade com log estruturado, `requestId` e Sentry opcional
+([14](14-qualidade-e-observabilidade.md)); testes unitários nos adapters, no motor de fluxos
+e na cobrança.
