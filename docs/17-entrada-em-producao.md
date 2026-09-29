@@ -128,6 +128,7 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec 
 
 ### Ordem que funciona
 
+0. No servidor limpo: `bash scripts/bootstrap-server.sh` (Docker, portas, swap, fuso)
 1. Contratar servidor e domínio
 2. Apontar no DNS: `app.` e `api.` → IP do servidor (registro A). **Espere propagar** — o
    Caddy só emite o certificado quando o domínio já resolve para o servidor
@@ -268,6 +269,7 @@ usamos têm `arm64`**, incluindo `evoapicloud/evolution-api` — verificado em 2
 | **Sem SLA** — recurso gratuito, a Oracle não deve disponibilidade a você | backup remoto + deploy automatizado: se cair, sobe em outro provedor e restaura |
 | **Capacidade ARM escassa** em algumas regiões | se a instância já existe, o problema já passou |
 | **Recuperação de instâncias ociosas** em contas somente-free | **converter a conta para Pay As You Go**: o Always Free continua gratuito e a recuperação deixa de valer |
+| **Portas fechadas por dentro** | a imagem Ubuntu da Oracle traz iptables restritivo; abrir só a security list da VCN **não basta**. `bootstrap-server.sh` resolve — é o motivo nº 1 de "apontei o DNS e não abre" |
 
 ### Regras para usar gratuito com cliente pagante
 
@@ -279,3 +281,10 @@ usamos têm `arm64`**, incluindo `evoapicloud/evolution-api` — verificado em 2
 
 Com o backup automatizado e o `prepare-prod.sh`, o custo de trocar de provedor é de menos de
 uma hora. É isso que torna o risco do gratuito aceitável no começo — e não o contrário.
+
+### Migrar de ARM para x86 depois
+
+Sem armadilha: o dump do Postgres (formato `custom`) e o tar das sessões da Evolution são
+**independentes de arquitetura**, e as imagens são reconstruídas no destino pelo próprio
+compose. A migração é: backup → `bootstrap-server.sh` e `prepare-prod.sh` no servidor novo →
+`restore.sh` → apontar o DNS.
