@@ -122,11 +122,58 @@ O Caddy emite o certificado HTTPS sozinho, desde que o DNS já aponte para o ser
 
 | | Item | Risco se ignorar |
 |---|---|---|
-| ⬜ | **Backup automático do Postgres**, testado com restauração | Perder conversas e agendamentos do cliente sem volta |
-| ⬜ | **Backup do volume da Evolution** | Todos os números precisam parear o QR de novo |
+| ✅ | **Backup automático do Postgres**, testado com restauração | feito — ver abaixo |
+| ✅ | **Backup do volume da Evolution** | feito — ver abaixo |
 | ⬜ | **Stripe exercitado ponta a ponta** em modo teste | Descobrir que a cobrança não fecha com cliente já dentro |
 | ⬜ | **Resend com domínio verificado** | Cliente não recebe convite nem redefinição de senha |
 | ⬜ | **Sentry ligado** (`SENTRY_DSN`) | Erro em produção só aparece quando o cliente reclama |
 | ⬜ | **Alerta de número caído** | A sessão cai de madrugada e ninguém percebe até de manhã |
 
 Backup e Stripe são os dois que eu não colocaria um cliente pagante sem ter.
+
+
+---
+
+## 6. Backup — como funciona
+
+O serviço `backup` do compose de produção roda **uma vez por dia** e guarda:
+
+| O quê | Por que importa |
+|---|---|
+| `atendo.dump` | conversas, mensagens, contatos, agendamentos, fluxos, cobrança |
+| `evolution.dump` | estado das instâncias |
+| `evolution-instances.tar.gz` | **credenciais de pareamento** — sem isto, todo número precisa ler o QR de novo |
+| `storage.tar.gz` | mídia, só quando `STORAGE_DRIVER=local` (com S3/R2 a durabilidade é do provedor) |
+
+### Envio remoto (obrigatório na prática)
+
+Backup que só existe no mesmo servidor não protege contra **perder o servidor** — que é o
+cenário principal. Configure:
+
+1. `cp infra/backup/rclone.conf.example infra/backup/rclone.conf` e preencha (exemplo pronto
+   para Cloudflare R2; funciona igual com S3, B2, Wasabi).
+2. `BACKUP_REMOTE=r2:atendo-backups` no `.env.production`.
+
+Sem `BACKUP_REMOTE` o serviço avisa no log a cada execução, de propósito.
+`BACKUP_KEEP_DAYS` (padrão 14) apaga as cópias antigas local e remotamente.
+
+### Restaurar
+
+```bash
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production stop api worker
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production \
+  exec backup sh /usr/local/bin/restore.sh /backup/20260929-030000
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production restart evolution
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production start api worker
+```
+
+`restore.sh` é **destrutivo**: substitui os bancos atuais. Pare a API e o worker antes.
+
+### Testado
+
+Em 2026-09-29 o backup foi gerado e restaurado num banco limpo: 21 conversas, 229 mensagens,
+18 contatos, 5 agendamentos e 7 fluxos conferem com o original, e os desfechos de venda e a
+credencial criptografada do número vieram íntegros.
+
+**Faça este teste de novo depois do primeiro deploy**, com os dados reais: backup que nunca
+foi restaurado não é backup.

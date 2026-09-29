@@ -96,6 +96,29 @@ services:
       LOG_LEVEL: ERROR,WARN
     volumes: ["./volumes/evolution:/evolution/instances"]
 
+  # Backup diário: bancos + sessões da Evolution, com envio para storage remoto.
+  # Sem isto, perder o servidor significa perder as conversas do cliente e o pareamento
+  # de todos os números.
+  backup:
+    build: ./backup
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      evolution-db: { condition: service_healthy }
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-atendo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+      EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD}
+      # ex.: r2:atendo-backups  (o remoto vem de infra/backup/rclone.conf)
+      BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_INTERVAL_S: ${BACKUP_INTERVAL_S:-86400}
+    volumes:
+      - ./volumes/backup:/backup
+      - ./volumes/evolution:/data/evolution:ro
+      - ./volumes/storage:/data/storage:ro
+      - ./backup/rclone.conf:/config/rclone.conf:ro
+
   evolution-db:
     image: postgres:16-alpine
     restart: unless-stopped

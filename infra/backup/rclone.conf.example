@@ -1,0 +1,9 @@
+# Copie para rclone.conf e preencha. Exemplo com Cloudflare R2 (S3-compatível).
+# Funciona igual com AWS S3, Backblaze B2, Wasabi, MinIO.
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = SUA_ACCESS_KEY
+secret_access_key = SEU_SECRET
+endpoint = https://SEU_ACCOUNT_ID.r2.cloudflarestorage.com
+acl = private

@@ -13,3 +13,4 @@ infra/volumes
 apps/api/storage
 .logs
 apps/web/tsconfig.tsbuildinfo
+infra/backup/rclone.conf
