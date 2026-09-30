@@ -122,6 +122,9 @@ function PlanoInner() {
             {plans.data?.map((p) => {
               const current = p.id === u.planId;
               const L = p.limits;
+              // botão desabilitado precisa dizer por quê: sem isto o cliente vê um botão
+              // morto e não sabe se é ele, se é o sistema, ou se quebrou
+              const semPreco = u.billingEnabled && !p.stripePriceId;
               return (
                 <div key={p.id} className={cn('rounded-2xl border p-5 space-y-3 bg-panel', current ? 'border-accent ring-1 ring-accent' : 'border-line')}>
                   <div className="flex items-baseline justify-between">
@@ -138,6 +141,7 @@ function PlanoInner() {
                   <Button className="w-full" variant={current ? 'ghost' : 'primary'} disabled={current || !u.billingEnabled || !p.stripePriceId} loading={checkout.isPending && checkout.variables === p.id} onClick={() => go(checkout.mutateAsync(p.id))}>
                     {current ? 'Plano atual' : u.status && u.status !== 'canceled' && u.billingEnabled ? 'Mudar para este' : 'Assinar'}
                   </Button>
+                  {semPreco && <p className="text-xs text-muted text-center">Este plano ainda não está à venda online — fale com o suporte para mudar.</p>}
                 </div>
               );
             })}
