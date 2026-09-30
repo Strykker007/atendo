@@ -46,9 +46,12 @@ log "Portas 80 e 443"
 # security list da VCN no painel não basta: o tráfego chega e é descartado aqui. É o motivo
 # nº 1 de "apontei o DNS e o site não abre" na Oracle.
 if command -v iptables >/dev/null 2>&1; then
+  # A posição importa: a regra tem de entrar ANTES do REJECT final, senão ela nunca é
+  # avaliada. Uma posição fixa não serve — o índice do REJECT varia entre imagens.
   for p in 80 443; do
-    sudo iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null \
-      || sudo iptables -I INPUT 6 -p tcp --dport "$p" -j ACCEPT
+    sudo iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null && continue
+    pos=$(sudo iptables -L INPUT -n --line-numbers | awk '$2=="REJECT"{print $1; exit}')
+    sudo iptables -I INPUT "${pos:-1}" -p tcp --dport "$p" -j ACCEPT
   done
   if command -v netfilter-persistent >/dev/null 2>&1; then
     sudo netfilter-persistent save >/dev/null 2>&1 || true
