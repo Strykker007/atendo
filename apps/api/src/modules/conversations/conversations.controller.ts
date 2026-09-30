@@ -41,6 +41,13 @@ class StatusDto {
   /** fluxo disparado ao encerrar (pesquisa de satisfação, pós-venda…) */
   @IsOptional() @IsUUID() flowId?: string;
 }
+class ContactDto {
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  @IsOptional() @IsString() @MaxLength(160) email?: string;
+  @IsOptional() @IsString() @MaxLength(300) address?: string;
+  @IsOptional() @IsString() @MaxLength(1000) note1?: string;
+  @IsOptional() @IsString() @MaxLength(1000) note2?: string;
+}
 class TagsDto {
   @IsArray() @IsUUID('4', { each: true }) tagIds: string[];
 }
@@ -116,6 +123,12 @@ export class ConversationsController {
   @Patch(':id/tags')
   tags(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: TagsDto) {
     return this.conversations.setTags(u.tenantId, id, dto.tagIds);
+  }
+
+  /** Ficha do contato: nome, e-mail, endereço e observações. */
+  @Patch('contacts/:contactId')
+  updateContact(@CurrentUser() u: AuthUser, @Param('contactId') contactId: string, @Body() dto: ContactDto) {
+    return this.conversations.updateContact(u.tenantId, contactId, dto);
   }
 
   @Patch('contacts/:contactId/tags')

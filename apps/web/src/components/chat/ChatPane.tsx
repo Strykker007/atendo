@@ -17,6 +17,7 @@ import { OriginBadge } from './OriginBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { AudioRecorder } from './AudioRecorder';
+import { ContactSheet, ContactSummary } from './ContactSheet';
 
 /** Tipos que a API aceita (ver ALLOWED em media.controller.ts). */
 const ACCEPT_ALL = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx';
@@ -45,6 +46,7 @@ export function ChatPane() {
   const ai = useAiStatus();
   const [scheduling, setScheduling] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [fichaAberta, setFichaAberta] = useState(false);
   const card = useContactCard(conv?.contact.id ?? null, sched.has);
   const tags = useTags();
   const messages = useMessages(conversationId);
@@ -227,6 +229,9 @@ export function ChatPane() {
           {rightPanelOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
         </button>
       </header>
+
+      <ContactSummary contact={conv.contact} onOpen={() => setFichaAberta(true)} />
+      {fichaAberta && <ContactSheet contact={conv.contact} onClose={() => setFichaAberta(false)} />}
 
       {/* Ficha de agendamento do contato */}
       {sched.has && card.data && (card.data.upcoming.length > 0 || card.data.visits > 0) && (

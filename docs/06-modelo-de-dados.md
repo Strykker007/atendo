@@ -104,3 +104,7 @@ texto de fora do expediente.
 **business_hours** — uma linha por intervalo de atendimento (`weekday` 0 = domingo, `start`
 e `end` em "HH:MM" no fuso do cliente). Vários intervalos no mesmo dia cobrem o almoço.
 Dia sem linha = fechado; nenhum intervalo cadastrado = sempre aberto.
+
+
+**contacts** ganhou a ficha preenchida pelo atendente: `email`, `address`, `note1` e
+`note2`. Campo enviado vazio vira `null` — o atendente apaga o que não vale mais.

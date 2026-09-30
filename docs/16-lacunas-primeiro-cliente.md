@@ -63,9 +63,11 @@ Round-robin entre atendentes online. Já estava no roadmap; o documento confirma
 Definir no perfil do atendente quais conexões ele opera. Necessário assim que o cliente
 tem mais de um número e equipes diferentes.
 
-### 8. Campos fixos no cadastro do contato
+### 8. Campos fixos no cadastro do contato — **FEITO** (2026-09-30)
 
-Endereço, e-mail, observações 1 e 2. Hoje o contato só tem nome, telefone e tags.
+E-mail, endereço e duas observações, além do nome. No chat aparece um resumo em uma linha
+sob o cabeçalho; clicar abre a ficha para editar. Vale para o **contato**, não para uma
+conversa — acompanha a pessoa em todos os atendimentos.
 
 ### 9. Mídia — **parcial** (2026-09-30)
 

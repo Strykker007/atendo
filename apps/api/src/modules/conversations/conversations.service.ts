@@ -451,6 +451,25 @@ export class ConversationsService {
     return this.present(message);
   }
 
+  /** Atualiza a ficha do contato. Campo vazio limpa — o atendente apaga o que não vale mais. */
+  async updateContact(tenantId: string, contactId: string, data: { name?: string; email?: string; address?: string; note1?: string; note2?: string }) {
+    const limpo = Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, typeof v === 'string' && !v.trim() ? null : v?.trim()]),
+    );
+    // contato inexistente (ou de outro cliente) é 404, não erro interno
+    const contact = await this.prisma.contact.update({ where: { id: contactId, tenantId }, data: limpo }).catch((err) => {
+      if (String((err as { code?: string })?.code) === 'P2025') throw new NotFoundException('Contato não encontrado');
+      throw err;
+    });
+    // a ficha aparece no cabeçalho do chat: avisa quem está com a conversa aberta
+    const convs = await this.prisma.conversation.findMany({ where: { contactId, tenantId }, select: { id: true } });
+    for (const c of convs) {
+      const full = await this.prisma.conversation.findUniqueOrThrow({ where: { id: c.id } });
+      this.gateway.emitConversation(tenantId, full);
+    }
+    return contact;
+  }
+
   async setStatus(
     tenantId: string,
     id: string,
