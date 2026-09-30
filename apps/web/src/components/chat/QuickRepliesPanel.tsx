@@ -1,9 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { Folder, FolderOpen, Zap, Workflow, Play, Lock } from 'lucide-react';
+import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useFlows, useStartFlow, useHasFeature, useActiveRun } from '@/lib/hooks';
+import { type QuickReplyItem, useFlows, useStartFlow, useHasFeature, useActiveRun } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { useQuickReplies, useConversation, useMe } from '@/lib/hooks';
@@ -68,6 +68,15 @@ function FlowsTab() {
   );
 }
 
+/** Ícone do tipo de anexo, para o atendente saber o que vai mandar antes de clicar. */
+function MediaIcon({ type }: { type: NonNullable<QuickReplyItem['mediaType']> }) {
+  const props = { size: 12, className: 'text-accent shrink-0' };
+  if (type === 'image') return <ImageIcon {...props} />;
+  if (type === 'audio') return <Mic {...props} />;
+  if (type === 'video') return <Video {...props} />;
+  return <FileText {...props} />;
+}
+
 function RepliesTab() {
   const folders = useQuickReplies();
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -77,11 +86,20 @@ function RepliesTab() {
   const { conversationId } = useUI();
   const conv = useConversation(conversationId).data;
 
-  /** Substitui {{contact.name}} / {{agent.name}} antes de mandar para o composer. */
-  const insert = (body: string) => {
+  /**
+   * Manda a resposta para o composer. Com anexo, vai o arquivo + legenda; o atendente ainda
+   * revisa e clica em enviar, como em qualquer mensagem.
+   */
+  const insert = (r: QuickReplyItem) => {
     const contactName = conv?.contact.name ?? conv?.contact.phone ?? '';
     const agentName = me.data?.name ?? '';
-    const text = body.replace(/\{\{\s*contact\.name\s*\}\}/g, contactName).replace(/\{\{\s*agent\.name\s*\}\}/g, agentName);
+    const text = r.body.replace(/\{\{\s*contact\.name\s*\}\}/g, contactName).replace(/\{\{\s*agent\.name\s*\}\}/g, agentName);
+    if (r.mediaKey && r.mediaUrl) {
+      window.dispatchEvent(new CustomEvent('atendo:insert-media', {
+        detail: { key: r.mediaKey, url: r.mediaUrl, mimeType: r.mediaMime ?? '', fileName: r.mediaName ?? 'arquivo', size: 0, caption: text },
+      }));
+      return;
+    }
     window.dispatchEvent(new CustomEvent('atendo:insert-text', { detail: text }));
   };
   const match = (s: string) => s.toLowerCase().includes(q.toLowerCase());
@@ -106,9 +124,12 @@ function RepliesTab() {
               </button>
               {isOpen &&
                 replies.map((r) => (
-                  <button key={r.id} onClick={() => insert(r.body)} className={cn('w-full text-left pl-10 pr-4 py-2 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent')}>
-                    <div className="text-sm font-medium truncate">{r.title}</div>
-                    <div className="text-xs text-muted line-clamp-2">{r.body}</div>
+                  <button key={r.id} onClick={() => insert(r)} className={cn('w-full text-left pl-10 pr-4 py-2 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent')}>
+                    <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                      {r.mediaType && <MediaIcon type={r.mediaType} />}
+                      <span className="truncate">{r.title}</span>
+                    </div>
+                    <div className="text-xs text-muted line-clamp-2">{r.body || <span className="italic text-faint">{r.mediaName}</span>}</div>
                   </button>
                 ))}
             </div>

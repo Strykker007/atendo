@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, Folder, Zap, GripVertical, Sun, Moon, Monitor } from 'lucide-react';
+import { Paperclip, X, Plus, Pencil, Trash2, Folder, Zap, GripVertical, Sun, Moon, Monitor } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
@@ -11,7 +11,7 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { BusinessHoursSection } from '@/components/settings/BusinessHoursSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
-import { useMe, useChangePassword, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
+import { uploadFile, mediaTypeOf, type QuickReplyItem, useMe, useChangePassword, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type Folder as FolderT } from '@/lib/hooks';
 
 type Reply = FolderT['replies'][number];
 
@@ -28,7 +28,8 @@ export default function ConfiguracoesPage() {
   const deleteReply = useDeleteReply();
 
   const [folderModal, setFolderModal] = useState<{ id?: string; name: string } | null>(null);
-  const [replyModal, setReplyModal] = useState<{ id?: string; folderId: string; title: string; body: string } | null>(null);
+  const [replyModal, setReplyModal] = useState<(Partial<QuickReplyItem> & { folderId: string; title: string; body: string }) | null>(null);
+  const [uploadingReply, setUploadingReply] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: 'folder' | 'reply'; id: string; name: string; count?: number } | null>(null);
 
   async function saveFolder(e: React.FormEvent) {
@@ -45,8 +46,9 @@ export default function ConfiguracoesPage() {
     e.preventDefault();
     if (!replyModal) return;
     try {
-      if (replyModal.id) await updateReply.mutateAsync({ id: replyModal.id, title: replyModal.title, body: replyModal.body });
-      else await createReply.mutateAsync({ folderId: replyModal.folderId, title: replyModal.title, body: replyModal.body });
+      const midia = { mediaKey: replyModal.mediaKey ?? null, mediaType: replyModal.mediaType ?? null, mediaName: replyModal.mediaName ?? null, mediaMime: replyModal.mediaMime ?? null };
+      if (replyModal.id) await updateReply.mutateAsync({ id: replyModal.id, title: replyModal.title, body: replyModal.body, ...midia });
+      else await createReply.mutateAsync({ folderId: replyModal.folderId, title: replyModal.title, body: replyModal.body, ...midia });
       toast.ok('Resposta salva');
       setReplyModal(null);
     } catch (err) { toast.err(err); }
@@ -112,8 +114,39 @@ export default function ConfiguracoesPage() {
         <form onSubmit={saveReply} className="space-y-4">
           <Field label="Título" hint="Como aparece na lista do painel"><input className={inputCls} value={replyModal?.title ?? ''} onChange={(e) => setReplyModal({ ...replyModal!, title: e.target.value })} maxLength={80} required autoFocus /></Field>
           <Field label="Mensagem">
-            <textarea className={`${inputCls} min-h-32`} value={replyModal?.body ?? ''} onChange={(e) => setReplyModal({ ...replyModal!, body: e.target.value })} maxLength={4096} required />
+            <textarea className={`${inputCls} min-h-32`} value={replyModal?.body ?? ''} onChange={(e) => setReplyModal({ ...replyModal!, body: e.target.value })} maxLength={4096} required={!replyModal?.mediaKey} />
           </Field>
+          <Field label="Anexo (opcional)" hint="Áudio, foto, vídeo ou arquivo. Com anexo, a mensagem acima vira a legenda.">
+            {replyModal?.mediaKey ? (
+              <div className="flex items-center gap-2 rounded-lg bg-field px-3 py-2 text-sm">
+                {replyModal.mediaType === 'image' && replyModal.mediaUrl
+                  ? <img src={replyModal.mediaUrl} alt="" className="w-12 h-12 rounded object-cover" />
+                  : <Paperclip size={18} className="text-muted" />}
+                <span className="flex-1 min-w-0 truncate">{replyModal.mediaName}</span>
+                <button type="button" onClick={() => setReplyModal({ ...replyModal!, mediaKey: null, mediaType: null, mediaName: null, mediaMime: null, mediaUrl: null })} className="text-faint hover:text-danger" title="Remover anexo"><X size={15} /></button>
+              </div>
+            ) : (
+              <label className="inline-flex items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-sm text-muted cursor-pointer hover:bg-field">
+                <Paperclip size={15} /> {uploadingReply ? 'Enviando…' : 'Escolher arquivo'}
+                <input
+                  type="file"
+                  hidden
+                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    setUploadingReply(true);
+                    try {
+                      const up = await uploadFile(file);
+                      setReplyModal((m) => m && { ...m, mediaKey: up.key, mediaUrl: up.url, mediaName: up.fileName, mediaMime: up.mimeType, mediaType: mediaTypeOf(up.mimeType) });
+                    } catch (err) { toast.err(err); } finally { setUploadingReply(false); }
+                  }}
+                />
+              </label>
+            )}
+          </Field>
+
           <div className="flex flex-wrap gap-1 text-xs">
             <span className="text-faint mr-1">Inserir:</span>
             {['{{contact.name}}', '{{agent.name}}'].map((v) => (

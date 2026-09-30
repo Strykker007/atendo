@@ -73,8 +73,10 @@ Endereço, e-mail, observações 1 e 2. Hoje o contato só tem nome, telefone e 
 **gravação de áudio pelo navegador**, que não existia. Enviar e reproduzir mídia já
 funcionava, mas ficava escondido atrás de um clipe que ninguém achava.
 
-**Falta:** mídia nas **respostas rápidas** (hoje só texto), figurinhas, e converter HEIC do
-iPhone, que hoje é recusado.
+**Respostas rápidas com anexo, feito** (2026-09-30): cada resposta pode levar áudio, foto,
+vídeo ou documento, com o texto virando legenda. Ver [08](08-frontend.md).
+
+**Falta:** figurinhas e converter HEIC do iPhone, que hoje é recusado.
 
 ### 10. Replicar fluxos e respostas rápidas por nicho
 

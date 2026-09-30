@@ -104,6 +104,17 @@ export function ChatPane() {
     return () => window.removeEventListener('atendo:insert-text', h);
   }, []);
 
+  // resposta rápida com anexo: entra como arquivo + legenda, ainda revisável antes de enviar
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent<Upload & { caption?: string }>).detail;
+      setAttachment({ key: d.key, url: d.url, mimeType: d.mimeType, fileName: d.fileName, size: d.size });
+      if (d.caption) setText(d.caption);
+    };
+    window.addEventListener('atendo:insert-media', h);
+    return () => window.removeEventListener('atendo:insert-media', h);
+  }, []);
+
   if (!conv) {
     return (
       <div className="flex-1 grid place-items-center chat-bg">

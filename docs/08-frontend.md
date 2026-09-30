@@ -165,3 +165,17 @@ o parâmetro a extensão do arquivo salvo saía errada.
 **Tipos aceitos** (`ALLOWED` em `media.controller.ts`): JPEG, PNG, WebP e GIF; MP4 e 3GPP;
 OGG, MP3, MP4, AAC e WebM de áudio; PDF, Word e Excel. **HEIC do iPhone não entra** — a
 recusa é explícita ("Tipo não permitido: image/heic"), mas o ideal seria converter.
+
+
+## Respostas rápidas com anexo
+
+Cada resposta pode ter **um arquivo** (áudio gravado, foto, vídeo ou documento) além do
+texto. Com anexo, o texto vira a **legenda** — e por isso deixa de ser obrigatório.
+
+Ao clicar na resposta no painel, o arquivo e a legenda entram no campo de digitação como um
+anexo comum: o atendente ainda revisa e clica em enviar. As variáveis `{{contact.name}}` e
+`{{agent.name}}` continuam sendo substituídas.
+
+O anexo é enviado uma vez no cadastro (Configurações → Respostas rápidas) e reaproveitado
+em todos os envios — não sobe de novo a cada uso. A chave do storage nunca sai crua: a API
+devolve uma URL assinada e temporária, e recusa `mediaKey` de outro cliente.

@@ -31,7 +31,8 @@ export interface Message {
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
 export type SendInput = { type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } };
-export interface Folder { id: string; name: string; replies: { id: string; title: string; body: string }[] }
+export interface QuickReplyItem { id: string; title: string; body: string; mediaKey?: string | null; mediaType?: 'image' | 'audio' | 'video' | 'document' | null; mediaName?: string | null; mediaMime?: string | null; mediaUrl?: string | null }
+export interface Folder { id: string; name: string; replies: QuickReplyItem[] }
 
 export const useNumbers = () => useQuery({ queryKey: ['numbers'], queryFn: () => api<NumberItem[]>('/numbers') });
 export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => api<Tag[]>('/tags') });
@@ -262,8 +263,8 @@ const invQR = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQuer
 export const useCreateFolder = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string }) => api('/quick-replies/folders', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
 export const useUpdateFolder = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; position?: number }) => api(`/quick-replies/folders/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
 export const useDeleteFolder = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/quick-replies/folders/${id}`, { method: 'DELETE' }), onSuccess: invQR(qc) }); };
-export const useCreateReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { folderId: string; title: string; body: string }) => api('/quick-replies', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
-export const useUpdateReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; title?: string; body?: string }) => api(`/quick-replies/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
+export const useCreateReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { folderId: string; title: string; body: string; mediaKey?: string | null; mediaType?: string | null; mediaName?: string | null; mediaMime?: string | null }) => api('/quick-replies', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
+export const useUpdateReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; title?: string; body?: string; mediaKey?: string | null; mediaType?: string | null; mediaName?: string | null; mediaMime?: string | null }) => api(`/quick-replies/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
 export const useDeleteReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/quick-replies/${id}`, { method: 'DELETE' }), onSuccess: invQR(qc) }); };
 
 /** Usuário logado (role, tenant) — para esconder ações de admin. */

@@ -425,8 +425,14 @@ model QuickReply {
   id       String  @id @default(uuid())
   folderId String
   title    String
-  /// suporta variáveis: {{contact.name}}, {{agent.name}}
+  /// suporta variáveis: {{contact.name}}, {{agent.name}}. Com mídia, vira a legenda.
   body     String
+  // ---- anexo opcional (áudio gravado, foto, catálogo em PDF…) ----
+  /// chave no storage; a URL assinada é gerada na hora de usar
+  mediaKey  String?
+  mediaType String?
+  mediaName String?
+  mediaMime String?
   position Int     @default(0)
 
   folder QuickReplyFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
