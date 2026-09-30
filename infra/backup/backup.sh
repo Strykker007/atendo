@@ -29,7 +29,8 @@ if [ -d /data/storage ] && [ "$(ls -A /data/storage 2>/dev/null)" ]; then
 fi
 
 echo "$STAMP" > "$DIR/MANIFEST"
-du -sh "$DIR" | log
+# o tamanho é o sinal mais rápido de backup vazio — log() lê argumentos, não stdin
+log "tamanho: $(du -sh "$DIR" | cut -f1)"
 
 # Envio remoto. Backup que só existe no mesmo servidor não protege contra perder o servidor.
 if [ -n "${BACKUP_REMOTE:-}" ]; then
