@@ -117,15 +117,23 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-atendo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
       EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD}
-      # ex.: r2:atendo-backups  (o remoto vem de infra/backup/rclone.conf)
+      # ex.: r2:atendo-backups — "r2" é o remoto definido pelas RCLONE_CONFIG_R2_* abaixo
       BACKUP_REMOTE: ${BACKUP_REMOTE:-}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
       BACKUP_INTERVAL_S: ${BACKUP_INTERVAL_S:-86400}
+      # O rclone aceita a configuração por ambiente, o que evita montar um arquivo único:
+      # quando o arquivo não existe no host, o Docker cria um DIRETÓRIO no lugar e o envio
+      # falha em silêncio. Assim o segredo fica só no .env.production.
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: ${BACKUP_S3_PROVIDER:-Cloudflare}
+      RCLONE_CONFIG_R2_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_R2_ACL: private
     volumes:
       - ./volumes/backup:/backup
       - ./volumes/evolution:/data/evolution:ro
       - ./volumes/storage:/data/storage:ro
-      - ./backup/rclone.conf:/config/rclone.conf:ro
 
   evolution-db:
     image: postgres:16-alpine

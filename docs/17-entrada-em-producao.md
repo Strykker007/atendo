@@ -220,9 +220,27 @@ O serviço `backup` do compose de produção roda **uma vez por dia** e guarda:
 Backup que só existe no mesmo servidor não protege contra **perder o servidor** — que é o
 cenário principal. Configure:
 
-1. `cp infra/backup/rclone.conf.example infra/backup/rclone.conf` e preencha (exemplo pronto
-   para Cloudflare R2; funciona igual com S3, B2, Wasabi).
-2. `BACKUP_REMOTE=r2:atendo-backups` no `.env.production`.
+No `.env.production` (exemplo com Cloudflare R2, que tem 10 GB grátis; funciona igual com
+S3, B2, Wasabi, MinIO):
+
+```
+BACKUP_S3_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
+BACKUP_S3_ACCESS_KEY_ID=...
+BACKUP_S3_SECRET_ACCESS_KEY=...
+BACKUP_REMOTE=r2:atendo-backups
+```
+
+Não há arquivo de configuração do rclone: ele lê `RCLONE_CONFIG_R2_*`, que o compose monta a
+partir dessas variáveis. Isso é deliberado — montar um arquivo único como volume é frágil:
+**se o arquivo não existe no host, o Docker cria um diretório no lugar** e o envio falha em
+silêncio, com o backup parecendo saudável.
+
+Para conferir sem esperar o ciclo diário:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec backup sh /usr/local/bin/backup.sh
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec backup rclone ls r2:atendo-backups
+```
 
 Sem `BACKUP_REMOTE` o serviço avisa no log a cada execução, de propósito.
 `BACKUP_KEEP_DAYS` (padrão 14) apaga as cópias antigas local e remotamente.

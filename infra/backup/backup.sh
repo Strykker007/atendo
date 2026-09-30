@@ -34,8 +34,8 @@ du -sh "$DIR" | log
 # Envio remoto. Backup que só existe no mesmo servidor não protege contra perder o servidor.
 if [ -n "${BACKUP_REMOTE:-}" ]; then
   log "enviando para $BACKUP_REMOTE"
-  rclone --config /config/rclone.conf copy "$DIR" "$BACKUP_REMOTE/$STAMP" --transfers 4
-  rclone --config /config/rclone.conf delete "$BACKUP_REMOTE" --min-age "${KEEP_DAYS}d" --rmdirs || true
+  rclone copy "$DIR" "$BACKUP_REMOTE/$STAMP" --transfers 4
+  rclone delete "$BACKUP_REMOTE" --min-age "${KEEP_DAYS}d" --rmdirs || true
 else
   log "AVISO: BACKUP_REMOTE não configurado — backup só no servidor, sem proteção contra perda da máquina"
 fi

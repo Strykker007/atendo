@@ -74,7 +74,7 @@ Faltam SÓ as chaves de terceiros (opcionais para subir, necessárias para cobra
    STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET   cobrança
    RESEND_API_KEY                             e-mails (convite funciona sem)
    AI_PROVIDER, AI_API_KEY                    copiloto e IA nos fluxos
-   BACKUP_REMOTE + infra/backup/rclone.conf   backup fora do servidor
+   BACKUP_REMOTE + BACKUP_S3_*                backup fora do servidor
 
 Antes de subir, aponte no DNS (registro A) para o IP do servidor:
    $APP   →  IP
