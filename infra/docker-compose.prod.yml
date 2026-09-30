@@ -39,10 +39,13 @@ services:
     restart: unless-stopped
     expose: ["3000"]
 
-  # Proxy reverso com HTTPS automático (Let's Encrypt). Ajuste os domínios no Caddyfile.
+  # Proxy reverso com HTTPS automático (Let's Encrypt). Domínios vêm do .env.production.
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?defina APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:?defina API_DOMAIN}
     ports: ["80:80", "443:443"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

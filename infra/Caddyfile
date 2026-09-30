@@ -1,9 +1,11 @@
-# Troque pelos seus domínios. O Caddy emite e renova o certificado sozinho.
-app.seudominio.com.br {
+# Os domínios vêm de APP_DOMAIN/API_DOMAIN no .env.production.
+# Este arquivo é versionado e NÃO deve ser editado por script: o deploy sincroniza a
+# versão do repositório por cima, e um Caddyfile remendado no servidor seria desfeito.
+{$APP_DOMAIN} {
 	reverse_proxy web:3000
 }
 
-api.seudominio.com.br {
+{$API_DOMAIN} {
 	# WebSocket (Socket.IO) passa normalmente pelo reverse_proxy
 	reverse_proxy api:4000 {
 		lb_policy round_robin

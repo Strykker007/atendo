@@ -1,0 +1,31 @@
+#!/bin/bash
+# Envia o código para o servidor e sobe a stack de produção.
+#
+# Uso: bash scripts/deploy.sh ubuntu@IP [caminho-da-chave]
+#
+# Não toca em .env.production nem em infra/volumes: segredos e dados vivem
+# só no servidor. Rodar duas vezes é seguro.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+HOST=${1:?informe o destino, ex.: bash scripts/deploy.sh ubuntu@1.2.3.4}
+KEY=${2:-$HOME/.ssh/atendo-prod.key}
+SSH="ssh -i $KEY -o BatchMode=yes"
+
+# --filter=':- .gitignore' faz o rsync obedecer o .gitignore. Sem isso, infra/volumes vai
+# junto e o Postgres do servidor sobe com o banco de desenvolvimento dentro — inclusive a
+# sessão do WhatsApp, que duas instâncias não podem compartilhar.
+echo "▶ Enviando código para $HOST…"
+rsync -az --delete -e "$SSH" \
+  --filter=':- .gitignore' \
+  --exclude '.git' \
+  --exclude 'infra/volumes' \
+  --exclude '.env.production' \
+  ./ "$HOST:~/atendo/"
+
+echo "▶ Subindo a stack…"
+# shellcheck disable=SC2029
+$SSH "$HOST" 'cd ~/atendo && sudo docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build'
+
+echo "▶ Estado dos serviços:"
+$SSH "$HOST" 'cd ~/atendo && sudo docker compose -f infra/docker-compose.prod.yml --env-file .env.production ps --format "table {{.Service}}\t{{.Status}}"'

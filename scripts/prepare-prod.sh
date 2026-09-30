@@ -3,7 +3,7 @@
 #
 # Uso: bash scripts/prepare-prod.sh seudominio.com.br
 #
-# Gera .env.production com segredos aleatórios e acerta os domínios no Caddyfile.
+# Gera .env.production com segredos aleatórios, domínios inclusive.
 # Não sobrescreve nada que já exista — rode à vontade.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -57,23 +57,16 @@ set_var EVOLUTION_DB_PASSWORD "$EVO_DB_PW"
 set_var META_WEBHOOK_VERIFY_TOKEN "$(secret)"
 set_var LOG_FORMAT json
 set_var MAIL_FROM "Atendo <nao-responda@$DOMAIN>"
+# o Caddyfile lê estas duas: ele é versionado e não pode ser remendado por script
+set_var APP_DOMAIN "$APP"
+set_var API_DOMAIN "$API"
 
-# domínios no Caddy
-python3 - "$APP" "$API" <<'PY'
-import re, sys
-app, api = sys.argv[1], sys.argv[2]
-p = 'infra/Caddyfile'
-s = open(p).read()
-s = re.sub(r'^app\.[^\s{]+', app, s, count=1, flags=re.M)
-s = re.sub(r'^api\.[^\s{]+', api, s, count=1, flags=re.M)
-open(p, 'w').write(s)
-PY
 
 chmod 600 "$ENVFILE"
 
 cat <<TXT
 
-✅ $ENVFILE gerado e infra/Caddyfile apontando para:
+✅ $ENVFILE gerado. O Caddy vai servir:
    painel  https://$APP
    API     https://$API
 

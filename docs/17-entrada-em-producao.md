@@ -104,24 +104,66 @@ então dá para estrear sem e-mail e configurar depois.
   - `api.seudominio.com.br` → API e webhooks
 - **Backup**: onde guardar (S3/R2 é o mais simples).
 
+#### Sem domínio ainda? Use `sslip.io`
+
+O domínio costuma ser o item mais lento (no `.br`, o Registro.br pode travar por associação
+de CPF a outro provedor). Ele **não precisa bloquear o deploy**: o `sslip.io` resolve
+qualquer IP escrito no próprio nome, sem cadastro.
+
+```bash
+bash scripts/prepare-prod.sh 163-176-200-252.sslip.io   # o IP com hífens
+```
+
+Isso dá `app.163-176-200-252.sslip.io` e `api.163-176-200-252.sslip.io`, e como são
+hostnames públicos reais o **Caddy emite certificado Let's Encrypt normalmente**. Não é
+detalhe estético: Meta e Stripe recusam webhook sem HTTPS confiável, então com IP cru você
+não conseguiria nem conectar o WhatsApp.
+
+Quando o domínio real sair, troque `APP_DOMAIN`, `API_DOMAIN`, `API_PUBLIC_URL`,
+`WEB_ORIGIN`, `NEXT_PUBLIC_API_URL` e `NEXT_PUBLIC_WS_URL` no `.env.production` e suba de
+novo. **Não rode `prepare-prod.sh` de novo** — ele geraria uma `ENCRYPTION_KEY` nova e as
+credenciais dos números já conectados viram lixo. Resta reconfigurar o webhook na Meta.
+
 ### O que roda no servidor
 
-Um comando prepara tudo o que não depende de terceiros — segredos aleatórios, URLs e os
-domínios no Caddy:
+Um comando prepara tudo o que não depende de terceiros — segredos aleatórios, URLs e
+domínios:
 
 ```bash
 bash scripts/prepare-prod.sh seudominio.com.br
 ```
 
-Ele gera `.env.production` (modo 600) e acerta `infra/Caddyfile` para
-`app.seudominio.com.br` e `api.seudominio.com.br`. Não sobrescreve se o arquivo já existir.
+Ele gera `.env.production` (modo 600), incluindo `APP_DOMAIN` e `API_DOMAIN`. Não
+sobrescreve se o arquivo já existir.
 
-Depois é só preencher as chaves de terceiros (Stripe, Resend, IA, backup) e subir:
+O `infra/Caddyfile` **não é editado por script**: ele lê `{$APP_DOMAIN}` e `{$API_DOMAIN}`
+do ambiente. É versionado, e um deploy sincroniza a versão do repositório por cima — um
+Caddyfile remendado no servidor seria desfeito no deploy seguinte, derrubando o HTTPS.
+
+Depois é só preencher as chaves de terceiros (Stripe, Resend, IA, backup) e subir. O envio
+do código e o `up` estão em um script só, que roda do seu computador:
 
 ```bash
-docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build
-docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec api npx prisma db seed
+bash scripts/deploy.sh ubuntu@IP_DO_SERVIDOR
 ```
+
+O `deploy.sh` obedece o `.gitignore` e exclui `infra/volumes` e `.env.production`. **Isso
+não é detalhe:** um `rsync` ingênuo leva `infra/volumes/` junto, e o Postgres do servidor
+sobe com o banco de desenvolvimento dentro (autenticação falha, porque a senha é a antiga).
+Pior, vai junto a sessão da Evolution — e duas instâncias com a mesma sessão derrubam o
+número de WhatsApp.
+
+O seed roda uma vez, com o arquivo já compilado na imagem:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec api node dist/prisma/seed.js
+```
+
+> `npx prisma db seed` **não funciona em produção**: ele chama `tsx`, que é devDependency e
+> não existe na imagem final. Pela mesma razão o `prisma` saiu de `devDependencies` — sem
+> ele instalado, o `npx` baixava o pacote do registro público em tempo de execução e um dia
+> trouxe um release candidate incompatível, derrubando a API em loop de restart. A imagem
+> chama `./node_modules/.bin/prisma` pelo caminho explícito: se faltar, falha alto.
 
 > **Guarde o `.env.production`.** Perder a `ENCRYPTION_KEY` torna ilegíveis as credenciais
 > dos números já cadastrados — todos precisariam ser reconectados por QR.

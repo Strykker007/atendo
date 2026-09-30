@@ -36,4 +36,7 @@ EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 CMD wget -qO- http://localhost:4000/health || exit 1
 ENTRYPOINT ["/sbin/tini", "--"]
 # API: aplica migrations e sobe. Worker: `node dist/src/worker`
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
+# Caminho explícito do binário, nunca `npx`: sem o pacote local o npx baixa a versão
+# mais recente do registro em tempo de execução — foi assim que um release candidate
+# do Prisma 8 entrou em produção e derrubou a API.
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && node dist/src/main"]
