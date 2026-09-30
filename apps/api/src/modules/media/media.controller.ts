@@ -19,10 +19,13 @@ export class MediaController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: env.MEDIA_MAX_MB * 1024 * 1024 } }))
   async upload(@CurrentUser() user: AuthUser, @UploadedFile() file?: Express.Multer.File) {
     if (!file) throw new BadRequestException('Arquivo ausente (campo "file")');
-    if (!ALLOWED.test(file.mimetype)) throw new BadRequestException(`Tipo não permitido: ${file.mimetype}`);
-    const key = this.storage.makeKey(user.tenantId, file.mimetype, file.originalname);
-    await this.storage.put(key, file.buffer, file.mimetype);
-    return { key, url: this.storage.signedUrl(key), mimeType: file.mimetype, fileName: file.originalname, size: file.size };
+    // o navegador manda o codec junto ("audio/webm;codecs=opus") ao gravar áudio;
+    // guardamos o tipo base, senão a extensão do arquivo sai errada
+    const mimeType = file.mimetype.split(';')[0].trim().toLowerCase();
+    if (!ALLOWED.test(mimeType)) throw new BadRequestException(`Tipo não permitido: ${mimeType}`);
+    const key = this.storage.makeKey(user.tenantId, mimeType, file.originalname);
+    await this.storage.put(key, file.buffer, mimeType);
+    return { key, url: this.storage.signedUrl(key), mimeType, fileName: file.originalname, size: file.size };
   }
 
   /** Serve o arquivo se a assinatura for válida. Sem JWT: <img>/<audio> não mandam header. */

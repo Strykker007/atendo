@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus } from 'lucide-react';
+import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +16,10 @@ import { avatarStyle, initialOf } from '@/lib/avatar';
 import { OriginBadge } from './OriginBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
+import { AudioRecorder } from './AudioRecorder';
+
+/** Tipos que a API aceita (ver ALLOWED em media.controller.ts). */
+const ACCEPT_ALL = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx';
 
 export function ChatPane() {
   const { conversationId, setConversation, status, setStatus: setFilterStatus, rightPanelOpen, toggleRightPanel } = useUI();
@@ -53,7 +57,27 @@ export function ChatPane() {
   const [attachment, setAttachment] = useState<Upload | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [accept, setAccept] = useState(ACCEPT_ALL);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  /** Abre o seletor já filtrado pelo tipo escolhido no atalho. */
+  function pick(tipos: string) {
+    setAccept(tipos);
+    // espera o React aplicar o accept antes de abrir o seletor do sistema
+    setTimeout(() => fileRef.current?.click(), 0);
+  }
+
+  /** Áudio gravado no navegador entra como anexo, igual a um arquivo escolhido. */
+  async function sendRecorded(file: File) {
+    setUploading(true);
+    try {
+      setAttachment(await uploadFile(file));
+    } catch (err) {
+      toast.err(err);
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -280,10 +304,21 @@ export function ChatPane() {
               <button type="button" onClick={() => setAttachment(null)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
           )}
-          {ai.enabled && !noteMode && <CopilotBar conversationId={conv.id} text={text} onText={setText} />}
+          {/* Atalhos de mídia: antes tudo ficava escondido atrás de um clipe e ninguém achava */}
+          {!noteMode && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<ImageIcon size={13} />} onClick={() => pick('image/jpeg,image/png,image/webp,image/gif')} title="Enviar foto">Foto</Button>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<Video size={13} />} onClick={() => pick('video/mp4,video/3gpp')} title="Enviar vídeo">Vídeo</Button>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<FileText size={13} />} onClick={() => pick('application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt')} title="Enviar arquivo">Arquivo</Button>
+              <AudioRecorder disabled={uploading} onRecorded={sendRecorded} />
+              {uploading && <span className="text-[11px] text-muted">enviando arquivo…</span>}
+              <span className="flex-1" />
+              {ai.enabled && <CopilotBar conversationId={conv.id} text={text} onText={setText} />}
+            </div>
+          )}
           <div className="flex items-end gap-2">
-          <input ref={fileRef} type="file" hidden onChange={pickFile} accept="image/*,audio/*,video/mp4,application/pdf,.doc,.docx,.xls,.xlsx" />
-          <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => fileRef.current?.click()} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
+          <input ref={fileRef} type="file" hidden onChange={pickFile} accept={accept} />
+          <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => pick(ACCEPT_ALL)} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}

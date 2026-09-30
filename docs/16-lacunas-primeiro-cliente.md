@@ -67,9 +67,14 @@ tem mais de um número e equipes diferentes.
 
 Endereço, e-mail, observações 1 e 2. Hoje o contato só tem nome, telefone e tags.
 
-### 9. Respostas rápidas com mídia
+### 9. Mídia — **parcial** (2026-09-30)
 
-Hoje só texto. O documento pede texto, áudio, figurinha e imagem+legenda.
+**No chat, feito:** atalhos de Foto, Vídeo, Arquivo e Áudio acima do campo de texto, e
+**gravação de áudio pelo navegador**, que não existia. Enviar e reproduzir mídia já
+funcionava, mas ficava escondido atrás de um clipe que ninguém achava.
+
+**Falta:** mídia nas **respostas rápidas** (hoje só texto), figurinhas, e converter HEIC do
+iPhone, que hoje é recusado.
 
 ### 10. Replicar fluxos e respostas rápidas por nicho
 

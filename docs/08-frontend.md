@@ -142,3 +142,26 @@ Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `c
 - Cadeado (gerente/admin em conversa alheia): botão de cadeado no lugar do composer; aberto → campo âmbar de nota interna (`POST …/notes`); bolha de nota centralizada com borda âmbar. Reseta ao trocar de conversa.
 - Número desconectado: o composer é substituído por um aviso com link para *Números* (o back também recusa o envio). Mensagens com `status: failed` têm botão **reenviar** (`POST …/resend`).
 - Mídia: `MediaBody` renderiza imagem/áudio/vídeo/documento a partir de `mediaUrl` (assinada, expira em 1 h — ao expirar, refetch das mensagens renova). Anexo no composer: `uploadFile()` → prévia → envio com `mediaKey`.
+
+
+## Mídia no chat
+
+Acima do campo de texto há atalhos diretos: **Foto**, **Vídeo**, **Arquivo** e **Áudio**.
+Cada um abre o seletor já filtrado pelos tipos que a API aceita, para o atendente não
+escolher um arquivo que seria recusado depois. O clipe continua ao lado do campo, para
+quem prefere escolher qualquer tipo de uma vez.
+
+Antes tudo isso existia apenas atrás do clipe, e na prática ninguém encontrava.
+
+**Áudio gravado no navegador** (`AudioRecorder`): pede o microfone, mostra o tempo enquanto
+grava, e ao parar vira anexo — daí em diante é igual a um arquivo escolhido. Botão para
+descartar sem enviar, teto de 5 minutos e descarte automático de clique acidental (menos de
+1 segundo). O formato é o melhor que o navegador oferecer (ogg/opus, senão webm/opus ou
+mp4); a conversão final para o padrão do WhatsApp fica com o provider.
+
+O upload normaliza o tipo: o navegador envia `audio/webm;codecs=opus` ao gravar, e sem tirar
+o parâmetro a extensão do arquivo salvo saía errada.
+
+**Tipos aceitos** (`ALLOWED` em `media.controller.ts`): JPEG, PNG, WebP e GIF; MP4 e 3GPP;
+OGG, MP3, MP4, AAC e WebM de áudio; PDF, Word e Excel. **HEIC do iPhone não entra** — a
+recusa é explícita ("Tipo não permitido: image/heic"), mas o ideal seria converter.
