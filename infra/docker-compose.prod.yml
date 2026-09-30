@@ -12,6 +12,11 @@ x-api-image: &api-image
   image: atendo/api:latest
   env_file: ../.env.production
   restart: unless-stopped
+  # Mídia com STORAGE_DRIVER=local. Precisa ser volume compartilhado: são 2 réplicas, e um
+  # arquivo gravado por uma teria de ser servido pela outra. Sem isto, some no deploy.
+  # O container roda como uid 100 — o dono do diretório no host tem de ser 100:101.
+  volumes:
+    - ./volumes/storage:/app/storage
   depends_on:
     postgres: { condition: service_healthy }
     redis: { condition: service_started }
