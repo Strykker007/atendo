@@ -78,10 +78,27 @@ model User {
   passwordSetAt DateTime?
   assigned      Conversation[] @relation("assignee")
   messages      Message[]
+  numbers       UserNumber[]
 
   @@index([tenantId])
   @@index([profileId])
   @@map("users")
+}
+
+/// Quais números o usuário opera. **Sem nenhuma linha = opera todos** — é o estado de quem
+/// nunca foi restringido, e o padrão para o cliente que tem um número só.
+/// Isto é escopo de DADOS, não permissão: "pode configurar números" é diferente de
+/// "só atende pelo número da filial Centro".
+model UserNumber {
+  userId   String
+  numberId String
+
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  number WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
+
+  @@id([userId, numberId])
+  @@index([numberId])
+  @@map("user_numbers")
 }
 
 /// Conjunto de permissões que o cliente monta. Um enum fechado de papéis não cobre
@@ -233,6 +250,7 @@ model WhatsAppNumber {
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
   usage         MessageUsage[]
+  users         UserNumber[]
 
   @@unique([provider, externalId])
   @@unique([tenantId, phone])

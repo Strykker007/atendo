@@ -6,6 +6,7 @@ import { ConversationsService } from './conversations.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
+import { ConversationScopeGuard } from './conversation-scope.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
 class ListDto {
@@ -54,7 +55,7 @@ class TagsDto {
 }
 
 @Controller('conversations')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, ConversationScopeGuard)
 export class ConversationsController {
   constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService) {}
 

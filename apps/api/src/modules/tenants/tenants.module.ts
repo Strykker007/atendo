@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { AuthService } from '../auth/auth.service';
@@ -43,6 +43,8 @@ class UpdateAgentDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
   /** Perfil de acesso; string vazia desvincula e volta ao padrão do papel. */
   @IsOptional() @IsString() profileId?: string;
+  /** Números que a pessoa opera. Lista vazia = todos (ver number-scope.ts). */
+  @IsOptional() @IsArray() @IsUUID('4', { each: true }) numberIds?: string[];
   /** Redefinir senha do atendente */
   @IsOptional() @IsString() @MinLength(8) password?: string;
 }
@@ -120,7 +122,7 @@ class TenantsController {
   /** Todos podem listar (precisam para transferir); só admin gerencia. */
   @Get('me/agents')
   agents(@CurrentUser() u: AuthUser) {
-    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } } } });
+    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } } } });
   }
 
   @Post('me/agents')
@@ -170,7 +172,7 @@ class TenantsController {
   @Patch('me/agents/:id')
   @RequirePermission('team.manage')
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
-    const { password, profileId, ...rest } = dto;
+    const { password, profileId, numberIds, ...rest } = dto;
     // `passwordSetAt` é o que libera o login de quem foi convidado: sem isto, definir a
     // senha pelo painel não adiantava nada e o usuário continuava travado no convite
     const base = profileId === undefined ? rest : { ...rest, profileId: profileId || null };
@@ -189,7 +191,16 @@ class TenantsController {
     // gerente não altera admins nem outros gerentes
     const editable = u.role === 'manager' ? (['agent'] as const) : (['agent', 'manager'] as const);
     const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, isActive: true } });
-    if (profileId !== undefined) this.permissions.invalidate();
+
+    if (numberIds) {
+      // só números deste cliente: os ids vêm do corpo da requisição
+      const valid = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: numberIds }, tenantId: u.tenantId }, select: { id: true } });
+      await this.prisma.$transaction([
+        this.prisma.userNumber.deleteMany({ where: { userId: id } }),
+        this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: id, numberId: n.id })), skipDuplicates: true }),
+      ]);
+    }
+    if (profileId !== undefined || numberIds) this.permissions.invalidate();
     return updated;
   }
 }

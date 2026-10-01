@@ -26,7 +26,9 @@ export class JwtAuthGuard implements CanActivate {
     }
     // a lista fica pronta para TODA rota: além do PermissionsGuard, os services de conversa
     // decidem por permissão (quem vê os atendimentos da equipe, quem transfere os dos outros)
-    req.user.permissions = await this.permissions.of(req.user);
+    const scope = await this.permissions.scope(req.user);
+    req.user.permissions = scope.permissions;
+    req.user.numberIds = scope.numberIds;
 
     // dono do sistema (sem tenant) só entra em rotas marcadas com @NoTenantOk
     return this.tenantGuard.canActivate(ctx);

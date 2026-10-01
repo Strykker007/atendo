@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, type Agent } from '@/lib/hooks';
 import { AccessProfiles } from '@/components/settings/AccessProfiles';
+import { NumberScopeButton } from '@/components/settings/NumberScope';
 import { MailCheck, Send, Link as LinkIcon } from 'lucide-react';
 
 export default function EquipePage() {
@@ -120,6 +121,7 @@ export default function EquipePage() {
                     )}
                     {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
                       <>
+                        <NumberScopeButton agent={a} />
                         <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>
                         <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-faint hover:text-danger' : 'text-accent')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
                       </>

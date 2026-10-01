@@ -16,23 +16,30 @@ import type { Permission } from '@atendo/shared';
  */
 @Injectable()
 export class PermissionsService {
-  private readonly cache = new Map<string, { at: number; permissions: string[] | null }>();
+  private readonly cache = new Map<string, { at: number; permissions: string[] | null; numberIds: string[] }>();
   private static readonly TTL_MS = 15_000;
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async of(user: { id: string; role: Principal['role'] }): Promise<Permission[]> {
-    return permissionsOf({ role: user.role, profilePermissions: await this.profilePermissions(user.id) });
+  /** Permissões (o que pode fazer) e números (sobre quais dados) numa consulta só. */
+  async scope(user: { id: string; role: Principal['role'] }): Promise<{ permissions: Permission[]; numberIds: string[] }> {
+    const row = await this.load(user.id);
+    return {
+      permissions: permissionsOf({ role: user.role, profilePermissions: row.permissions }),
+      numberIds: row.numberIds,
+    };
   }
 
-  /** `null` = usuário sem perfil; vale o padrão do papel. */
-  private async profilePermissions(userId: string): Promise<string[] | null> {
+  private async load(userId: string) {
     const hit = this.cache.get(userId);
-    if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit.permissions;
-    const row = await this.prisma.user.findUnique({ where: { id: userId }, select: { profile: { select: { permissions: true } } } });
-    const permissions = row?.profile?.permissions ?? null;
-    this.cache.set(userId, { at: Date.now(), permissions });
-    return permissions;
+    if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit;
+    const row = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { profile: { select: { permissions: true } }, numbers: { select: { numberId: true } } },
+    });
+    const entry = { at: Date.now(), permissions: row?.profile?.permissions ?? null, numberIds: (row?.numbers ?? []).map((n) => n.numberId) };
+    this.cache.set(userId, entry);
+    return entry;
   }
 
   /** Chamar sempre que um perfil for salvo ou um usuário trocar de perfil. */

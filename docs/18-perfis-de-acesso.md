@@ -86,3 +86,36 @@ com seletor por pessoa. `useCan('x')` esconde o que a pessoa não pode fazer.
 Restrição por número (item 7 de [16](16-lacunas-primeiro-cliente.md)) encaixa aqui: é escopo
 de dados, não ação, então provavelmente vira um campo do vínculo usuário↔número e não uma
 permissão do catálogo.
+
+## Restrição por número (escopo de dados)
+
+Permissão é **ação**; "quais números esta pessoa atende" é **escopo de dados**. Por isso não
+entrou no catálogo: `numbers.manage` ("pode configurar números") é outra coisa, e misturar as
+duas faria um perfil chamado "atendente da filial Centro" que, ao ser reaproveitado em outro
+cliente, restringiria as pessoas erradas.
+
+Vive na tabela `user_numbers` (vínculo usuário↔número) e na tela de **Equipe**, no ícone de
+telefone ao lado de cada pessoa. Só aparece quando o cliente tem **dois ou mais números** —
+com um só não há o que escolher.
+
+### A regra central
+
+**Nenhum número marcado = opera todos.** Esse é o estado de quem nunca foi restringido e do
+cliente com um número só. Se vazio significasse "nenhum", o primeiro deploy trancaria a
+equipe inteira para fora do atendimento. `number-scope.ts` existe para essa regra ficar num
+lugar só, testada.
+
+### Onde é aplicado
+
+| Ponto | Comportamento |
+|---|---|
+| Lista de conversas e contadores | filtradas pelos números da pessoa |
+| Filtro por número na tela | interseccionado com o escopo; pedir um número que não opera devolve lista vazia, nunca ignora o pedido |
+| Qualquer rota `/conversations/:id/…` | `ConversationScopeGuard` |
+
+O guard responde **404, não 403**: um 403 confirmaria que a conversa existe, e para quem não
+pode vê-la ela não deveria ser distinguível de uma inexistente. Ele fica no controller, em um
+ponto só, porque são dez rotas `:id` hoje e vão aparecer mais — a que esquecessem de checar
+seria o furo.
+
+O dono do sistema nunca é restringido: é ele quem dá suporte entrando como o cliente.

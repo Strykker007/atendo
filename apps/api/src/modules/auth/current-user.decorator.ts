@@ -11,8 +11,10 @@ export interface AuthUser {
   name: string;
   /** presente quando o dono do sistema está "entrando como" este tenant */
   impersonatorId?: string;
-  /** preenchido pelo PermissionsGuard quando a rota exige permissão */
+  /** preenchido pelo JwtAuthGuard em toda rota */
   permissions?: Permission[];
+  /** números que o usuário opera; vazio = todos (ver number-scope.ts) */
+  numberIds?: string[];
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthUser => {

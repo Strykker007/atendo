@@ -11,12 +11,13 @@ import type { Message } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import type { Permission } from '@atendo/shared';
+import { narrowTo } from '../auth/number-scope';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
  * sistema, que dá suporte entrando como o cliente e não tem perfil neste tenant.
  */
-type Viewer = { id: string; role: string; permissions?: readonly Permission[] };
+type Viewer = { id: string; role: string; permissions?: readonly Permission[]; numberIds?: readonly string[] };
 const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permissions?.includes(p);
 
 
@@ -58,6 +59,7 @@ export class ConversationsService {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
     const isAdmin = may(viewer, 'conversations.view_all');
+    const scoped = narrowTo(viewer, q.numberId);
     const ownership: Prisma.ConversationWhereInput =
       q.assigneeId && isAdmin ? { assigneeId: q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
@@ -65,7 +67,9 @@ export class ConversationsService {
       ...(q.status && { status: q.status }),
       ...(q.origin && { origin: q.origin }),
       ...ownership,
-      ...(q.numberId && { numberId: q.numberId }),
+      // o número pedido é interseccionado com o escopo do usuário; `null` = pediu um número
+      // que ele não opera, e aí a lista vem vazia em vez de ignorar o pedido
+      ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
       // tag da conversa OU tag do contato
       ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
       ...(q.search && {
@@ -82,8 +86,9 @@ export class ConversationsService {
   }
 
   /** Contadores dos três filtros principais (opcionalmente por número). */
-  async counts(tenantId: string, viewer: { id: string; role: string }, numberId?: string) {
-    const base = { tenantId, ...(numberId && { numberId }) };
+  async counts(tenantId: string, viewer: Viewer, numberId?: string) {
+    const scoped = narrowTo(viewer, numberId);
+    const base = { tenantId, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}) };
     const [waiting, closed, mine, all] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
