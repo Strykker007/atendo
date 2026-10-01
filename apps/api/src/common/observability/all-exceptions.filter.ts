@@ -1,4 +1,5 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { AppLogger } from './app-logger';
 import { currentContext } from './request-context';
@@ -18,15 +19,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const req = host.switchToHttp().getRequest<Request>();
     const requestId = currentContext()?.requestId;
 
-    const isHttp = exception instanceof HttpException;
-    const status = isHttp ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
-    const payload = isHttp ? exception.getResponse() : { statusCode: status, message: 'Erro interno. Tente novamente.' };
+    // P2025 = "registro não encontrado", o que o Prisma lança em findFirstOrThrow, update e
+    // delete. São 44 chamadas espalhadas pelo código; sem esta tradução cada uma vira 500 e
+    // vai para o Sentry como se fosse defeito, quando é só um id que não existe.
+    const error = exception instanceof Prisma.PrismaClientKnownRequestError && exception.code === 'P2025'
+      ? new NotFoundException('Não encontrado')
+      : exception;
+
+    const isHttp = error instanceof HttpException;
+    const status = isHttp ? error.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    const payload = isHttp ? error.getResponse() : { statusCode: status, message: 'Erro interno. Tente novamente.' };
     const body = typeof payload === 'string' ? { statusCode: status, message: payload } : { ...(payload as object) };
 
     const where = `${req.method} ${req.originalUrl.split('?')[0]}`;
     if (status >= 500) {
-      this.log.error(`${where} → ${status}`, exception instanceof Error ? exception.stack : String(exception), { status });
-      captureError(exception, { path: where, status });
+      this.log.error(`${where} → ${status}`, error instanceof Error ? error.stack : String(error), { status });
+      captureError(error, { path: where, status });
     } else {
       this.log.warn(`${where} → ${status}: ${describe(payload)}`, { status });
     }
