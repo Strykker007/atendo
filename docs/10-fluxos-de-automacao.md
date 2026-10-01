@@ -63,12 +63,47 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 | GET | `/flows` | todos* | Lista (com contagem de execuções) |
 | GET | `/flows/:id` | todos* | Definição completa |
 | POST / PATCH / DELETE | `/flows[/:id]` | admin, gerente | CRUD (valida a definição) |
+| POST | `/flows/:id/duplicate` | admin, gerente | Cópia no mesmo cliente |
+| GET | `/flows/:id/export` | admin, gerente | `{portable, warnings}` para outro cliente |
+| POST | `/flows/import` | admin, gerente | `{portable}` → `{flow, warnings}` |
 | GET | `/flows/:id/runs` | todos* | `byStatus` + últimas execuções |
 | POST | `/flows/:id/start` | todos* | `{conversationId}` — disparo manual |
 | GET | `/conversations/:id/flow` | todos | Run ativo ou `null` |
 | POST | `/conversations/:id/flow/stop` | todos | Para o run ativo |
 
 \* exige `features: ['flows']` no plano (`FeatureGuard`) — 403 com mensagem "não está incluído no seu plano".
+
+## Replicar um fluxo
+
+Duas operações diferentes de propósito, porque o risco é diferente.
+
+**Duplicar** (`POST /flows/:id/duplicate`) copia dentro do **mesmo** cliente. Cópia literal:
+etiquetas, atendentes e anexos continuam válidos. O nome ganha " (cópia)", numerando a partir
+da segunda.
+
+**Exportar / Importar** leva o fluxo para **outro** cliente, e aí o JSON cru não serve. O
+`definition` guarda referências locais — `tagId`, `agentId`, `serviceId`, `mediaKey` — que no
+destino não existem. A da mídia é a mais perigosa: a chave é `media/<tenantId>/arquivo`, então
+um fluxo copiado cru faria o cliente de destino **servir arquivo do cliente de origem**.
+
+`apps/api/src/modules/flows/portable.ts` resolve assim:
+
+| Referência | No arquivo exportado |
+|---|---|
+| `tagId` | vira `tagName` — o nome é único por cliente (`@@unique([tenantId, name])`) |
+| `agentId` | removido, com aviso |
+| `serviceId` / `professionalId` | removidos, com aviso (o fluxo passa a perguntar) |
+| `mediaKey` / `mediaType` / `mediaName` | removidos, com aviso |
+| `trigger.numberIds` | removido, com aviso |
+
+Na importação as etiquetas citadas são **criadas se faltarem**: sem isso o fluxo chegaria com
+os blocos de etiqueta vazios — pior que falhar, porque parece que funcionou.
+
+Todo fluxo duplicado ou importado nasce **desativado**, e `parsePortable` desconfia do arquivo
+(ele pode ter sido editado à mão entre exportar e importar).
+
+Os avisos vão para a tela: um fluxo que chega mudo no destino é pior do que um que chega
+dizendo o que falta ajustar.
 
 ## Exemplo de definição
 

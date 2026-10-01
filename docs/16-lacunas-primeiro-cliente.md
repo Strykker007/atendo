@@ -80,10 +80,13 @@ vídeo ou documento, com o texto virando legenda. Ver [08](08-frontend.md).
 
 **Falta:** figurinhas e converter HEIC do iPhone, que hoje é recusado.
 
-### 10. Replicar fluxos e respostas rápidas por nicho
+### 10. Replicar fluxos — **parcial** (2026-10-01)
 
-Duplicar e exportar/importar, para montar um pacote "barbearia" e aplicar em cada cliente
-novo. É o que faz a operação escalar sem retrabalho.
+**Fluxos, feito.** Na lista de Fluxos: **Duplicar** (dentro do mesmo cliente),
+**Exportar** e **Importar** (entre clientes). Ver [10](10-fluxos-de-automacao.md).
+
+**Falta:** o mesmo para respostas rápidas, e empacotar um conjunto por nicho
+("barbearia") para aplicar de uma vez em cliente novo.
 
 ### 11. Plano customizado por cliente
 

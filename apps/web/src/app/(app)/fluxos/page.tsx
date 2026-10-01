@@ -1,14 +1,14 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
-import { Plus, Workflow, Trash2, Zap, Lock } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useFlows, useDeleteFlow, useHasFeature, useMe, type FlowSummary } from '@/lib/hooks';
+import { useFlows, useDeleteFlow, useDuplicateFlow, useExportFlow, useImportFlow, useHasFeature, useMe, type FlowSummary } from '@/lib/hooks';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
@@ -18,7 +18,43 @@ export default function FluxosPage() {
   const feature = useHasFeature('flows');
   const flows = useFlows();
   const remove = useDeleteFlow();
+  const duplicate = useDuplicateFlow();
+  const exportFlow = useExportFlow();
+  const importFlow = useImportFlow();
+  const fileInput = useRef<HTMLInputElement>(null);
   const [deleting, setDeleting] = useState<FlowSummary | null>(null);
+
+  // o que não viaja entre clientes (anexo, atendente, serviço) vira aviso — melhor o usuário
+  // saber o que ajustar do que descobrir com o fluxo mudo na frente do contato
+  const warn = (warnings: string[]) => warnings.forEach((w) => toast.err(w));
+
+  async function onDuplicate(f: FlowSummary) {
+    try {
+      const novo = await duplicate.mutateAsync(f.id);
+      toast.ok(`"${novo.name}" criado, desativado — ative quando terminar de ajustar.`);
+    } catch (err) { toast.err(err); }
+  }
+
+  async function onExport(f: FlowSummary) {
+    try {
+      const { portable, warnings } = await exportFlow.mutateAsync(f.id);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(portable, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${f.name.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'fluxo'}.fluxo.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      warn(warnings);
+    } catch (err) { toast.err(err); }
+  }
+
+  async function onImport(file: File) {
+    try {
+      const { flow, warnings } = await importFlow.mutateAsync(JSON.parse(await file.text()));
+      toast.ok(`"${flow.name}" importado, desativado — confira antes de ativar.`);
+      warn(warnings);
+    } catch (err) { toast.err(err instanceof SyntaxError ? 'Arquivo não é um JSON válido.' : err); }
+  }
 
   if (!feature.loading && !feature.has) {
     return (
@@ -36,7 +72,13 @@ export default function FluxosPage() {
 
   return (
     <PageShell width="max-w-4xl">
-      <PageHeader title="Fluxos de automação" subtitle="Atendimento automático que você desenha: mensagens, menus, perguntas, condições e entrega para humano." action={isAdmin && <Link href="/fluxos/novo"><Button icon={<Plus size={16} />}>Novo fluxo</Button></Link>} />
+      <PageHeader title="Fluxos de automação" subtitle="Atendimento automático que você desenha: mensagens, menus, perguntas, condições e entrega para humano." action={isAdmin && (
+        <div className="flex gap-2">
+          <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onImport(f); }} />
+          <Button variant="ghost" icon={<Upload size={16} />} loading={importFlow.isPending} onClick={() => fileInput.current?.click()}>Importar</Button>
+          <Link href="/fluxos/novo"><Button icon={<Plus size={16} />}>Novo fluxo</Button></Link>
+        </div>
+      )} />
       {flows.isLoading && <SkeletonRows rows={3} />}
       {flows.data?.length === 0 && <Empty icon={<Workflow size={36} />} title="Nenhum fluxo" text="Crie o primeiro: por exemplo, uma triagem com menu 'Vendas / Suporte'." />}
       {!!flows.data?.length && (
@@ -50,7 +92,13 @@ export default function FluxosPage() {
               </div>
               <span className="text-xs text-faint tnum hidden sm:inline">{f._count.runs} execuções</span>
               <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', f.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{f.isActive ? 'Ativo' : 'Inativo'}</span>
-              {isAdmin && <button onClick={() => setDeleting(f)} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
+              {isAdmin && (
+                <>
+                  <button title="Duplicar neste cliente" onClick={() => onDuplicate(f)} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
+                  <button title="Exportar para usar em outro cliente" onClick={() => onExport(f)} className="text-faint hover:text-accent-ink p-1"><Download size={15} /></button>
+                  <button title="Excluir" onClick={() => setDeleting(f)} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
+                </>
+              )}
             </div>
           ))}
         </div>
