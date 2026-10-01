@@ -4,6 +4,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
 class FolderDto {
@@ -25,7 +26,7 @@ class ReplyDto {
 
 /** Painel direito: pastas -> mensagens pré-configuradas. */
 @Controller('quick-replies')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 class QuickRepliesController {
   constructor(
     private readonly prisma: PrismaService,
@@ -48,25 +49,30 @@ class QuickRepliesController {
   }
 
   @Post('folders')
+  @RequirePermission('quick_replies.manage')
   createFolder(@CurrentUser() u: AuthUser, @Body() dto: FolderDto) {
     return this.prisma.quickReplyFolder.create({ data: { tenantId: u.tenantId, ...dto } });
   }
   @Patch('folders/:id')
+  @RequirePermission('quick_replies.manage')
   updateFolder(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<FolderDto>) {
     return this.prisma.quickReplyFolder.update({ where: { id, tenantId: u.tenantId }, data: dto });
   }
   @Delete('folders/:id')
+  @RequirePermission('quick_replies.manage')
   deleteFolder(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.prisma.quickReplyFolder.delete({ where: { id, tenantId: u.tenantId } });
   }
 
   @Post()
+  @RequirePermission('quick_replies.manage')
   async create(@CurrentUser() u: AuthUser, @Body() dto: ReplyDto) {
     await this.prisma.quickReplyFolder.findFirstOrThrow({ where: { id: dto.folderId, tenantId: u.tenantId } });
     this.assertOwnMedia(u.tenantId, dto.mediaKey);
     return this.present(await this.prisma.quickReply.create({ data: dto }));
   }
   @Patch(':id')
+  @RequirePermission('quick_replies.manage')
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<ReplyDto>) {
     this.assertOwnMedia(u.tenantId, dto.mediaKey);
     return this.present(await this.prisma.quickReply.update({ where: { id, folder: { tenantId: u.tenantId } }, data: dto }));
@@ -77,6 +83,7 @@ class QuickRepliesController {
     if (key && !key.startsWith(`media/${tenantId}/`)) throw new BadRequestException('mediaKey inválida');
   }
   @Delete(':id')
+  @RequirePermission('quick_replies.manage')
   remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.prisma.quickReply.delete({ where: { id, folder: { tenantId: u.tenantId } } });
   }

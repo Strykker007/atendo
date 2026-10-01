@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
 /**
@@ -23,7 +24,8 @@ export const ReportDefinition = z.object({
 export type ReportDefinition = z.infer<typeof ReportDefinition>;
 
 @Controller('reports')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission('reports.view')
 class ReportsController {
   constructor(private readonly prisma: PrismaService) {}
 

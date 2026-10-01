@@ -5,6 +5,7 @@ import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@pr
 import { ConversationsService } from './conversations.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
 class ListDto {
@@ -53,7 +54,7 @@ class TagsDto {
 }
 
 @Controller('conversations')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ConversationsController {
   constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService) {}
 
@@ -127,6 +128,7 @@ export class ConversationsController {
 
   /** Ficha do contato: nome, e-mail, endereço e observações. */
   @Patch('contacts/:contactId')
+  @RequirePermission('contacts.edit')
   updateContact(@CurrentUser() u: AuthUser, @Param('contactId') contactId: string, @Body() dto: ContactDto) {
     return this.conversations.updateContact(u.tenantId, contactId, dto);
   }
