@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
-import { useAppointments, useProfessionals, useUpdateAppointment, useHasFeature, useMe, type Appointment, type AppointmentStatus } from '@/lib/hooks';
+import { useAppointments, useProfessionals, useUpdateAppointment, useHasFeature, useMe, type Appointment, type AppointmentStatus , useCan} from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 
 const STATUS: Record<AppointmentStatus, { label: string; cls: string }> = {
@@ -24,7 +24,8 @@ const hm = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2
 /** Agenda do dia por profissional. Semana com contadores; clique no card para agir. */
 export default function AgendaPage() {
   const me = useMe();
-  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  // esconder na tela é conveniência; quem autoriza é a API
+  const isAdmin = useCan('agenda.manage');
   const feature = useHasFeature('scheduling');
   const [day, setDay] = useState(() => ymd(new Date()));
   const [proFilter, setProFilter] = useState<string | null>(null);

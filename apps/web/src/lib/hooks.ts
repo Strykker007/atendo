@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken } from './api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
@@ -250,7 +250,7 @@ export const useDeleteTag = () => {
 
 // ---- Equipe ----
 export type Role = 'tenant_admin' | 'manager' | 'agent' | 'super_admin';
-export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null }
+export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null; profile?: { id: string; name: string } | null }
 export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
 export const useCreateAgent = () => {
   const qc = useQueryClient();
@@ -263,7 +263,7 @@ export const useChangePassword = () => useMutation({ mutationFn: (b: { current: 
 
 export const useUpdateAgent = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; password?: string }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; password?: string; profileId?: string }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };
 
 // ---- Respostas rápidas (admin) ----
@@ -275,8 +275,26 @@ export const useCreateReply = () => { const qc = useQueryClient(); return useMut
 export const useUpdateReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; title?: string; body?: string; mediaKey?: string | null; mediaType?: string | null; mediaName?: string | null; mediaMime?: string | null }) => api(`/quick-replies/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invQR(qc) }); };
 export const useDeleteReply = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/quick-replies/${id}`, { method: 'DELETE' }), onSuccess: invQR(qc) }); };
 
-/** Usuário logado (role, tenant) — para esconder ações de admin. */
-export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id: string; tenantId: string | null; role: Agent['role']; email: string; name: string; impersonatorId?: string }>('/auth/me'), staleTime: Infinity });
+/** Usuário logado (papel, tenant, permissões) — para esconder o que ele não pode fazer. */
+export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id: string; tenantId: string | null; role: Agent['role']; email: string; name: string; impersonatorId?: string; permissions?: Permission[] }>('/auth/me'), staleTime: Infinity });
+
+/**
+ * O usuário pode fazer isto? Esconder na tela é conveniência — quem autoriza de verdade é a
+ * API, que checa de novo a cada requisição.
+ */
+export const useCan = (permission: Permission) => {
+  const me = useMe();
+  if (!me.data) return false;
+  return me.data.role === 'super_admin' || !!me.data.permissions?.includes(permission);
+};
+
+// ---- Perfis de acesso ----
+export interface AccessProfile { id: string; name: string; description: string | null; permissions: Permission[]; isSystem: boolean; _count: { users: number } }
+export const useProfiles = () => useQuery({ queryKey: ['profiles'], queryFn: () => api<AccessProfile[]>('/profiles') });
+const invProfiles = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['profiles'] }); qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['me'] }); };
+export const useCreateProfile = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; description?: string; permissions: Permission[] }) => api<AccessProfile>('/profiles', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invProfiles(qc) }); };
+export const useUpdateProfile = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; description?: string; permissions?: Permission[] }) => api<AccessProfile>(`/profiles/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invProfiles(qc) }); };
+export const useDeleteProfile = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/profiles/${id}`, { method: 'DELETE' }), onSuccess: invProfiles(qc) }); };
 
 
 // ---- Relatórios ----

@@ -4,6 +4,7 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { TenantSettingsService } from './tenant-settings.service';
 
@@ -30,7 +31,7 @@ class SettingsDto {
 
 /** Configurações do cliente: fuso, expediente e chave de atendimento ativo. */
 @Controller('settings')
-@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard, PermissionsGuard)
 export class TenantSettingsController {
   constructor(private readonly settings: TenantSettingsService) {}
 
@@ -41,13 +42,13 @@ export class TenantSettingsController {
   }
 
   @Patch()
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('settings.manage')
   update(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     return this.settings.update(u.tenantId, dto);
   }
 
   @Put('business-hours')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('settings.manage')
   setHours(@CurrentUser() u: AuthUser, @Body() dto: HoursDto) {
     return this.settings.setHours(u.tenantId, dto.hours);
   }

@@ -10,6 +10,15 @@ import { StorageService } from '../../common/storage/storage.service';
 import type { Message } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
+import type { Permission } from '@atendo/shared';
+
+/**
+ * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
+ * sistema, que dá suporte entrando como o cliente e não tem perfil neste tenant.
+ */
+type Viewer = { id: string; role: string; permissions?: readonly Permission[] };
+const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permissions?.includes(p);
+
 
 const META_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -43,10 +52,12 @@ export class ConversationsService {
    */
   list(
     tenantId: string,
-    viewer: { id: string; role: string },
+    viewer: Viewer,
     q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; cursor?: string; take?: number },
   ) {
-    const isAdmin = viewer.role !== 'agent';
+    // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
+    // permite um "atendente líder" enxergar a equipe sem virar gerente
+    const isAdmin = may(viewer, 'conversations.view_all');
     const ownership: Prisma.ConversationWhereInput =
       q.assigneeId && isAdmin ? { assigneeId: q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
@@ -80,7 +91,7 @@ export class ConversationsService {
       this.prisma.conversation.count({ where: { ...base, status: 'in_progress' } }),
     ]);
     // atendente comum conta só as suas em atendimento; admin conta todas
-    return { waiting, in_progress: viewer.role === 'agent' ? mine : all, closed, in_progress_mine: mine, in_progress_all: all };
+    return { waiting, in_progress: may(viewer, 'conversations.view_all') ? all : mine, closed, in_progress_mine: mine, in_progress_all: all };
   }
 
   /**
@@ -104,10 +115,10 @@ export class ConversationsService {
   }
 
   /** Transferir para outro atendente (admin, ou o próprio dono). */
-  async transfer(tenantId: string, id: string, toUserId: string, by: { id: string; role: string }) {
+  async transfer(tenantId: string, id: string, toUserId: string, by: Viewer) {
     const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
-    if (by.role === 'agent' && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou um admin) pode transferir.');
+    if (!may(by, 'conversations.transfer_any') && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou quem tem permissão) pode transferir.');
     const target = await this.prisma.user.findFirst({ where: { id: toUserId, tenantId, isActive: true } });
     if (!target) throw new NotFoundException('Atendente não encontrado');
     const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: target.id, status: conv.status === 'closed' ? 'closed' : 'in_progress' } });
@@ -116,10 +127,10 @@ export class ConversationsService {
   }
 
   /** Devolver para a fila (sem dono, volta a Aguardando). */
-  async release(tenantId: string, id: string, by: { id: string; role: string }) {
+  async release(tenantId: string, id: string, by: Viewer) {
     const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
-    if (by.role === 'agent' && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou um admin) pode devolver.');
+    if (!may(by, 'conversations.transfer_any') && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou quem tem permissão) pode devolver.');
     const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: null, status: 'waiting' } });
     this.gateway.emitConversation(tenantId, updated);
     return updated;
@@ -360,7 +371,7 @@ export class ConversationsService {
 
   // ---------- outbound (API) ----------
 
-  async send(tenantId: string, author: { id: string; role: string }, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string }) {
+  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string }) {
     const authorId = author.id;
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
@@ -439,8 +450,8 @@ export class ConversationsService {
    * Nota interna ("cadeado"): admin/gerente orienta o atendente dentro da conversa.
    * Fica no histórico com destaque, só a equipe vê, nunca vai ao WhatsApp, não conta no uso.
    */
-  async note(tenantId: string, author: { id: string; role: string }, conversationId: string, text: string) {
-    if (author.role === 'agent') throw new ForbiddenException('Só gerentes e administradores enviam notas internas.');
+  async note(tenantId: string, author: Viewer, conversationId: string, text: string) {
+    if (!may(author, 'conversations.internal_note')) throw new ForbiddenException('Seu perfil de acesso não permite escrever notas internas.');
     const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     const message = await this.prisma.message.create({

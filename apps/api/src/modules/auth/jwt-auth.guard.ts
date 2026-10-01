@@ -4,12 +4,14 @@ import type { Request } from 'express';
 import { env } from '../../config/env';
 import { TenantGuard } from './tenant.guard';
 import type { AuthUser } from './current-user.decorator';
+import { PermissionsService } from './permissions.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
     private readonly tenantGuard: TenantGuard,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async canActivate(ctx: ExecutionContext) {
@@ -22,6 +24,10 @@ export class JwtAuthGuard implements CanActivate {
     } catch {
       throw new UnauthorizedException('Token inválido ou expirado');
     }
+    // a lista fica pronta para TODA rota: além do PermissionsGuard, os services de conversa
+    // decidem por permissão (quem vê os atendimentos da equipe, quem transfere os dos outros)
+    req.user.permissions = await this.permissions.of(req.user);
+
     // dono do sistema (sem tenant) só entra em rotas marcadas com @NoTenantOk
     return this.tenantGuard.canActivate(ctx);
   }

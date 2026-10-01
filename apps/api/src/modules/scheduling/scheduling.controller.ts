@@ -4,6 +4,7 @@ import { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { SchedulingService } from './scheduling.service';
@@ -63,7 +64,7 @@ class UpdateAppointmentDto {
 
 /** Agendamento — funcionalidade plugável (`features: ['scheduling']`). */
 @Controller('scheduling')
-@UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard, FeatureGuard)
 @RequireFeature('scheduling')
 export class SchedulingController {
   constructor(
@@ -77,7 +78,7 @@ export class SchedulingController {
     return this.scheduling.settings(u.tenantId);
   }
   @Patch('settings')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('agenda.manage')
   async updateSettings(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     await this.scheduling.settings(u.tenantId);
     return this.prisma.schedulingSettings.update({ where: { tenantId: u.tenantId }, data: dto });
@@ -89,13 +90,13 @@ export class SchedulingController {
     return this.prisma.professional.findMany({ where: { tenantId: u.tenantId }, include: { hours: { orderBy: [{ weekday: 'asc' }, { start: 'asc' }] } }, orderBy: { name: 'asc' } });
   }
   @Post('professionals')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('agenda.manage')
   createProfessional(@CurrentUser() u: AuthUser, @Body() dto: ProfessionalDto) {
     const { hours, phone, ...rest } = dto;
     return this.prisma.professional.create({ data: { tenantId: u.tenantId, ...rest, phone: phone?.replace(/^\+/, '') || null, hours: { create: (hours ?? []).map((h) => ({ weekday: h.weekday, start: h.start, end: h.end })) } }, include: { hours: true } });
   }
   @Patch('professionals/:id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('agenda.manage')
   async updateProfessional(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateProfessionalDto) {
     await this.prisma.professional.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     const { hours, phone, ...rest } = dto;
@@ -106,7 +107,7 @@ export class SchedulingController {
     });
   }
   @Delete('professionals/:id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('agenda.manage')
   async deleteProfessional(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     await this.prisma.professional.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     await this.prisma.professional.update({ where: { id }, data: { isActive: false } }); // preserva histórico
@@ -119,18 +120,18 @@ export class SchedulingController {
     return this.prisma.service.findMany({ where: { tenantId: u.tenantId }, orderBy: [{ position: 'asc' }, { name: 'asc' }] });
   }
   @Post('services')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('agenda.manage')
   createService(@CurrentUser() u: AuthUser, @Body() dto: ServiceDto) {
     return this.prisma.service.create({ data: { tenantId: u.tenantId, ...dto } });
   }
   @Patch('services/:id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('agenda.manage')
   async updateService(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateServiceDto) {
     await this.prisma.service.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     return this.prisma.service.update({ where: { id }, data: dto });
   }
   @Delete('services/:id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('agenda.manage')
   async deleteService(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     await this.prisma.service.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     await this.prisma.service.update({ where: { id }, data: { isActive: false } });

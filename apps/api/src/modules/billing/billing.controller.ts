@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { IsUUID } from 'class-validator';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { StripeService } from './stripe.service';
 import { FinanceService } from './finance.service';
@@ -14,7 +15,7 @@ class CheckoutDto {
 }
 
 @Controller('billing')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class BillingController {
   constructor(
     private readonly usage: UsageService,
@@ -45,13 +46,13 @@ export class BillingController {
   }
 
   @Post('checkout')
-  @Roles('tenant_admin', 'super_admin')
+  @RequirePermission('billing.manage')
   checkout(@CurrentUser() user: AuthUser, @Body() dto: CheckoutDto) {
     return this.stripe.checkout(user.tenantId, dto.planId);
   }
 
   @Post('portal')
-  @Roles('tenant_admin', 'super_admin')
+  @RequirePermission('billing.manage')
   portal(@CurrentUser() user: AuthUser) {
     return this.stripe.portal(user.tenantId);
   }

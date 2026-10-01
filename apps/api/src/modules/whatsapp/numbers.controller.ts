@@ -6,6 +6,7 @@ import { CryptoService } from '../../common/crypto/crypto.service';
 import { NumbersService } from './numbers.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard, Roles } from '../auth/roles.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { SendPacer } from './send-pacer';
@@ -29,7 +30,7 @@ class UpdateNumberDto {
 }
 
 @Controller('numbers')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class NumbersController {
   constructor(
     private readonly prisma: PrismaService,
@@ -48,7 +49,7 @@ export class NumbersController {
   }
 
   @Post()
-  @Roles('tenant_admin', 'super_admin')
+  @RequirePermission('numbers.manage')
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxNumbers')
   async create(@CurrentUser() user: AuthUser, @Body() dto: CreateNumberDto) {
@@ -69,14 +70,14 @@ export class NumbersController {
 
   /** A troca oficial <-> não-oficial. */
   @Put(':id/provider')
-  @Roles('tenant_admin', 'super_admin')
+  @RequirePermission('numbers.manage')
   async switchProvider(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: SwitchProviderDto) {
     await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
     return this.numbers.switchProvider(id, dto.provider, dto.config as any);
   }
 
   @Patch(':id')
-  @Roles('tenant_admin', 'super_admin')
+  @RequirePermission('numbers.manage')
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
     return this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId },
@@ -98,7 +99,7 @@ export class NumbersController {
 
   /** Remove o número do provider e do banco (conversas vão junto — cascade). */
   @Delete(':id')
-  @Roles('tenant_admin', 'super_admin')
+  @RequirePermission('numbers.manage')
   async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
     await this.numbers.remove(id);
@@ -107,7 +108,7 @@ export class NumbersController {
 
   /** Reconecta (gera QR novo na Evolution, revalida token na Meta). */
   @Post(':id/connect')
-  @Roles('tenant_admin', 'super_admin')
+  @RequirePermission('numbers.manage')
   async connect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
     const ctx = await this.numbers.context(n.id);

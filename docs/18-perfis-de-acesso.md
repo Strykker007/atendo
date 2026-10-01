@@ -1,0 +1,88 @@
+# 18 — Perfis de acesso
+
+## O problema
+
+O papel (`Role`) era a única fonte de autorização: `agent`, `manager`, `tenant_admin`,
+`super_admin`. Um enum fechado não cobre a realidade dos clientes — uma farmácia tem três
+gerentes no mesmo nível, outra não tem gerente nenhum e precisa de um **atendente líder**
+que enxerga a equipe sem mexer na conta.
+
+## O desenho
+
+O papel continua existindo, mas decide só duas coisas:
+
+1. quem é o **dono do sistema** (`super_admin`), que passa por qualquer checagem porque é
+   ele quem dá suporte entrando como o cliente;
+2. o conjunto **inicial** de permissões, para quem ainda não tem perfil.
+
+Quem autoriza é o **perfil de acesso** (`AccessProfile`), que cada cliente monta.
+
+### Catálogo (`packages/shared/src/permissions.ts`)
+
+Lista **fechada** de 14 permissões. Perfil nunca guarda permissão que o código não conheça —
+senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
+
+| Grupo | Permissões |
+|---|---|
+| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `contacts.edit` |
+| Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `agenda.manage` |
+| Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
+| Conta | `numbers.manage`, `billing.manage` |
+
+`DEFAULT_PERMISSIONS` reproduz **exatamente** o acesso que cada papel já tinha antes dos
+perfis. Em particular, `agent` inclui `quick_replies.manage` e `reports.view`: nenhum dos dois
+era restrito, e tirá-los na migração seria perder acesso sem ninguém pedir.
+
+## Como é aplicado
+
+**`JwtAuthGuard`** resolve a lista a cada requisição e deixa em `user.permissions`.
+
+As permissões **não vão no token** de propósito: se fossem assinadas, tirar o acesso de alguém
+só valeria quando o token expirasse — 15 minutos entrando onde já não deveria. O custo é uma
+consulta por requisição, amortizada por um cache de 15s (`PermissionsService`), limpo inteiro
+quando um perfil ou um vínculo muda.
+
+**`@RequirePermission('x')` + `PermissionsGuard`** substituem `@Roles` onde a regra é "o que
+pode fazer". `@Roles('super_admin')` continua onde a regra é "quem é" (área do dono).
+
+**Dentro dos services.** As regras de conversa viviam como `role !== 'agent'` espalhadas pelo
+`conversations.service.ts` — quem vê os atendimentos da equipe, quem transfere os dos outros,
+quem escreve nota interna. Elas agora leem permissão. **Sem isso o "atendente líder" não
+existiria**: trocar só os decorators dos controllers o deixaria vendo apenas os próprios
+atendimentos.
+
+## Regras que protegem o cliente de si mesmo
+
+| Regra | Por quê |
+|---|---|
+| Sem perfil → vale o padrão do papel | ninguém perde acesso na migração |
+| Perfil vazio concede **nada** | voltar ao padrão daria mais acesso do que o admin marcou na tela |
+| Ninguém concede o que não tem (`grantable`) | senão quem tem `profiles.manage` cria um perfil com `billing.manage` e vira dono da conta |
+| Perfil padrão não é excluível | o cliente nunca fica sem perfil de referência |
+| Perfil com gente dentro não é excluível | jogaria essas pessoas no padrão do papel sem ninguém perceber |
+| Perfil padrão não é renomeável | é a referência que a tela de Equipe mostra |
+
+A tela desabilita as caixas que o editor não pode conceder, mas **a API corta de novo**: a
+tela é conveniência, não segurança.
+
+## API
+
+| Método | Rota | Permissão | Descrição |
+|---|---|---|---|
+| GET | `/profiles` | — | Lista (cria os padrão na primeira chamada) |
+| GET | `/profiles/catalog` | — | Catálogo + permissões de quem pediu |
+| POST | `/profiles` | `profiles.manage` | Cria (filtra por `grantable`) |
+| PATCH | `/profiles/:id` | `profiles.manage` | Edita (filtra por `grantable`) |
+| DELETE | `/profiles/:id` | `profiles.manage` | Exclui (recusa padrão e em uso) |
+| PATCH | `/tenants/me/agents/:id` | `team.manage` | `profileId` vincula; `""` desvincula |
+
+## Interface
+
+**Equipe** ganhou a seção **Perfis de acesso** e a coluna "Papel" virou **Perfil de acesso**,
+com seletor por pessoa. `useCan('x')` esconde o que a pessoa não pode fazer.
+
+## Próximo passo
+
+Restrição por número (item 7 de [16](16-lacunas-primeiro-cliente.md)) encaixa aqui: é escopo
+de dados, não ação, então provavelmente vira um campo do vínculo usuário↔número e não uma
+permissão do catálogo.

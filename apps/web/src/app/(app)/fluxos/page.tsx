@@ -8,13 +8,14 @@ import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useFlows, useDeleteFlow, useDuplicateFlow, useExportFlow, useImportFlow, useHasFeature, useMe, type FlowSummary } from '@/lib/hooks';
+import { useFlows, useDeleteFlow, useDuplicateFlow, useExportFlow, useImportFlow, useHasFeature, useMe, type FlowSummary , useCan} from '@/lib/hooks';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
 export default function FluxosPage() {
   const me = useMe();
-  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  // esconder na tela é conveniência; quem autoriza é a API
+  const isAdmin = useCan('flows.manage');
   const feature = useHasFeature('flows');
   const flows = useFlows();
   const remove = useDeleteFlow();

@@ -4,6 +4,7 @@ import type { FlowDefinition, FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { FlowEngineService } from './flow-engine.service';
@@ -23,7 +24,7 @@ class StartDto {
 
 /** Fluxos de automação — funcionalidade plugável no plano (`features: ['flows']`). */
 @Controller('flows')
-@UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard, FeatureGuard)
 @RequireFeature('flows')
 export class FlowsController {
   constructor(
@@ -46,14 +47,14 @@ export class FlowsController {
   }
 
   @Post()
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('flows.manage')
   create(@CurrentUser() u: AuthUser, @Body() dto: FlowDto) {
     validateDefinition(dto.definition);
     return this.prisma.flow.create({ data: { tenantId: u.tenantId, name: dto.name, description: dto.description, isActive: dto.isActive ?? true, trigger: dto.trigger as object, definition: dto.definition as object } });
   }
 
   @Patch(':id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('flows.manage')
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<FlowDto>) {
     if (dto.definition) validateDefinition(dto.definition);
     await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
@@ -61,7 +62,7 @@ export class FlowsController {
   }
 
   @Delete(':id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('flows.manage')
   async remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     await this.prisma.flow.delete({ where: { id } });
@@ -73,7 +74,7 @@ export class FlowsController {
    * referenciados continuam valendo. Nasce desativada para não começar a responder sozinha.
    */
   @Post(':id/duplicate')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('flows.manage')
   async duplicate(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     const src = await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     const taken = await this.prisma.flow.findMany({ where: { tenantId: u.tenantId }, select: { name: true } });
@@ -91,7 +92,7 @@ export class FlowsController {
 
   /** Arquivo para levar o fluxo a OUTRO cliente. Ver `portable.ts` para o que não viaja. */
   @Get(':id/export')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('flows.manage')
   async export(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     const flow = await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     const tags = await this.prisma.tag.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true } });
@@ -107,7 +108,7 @@ export class FlowsController {
    * — sem isso o fluxo chegaria mudo, com os blocos de etiqueta vazios.
    */
   @Post('import')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('flows.manage')
   async import(@CurrentUser() u: AuthUser, @Body() body: unknown) {
     let portable;
     try {

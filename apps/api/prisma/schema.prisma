@@ -40,6 +40,7 @@ model Tenant {
   aiUsage       AiUsage[]
   settings      TenantSettings?
   businessHours BusinessHour[]
+  accessProfiles AccessProfile[]
 
   @@map("tenants")
 }
@@ -59,6 +60,9 @@ model User {
   name         String
   passwordHash String
   role         Role
+  /// perfil de acesso: quando presente, é ELE que decide o que o usuário pode fazer.
+  /// Sem perfil, vale o conjunto padrão do `role` (ver packages/shared/permissions.ts).
+  profileId    String?
   isActive     Boolean   @default(true)
   totpSecret   String?   // 2FA opcional (criptografado)
   lastLoginAt  DateTime?
@@ -66,6 +70,7 @@ model User {
   updatedAt    DateTime  @updatedAt
 
   tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profile       AccessProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
   refreshTokens RefreshToken[]
   authTokens    AuthToken[]
   /// convite pendente: usuário existe mas ainda não definiu senha
@@ -75,7 +80,29 @@ model User {
   messages      Message[]
 
   @@index([tenantId])
+  @@index([profileId])
   @@map("users")
+}
+
+/// Conjunto de permissões que o cliente monta. Um enum fechado de papéis não cobre
+/// uma farmácia com três gerentes iguais e outra com um "atendente líder" sob medida.
+model AccessProfile {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  /// chaves de `Permission` (packages/shared) — lista fechada, validada na API
+  permissions String[]
+  /// criado junto com o cliente; não pode ser apagado, para o cliente nunca ficar sem perfil
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users  User[]
+
+  @@unique([tenantId, name])
+  @@map("access_profiles")
 }
 
 enum AuthTokenKind {

@@ -7,7 +7,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useTags, useCreateTag, useUpdateTag, useDeleteTag, useMe, type Tag } from '@/lib/hooks';
+import { useTags, useCreateTag, useUpdateTag, useDeleteTag, useMe, type Tag , useCan} from '@/lib/hooks';
 
 const PALETTE = ['#22c55e', '#f59e0b', '#6366f1', '#ec4899', '#0ea5e9', '#ef4444', '#8b5cf6', '#14b8a6', '#64748b', '#f97316'];
 
@@ -15,7 +15,8 @@ type TagWithCount = Tag & { _count?: { conversations: number; contacts: number }
 
 export default function TagsPage() {
   const me = useMe();
-  const isAdmin = me.data?.role !== 'agent';
+  // esconder na tela é conveniência; quem autoriza é a API
+  const isAdmin = useCan('tags.manage');
   const tags = useTags();
   const create = useCreateTag();
   const update = useUpdateTag();

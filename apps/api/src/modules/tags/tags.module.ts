@@ -4,6 +4,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
 class TagDto {
@@ -13,7 +14,7 @@ class TagDto {
 
 /** Tags são criadas dinamicamente em configurações e viram filtros/relatórios. */
 @Controller('tags')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 class TagsController {
   constructor(private readonly prisma: PrismaService) {}
 
@@ -23,19 +24,19 @@ class TagsController {
   }
 
   @Post()
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('tags.manage')
   create(@CurrentUser() u: AuthUser, @Body() dto: TagDto) {
     return this.prisma.tag.create({ data: { tenantId: u.tenantId, ...dto } });
   }
 
   @Patch(':id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('tags.manage')
   update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<TagDto>) {
     return this.prisma.tag.update({ where: { id, tenantId: u.tenantId }, data: dto });
   }
 
   @Delete(':id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('tags.manage')
   remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.prisma.tag.delete({ where: { id, tenantId: u.tenantId } });
   }

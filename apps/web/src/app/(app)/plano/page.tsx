@@ -3,7 +3,7 @@ import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, 
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
-import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature } from '@/lib/hooks';
+import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature , useCan} from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useSearchParams } from 'next/navigation';
@@ -26,7 +26,8 @@ export default function PlanoPage() {
 function PlanoInner() {
   const { data: u, refetch } = useUsage();
   const me = useMe();
-  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  // esconder na tela é conveniência; quem autoriza é a API
+  const isAdmin = useCan('billing.manage');
   const plans = usePlans();
   const invoices = useInvoices();
   const checkout = useCheckout();

@@ -19,5 +19,6 @@
 | [15 — IA](15-ia.md) | Dev / Negócio | Copiloto do atendente, bloco de IA nos fluxos, guarda-corpos, custo e cobrança por interação |
 | [16 — Lacunas para o primeiro cliente](16-lacunas-primeiro-cliente.md) | Produto | O que o documento de funções pede, o que já existe e o que falta, em ordem de risco |
 | [17 — Entrada em produção](17-entrada-em-producao.md) | Você / Ops | Checklist de go-live: o que criar no Stripe, na Meta, no Resend e no servidor |
+| [18 — Perfis de acesso](18-perfis-de-acesso.md) | Dev / Produto | Permissões configuráveis por cliente: catálogo, guards e as travas contra escalada |
 
 Convenção: código em inglês, comentários e documentação em português.

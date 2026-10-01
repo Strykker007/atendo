@@ -7,13 +7,18 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, type Agent } from '@/lib/hooks';
+import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, type Agent } from '@/lib/hooks';
+import { AccessProfiles } from '@/components/settings/AccessProfiles';
 import { MailCheck, Send, Link as LinkIcon } from 'lucide-react';
 
 export default function EquipePage() {
   const me = useMe();
-  const isAdmin = me.data?.role !== 'agent';
+  const canManageTeam = useCan('team.manage');
+  // esconder na tela é conveniência; quem autoriza é a API, que checa a cada requisição
+  const isAdmin = canManageTeam;
   const agents = useAgents();
+  const profiles = useProfiles();
+  const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
   const usage = useUsage();
   const create = useCreateAgent();
   const update = useUpdateAgent();
@@ -59,14 +64,33 @@ export default function EquipePage() {
         <div className="rounded-2xl bg-panel border border-line overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide">
-              <tr><th className="px-5 py-2.5">Nome</th><th className="px-5 py-2.5 hidden sm:table-cell">E-mail</th><th className="px-5 py-2.5">Papel</th><th className="px-5 py-2.5 hidden md:table-cell">Último acesso</th><th className="px-5 py-2.5"></th></tr>
+              <tr><th className="px-5 py-2.5">Nome</th><th className="px-5 py-2.5 hidden sm:table-cell">E-mail</th><th className="px-5 py-2.5">Perfil de acesso</th><th className="px-5 py-2.5 hidden md:table-cell">Último acesso</th><th className="px-5 py-2.5"></th></tr>
             </thead>
             <tbody className="divide-y divide-line">
               {agents.data.map((a) => (
                 <tr key={a.id} className={cn(!a.isActive && 'opacity-50')}>
                   <td className="px-5 py-3 font-medium">{a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}</td>
                   <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}</td>
-                  <td className="px-5 py-3"><span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{{ agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' }[a.role]}</span></td>
+                  <td className="px-5 py-3">
+                    {canManageTeam && a.role !== 'tenant_admin' && a.role !== 'super_admin' ? (
+                      <select
+                        value={a.profile?.id ?? ''}
+                        disabled={savingProfileId === a.id}
+                        onChange={async (e) => {
+                          setSavingProfileId(a.id);
+                          try { await update.mutateAsync({ id: a.id, profileId: e.target.value }); toast.ok('Perfil atualizado'); }
+                          catch (err) { toast.err(err); } finally { setSavingProfileId(null); }
+                        }}
+                        className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1"
+                      >
+                        {/* sem perfil o acesso vem do papel — é o estado de quem existia antes dos perfis */}
+                        <option value="">Padrão do papel ({{ agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' }[a.role]})</option>
+                        {profiles.data?.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                      </select>
+                    ) : (
+                      <span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{a.profile?.name ?? { agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' }[a.role]}</span>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-muted hidden md:table-cell">
                     {a.invitedAt && !a.passwordSetAt ? <span className="inline-flex items-center gap-1 text-xs rounded-full bg-warn-soft text-warn-ink px-2 py-0.5"><MailCheck size={12} /> convite pendente</span> : a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}
                   </td>
@@ -119,6 +143,8 @@ export default function EquipePage() {
           <p className="text-[11.5px] text-muted">Mande por WhatsApp. Ao abrir, o atendente define a própria senha. Gerar um link novo invalida este.</p>
         </div>
       )}
+
+      <AccessProfiles />
 
       <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ?? null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Atendente criado — mande o link do convite'); } else toast.ok(b.role === 'manager' ? 'Gerente criado' : 'Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />

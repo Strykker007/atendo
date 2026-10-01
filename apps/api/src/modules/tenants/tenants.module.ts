@@ -5,6 +5,9 @@ import { AuthModule } from '../auth/auth.module';
 import { AuthService } from '../auth/auth.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
+import { PermissionsService } from '../auth/permissions.service';
+import { ProfilesController } from './profiles.controller';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { BillingModule } from '../billing/billing.module';
@@ -38,17 +41,20 @@ class CreateAgentDto {
 class UpdateAgentDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** Perfil de acesso; string vazia desvincula e volta ao padrão do papel. */
+  @IsOptional() @IsString() profileId?: string;
   /** Redefinir senha do atendente */
   @IsOptional() @IsString() @MinLength(8) password?: string;
 }
 
 /** Gestão de clientes (super_admin) e de atendentes (tenant_admin). */
 @Controller('tenants')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 class TenantsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auth: AuthService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   @Get()
@@ -114,11 +120,11 @@ class TenantsController {
   /** Todos podem listar (precisam para transferir); só admin gerencia. */
   @Get('me/agents')
   agents(@CurrentUser() u: AuthUser) {
-    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true } });
+    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } } } });
   }
 
   @Post('me/agents')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('team.manage')
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxAgents')
   async createAgent(@CurrentUser() u: AuthUser, @Body() dto: CreateAgentDto) {
@@ -139,7 +145,7 @@ class TenantsController {
 
   /** Reenvia o convite (usuário que ainda não definiu senha). */
   @Post('me/agents/:id/resend-invite')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('team.manage')
   async resendInvite(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     const [target, tenant] = await Promise.all([
       this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId } }),
@@ -154,7 +160,7 @@ class TenantsController {
    * Gerar um novo invalida o anterior.
    */
   @Post('me/agents/:id/invite-link')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('team.manage')
   async inviteLink(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     const target = await this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { id: true, passwordSetAt: true } });
     if (target.passwordSetAt) throw new BadRequestException('Este usuário já definiu a senha. Para trocar, use "Redefinir senha".');
@@ -162,27 +168,35 @@ class TenantsController {
   }
 
   @Patch('me/agents/:id')
-  @Roles('tenant_admin', 'manager', 'super_admin')
+  @RequirePermission('team.manage')
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
-    const { password, ...rest } = dto;
+    const { password, profileId, ...rest } = dto;
     // `passwordSetAt` é o que libera o login de quem foi convidado: sem isto, definir a
     // senha pelo painel não adiantava nada e o usuário continuava travado no convite
+    const base = profileId === undefined ? rest : { ...rest, profileId: profileId || null };
+    if (profileId) {
+      // perfil de outro cliente não entra: o id vem do corpo da requisição
+      const ok = await this.prisma.accessProfile.count({ where: { id: profileId, tenantId: u.tenantId } });
+      if (!ok) throw new BadRequestException('Perfil de acesso não encontrado.');
+    }
     const data = password
-      ? { ...rest, passwordHash: await this.auth.hashPassword(password), passwordSetAt: new Date() }
-      : rest;
+      ? { ...base, passwordHash: await this.auth.hashPassword(password), passwordSetAt: new Date() }
+      : base;
     // revoga sessões ativas ao trocar senha ou desativar
     if (password || dto.isActive === false) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
     // gerente não altera admins nem outros gerentes
     const editable = u.role === 'manager' ? (['agent'] as const) : (['agent', 'manager'] as const);
-    return this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, isActive: true } });
+    const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, isActive: true } });
+    if (profileId !== undefined) this.permissions.invalidate();
+    return updated;
   }
 }
 
 @Module({
   imports: [AuthModule, BillingModule],
-  controllers: [TenantsController, TenantSettingsController],
+  controllers: [TenantsController, TenantSettingsController, ProfilesController],
   providers: [TenantSettingsService],
   exports: [TenantSettingsService],
 })

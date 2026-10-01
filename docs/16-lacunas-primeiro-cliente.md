@@ -61,7 +61,7 @@ Round-robin entre atendentes online. Já estava no roadmap; o documento confirma
 ### 7. Restrição de usuário por número
 
 Definir no perfil do atendente quais conexões ele opera. Necessário assim que o cliente
-tem mais de um número e equipes diferentes.
+tem mais de um número e equipes diferentes. Encaixa agora no perfil de acesso (item 16).
 
 ### 8. Campos fixos no cadastro do contato — **FEITO** (2026-09-30)
 
@@ -112,6 +112,13 @@ limita o plano. Falta ainda a carência de 3 dias antes de faturar o cliente nov
 Chamar outro fluxo, departamentos, notificar membro da equipe, randomizador, variável
 global; e no bloco de conteúdo: arquivo, vídeo, figurinha e contato (hoje o editor só
 manda texto).
+
+### 16. Perfis de acesso configuráveis — **FEITO** (2026-10-01)
+
+O papel fixo (atendente/gerente/admin) não cobre a realidade: uma farmácia tem três gerentes
+no mesmo nível, outra não tem gerente nenhum e precisa de um "atendente líder" com acesso sob
+medida. Em **Equipe → Perfis de acesso**, cada cliente monta o que cada função pode fazer, a
+partir de um catálogo fechado de 14 permissões. Ver [18](18-perfis-de-acesso.md).
 
 ## Corte sugerido para o primeiro cliente
 
