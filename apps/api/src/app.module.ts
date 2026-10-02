@@ -18,6 +18,7 @@ import { HealthController } from './modules/health.controller';
 import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { AiModule } from './modules/ai/ai.module';
 import { env } from './config/env';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { env } from './config/env';
     QuickRepliesModule,
     BillingModule,
     ReportsModule,
+    CampaignsModule,
     MediaModule,
     FlowsModule,
     SchedulingModule,

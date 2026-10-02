@@ -9,6 +9,8 @@ import { FlowEngineService } from '../flows/flow-engine.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { enrichContext } from '../../common/observability/request-context';
+import { isOptOut } from '../campaigns/dispatch';
+import { PrismaService } from '../../common/prisma/prisma.service';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
 export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
@@ -19,6 +21,7 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     private readonly storage: StorageService,
     private readonly flows: FlowEngineService,
     private readonly scheduling: SchedulingService,
+    private readonly prisma: PrismaService,
   ) {
     super(QUEUE_INBOUND);
   }
@@ -37,6 +40,14 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       const saved = result?.message;
       // automação: avança fluxo ativo ou avalia gatilhos (nunca derruba a ingestão)
       if (result) {
+        // "sair"/"parar": descadastra do disparo em massa. Vem antes da automação porque
+        // responder com um fluxo a quem pediu para sair é o caminho curto para a denúncia.
+        // Não encerra o atendimento: a pessoa pode voltar a escrever e precisa ser atendida.
+        if (isOptOut(result.message.text)) {
+          await this.prisma.contact.update({ where: { id: result.conversation.contactId }, data: { optOutAt: new Date() } })
+            .then(() => this.log.log(`Contato ${result.conversation.contactId} pediu para não receber disparos`))
+            .catch((err) => this.log.error(`descadastro: ${err instanceof Error ? err.message : err}`));
+        }
         // "1"/"2" em resposta a lembrete de agendamento tem prioridade sobre fluxos
         const handled = await this.scheduling.onInbound(number.tenantId, result.conversation.contactId, result.conversation.id, result.message.text ?? '', msg.interactiveReplyId).catch((err) => { this.log.error(`agenda: ${err instanceof Error ? err.message : err}`); return false; });
         if (!handled) await this.flows.onInbound(number, result.conversation, result.message, result.isNew, { isNewContact: result.isNewContact, returningAfterClosed: result.returningAfterClosed, hoursSinceLastMessage: result.hoursSinceLastMessage }).catch((err) => this.log.error(`fluxo: ${err instanceof Error ? err.message : err}`));

@@ -6,6 +6,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { env } from '../../config/env';
 import { MailService } from '../../common/mail/mail.service';
 import type { AuthTokenKind } from '@prisma/client';
+import { refreshAcceptable } from './refresh-grace';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const ttlMs = (ttl: string) => {
@@ -138,9 +139,11 @@ Seu login será: ${user.email}`,
 
   async refresh(refreshToken: string, meta: { userAgent?: string; ip?: string }) {
     const row = await this.prisma.refreshToken.findUnique({ where: { tokenHash: sha256(refreshToken) }, include: { user: true } });
-    if (!row || row.revokedAt || row.expiresAt < new Date()) throw new UnauthorizedException('Refresh inválido');
+    // revogado há poucos segundos ainda passa: é a corrida de duas abas renovando juntas,
+    // não um token vazado (ver refresh-grace.ts)
+    if (!row || !refreshAcceptable(row)) throw new UnauthorizedException('Refresh inválido');
     // rotação: revoga o antigo e emite novo par
-    await this.prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
+    if (!row.revokedAt) await this.prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
     return this.issue(row.user, meta);
   }
 

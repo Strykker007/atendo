@@ -42,13 +42,14 @@ export interface PlanLimits {
   aiMonthlyCostCap?: number;
 }
 
-export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot' } as const;
+export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot', CAMPAIGNS: 'campaigns' } as const;
 export type PlanFeature = (typeof PlanFeature)[keyof typeof PlanFeature];
 export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
   flows: 'Fluxos de automação',
   scheduling: 'Agendamento',
   ai_flows: 'IA nos fluxos',
   ai_copilot: 'Copiloto de IA',
+  campaigns: 'Transmissão em massa',
 };
 
 export const USAGE_ALERT_THRESHOLDS = [0.8, 1.0] as const;

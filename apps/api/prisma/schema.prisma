@@ -41,6 +41,7 @@ model Tenant {
   settings      TenantSettings?
   businessHours BusinessHour[]
   accessProfiles AccessProfile[]
+  campaigns     Campaign[]
 
   @@map("tenants")
 }
@@ -251,6 +252,7 @@ model WhatsAppNumber {
   conversations Conversation[]
   usage         MessageUsage[]
   users         UserNumber[]
+  campaigns     Campaign[]
 
   @@unique([provider, externalId])
   @@unique([tenantId, phone])
@@ -281,6 +283,12 @@ model Contact {
   conversations Conversation[]
   tags          ContactTag[]
   appointments  Appointment[]
+
+  /// pediu para não receber disparo. Vale para campanhas; atendimento 1-a-1 continua normal,
+  /// porque o contato pode voltar a escrever e precisa ser respondido.
+  optOutAt  DateTime?
+
+  campaignTargets CampaignTarget[]
 
   @@unique([tenantId, phone])
   @@map("contacts")
@@ -910,4 +918,77 @@ model SavedReport {
 
   @@index([tenantId])
   @@map("saved_reports")
+}
+
+// ============================================================
+// Transmissão (disparo em massa)
+// ============================================================
+
+enum CampaignStatus {
+  draft
+  scheduled
+  running
+  paused
+  done
+  canceled
+}
+
+enum CampaignTargetStatus {
+  pending
+  sent
+  failed
+  /// inelegível (descadastrado, fora da janela de 24h): não vira mensagem
+  skipped
+}
+
+/// Disparo para uma lista. NÃO envia por conta própria: cria mensagens e as entrega à fila
+/// de saída, herdando intervalo entre envios, teto diário e aquecimento do número.
+model Campaign {
+  id         String         @id @default(uuid())
+  tenantId   String
+  numberId   String
+  name       String
+  /// texto da mensagem; aceita {{nome}} e {{primeiro_nome}}
+  text       String
+  mediaKey   String?
+  mediaType  String?
+  mediaName  String?
+  /// template aprovado (Meta) — obrigatório para falar com quem está fora da janela de 24h
+  template   Json?
+  status     CampaignStatus @default(draft)
+  /// quando começar; null = assim que iniciar
+  startAt    DateTime?
+  /// só dispara dentro do horário de funcionamento do cliente
+  businessHoursOnly Boolean @default(true)
+  createdById String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  number  WhatsAppNumber   @relation(fields: [numberId], references: [id], onDelete: Cascade)
+  targets CampaignTarget[]
+
+  @@index([tenantId, status])
+  @@map("campaigns")
+}
+
+/// Um contato dentro de um disparo. A lista é materializada na criação: quem entrou na
+/// etiqueta DEPOIS não recebe um disparo que já começou, e o relatório fica estável.
+model CampaignTarget {
+  id         String               @id @default(uuid())
+  campaignId String
+  contactId  String
+  status     CampaignTargetStatus @default(pending)
+  messageId  String?
+  error      String?
+  sentAt     DateTime?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@map("campaign_targets")
 }

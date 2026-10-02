@@ -14,7 +14,21 @@ export const impersonation = {
   set: (v: { tenantId: string; name: string } | null) => { try { v ? sessionStorage.setItem(IMPERSONATE_KEY, JSON.stringify(v)) : sessionStorage.removeItem(IMPERSONATE_KEY); } catch { /* ignore */ } },
 };
 
-async function refresh(): Promise<boolean> {
+/**
+ * Renovação com trava de concorrência.
+ *
+ * O painel dispara várias chamadas em paralelo; quando o token expira, TODAS tomam 401 ao
+ * mesmo tempo. Sem esta trava, cada uma chamaria /auth/refresh com o mesmo cookie — e como o
+ * servidor rotaciona o refresh, a primeira vence e as demais apresentam um token já revogado,
+ * derrubando a sessão inteira a cada 15 minutos.
+ */
+let inFlight: Promise<boolean> | null = null;
+function refresh(): Promise<boolean> {
+  inFlight ??= doRefresh().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function doRefresh(): Promise<boolean> {
   const r = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
   if (!r.ok) return false;
   accessToken = (await r.json()).accessToken;
