@@ -27,22 +27,22 @@ const mmss = (s: number) => (Number.isFinite(s) ? `${Math.floor(s / 60)}:${Strin
  */
 async function extrairPicos(url: string, barras: number): Promise<{ picos: number[]; duracao: number }> {
   const buf = await fetch(url).then((r) => r.arrayBuffer());
-  const ctx = new AudioContext();
-  try {
-    const audio = await ctx.decodeAudioData(buf);
-    const dados = audio.getChannelData(0);
-    const porBarra = Math.floor(dados.length / barras) || 1;
-    const picos: number[] = [];
-    for (let i = 0; i < barras; i++) {
-      let max = 0;
-      for (let j = 0; j < porBarra; j++) max = Math.max(max, Math.abs(dados[i * porBarra + j] ?? 0));
-      picos.push(max);
-    }
-    const maior = Math.max(...picos, 0.01);
-    return { picos: picos.map((p) => p / maior), duracao: audio.duration };
-  } finally {
-    await ctx.close().catch(() => undefined);
+  // OfflineAudioContext, não AudioContext: o segundo abre a saída de som do sistema e, criado
+  // enquanto o <audio> acabou de começar, troca a sessão de áudio e silencia a reprodução —
+  // era por isso que o primeiro play não saía e o segundo funcionava (aí os picos já existiam
+  // e nenhum contexto era criado). O offline só processa, nunca toca nada.
+  const ctx = new OfflineAudioContext(1, 1, 44_100);
+  const audio = await ctx.decodeAudioData(buf);
+  const dados = audio.getChannelData(0);
+  const porBarra = Math.floor(dados.length / barras) || 1;
+  const picos: number[] = [];
+  for (let i = 0; i < barras; i++) {
+    let max = 0;
+    for (let j = 0; j < porBarra; j++) max = Math.max(max, Math.abs(dados[i * porBarra + j] ?? 0));
+    picos.push(max);
   }
+  const maior = Math.max(...picos, 0.01);
+  return { picos: picos.map((p) => p / maior), duracao: audio.duration };
 }
 
 export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
