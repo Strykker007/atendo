@@ -1,14 +1,14 @@
 'use client';
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload } from 'lucide-react';
+import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, PinOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useFlows, useDeleteFlow, useDuplicateFlow, useExportFlow, useImportFlow, useHasFeature, useMe, type FlowSummary , useCan} from '@/lib/hooks';
+import { useFlows, useDeleteFlow, useDuplicateFlow, useExportFlow, useImportFlow, useUpdateFlow, useHasFeature, useMe, useCan, type FlowSummary } from '@/lib/hooks';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
@@ -20,6 +20,7 @@ export default function FluxosPage() {
   const flows = useFlows();
   const remove = useDeleteFlow();
   const duplicate = useDuplicateFlow();
+  const update = useUpdateFlow();
   const exportFlow = useExportFlow();
   const importFlow = useImportFlow();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -95,6 +96,13 @@ export default function FluxosPage() {
               <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', f.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{f.isActive ? 'Ativo' : 'Inativo'}</span>
               {isAdmin && (
                 <>
+                  <button
+                    title={f.showInChat ? 'Remover o atalho da aba Fluxos do chat' : 'Mostrar como atalho na aba Fluxos do chat'}
+                    onClick={() => update.mutateAsync({ id: f.id, showInChat: !f.showInChat }).then(() => toast.ok(f.showInChat ? 'Atalho removido do chat' : 'Atalho adicionado ao chat')).catch(toast.err)}
+                    className={cn('p-1', f.showInChat ? 'text-accent-ink hover:text-faint' : 'text-faint hover:text-accent-ink')}
+                  >
+                    {f.showInChat ? <Pin size={15} /> : <PinOff size={15} />}
+                  </button>
                   <button title="Duplicar neste cliente" onClick={() => onDuplicate(f)} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
                   <button title="Exportar para usar em outro cliente" onClick={() => onExport(f)} className="text-faint hover:text-accent-ink p-1"><Download size={15} /></button>
                   <button title="Excluir" onClick={() => setDeleting(f)} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>

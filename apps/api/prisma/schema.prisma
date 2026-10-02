@@ -513,6 +513,9 @@ model Flow {
   name        String
   description String?
   isActive    Boolean  @default(true)
+  /// aparece como atalho na aba Fluxos do chat. Fluxo que roda sozinho (nova conversa,
+  /// palavra-chave) não precisa estar lá — vira ruído para quem atende.
+  showInChat  Boolean  @default(true)
   /// FlowTrigger (packages/shared)
   trigger     Json
   /// FlowDefinition (packages/shared): nós + arestas

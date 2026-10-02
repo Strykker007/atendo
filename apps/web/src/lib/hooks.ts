@@ -344,8 +344,8 @@ export interface FinanceOverview {
 export const useFinance = (months = 12) => useQuery({ queryKey: ['finance', months], queryFn: () => api<FinanceOverview>(`/billing/finance?months=${months}`) });
 
 // ---- Fluxos de automação ----
-export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
-export interface Flow { id: string; name: string; description: string | null; isActive: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string }
+export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
+export interface Flow { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string }
 export interface ActiveRun { id: string; status: 'running' | 'waiting'; currentNodeId: string | null; flow: { id: string; name: string }; startedAt: string; waitUntil: string | null }
 export interface FlowRuns { byStatus: Record<string, number>; recent: { id: string; status: string; startedAt: string; endedAt: string | null; error: string | null; contact: { name: string | null; phone: string }; conversationId: string }[] }
 

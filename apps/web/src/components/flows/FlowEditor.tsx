@@ -18,17 +18,24 @@ const PALETTE: FlowNodeType[] = ['message', 'question', 'menu', 'ai', 'condition
 const EMPTY: FlowDefinition = { nodes: [{ id: 'start', type: 'start', position: { x: 250, y: 40 }, data: {} as never }], edges: [] };
 
 /** Editor visual de fluxo: paleta à esquerda, canvas no meio, propriedades à direita. */
-export function FlowEditor(props: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
+export function FlowEditor(props: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
   return <ReactFlowProvider><FlowEditorInner {...props} /></ReactFlowProvider>;
 }
 
-function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
+function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
   const rf = useReactFlow();
   const def = flow.definition ?? EMPTY;
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(def.nodes.map(toRf));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(def.edges.map((e) => ({ ...e, sourceHandle: e.sourceHandle ?? undefined, type: 'smoothstep', animated: false })));
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [meta, setMeta] = useState({ name: flow.name ?? 'Novo fluxo', description: flow.description ?? '', isActive: flow.isActive ?? true, trigger: flow.trigger ?? ({ type: 'manual' } as FlowTrigger) });
+  const [meta, setMeta] = useState({
+    name: flow.name ?? 'Novo fluxo',
+    description: flow.description ?? '',
+    isActive: flow.isActive ?? true,
+    // fluxo novo: só vira atalho se for de disparo manual — os automáticos poluiriam a lista
+    showInChat: flow.showInChat ?? (flow.trigger?.type ?? 'manual') === 'manual',
+    trigger: flow.trigger ?? ({ type: 'manual' } as FlowTrigger),
+  });
   const [side, setSide] = useState<'node' | 'settings' | 'runs'>('settings');
   const [dirty, setDirty] = useState(false);
   const numbers = useNumbers();
@@ -167,6 +174,13 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
                 </Field>
               )}
               <label className="flex items-center gap-2 text-ink"><input type="checkbox" checked={meta.isActive} onChange={(e) => setMeta({ ...meta, isActive: e.target.checked })} /> Fluxo ativo</label>
+              <label className="flex items-start gap-2 text-ink">
+                <input type="checkbox" className="mt-0.5" checked={meta.showInChat} onChange={(e) => setMeta({ ...meta, showInChat: e.target.checked })} />
+                <span>
+                  Atalho no chat
+                  <span className="block text-[11px] text-muted">Aparece na aba Fluxos para o atendente disparar. Fluxo que roda sozinho não precisa.</span>
+                </span>
+              </label>
 
               <div className="pt-2 border-t border-line">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">Variáveis disponíveis</div>

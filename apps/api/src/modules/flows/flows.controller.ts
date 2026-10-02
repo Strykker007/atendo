@@ -15,6 +15,7 @@ class FlowDto {
   @IsString() @MaxLength(80) name: string;
   @IsOptional() @IsString() @MaxLength(300) description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsBoolean() showInChat?: boolean;
   @IsObject() trigger: FlowTrigger;
   @IsObject() definition: FlowDefinition;
 }
@@ -37,7 +38,7 @@ export class FlowsController {
     return this.prisma.flow.findMany({
       where: { tenantId: u.tenantId },
       orderBy: { name: 'asc' },
-      select: { id: true, name: true, description: true, isActive: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
+      select: { id: true, name: true, description: true, isActive: true, showInChat: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
     });
   }
 
@@ -50,7 +51,18 @@ export class FlowsController {
   @RequirePermission('flows.manage')
   create(@CurrentUser() u: AuthUser, @Body() dto: FlowDto) {
     validateDefinition(dto.definition);
-    return this.prisma.flow.create({ data: { tenantId: u.tenantId, name: dto.name, description: dto.description, isActive: dto.isActive ?? true, trigger: dto.trigger as object, definition: dto.definition as object } });
+    return this.prisma.flow.create({
+      data: {
+        tenantId: u.tenantId,
+        name: dto.name,
+        description: dto.description,
+        isActive: dto.isActive ?? true,
+        // padrão pelo gatilho: fluxo que dispara sozinho não precisa de atalho manual no chat
+        showInChat: dto.showInChat ?? dto.trigger.type === 'manual',
+        trigger: dto.trigger as object,
+        definition: dto.definition as object,
+      },
+    });
   }
 
   @Patch(':id')
@@ -84,6 +96,7 @@ export class FlowsController {
         name: copyName(src.name, taken.map((f) => f.name)),
         description: src.description,
         isActive: false,
+        showInChat: src.showInChat,
         trigger: src.trigger as object,
         definition: src.definition as object,
       },

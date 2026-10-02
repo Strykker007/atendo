@@ -73,6 +73,19 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 
 \* exige `features: ['flows']` no plano (`FeatureGuard`) — 403 com mensagem "não está incluído no seu plano".
 
+## Atalho no chat
+
+Cada fluxo tem `showInChat`, que decide se ele aparece na aba **Fluxos** do chat para o
+atendente disparar na conversa aberta. A aba listava todos os fluxos ativos, e fluxo que roda
+sozinho (gatilho `new_conversation` ou `keyword`) só virava ruído ali.
+
+O padrão de um fluxo **novo** segue o gatilho: manual entra como atalho, automático não. Os
+fluxos que já existiam continuam aparecendo — mudar isso retroativamente faria sumir da tela
+um atalho que alguém usava.
+
+Dá para alternar no editor (*Atalho no chat*) ou direto na lista de Fluxos, pelo ícone de
+alfinete.
+
 ## Replicar um fluxo
 
 Duas operações diferentes de propósito, porque o risco é diferente.

@@ -33,7 +33,8 @@ function FlowsTab() {
   const flows = useFlows();
   const start = useStartFlow();
   const active = useActiveRun(conversationId);
-  const list = flows.data?.filter((f) => f.isActive) ?? [];
+  // só os marcados como atalho: fluxo que roda sozinho não precisa poluir esta lista
+  const list = flows.data?.filter((f) => f.isActive && f.showInChat) ?? [];
   if (!feature.loading && !feature.has) {
     return (
       <div className="p-5 text-center space-y-2">
@@ -48,7 +49,7 @@ function FlowsTab() {
     <div className="flex-1 overflow-y-auto scrollbar-thin">
       {!conversationId && <p className="p-5 text-xs text-muted text-center">Abra uma conversa para disparar um fluxo nela.</p>}
       {active.data && <div className="m-2.5 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">🤖 <b>{active.data.flow.name}</b> está rodando nesta conversa{active.data.status === 'waiting' ? ' (esperando o contato)' : ''}. Disparar outro substitui este.</div>}
-      {list.length === 0 && flows.data && <p className="p-5 text-xs text-muted text-center">Nenhum fluxo ativo. <Link href="/fluxos" className="text-accent-ink underline">Criar</Link></p>}
+      {list.length === 0 && flows.data && <p className="p-5 text-xs text-muted text-center">Nenhum fluxo marcado como atalho. Marque em <Link href="/fluxos" className="text-accent-ink underline">Fluxos</Link>.</p>}
       <ul className="divide-y divide-line">
         {list.map((f) => {
           const running = active.data?.flow.id === f.id;
