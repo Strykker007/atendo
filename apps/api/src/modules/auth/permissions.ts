@@ -1,4 +1,4 @@
-import { DEFAULT_PERMISSIONS, isPermission, type Permission } from '@atendo/shared';
+import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, isPermission, type Permission } from '@atendo/shared';
 
 /**
  * Resolve o que um usuário pode fazer. Puro de propósito: é a regra mais sensível do
@@ -17,10 +17,10 @@ export interface Principal {
 }
 
 export function permissionsOf(user: Principal): Permission[] {
-  // o dono do sistema não é membro de cliente nenhum: ele não "tem" permissões de cliente,
-  // ele passa por fora (ver `can`). Devolver tudo aqui faria a UI do cliente aparecer para
-  // ele como se fosse dele.
-  if (user.role === 'super_admin') return [];
+  // O dono do sistema tem tudo, sempre — e isso precisa valer AQUI, não só nos guards.
+  // Devolver lista vazia obrigaria cada ponto de checagem a lembrar de tratar o papel à
+  // parte, e o próximo endpoint escrito seria o que esquece.
+  if (user.role === 'super_admin') return [...ALL_PERMISSIONS];
   if (user.profilePermissions) return sanitize(user.profilePermissions);
   return [...DEFAULT_PERMISSIONS[user.role]];
 }

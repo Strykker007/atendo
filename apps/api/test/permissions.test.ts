@@ -25,8 +25,12 @@ describe('permissionsOf', () => {
     expect(permissionsOf(p('manager', ['tags.manage']))).toEqual(['tags.manage']);
   });
 
-  it('o dono do sistema não carrega permissões de cliente', () => {
-    expect(permissionsOf(p('super_admin'))).toEqual([]);
+  it('o dono do sistema tem TUDO, mesmo com um perfil restrito pendurado nele', () => {
+    // vale aqui, não só nos guards: cada ponto que tivesse de lembrar do papel à parte
+    // seria um candidato a esquecer
+    expect([...permissionsOf(p('super_admin'))].sort()).toEqual([...ALL_PERMISSIONS].sort());
+    expect([...permissionsOf(p('super_admin', ['tags.manage']))].sort()).toEqual([...ALL_PERMISSIONS].sort());
+    expect([...permissionsOf(p('super_admin', []))].sort()).toEqual([...ALL_PERMISSIONS].sort());
   });
 
   it('descarta o que não existe no catálogo', () => {
