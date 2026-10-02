@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Tags, BarChart3, Settings, Users, Smartphone, ChevronsLeft, ChevronsRight, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -19,6 +19,7 @@ const items = [
   { href: '/numeros', label: 'Números', icon: Smartphone },
   { href: '/agenda', label: 'Agenda', icon: CalendarDays },
   { href: '/fluxos', label: 'Fluxos', icon: Workflow },
+  { href: '/respostas', label: 'Respostas', icon: Zap },
   { href: '/tags', label: 'Tags', icon: Tags },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3 },
   { href: '/equipe', label: 'Equipe', icon: Users },
@@ -57,10 +58,24 @@ export function Sidebar() {
 
   return (
     <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-14' : 'w-52')}>
+      {/* recolher fica no topo, ao lado da marca: no rodapé ficava perdido no meio da gaveta
+          e as pessoas não achavam */}
       <div className={cn('h-12 flex items-center gap-2.5 px-3.5', collapsed && 'justify-center px-0')}>
         <span className="w-7 h-7 rounded-lg bg-accent grid place-items-center text-white font-display font-bold text-sm shrink-0">A</span>
-        {!collapsed && <span className="font-display font-semibold text-[17px] text-white tracking-tight">Atendo</span>}
+        {!collapsed && (
+          <>
+            <span className="font-display font-semibold text-[17px] text-white tracking-tight flex-1">Atendo</span>
+            <button onClick={toggleSidebar} className="p-1 -mr-1 rounded-md text-side-ink/60 hover:text-white hover:bg-white/5" title="Recolher menu">
+              <PanelLeftClose size={17} />
+            </button>
+          </>
+        )}
       </div>
+      {collapsed && (
+        <button onClick={toggleSidebar} className="mx-auto mb-1 p-1 rounded-md text-side-ink/60 hover:text-white hover:bg-white/5" title="Expandir menu">
+          <PanelLeftOpen size={17} />
+        </button>
+      )}
 
       <nav className="flex-1 py-2">
         {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items).map(({ href, label, icon: Icon }) => {
@@ -98,9 +113,6 @@ export function Sidebar() {
         )}
         <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white disabled:opacity-60', collapsed && 'justify-center px-0')}>
           {leaving ? <Loader2 size={17} className="animate-spin" /> : <LogOut size={17} />} {!collapsed && (leaving ? 'Saindo…' : 'Sair')}
-        </button>
-        <button onClick={toggleSidebar} className="w-full flex items-center justify-center rounded-lg py-1.5 text-side-ink/60 hover:text-white" title={collapsed ? 'Expandir' : 'Recolher'}>
-          {collapsed ? <ChevronsRight size={17} /> : <ChevronsLeft size={17} />}
         </button>
       </div>
     </aside>

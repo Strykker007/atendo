@@ -218,3 +218,24 @@ Fecha com `Esc` ou clique no fundo — **clicar na imagem não fecha**, senão o
 fecharia sem querer. As setas (e `←` / `→`) percorrem as outras imagens da mesma conversa,
 que é como se vê um comprovante seguido da foto do produto sem ficar fechando e reabrindo.
 O botão de baixar continua disponível para quem quer o arquivo.
+
+
+## Respostas rápidas: módulo próprio
+
+A gestão de pastas e respostas ocupava **115 das 222 linhas** da página de Configurações.
+Virou rota própria (`/respostas`), no menu lateral. Quem entra em Configurações quer aparência,
+horário ou segurança — não manter um catálogo que a equipe usa o dia inteiro.
+
+Editar exige `quick_replies.manage`; sem a permissão a tela mostra o conteúdo e esconde as
+ações (a API checa de novo).
+
+## Preferências de tela
+
+`usePersistedState` (`lib/persisted.ts`) guarda no navegador o que o atendente ajusta e espera
+reencontrar: pasta aberta no painel de respostas, aba escolhida (Mensagens/Fluxos), menu
+recolhido.
+
+Uma armadilha vale registrar: gravar a cada mudança de valor **apaga o que acabou de ser
+lido**. Na montagem, o efeito de escrita roda no mesmo ciclo do de leitura e ainda enxerga o
+valor inicial. Por isso o hook só grava depois que o usuário mexeu, marcado no próprio setter
+— depender da ordem dos efeitos não resolve.

@@ -9,10 +9,12 @@ import Link from 'next/link';
 import { useQuickReplies, useConversation, useMe } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 import { Settings2 } from 'lucide-react';
+import { usePersistedState } from '@/lib/persisted';
 
 /** Painel direito: sessões (pastas) com mensagens pré-configuradas. Clique insere no composer. */
 export function QuickRepliesPanel() {
-  const [tab, setTab] = useState<'replies' | 'flows'>('replies');
+  // a aba escolhida também fica guardada: trocar de conversa não deve devolver o painel ao padrão
+  const [tab, setTab] = usePersistedState<'replies' | 'flows'>('painel-aba', 'replies');
   return (
     <>
       <div className="h-12 px-2 flex items-center border-b border-line">
@@ -80,7 +82,9 @@ function MediaIcon({ type }: { type: NonNullable<QuickReplyItem['mediaType']> })
 
 function RepliesTab() {
   const folders = useQuickReplies();
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  // quais pastas ficaram abertas. Antes era estado local: sair da aba e voltar fechava tudo,
+  // e quem estava procurando uma resposta perdia o lugar
+  const [abertas, setAbertas] = usePersistedState<string[]>('pastas-respostas', []);
   const [q, setQ] = useState('');
 
   const me = useMe();
@@ -108,35 +112,41 @@ function RepliesTab() {
   return (
     <>
       <div className="p-2.5 border-b border-line flex items-center gap-2">
-        <Link href="/configuracoes" className="text-faint hover:text-ink shrink-0" title="Gerenciar respostas"><Settings2 size={16} /></Link>
+        <Link href="/respostas" className="text-faint hover:text-ink shrink-0" title="Gerenciar respostas"><Settings2 size={16} /></Link>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full rounded-lg bg-field px-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin py-1">
         {folders.data?.map((f) => {
           const replies = f.replies.filter((r) => !q || match(r.title) || match(r.body));
           if (q && replies.length === 0) return null;
-          const isOpen = open[f.id] ?? !!q;
+          // buscando, tudo abre: esconder resultado atrás de pasta fechada não ajuda ninguém
+          const isOpen = q ? true : abertas.includes(f.id);
           return (
             <div key={f.id}>
-              <button onClick={() => setOpen((o) => ({ ...o, [f.id]: !isOpen }))} className="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-ink hover:bg-field">
-                {isOpen ? <FolderOpen size={16} className="text-warn" /> : <Folder size={16} className="text-warn" />}
+              <button
+                onClick={() => setAbertas((a) => (a.includes(f.id) ? a.filter((x) => x !== f.id) : [...a, f.id]))}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-field"
+              >
+                {isOpen ? <FolderOpen size={14} className="text-warn shrink-0" /> : <Folder size={14} className="text-warn shrink-0" />}
                 <span className="flex-1 text-left truncate">{f.name}</span>
-                <span className="text-xs text-faint">{f.replies.length}</span>
+                <span className="text-[11px] text-faint tnum">{f.replies.length}</span>
               </button>
               {isOpen &&
                 replies.map((r) => (
-                  <button key={r.id} onClick={() => insert(r)} className={cn('w-full text-left pl-10 pr-4 py-2 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent')}>
-                    <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                  // uma linha por resposta: o trecho do corpo em duas linhas fazia dez
+                  // respostas ocuparem a tela inteira, e procurar virava rolagem
+                  <button key={r.id} onClick={() => insert(r)} title={r.body || r.mediaName || r.title} className={cn('w-full text-left pl-8 pr-3 py-1.5 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent')}>
+                    <div className="text-[12.5px] font-medium truncate flex items-center gap-1.5">
                       {r.mediaType && <MediaIcon type={r.mediaType} />}
                       <span className="truncate">{r.title}</span>
                     </div>
-                    <div className="text-xs text-muted line-clamp-2">{r.body || <span className="italic text-faint">{r.mediaName}</span>}</div>
+                    <div className="text-[11px] text-muted truncate">{r.body || <span className="italic text-faint">{r.mediaName}</span>}</div>
                   </button>
                 ))}
             </div>
           );
         })}
-        {folders.data?.length === 0 && <p className="p-6 text-sm text-faint text-center">Nenhuma resposta ainda. <Link href="/configuracoes" className="text-accent underline">Criar</Link></p>}
+        {folders.data?.length === 0 && <p className="p-6 text-sm text-faint text-center">Nenhuma resposta ainda. <Link href="/respostas" className="text-accent underline">Criar</Link></p>}
       </div>
     </>
   );

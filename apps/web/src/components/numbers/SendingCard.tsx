@@ -1,6 +1,7 @@
 'use client';
 import { ShieldAlert, Flame } from 'lucide-react';
 import { inputCls } from '@/components/ui/Modal';
+import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useSendingStatus, useUpdateNumber, type NumberItem, type SendDelayProfile } from '@/lib/hooks';
 
@@ -30,11 +31,14 @@ export function SendingCard({ number }: { number: NumberItem }) {
         <ShieldAlert size={13} /> Proteção do número
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <label className="space-y-1">
-          <span className="text-[11px] text-faint">Intervalo entre envios</span>
+      {/* `items-end` alinha os campos pela base: o rótulo do teto diário quebra em duas
+          linhas e, sem isso, um campo ficava mais baixo que o outro. A altura fixa iguala
+          select e input, que têm alturas intrínsecas diferentes com a mesma classe. */}
+      <div className="grid grid-cols-2 gap-2 items-end">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-faint leading-tight">Intervalo entre envios</span>
           <select
-            className={inputCls}
+            className={cn(inputCls, 'h-9 py-0')}
             value={number.sendDelay}
             onChange={(e) => update.mutateAsync({ id: number.id, sendDelay: e.target.value as SendDelayProfile }).catch(toast.err)}
           >
@@ -43,12 +47,12 @@ export function SendingCard({ number }: { number: NumberItem }) {
               .map((k) => <option key={k} value={k}>{DELAY_LABEL[k]}</option>)}
           </select>
         </label>
-        <label className="space-y-1">
-          <span className="text-[11px] text-faint">Máximo por dia (0 = sem teto)</span>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-faint leading-tight">Máximo por dia (0 = sem teto)</span>
           <input
             type="number"
             min={0}
-            className={inputCls}
+            className={cn(inputCls, 'h-9 py-0')}
             defaultValue={number.sendDailyLimit}
             onBlur={(e) => {
               const v = Number(e.target.value);
