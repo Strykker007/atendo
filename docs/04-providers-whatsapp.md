@@ -167,3 +167,35 @@ empurraria para frente indefinidamente, sem nunca enviar.
 
 Envio que falha no provider **não** conta no teto do dia — o teto é sobre o que realmente
 saiu.
+
+
+## Mensagem enviada pelo celular do cliente
+
+O WhatsApp entrega as mensagens que **saem** do número no mesmo evento das recebidas
+(`messages.upsert` com `key.fromMe`). O parser descartava todas, e isso misturava dois casos
+bem diferentes:
+
+| Caso | O que deve acontecer |
+|---|---|
+| O painel acabou de enviar | descartar — a mensagem já está no banco |
+| O cliente digitou no celular dele | **entrar no histórico como enviada** |
+
+Descartar os dois deixava o painel com metade da conversa: aparecia o que o contato escreveu
+e sumia o que o cliente respondeu do aparelho.
+
+Hoje o parser marca `fromMe` e quem decide é o `ConversationsService`:
+
+- o eco do próprio painel cai na **idempotência por `externalId`** (já está no banco);
+- o resto vira mensagem `out` sem autor, por `ingestFromDevice`.
+
+Três cuidados nesse caminho:
+
+1. **Não aciona automação.** Disparar um fluxo por algo que o próprio cliente escreveu seria
+   o robô respondendo ao dono do número. O `InboundProcessor` pula fluxos, agenda e
+   descadastro quando `fromMe`.
+2. **Não mexe em `lastInboundAt` nem nas não-lidas.** Quem falou foi o cliente, não o contato
+   — e `lastInboundAt` reabriria a janela de 24h da Meta sem o contato ter escrito.
+3. **Cria a conversa se não houver.** Conversa iniciada pelo celular precisa existir no
+   painel, senão a resposta do contato abriria outra e o histórico nasceria partido.
+
+Vale só para a Evolution: na API oficial o número não é operado por um aparelho.

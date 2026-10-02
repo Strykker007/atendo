@@ -41,8 +41,12 @@ describe('EvolutionProvider.parseWebhook — mensagens', () => {
     expect(out.messages[0].quotedExternalId).toBe('EVO0');
   });
 
-  it('ignora mensagens enviadas por nós (fromMe) — senão o robô responderia a si mesmo', () => {
-    expect(provider.parseWebhook(upsert({ conversation: 'eco' }, { fromMe: true })).messages).toHaveLength(0);
+  it('marca o que saiu do número em vez de descartar — o aparelho do cliente também fala ali', () => {
+    // descartar aqui fazia o painel mostrar metade da conversa: sumiam as respostas que o
+    // cliente digitava no celular. O robô não responde a si mesmo porque o InboundProcessor
+    // pula a automação quando `fromMe`, não porque a mensagem deixa de existir.
+    const [m] = provider.parseWebhook(upsert({ conversation: 'eco' }, { fromMe: true })).messages;
+    expect(m.fromMe).toBe(true);
   });
 
   it('ignora grupos', () => {

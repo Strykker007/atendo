@@ -185,10 +185,14 @@ export class ConversationsService {
 
   // ---------- inbound (worker) ----------
 
-  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null } | null> {
-    // idempotência: o mesmo webhook pode chegar duas vezes
+  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null; fromMe?: boolean } | null> {
+    // idempotência: o mesmo webhook pode chegar duas vezes. É também o que descarta o eco do
+    // que o PAINEL enviou: aquela mensagem já está no banco com este externalId.
     const exists = await this.prisma.message.findUnique({ where: { externalId: msg.externalId } });
     if (exists) return null;
+
+    // digitada no celular do cliente, não no painel: entra como enviada
+    if (msg.fromMe) return this.ingestFromDevice(number, msg);
 
     const contact = await this.prisma.contact.upsert({
       where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } },
@@ -266,6 +270,72 @@ export class ConversationsService {
     this.gateway.emitMessage(number.tenantId, message);
     this.gateway.emitConversation(number.tenantId, conversation);
     return { message, conversation, isNew, isNewContact, returningAfterClosed, hoursSinceLastMessage };
+  }
+
+  /**
+   * Mensagem que o cliente mandou pelo CELULAR dele, não pelo painel.
+   *
+   * O WhatsApp entrega o mesmo evento das recebidas, só que marcado. Ignorá-las — como era
+   * feito — deixava o painel com metade da conversa: aparecia o que o contato escreveu e
+   * sumia o que o cliente respondeu do aparelho.
+   *
+   * Entra como mensagem enviada, sem autor (ninguém a escreveu no painel), e **sem acionar
+   * automação**: disparar um fluxo por causa de algo que o próprio cliente escreveu seria o
+   * robô respondendo ao dono do número.
+   */
+  private async ingestFromDevice(number: WhatsAppNumber, msg: InboundMessage) {
+    const contact = await this.prisma.contact.upsert({
+      where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } },
+      create: { tenantId: number.tenantId, phone: msg.from, name: msg.contactName },
+      update: {},
+    });
+
+    let conversation = await this.prisma.conversation.findFirst({
+      where: { numberId: number.id, contactId: contact.id, status: { not: 'closed' } },
+    });
+    // conversa iniciada do celular: precisa existir no painel, senão a resposta do contato
+    // abriria outra e o histórico nasceria partido
+    const isNew = !conversation;
+    conversation ??= await this.prisma.conversation.create({
+      data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting' },
+    });
+
+    const message = await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        direction: 'out',
+        type: msg.type,
+        status: 'sent',
+        text: msg.text,
+        mediaMime: msg.media?.mimeType,
+        mediaName: msg.media?.fileName,
+        externalId: msg.externalId,
+        quotedId: msg.quotedExternalId,
+        raw: msg.raw as Prisma.InputJsonValue,
+        createdAt: msg.timestamp,
+      },
+    });
+
+    // nada de lastInboundAt nem de não-lidas: quem falou foi o cliente, não o contato.
+    // Mexer em lastInboundAt ainda reabriria a janela de 24h da Meta sem o contato ter escrito.
+    conversation = await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { lastMessageAt: msg.timestamp, lastMessagePreview: (msg.text ?? `[${msg.type}]`).slice(0, 120) },
+    });
+
+    await this.usage.record({
+      tenantId: number.tenantId,
+      numberId: number.id,
+      messageId: message.id,
+      provider: number.provider,
+      direction: 'out',
+      billingCategory: number.provider === 'meta' ? 'service' : 'unofficial',
+      contactId: contact.id,
+    });
+
+    this.gateway.emitMessage(number.tenantId, message);
+    this.gateway.emitConversation(number.tenantId, conversation);
+    return { message, conversation, isNew, isNewContact: false, returningAfterClosed: false, hoursSinceLastMessage: null, fromMe: true };
   }
 
   /**

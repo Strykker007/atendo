@@ -201,9 +201,12 @@ export class EvolutionProvider implements WhatsAppProvider {
       case 'messages.upsert': {
         const items = Array.isArray(data) ? data : [data];
         for (const m of items) {
-          if (!m?.key || m.key.fromMe) continue;
+          if (!m?.key) continue;
           if (m.key.remoteJid?.endsWith('@g.us')) continue; // grupos ficam fora do atendimento
-          out.messages.push(this.toInbound(m, externalNumberId));
+          // `fromMe` cobre DOIS casos: o que o painel acabou de enviar (descartado adiante
+          // pelo externalId, que já está no banco) e o que a pessoa digitou no celular, que
+          // precisa aparecer no histórico. Filtrar aqui jogava os dois fora.
+          out.messages.push({ ...this.toInbound(m, externalNumberId), fromMe: !!m.key.fromMe });
         }
         break;
       }

@@ -9,6 +9,12 @@ export interface InboundMessage {
   externalNumberId: string;
   /** telefone do contato em E.164 */
   from: string;
+  /**
+   * Mensagem que SAIU do número do cliente. Acontece quando ele responde pelo celular em vez
+   * do painel — o WhatsApp manda o mesmo evento, com esta marca. Precisa entrar no histórico,
+   * senão o painel mostra só metade da conversa.
+   */
+  fromMe?: boolean;
   contactName?: string;
   type: MessageType;
   text?: string;
