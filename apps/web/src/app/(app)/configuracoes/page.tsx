@@ -72,10 +72,13 @@ function SecuritySection() {
         <h2 className="font-display font-semibold text-ink">Segurança</h2>
         <p className="text-sm text-muted">Troque a sua senha. As outras sessões abertas serão encerradas.</p>
       </div>
-      <form onSubmit={(e) => { e.preventDefault(); if (mismatch) return; change.mutateAsync({ current: f.current, password: f.password }).then(() => { toast.ok('Senha alterada'); setF({ current: '', password: '', confirm: '' }); }).catch(toast.err); }} className="grid sm:grid-cols-3 gap-3 items-end">
+      {/* `items-start`, não `items-end`: a dica "mínimo 8 caracteres" fica abaixo do campo do meio
+          e, alinhando pelo fim, era ela que empurrava aquele campo para cima. Os três rótulos têm
+          uma linha só, então alinhar pelo topo deixa os três campos na mesma altura. */}
+      <form onSubmit={(e) => { e.preventDefault(); if (mismatch) return; change.mutateAsync({ current: f.current, password: f.password }).then(() => { toast.ok('Senha alterada'); setF({ current: '', password: '', confirm: '' }); }).catch(toast.err); }} className="grid sm:grid-cols-3 gap-3 items-start">
         <Field label="Senha atual"><input type="password" className={inputCls} value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} required autoComplete="current-password" /></Field>
-        <Field label="Nova senha" hint="mínimo 8"><input type="password" className={inputCls} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} minLength={8} required autoComplete="new-password" /></Field>
-        <Field label="Confirmar"><input type="password" className={inputCls} value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} required autoComplete="new-password" /></Field>
+        <Field label="Nova senha" hint="mínimo 8 caracteres"><input type="password" className={inputCls} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} minLength={8} required autoComplete="new-password" /></Field>
+        <Field label="Confirmar a nova senha"><input type="password" className={inputCls} value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} required autoComplete="new-password" /></Field>
         {mismatch && <p className="text-xs text-danger sm:col-span-3">As senhas não conferem.</p>}
         <div className="sm:col-span-3"><Button type="submit" loading={change.isPending} loadingText="Salvando…" disabled={!f.current || !f.password || mismatch}>Alterar senha</Button></div>
       </form>

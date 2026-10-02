@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X } from 'lucide-react';
+import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, type Conversation } from '@/lib/hooks';
+import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
@@ -12,6 +12,7 @@ import type { ConversationOrigin } from '@/lib/hooks';
 import { SkeletonConversations } from '@/components/ui/Skeleton';
 import { BulkCloseModal } from './BulkCloseModal';
 import { Button } from '@/components/ui/Button';
+import { usePersistedState } from '@/lib/persisted';
 
 /** Semáforo: cada status tem cor (texto/faixa) e fundo suave. */
 export const STATUS_META: Record<ConversationStatus, { label: string; short: string; color: string; soft: string; bar: string }> = {
@@ -20,6 +21,22 @@ export const STATUS_META: Record<ConversationStatus, { label: string; short: str
   closed: { label: 'Encerrado', short: 'Encerrado', color: 'text-done', soft: 'bg-done-soft', bar: 'bg-done' },
 };
 const ORDER: ConversationStatus[] = ['waiting', 'in_progress', 'closed'];
+
+/**
+ * Relógio da lista: um intervalo só, no pai, em vez de um por linha.
+ *
+ * Sem isto o selo de espera congela no valor que tinha quando a lista chegou — o painel fica
+ * aberto o dia inteiro, e "5min" ainda apareceria duas horas depois, que é pior do que não
+ * mostrar nada.
+ */
+function useMinuto() {
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  return agora;
+}
 
 export function ConversationList() {
   const { numberId, setNumber, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation } = useUI();
@@ -30,10 +47,12 @@ export function ConversationList() {
   const numbers = useNumbers();
   const tags = useTags();
   const counts = useConversationCounts(numberId);
+  const agora = useMinuto();
+  const [ordem, setOrdem] = usePersistedState<OrdemConversas>('ordem-conversas', 'recent');
   const [selecionando, setSelecionando] = useState(false);
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
-  const conversations = useConversations({ status, numberId, tagIds, origin, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
+  const conversations = useConversations({ status, numberId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
 
   const visiveis = conversations.data ?? [];
@@ -107,6 +126,21 @@ export function ConversationList() {
             {agents.data?.filter((a) => a.id !== me.data?.id && a.isActive).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         )}
+        {/* Ordem da fila. Em "Encerrado" não existe espera, então só aparece nos abertos. */}
+        {status !== 'closed' && (
+          <div className="flex gap-1">
+            {([['recent', 'Mais recentes'], ['waiting', 'Esperando há mais tempo']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setOrdem(id)}
+                className={cn('text-[10.5px] font-semibold px-2 py-0.5 rounded-md border transition-colors', ordem === id ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* origem do lead — chips pequenos, um clique liga/desliga */}
         <div className="flex flex-wrap gap-1">
           {(['ad', 'link', 'post', 'organic'] as ConversationOrigin[]).map((o) => (
@@ -165,6 +199,7 @@ export function ConversationList() {
             active={c.id === conversationId}
             onClick={() => (selecionando ? alternar(c.id) : setConversation(c.id))}
             showNumber={!numberId}
+            agora={agora}
             selecionando={selecionando}
             marcado={marcados.includes(c.id)}
           />
@@ -178,7 +213,7 @@ export function ConversationList() {
   );
 }
 
-function ConversationRow({ c, active, onClick, showNumber, selecionando, marcado }: { c: Conversation; active: boolean; onClick: () => void; showNumber: boolean; selecionando: boolean; marcado: boolean }) {
+function ConversationRow({ c, active, onClick, showNumber, agora, selecionando, marcado }: { c: Conversation; active: boolean; onClick: () => void; showNumber: boolean; agora: number; selecionando: boolean; marcado: boolean }) {
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   const m = STATUS_META[c.status];
@@ -195,16 +230,19 @@ function ConversationRow({ c, active, onClick, showNumber, selecionando, marcado
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}</span>
+          {/* o número fica aqui, na linha da hora: embaixo, junto das tags, ele acrescentava uma
+              faixa inteira só por estar vendo "todos os números" — a lista dobrava de altura */}
+          {showNumber && <span className="text-[10px] text-faint shrink-0 max-w-[80px] truncate" title={`Número: ${c.number.label}`}>{c.number.label}</span>}
           <span className="tnum text-[10.5px] text-faint shrink-0 font-mono">{time}</span>
         </div>
         <div className="flex items-center justify-between gap-2 mt-0.5">
           <span className={cn('text-xs truncate', c.unreadCount > 0 ? 'text-ink' : 'text-muted')}>{c.lastMessagePreview ?? '—'}</span>
+          <SeloEspera desde={c.awaitingSince} encerrada={c.status === 'closed'} agora={agora} />
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
-        {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || showNumber || c.assignee || c.origin !== 'organic') && (
+        {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || c.assignee || c.origin !== 'organic') && (
           <div className="flex flex-wrap items-center gap-1 mt-1">
             <OriginBadge origin={c.origin} data={c.originData} />
-            {showNumber && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-field text-muted font-medium">{c.number.label}</span>}
             {c.tags.map(({ tag }) => (
               <span key={tag.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `color-mix(in srgb, ${tag.color} 18%, transparent)`, color: tag.color }}>{tag.name}</span>
             ))}
@@ -217,6 +255,35 @@ function ConversationRow({ c, active, onClick, showNumber, selecionando, marcado
       </div>
     </button>
   );
+}
+
+/**
+ * Há quanto tempo o contato espera resposta.
+ *
+ * É a informação que decide o que atender agora, e ela não está em lugar nenhum da tela: a
+ * hora da última mensagem diz *quando* falaram, não *há quanto tempo ninguém responde*. A cor
+ * sobe junto com o atraso — o olho precisa achar os atrasados sem ler número por número.
+ *
+ * Conversa já respondida (ou encerrada) não mostra nada: selo em tudo vira ruído e ninguém
+ * mais repara nos vermelhos.
+ */
+function SeloEspera({ desde, encerrada, agora }: { desde: string | null; encerrada: boolean; agora: number }) {
+  if (!desde || encerrada) return null;
+  const minutos = Math.max(0, Math.floor((agora - new Date(desde).getTime()) / 60_000));
+  const cor = minutos >= 60 ? 'bg-danger-soft text-danger' : minutos >= 15 ? 'bg-wait-soft text-wait' : 'bg-field text-muted';
+  return (
+    <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-semibold rounded-md px-1 py-0.5 shrink-0 tnum', cor)} title={`Sem resposta desde ${new Date(desde).toLocaleString('pt-BR')}`}>
+      <Clock size={9} /> {duracaoCurta(minutos)}
+    </span>
+  );
+}
+
+/** "12min", "3h", "2d" — cabe ao lado da prévia sem empurrar nada. */
+export function duracaoCurta(minutos: number) {
+  if (minutos < 60) return `${minutos}min`;
+  const horas = Math.floor(minutos / 60);
+  if (horas < 24) return `${horas}h`;
+  return `${Math.floor(horas / 24)}d`;
 }
 
 function formatTime(iso: string) {

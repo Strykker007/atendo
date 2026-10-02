@@ -64,7 +64,7 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; cursor?: string; take?: number },
+    q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
@@ -89,7 +89,12 @@ export class ConversationsService {
     const rows = await this.prisma.conversation.findMany({
       where,
       include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true } } },
-      orderBy: { lastMessageAt: 'desc' },
+      // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
+      // as já respondidas para o fim em vez de empilhá-las no topo
+      orderBy:
+        q.sort === 'waiting'
+          ? [{ awaitingSince: { sort: 'asc', nulls: 'last' } }, { lastMessageAt: 'desc' }]
+          : [{ lastMessageAt: 'desc' }],
       take: q.take ?? 50,
       ...(q.cursor && { cursor: { id: q.cursor }, skip: 1 }),
     });
@@ -255,6 +260,7 @@ export class ConversationsService {
       data: {
         lastInboundAt: msg.timestamp,
         lastMessageAt: msg.timestamp,
+        awaitingSince: inicioDaEspera(conversation.awaitingSince, msg.timestamp),
         lastMessagePreview: (msg.text ?? `[${msg.type}]`).slice(0, 120),
         unreadCount: { increment: 1 },
       },
@@ -323,7 +329,8 @@ export class ConversationsService {
     // Mexer em lastInboundAt ainda reabriria a janela de 24h da Meta sem o contato ter escrito.
     conversation = await this.prisma.conversation.update({
       where: { id: conversation.id },
-      data: { lastMessageAt: msg.timestamp, lastMessagePreview: (msg.text ?? `[${msg.type}]`).slice(0, 120) },
+      // respondeu pelo celular também é resposta: a espera acabou
+      data: { lastMessageAt: msg.timestamp, lastMessagePreview: (msg.text ?? `[${msg.type}]`).slice(0, 120), awaitingSince: null },
     });
 
     await this.usage.record({
@@ -360,7 +367,7 @@ export class ConversationsService {
     const message = await this.prisma.message.create({
       data: { conversationId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, raw: interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : undefined },
     });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: (shown ?? `[${media?.type}]`).slice(0, 120) } });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: (shown ?? `[${media?.type}]`).slice(0, 120), awaitingSince: null } });
     await this.outbound.add('send', { messageId: message.id });
     this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
@@ -518,6 +525,7 @@ export class ConversationsService {
         status: conv.status === 'waiting' ? 'in_progress' : conv.status,
         lastMessageAt: new Date(),
         lastMessagePreview: (input.text ?? `[${input.type}]`).slice(0, 120),
+        awaitingSince: null,
         unreadCount: 0,
       },
     });
@@ -771,4 +779,15 @@ export function tipoDaTransicao(de: ConversationStatus | null | undefined, para:
   if (para === 'closed') return 'closed';
   if (de === 'closed') return 'reopened';
   return para === 'in_progress' ? 'claimed' : 'released';
+}
+
+/**
+ * Desde quando o contato espera resposta, ao chegar mais uma mensagem dele.
+ *
+ * Cinco mensagens seguidas são **uma** espera só, e quem mede o atraso é a primeira: trocar
+ * pela mais recente zeraria o relógio a cada "oi?" do cliente — justamente quem está sendo
+ * mais ignorado apareceria como o mais recente.
+ */
+export function inicioDaEspera(atual: Date | null, chegada: Date): Date {
+  return atual ?? chegada;
 }

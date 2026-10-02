@@ -17,6 +17,8 @@ class ListDto {
   @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
   /** admin: filtrar por atendente */
   @IsOptional() @IsUUID() assigneeId?: string;
+  /** `waiting` = quem espera resposta há mais tempo primeiro */
+  @IsOptional() @IsIn(['recent', 'waiting']) sort?: 'recent' | 'waiting';
   @IsOptional() @IsUUID() cursor?: string;
 }
 class TransferDto {

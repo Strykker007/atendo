@@ -43,10 +43,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | PATCH | `/numbers/:id` | tenant_admin | Label / ativo |
 | DELETE | `/numbers/:id` | tenant_admin | Remove (cascade em conversas) |
 | **Conversas** | | | |
-| GET | `/conversations?status=&numberId=&tagIds=a,b&search=&origin=&assigneeId=&cursor=` | todos | Lista por cursor. Em `in_progress`, atendente vê só as suas; admin vê todas ou filtra por `assigneeId` |
+| GET | `/conversations?status=&numberId=&tagIds=a,b&search=&origin=&assigneeId=&sort=&cursor=` | todos | Lista por cursor. Em `in_progress`, atendente vê só as suas; admin vê todas ou filtra por `assigneeId`. `sort=waiting` ordena por quem espera resposta há mais tempo (`awaitingSince` asc, já respondidas por último) |
 | GET | `/conversations/counts?numberId=` | todos | `{waiting, in_progress, closed, in_progress_mine, in_progress_all}` (`in_progress` já respeita a visão do usuário) |
 | GET | `/conversations/:id` | todos | Uma conversa (contato, tags, atendente, número) |
-| GET | `/conversations/:id/messages?cursor=` | todos | Mensagens (mais recentes primeiro, 50); `mediaUrl` já vem assinada |
+| GET | `/conversations/:id/messages?cursor=` | todos | Mensagens (mais recentes primeiro, 50); `mediaUrl` já vem assinada. **Nada é apagado**: o painel carrega a última página e busca o passado conforme a pessoa rola, com `cursor` = id da última linha recebida |
 | POST | `/conversations/:id/messages` | todos | Envia: `{type:'text', text}` ou `{type:'image'|'audio'|'video'|'document', mediaKey, text?}` ou template |
 | POST | `/conversations/:id/claim` | todos | Assumir (atômico; 409 se outra pessoa assumiu) |
 | POST | `/conversations/:id/transfer` | dono ou admin | `{agentId}` |

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus } from '@/lib/hooks';
-import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
@@ -55,6 +55,7 @@ export function ChatPane() {
   const card = useContactCard(conv?.contact.id ?? null, sched.has);
   const tags = useTags();
   const messages = useMessages(conversationId);
+  const mensagens = useMemo(() => mensagensEmOrdem(messages.data), [messages.data]);
   const send = useSendMessage(conversationId);
   // gravando: a linha inteira vira a gravação, como no WhatsApp
   const [gravando, setGravando] = useState(false);
@@ -68,12 +69,17 @@ export function ChatPane() {
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
   const [previa, setPrevia] = useState<File | null>(null);
   // imagens desta conversa, na ordem em que aparecem: as setas do visualizador andam por elas
-  const imagens = (messages.data ?? []).filter((m) => (m.type === 'image' || m.type === 'sticker') && m.mediaUrl).map((m) => ({ url: m.mediaUrl!, nome: m.mediaName }));
+  const imagens = mensagens.filter((m) => (m.type === 'image' || m.type === 'sticker') && m.mediaUrl).map((m) => ({ url: m.mediaUrl!, nome: m.mediaName }));
   const [vendoImagem, setVendoImagem] = useState<string | null>(null);
   const indiceImagem = imagens.findIndex((i) => i.url === vendoImagem);
   const fileRef = useRef<HTMLInputElement>(null);
   const [accept, setAccept] = useState(ACCEPT_ALL);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const rolagemRef = useRef<HTMLDivElement>(null);
+  /** altura do conteúdo antes de buscar o passado, para devolver a pessoa ao mesmo ponto */
+  const alturaAntes = useRef(0);
+  /** colado no fim? Falso quando a pessoa subiu para ler o passado. */
+  const noFim = useRef(true);
 
   /** Abre o seletor já filtrado pelo tipo escolhido no atalho. */
   function pick(tipos: string) {
@@ -110,9 +116,60 @@ export function ChatPane() {
     }
   }
 
+  // trocar de conversa recomeça: a próxima leva de mensagens é de outra pessoa
+  useEffect(() => { noFim.current = true; alturaAntes.current = 0; }, [conversationId]);
+
+  /**
+   * Manter o fim da conversa à vista.
+   *
+   * Rolar uma vez quando as mensagens chegam **não basta**: as bolhas crescem depois, quando a
+   * imagem carrega e o player de áudio monta, e o chat terminava parado lá em cima. Por isso
+   * quem decide é um ResizeObserver — enquanto a pessoa estiver no fim, qualquer crescimento
+   * do conteúdo rola junto. Quem subiu para ler o passado não é arrastado para baixo porque o
+   * contato respondeu.
+   */
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' });
-  }, [messages.data?.length]);
+    const el = rolagemRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => {
+      if (alturaAntes.current) return; // restauração de página antiga manda neste quadro
+      if (noFim.current) el.scrollTop = el.scrollHeight;
+    });
+    obs.observe(el);
+    for (const filho of Array.from(el.children)) obs.observe(filho);
+    return () => obs.disconnect();
+  }, [conversationId, mensagens.length]);
+
+  /**
+   * Para onde a tela vai quando a lista muda, antes da pintura (`useLayoutEffect`, senão o
+   * salto aparece):
+   *  - carregou o passado: devolver a pessoa ao mesmo ponto. A altura foi medida antes do
+   *    pedido, e a diferença é exatamente o que entrou acima;
+   *  - abriu a conversa ou chegou mensagem com a pessoa no fim: ir para o fim.
+   *
+   * O ResizeObserver acima não cobre este caso: ele só reage a mudança de tamanho, e aqui
+   * as bolhas estão sendo criadas, não redimensionadas.
+   */
+  useLayoutEffect(() => {
+    const el = rolagemRef.current;
+    if (!el) return;
+    if (alturaAntes.current) {
+      el.scrollTop = el.scrollHeight - alturaAntes.current;
+      alturaAntes.current = 0;
+      return;
+    }
+    if (noFim.current) el.scrollTop = el.scrollHeight;
+  }, [mensagens]);
+
+  function aoRolar() {
+    const el = rolagemRef.current;
+    if (!el) return;
+    noFim.current = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+    // perto do topo = a pessoa está indo para trás na conversa: busca a página anterior
+    if (el.scrollTop > 160 || !messages.hasNextPage || messages.isFetchingNextPage) return;
+    alturaAntes.current = el.scrollHeight;
+    void messages.fetchNextPage();
+  }
 
   // permite que o painel de respostas rápidas insira texto no composer
   useEffect(() => {
@@ -279,7 +336,11 @@ export function ChatPane() {
       </div>
 
       {/* Mensagens */}
-      <div className="flex-1 overflow-y-auto chat-bg px-4 py-2.5 space-y-1 scrollbar-thin">
+      <div ref={rolagemRef} onScroll={aoRolar} className="flex-1 overflow-y-auto chat-bg px-4 py-2.5 space-y-1 scrollbar-thin">
+        {messages.isFetchingNextPage && <div className="py-2 text-center text-[11.5px] text-muted">Carregando mensagens anteriores…</div>}
+        {!messages.hasNextPage && !messages.isLoading && mensagens.length >= PAGINA_MENSAGENS && (
+          <div className="py-2 text-center text-[11px] text-faint">Começo da conversa</div>
+        )}
         {messages.isLoading && (
           <div className="space-y-2 pt-2">
             {[60, 40, 75, 35].map((w, i) => (
@@ -287,7 +348,7 @@ export function ChatPane() {
             ))}
           </div>
         )}
-        {messages.data?.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} />)}
+        {mensagens.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} />)}
         <div ref={bottomRef} />
       </div>
 

@@ -131,6 +131,25 @@ Duas decisões que não são estéticas:
 
 O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseModal`, o porquê está no cabeçalho do arquivo. A resposta traz `ignored`, e o toast diz o número: alguém da equipe pode ter encerrado no meio do caminho.
 
+## Conversa longa (carregar o passado)
+
+`useMessages` é `useInfiniteQuery`: abre no fim e busca páginas de 50 para trás quando a pessoa chega perto do topo. Nada é apagado no banco — o que não dá é baixar dois anos de conversa antes de mostrar a primeira mensagem.
+
+Três comportamentos de rolagem, e tratá-los como um só é o que faz o chat pular sozinho:
+- **carregou o passado**: a altura é medida *antes* do pedido e recomposta depois, em `useLayoutEffect`, para a pessoa continuar exatamente onde estava;
+- **abriu a conversa / chegou mensagem com a pessoa no fim**: vai para o fim;
+- **a pessoa está lendo o passado**: não é arrastada para baixo porque o contato respondeu.
+
+Há ainda um `ResizeObserver`, para o caso de a bolha crescer depois (imagem que carrega, player de áudio que monta). Ele não substitui o efeito acima: **não dispara quando o elemento só é criado**, apenas quando muda de tamanho — foi o que fez a conversa abrir parada no topo na primeira tentativa.
+
+## Fila por tempo de espera
+
+Cada conversa aberta mostra **há quanto tempo está sem resposta** (`awaitingSince`), com a cor subindo junto com o atraso (até 15min neutro, 15–60min âmbar, acima de 1h vermelho). Conversa já respondida ou encerrada não mostra nada: selo em tudo vira ruído e ninguém repara nos vermelhos.
+
+O chip **Esperando há mais tempo** reordena a lista (`sort=waiting`), e a escolha fica guardada. Um `setInterval` só, no componente da lista, mantém os selos atualizados — um por linha seriam cinquenta relógios, e sem nenhum o "5min" continuaria dizendo 5min duas horas depois.
+
+O rótulo do número saiu da faixa de tags e foi para a linha da hora: embaixo, ele acrescentava uma faixa inteira só por estar vendo "todos os números", e a lista ficava com o dobro da altura. Agora a linha mede o mesmo nos dois casos (medido: 58px).
+
 ## Histórico do atendimento
 
 Botão **Histórico** no cabeçalho do chat abre a linha do tempo (`GET /conversations/:id/events`): quem assumiu, transferiu, devolveu, encerrou e reabriu, com data. No topo, **atendimentos encerrados** e **reaberturas** — é a pergunta que se faz numa auditoria, e é o que distingue um atendimento reaberto de dois atendimentos.

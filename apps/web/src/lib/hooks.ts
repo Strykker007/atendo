@@ -1,5 +1,5 @@
 'use client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken } from './api';
@@ -18,6 +18,8 @@ export interface Conversation {
   origin: ConversationOrigin; originData: LeadReferral | null;
   activeFlowRunId?: string | null;
   lastInboundAt: string | null; numberId: string;
+  /** desde quando o contato espera resposta; null = já respondemos */
+  awaitingSince: string | null;
   contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[] };
   tags: { tag: Tag }[];
   assignee: { id: string; name: string } | null;
@@ -53,7 +55,9 @@ export interface Usage {
 }
 export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/billing/usage'), refetchInterval: 60_000 });
 
-export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null }) =>
+export type OrdemConversas = 'recent' | 'waiting';
+
+export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas }) =>
   useQuery({
     queryKey: ['conversations', q],
     queryFn: () => {
@@ -63,6 +67,7 @@ export const useConversations = (q: { status: ConversationStatus; numberId: stri
       if (q.origin) p.set('origin', q.origin);
       if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
       if (q.search) p.set('search', q.search);
+      if (q.sort && q.sort !== 'recent') p.set('sort', q.sort);
       return api<Conversation[]>(`/conversations?${p}`);
     },
   });
@@ -84,19 +89,55 @@ export const useRelease = () => { const qc = useQueryClient(); return useMutatio
 export const useConversation = (id: string | null) =>
   useQuery({ queryKey: ['conversation', id], enabled: !!id, queryFn: () => api<Conversation>(`/conversations/${id}`) });
 
+/** Tamanho da página no servidor. Se mudar lá, muda aqui: é o que diz se ainda há passado. */
+export const PAGINA_MENSAGENS = 50;
+
+/**
+ * Mensagens da conversa, do fim para trás.
+ *
+ * Nada é apagado no banco — a conversa inteira fica guardada para sempre. O que não dá é
+ * carregar tudo de uma vez: um cliente de dois anos tem milhares de mensagens, e abrir a
+ * conversa baixaria todas antes de mostrar a primeira. Então vem a última página e o resto
+ * sobe conforme a pessoa rola, como no WhatsApp.
+ *
+ * Cada página vem do servidor da mais nova para a mais antiga; o cursor é o id da última
+ * linha recebida.
+ */
 export const useMessages = (conversationId: string | null) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: ['messages', conversationId],
     enabled: !!conversationId,
-    queryFn: async () => (await api<Message[]>(`/conversations/${conversationId}/messages`)).reverse(),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api<Message[]>(`/conversations/${conversationId}/messages${pageParam ? `?cursor=${pageParam}` : ''}`),
+    // página incompleta = chegou no começo da conversa, não há mais o que buscar
+    getNextPageParam: (ultima) => (ultima.length < PAGINA_MENSAGENS ? undefined : ultima[ultima.length - 1]?.id),
   });
 
-/** Insere/atualiza uma mensagem no cache da conversa (mesma lógica do socket). */
+/** As páginas viram uma lista só, em ordem cronológica (a tela lê de cima para baixo). */
+export function mensagensEmOrdem(data?: InfiniteData<Message[]>): Message[] {
+  return (data?.pages.flat() ?? []).slice().reverse();
+}
+
+/**
+ * Insere/atualiza uma mensagem no cache da conversa (mesma lógica do socket).
+ *
+ * A página 0 é a mais recente, e dentro dela a ordem é do mais novo para o mais antigo —
+ * por isso a mensagem nova entra no **começo** dela. Colocar no fim a jogaria para o meio da
+ * conversa, entre mensagens antigas.
+ */
 export function upsertMessageInCache(qc: ReturnType<typeof useQueryClient>, m: Message) {
-  qc.setQueryData<Message[]>(['messages', m.conversationId], (old) => {
+  qc.setQueryData<InfiniteData<Message[]>>(['messages', m.conversationId], (old) => {
     if (!old) return old;
-    const i = old.findIndex((x) => x.id === m.id);
-    return i >= 0 ? old.map((x) => (x.id === m.id ? { ...x, ...m } : x)) : [...old, m];
+    let achou = false;
+    const pages = old.pages.map((p) =>
+      p.map((x) => {
+        if (x.id !== m.id) return x;
+        achou = true;
+        return { ...x, ...m };
+      }),
+    );
+    if (achou) return { ...old, pages };
+    return { ...old, pages: pages.map((p, i) => (i === 0 ? [m, ...p] : p)) };
   });
 }
 

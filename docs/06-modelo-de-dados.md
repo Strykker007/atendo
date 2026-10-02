@@ -37,7 +37,7 @@ provider_pricing (global, sem tenant)
 
 **contacts** — telefone E.164 único por tenant. Nome vem do `pushName`/profile do WhatsApp.
 
-**conversations** — um atendimento. `origin` (`organic | ad | post | link`) e `originData` (referral do anúncio) — ver [04 › Origem do lead](04-providers-whatsapp.md#origem-do-lead-atribuição-de-anúncio). Único aberto por (número, contato); encerrar e receber de novo cria outra linha. `lastInboundAt` define a janela de 24h da Meta. `unreadCount` para o badge. Índice em `(tenantId, status, lastMessageAt desc)` = a query da lista.
+**conversations** — um atendimento. `awaitingSince` = desde quando o contato espera resposta: marcado na mensagem recebida (mantendo a **primeira** sem resposta — cinco mensagens seguidas são uma espera só) e limpo em qualquer saída, inclusive a enviada pelo celular. É coluna própria porque "quem espera há mais tempo" precisa ser ordenável: comparar `lastInboundAt` com `lastMessageAt` dá para ler, não dá para ordenar nem filtrar (Prisma não compara coluna com coluna). `origin` (`organic | ad | post | link`) e `originData` (referral do anúncio) — ver [04 › Origem do lead](04-providers-whatsapp.md#origem-do-lead-atribuição-de-anúncio). Único aberto por (número, contato); encerrar e receber de novo cria outra linha. `lastInboundAt` define a janela de 24h da Meta. `unreadCount` para o badge. Índice em `(tenantId, status, lastMessageAt desc)` = a query da lista.
 
 **conversation_events** — histórico do atendimento (auditoria). A conversa guarda só a foto do momento: dono atual, data do fechamento, último resultado. Isso não responde "quantos atendimentos a Ana fechou em março", e reabrir **limpa** o desfecho da conversa, então o resultado anterior deixava de existir.
 

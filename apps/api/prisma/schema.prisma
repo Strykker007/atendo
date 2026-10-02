@@ -351,6 +351,13 @@ model Conversation {
   /// Última mensagem recebida do contato — define a janela de 24h da Meta
   lastInboundAt  DateTime?
   lastMessageAt  DateTime?
+  /// Desde quando o contato espera resposta: marcado na mensagem recebida, limpo quando a
+  /// equipe responde. Guarda o momento da PRIMEIRA mensagem sem resposta — se a pessoa manda
+  /// cinco seguidas, a espera dela começou na primeira, não na última.
+  /// Coluna própria porque "quem está esperando há mais tempo" precisa ser ordenável no banco,
+  /// e comparar `lastInboundAt` com `lastMessageAt` é comparação entre colunas: dá para ler,
+  /// não dá para ordenar nem filtrar.
+  awaitingSince  DateTime?
   lastMessagePreview String?
   unreadCount    Int       @default(0)
   closedAt       DateTime?
@@ -377,6 +384,8 @@ model Conversation {
   activeFlowRunId String?
 
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
+  /// fila por tempo de espera
+  @@index([tenantId, status, awaitingSince])
   @@index([tenantId, origin])
   @@index([numberId, contactId])
   aiUsage   AiUsage[]
