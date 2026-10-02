@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, PinOff } from 'lucide-react';
+import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -96,13 +96,14 @@ export default function FluxosPage() {
               <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', f.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{f.isActive ? 'Ativo' : 'Inativo'}</span>
               {isAdmin && (
                 <>
-                  {/* o ícone mostra a AÇÃO do clique, não o estado — é o que a dica diz */}
+                  {/* Sempre o MESMO ícone: o que muda é o destaque. O alfinete cortado era
+                      ambíguo — não dava para saber se mostrava o estado ou a ação do clique. */}
                   <button
-                    title={f.showInChat ? 'Remover o atalho da aba Fluxos do chat' : 'Mostrar como atalho na aba Fluxos do chat'}
+                    title={f.showInChat ? 'Com atalho no chat — clique para remover' : 'Sem atalho no chat — clique para adicionar'}
                     onClick={() => update.mutateAsync({ id: f.id, showInChat: !f.showInChat }).then(() => toast.ok(f.showInChat ? 'Atalho removido do chat' : 'Atalho adicionado ao chat')).catch(toast.err)}
-                    className="text-faint hover:text-accent-ink p-1"
+                    className={cn('p-1 rounded-md', f.showInChat ? 'text-accent-ink bg-accent-soft' : 'text-faint hover:text-ink')}
                   >
-                    {f.showInChat ? <PinOff size={15} /> : <Pin size={15} />}
+                    <Pin size={15} className={cn(f.showInChat && 'fill-current')} />
                   </button>
                   <button title="Duplicar neste cliente" onClick={() => onDuplicate(f)} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
                   <button title="Exportar para usar em outro cliente" onClick={() => onExport(f)} className="text-faint hover:text-accent-ink p-1"><Download size={15} /></button>
