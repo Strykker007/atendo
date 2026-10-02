@@ -18,7 +18,7 @@ export interface Conversation {
   origin: ConversationOrigin; originData: LeadReferral | null;
   activeFlowRunId?: string | null;
   lastInboundAt: string | null; numberId: string;
-  contact: { id: string; name: string | null; phone: string; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[] };
+  contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[] };
   tags: { tag: Tag }[];
   assignee: { id: string; name: string } | null;
   number: { id: string; label: string; provider?: 'meta' | 'evolution'; status?: string };

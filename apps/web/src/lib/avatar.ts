@@ -7,3 +7,11 @@ export function avatarStyle(seed: string): React.CSSProperties {
   return { background: `hsl(${hue} 55% 45%)`, color: '#fff' };
 }
 export const initialOf = (name: string) => (name.trim()[0] ?? '?').toUpperCase();
+
+/**
+ * A foto do contato pode falhar: a URL assinada expira e o arquivo pode ter sumido do
+ * storage. Quem usa deve cair para a inicial colorida em vez de mostrar imagem quebrada.
+ */
+export function onAvatarError(e: React.SyntheticEvent<HTMLImageElement>) {
+  e.currentTarget.style.display = 'none';
+}

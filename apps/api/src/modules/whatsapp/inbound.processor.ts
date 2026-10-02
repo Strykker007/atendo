@@ -11,6 +11,7 @@ import { TrackedWorkerHost } from '../../common/observability/tracked-worker.hos
 import { enrichContext } from '../../common/observability/request-context';
 import { isOptOut } from '../campaigns/dispatch';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { shouldRefreshAvatar } from './avatar-refresh';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
 export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
@@ -24,6 +25,30 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     private readonly prisma: PrismaService,
   ) {
     super(QUEUE_INBOUND);
+  }
+
+  /** Baixa a foto do contato e guarda no nosso storage; a URL da CDN do WhatsApp expira. */
+  private async refreshAvatar(number: { id: string; tenantId: string }, contactId: string) {
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { phone: true, avatarUrl: true, avatarCheckedAt: true },
+    });
+    if (!contact || !shouldRefreshAvatar(contact)) return;
+
+    const ctx = await this.numbers.context(number.id);
+    const provider = this.registry.get(ctx.provider);
+    if (!provider.fetchProfilePicture) return; // API oficial não expõe foto de contato
+
+    // marca a tentativa ANTES de buscar: se o provider estiver fora do ar, não queremos
+    // repetir a chamada a cada mensagem que chegar
+    await this.prisma.contact.update({ where: { id: contactId }, data: { avatarCheckedAt: new Date() } });
+
+    const pic = await provider.fetchProfilePicture(ctx, contact.phone);
+    if (!pic) return;
+
+    const key = this.storage.makeKey(number.tenantId, pic.mimeType, pic.fileName);
+    await this.storage.put(key, pic.data, pic.mimeType);
+    await this.prisma.contact.update({ where: { id: contactId }, data: { avatarUrl: key } });
   }
 
   protected async handle(job: Job<InboundJob>) {
@@ -52,6 +77,10 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
         const handled = await this.scheduling.onInbound(number.tenantId, result.conversation.contactId, result.conversation.id, result.message.text ?? '', msg.interactiveReplyId).catch((err) => { this.log.error(`agenda: ${err instanceof Error ? err.message : err}`); return false; });
         if (!handled) await this.flows.onInbound(number, result.conversation, result.message, result.isNew, { isNewContact: result.isNewContact, returningAfterClosed: result.returningAfterClosed, hoursSinceLastMessage: result.hoursSinceLastMessage }).catch((err) => this.log.error(`fluxo: ${err instanceof Error ? err.message : err}`));
       }
+      // foto de perfil do contato: na primeira mensagem e depois só de tempos em tempos.
+      // Nunca derruba a ingestão — é enfeite, a mensagem é o que importa.
+      if (result) await this.refreshAvatar(number, result.conversation.contactId).catch((err) => this.log.debug(`foto: ${err instanceof Error ? err.message : err}`));
+
       // mídia: baixa do provider e guarda no storage privado (falha aqui não perde a mensagem)
       if (saved && msg.media) {
         try {

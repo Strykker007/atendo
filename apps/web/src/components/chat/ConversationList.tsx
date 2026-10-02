@@ -5,7 +5,7 @@ import type { ConversationStatus } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, type Conversation } from '@/lib/hooks';
-import { avatarStyle, initialOf } from '@/lib/avatar';
+import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
 import type { ConversationOrigin } from '@/lib/hooks';
@@ -129,7 +129,7 @@ function ConversationRow({ c, active, onClick, showNumber }: { c: Conversation; 
     <button onClick={onClick} className={cn('relative w-full text-left pl-3.5 pr-2.5 py-2 flex gap-2.5 border-b border-line hover:bg-field transition-colors', active && 'bg-accent-soft hover:bg-accent-soft')}>
       {/* faixa de status (semáforo) */}
       <span className={cn('absolute left-0 top-0 bottom-0 w-[5px]', m.bar)} aria-hidden />
-      <div className="w-9 h-9 rounded-lg grid place-items-center font-display font-semibold text-[14px] shrink-0" style={avatarStyle(c.contact.phone)}>{initialOf(name)}</div>
+      <Avatar name={name} phone={c.contact.phone} src={c.contact.avatarUrl} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}</span>

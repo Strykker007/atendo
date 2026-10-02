@@ -152,6 +152,24 @@ export class EvolutionProvider implements WhatsAppProvider {
     return { data: Buffer.from(r.base64, 'base64'), mimeType: r.mimetype ?? msg.media.mimeType ?? 'application/octet-stream', fileName: r.fileName ?? msg.media.fileName };
   }
 
+  /**
+   * Foto de perfil do contato. A Evolution devolve uma URL da CDN do WhatsApp, que expira —
+   * então baixamos o arquivo aqui e quem chama guarda no nosso storage. Mandar a URL da CDN
+   * para o navegador também faria o painel do cliente buscar imagem direto do WhatsApp.
+   */
+  async fetchProfilePicture(ctx: NumberContext, phone: string): Promise<MediaPayload | null> {
+    const r = await this.api<{ profilePictureUrl?: string }>(`/chat/fetchProfilePictureUrl/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ number: phone }),
+    }, this.shard(ctx)).catch(() => null);
+    if (!r?.profilePictureUrl) return null;
+
+    const res = await fetch(r.profilePictureUrl);
+    if (!res.ok) return null;
+    const data = Buffer.from(await res.arrayBuffer());
+    return { data, mimeType: res.headers.get('content-type') ?? 'image/jpeg', fileName: `${phone}.jpg` };
+  }
+
   async markRead(ctx: NumberContext, externalMessageId: string) {
     await this.api(`/chat/markMessageAsRead/${this.instance(ctx)}`, {
       method: 'POST',

@@ -12,7 +12,7 @@ import { useAiStatus } from '@/lib/hooks';
 import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
-import { avatarStyle, initialOf } from '@/lib/avatar';
+import { Avatar } from './Avatar';
 import { OriginBadge } from './OriginBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
@@ -172,9 +172,7 @@ export function ChatPane() {
         <button className="md:hidden text-muted" onClick={() => setConversation(null)}>
           <ArrowLeft size={20} />
         </button>
-        <div className="w-9 h-9 rounded-lg grid place-items-center font-display font-semibold shrink-0" style={avatarStyle(conv.contact.phone)}>
-          {initialOf(conv.contact.name ?? conv.contact.phone)}
-        </div>
+        <Avatar name={conv.contact.name ?? conv.contact.phone} phone={conv.contact.phone} src={conv.contact.avatarUrl} />
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-sm truncate text-ink">{conv.contact.name ?? `+${conv.contact.phone}`}</div>
           <div className="text-xs text-muted truncate tnum flex items-center gap-1.5">

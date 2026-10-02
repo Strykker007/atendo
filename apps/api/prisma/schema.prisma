@@ -269,7 +269,10 @@ model Contact {
   tenantId  String
   phone     String // E.164
   name      String?
+  /// chave da foto de perfil no NOSSO storage (a URL da CDN do WhatsApp expira)
   avatarUrl String?
+  /// última tentativa de buscar a foto — evita uma chamada ao provider por mensagem
+  avatarCheckedAt DateTime?
   // ---- ficha do cliente, preenchida pelo atendente ----
   email     String?
   address   String?

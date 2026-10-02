@@ -42,6 +42,16 @@ export class ConversationsService {
     return m.mediaUrl && !m.mediaUrl.startsWith('http') ? { ...m, mediaUrl: this.storage.signedUrl(m.mediaUrl) } : m;
   }
 
+  /**
+   * Mesma ideia para a foto do contato: no banco fica a chave, para o navegador vai uma URL
+   * assinada. Sem isto o `<img>` receberia a chave crua e não carregaria nada.
+   */
+  presentContact<T extends { contact?: { avatarUrl?: string | null } | null }>(row: T): T {
+    const key = row.contact?.avatarUrl;
+    if (!key || key.startsWith('http')) return row;
+    return { ...row, contact: { ...row.contact, avatarUrl: this.storage.signedUrl(key) } } as T;
+  }
+
   // ---------- leitura ----------
 
   /**
@@ -51,7 +61,7 @@ export class ConversationsService {
    *  - `closed`: todos veem.
    * `viewer` decide isso; `assigneeId` explícito (admin) sobrescreve.
    */
-  list(
+  async list(
     tenantId: string,
     viewer: Viewer,
     q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; cursor?: string; take?: number },
@@ -76,13 +86,14 @@ export class ConversationsService {
         contact: { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }] },
       }),
     };
-    return this.prisma.conversation.findMany({
+    const rows = await this.prisma.conversation.findMany({
       where,
       include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true } } },
       orderBy: { lastMessageAt: 'desc' },
       take: q.take ?? 50,
       ...(q.cursor && { cursor: { id: q.cursor }, skip: 1 }),
     });
+    return rows.map((r) => this.presentContact(r));
   }
 
   /** Contadores dos três filtros principais (opcionalmente por número). */
@@ -141,11 +152,12 @@ export class ConversationsService {
     return updated;
   }
 
-  one(tenantId: string, id: string) {
-    return this.prisma.conversation.findFirstOrThrow({
+  async one(tenantId: string, id: string) {
+    const row = await this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
       include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, provider: true, status: true } } },
     });
+    return this.presentContact(row);
   }
 
   async messages(tenantId: string, conversationId: string, cursor?: string, take = 50) {
