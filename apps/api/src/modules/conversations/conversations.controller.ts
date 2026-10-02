@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService } from './conversations.service';
@@ -43,6 +43,15 @@ class StatusDto {
   /** fluxo disparado ao encerrar (pesquisa de satisfação, pós-venda…) */
   @IsOptional() @IsUUID() flowId?: string;
 }
+class BulkCloseDto {
+  /**
+   * Teto de 200 por chamada: é mais do que a tela mostra de uma vez e evita que um pedido
+   * sozinho segure a conexão fechando mil conversas.
+   */
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(200) @IsUUID('4', { each: true }) ids: string[];
+  @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
+  @IsOptional() @IsString() @MaxLength(200) reason?: string;
+}
 class ContactDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
   @IsOptional() @IsString() @MaxLength(160) email?: string;
@@ -62,6 +71,17 @@ export class ConversationsController {
   @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: ListDto) {
     return this.conversations.list(u.tenantId, u, q);
+  }
+
+  /**
+   * Encerrar vários de uma vez.
+   *
+   * O `ConversationScopeGuard` não cobre esta rota — ele olha `:id` e aqui a lista vem no
+   * corpo. Quem recorta é o service, e isso está dito lá.
+   */
+  @Post('bulk/close')
+  bulkClose(@CurrentUser() u: AuthUser, @Body() dto: BulkCloseDto) {
+    return this.conversations.closeMany(u.tenantId, u, dto.ids, dto.outcome ? { outcome: dto.outcome, reason: dto.reason } : undefined);
   }
 
   /** Nota interna (cadeado) — só equipe vê. */
@@ -98,6 +118,12 @@ export class ConversationsController {
   @Get(':id/messages')
   messages(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
     return this.conversations.messages(u.tenantId, id, cursor);
+  }
+
+  /** Histórico do atendimento: quem assumiu, transferiu, encerrou e quando. */
+  @Get(':id/events')
+  events(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.events(u.tenantId, id);
   }
 
   @Post(':id/messages')

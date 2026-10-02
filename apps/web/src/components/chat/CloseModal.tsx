@@ -6,7 +6,14 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useFlows, useHasFeature, useSetStatus, type ConversationOutcome } from '@/lib/hooks';
 
-const MOTIVOS = ['Preço', 'Prazo', 'Não respondeu', 'Comprou com concorrente', 'Fora da área', 'Só pesquisando'];
+export const MOTIVOS = ['Preço', 'Prazo', 'Não respondeu', 'Comprou com concorrente', 'Fora da área', 'Só pesquisando'];
+
+/** As três saídas possíveis. Exportado porque o encerramento em massa usa as mesmas. */
+export const OUTCOMES: { id: ConversationOutcome; label: string; icon: React.ReactNode; cls: string }[] = [
+  { id: 'won', label: 'Comprou', icon: <CheckCircle2 size={15} />, cls: 'border-ok text-ok bg-ok-soft' },
+  { id: 'lost', label: 'Não comprou', icon: <XCircle size={15} />, cls: 'border-danger text-danger bg-danger-soft' },
+  { id: 'none', label: 'Sem resultado', icon: <MinusCircle size={15} />, cls: 'border-line text-muted bg-field' },
+];
 
 /**
  * Encerramento com resultado. É o que transforma o relatório de conversas em relatório de
@@ -20,12 +27,6 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
   const [valor, setValor] = useState('');
   const [motivo, setMotivo] = useState('');
   const [flowId, setFlowId] = useState('');
-
-  const opcoes: { id: ConversationOutcome; label: string; icon: React.ReactNode; cls: string }[] = [
-    { id: 'won', label: 'Comprou', icon: <CheckCircle2 size={15} />, cls: 'border-ok text-ok bg-ok-soft' },
-    { id: 'lost', label: 'Não comprou', icon: <XCircle size={15} />, cls: 'border-danger text-danger bg-danger-soft' },
-    { id: 'none', label: 'Sem resultado', icon: <MinusCircle size={15} />, cls: 'border-line text-muted bg-field' },
-  ];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -50,7 +51,7 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
       <form onSubmit={submit} className="space-y-4">
         <Field label="Resultado" hint="Alimenta o relatório de vendas. Pode deixar sem resultado.">
           <div className="flex flex-wrap gap-2">
-            {opcoes.map((o) => (
+            {OUTCOMES.map((o) => (
               <button
                 key={o.id}
                 type="button"

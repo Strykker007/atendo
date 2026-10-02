@@ -42,6 +42,7 @@ model Tenant {
   businessHours BusinessHour[]
   accessProfiles AccessProfile[]
   campaigns     Campaign[]
+  conversationEvents ConversationEvent[]
 
   @@map("tenants")
 }
@@ -80,6 +81,8 @@ model User {
   assigned      Conversation[] @relation("assignee")
   messages      Message[]
   numbers       UserNumber[]
+  events        ConversationEvent[] @relation("eventActor")
+  eventsAbout   ConversationEvent[] @relation("eventTarget")
 
   @@index([tenantId])
   @@index([profileId])
@@ -369,6 +372,7 @@ model Conversation {
   messages Message[]
   tags     ConversationTag[]
   flowRuns FlowRun[]
+  events   ConversationEvent[]
   /// execução de fluxo ativa (para marcar "em automação" na lista)
   activeFlowRunId String?
 
@@ -404,6 +408,60 @@ enum MessageStatus {
   delivered
   read
   failed
+}
+
+/// O que aconteceu com o atendimento, em ordem. Ver `ConversationEvent`.
+enum ConversationEventType {
+  /// atendente assumiu (da fila ou de volta para si)
+  claimed
+  transferred
+  /// devolvido para a fila
+  released
+  closed
+  reopened
+}
+
+/// Histórico do atendimento — quem fez o quê e quando.
+///
+/// A conversa guarda só a foto do momento: dono atual, data do fechamento, último resultado.
+/// Isso não responde "quantos atendimentos a Ana fechou em março", e pior: reabrir limpa o
+/// desfecho, então o resultado anterior simplesmente deixava de existir.
+///
+/// Cada encerramento aqui é **um atendimento**. É por isso que a tabela é de eventos e não
+/// de campos na conversa: a mesma pessoa volta semanas depois, na mesma conversa, e aquilo é
+/// outro atendimento, com outro dono e outro resultado.
+///
+/// Linha gravada nunca é alterada nem apagada — é registro de auditoria. O desfecho fica
+/// copiado no evento de propósito: mesmo que a conversa reabra e perca o dela, o número do
+/// mês que já fechou não pode mudar depois.
+model ConversationEvent {
+  id             String                @id @default(uuid())
+  tenantId       String
+  conversationId String
+  type           ConversationEventType
+  /// quem fez. Nulo = sistema (fluxo, automação, encerramento por inatividade)
+  actorId        String?
+  /// em transferência, quem recebeu
+  targetId       String?
+  fromStatus     ConversationStatus?
+  toStatus       ConversationStatus?
+  /// desfecho no encerramento, congelado neste evento
+  outcome        ConversationOutcome?
+  outcomeValue   Decimal?              @db.Decimal(12, 2)
+  /// motivo da perda, ou nota do sistema ("encerrado em massa")
+  reason         String?
+  createdAt      DateTime              @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("eventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  target       User?        @relation("eventTarget", fields: [targetId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  /// base do relatório por atendente e período
+  @@index([tenantId, type, createdAt])
+  @@index([tenantId, actorId, createdAt])
+  @@map("conversation_events")
 }
 
 model Message {

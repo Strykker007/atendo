@@ -121,6 +121,22 @@ Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `c
 - Cabeçalho do chat: **pill de status** com a mesma cor da faixa.
 - Menu: item *Conversas* com badge laranja = quantas aguardando.
 
+## Seleção em massa (lista de conversas)
+
+Botão **Selecionar** acima da lista liga o modo: cada linha ganha caixa de marcação, clicar marca em vez de abrir, e a barra traz *Todos (n)*, a contagem e **Encerrar**.
+
+Duas decisões que não são estéticas:
+- **Trocar de filtro limpa a seleção** (`useEffect` em status/número/origem/atendente). Encerrar em massa o que saiu da tela é fechar no escuro, e não há como desfazer trinta de uma vez.
+- **Só vale o que está visível** (`marcadosVisiveis`): o que foi marcado e sumiu do filtro não entra no pedido.
+
+O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseModal`, o porquê está no cabeçalho do arquivo. A resposta traz `ignored`, e o toast diz o número: alguém da equipe pode ter encerrado no meio do caminho.
+
+## Histórico do atendimento
+
+Botão **Histórico** no cabeçalho do chat abre a linha do tempo (`GET /conversations/:id/events`): quem assumiu, transferiu, devolveu, encerrou e reabriu, com data. No topo, **atendimentos encerrados** e **reaberturas** — é a pergunta que se faz numa auditoria, e é o que distingue um atendimento reaberto de dois atendimentos.
+
+Ator vazio aparece como **Automação**, nunca em branco: em auditoria, campo vazio é lido como falha de registro.
+
 ## Relatórios (gráficos)
 
 `components/reports/ReportChart.tsx` (Recharts 3). Regras:

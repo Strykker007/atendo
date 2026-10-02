@@ -6,6 +6,7 @@ Fonte: `apps/api/prisma/schema.prisma`. Todas as tabelas de dados de cliente tê
 tenants ─┬─ users ─── refresh_tokens
          ├─ whatsapp_numbers ─┐
          ├─ contacts ─────────┼─ conversations ─┬─ messages ─── message_usage
+         │                    │                 └─ conversation_events
          ├─ tags ─────────────┘   (conversation_tags)
          ├─ quick_reply_folders ── quick_replies
          ├─ subscriptions ── plans
@@ -37,6 +38,12 @@ provider_pricing (global, sem tenant)
 **contacts** — telefone E.164 único por tenant. Nome vem do `pushName`/profile do WhatsApp.
 
 **conversations** — um atendimento. `origin` (`organic | ad | post | link`) e `originData` (referral do anúncio) — ver [04 › Origem do lead](04-providers-whatsapp.md#origem-do-lead-atribuição-de-anúncio). Único aberto por (número, contato); encerrar e receber de novo cria outra linha. `lastInboundAt` define a janela de 24h da Meta. `unreadCount` para o badge. Índice em `(tenantId, status, lastMessageAt desc)` = a query da lista.
+
+**conversation_events** — histórico do atendimento (auditoria). A conversa guarda só a foto do momento: dono atual, data do fechamento, último resultado. Isso não responde "quantos atendimentos a Ana fechou em março", e reabrir **limpa** o desfecho da conversa, então o resultado anterior deixava de existir.
+
+Cada linha é um fato: `claimed`, `transferred`, `released`, `closed`, `reopened`, com `actorId` (nulo = automação), `targetId` (transferência), status de/para e o desfecho **copiado** — congelado ali, para que reabrir não mude o número de um mês já fechado. Linha gravada nunca é alterada nem apagada.
+
+Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mesma conversa, e aquilo é outro atendimento, com outro dono e outro resultado. Índices por `(tenantId, type, createdAt)` e `(tenantId, actorId, createdAt)` = a base do relatório por atendente e período. Começa a valer da estreia em diante; o que aconteceu antes não foi gravado.
 
 **messages** — `externalId` único → idempotência de webhook. `raw` guarda o payload original (debug e reprocessamento). `authorId` = atendente que enviou.
 

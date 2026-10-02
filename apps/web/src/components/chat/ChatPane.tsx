@@ -4,7 +4,7 @@ import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightL
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
@@ -16,6 +16,7 @@ import { Avatar } from './Avatar';
 import { OriginBadge } from './OriginBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
+import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
 import { AudioMessage } from './AudioMessage';
 import { ContactSheet, ContactSummary } from './ContactSheet';
@@ -49,6 +50,7 @@ export function ChatPane() {
   const ai = useAiStatus();
   const [scheduling, setScheduling] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [historico, setHistorico] = useState(false);
   const [fichaAberta, setFichaAberta] = useState(false);
   const card = useContactCard(conv?.contact.id ?? null, sched.has);
   const tags = useTags();
@@ -227,6 +229,9 @@ export function ChatPane() {
           </div>
         )}
         {ai.enabled && <SummaryButton conversationId={conv.id} />}
+        <Button size="sm" variant="ghost" icon={<History size={14} />} onClick={() => setHistorico(true)} title="Quem assumiu, transferiu e encerrou — e quando">
+          <span className="hidden lg:inline">Histórico</span>
+        </Button>
         {conv.status !== 'closed' ? (
           <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
             <span className="hidden sm:inline">Encerrar</span>
@@ -287,6 +292,7 @@ export function ChatPane() {
       </div>
 
       {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} />}
+      {historico && <HistorySheet conversationId={conv.id} onClose={() => setHistorico(false)} />}
 
       {vendoImagem && indiceImagem >= 0 && (
         <ImageViewer

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
-import type { Conversation, ConversationOrigin, ConversationOutcome, ConversationStatus, WhatsAppNumber } from '@prisma/client';
+import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus, WhatsAppNumber } from '@prisma/client';
 import type { InboundMessage, StatusUpdate, NumberStatus, OutboundMessage } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -11,7 +11,7 @@ import type { Message } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import type { Permission } from '@atendo/shared';
-import { narrowTo } from '../auth/number-scope';
+import { narrowTo, numberFilter } from '../auth/number-scope';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -126,6 +126,7 @@ export class ConversationsService {
       throw new ConflictException(`${c.assignee?.name ?? 'Outro atendente'} já assumiu este atendimento.`);
     }
     const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id } });
+    await this.registrar({ tenantId, conversationId: id, type: 'claimed', actorId: user.id, toStatus: 'in_progress' });
     this.gateway.emitConversation(tenantId, conv);
     return conv;
   }
@@ -138,6 +139,7 @@ export class ConversationsService {
     const target = await this.prisma.user.findFirst({ where: { id: toUserId, tenantId, isActive: true } });
     if (!target) throw new NotFoundException('Atendente não encontrado');
     const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: target.id, status: conv.status === 'closed' ? 'closed' : 'in_progress' } });
+    await this.registrar({ tenantId, conversationId: id, type: 'transferred', actorId: by.id, targetId: target.id, fromStatus: conv.status, toStatus: updated.status });
     this.gateway.emitConversation(tenantId, updated);
     return updated;
   }
@@ -148,6 +150,7 @@ export class ConversationsService {
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     if (!may(by, 'conversations.transfer_any') && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou quem tem permissão) pode devolver.');
     const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: null, status: 'waiting' } });
+    await this.registrar({ tenantId, conversationId: id, type: 'released', actorId: by.id, fromStatus: conv.status, toStatus: 'waiting' });
     this.gateway.emitConversation(tenantId, updated);
     return updated;
   }
@@ -397,7 +400,10 @@ export class ConversationsService {
   }
 
   async setStatusSystem(conversationId: string, status: ConversationStatus) {
+    const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true } });
     const conv = await this.prisma.conversation.update({ where: { id: conversationId }, data: { status, closedAt: status === 'closed' ? new Date() : null, ...(status === 'waiting' && { assigneeId: null }) } });
+    // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria
+    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação' });
     this.gateway.emitConversation(conv.tenantId, conv);
     return conv;
   }
@@ -589,6 +595,7 @@ export class ConversationsService {
             }
           : {};
 
+    const antes = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true } });
     const conv = await this.prisma.conversation.update({
       where: { id, tenantId },
       data: {
@@ -600,8 +607,134 @@ export class ConversationsService {
         ...desfecho,
       },
     });
+    // o desfecho vai copiado para o evento: reabrir limpa o da conversa, e o fechamento que
+    // já entrou no relatório do mês não pode mudar depois
+    await this.registrar({
+      tenantId,
+      conversationId: id,
+      type: tipoDaTransicao(antes?.status, status),
+      actorId: userId,
+      fromStatus: antes?.status,
+      toStatus: status,
+      outcome: status === 'closed' ? (outcome?.outcome ?? 'none') : null,
+      outcomeValue: conv.outcomeValue,
+      reason: status === 'closed' ? outcome?.reason?.trim() || null : null,
+    });
     this.gateway.emitConversation(tenantId, conv);
     return conv;
+  }
+
+  /**
+   * Encerrar vários atendimentos numa tacada.
+   *
+   * Existe porque a fila de "Aguardando" acumula gente que nunca respondeu, e fechar uma por
+   * uma é meia hora de cliques — na prática o atendente desistia e a fila virava ruído, o que
+   * tira o sentido do próprio semáforo.
+   *
+   * O recorte de quem pode fechar o quê é feito **aqui**, não no guard: o guard olha
+   * `:id` na rota e esta chamada traz uma lista no corpo. Então a cláusula repete as duas
+   * regras da listagem — só números que a pessoa opera, e atendente comum só mexe no que é
+   * dele ou está sem dono. Id de fora do recorte não dá erro, só não entra na conta; a
+   * resposta diz quantos ficaram de fora para a tela poder avisar.
+   *
+   * Sem disparo de fluxo de propósito: um fluxo de encerramento aplicado a cinquenta conversas
+   * é envio em massa, e isso tem (ou terá) tela própria, com limite diário e opt-out.
+   */
+  async closeMany(tenantId: string, viewer: Viewer, ids: string[], desfecho?: { outcome: ConversationOutcome; reason?: string }) {
+    const pedidos = [...new Set(ids)];
+    const escopo = numberFilter(viewer);
+    const alvos = await this.prisma.conversation.findMany({
+      where: {
+        id: { in: pedidos },
+        tenantId,
+        // já encerrada não é erro nem reencerra: fechar duas vezes mudaria a data e estragaria
+        // o tempo de atendimento no relatório
+        status: { not: 'closed' },
+        ...(escopo && { numberId: escopo }),
+        ...(may(viewer, 'conversations.view_all') ? {} : { OR: [{ assigneeId: viewer.id }, { assigneeId: null }] }),
+      },
+      select: { id: true, status: true },
+    });
+    if (!alvos.length) return { closed: 0, ignored: pedidos.length };
+
+    const idsAlvo = alvos.map((a) => a.id);
+    // mesma razão do `registrar`: dono do sistema não tem linha em `users` deste tenant
+    const ator = (await this.prisma.user.findFirst({ where: { id: viewer.id, tenantId }, select: { id: true } }))?.id ?? null;
+    await this.prisma.conversation.updateMany({
+      where: { id: { in: idsAlvo } },
+      data: {
+        status: 'closed',
+        closedAt: new Date(),
+        // valor de venda não entra em massa: ele é por conversa, e um número repetido em
+        // cinquenta atendimentos inflaria o faturamento do relatório
+        ...(desfecho && desfecho.outcome !== 'none'
+          ? {
+              outcome: desfecho.outcome,
+              outcomeReason: desfecho.outcome === 'lost' ? desfecho.reason?.trim() || null : null,
+              outcomeAt: new Date(),
+              outcomeById: viewer.id,
+            }
+          : {}),
+      },
+    });
+
+    await this.prisma.conversationEvent.createMany({
+      // "em massa" fica no registro: na auditoria, trinta encerramentos no mesmo segundo
+      // precisam ser distinguíveis de trinta atendimentos de verdade
+      data: alvos.map((a) => ({
+        tenantId,
+        conversationId: a.id,
+        type: 'closed' as const,
+        actorId: ator,
+        fromStatus: a.status,
+        toStatus: 'closed' as const,
+        outcome: desfecho?.outcome ?? 'none',
+        reason: [desfecho?.outcome === 'lost' ? desfecho.reason?.trim() : null, 'encerrado em massa'].filter(Boolean).join(' · '),
+      })),
+    });
+
+    // cada conversa precisa ir pelo socket: quem está com o painel aberto vê a fila esvaziar
+    const fechadas = await this.prisma.conversation.findMany({ where: { id: { in: idsAlvo } } });
+    for (const c of fechadas) this.gateway.emitConversation(tenantId, c);
+    this.log.log(`${fechadas.length} atendimento(s) encerrados em massa por ${viewer.id}`);
+    return { closed: fechadas.length, ignored: pedidos.length - fechadas.length };
+  }
+
+  // ---------- histórico (auditoria) ----------
+
+  /**
+   * Grava o que aconteceu com o atendimento.
+   *
+   * Não é try/catch de propósito: auditoria que engole o próprio erro é pior que auditoria
+   * nenhuma, porque o relatório fica plausível e errado. Se não deu para registrar, a ação
+   * falha e aparece.
+   */
+  private async registrar(e: {
+    tenantId: string;
+    conversationId: string;
+    type: ConversationEventType;
+    actorId?: string | null;
+    targetId?: string | null;
+    fromStatus?: ConversationStatus | null;
+    toStatus?: ConversationStatus | null;
+    outcome?: ConversationOutcome | null;
+    outcomeValue?: Prisma.Decimal | null;
+    reason?: string | null;
+  }) {
+    // super_admin não tem linha em `users` deste tenant: entra como sistema, senão a FK quebra
+    const actorId = e.actorId && (await this.prisma.user.findFirst({ where: { id: e.actorId, tenantId: e.tenantId }, select: { id: true } })) ? e.actorId : null;
+    await this.prisma.conversationEvent.create({ data: { ...e, actorId } });
+  }
+
+  /** Linha do tempo do atendimento, do mais recente para o mais antigo. */
+  async events(tenantId: string, conversationId: string) {
+    await this.prisma.conversation.findFirstOrThrow({ where: { id: conversationId, tenantId }, select: { id: true } });
+    return this.prisma.conversationEvent.findMany({
+      where: { conversationId, tenantId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: { actor: { select: { id: true, name: true } }, target: { select: { id: true, name: true } } },
+    });
   }
 
   async setTags(tenantId: string, id: string, tagIds: string[]) {
@@ -628,4 +761,14 @@ export class ConversationsService {
   async markRead(tenantId: string, id: string) {
     return this.prisma.conversation.update({ where: { id, tenantId }, data: { unreadCount: 0 } });
   }
+}
+
+/**
+ * Que nome dar à mudança de status. Reabrir é o caso que importa: sem ele, um atendimento
+ * fechado e reaberto apareceria como dois encerramentos no relatório.
+ */
+export function tipoDaTransicao(de: ConversationStatus | null | undefined, para: ConversationStatus): ConversationEventType {
+  if (para === 'closed') return 'closed';
+  if (de === 'closed') return 'reopened';
+  return para === 'in_progress' ? 'claimed' : 'released';
 }

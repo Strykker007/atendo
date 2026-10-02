@@ -1,6 +1,6 @@
 'use client';
-import { useMemo, useState } from 'react';
-import { Search, ChevronDown, ShieldCheck, QrCode } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
@@ -10,6 +10,8 @@ import { TagPicker } from './TagPicker';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
 import type { ConversationOrigin } from '@/lib/hooks';
 import { SkeletonConversations } from '@/components/ui/Skeleton';
+import { BulkCloseModal } from './BulkCloseModal';
+import { Button } from '@/components/ui/Button';
 
 /** Semáforo: cada status tem cor (texto/faixa) e fundo suave. */
 export const STATUS_META: Record<ConversationStatus, { label: string; short: string; color: string; soft: string; bar: string }> = {
@@ -28,8 +30,20 @@ export function ConversationList() {
   const numbers = useNumbers();
   const tags = useTags();
   const counts = useConversationCounts(numberId);
+  const [selecionando, setSelecionando] = useState(false);
+  const [marcados, setMarcados] = useState<string[]>([]);
+  const [encerrando, setEncerrando] = useState(false);
   const conversations = useConversations({ status, numberId, tagIds, origin, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
+
+  const visiveis = conversations.data ?? [];
+  // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
+  // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
+  useEffect(() => { setMarcados([]); setSelecionando(false); }, [status, numberId, origin, assigneeId]);
+  const marcadosVisiveis = marcados.filter((id) => visiveis.some((c) => c.id === id));
+  const todosMarcados = visiveis.length > 0 && marcadosVisiveis.length === visiveis.length;
+  const alternar = (id: string) => setMarcados((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+  function sair() { setSelecionando(false); setMarcados([]); }
 
   return (
     <>
@@ -103,6 +117,37 @@ export function ConversationList() {
         </div>
       </div>
 
+      {/* Seleção em massa. Fora de "Encerrado" — ali não há o que encerrar. */}
+      {status !== 'closed' && (
+        <div className="px-2.5 py-1.5 border-b border-line">
+          {!selecionando ? (
+            <button
+              onClick={() => setSelecionando(true)}
+              disabled={visiveis.length === 0}
+              className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-muted hover:text-ink disabled:opacity-40"
+            >
+              <CheckSquare size={14} /> Selecionar
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button onClick={() => setMarcados(todosMarcados ? [] : visiveis.map((c) => c.id))} className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-ink">
+                {todosMarcados ? <CheckSquare size={14} className="text-accent" /> : <Square size={14} className="text-faint" />}
+                Todos ({visiveis.length})
+              </button>
+              <span className="tnum text-[11px] text-muted ml-auto">{marcadosVisiveis.length} marcado(s)</span>
+              <Button
+                onClick={() => setEncerrando(true)}
+                disabled={marcadosVisiveis.length === 0}
+                className="h-7 px-2.5 text-[11.5px]"
+              >
+                Encerrar
+              </Button>
+              <button onClick={sair} className="p-1 rounded-md text-faint hover:text-ink hover:bg-field" title="Sair da seleção"><X size={15} /></button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Lista */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {conversations.isLoading && <SkeletonConversations />}
@@ -113,22 +158,39 @@ export function ConversationList() {
             <p className="text-sm text-muted">Nenhuma conversa em <b className="text-ink">{STATUS_META[status].short.toLowerCase()}</b>.</p>
           </div>
         )}
-        {conversations.data?.map((c) => (
-          <ConversationRow key={c.id} c={c} active={c.id === conversationId} onClick={() => setConversation(c.id)} showNumber={!numberId} />
+        {visiveis.map((c) => (
+          <ConversationRow
+            key={c.id}
+            c={c}
+            active={c.id === conversationId}
+            onClick={() => (selecionando ? alternar(c.id) : setConversation(c.id))}
+            showNumber={!numberId}
+            selecionando={selecionando}
+            marcado={marcados.includes(c.id)}
+          />
         ))}
       </div>
+
+      {encerrando && (
+        <BulkCloseModal ids={marcadosVisiveis} onDone={sair} onClose={() => setEncerrando(false)} />
+      )}
     </>
   );
 }
 
-function ConversationRow({ c, active, onClick, showNumber }: { c: Conversation; active: boolean; onClick: () => void; showNumber: boolean }) {
+function ConversationRow({ c, active, onClick, showNumber, selecionando, marcado }: { c: Conversation; active: boolean; onClick: () => void; showNumber: boolean; selecionando: boolean; marcado: boolean }) {
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   const m = STATUS_META[c.status];
   return (
-    <button onClick={onClick} className={cn('relative w-full text-left pl-3.5 pr-2.5 py-2 flex gap-2.5 border-b border-line hover:bg-field transition-colors', active && 'bg-accent-soft hover:bg-accent-soft')}>
+    <button onClick={onClick} className={cn('relative w-full text-left pl-3.5 pr-2.5 py-2 flex gap-2.5 border-b border-line hover:bg-field transition-colors', active && !selecionando && 'bg-accent-soft hover:bg-accent-soft', selecionando && marcado && 'bg-accent-soft')}>
       {/* faixa de status (semáforo) */}
       <span className={cn('absolute left-0 top-0 bottom-0 w-[5px]', m.bar)} aria-hidden />
+      {selecionando && (
+        <span className="self-center shrink-0">
+          {marcado ? <CheckSquare size={18} className="text-accent" /> : <Square size={18} className="text-faint" />}
+        </span>
+      )}
       <Avatar name={name} phone={c.contact.phone} src={c.contact.avatarUrl} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">

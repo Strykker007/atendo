@@ -142,6 +142,40 @@ export const useSetStatus = () => {
   });
 };
 
+/** Encerrar vários atendimentos de uma vez. Devolve quantos fecharam e quantos ficaram de fora. */
+export const useBulkClose = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { ids: string[]; outcome?: ConversationOutcome; reason?: string }) =>
+      api<{ closed: number; ignored: number }>('/conversations/bulk/close', { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['conversation-counts'] });
+    },
+  });
+};
+
+export interface ConversationEvent {
+  id: string;
+  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened';
+  actor: { id: string; name: string } | null;
+  target: { id: string; name: string } | null;
+  fromStatus: ConversationStatus | null;
+  toStatus: ConversationStatus | null;
+  outcome: ConversationOutcome | null;
+  outcomeValue: string | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** Histórico do atendimento (auditoria). Só busca quando o painel está aberto. */
+export const useConversationEvents = (id: string | null, enabled = true) =>
+  useQuery({
+    queryKey: ['conversation-events', id],
+    queryFn: () => api<ConversationEvent[]>(`/conversations/${id}/events`),
+    enabled: !!id && enabled,
+  });
+
 /** Ficha do contato (nome, e-mail, endereço, observações). */
 export const useUpdateContact = () => {
   const qc = useQueryClient();
