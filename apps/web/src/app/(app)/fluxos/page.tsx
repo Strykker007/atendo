@@ -96,12 +96,13 @@ export default function FluxosPage() {
               <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', f.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{f.isActive ? 'Ativo' : 'Inativo'}</span>
               {isAdmin && (
                 <>
+                  {/* o ícone mostra a AÇÃO do clique, não o estado — é o que a dica diz */}
                   <button
                     title={f.showInChat ? 'Remover o atalho da aba Fluxos do chat' : 'Mostrar como atalho na aba Fluxos do chat'}
                     onClick={() => update.mutateAsync({ id: f.id, showInChat: !f.showInChat }).then(() => toast.ok(f.showInChat ? 'Atalho removido do chat' : 'Atalho adicionado ao chat')).catch(toast.err)}
-                    className={cn('p-1', f.showInChat ? 'text-accent-ink hover:text-faint' : 'text-faint hover:text-accent-ink')}
+                    className="text-faint hover:text-accent-ink p-1"
                   >
-                    {f.showInChat ? <Pin size={15} /> : <PinOff size={15} />}
+                    {f.showInChat ? <PinOff size={15} /> : <Pin size={15} />}
                   </button>
                   <button title="Duplicar neste cliente" onClick={() => onDuplicate(f)} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
                   <button title="Exportar para usar em outro cliente" onClick={() => onExport(f)} className="text-faint hover:text-accent-ink p-1"><Download size={15} /></button>
