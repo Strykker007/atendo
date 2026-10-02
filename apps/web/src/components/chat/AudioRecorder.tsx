@@ -19,8 +19,14 @@ const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${St
 /** Quantas barrinhas a onda mostra. */
 const BARRAS = 28;
 
-/** Grava áudio pelo navegador e devolve como arquivo, pronto para enviar. */
-export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: File) => void; disabled?: boolean }) {
+/**
+ * Grava áudio pelo navegador e devolve como arquivo.
+ *
+ * Fica no lugar do botão de enviar, como no WhatsApp: com o campo vazio aparece o microfone,
+ * e assim que se digita algo o botão vira o de enviar. Quem decide isso é o chat — aqui só
+ * avisamos quando a gravação começa e termina, para ele esconder o campo de texto.
+ */
+export function AudioRecorder({ onRecorded, disabled, onRecordingChange }: { onRecorded: (file: File) => void; disabled?: boolean; onRecordingChange?: (gravando: boolean) => void }) {
   const [gravando, setGravando] = useState(false);
   const [segundos, setSegundos] = useState(0);
   const [niveis, setNiveis] = useState<number[]>(() => Array(BARRAS).fill(0));
@@ -109,6 +115,7 @@ export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: Fil
     rec.current = r;
     r.start();
     setGravando(true);
+    onRecordingChange?.(true);
     setSegundos(0);
     setNiveis(Array(BARRAS).fill(0));
     ouvirNivel(stream.current);
@@ -125,18 +132,25 @@ export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: Fil
     if (rec.current && rec.current.state !== 'inactive') rec.current.stop();
     else soltarTudo();
     setGravando(false);
+    onRecordingChange?.(false);
   }
 
   if (!gravando) {
     return (
-      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={disabled} icon={<Mic size={13} />} onClick={começar} title="Gravar áudio">
-        Áudio
-      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted hover:text-ink"
+        disabled={disabled}
+        icon={<Mic size={18} />}
+        onClick={começar}
+        title="Gravar áudio"
+      />
     );
   }
 
   return (
-    <span className="inline-flex items-center gap-2 rounded-lg bg-danger-soft px-2 py-1">
+    <span className="flex flex-1 items-center gap-2 rounded-xl bg-danger-soft px-2.5 py-1.5">
       <button type="button" onClick={() => parar(true)} className="text-danger-ink/70 hover:text-danger-ink p-0.5" title="Descartar gravação">
         <Trash2 size={14} />
       </button>
@@ -144,7 +158,7 @@ export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: Fil
       <span className="tnum font-mono text-[11px] text-danger-ink shrink-0">{mmss(segundos)}</span>
 
       {/* onda sonora: cada barra é um instante recente, a mais nova à direita */}
-      <span className="flex items-center gap-[2px] h-5" aria-hidden>
+      <span className="flex flex-1 items-center justify-end gap-[2px] h-6 overflow-hidden" aria-hidden>
         {niveis.map((n, i) => (
           <span
             key={i}

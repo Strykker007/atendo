@@ -17,6 +17,7 @@ import { OriginBadge } from './OriginBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { AudioRecorder } from './AudioRecorder';
+import { AudioMessage } from './AudioMessage';
 import { ContactSheet, ContactSummary } from './ContactSheet';
 
 /** Tipos que a API aceita (ver ALLOWED em media.controller.ts). */
@@ -51,6 +52,8 @@ export function ChatPane() {
   const tags = useTags();
   const messages = useMessages(conversationId);
   const send = useSendMessage(conversationId);
+  // gravando: a linha inteira vira a gravação, como no WhatsApp
+  const [gravando, setGravando] = useState(false);
   const setStatus = useSetStatus();
   const setTags = useSetTags();
   const setContactTags = useSetContactTags();
@@ -324,7 +327,6 @@ export function ChatPane() {
               <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<ImageIcon size={13} />} onClick={() => pick('image/jpeg,image/png,image/webp,image/gif')} title="Enviar foto">Foto</Button>
               <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<Video size={13} />} onClick={() => pick('video/mp4,video/3gpp')} title="Enviar vídeo">Vídeo</Button>
               <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<FileText size={13} />} onClick={() => pick('application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt')} title="Enviar arquivo">Arquivo</Button>
-              <AudioRecorder disabled={uploading} onRecorded={sendRecorded} />
               {uploading && <span className="text-[11px] text-muted">enviando arquivo…</span>}
               <span className="flex-1" />
               {ai.enabled && <CopilotBar conversationId={conv.id} text={text} onText={setText} />}
@@ -332,16 +334,25 @@ export function ChatPane() {
           )}
           <div className="flex items-end gap-2">
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept={accept} />
-          <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => pick(ACCEPT_ALL)} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}
-            rows={1}
-            placeholder={attachment ? 'Legenda (opcional)' : 'Mensagem… (Enter envia)'}
-            className="flex-1 resize-none max-h-40 rounded-xl bg-field text-ink placeholder:text-faint px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent/40"
-          />
-          <Button type="submit" className="w-9 h-9 rounded-full p-0" disabled={(!text.trim() && !attachment) || uploading} loading={send.isPending} icon={<Send size={18} />} title="Enviar" />
+          {!gravando && (
+            <>
+              <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => pick(ACCEPT_ALL)} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}
+                rows={1}
+                placeholder={attachment ? 'Legenda (opcional)' : 'Mensagem… (Enter envia)'}
+                className="flex-1 resize-none max-h-40 rounded-xl bg-field text-ink placeholder:text-faint px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent/40"
+              />
+            </>
+          )}
+          {/* microfone no lugar do enviar: com algo escrito (ou anexo) vira o botão de enviar */}
+          {text.trim() || attachment ? (
+            <Button type="submit" className="w-9 h-9 rounded-full p-0" disabled={uploading} loading={send.isPending} icon={<Send size={18} />} title="Enviar" />
+          ) : (
+            <AudioRecorder disabled={uploading} onRecorded={sendRecorded} onRecordingChange={setGravando} />
+          )}
           </div>
         </form>
       )}
@@ -392,7 +403,7 @@ function MediaBody({ m }: { m: Message }) {
   if (m.type === 'text' || m.type === 'template') return null;
   if (!m.mediaUrl) return <span className="italic text-muted text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
   if (m.type === 'image' || m.type === 'sticker') return <a href={m.mediaUrl} target="_blank" rel="noreferrer"><img src={m.mediaUrl} alt="" className="rounded-md max-h-72 max-w-full object-contain mb-1" /></a>;
-  if (m.type === 'audio') return <audio controls preload="metadata" src={m.mediaUrl} className="max-w-[260px] h-10 mb-1" />;
+  if (m.type === 'audio') return <AudioMessage src={m.mediaUrl} mine={m.direction === 'out'} />;
   if (m.type === 'video') return <video controls preload="metadata" src={m.mediaUrl} className="rounded-md max-h-72 max-w-full mb-1" />;
   return (
     <a href={m.mediaUrl} target="_blank" rel="noreferrer" download={m.mediaName ?? undefined} className="flex items-center gap-2 rounded-md bg-black/5 px-2.5 py-2 mb-1 hover:bg-black/10">
