@@ -179,3 +179,30 @@ anexo comum: o atendente ainda revisa e clica em enviar. As variáveis `{{contac
 O anexo é enviado uma vez no cadastro (Configurações → Respostas rápidas) e reaproveitado
 em todos os envios — não sobe de novo a cada uso. A chave do storage nunca sai crua: a API
 devolve uma URL assinada e temporária, e recusa `mediaKey` de outro cliente.
+
+
+## Prévia antes de enviar mídia
+
+Escolher um arquivo **não envia nada**. Abre uma tela sobre o chat com o que foi escolhido, a
+legenda e, em imagem, as ferramentas de marcação. Antes, o arquivo subia no momento da
+escolha e a pessoa só percebia que pegou o errado depois de mandar — e aí já era mensagem
+gasta, cobrada e vista pelo contato.
+
+| Tipo | O que a prévia mostra |
+|---|---|
+| Imagem | a imagem, com rabisco (6 cores, 3 espessuras, desfazer/refazer/apagar) |
+| Vídeo | o vídeo com controles |
+| Áudio | o áudio com controles — inclusive o que acabou de ser gravado |
+| Documento | nome e aviso de que o contato recebe para baixar |
+
+O áudio gravado passa pela mesma prévia: dá para ouvir antes de mandar, em vez de descobrir
+depois que ficou ruim.
+
+**O desenho é achatado na imagem no momento de enviar**, na resolução original do arquivo — o
+WhatsApp recebe uma imagem só, não imagem mais camada. Os traços são guardados em coordenadas
+de 0 a 1, então não escorregam quando a janela muda de tamanho e a espessura acompanha a
+escala: traço fino na tela não sai grosso no arquivo. O resultado sai em PNG, porque JPEG
+borra marcação fina.
+
+Se o envio falhar, **a prévia continua aberta** com o arquivo e a legenda: o trabalho de
+marcar a imagem não se perde num erro de rede.

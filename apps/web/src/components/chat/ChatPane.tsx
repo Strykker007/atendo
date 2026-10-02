@@ -19,6 +19,7 @@ import { CloseModal } from './CloseModal';
 import { AudioRecorder } from './AudioRecorder';
 import { AudioMessage } from './AudioMessage';
 import { ContactSheet, ContactSummary } from './ContactSheet';
+import { MediaPreview, type Escolhido } from './MediaPreview';
 
 /** Tipos que a API aceita (ver ALLOWED em media.controller.ts). */
 const ACCEPT_ALL = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx';
@@ -61,6 +62,8 @@ export function ChatPane() {
   const [text, setText] = useState('');
   const [attachment, setAttachment] = useState<Upload | null>(null);
   const [uploading, setUploading] = useState(false);
+  // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
+  const [previa, setPrevia] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [accept, setAccept] = useState(ACCEPT_ALL);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -72,27 +75,29 @@ export function ChatPane() {
     setTimeout(() => fileRef.current?.click(), 0);
   }
 
-  /** Áudio gravado no navegador entra como anexo, igual a um arquivo escolhido. */
-  async function sendRecorded(file: File) {
-    setUploading(true);
-    try {
-      setAttachment(await uploadFile(file));
-    } catch (err) {
-      toast.err(err);
-    } finally {
-      setUploading(false);
-    }
+  /** Áudio gravado passa pela mesma prévia: dá para ouvir antes de mandar. */
+  function sendRecorded(file: File) {
+    setPrevia(file);
   }
 
-  async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+  /** Escolher arquivo NÃO envia: abre a prévia. Antes, subia direto e a pessoa só via que
+   *  tinha escolhido o arquivo errado depois de mandar — e aí já era mensagem gasta. */
+  function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (file) setPrevia(file);
+  }
+
+  /** Confirmou na prévia: sobe o arquivo (já com os rabiscos, se houver) e envia. */
+  async function enviarDaPrevia({ file, caption }: Escolhido) {
     setUploading(true);
     try {
-      setAttachment(await uploadFile(file));
+      const up = await uploadFile(file);
+      setPrevia(null);
+      await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName } });
+      if (status === 'waiting' && conv?.status === 'waiting') setFilterStatus('in_progress', true);
     } catch (err) {
-      toast.err(err);
+      toast.err(err); // a prévia continua aberta: o arquivo escolhido não se perde no erro
     } finally {
       setUploading(false);
     }
@@ -277,6 +282,16 @@ export function ChatPane() {
       </div>
 
       {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} />}
+
+      {/* prévia do que vai ser enviado, sobre o chat — nada sobe antes de confirmar */}
+      {previa && (
+        <MediaPreview
+          file={previa}
+          enviando={uploading || send.isPending}
+          onCancel={() => setPrevia(null)}
+          onConfirm={enviarDaPrevia}
+        />
+      )}
       <AppointmentModal open={scheduling} onClose={() => setScheduling(false)} contact={conv.contact} conversationId={conv.id} />
 
       {/* Composer */}
