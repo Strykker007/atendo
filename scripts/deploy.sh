@@ -23,9 +23,15 @@ rsync -az --delete -e "$SSH" \
   --exclude '.env.production' \
   ./ "$HOST:~/atendo/"
 
-echo "▶ Subindo a stack…"
+# A versão vai para o APP_VERSION do servidor: é o que o painel aberto compara para avisar
+# "saiu versão nova, atualize". Sem isso, o atendente roda o código de ontem sem saber.
+VERSION=$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)
+echo "▶ Subindo a stack (versão $VERSION)…"
 # shellcheck disable=SC2029
-$SSH "$HOST" 'cd ~/atendo && sudo docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build'
+$SSH "$HOST" "cd ~/atendo \
+  && (grep -q '^APP_VERSION=' .env.production || echo 'APP_VERSION=' >> .env.production) \
+  && sed -i 's|^APP_VERSION=.*|APP_VERSION=$VERSION|' .env.production \
+  && sudo docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build" 
 
 echo "▶ Estado dos serviços:"
 $SSH "$HOST" 'cd ~/atendo && sudo docker compose -f infra/docker-compose.prod.yml --env-file .env.production ps --format "table {{.Service}}\t{{.Status}}"'

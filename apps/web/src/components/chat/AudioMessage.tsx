@@ -71,11 +71,18 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
   const progresso = duracao > 0 ? atual / duracao : 0;
   const barras = picos?.length ? picos : Array(BARRAS).fill(0.35);
 
-  function alternar() {
+  async function alternar() {
     const a = audioRef.current;
     if (!a) return;
-    if (a.paused) void a.play();
-    else a.pause();
+    if (!a.paused) return a.pause();
+    try {
+      await a.play();
+    } catch {
+      // a primeira tentativa pode falhar com a mídia ainda não carregada; recarregar a fonte
+      // e tentar de novo é melhor do que o botão ficar mudo e o usuário achar que quebrou
+      a.load();
+      await a.play().catch(() => undefined);
+    }
   }
 
   /** Clicar na onda pula para aquele ponto. */
