@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Square, Trash2 } from 'lucide-react';
+import { Mic, Send, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 
@@ -16,20 +16,68 @@ function pickMime() {
 
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
+/** Quantas barrinhas a onda mostra. */
+const BARRAS = 28;
+
 /** Grava áudio pelo navegador e devolve como arquivo, pronto para enviar. */
 export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: File) => void; disabled?: boolean }) {
   const [gravando, setGravando] = useState(false);
   const [segundos, setSegundos] = useState(0);
+  const [niveis, setNiveis] = useState<number[]>(() => Array(BARRAS).fill(0));
+
   const rec = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const stream = useRef<MediaStream | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioCtx = useRef<AudioContext | null>(null);
+  const raf = useRef<number | null>(null);
+  /**
+   * Descarte real. `stop()` ainda dispara um último `dataavailable` DEPOIS de limparmos os
+   * pedaços — era por isso que "descartar" mandava o áudio assim mesmo. Quem decide é esta
+   * marca, lida dentro do `onstop`.
+   */
+  const descartado = useRef(false);
+
+  function soltarTudo() {
+    timer.current && clearInterval(timer.current);
+    raf.current && cancelAnimationFrame(raf.current);
+    stream.current?.getTracks().forEach((t) => t.stop());
+    audioCtx.current?.close().catch(() => undefined);
+    timer.current = null;
+    raf.current = null;
+    stream.current = null;
+    audioCtx.current = null;
+  }
 
   // solta o microfone se o componente sair do ar no meio da gravação
-  useEffect(() => () => {
-    timer.current && clearInterval(timer.current);
-    stream.current?.getTracks().forEach((t) => t.stop());
-  }, []);
+  useEffect(() => () => soltarTudo(), []);
+
+  /** Onda sonora a partir do microfone — reage à voz, não é animação decorativa. */
+  function ouvirNivel(src: MediaStream) {
+    const ctx = new AudioContext();
+    audioCtx.current = ctx;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    ctx.createMediaStreamSource(src).connect(analyser);
+    const buf = new Uint8Array(analyser.frequencyBinCount);
+    let ultimo = 0;
+
+    const tick = () => {
+      raf.current = requestAnimationFrame(tick);
+      const agora = performance.now();
+      if (agora - ultimo < 60) return; // ~16 quadros/s já parece contínuo e poupa bateria
+      ultimo = agora;
+
+      analyser.getByteTimeDomainData(buf);
+      // energia do trecho (RMS): silêncio fica perto de 0, voz sobe
+      let soma = 0;
+      for (const v of buf) soma += (v - 128) ** 2;
+      const rms = Math.sqrt(soma / buf.length) / 128;
+      const altura = Math.min(1, rms * 3.2);
+      setNiveis((n) => [...n.slice(1), altura]);
+    };
+    tick();
+  }
 
   async function começar() {
     const mime = pickMime();
@@ -41,22 +89,29 @@ export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: Fil
     } catch {
       return toast.err(new Error('Permissão de microfone negada. Libere nas configurações do navegador.'));
     }
+
     chunks.current = [];
+    descartado.current = false;
     const r = new MediaRecorder(stream.current, { mimeType: mime });
     r.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
     r.onstop = () => {
-      stream.current?.getTracks().forEach((t) => t.stop());
-      stream.current = null;
-      const blob = new Blob(chunks.current, { type: mime });
+      const pedaços = chunks.current;
+      chunks.current = [];
+      soltarTudo();
+      if (descartado.current) return; // o usuário jogou fora: nada é anexado
+      const blob = new Blob(pedaços, { type: mime });
       // descarta clique acidental: menos de 1s não é mensagem
       if (blob.size < 1200) return;
       const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : 'webm';
       onRecorded(new File([blob], `audio-${Date.now()}.${ext}`, { type: mime }));
     };
+
     rec.current = r;
     r.start();
     setGravando(true);
     setSegundos(0);
+    setNiveis(Array(BARRAS).fill(0));
+    ouvirNivel(stream.current);
     timer.current = setInterval(() => setSegundos((s) => {
       if (s >= 299) parar(); // teto de 5 min, para não gerar arquivo gigante sem querer
       return s + 1;
@@ -64,9 +119,11 @@ export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: Fil
   }
 
   function parar(descartar = false) {
+    descartado.current = descartar;
     timer.current && clearInterval(timer.current);
-    if (descartar) chunks.current = [];
-    rec.current?.state !== 'inactive' && rec.current?.stop();
+    timer.current = null;
+    if (rec.current && rec.current.state !== 'inactive') rec.current.stop();
+    else soltarTudo();
     setGravando(false);
   }
 
@@ -79,11 +136,27 @@ export function AudioRecorder({ onRecorded, disabled }: { onRecorded: (file: Fil
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-lg bg-danger-soft px-2 py-1">
-      <span className="w-2 h-2 rounded-full bg-danger animate-pulse" />
-      <span className="tnum font-mono text-[11px] text-danger-ink">{mmss(segundos)}</span>
-      <button type="button" onClick={() => parar(true)} className="text-danger-ink/70 hover:text-danger-ink p-0.5" title="Descartar"><Trash2 size={13} /></button>
-      <button type="button" onClick={() => parar()} className="inline-flex items-center gap-1 rounded-md bg-danger text-white px-2 py-0.5 text-[11px] font-medium" title="Parar e anexar"><Square size={10} /> Parar</button>
+    <span className="inline-flex items-center gap-2 rounded-lg bg-danger-soft px-2 py-1">
+      <button type="button" onClick={() => parar(true)} className="text-danger-ink/70 hover:text-danger-ink p-0.5" title="Descartar gravação">
+        <Trash2 size={14} />
+      </button>
+
+      <span className="tnum font-mono text-[11px] text-danger-ink shrink-0">{mmss(segundos)}</span>
+
+      {/* onda sonora: cada barra é um instante recente, a mais nova à direita */}
+      <span className="flex items-center gap-[2px] h-5" aria-hidden>
+        {niveis.map((n, i) => (
+          <span
+            key={i}
+            className="w-[2px] rounded-full bg-danger/70 transition-[height] duration-75"
+            style={{ height: `${Math.max(10, n * 100)}%` }}
+          />
+        ))}
+      </span>
+
+      <button type="button" onClick={() => parar()} className="inline-flex items-center gap-1 rounded-md bg-danger text-white px-2 py-0.5 text-[11px] font-medium" title="Encerrar e anexar">
+        <Send size={11} /> Pronto
+      </button>
     </span>
   );
 }
