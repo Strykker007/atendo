@@ -113,6 +113,9 @@ model AccessProfile {
   permissions String[]
   /// criado junto com o cliente; não pode ser apagado, para o cliente nunca ficar sem perfil
   isSystem    Boolean  @default(false)
+  /// perfil padrão que o cliente editou. Enquanto for falso, as permissões acompanham o
+  /// catálogo — senão um perfil criado hoje não ganharia as funcionalidades de amanhã.
+  customized  Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

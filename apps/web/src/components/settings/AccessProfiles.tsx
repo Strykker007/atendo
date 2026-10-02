@@ -42,14 +42,22 @@ export function AccessProfiles() {
 
       <div className="rounded-2xl bg-panel border border-line divide-y divide-line">
         {profiles.data?.map((p) => (
-          <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-            <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0 bg-accent-soft text-accent-ink"><Shield size={15} /></span>
+          <div key={p.id} className="flex items-start gap-3 px-4 py-3">
+            <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0 bg-accent-soft text-accent-ink mt-0.5"><Shield size={15} /></span>
             <div className="min-w-0 flex-1">
               <div className="font-medium text-ink flex items-center gap-1.5">
                 {p.name}
                 {p.isSystem && <span title="Perfil padrão — não pode ser excluído" className="text-faint"><Lock size={12} /></span>}
+                <span className="text-xs text-muted font-normal">· {p._count.users} pessoa{p._count.users === 1 ? '' : 's'}</span>
               </div>
-              <div className="text-xs text-muted truncate">{p.permissions.length} permissõe{p.permissions.length === 1 ? 'm' : 's'} · {p._count.users} pessoa{p._count.users === 1 ? '' : 's'}</div>
+              {/* o que o perfil libera, por extenso: a contagem sozinha não responde
+                  "o que esta pessoa pode fazer?", que é a pergunta de quem abre esta tela */}
+              <div className="mt-1 flex flex-wrap gap-1">
+                {p.permissions.length === 0 && <span className="text-xs text-muted">Nenhuma permissão — só atende as próprias conversas.</span>}
+                {p.permissions.map((perm) => (
+                  <span key={perm} className="text-[11px] rounded bg-field text-muted px-1.5 py-0.5">{PERMISSIONS[perm]}</span>
+                ))}
+              </div>
             </div>
             {canManage && (
               <>

@@ -39,7 +39,7 @@ export class ProfilesController {
     return this.prisma.accessProfile.findMany({
       where: { tenantId: u.tenantId },
       orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
-      select: { id: true, name: true, description: true, permissions: true, isSystem: true, _count: { select: { users: true } } },
+      select: { id: true, name: true, description: true, permissions: true, isSystem: true, customized: true, _count: { select: { users: true } } },
     });
   }
 
@@ -66,7 +66,8 @@ export class ProfilesController {
 
     const updated = await this.prisma.accessProfile.update({
       where: { id },
-      data: { name, description: dto.description?.trim() ?? current.description, permissions },
+      // a partir da primeira edição, o perfil padrão deixa de acompanhar o catálogo
+      data: { name, description: dto.description?.trim() ?? current.description, permissions, ...(permissions && current.isSystem && { customized: true }) },
     });
     this.permissions.invalidate();
     return updated;
@@ -87,15 +88,32 @@ export class ProfilesController {
   }
 
   /**
-   * Cria os perfis padrão do cliente se ainda não existirem. Idempotente, e feito aqui em vez
-   * de na migração para a lista de permissões viver num lugar só (o catálogo em TypeScript).
+   * Garante os perfis padrão do cliente e os mantém alinhados ao catálogo.
+   *
+   * Criar e esquecer não serve: quando uma permissão nova entra no catálogo (foi o caso de
+   * `campaigns.manage`), um perfil "Administrador" criado antes ficaria sem ela para sempre,
+   * e quem estivesse nesse perfil perderia a funcionalidade nova sem ninguém perceber.
+   *
+   * O alinhamento para em quem o cliente editou (`customized`): aí a escolha é dele.
    */
   private async ensureSystemProfiles(tenantId: string) {
-    const existing = await this.prisma.accessProfile.count({ where: { tenantId, isSystem: true } });
-    if (existing >= SYSTEM_PROFILES.length) return;
-    await this.prisma.accessProfile.createMany({
-      data: SYSTEM_PROFILES.map((p) => ({ tenantId, name: p.name, isSystem: true, permissions: DEFAULT_PERMISSIONS[p.role] as Permission[], description: `Perfil padrão de ${p.name.toLowerCase()}` })),
-      skipDuplicates: true,
-    });
+    const existentes = await this.prisma.accessProfile.findMany({ where: { tenantId, isSystem: true } });
+    const porNome = new Map(existentes.map((p) => [p.name, p]));
+
+    for (const { name, role } of SYSTEM_PROFILES) {
+      const esperado = DEFAULT_PERMISSIONS[role] as Permission[];
+      const atual = porNome.get(name);
+
+      if (!atual) {
+        await this.prisma.accessProfile
+          .create({ data: { tenantId, name, isSystem: true, permissions: esperado, description: `Perfil padrão de ${name.toLowerCase()}` } })
+          .catch(() => undefined); // corrida entre duas abas abrindo a tela ao mesmo tempo
+        continue;
+      }
+
+      if (atual.customized) continue;
+      const igual = atual.permissions.length === esperado.length && esperado.every((x) => atual.permissions.includes(x));
+      if (!igual) await this.prisma.accessProfile.update({ where: { id: atual.id }, data: { permissions: esperado } });
+    }
   }
 }
