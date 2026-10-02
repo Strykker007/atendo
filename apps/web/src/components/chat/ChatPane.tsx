@@ -20,6 +20,7 @@ import { AudioRecorder } from './AudioRecorder';
 import { AudioMessage } from './AudioMessage';
 import { ContactSheet, ContactSummary } from './ContactSheet';
 import { MediaPreview, type Escolhido } from './MediaPreview';
+import { ImageViewer } from './ImageViewer';
 
 /** Tipos que a API aceita (ver ALLOWED em media.controller.ts). */
 const ACCEPT_ALL = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx';
@@ -64,6 +65,10 @@ export function ChatPane() {
   const [uploading, setUploading] = useState(false);
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
   const [previa, setPrevia] = useState<File | null>(null);
+  // imagens desta conversa, na ordem em que aparecem: as setas do visualizador andam por elas
+  const imagens = (messages.data ?? []).filter((m) => (m.type === 'image' || m.type === 'sticker') && m.mediaUrl).map((m) => ({ url: m.mediaUrl!, nome: m.mediaName }));
+  const [vendoImagem, setVendoImagem] = useState<string | null>(null);
+  const indiceImagem = imagens.findIndex((i) => i.url === vendoImagem);
   const fileRef = useRef<HTMLInputElement>(null);
   const [accept, setAccept] = useState(ACCEPT_ALL);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -277,11 +282,20 @@ export function ChatPane() {
             ))}
           </div>
         )}
-        {messages.data?.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} />)}
+        {messages.data?.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} />)}
         <div ref={bottomRef} />
       </div>
 
       {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} />}
+
+      {vendoImagem && indiceImagem >= 0 && (
+        <ImageViewer
+          imagens={imagens}
+          indice={indiceImagem}
+          onIndice={(i) => setVendoImagem(imagens[i]?.url ?? null)}
+          onClose={() => setVendoImagem(null)}
+        />
+      )}
 
       {/* prévia do que vai ser enviado, sobre o chat — nada sobe antes de confirmar */}
       {previa && (
@@ -375,7 +389,7 @@ export function ChatPane() {
   );
 }
 
-function Bubble({ m, canResend }: { m: Message; canResend: boolean }) {
+function Bubble({ m, canResend, onVerImagem }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void }) {
   const out = m.direction === 'out';
   const resend = useResend();
   if (m.internal) {
@@ -392,7 +406,7 @@ function Bubble({ m, canResend }: { m: Message; canResend: boolean }) {
   return (
     <div className={cn('flex', out ? 'justify-end' : 'justify-start')}>
       <div className={cn('max-w-[72%] px-2.5 py-1.5 text-[13px] shadow-sm', out ? 'bg-chat-out text-chat-out-ink rounded-xl rounded-br-sm' : 'bg-chat-in text-chat-in-ink rounded-xl rounded-bl-sm')}>
-        <MediaBody m={m} />
+        <MediaBody m={m} onVerImagem={onVerImagem} />
         {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
         <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>
           {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -414,10 +428,13 @@ function Bubble({ m, canResend }: { m: Message; canResend: boolean }) {
 }
 
 /** Corpo de mídia da bolha. Sem mediaUrl ainda (download em andamento) mostra placeholder. */
-function MediaBody({ m }: { m: Message }) {
+function MediaBody({ m, onVerImagem }: { m: Message; onVerImagem?: (url: string) => void }) {
   if (m.type === 'text' || m.type === 'template') return null;
   if (!m.mediaUrl) return <span className="italic text-muted text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
-  if (m.type === 'image' || m.type === 'sticker') return <a href={m.mediaUrl} target="_blank" rel="noreferrer"><img src={m.mediaUrl} alt="" className="rounded-md max-h-72 max-w-full object-contain mb-1" /></a>;
+  // abre por cima, não em aba nova: abrir fora tirava o atendente da conversa
+  if (m.type === 'image' || m.type === 'sticker') {
+    return <img src={m.mediaUrl} alt="" onClick={() => onVerImagem?.(m.mediaUrl!)} className="rounded-md max-h-72 max-w-full object-contain mb-1 cursor-zoom-in" />;
+  }
   if (m.type === 'audio') return <AudioMessage src={m.mediaUrl} mine={m.direction === 'out'} />;
   if (m.type === 'video') return <video controls preload="metadata" src={m.mediaUrl} className="rounded-md max-h-72 max-w-full mb-1" />;
   return (

@@ -206,3 +206,15 @@ borra marcação fina.
 
 Se o envio falhar, **a prévia continua aberta** com o arquivo e a legenda: o trabalho de
 marcar a imagem não se perde num erro de rede.
+
+
+## Ver imagem recebida
+
+Clicar numa imagem do histórico abre um visualizador **sobre o chat**, não uma aba nova:
+abrir fora tirava o atendente da conversa, que depois voltava e tinha de achar o lugar de
+novo.
+
+Fecha com `Esc` ou clique no fundo — **clicar na imagem não fecha**, senão olhar de perto
+fecharia sem querer. As setas (e `←` / `→`) percorrem as outras imagens da mesma conversa,
+que é como se vê um comprovante seguido da foto do produto sem ficar fechando e reabrindo.
+O botão de baixar continua disponível para quem quer o arquivo.
