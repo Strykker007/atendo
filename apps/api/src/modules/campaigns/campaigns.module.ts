@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { TenantsModule } from '../tenants/tenants.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -80,7 +81,7 @@ class CampaignsController {
 }
 
 @Module({
-  imports: [AuthModule, TenantsModule, WhatsAppModule, ConversationsModule, BullModule.registerQueue({ name: QUEUE_CAMPAIGN })],
+  imports: [AuthModule, BillingModule, TenantsModule, WhatsAppModule, ConversationsModule, BullModule.registerQueue({ name: QUEUE_CAMPAIGN })],
   controllers: [CampaignsController],
   providers: [CampaignsService, CampaignProcessor],
   exports: [CampaignsService],
