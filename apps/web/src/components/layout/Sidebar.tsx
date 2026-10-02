@@ -61,10 +61,15 @@ export function Sidebar() {
       {/* recolher fica no topo, ao lado da marca: no rodapé ficava perdido no meio da gaveta
           e as pessoas não achavam */}
       <div className={cn('h-12 flex items-center gap-2.5 px-3.5', collapsed && 'justify-center px-0')}>
-        <span className="w-7 h-7 rounded-lg bg-accent grid place-items-center text-white font-display font-bold text-sm shrink-0">A</span>
-        {!collapsed && (
+        {/* a logo é escura no original e o menu tem fundo escuro: a versão `-escuro` tem o
+            texto em branco e mantém o vermelho da marca. Recolhido fica só o robô. */}
+        {collapsed ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src="/marca/vogo-icone.png" alt="VOGO.CHAT" className="h-7 w-auto shrink-0" />
+        ) : (
           <>
-            <span className="font-display font-semibold text-[17px] text-white tracking-tight flex-1">Atendo</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/marca/vogo-escuro.png" alt="VOGO.CHAT" className="h-6 w-auto flex-1 object-contain object-left" />
             <button onClick={toggleSidebar} className="p-1 -mr-1 rounded-md text-side-ink/60 hover:text-white hover:bg-white/5" title="Recolher menu">
               <PanelLeftClose size={17} />
             </button>

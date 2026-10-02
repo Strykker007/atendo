@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock } from 'lucide-react';
+import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { type QuickReplyItem, useFlows, useStartFlow, useHasFeature, useActiveRun } from '@/lib/hooks';
@@ -23,8 +23,67 @@ export function QuickRepliesPanel() {
           <button onClick={() => setTab('flows')} className={cn('rounded-md py-1 flex items-center justify-center gap-1.5', tab === 'flows' ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}><Workflow size={13} /> Fluxos</button>
         </div>
       </div>
+      <DadosDaConversa />
       {tab === 'replies' ? <RepliesTab /> : <FlowsTab />}
     </>
+  );
+}
+
+/**
+ * Dados da conversa aberta, à mão.
+ *
+ * Durante o atendimento a pessoa precisa do nome, do telefone ou do e-mail do contato para
+ * escrever a mensagem, e hoje isso obriga a abrir a ficha, ler, lembrar e voltar — ou pior,
+ * digitar de cabeça e errar o e-mail. Aqui um clique joga o valor no campo de mensagem, já
+ * resolvido: o que entra é "Tiago", não `{{contact.name}}`.
+ *
+ * Fica fechável porque divide espaço com a lista de respostas, que é o que mais se usa.
+ */
+function DadosDaConversa() {
+  const [aberto, setAberto] = usePersistedState('painel-dados', true);
+  const { conversationId } = useUI();
+  const conv = useConversation(conversationId).data;
+  const me = useMe();
+  if (!conv) return null;
+
+  const c = conv.contact;
+  const primeiro = (c.name ?? '').trim().split(/\s+/)[0] || null;
+  const linhas: { rotulo: string; valor: string | null | undefined }[] = [
+    { rotulo: 'Nome', valor: c.name },
+    { rotulo: 'Primeiro nome', valor: primeiro && primeiro !== c.name ? primeiro : null },
+    { rotulo: 'Telefone', valor: c.phone ? `+${c.phone}` : null },
+    { rotulo: 'E-mail', valor: c.email },
+    { rotulo: 'Endereço', valor: c.address },
+    { rotulo: 'Atendente', valor: me.data?.name },
+  ];
+  const uteis = linhas.filter((l) => !!l.valor);
+  if (uteis.length === 0) return null;
+
+  const inserir = (v: string) => window.dispatchEvent(new CustomEvent('atendo:insert-text', { detail: v }));
+  const copiar = (v: string) => navigator.clipboard?.writeText(v).then(() => toast.ok('Copiado')).catch(() => undefined);
+
+  return (
+    <div className="border-b border-line">
+      <button onClick={() => setAberto((a) => !a)} className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint hover:text-ink">
+        {aberto ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        Dados da conversa
+      </button>
+      {aberto && (
+        <ul className="pb-1.5">
+          {uteis.map((l) => (
+            <li key={l.rotulo} className="group flex items-center gap-2 pl-6 pr-2 py-0.5 hover:bg-field">
+              <span className="text-[10.5px] text-faint w-20 shrink-0">{l.rotulo}</span>
+              <button onClick={() => inserir(l.valor!)} title="Inserir no campo de mensagem" className="text-[12px] text-ink truncate flex-1 text-left hover:text-accent-ink">
+                {l.valor}
+              </button>
+              <button onClick={() => copiar(l.valor!)} title="Copiar" className="opacity-0 group-hover:opacity-100 text-faint hover:text-ink shrink-0">
+                <Copy size={12} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

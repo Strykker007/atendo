@@ -25,6 +25,8 @@ RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=build --chown=app:app /app/apps/web/.next-build/standalone ./
 COPY --from=build --chown=app:app /app/apps/web/.next-build/static ./apps/web/.next-build/static
+# o `standalone` do Next NÃO leva o public/ junto: sem esta linha a logo volta 404 em produção
+COPY --from=build --chown=app:app /app/apps/web/public ./apps/web/public
 USER app
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]

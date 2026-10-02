@@ -121,6 +121,8 @@ Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `c
 - Cabeçalho do chat: **pill de status** com a mesma cor da faixa.
 - Menu: item *Conversas* com badge laranja = quantas aguardando.
 
+Em **/respostas** as pastas também abrem e fecham, mas o que fica guardado são as **fechadas**, não as abertas — o inverso do painel do chat, e de propósito: no chat o atendente procura duas respostas entre muitas, na página de gestão a pessoa veio ver o catálogo. Assim a página nasce mostrando tudo.
+
 ## Seleção em massa (lista de conversas)
 
 Botão **Selecionar** acima da lista liga o modo: cada linha ganha caixa de marcação, clicar marca em vez de abrir, e a barra traz *Todos (n)*, a contagem e **Encerrar**.
@@ -130,6 +132,18 @@ Duas decisões que não são estéticas:
 - **Só vale o que está visível** (`marcadosVisiveis`): o que foi marcado e sumiu do filtro não entra no pedido.
 
 O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseModal`, o porquê está no cabeçalho do arquivo. A resposta traz `ignored`, e o toast diz o número: alguém da equipe pode ter encerrado no meio do caminho.
+
+## Marca
+
+A logo fica em `apps/web/public/marca/`, em três recortes: `vogo.png` (original, fundo claro), `vogo-escuro.png` (texto em branco, para o menu lateral, que é escuro nos dois temas) e `vogo-icone.png` (só o robô, para o menu recolhido). A versão escura é gerada do original clareando os pixels **sem cor** — o vermelho da marca fica intacto e o "CHAT", que é preto, sumiria no fundo do menu.
+
+Login, telas de convite/recuperação, título da aba e aviso de versão ainda dizem "Atendo".
+
+## Painel direito: dados da conversa
+
+Abaixo das abas Mensagens/Fluxos, um bloco com nome, primeiro nome, telefone, e-mail, endereço e atendente. Clicar insere o valor no campo de mensagem **já resolvido** (vai "Tiago", não `{{contact.name}}`); o ícone ao lado copia. Campo sem valor não aparece.
+
+Serve para o que acontece o tempo todo no atendimento: precisar do e-mail ou do telefone no meio da frase e ter que abrir a ficha, ler, lembrar e voltar — ou digitar de cabeça e errar. O bloco fecha, porque divide espaço com a lista de respostas.
 
 ## Conversa longa (carregar o passado)
 

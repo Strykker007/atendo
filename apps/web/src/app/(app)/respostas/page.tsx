@@ -1,11 +1,13 @@
 'use client';
 import { useState } from 'react';
-import { Paperclip, X, Plus, Pencil, Trash2, Folder, Zap, GripVertical } from 'lucide-react';
+import { Paperclip, X, Plus, Pencil, Trash2, Folder, FolderOpen, Zap, GripVertical, ChevronDown, ChevronRight } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
+import { usePersistedState } from '@/lib/persisted';
+import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { uploadFile, mediaTypeOf, useCan, useMe, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, type QuickReplyItem, type Folder as FolderT } from '@/lib/hooks';
 
@@ -33,6 +35,16 @@ export default function RespostasPage() {
   const [replyModal, setReplyModal] = useState<(Partial<QuickReplyItem> & { folderId: string; title: string; body: string }) | null>(null);
   const [uploadingReply, setUploadingReply] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: 'folder' | 'reply'; id: string; name: string; count?: number } | null>(null);
+  /**
+   * Guarda as pastas FECHADAS, não as abertas.
+   *
+   * É o inverso do painel do chat, e de propósito: lá o atendente quer achar duas respostas
+   * entre muitas, aqui a pessoa veio ver o catálogo. Guardando as fechadas, a página nasce
+   * mostrando tudo e quem tem muitas pastas fecha as que não interessam — e encontra assim
+   * na próxima vez.
+   */
+  const [fechadas, setFechadas] = usePersistedState<string[]>('pastas-respostas-fechadas', []);
+  const alternar = (id: string) => setFechadas((f) => (f.includes(id) ? f.filter((x) => x !== id) : [...f, id]));
 
   async function saveFolder(e: React.FormEvent) {
     e.preventDefault();
@@ -74,9 +86,12 @@ export default function RespostasPage() {
       <div className="space-y-4">
         {folders.data?.map((f) => (
           <div key={f.id} className="rounded-2xl bg-panel border border-line">
-            <div className="flex items-center gap-2 px-5 py-3 border-b border-line">
-              <Folder size={16} className="text-warn" />
-              <span className="font-medium text-sm flex-1">{f.name}</span>
+            <div className={cn('flex items-center gap-2 px-5 py-3', !fechadas.includes(f.id) && 'border-b border-line')}>
+              <button onClick={() => alternar(f.id)} className="flex items-center gap-2 flex-1 min-w-0 text-left" title={fechadas.includes(f.id) ? 'Abrir pasta' : 'Fechar pasta'}>
+                {fechadas.includes(f.id) ? <ChevronRight size={14} className="text-faint shrink-0" /> : <ChevronDown size={14} className="text-faint shrink-0" />}
+                {fechadas.includes(f.id) ? <Folder size={16} className="text-warn shrink-0" /> : <FolderOpen size={16} className="text-warn shrink-0" />}
+                <span className="font-medium text-sm truncate">{f.name}</span>
+              </button>
               <span className="text-xs text-faint mr-2">{f.replies.length}</span>
               {podeEditar && <>
                 <button onClick={() => setReplyModal({ folderId: f.id, title: '', body: '' })} className="text-xs rounded-lg border border-line px-2 py-1 text-ink hover:bg-field"><Plus size={12} className="inline -mt-0.5" /> Resposta</button>
@@ -84,8 +99,8 @@ export default function RespostasPage() {
                 <button onClick={() => setConfirm({ kind: 'folder', id: f.id, name: f.name, count: f.replies.length })} className="text-faint hover:text-danger p-1"><Trash2 size={14} /></button>
               </>}
             </div>
-            {f.replies.length === 0 && <p className="px-5 py-3 text-xs text-faint">Pasta vazia.</p>}
-            <ul className="divide-y divide-line">
+            {!fechadas.includes(f.id) && f.replies.length === 0 && <p className="px-5 py-3 text-xs text-faint">Pasta vazia.</p>}
+            <ul className={cn('divide-y divide-line', fechadas.includes(f.id) && 'hidden')}>
               {f.replies.map((r: Reply) => (
                 <li key={r.id} className="flex items-start gap-3 px-5 py-3">
                   <GripVertical size={14} className="text-faint mt-1 shrink-0" />
