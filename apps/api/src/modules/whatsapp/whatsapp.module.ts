@@ -32,6 +32,6 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
   ],
   controllers: [NumbersController, WebhooksController],
   providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor, SendPacer],
-  exports: [ProviderRegistry, NumbersService, BullModule],
+  exports: [ProviderRegistry, NumbersService, SendPacer, BullModule],
 })
 export class WhatsAppModule {}
