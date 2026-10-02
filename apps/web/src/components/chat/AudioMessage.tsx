@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { chaveDe, gravarOnda, lerOnda, type Onda } from '@/lib/wave-cache';
 
 /**
  * Áudio com onda sonora, como no WhatsApp.
@@ -10,11 +11,51 @@ import { cn } from '@/lib/utils';
  * trecho. Desenhar barras aleatórias seria mais barato e pareceria igual, mas mentiria sobre
  * o conteúdo — num áudio com silêncio no meio a pessoa veria movimento onde não há som.
  *
- * A decodificação só acontece no primeiro play: numa conversa com dezenas de áudios, decodificar
- * tudo ao abrir travaria a aba por segundos.
+ * A onda aparece **antes** de tocar, como no WhatsApp: a decodificação começa junto com a
+ * mensagem, não no play. Para não engasgar um histórico com dezenas de áudios, passa por uma
+ * fila de duas por vez e o resultado fica em cache.
+ *
+ * Decodificar antes do play também evita o problema inverso: criar contexto de áudio com a
+ * reprodução em andamento silenciava o primeiro play.
  */
 
 const BARRAS = 42;
+
+/**
+ * Dois níveis de cache. O da memória evita recalcular entre renders; o do navegador
+ * (`wave-cache`) evita recalcular entre aberturas da conversa e entre sessões — era o que
+ * fazia a onda ser reconstruída do zero toda vez que se voltava para a mesma conversa.
+ */
+const cache = new Map<string, Onda>();
+
+function doCache(src: string): Onda | null {
+  const chave = chaveDe(src);
+  const memoria = cache.get(chave);
+  if (memoria) return memoria;
+  const salvo = lerOnda(src);
+  if (salvo) cache.set(chave, salvo);
+  return salvo;
+}
+
+/**
+ * Fila com duas decodificações por vez. Sem limite, abrir uma conversa com 30 áudios dispara
+ * 30 downloads e 30 decodificações simultâneas, e a aba engasga justamente quando a pessoa
+ * está lendo as mensagens.
+ */
+let rodando = 0;
+const espera: (() => void)[] = [];
+/** Decodificações em andamento, por arquivo. */
+const emVoo = new Map<string, Promise<Onda>>();
+async function comVaga<T>(fn: () => Promise<T>): Promise<T> {
+  if (rodando >= 2) await new Promise<void>((r) => espera.push(r));
+  rodando++;
+  try {
+    return await fn();
+  } finally {
+    rodando--;
+    espera.shift()?.();
+  }
+}
 
 const mmss = (s: number) => (Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00');
 
@@ -45,28 +86,56 @@ async function extrairPicos(url: string, barras: number): Promise<{ picos: numbe
   return { picos: picos.map((p) => p / maior), duracao: audio.duration };
 }
 
+/**
+ * Uma decodificação por arquivo, compartilhada por quem precisar.
+ *
+ * Em desenvolvimento o React monta o componente duas vezes; com uma trava por instância, a
+ * segunda montagem desistia e o resultado da primeira era descartado — a onda ficava lisa
+ * para sempre. Compartilhando a promessa, as duas montagens recebem o mesmo resultado.
+ */
+function obterPicos(src: string) {
+  const chave = chaveDe(src);
+  const pronto = doCache(src);
+  if (pronto) return Promise.resolve(pronto);
+
+  let p = emVoo.get(chave);
+  if (!p) {
+    p = comVaga(() => extrairPicos(src, BARRAS)).then(
+      (r) => { cache.set(chave, r); gravarOnda(src, r); emVoo.delete(chave); return r; },
+      (e) => { emVoo.delete(chave); throw e; },
+    );
+    emVoo.set(chave, p);
+  }
+  return p;
+}
+
 export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [picos, setPicos] = useState<number[] | null>(null);
+  const [picos, setPicos] = useState<number[] | null>(() => doCache(src)?.picos ?? null);
   const [tocando, setTocando] = useState(false);
   const [atual, setAtual] = useState(0);
-  const [duracao, setDuracao] = useState(0);
-  const decodificando = useRef(false);
+  const [duracao, setDuracao] = useState(() => doCache(src)?.duracao ?? 0);
 
-  // decodifica uma vez, no primeiro play
+  // a onda já nasce pronta: decodifica junto com a mensagem, sem esperar o play.
+  // Tentei disparar por IntersectionObserver para economizar, mas ele reporta "fora da tela"
+  // para mensagens visíveis dentro da área rolável do chat — e a onda ficava lisa para sempre.
   useEffect(() => {
-    if (!tocando || picos || decodificando.current) return;
-    decodificando.current = true;
-    extrairPicos(src, BARRAS)
+    if (picos) return;
+    let vivo = true;
+
+    void obterPicos(src)
       .then(({ picos: p, duracao: d }) => {
+        if (!vivo) return;
         setPicos(p);
-        // só assume se o elemento não souber: um arquivo com duração no cabeçalho é mais confiável
+        // só assume se o elemento não souber: arquivo com duração no cabeçalho é mais confiável
         setDuracao((atual) => (Number.isFinite(atual) && atual > 0 ? atual : d));
       })
       // sem a onda o áudio continua tocando: formato que o navegador não decodifica, link
-      // expirado, ou arquivo grande demais não podem quebrar a mensagem
-      .catch(() => setPicos([]));
-  }, [tocando, picos, src]);
+      // expirado ou arquivo grande demais não podem quebrar a mensagem
+      .catch(() => vivo && setPicos([]));
+
+    return () => { vivo = false; };
+  }, [picos, src]);
 
   const progresso = duracao > 0 ? atual / duracao : 0;
   const barras = picos?.length ? picos : Array(BARRAS).fill(0.35);
