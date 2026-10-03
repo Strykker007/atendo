@@ -18,13 +18,13 @@ export function ProviderForm({ value, onChange, config, onConfig }: { value: Pro
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <ProviderCard active={value === 'evolution'} onClick={() => onChange('evolution')} icon={<QrCode size={20} />} title="Não-oficial (QR code)" desc="Qualquer número. Conecta em 2 min. Grátis por mensagem." />
-        <ProviderCard active={value === 'meta'} onClick={() => onChange('meta')} icon={<ShieldCheck size={20} />} title="Oficial (Meta Cloud API)" desc="Número de negócio verificado. Sem risco de banimento." />
+        <ProviderCard active={value === 'meta'} onClick={() => onChange('meta')} icon={<ShieldCheck size={20} />} title="Oficial (Meta Cloud API)" desc="Número de negócio verificado pela Meta, com suporte oficial." />
       </div>
 
       {value === 'evolution' ? (
         <div className="flex gap-2 rounded-lg bg-warn-soft border border-warn/30 p-3 text-xs text-warn-ink">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-          <span>Este modo emula o WhatsApp Web e <b>viola os termos da Meta</b>. Existe risco real de banimento do número, principalmente com disparos em massa. Use para atendimento receptivo.</span>
+          <span>Este modo conecta lendo o QR Code, como no WhatsApp Web: o celular precisa continuar com a conta ativa. Indicado para atendimento do dia a dia.</span>
         </div>
       ) : (
         <div className="space-y-3">

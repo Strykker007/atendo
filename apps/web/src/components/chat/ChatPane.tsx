@@ -4,12 +4,12 @@ import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightL
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, PanelRightOpen, PanelRightClose, CheckCircle2, RotateCcw, History } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus } from '@/lib/hooks';
-import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, useMarkRead, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
@@ -27,7 +27,7 @@ import { ImageViewer } from './ImageViewer';
 const ACCEPT_ALL = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx';
 
 export function ChatPane() {
-  const { conversationId, setConversation, status, setStatus: setFilterStatus, rightPanelOpen, toggleRightPanel } = useUI();
+  const { conversationId, setConversation, status, setStatus: setFilterStatus } = useUI();
   const conv = useConversation(conversationId).data;
   const me = useMe();
   const agents = useAgents();
@@ -118,6 +118,18 @@ export function ChatPane() {
 
   // trocar de conversa recomeça: a próxima leva de mensagens é de outra pessoa
   useEffect(() => { noFim.current = true; alturaAntes.current = 0; }, [conversationId]);
+
+  /**
+   * Abriu a conversa = leu. Dispara uma vez por conversa aberta; mensagem que chegar depois,
+   * com a conversa já na tela, também entra como lida — é o que o atendente espera, já que
+   * ele está olhando para ela.
+   */
+  const marcarLida = useMarkRead();
+  useEffect(() => {
+    if (!conversationId) return;
+    marcarLida.mutate(conversationId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, mensagens.length]);
 
   /**
    * Manter o fim da conversa à vista.
@@ -239,8 +251,12 @@ export function ChatPane() {
 
   return (
     <>
-      {/* Cabeçalho: contato, tags, ações de status */}
-      <header className="bg-panel border-b border-line px-3 py-1.5 flex items-center gap-2 min-w-0">
+      {/* Cabeçalho: contato, tags, ações de status.
+          `flex-wrap`: a largura aqui não depende do tamanho da tela, e sim de o painel da
+          direita estar aberto — com ele aberto as ações estouravam e o "Encerrar" ficava
+          escondido atrás da borda do painel. Quebrar linha adapta à largura real; esconder
+          botão por breakpoint não resolveria, porque o breakpoint não sabe do painel. */}
+      <header className="bg-panel border-b border-line px-3 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
         <button className="md:hidden text-muted" onClick={() => setConversation(null)}>
           <ArrowLeft size={20} />
         </button>
@@ -298,9 +314,6 @@ export function ChatPane() {
             <span className="hidden sm:inline">Reabrir</span>
           </Button>
         )}
-        <button onClick={toggleRightPanel} className="hidden xl:block text-faint hover:text-ink" title="Respostas rápidas">
-          {rightPanelOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
-        </button>
       </header>
 
       <ContactSummary contact={conv.contact} onOpen={() => setFichaAberta(true)} />

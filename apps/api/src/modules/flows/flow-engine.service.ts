@@ -57,6 +57,17 @@ export class FlowEngineService {
       data: { tenantId: flow.tenantId, flowId: flow.id, conversationId, currentNodeId: startNode.id, startedById, vars: {} },
     });
     await this.markConversation(conversationId, run.id);
+    /**
+     * Disparado por uma pessoa, o fluxo tira a conversa da fila.
+     *
+     * Antes o atendente mandava o fluxo rodar e a conversa continuava em "aguardando", como se
+     * ninguém tivesse mexido: outro atendente pegava a mesma pessoa e os dois falavam junto
+     * com o robô. Quem apertou o botão assumiu o atendimento — o robô está respondendo no
+     * lugar dele, não no lugar de ninguém.
+     */
+    if (startedById && conv.status === 'waiting') {
+      await this.conversations.setStatus(conv.tenantId, conversationId, 'in_progress', startedById);
+    }
     await this.advance(run.id);
     return run;
   }

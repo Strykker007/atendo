@@ -17,7 +17,6 @@ const OWNER_ITEMS = [
 ];
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
-  { href: '/numeros', label: 'Números', icon: Smartphone },
   { href: '/agenda', label: 'Agenda', icon: CalendarDays },
   { href: '/fluxos', label: 'Fluxos', icon: Workflow },
   { href: '/respostas', label: 'Respostas', icon: Zap },

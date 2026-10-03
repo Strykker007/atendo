@@ -46,6 +46,6 @@ export const useUI = create<UIState>()(
       setAssignee: (assigneeId) => set({ assigneeId }),
       setConversation: (conversationId) => set({ conversationId }),
     }),
-    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, numberId: s.numberId }) },
+    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, numberId: s.numberId, conversationId: s.conversationId, status: s.status }) },
   ),
 );

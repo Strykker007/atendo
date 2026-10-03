@@ -3,8 +3,24 @@
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 let accessToken: string | null = null;
 
+/**
+ * Quem precisa saber que o token chegou.
+ *
+ * O socket do tempo real é montado uma vez, na montagem do layout, e naquele instante o token
+ * ainda não existe: ele vem de uma chamada de refresh. Sem este aviso, o socket simplesmente
+ * não era criado — e o painel só recebia mensagem nova depois de um F5 que, por sorte de
+ * tempo, caísse do outro lado da corrida.
+ */
+const ouvintes = new Set<(t: string | null) => void>();
+export const onAccessToken = (fn: (t: string | null) => void) => {
+  ouvintes.add(fn);
+  return () => ouvintes.delete(fn);
+};
+
 export const setAccessToken = (t: string | null) => {
+  const mudou = accessToken !== t;
   accessToken = t;
+  if (mudou) for (const fn of ouvintes) fn(t);
 };
 
 const IMPERSONATE_KEY = 'atendo-impersonate';

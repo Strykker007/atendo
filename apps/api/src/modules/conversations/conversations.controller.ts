@@ -3,6 +3,7 @@ import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNumber, IsOptiona
 import { Transform } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService } from './conversations.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -68,7 +69,7 @@ class TagsDto {
 @Controller('conversations')
 @UseGuards(JwtAuthGuard, PermissionsGuard, ConversationScopeGuard)
 export class ConversationsController {
-  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService) {}
+  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService) {}
 
   @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: ListDto) {
@@ -143,9 +144,13 @@ export class ConversationsController {
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
     const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason } : undefined);
-    // fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar)
-    if (dto.status === 'closed' && dto.flowId) {
-      await this.flows.startOnClose(u.tenantId, id, dto.flowId).catch(() => undefined);
+    // Fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar).
+    // Sem escolha no modal, vale o fluxo padrão configurado — é o caso comum: pesquisa de
+    // satisfação que precisa sair em TODO encerramento, e depender de alguém lembrar de
+    // escolher na hora é o mesmo que não existir.
+    if (dto.status === 'closed') {
+      const padrao = dto.flowId ?? (await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { onCloseFlowId: true } }))?.onCloseFlowId;
+      if (padrao) await this.flows.startOnClose(u.tenantId, id, padrao).catch(() => undefined);
     }
     return conv;
   }

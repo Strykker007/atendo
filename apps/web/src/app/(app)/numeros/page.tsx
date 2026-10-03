@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
-import { useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, type NumberItem } from '@/lib/hooks';
+import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, type NumberItem } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
@@ -19,6 +19,8 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 export default function NumerosPage() {
+  // a API já recusava sem esta permissão; a tela é que continuava oferecendo o botão
+  const podeGerenciar = useCan('numbers.manage');
   const numbers = useNumbers();
   const usage = useUsage();
   const connect = useConnectNumber();
@@ -76,7 +78,7 @@ export default function NumerosPage() {
               Cada número é um canal de atendimento. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} números.</>}
             </p>
           </div>
-          <Button onClick={() => setCreating(true)} disabled={max !== undefined && count >= max} icon={<Plus size={16} />}>Novo número</Button>
+          {podeGerenciar && <Button onClick={() => setCreating(true)} disabled={max !== undefined && count >= max} icon={<Plus size={16} />}>Novo número</Button>}
         </header>
 
         {numbers.isLoading && <SkeletonCards count={2} />}
@@ -119,9 +121,11 @@ export default function NumerosPage() {
                   {(n.provider === 'meta' || n.status === 'connected') && (
                     <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => reconnect(n)} loading={busyId === n.id && connect.isPending} loadingText="Validando…">Revalidar</Button>
                   )}
-                  <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)} disabled={busyId === n.id}>Trocar provider</Button>
-                  <Button size="sm" variant="ghost" icon={<Power size={14} />} onClick={() => toggleActive(n)} loading={busyId === n.id && update.isPending}>{n.isActive ? 'Desativar' : 'Ativar'}</Button>
-                  <Button size="sm" variant="subtle" icon={<Trash2 size={14} />} onClick={() => setDeleting(n)} disabled={busyId === n.id}>Excluir</Button>
+                  {podeGerenciar && <>
+                    <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)} disabled={busyId === n.id}>Trocar provider</Button>
+                    <Button size="sm" variant="ghost" icon={<Power size={14} />} onClick={() => toggleActive(n)} loading={busyId === n.id && update.isPending}>{n.isActive ? 'Desativar' : 'Ativar'}</Button>
+                    <Button size="sm" variant="subtle" icon={<Trash2 size={14} />} onClick={() => setDeleting(n)} disabled={busyId === n.id}>Excluir</Button>
+                  </>}
                 </div>
               </div>
             );

@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { BusinessHoursSection } from '@/components/settings/BusinessHoursSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
-import { useMe, useChangePassword } from '@/lib/hooks';
+import Link from 'next/link';
+import { Smartphone } from 'lucide-react';
+import { useMe, useChangePassword, useNumbers } from '@/lib/hooks';
 
 /** Configurações do cliente: aparência, horário, fluxos padrão e segurança. As respostas
  *  rápidas saíram daqui e viraram módulo próprio (/respostas). */
@@ -23,6 +25,7 @@ export default function ConfiguracoesPage() {
     <PageShell width="max-w-4xl">
       <PageHeader title="Configurações" subtitle="Aparência do painel, horário de funcionamento e segurança." />
 
+      {!isOwner && <NumbersSection />}
       <AppearanceSection />
       {!isOwner && <BusinessHoursSection />}
       {!isOwner && <DefaultFlowsSection />}
@@ -82,6 +85,30 @@ function SecuritySection() {
         {mismatch && <p className="text-xs text-danger sm:col-span-3">As senhas não conferem.</p>}
         <div className="sm:col-span-3"><Button type="submit" loading={change.isPending} loadingText="Salvando…" disabled={!f.current || !f.password || mismatch}>Alterar senha</Button></div>
       </form>
+    </section>
+  );
+}
+
+/**
+ * Números saiu do menu principal: é configuração de uma vez, não tarefa do dia.
+ *
+ * Fica como atalho e não como tela embutida porque o cadastro tem QR Code, troca de provider
+ * e exclusão — coisas que pedem a página inteira.
+ */
+function NumbersSection() {
+  const numbers = useNumbers();
+  const conectados = numbers.data?.filter((n) => n.status === 'connected').length ?? 0;
+  const total = numbers.data?.length ?? 0;
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-5 flex flex-wrap items-center gap-4">
+      <div className="w-10 h-10 rounded-xl bg-accent-soft text-accent grid place-items-center shrink-0"><Smartphone size={20} /></div>
+      <div className="flex-1 min-w-48">
+        <h2 className="font-display font-semibold text-ink">Números de WhatsApp</h2>
+        <p className="text-sm text-muted">
+          {total === 0 ? 'Nenhum número cadastrado ainda.' : `${total} cadastrado(s) · ${conectados} conectado(s).`} Conectar, trocar de provider e proteger o ritmo de envio.
+        </p>
+      </div>
+      <Link href="/numeros" className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-field">Gerenciar números</Link>
     </section>
   );
 }

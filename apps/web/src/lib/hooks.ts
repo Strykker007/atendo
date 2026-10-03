@@ -1,8 +1,8 @@
 'use client';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api, getAccessToken } from './api';
+import { api, getAccessToken, onAccessToken } from './api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string }
@@ -142,6 +142,27 @@ export function upsertMessageInCache(qc: ReturnType<typeof useQueryClient>, m: M
     return { ...old, pages: pages.map((p, i) => (i === 0 ? [m, ...p] : p)) };
   });
 }
+
+/**
+ * Zera o contador de não lidas da conversa aberta.
+ *
+ * A rota existia desde o começo e **ninguém a chamava**: o balãozinho de não lidas aparecia,
+ * a pessoa abria a conversa, lia tudo, e o número continuava lá para sempre. Um contador que
+ * nunca zera é pior que contador nenhum, porque ensina a ignorá-lo.
+ */
+export const useMarkRead = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/conversations/${id}/read`, { method: 'POST' }),
+    // some da lista na hora, sem esperar o servidor: é só um badge, e esperar faz piscar
+    onMutate: (id) => {
+      qc.setQueriesData<Conversation[]>({ queryKey: ['conversations'] }, (old) =>
+        old?.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)),
+      );
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['conversation-counts'] }),
+  });
+};
 
 export const useSendMessage = (conversationId: string | null) => {
   const qc = useQueryClient();
@@ -334,6 +355,9 @@ export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-
 /** Tempo real: aplica eventos do socket direto no cache do react-query. */
 export function useRealtime() {
   const qc = useQueryClient();
+  // reexecuta quando o token aparece: na primeira montagem ele ainda não existe
+  const [temToken, setTemToken] = useState(() => !!getAccessToken());
+  useEffect(() => { const fora = onAccessToken((t) => setTemToken(!!t)); return () => { fora(); }; }, []);
   useEffect(() => {
     if (!getAccessToken()) return;
     // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
@@ -354,7 +378,7 @@ export function useRealtime() {
     return () => {
       socket.disconnect();
     };
-  }, [qc]);
+  }, [qc, temToken]);
 }
 
 // ---- Tags (admin) ----
@@ -551,10 +575,10 @@ export const useAiSummary = () => { const qc = useQueryClient(); return useMutat
 export interface BusinessHour { weekday: number; start: string; end: string }
 export interface TenantSettings {
   tenantId: string; timezone: string; attendanceActive: boolean; outsideHoursText: string | null;
-  welcomeFlowId: string | null; closedFlowId: string | null; defaultFlowId: string | null; defaultFlowInactivityHours: number;
+  welcomeFlowId: string | null; closedFlowId: string | null; onCloseFlowId: string | null; defaultFlowId: string | null; defaultFlowInactivityHours: number;
   hours: (BusinessHour & { id: string })[]; isOpenNow: boolean; suggested: BusinessHour[];
 }
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 const invSettings = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['tenant-settings'] });
-export const useUpdateTenantSettings = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { timezone?: string; attendanceActive?: boolean; outsideHoursText?: string; welcomeFlowId?: string | null; closedFlowId?: string | null; defaultFlowId?: string | null; defaultFlowInactivityHours?: number }) => api('/settings', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invSettings(qc) }); };
+export const useUpdateTenantSettings = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { timezone?: string; attendanceActive?: boolean; outsideHoursText?: string; welcomeFlowId?: string | null; closedFlowId?: string | null; onCloseFlowId?: string | null; defaultFlowId?: string | null; defaultFlowInactivityHours?: number }) => api('/settings', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invSettings(qc) }); };
 export const useSetBusinessHours = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (hours: BusinessHour[]) => api('/settings/business-hours', { method: 'PUT', body: JSON.stringify({ hours }) }), onSuccess: invSettings(qc) }); };

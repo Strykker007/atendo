@@ -25,6 +25,8 @@ class SettingsDto {
   // fluxos padrão: null limpa a configuração
   @IsOptional() @IsUUID() welcomeFlowId?: string | null;
   @IsOptional() @IsUUID() closedFlowId?: string | null;
+  /** disparado quando o atendente encerra */
+  @IsOptional() @IsUUID() onCloseFlowId?: string | null;
   @IsOptional() @IsUUID() defaultFlowId?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(720) defaultFlowInactivityHours?: number;
 }

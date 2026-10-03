@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles } from 'lucide-react';
+import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles, Send } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
@@ -24,7 +24,7 @@ export function DefaultFlowsSection() {
   const salvar = (patch: Parameters<typeof update.mutateAsync>[0], msg = 'Configuração salva') =>
     update.mutateAsync(patch).then(() => toast.ok(msg)).catch(toast.err);
 
-  const Select = ({ label, hint, icon, value, field }: { label: string; hint: string; icon: React.ReactNode; value: string | null; field: 'welcomeFlowId' | 'closedFlowId' | 'defaultFlowId' }) => (
+  const Select = ({ label, hint, icon, value, field }: { label: string; hint: string; icon: React.ReactNode; value: string | null; field: 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'defaultFlowId' }) => (
     <div className="space-y-1 py-2.5 border-b border-line last:border-0">
       <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink">{icon} {label}</div>
       <p className="text-[11.5px] text-muted">{hint}</p>
@@ -61,6 +61,13 @@ export function DefaultFlowsSection() {
         label="Conversa finalizada"
         hint="Dispara quando um contato volta a escrever depois de o atendimento ter sido encerrado."
         value={s.closedFlowId}
+      />
+      <Select
+        field="onCloseFlowId"
+        icon={<Send size={14} className="text-done" />}
+        label="Ao encerrar o atendimento"
+        hint="Dispara sozinho toda vez que alguém encerra — pesquisa de satisfação, pós-venda. No encerramento ainda dá para escolher outro fluxo só para aquele atendimento."
+        value={s.onCloseFlowId}
       />
       <Select
         field="defaultFlowId"

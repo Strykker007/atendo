@@ -15,7 +15,7 @@ export class TenantSettingsService {
     return { ...settings, hours };
   }
 
-  async update(tenantId: string, data: { timezone?: string; attendanceActive?: boolean; outsideHoursText?: string | null; welcomeFlowId?: string | null; closedFlowId?: string | null; defaultFlowId?: string | null; defaultFlowInactivityHours?: number }) {
+  async update(tenantId: string, data: { timezone?: string; attendanceActive?: boolean; outsideHoursText?: string | null; welcomeFlowId?: string | null; closedFlowId?: string | null; onCloseFlowId?: string | null; defaultFlowId?: string | null; defaultFlowInactivityHours?: number }) {
     await this.prisma.tenantSettings.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
     return this.get(tenantId);
   }

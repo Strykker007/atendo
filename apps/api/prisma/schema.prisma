@@ -179,6 +179,9 @@ model TenantSettings {
   welcomeFlowId String?
   /// contato escreve de novo depois de o atendimento ter sido encerrado
   closedFlowId String?
+  /// disparado automaticamente QUANDO o atendente encerra (pesquisa de satisfação, pós-venda).
+  /// Diferente de `closedFlowId`, que reage ao contato voltar a escrever depois do encerramento.
+  onCloseFlowId String?
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)

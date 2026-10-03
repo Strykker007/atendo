@@ -139,6 +139,18 @@ A logo fica em `apps/web/public/marca/`, em três recortes: `vogo.png` (original
 
 Login, telas de convite/recuperação, título da aba e aviso de versão ainda dizem "Atendo".
 
+## Cabeçalho do chat
+
+`flex-wrap`: a largura disponível ali não depende do tamanho da tela e sim de o painel da direita estar aberto. Com ele aberto, as ações estouravam e o **Encerrar ficava escondido atrás da borda do painel** (medido: conteúdo de 608px numa caixa de 594px). Esconder botão por breakpoint não resolveria — o breakpoint não sabe do painel.
+
+O botão de recolher o painel saiu daqui: ele já existe no topo do próprio painel, e ter os dois era duplicata.
+
+## Não lidas e tempo real
+
+A rota `POST /conversations/:id/read` existia desde o começo e **ninguém a chamava**: o balão de não lidas aparecia e nunca mais saía. Agora abrir a conversa marca como lida (otimista no cache, para não piscar).
+
+O socket do tempo real era criado num `useEffect` que desistia quando ainda não havia token — e o token chega depois, de uma chamada de refresh. Quando a corrida dava errado, o socket **nunca** era criado e o painel só recebia mensagem nova depois de um F5. `setAccessToken` agora avisa quem estiver esperando (`onAccessToken`), e o efeito refaz a conexão quando o token aparece.
+
 ## Recolher os dois painéis
 
 O menu da esquerda e o painel da direita recolhem pelo **próprio topo**, cada um com o botão na sua borda interna — quem quer mais espaço para a conversa fecha de onde está olhando.
