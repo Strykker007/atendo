@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Paperclip, FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
@@ -16,8 +16,10 @@ import { Avatar } from './Avatar';
 import { OriginBadge } from './OriginBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
+import { ComposerBar } from './ComposerBar';
 import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
+import { usePersistedState } from '@/lib/persisted';
 import { AudioMessage } from './AudioMessage';
 import { ContactSheet, ContactSummary } from './ContactSheet';
 import { MediaPreview, type Escolhido } from './MediaPreview';
@@ -74,6 +76,29 @@ export function ChatPane() {
   const indiceImagem = imagens.findIndex((i) => i.url === vendoImagem);
   const fileRef = useRef<HTMLInputElement>(null);
   const [accept, setAccept] = useState(ACCEPT_ALL);
+  /**
+   * Assinatura: o nome de quem atende vai na frente da mensagem.
+   *
+   * Em número de empresa, quem lê não sabe com quem está falando — e trocar de atendente no
+   * meio do atendimento fica invisível. Fica guardado por navegador, porque é preferência de
+   * quem atende, não configuração da empresa.
+   */
+  const [assinando, setAssinando] = usePersistedState('assinar-mensagens', false);
+  const campoRef = useRef<HTMLTextAreaElement>(null);
+
+  /** Insere no ponto do cursor, não no fim: emoji e menção entram no meio da frase. */
+  function inserirNoTexto(trecho: string) {
+    const el = campoRef.current;
+    if (!el) return setText((t) => (t ? `${t} ` : '') + trecho);
+    const ini = el.selectionStart ?? el.value.length;
+    const fim = el.selectionEnd ?? ini;
+    setText((t) => t.slice(0, ini) + trecho + t.slice(fim));
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = ini + trecho.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
   const bottomRef = useRef<HTMLDivElement>(null);
   const rolagemRef = useRef<HTMLDivElement>(null);
   /** altura do conteúdo antes de buscar o passado, para devolver a pessoa ao mesmo ponto */
@@ -218,7 +243,7 @@ export function ChatPane() {
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
-    const t = text.trim();
+    const t = assinando && !noteMode && text.trim() ? `*${me.data?.name ?? ''}*\n${text.trim()}` : text.trim();
     if (noteMode) {
       if (!unlocked || !t || sendNote.isPending) return;
       setText('');
@@ -430,23 +455,12 @@ export function ChatPane() {
               <button type="button" onClick={() => setAttachment(null)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
           )}
-          {/* Atalhos de mídia: antes tudo ficava escondido atrás de um clipe e ninguém achava */}
-          {!noteMode && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<ImageIcon size={13} />} onClick={() => pick('image/jpeg,image/png,image/webp,image/gif')} title="Enviar foto">Foto</Button>
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<Video size={13} />} onClick={() => pick('video/mp4,video/3gpp')} title="Enviar vídeo">Vídeo</Button>
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1" disabled={uploading} icon={<FileText size={13} />} onClick={() => pick('application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt')} title="Enviar arquivo">Arquivo</Button>
-              {uploading && <span className="text-[11px] text-muted">enviando arquivo…</span>}
-              <span className="flex-1" />
-              {ai.enabled && <CopilotBar conversationId={conv.id} text={text} onText={setText} />}
-            </div>
-          )}
           <div className="flex items-end gap-2">
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept={accept} />
           {!gravando && (
             <>
-              <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted" onClick={() => pick(ACCEPT_ALL)} loading={uploading} title={uploading ? 'Enviando arquivo…' : 'Anexar arquivo'} icon={<Paperclip size={18} />} />
               <textarea
+                ref={campoRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}
@@ -463,6 +477,19 @@ export function ChatPane() {
             <AudioRecorder disabled={uploading} onRecorded={sendRecorded} onRecordingChange={setGravando} />
           )}
           </div>
+
+          {/* atalhos embaixo do campo, como no WhatsApp: a mão está no teclado */}
+          {!gravando && (
+            <ComposerBar
+              conversationId={conv.id}
+              onInserir={inserirNoTexto}
+              onEscolherArquivo={pick}
+              enviando={uploading}
+              assinando={assinando}
+              onAssinando={setAssinando}
+              direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
+            />
+          )}
         </form>
       )}
     </>

@@ -184,6 +184,18 @@ O chip **Esperando há mais tempo** reordena a lista (`sort=waiting`), e a escol
 
 O rótulo do número saiu da faixa de tags e foi para a linha da hora: embaixo, ele acrescentava uma faixa inteira só por estar vendo "todos os números", e a lista ficava com o dobro da altura. Agora a linha mede o mesmo nos dois casos (medido: 58px).
 
+## Barra do composer
+
+Os atalhos ficam **abaixo** do campo de texto, como no WhatsApp: a mão está no teclado, e atalho acima do texto obriga o olho a subir e voltar. Cada botão abre o seu menu ancorado ali mesmo (`ComposerBar`), que fecha com Esc ou clique fora.
+
+Da esquerda para a direita: **clipe** (foto, vídeo, documento — antes esses três eram botões soltos acima *e* o clipe repetia os mesmos), **raio** = respostas rápidas (ícone do raio em todo o sistema), **fluxo** para disparar, **pausar** (só aparece com fluxo rodando — botão que não faz nada ensina a ignorar a barra), **emoji**, **@** para mencionar a equipe e **A sublinhado** para assinatura. O copiloto de IA fica na ponta direita.
+
+Emoji, menção e resposta rápida entram **no ponto do cursor**, não no fim: emoji no meio da frase é o caso comum.
+
+**Assinatura** liga/desliga e fica guardada por navegador — é preferência de quem atende, não configuração da empresa. Ligada, a mensagem sai com `*Nome*` na primeira linha, que é como o cliente sabe com quem está falando num número de empresa.
+
+**Menção** insere `@Nome` e serve para a nota interna ("@Ana, esse é seu cliente"). Ela **não notifica** ninguém ainda — não existe notificação interna no sistema, e fingir que avisa seria pior que não ter.
+
 ## Uma conversa, vários atendimentos
 
 A lista mostra **uma linha por pessoa**, não uma por atendimento. Encerrar e receber mensagem de novo **reabre a mesma conversa** (volta para *Aguardando*) em vez de criar outra — o contato deixa de aparecer duplicado, em "encerrado" e em "aguardando" ao mesmo tempo, com o histórico partido entre as duas.
