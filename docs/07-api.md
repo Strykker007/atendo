@@ -70,6 +70,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/media/*path?exp=&sig=` | — (assinatura) | Serve o arquivo se a assinatura for válida |
 | **Billing** | | | |
 | GET | `/billing/plans` | todos | Planos ativos com limites e `stripePriceId` |
+| GET | `/billing/plans/all` | super_admin | Catálogo completo (inclui inativos) com `subscribers` e `billingEnabled` |
+| POST | `/billing/plans` | super_admin | Cria plano. `{name, priceMonth, billingModel, limits}` — `limits` validado campo a campo. Cria produto+preço no Stripe quando a cobrança está ligada |
+| PATCH | `/billing/plans/:id` | super_admin | Edita. Mudar `priceMonth` cria um preço novo no Stripe e arquiva o antigo (preço é imutável lá); quem já assina continua no antigo |
+| DELETE | `/billing/plans/:id` | super_admin | Só sem assinantes (senão 400). Arquiva o produto no Stripe |
 | GET | `/billing/invoices` | todos | Faturas do tenant (espelho do Stripe) |
 | POST | `/billing/checkout` | tenant_admin | `{planId}` → `{url}` do Checkout (ou troca com proration se já assina) |
 | POST | `/billing/portal` | tenant_admin | `{url}` do Customer Portal |

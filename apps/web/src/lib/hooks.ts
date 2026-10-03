@@ -196,6 +196,44 @@ export const useBulkClose = () => {
   });
 };
 
+export interface PlanRow {
+  id: string;
+  name: string;
+  priceMonth: number;
+  billingModel: 'fixed' | 'usage' | 'hybrid';
+  limits: PlanLimits;
+  stripePriceId: string | null;
+  isActive: boolean;
+  subscribers: number;
+  /** cobrança configurada no servidor; sem isso "sem Stripe" seria alarme falso */
+  billingEnabled?: boolean;
+}
+export interface PlanInput {
+  name: string;
+  priceMonth: number;
+  billingModel: 'fixed' | 'usage' | 'hybrid';
+  limits: PlanLimits;
+  isActive?: boolean;
+}
+
+/** Catálogo do dono: inclui inativos e quantos clientes cada plano tem. */
+export const useAllPlans = () => useQuery({ queryKey: ['plans-all'], queryFn: () => api<PlanRow[]>('/billing/plans/all') });
+
+const invPlanos = (qc: ReturnType<typeof useQueryClient>) => { qc.invalidateQueries({ queryKey: ['plans-all'] }); qc.invalidateQueries({ queryKey: ['plans'] }); };
+
+export const useCreatePlan = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (b: PlanInput) => api<PlanRow>('/billing/plans', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => invPlanos(qc) });
+};
+export const useUpdatePlan = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, ...b }: PlanInput & { id: string }) => api<PlanRow>(`/billing/plans/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => invPlanos(qc) });
+};
+export const useDeletePlan = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api(`/billing/plans/${id}`, { method: 'DELETE' }), onSuccess: () => invPlanos(qc) });
+};
+
 export interface ConversationEvent {
   id: string;
   type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened';

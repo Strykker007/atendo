@@ -32,7 +32,19 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
 }
 ```
 
-Seed cria três: Starter (fixo, `hardLimit: true`), Pro e Business (híbridos com excedente). Planos novos são linhas no banco — sem migration.
+Seed cria três: Starter (fixo, `hardLimit: true`), Pro e Business (híbridos com excedente).
+
+### Criar e editar planos (dono do sistema)
+
+Tela **Planos**, na área do dono. Até então o catálogo só existia no seed: criar um pacote para um cliente exigia mexer no código, e por isso nenhum plano novo nascia — a transmissão em massa ficou pronta e trancada por falta de um plano que a liberasse.
+
+A tela cobre tudo que o `PlanLimits` aceita: limites de números e usuários, unidade de cobrança (conversa ou mensagem), incluídos, excedentes, bloquear x cobrar, tolerância no pagamento, funcionalidades plugáveis e os três controles de IA (interações incluídas, excedente e **teto de custo**).
+
+**Stripe:** ao salvar, o produto e o preço recorrente são criados automaticamente. Quando a cobrança está ligada e o plano fica sem preço, o cartão mostra "sem Stripe" — porque sem preço o cliente não consegue assinar, e descobrir isso no clique do checkout é tarde.
+
+**Mudar o valor de um plano existente** cria um preço novo no Stripe e arquiva o anterior: preço é imutável lá. **Quem já assina continua no antigo** até trocar de plano — reajustar por baixo seria mexer no que o cliente contratou sem avisar.
+
+**Apagar** só é permitido quando ninguém assina; com assinante, a API responde 400 e a tela desabilita o botão, porque apagar levaria junto o histórico de faturamento. O caminho é **desativar**: some do checkout e quem já assina continua. Ao apagar, o produto também é arquivado no Stripe.
 
 ## Preços do provider
 

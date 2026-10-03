@@ -245,6 +245,36 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
     }
   }
 
+  /**
+   * Preço mudou: no Stripe um `price` é imutável, então cria-se outro no mesmo produto e o
+   * plano passa a apontar para ele. **Quem já assina continua no preço antigo** até trocar de
+   * plano — é assim que o Stripe funciona, e mudar isso por baixo seria reajustar cliente sem
+   * aviso. O novo valor vale para quem assinar daqui para frente.
+   */
+  async repricePlan(planId: string) {
+    if (!this.enabled) return;
+    const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: planId } });
+    let productId: string | undefined;
+    if (plan.stripePriceId) {
+      const anterior = await this.client.prices.retrieve(plan.stripePriceId);
+      productId = typeof anterior.product === 'string' ? anterior.product : anterior.product.id;
+      await this.client.prices.update(plan.stripePriceId, { active: false }).catch(() => undefined);
+    }
+    const product = productId ?? (await this.client.products.create({ name: `Atendo ${plan.name}`, metadata: { planId: plan.id } })).id;
+    const price = await this.client.prices.create({ product, unit_amount: Math.round(Number(plan.priceMonth) * 100), currency: env.STRIPE_CURRENCY, recurring: { interval: 'month' }, metadata: { planId: plan.id } });
+    await this.prisma.plan.update({ where: { id: plan.id }, data: { stripePriceId: price.id } });
+    this.log.log(`plano ${plan.name} reprecificado → ${price.id}`);
+  }
+
+  /** Plano apagado: arquiva preço e produto, senão o painel do Stripe vira um cemitério. */
+  async archivePlan(stripePriceId: string) {
+    if (!this.enabled) return;
+    const price = await this.client.prices.retrieve(stripePriceId);
+    await this.client.prices.update(stripePriceId, { active: false }).catch(() => undefined);
+    const productId = typeof price.product === 'string' ? price.product : price.product.id;
+    await this.client.products.update(productId, { active: false }).catch(() => undefined);
+  }
+
   // ---------- Margem (super_admin) ----------
 
   async margin(period = periodOf()) {

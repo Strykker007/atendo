@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -13,6 +13,7 @@ import { useConversationCounts, useMe } from '@/lib/hooks';
 const OWNER_ITEMS = [
   { href: '/admin', label: 'Financeiro', icon: ShieldCheck },
   { href: '/clientes', label: 'Clientes', icon: Building2 },
+  { href: '/planos', label: 'Planos', icon: Package },
 ];
 const items = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
