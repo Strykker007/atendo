@@ -47,7 +47,9 @@ class ReportsController {
     const t = u.tenantId;
     const [total, closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, won, lost] = await Promise.all([
       this.prisma.conversation.count({ where: { tenantId: t, createdAt: { gte: from, lt: to } } }),
-      this.prisma.conversation.count({ where: { tenantId: t, createdAt: { gte: from, lt: to }, status: 'closed' } }),
+      // atendimentos ENCERRADOS no período (um encerramento = um atendimento), não conversas
+      // criadas no período que por acaso estão fechadas agora
+      this.prisma.conversationEvent.count({ where: { tenantId: t, type: 'closed', createdAt: { gte: from, lt: to } } }),
       this.prisma.conversation.count({ where: { tenantId: t, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { tenantId: t, status: 'in_progress' } }),
       this.prisma.message.count({ where: { direction: 'in', createdAt: { gte: from, lt: to }, conversation: { tenantId: t } } }),
@@ -59,8 +61,11 @@ class ReportsController {
       this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }),
       this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }),
       this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }),
-      this.prisma.conversation.aggregate({ where: { tenantId: t, outcomeAt: { gte: from, lt: to }, outcome: 'won' }, _count: { _all: true }, _sum: { outcomeValue: true } }),
-      this.prisma.conversation.count({ where: { tenantId: t, outcomeAt: { gte: from, lt: to }, outcome: 'lost' } }),
+      // vendas saem do HISTÓRICO de atendimentos, não da conversa: a conversa guarda só o
+      // último desfecho, e a mesma pessoa pode comprar em março e voltar a comprar em junho —
+      // contar pela conversa somaria uma venda só
+      this.prisma.conversationEvent.aggregate({ where: { tenantId: t, type: 'closed', outcome: 'won', createdAt: { gte: from, lt: to } }, _count: { _all: true }, _sum: { outcomeValue: true } }),
+      this.prisma.conversationEvent.count({ where: { tenantId: t, type: 'closed', outcome: 'lost', createdAt: { gte: from, lt: to } } }),
     ]);
     const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
     return {
@@ -101,33 +106,45 @@ class ReportsController {
 
   /** Conversas agrupadas. Parametrizado via Prisma.sql — sem concatenação de string do usuário. */
   private async query(tenantId: string, d: ReportDefinition): Promise<{ label: string; value: number }[]> {
+    // em métrica de venda, o dia que importa é o do encerramento, não o da abertura da conversa
+    const vendasDim = ['revenue', 'won', 'lost', 'win_rate'].includes(d.metric);
+    const quando = vendasDim ? Prisma.sql`e."createdAt"` : Prisma.sql`c."createdAt"`;
     const dim = {
-      day: Prisma.sql`to_char(c."createdAt", 'YYYY-MM-DD')`,
-      week: Prisma.sql`to_char(date_trunc('week', c."createdAt"), 'YYYY-MM-DD')`,
-      month: Prisma.sql`to_char(c."createdAt", 'YYYY-MM')`,
+      day: Prisma.sql`to_char(${quando}, 'YYYY-MM-DD')`,
+      week: Prisma.sql`to_char(date_trunc('week', ${quando}), 'YYYY-MM-DD')`,
+      month: Prisma.sql`to_char(${quando}, 'YYYY-MM')`,
       tag: Prisma.sql`coalesce(t.name, '(sem tag)')`,
       status: Prisma.sql`c.status::text`,
       number: Prisma.sql`n.label`,
-      agent: Prisma.sql`coalesce(a.name, '(não atribuído)')`,
+      agent: vendasDim ? Prisma.sql`coalesce(ea.name, a.name, '(não atribuído)')` : Prisma.sql`coalesce(a.name, '(não atribuído)')`,
       origin: Prisma.sql`c.origin::text`,
       campaign: Prisma.sql`coalesce(c."originData"->>'headline', case when c.origin = 'ad' then '(anúncio sem título)' else '(orgânico)' end)`,
     }[d.groupBy];
 
+    /**
+     * Métricas de venda contam ATENDIMENTOS encerrados (`conversation_events`), não conversas.
+     * A conversa guarda só o último desfecho: a mesma pessoa comprando em março e de novo em
+     * junho apareceria como uma venda só. O join entra apenas nestas métricas — somado às de
+     * mensagem, multiplicaria as linhas e inflaria a contagem.
+     */
+    const vendas = ['revenue', 'won', 'lost', 'win_rate'].includes(d.metric);
     const metric = {
       conversations: Prisma.sql`count(distinct c.id)`,
       messages_in: Prisma.sql`count(m.id) filter (where m.direction = 'in')`,
       messages_out: Prisma.sql`count(m.id) filter (where m.direction = 'out')`,
       avg_first_response_min: Prisma.sql`avg(extract(epoch from (fr.first_out - c."createdAt")) / 60)`,
-      // desfecho registrado no encerramento — é o que transforma o painel em relatório de vendas
-      revenue: Prisma.sql`coalesce(sum(distinct c."outcomeValue"), 0)`,
-      won: Prisma.sql`count(distinct c.id) filter (where c.outcome = 'won')`,
-      lost: Prisma.sql`count(distinct c.id) filter (where c.outcome = 'lost')`,
-      win_rate: Prisma.sql`case when count(distinct c.id) filter (where c.outcome <> 'none') = 0 then 0
-        else count(distinct c.id) filter (where c.outcome = 'won')::float
-             / count(distinct c.id) filter (where c.outcome <> 'none') end`,
+      revenue: Prisma.sql`coalesce(sum(e."outcomeValue"), 0)`,
+      won: Prisma.sql`count(e.id) filter (where e.outcome = 'won')`,
+      lost: Prisma.sql`count(e.id) filter (where e.outcome = 'lost')`,
+      win_rate: Prisma.sql`case when count(e.id) filter (where e.outcome <> 'none') = 0 then 0
+        else count(e.id) filter (where e.outcome = 'won')::float
+             / count(e.id) filter (where e.outcome <> 'none') end`,
     }[d.metric];
 
-    const filters: Prisma.Sql[] = [Prisma.sql`c."tenantId" = ${tenantId}`, Prisma.sql`c."createdAt" >= ${d.from}`, Prisma.sql`c."createdAt" < ${d.to}`];
+    // a janela de tempo também muda: venda entra no mês em que foi fechada
+    const filters: Prisma.Sql[] = vendas
+      ? [Prisma.sql`c."tenantId" = ${tenantId}`, Prisma.sql`e."createdAt" >= ${d.from}`, Prisma.sql`e."createdAt" < ${d.to}`]
+      : [Prisma.sql`c."tenantId" = ${tenantId}`, Prisma.sql`c."createdAt" >= ${d.from}`, Prisma.sql`c."createdAt" < ${d.to}`];
     if (d.filters.status) filters.push(Prisma.sql`c.status = ${d.filters.status}::"ConversationStatus"`);
     if (d.filters.numberId) filters.push(Prisma.sql`c."numberId" = ${d.filters.numberId}`);
     if (d.filters.origin) filters.push(Prisma.sql`c.origin = ${d.filters.origin}::"ConversationOrigin"`);
@@ -138,6 +155,7 @@ class ReportsController {
       from conversations c
       join whatsapp_numbers n on n.id = c."numberId"
       left join users a on a.id = c."assigneeId"
+      ${vendas ? Prisma.sql`join conversation_events e on e."conversationId" = c.id and e.type = 'closed' left join users ea on ea.id = e."actorId"` : Prisma.empty}
       left join messages m on m."conversationId" = c.id
       left join conversation_tags ct on ct."conversationId" = c.id
       left join tags t on t.id = ct."tagId"

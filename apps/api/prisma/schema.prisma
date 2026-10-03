@@ -386,6 +386,9 @@ model Conversation {
   /// execução de fluxo ativa (para marcar "em automação" na lista)
   activeFlowRunId String?
 
+  /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
+  /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
+  @@unique([numberId, contactId])
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
   /// fila por tempo de espera
   @@index([tenantId, status, awaitingSince])

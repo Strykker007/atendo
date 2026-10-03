@@ -12,6 +12,7 @@ import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import type { Permission } from '@atendo/shared';
 import { narrowTo, numberFilter } from '../auth/number-scope';
+import { decidirEntrada, voltandoDepoisDeEncerrado } from './reopen';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -208,12 +209,13 @@ export class ConversationsService {
       update: msg.contactName ? { name: msg.contactName } : {},
     });
 
-    // conversa aberta (não encerrada) com este contato neste número, senão cria uma nova em "aguardando"
+    // A conversa com esta pessoa neste número é UMA só, encerrada ou não (ver reopen.ts).
+    // Encerrada, ela volta para a fila; o que começa de novo é o atendimento, não a conversa.
     let conversation = await this.prisma.conversation.findFirst({
-      where: { numberId: number.id, contactId: contact.id, status: { not: 'closed' } },
+      where: { numberId: number.id, contactId: contact.id },
+      orderBy: { lastMessageAt: 'desc' },
     });
     const origin = this.originOf(msg.referral);
-    const isNew = !conversation;
     // contexto para os fluxos padrão do cliente: é a primeira vez desta pessoa, ou ela
     // está voltando depois de um atendimento encerrado?
     const anterior = await this.prisma.conversation.findFirst({
@@ -222,10 +224,16 @@ export class ConversationsService {
       select: { id: true, status: true, lastMessageAt: true },
     });
     const isNewContact = !anterior;
-    const returningAfterClosed = isNew && !!anterior && anterior.status === 'closed';
+    const decisao = decidirEntrada(conversation ? { id: conversation.id, status: conversation.status } : null);
+    const returningAfterClosed = voltandoDepoisDeEncerrado(decisao, anterior?.status);
     const hoursSinceLastMessage = anterior?.lastMessageAt
       ? (msg.timestamp.getTime() - anterior.lastMessageAt.getTime()) / 3_600_000
       : null;
+    if (decisao.acao === 'reabrir') {
+      // atendimento novo na mesma conversa: volta para a fila, sem dono e sem o desfecho do
+      // atendimento anterior — aquele já está congelado no histórico (conversation_events)
+      conversation = await this.setStatusSystem(conversation!.id, 'waiting');
+    }
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
         data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
@@ -278,7 +286,7 @@ export class ConversationsService {
 
     this.gateway.emitMessage(number.tenantId, message);
     this.gateway.emitConversation(number.tenantId, conversation);
-    return { message, conversation, isNew, isNewContact, returningAfterClosed, hoursSinceLastMessage };
+    return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed, hoursSinceLastMessage };
   }
 
   /**
@@ -299,14 +307,19 @@ export class ConversationsService {
       update: {},
     });
 
+    // mesma regra da entrada: uma conversa por pessoa neste número (ver reopen.ts)
     let conversation = await this.prisma.conversation.findFirst({
-      where: { numberId: number.id, contactId: contact.id, status: { not: 'closed' } },
+      where: { numberId: number.id, contactId: contact.id },
+      orderBy: { lastMessageAt: 'desc' },
     });
     // conversa iniciada do celular: precisa existir no painel, senão a resposta do contato
     // abriria outra e o histórico nasceria partido
     const isNew = !conversation;
+    // falar com alguém cujo atendimento estava encerrado começa outro atendimento — e quem
+    // está atendendo é quem escreveu do celular, então vai direto para "em atendimento"
+    if (conversation?.status === 'closed') conversation = await this.setStatusSystem(conversation.id, 'in_progress');
     conversation ??= await this.prisma.conversation.create({
-      data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting' },
+      data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'in_progress' },
     });
 
     const message = await this.prisma.message.create({
@@ -408,7 +421,17 @@ export class ConversationsService {
 
   async setStatusSystem(conversationId: string, status: ConversationStatus) {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true } });
-    const conv = await this.prisma.conversation.update({ where: { id: conversationId }, data: { status, closedAt: status === 'closed' ? new Date() : null, ...(status === 'waiting' && { assigneeId: null }) } });
+    const conv = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        status,
+        closedAt: status === 'closed' ? new Date() : null,
+        ...(status === 'waiting' && { assigneeId: null }),
+        // sair de encerrado começa outro atendimento: o desfecho do anterior fica congelado no
+        // histórico, e deixá-lo aqui marcaria o atendimento novo como se já tivesse resultado
+        ...(status !== 'closed' && { outcome: 'none' as const, outcomeValue: null, outcomeReason: null, outcomeAt: null, outcomeById: null }),
+      },
+    });
     // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria
     await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação' });
     this.gateway.emitConversation(conv.tenantId, conv);

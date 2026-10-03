@@ -184,6 +184,12 @@ O chip **Esperando há mais tempo** reordena a lista (`sort=waiting`), e a escol
 
 O rótulo do número saiu da faixa de tags e foi para a linha da hora: embaixo, ele acrescentava uma faixa inteira só por estar vendo "todos os números", e a lista ficava com o dobro da altura. Agora a linha mede o mesmo nos dois casos (medido: 58px).
 
+## Uma conversa, vários atendimentos
+
+A lista mostra **uma linha por pessoa**, não uma por atendimento. Encerrar e receber mensagem de novo **reabre a mesma conversa** (volta para *Aguardando*) em vez de criar outra — o contato deixa de aparecer duplicado, em "encerrado" e em "aguardando" ao mesmo tempo, com o histórico partido entre as duas.
+
+Os atendimentos continuam separados, mas por dentro: cada encerramento é um registro no **Histórico** (botão no cabeçalho), e é de lá que o relatório de vendas conta. Contar pela conversa somaria uma venda só quando a mesma pessoa compra em março e volta a comprar em junho.
+
 ## Histórico do atendimento
 
 Botão **Histórico** no cabeçalho do chat abre a linha do tempo (`GET /conversations/:id/events`): quem assumiu, transferiu, devolveu, encerrou e reabriu, com data. No topo, **atendimentos encerrados** e **reaberturas** — é a pergunta que se faz numa auditoria, e é o que distingue um atendimento reaberto de dois atendimentos.
