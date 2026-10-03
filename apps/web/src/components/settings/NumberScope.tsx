@@ -5,6 +5,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useNumbers, useUpdateAgent, type Agent } from '@/lib/hooks';
+import { cn } from '@/lib/utils';
 
 /**
  * Quais números a pessoa opera. Escopo de dados, não permissão: "pode configurar números"
@@ -18,18 +19,24 @@ export function NumberScopeButton({ agent }: { agent: Agent }) {
   const numbers = useNumbers();
   const [open, setOpen] = useState(false);
 
-  // com um número só não há o que escolher — mostrar a opção só confundiria
-  if ((numbers.data?.length ?? 0) < 2) return null;
-
-  const count = agent.numbers?.length ?? 0;
+  /**
+   * Antes isto era um ícone de telefone solto na coluna de ações, e **sumia quando o cliente
+   * tinha só um número**. O resultado prático era uma funcionalidade que ninguém achava: o
+   * escopo existia no banco, a tela de configurar não aparecia. Agora é coluna própria, com o
+   * resumo escrito — "Todos" é informação, não ausência de informação.
+   */
+  const ids = (agent.numbers ?? []).map((n) => n.numberId);
+  const lista = numbers.data ?? [];
+  const resumo = ids.length === 0 ? 'Todos' : lista.filter((n) => ids.includes(n.id)).map((n) => n.label).join(', ') || `${ids.length} número(s)`;
   return (
     <>
       <button
         onClick={() => setOpen(true)}
-        className="text-faint hover:text-ink p-1"
-        title={count ? `Opera ${count} de ${numbers.data!.length} números` : 'Opera todos os números'}
+        className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs max-w-44', ids.length ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}
+        title={ids.length ? `Atende só ${resumo}` : 'Sem restrição: atende todos os números'}
       >
-        <Phone size={15} />
+        <Phone size={12} className="shrink-0" />
+        <span className="truncate">{resumo}</span>
       </button>
       <NumberScopeModal agent={agent} open={open} onClose={() => setOpen(false)} />
     </>

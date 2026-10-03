@@ -11,13 +11,17 @@ import { BusinessHoursSection } from '@/components/settings/BusinessHoursSection
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
-import { useMe, useChangePassword, useNumbers } from '@/lib/hooks';
+import { useCan, useMe, useChangePassword, useNumbers } from '@/lib/hooks';
 
 /** Configurações do cliente: aparência, horário, fluxos padrão e segurança. As respostas
  *  rápidas saíram daqui e viraram módulo próprio (/respostas). */
 export default function ConfiguracoesPage() {
   const me = useMe();
   const isOwner = me.data?.role === 'super_admin';
+  // horário e fluxos padrão são configuração da empresa: a API recusa sem `settings.manage`,
+  // e mostrar o formulário para quem não pode salvar é convite para perder trabalho digitado
+  const podeConfigurar = useCan('settings.manage');
+  const podeNumeros = useCan('numbers.manage');
 
 
 
@@ -25,10 +29,10 @@ export default function ConfiguracoesPage() {
     <PageShell width="max-w-4xl">
       <PageHeader title="Configurações" subtitle="Aparência do painel, horário de funcionamento e segurança." />
 
-      {!isOwner && <NumbersSection />}
+      {!isOwner && podeNumeros && <NumbersSection />}
       <AppearanceSection />
-      {!isOwner && <BusinessHoursSection />}
-      {!isOwner && <DefaultFlowsSection />}
+      {!isOwner && podeConfigurar && <BusinessHoursSection />}
+      {!isOwner && podeConfigurar && <DefaultFlowsSection />}
       {!me.data?.impersonatorId && <SecuritySection />}
 
     </PageShell>

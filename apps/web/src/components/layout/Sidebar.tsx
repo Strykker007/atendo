@@ -8,22 +8,30 @@ import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
 import { useTheme, applyTheme } from '@/lib/theme';
-import { useConversationCounts, useMe } from '@/lib/hooks';
+import { useConversationCounts, useMe, usePermissions } from '@/lib/hooks';
+import type { Permission } from '@atendo/shared';
 
 const OWNER_ITEMS = [
   { href: '/admin', label: 'Financeiro', icon: ShieldCheck },
   { href: '/clientes', label: 'Clientes', icon: Building2 },
   { href: '/planos', label: 'Planos', icon: Package },
 ];
-const items = [
+/**
+ * `need`: a permissão sem a qual o item some do menu.
+ *
+ * A API já recusava, mas o menu continuava oferecendo — a pessoa clicava e batia num 403, ou
+ * pior, numa tela vazia que parecia defeito. Itens sem `need` são de todo mundo: conversas,
+ * respostas (consultar) e configurações (onde fica a troca da própria senha).
+ */
+const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission }[] = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
-  { href: '/agenda', label: 'Agenda', icon: CalendarDays },
-  { href: '/fluxos', label: 'Fluxos', icon: Workflow },
+  { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: 'agenda.manage' },
+  { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: 'flows.manage' },
   { href: '/respostas', label: 'Respostas', icon: Zap },
-  { href: '/tags', label: 'Tags', icon: Tags },
-  { href: '/relatorios', label: 'Relatórios', icon: BarChart3 },
-  { href: '/equipe', label: 'Equipe', icon: Users },
-  { href: '/plano', label: 'Plano e uso', icon: CreditCard },
+  { href: '/tags', label: 'Tags', icon: Tags, need: 'tags.manage' },
+  { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: 'reports.view' },
+  { href: '/equipe', label: 'Equipe', icon: Users, need: 'team.manage' },
+  { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: 'billing.manage' },
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
 
@@ -36,6 +44,8 @@ export function Sidebar() {
   const mode = useTheme((s) => s.mode);
   const me = useMe();
   const counts = useConversationCounts(numberId);
+  const minhas = usePermissions();
+  const permitido = (p: Permission) => minhas.includes(p);
   const [target, setTarget] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   useEffect(() => { if (!pending) setTarget(null); }, [pending]);
@@ -83,7 +93,7 @@ export function Sidebar() {
       )}
 
       <nav className="flex-1 py-2">
-        {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items).map(({ href, label, icon: Icon }) => {
+        {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items.filter((i) => !i.need || permitido(i.need))).map(({ href, label, icon: Icon }) => {
           const active = target ? target === href : path.startsWith(href);
           const badge = href === '/conversas' && waiting > 0 ? waiting : null;
           return (

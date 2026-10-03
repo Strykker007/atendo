@@ -119,3 +119,30 @@ ponto só, porque são dez rotas `:id` hoje e vão aparecer mais — a que esque
 seria o furo.
 
 O dono do sistema nunca é restringido: é ele quem dá suporte entrando como o cliente.
+
+## Onde cada permissão aparece na tela
+
+A API sempre recusou o que o perfil não permite — o problema era a **tela continuar oferecendo**: a pessoa clicava, batia num 403 e parecia defeito do sistema. Auditoria feita permissão a permissão:
+
+| Permissão | Na tela |
+|---|---|
+| `conversations.view_all` | aba "Atendendo" vs "Minhas", seletor de atendente na lista |
+| `conversations.transfer_any` | menu Transferir/Devolver no cabeçalho do chat |
+| `conversations.internal_note` | modo nota interna |
+| `contacts.edit` | ficha do contato fica só de leitura, com o motivo escrito |
+| `tags.manage`, `flows.manage`, `agenda.manage`, `team.manage`, `reports.view`, `billing.manage` | item somem do menu lateral; `reports.view` também barra a rota direta |
+| `quick_replies.manage` | botões de editar em /respostas |
+| `numbers.manage` | botões em Números e o atalho em Configurações |
+| `settings.manage` | horário de funcionamento e fluxos padrão |
+| `profiles.manage` | edição de perfis |
+| `campaigns.manage` | ainda sem tela (módulo sem interface) |
+
+**Três checagens usavam o papel em vez da permissão** (`role !== 'agent'`) e foram trocadas: ver a fila da equipe, transferir e nota interna. Era o que impedia um "atendente líder" com perfil personalizado de enxergar a equipe — e o que deixava um gerente continuar vendo depois de o acesso ser retirado.
+
+## Quais números cada pessoa atende
+
+Fica em **Equipe → coluna Números**. Nenhum marcado = **todos**, que é o padrão de quem nunca foi restringido.
+
+Antes isto era um ícone de telefone solto na coluna de ações **que sumia quando o cliente tinha menos de dois números** — ou seja, a funcionalidade existia no banco e não tinha como ser configurada por quem tem um número hoje e dois amanhã. Agora é coluna com o resumo escrito.
+
+Isto é **escopo de dados, não permissão**: "pode configurar números" (`numbers.manage`) é outra coisa, e nenhuma permissão restringe por número.

@@ -4,13 +4,15 @@ import { UserRound, Mail, MapPin, StickyNote, X } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useUpdateContact, type Conversation } from '@/lib/hooks';
+import { useCan, useUpdateContact, type Conversation } from '@/lib/hooks';
 
 type Contato = Conversation['contact'];
 
 /** Ficha do contato: o que o atendente precisa saber sem perguntar de novo a cada conversa. */
 export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: () => void }) {
   const update = useUpdateContact();
+  // a API recusa sem `contacts.edit`; sem isto a tela deixava preencher e só avisava no salvar
+  const podeEditar = useCan('contacts.edit');
   const [form, setForm] = useState({
     name: contact.name ?? '',
     email: contact.email ?? '',
@@ -37,15 +39,19 @@ export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: 
     <Modal open onClose={onClose} title="Ficha do contato">
       <form onSubmit={salvar} className="space-y-3">
         <div className="text-[12px] text-muted tnum">+{contact.phone}</div>
-        <Field label="Nome"><input className={inputCls} value={form.name} onChange={set('name')} maxLength={80} placeholder="Como o cliente se chama" /></Field>
-        <Field label="E-mail"><input className={inputCls} type="email" value={form.email} onChange={set('email')} maxLength={160} placeholder="para orçamento, nota fiscal…" /></Field>
-        <Field label="Endereço"><input className={inputCls} value={form.address} onChange={set('address')} maxLength={300} placeholder="Rua, número, bairro, cidade" /></Field>
-        <Field label="Observação 1"><textarea className={inputCls} rows={2} value={form.note1} onChange={set('note1')} maxLength={1000} placeholder="Preferências, histórico, o que evitar…" /></Field>
-        <Field label="Observação 2"><textarea className={inputCls} rows={2} value={form.note2} onChange={set('note2')} maxLength={1000} /></Field>
-        <p className="text-[11px] text-faint">Campo apagado limpa a informação. A ficha vale para o contato, não para uma conversa — fica disponível em todos os atendimentos dele.</p>
+        <Field label="Nome"><input readOnly={!podeEditar} className={inputCls} value={form.name} onChange={set('name')} maxLength={80} placeholder="Como o cliente se chama" /></Field>
+        <Field label="E-mail"><input readOnly={!podeEditar} className={inputCls} type="email" value={form.email} onChange={set('email')} maxLength={160} placeholder="para orçamento, nota fiscal…" /></Field>
+        <Field label="Endereço"><input readOnly={!podeEditar} className={inputCls} value={form.address} onChange={set('address')} maxLength={300} placeholder="Rua, número, bairro, cidade" /></Field>
+        <Field label="Observação 1"><textarea readOnly={!podeEditar} className={inputCls} rows={2} value={form.note1} onChange={set('note1')} maxLength={1000} placeholder="Preferências, histórico, o que evitar…" /></Field>
+        <Field label="Observação 2"><textarea readOnly={!podeEditar} className={inputCls} rows={2} value={form.note2} onChange={set('note2')} maxLength={1000} /></Field>
+        <p className="text-[11px] text-faint">
+          {podeEditar
+            ? 'Campo apagado limpa a informação. A ficha vale para o contato, não para uma conversa — fica disponível em todos os atendimentos dele.'
+            : 'Seu perfil de acesso não permite editar a ficha — você só está vendo.'}
+        </p>
         <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" loading={update.isPending} loadingText="Salvando…">Salvar</Button>
+          <Button type="button" variant="ghost" onClick={onClose}>{podeEditar ? 'Cancelar' : 'Fechar'}</Button>
+          {podeEditar && <Button type="submit" loading={update.isPending} loadingText="Salvando…">Salvar</Button>}
         </div>
       </form>
     </Modal>

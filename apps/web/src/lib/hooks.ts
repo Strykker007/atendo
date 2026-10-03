@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from './api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
@@ -438,10 +439,17 @@ export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id:
  * O usuário pode fazer isto? Esconder na tela é conveniência — quem autoriza de verdade é a
  * API, que checa de novo a cada requisição.
  */
-export const useCan = (permission: Permission) => {
+export const useCan = (permission: Permission) => usePermissions().includes(permission);
+
+/**
+ * Tudo que o usuário pode. O dono do sistema recebe o catálogo inteiro — mesma regra do
+ * servidor (`permissionsOf`), para a tela não divergir de quem autoriza.
+ */
+export const usePermissions = (): Permission[] => {
   const me = useMe();
-  if (!me.data) return false;
-  return me.data.role === 'super_admin' || !!me.data.permissions?.includes(permission);
+  if (!me.data) return [];
+  if (me.data.role === 'super_admin') return [...ALL_PERMISSIONS];
+  return me.data.permissions ?? [];
 };
 
 // ---- Perfis de acesso ----

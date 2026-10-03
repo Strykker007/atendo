@@ -13,6 +13,7 @@ import { SkeletonConversations } from '@/components/ui/Skeleton';
 import { BulkCloseModal } from './BulkCloseModal';
 import { Button } from '@/components/ui/Button';
 import { usePersistedState } from '@/lib/persisted';
+import { useCan } from '@/lib/hooks';
 
 /** Semáforo: cada status tem cor (texto/faixa) e fundo suave. */
 export const STATUS_META: Record<ConversationStatus, { label: string; short: string; color: string; soft: string; bar: string }> = {
@@ -41,7 +42,9 @@ function useMinuto() {
 export function ConversationList() {
   const { numberId, setNumber, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation } = useUI();
   const me = useMe();
-  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  // quem vê a fila da equipe é decidido pela PERMISSÃO, não pelo papel: é isso que permite um
+  // "atendente líder" enxergar a equipe, e um gerente com o acesso retirado deixar de ver
+  const isAdmin = useCan('conversations.view_all');
   const agents = useAgents();
   const [search, setSearch] = useState('');
   const numbers = useNumbers();

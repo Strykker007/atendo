@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus } from '@/lib/hooks';
-import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, useMarkRead, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useTags, useUsage, useMarkRead, useCan, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
@@ -37,7 +37,10 @@ export function ChatPane() {
   const transfer = useTransfer();
   const release = useRelease();
   const [transferOpen, setTransferOpen] = useState(false);
-  const isAdmin = me.data ? me.data.role !== 'agent' : false;
+  // permissão, não papel (ver ConversationList)
+  const isAdmin = useCan('conversations.view_all');
+  const podeTransferir = useCan('conversations.transfer_any');
+  const podeNota = useCan('conversations.internal_note');
   const mine = !!conv && conv.assignee?.id === me.data?.id;
   const ownedByOther = !!conv && !!conv.assignee && !mine;
   // Cadeado: gerente/admin numa conversa de outra pessoa. Fechado = não envia nada.
@@ -45,7 +48,7 @@ export function ChatPane() {
   const [unlocked, setUnlocked] = useState(false);
   useEffect(() => setUnlocked(false), [conversationId]);
   const sendNote = useSendNote(conversationId);
-  const noteMode = isAdmin && ownedByOther;
+  const noteMode = podeNota && ownedByOther;
   const activeRun = useActiveRun(conversationId);
   const stopFlow = useStopFlow();
   const sched = useHasFeature('scheduling');
@@ -309,7 +312,7 @@ export function ChatPane() {
             <span className="hidden sm:inline">Assumir</span>
           </Button>
         )}
-        {conv.status === 'in_progress' && (mine || isAdmin) && (
+        {conv.status === 'in_progress' && (mine || podeTransferir) && (
           <div className="relative">
             <Button size="sm" variant="ghost" icon={<ArrowRightLeft size={14} />} onClick={() => setTransferOpen((o) => !o)} title="Transferir ou devolver à fila">
               <span className="hidden sm:inline">Transferir</span>

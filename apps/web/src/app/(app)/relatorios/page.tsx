@@ -9,7 +9,7 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel } from '@/components/reports/ReportChart';
-import { useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 
@@ -25,6 +25,8 @@ const DEFAULT: ReportDefinition = { metric: 'conversations', groupBy: 'day', fro
 const TIME_GROUPS = ['day', 'week', 'month'];
 
 export default function RelatoriosPage() {
+  // sem a permissão a API devolve 403: melhor dizer o motivo do que mostrar gráfico vazio
+  const podeVer = useCan('reports.view');
   const [def, setDef] = useState<ReportDefinition>(DEFAULT);
   const [result, setResult] = useState<ReportResult | null>(null);
   const [range, setRange] = useState<[string, string]>(PRESETS[1].range());
@@ -68,6 +70,8 @@ export default function RelatoriosPage() {
     a.download = `atendo-${result.definition.metric}-por-${result.definition.groupBy}.csv`;
     a.click();
   }
+
+  if (!podeVer) return <PageShell><p className="text-sm text-muted">Seu perfil de acesso não inclui relatórios.</p></PageShell>;
 
   return (
     <PageShell width="max-w-6xl">
