@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Logger, Param, Patc
 import { IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PLAN_FEATURES } from '@atendo/shared';
+import { aReajustar, dataDoReajuste } from './reprice';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
@@ -34,12 +35,21 @@ class PlanLimitsDto {
   @IsOptional() @IsNumber() @Min(0) aiMonthlyCostCap?: number;
 }
 
+/** O que acontece com quem já assina quando o preço muda. */
+class ApplyToExistingDto {
+  @IsIn(['never', 'scheduled', 'now']) mode: 'never' | 'scheduled' | 'now';
+  /** aviso prévio, em dias, quando `scheduled` */
+  @IsOptional() @IsInt() @Min(0) @Max(365) days?: number;
+}
+
 class PlanDto {
   @IsString() @MaxLength(40) name: string;
   @IsNumber() @Min(0) @Max(99_999) priceMonth: number;
   @IsIn(['fixed', 'usage', 'hybrid']) billingModel: 'fixed' | 'usage' | 'hybrid';
   @ValidateNested() @Type(() => PlanLimitsDto) limits: PlanLimitsDto;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** só é lido quando o preço muda; ausente = mantém quem já assina no preço atual */
+  @IsOptional() @ValidateNested() @Type(() => ApplyToExistingDto) applyToExisting?: ApplyToExistingDto;
 }
 
 class CheckoutDto {
@@ -81,8 +91,19 @@ export class BillingController {
   @NoTenantOk()
   @Roles('super_admin')
   async allPlans() {
-    const plans = await this.prisma.plan.findMany({ orderBy: [{ isActive: 'desc' }, { priceMonth: 'asc' }], include: { _count: { select: { subscriptions: true } } } });
-    return plans.map(({ _count, ...p }) => ({ ...p, priceMonth: Number(p.priceMonth), subscribers: _count.subscriptions, billingEnabled: this.stripe.enabled }));
+    const plans = await this.prisma.plan.findMany({ orderBy: [{ isActive: 'desc' }, { priceMonth: 'asc' }], include: { subscriptions: { select: { status: true, priceMonth: true } } } });
+    return plans.map(({ subscriptions, ...p }) => {
+      const preco = Number(p.priceMonth);
+      return {
+        ...p,
+        priceMonth: preco,
+        subscribers: subscriptions.length,
+        // quantos pagam valor diferente do atual: é o número que mostra quanto está parado no
+        // passado, e some sozinho quando o reajuste roda
+        onOldPrice: aReajustar(subscriptions.map((s, i) => ({ id: String(i), status: s.status, priceMonth: s.priceMonth === null ? null : Number(s.priceMonth) })), preco).length,
+        billingEnabled: this.stripe.enabled,
+      };
+    });
   }
 
   @Post('plans')
@@ -106,10 +127,24 @@ export class BillingController {
       where: { id },
       data: { name: dto.name.trim(), priceMonth: dto.priceMonth, billingModel: dto.billingModel, limits: dto.limits as object, ...(dto.isActive !== undefined && { isActive: dto.isActive }) },
     });
+    const mudouPreco = Number(atual.priceMonth) !== dto.priceMonth;
     // preço no Stripe é imutável: mudar valor exige criar outro price e apontar o plano para ele
     if (this.stripe.enabled) {
-      if (Number(atual.priceMonth) !== dto.priceMonth) await this.stripe.repricePlan(plan.id).catch((err) => this.log.warn(`plano ${plan.name}: preço não propagou para o Stripe: ${err?.message ?? err}`));
+      if (mudouPreco) await this.stripe.repricePlan(plan.id).catch((err) => this.log.warn(`plano ${plan.name}: preço não propagou para o Stripe: ${err?.message ?? err}`));
       else await this.stripe.syncPlans().catch((err) => this.log.warn(`plano ${plan.name}: sync com o Stripe falhou: ${err?.message ?? err}`));
+    }
+
+    /**
+     * Quem já assina. Por padrão nada acontece — era o comportamento anterior e continua sendo
+     * o seguro. Agendar é o caminho normal: o cliente é avisado hoje e o valor muda na data,
+     * com tempo de decidir, inclusive de sair. "Agora" existe para corrigir erro de digitação
+     * no preço, não para reajustar sem aviso.
+     */
+    if (mudouPreco && dto.applyToExisting && dto.applyToExisting.mode !== 'never') {
+      const quando = dto.applyToExisting.mode === 'now' ? new Date() : dataDoReajuste(dto.applyToExisting.days ?? 30);
+      await this.prisma.plan.update({ where: { id }, data: { priceAppliesToExistingAt: quando } });
+      if (dto.applyToExisting.mode === 'now') await this.stripe.applyDuePriceChanges().catch((err) => this.log.error(`reajuste imediato falhou: ${err?.message ?? err}`));
+      else await this.stripe.notifyPriceChange(id, quando).catch((err) => this.log.warn(`aviso de reajuste não saiu: ${err?.message ?? err}`));
     }
     return this.prisma.plan.findUniqueOrThrow({ where: { id } });
   }
@@ -169,7 +204,7 @@ export class BillingController {
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, messagesIn: 0 }, limits: null, status: null, plan: null, priceMonth: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
+      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, messagesIn: 0 }, limits: null, status: null, plan: null, priceMonth: null, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
     }
     const [used, plan, sub, numbers, agents, counter] = await Promise.all([
       this.usage.current(user.tenantId),
@@ -189,7 +224,14 @@ export class BillingController {
       limits: plan?.limits ?? null,
       status: sub?.status ?? null,
       plan: sub?.plan.name ?? null,
-      priceMonth: sub ? Number(sub.plan.priceMonth) : null,
+      // o que ELE paga, não o preço de tabela: quem assinou antes de um reajuste continua no
+      // valor contratado, e mostrar o do catálogo seria avisar de uma cobrança que não existe
+      priceMonth: sub ? Number(sub.priceMonth ?? sub.plan.priceMonth) : null,
+      /** reajuste já avisado e ainda não aplicado — a tela do cliente mostra antes de chegar */
+      priceChange:
+        sub && sub.plan.priceAppliesToExistingAt && Number(sub.priceMonth ?? sub.plan.priceMonth) !== Number(sub.plan.priceMonth)
+          ? { priceMonth: Number(sub.plan.priceMonth), at: sub.plan.priceAppliesToExistingAt }
+          : null,
       currentPeriodEnd: sub?.currentPeriodEnd ?? null,
       overageAmount: counter ? Number(counter.overageAmount) : 0,
     };

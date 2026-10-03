@@ -79,10 +79,13 @@ class TenantsController {
       const now = new Date();
       const end = new Date(now);
       end.setMonth(end.getMonth() + 1);
+      // mudou de plano = preço contratado passa a ser o do plano novo. Sem isto o cliente
+      // ficaria com o preço do plano anterior registrado e o painel dele mostraria outro valor
+      const preco = dto.planId ? (await this.prisma.plan.findUniqueOrThrow({ where: { id: dto.planId } })).priceMonth : undefined;
       await this.prisma.subscription.upsert({
         where: { tenantId: id },
-        create: { tenantId: id, planId: dto.planId!, status: dto.subscriptionStatus ?? 'active', currentPeriodStart: now, currentPeriodEnd: end },
-        update: { ...(dto.planId && { planId: dto.planId }), ...(dto.subscriptionStatus && { status: dto.subscriptionStatus, graceUntil: null }) },
+        create: { tenantId: id, planId: dto.planId!, status: dto.subscriptionStatus ?? 'active', currentPeriodStart: now, currentPeriodEnd: end, priceMonth: preco },
+        update: { ...(dto.planId && { planId: dto.planId, priceMonth: preco }), ...(dto.subscriptionStatus && { status: dto.subscriptionStatus, graceUntil: null }) },
       });
     }
     return this.prisma.tenant.findUniqueOrThrow({ where: { id }, include: { subscription: { include: { plan: true } } } });

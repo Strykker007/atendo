@@ -124,6 +124,16 @@ export default function PlanosPage() {
             <div className="flex items-center gap-1.5 pt-1 mt-auto border-t border-line">
               <span className="text-[11px] text-faint flex items-center gap-1 flex-1" title="Clientes assinando este plano">
                 <Users size={11} /> {p.subscribers}
+                {p.onOldPrice > 0 && (
+                  <span className="ml-1 text-warn" title={`${p.onOldPrice} cliente(s) ainda pagam um valor diferente de ${brl(p.priceMonth)}`}>
+                    · {p.onOldPrice} no preço antigo
+                  </span>
+                )}
+                {p.priceAppliesToExistingAt && (
+                  <span className="ml-1 text-accent-ink" title="Reajuste avisado e agendado">
+                    · reajusta {new Date(p.priceAppliesToExistingAt).toLocaleDateString('pt-BR')}
+                  </span>
+                )}
                 {p.billingEnabled && !p.stripePriceId && p.isActive && <span className="ml-2 text-warn" title="Sem preço no Stripe: o cliente não consegue assinar">· sem Stripe</span>}
               </span>
               <button onClick={() => setForm({ id: p.id, name: p.name, priceMonth: p.priceMonth, billingModel: p.billingModel, limits: p.limits, isActive: p.isActive })} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={14} /></button>
@@ -141,7 +151,16 @@ export default function PlanosPage() {
         ))}
       </div>
 
-      {form && <FormularioPlano form={form} setForm={setForm} onSubmit={salvar} salvando={criar.isPending || atualizar.isPending} />}
+      {form && (
+        <FormularioPlano
+          form={form}
+          setForm={setForm}
+          onSubmit={salvar}
+          salvando={criar.isPending || atualizar.isPending}
+          precoOriginal={plans.data?.find((p) => p.id === form.id)?.priceMonth ?? null}
+          assinantes={plans.data?.find((p) => p.id === form.id)?.subscribers ?? 0}
+        />
+      )}
 
       <ConfirmDialog
         open={!!confirmar}
@@ -159,13 +178,71 @@ export default function PlanosPage() {
   );
 }
 
-function FormularioPlano({ form, setForm, onSubmit, salvando }: {
+/**
+ * O que acontece com quem já assina quando o preço muda.
+ *
+ * Sem esta escolha o cliente ficava congelado para sempre: no Stripe o preço de uma assinatura
+ * não muda sozinho, então quem entrou hoje pagaria o preço de hoje daqui a dez anos. Por outro
+ * lado, reajustar sem aviso não é opção — contrato de serviço continuado exige avisar antes, e
+ * o cliente precisa poder sair se não aceitar. Daí a opção do meio ser a normal.
+ */
+function ReajusteDosAtuais({ aplicar, setAplicar, assinantes, de, para }: {
+  aplicar: { mode: 'never' | 'scheduled' | 'now'; days?: number };
+  setAplicar: (p: { mode?: 'never' | 'scheduled' | 'now'; days?: number }) => void;
+  assinantes: number;
+  de: number;
+  para: number;
+}) {
+  const sobe = para > de;
+  const um = assinantes === 1;
+  const opcoes = [
+    { id: 'never' as const, titulo: um ? 'Manter como está' : 'Manter como estão', desc: `${um ? 'Ele continua' : `Os ${assinantes} continuam`} em ${brl(de)}. O valor novo vale só para quem assinar daqui para frente.` },
+    { id: 'scheduled' as const, titulo: 'Avisar e reajustar', desc: 'Avisa por e-mail hoje e muda na data. É o caminho normal.' },
+    { id: 'now' as const, titulo: 'Aplicar agora', desc: 'Sem aviso prévio. Para corrigir preço digitado errado, não para reajustar.' },
+  ];
+  return (
+    <div className="rounded-xl border border-warn/40 bg-warn-soft/40 p-3 space-y-2">
+      <div className="text-[13px] font-semibold text-ink">
+        {sobe ? 'Aumento' : 'Redução'} de {brl(de)} para {brl(para)} — e {um ? 'o cliente que já assina' : `os ${assinantes} clientes que já assinam`}?
+      </div>
+      <div className="grid sm:grid-cols-3 gap-2">
+        {opcoes.map((o) => (
+          <button key={o.id} type="button" onClick={() => setAplicar({ mode: o.id })} className={cn('text-left rounded-lg border p-2', aplicar.mode === o.id ? 'border-accent bg-panel' : 'border-line bg-panel/60 hover:bg-panel')}>
+            <div className="text-[12.5px] font-semibold text-ink">{o.titulo}</div>
+            <div className="text-[11px] text-muted">{o.desc}</div>
+          </button>
+        ))}
+      </div>
+      {aplicar.mode === 'scheduled' && (
+        <label className="flex items-center gap-2 text-[12.5px] text-ink">
+          Aviso prévio de
+          <input className={cn(inputCls, 'w-20 py-1')} inputMode="numeric" value={String(aplicar.days ?? 30)} onChange={(e) => setAplicar({ days: Number(e.target.value) || 0 })} />
+          dias — passa a valer em <b>{new Date(Date.now() + (aplicar.days ?? 30) * 86_400_000).toLocaleDateString('pt-BR')}</b>
+        </label>
+      )}
+      {aplicar.mode !== 'never' && (
+        <p className="text-[11px] text-muted">
+          Cada cliente recebe e-mail com o valor antigo, o novo e a data. A cobrança muda na primeira fatura depois dessa data — sem valor proporcional no meio do mês.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, assinantes }: {
   form: PlanInput & { id?: string };
   setForm: (f: (PlanInput & { id?: string }) | null) => void;
   onSubmit: (e: React.FormEvent) => void;
   salvando: boolean;
+  precoOriginal: number | null;
+  assinantes: number;
 }) {
   const lim = (patch: Partial<PlanLimits>) => setForm({ ...form, limits: { ...form.limits, ...patch } });
+  // a pergunta do reajuste só faz sentido quando há preço anterior, ele mudou, e existe gente
+  // pagando o antigo — perguntar fora disso é ruído num formulário que já é grande
+  const mudouPreco = precoOriginal !== null && form.priceMonth !== precoOriginal && assinantes > 0;
+  const aplicar = form.applyToExisting ?? { mode: 'never' as const, days: 30 };
+  const setAplicar = (p: Partial<NonNullable<PlanInput['applyToExisting']>>) => setForm({ ...form, applyToExisting: { ...aplicar, ...p } });
   const porConversa = form.limits.billingUnit === 'conversations';
   const features = form.limits.features ?? [];
 
@@ -178,6 +255,8 @@ function FormularioPlano({ form, setForm, onSubmit, salvando }: {
             <input className={inputCls} inputMode="decimal" value={String(form.priceMonth)} onChange={(e) => setForm({ ...form, priceMonth: Number(e.target.value.replace(',', '.')) || 0 })} required />
           </Field>
         </div>
+
+        {mudouPreco && <ReajusteDosAtuais aplicar={aplicar} setAplicar={setAplicar} assinantes={assinantes} de={precoOriginal!} para={form.priceMonth} />}
 
         <Field label="Modelo de cobrança">
           <div className="grid sm:grid-cols-3 gap-2">

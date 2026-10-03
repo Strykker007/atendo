@@ -53,13 +53,15 @@ export class FinanceService {
 
     // agora
     const active = subs.filter((s) => ['active', 'trialing', 'past_due'].includes(s.status));
-    const mrr = active.filter((s) => s.status !== 'trialing').reduce((a, s) => a + Number(s.plan.priceMonth), 0);
+    // o preço contratado manda sobre o de tabela: cliente congelado num preço antigo rende o
+    // que ele paga, não o que o plano custa hoje — somar o do catálogo inflaria o MRR
+    const mrr = active.filter((s) => s.status !== 'trialing').reduce((a, s) => a + Number(s.priceMonth ?? s.plan.priceMonth), 0);
     const byPlan = Object.values(
       active.reduce<Record<string, { plan: string; count: number; mrr: number }>>((acc, s) => {
         const k = s.plan.name;
         acc[k] ??= { plan: k, count: 0, mrr: 0 };
         acc[k].count++;
-        if (s.status !== 'trialing') acc[k].mrr += Number(s.plan.priceMonth);
+        if (s.status !== 'trialing') acc[k].mrr += Number(s.priceMonth ?? s.plan.priceMonth);
         return acc;
       }, {}),
     );
@@ -82,7 +84,7 @@ export class FinanceService {
       byPlan,
       series,
       invoices: invoices.slice(0, 100).map((i) => ({ id: i.id, tenant: i.tenant.name, period: i.period, total: Number(i.totalAmount), overage: Number(i.overageAmount), status: i.status, dueAt: i.dueAt, paidAt: i.paidAt, hostedUrl: i.hostedUrl })),
-      subscriptions: subs.map((s) => ({ tenant: s.tenant.name, plan: s.plan.name, price: Number(s.plan.priceMonth), status: s.status, periodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd, graceUntil: s.graceUntil })),
+      subscriptions: subs.map((s) => ({ tenant: s.tenant.name, plan: s.plan.name, price: Number(s.priceMonth ?? s.plan.priceMonth), status: s.status, periodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd, graceUntil: s.graceUntil })),
     };
   }
 }

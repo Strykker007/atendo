@@ -69,6 +69,13 @@ function PlanoInner() {
         <div>
           <div className="text-xs text-muted">Mensalidade</div>
           <div className="font-medium">{u.priceMonth != null ? brl(u.priceMonth) : '—'}</div>
+          {/* reajuste já avisado: aparece aqui também, não só no e-mail, porque e-mail se perde
+              e a conta do mês que vem não pode ser surpresa */}
+          {u.priceChange && (
+            <div className="text-[11px] text-warn-ink mt-0.5" title={`A partir de ${new Date(u.priceChange.at).toLocaleDateString('pt-BR')}`}>
+              {brl(u.priceChange.priceMonth)} a partir de {new Date(u.priceChange.at).toLocaleDateString('pt-BR')}
+            </div>
+          )}
         </div>
         <div>
           <div className="text-xs text-muted">Excedente até agora</div>

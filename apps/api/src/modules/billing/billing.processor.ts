@@ -19,6 +19,8 @@ export class BillingProcessor extends TrackedWorkerHost {
       await this.usage.reconcile();
       // carência vencida sem pagamento → suspende (envio bloqueado, recebimento continua)
       await this.stripe.suspendOverdue();
+      // reajustes cuja data de aviso prévio venceu
+      await this.stripe.applyDuePriceChanges();
     }
   }
 }

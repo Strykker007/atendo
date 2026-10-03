@@ -774,6 +774,10 @@ model Plan {
   limits       Json
   /// Price recorrente no Stripe (price_…). Criado por `pnpm stripe:sync`.
   stripePriceId String?     @unique
+  /// Quando o preço atual passa a valer TAMBÉM para quem já assina.
+  /// Null = só vale para novas assinaturas (o cliente antigo fica congelado no preço dele).
+  /// É o que impede um cliente de dez anos continuar pagando o preço de dez anos atrás.
+  priceAppliesToExistingAt DateTime?
   isActive     Boolean      @default(true)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -800,6 +804,10 @@ model Subscription {
   currentPeriodEnd   DateTime
   /// id da Subscription no Stripe (sub_…)
   externalId         String?   @unique
+  /// Preço contratado POR ESTE cliente. Pode ser mais antigo que o do plano: no Stripe o
+  /// preço de quem já assina não muda sozinho, e exibir o preço do catálogo mostraria um
+  /// valor que não é o que ele paga.
+  priceMonth         Decimal?  @db.Decimal(10, 2)
   /// avisa que o cliente pediu cancelamento ao fim do período
   cancelAtPeriodEnd  Boolean   @default(false)
   graceUntil         DateTime?

@@ -50,6 +50,8 @@ export interface Usage {
   status: string | null;
   plan: string | null;
   priceMonth: number | null;
+  /** reajuste já avisado e ainda não aplicado */
+  priceChange: { priceMonth: number; at: string } | null;
   currentPeriodEnd: string | null;
   overageAmount: number;
 }
@@ -205,6 +207,10 @@ export interface PlanRow {
   stripePriceId: string | null;
   isActive: boolean;
   subscribers: number;
+  /** quantos ainda pagam valor diferente do atual (reajuste pendente ou nunca feito) */
+  onOldPrice: number;
+  /** data em que o preço atual passa a valer também para quem já assina */
+  priceAppliesToExistingAt: string | null;
   /** cobrança configurada no servidor; sem isso "sem Stripe" seria alarme falso */
   billingEnabled?: boolean;
 }
@@ -214,6 +220,8 @@ export interface PlanInput {
   billingModel: 'fixed' | 'usage' | 'hybrid';
   limits: PlanLimits;
   isActive?: boolean;
+  /** o que fazer com quem já assina quando o preço muda */
+  applyToExisting?: { mode: 'never' | 'scheduled' | 'now'; days?: number };
 }
 
 /** Catálogo do dono: inclui inativos e quantos clientes cada plano tem. */

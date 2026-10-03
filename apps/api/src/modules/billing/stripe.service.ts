@@ -5,6 +5,9 @@ import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService, periodOf } from './usage.service';
 import { MailService } from '../../common/mail/mail.service';
+import { aReajustar, porExtenso } from './reprice';
+
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /**
  * Integração com o Stripe.
@@ -58,7 +61,8 @@ export class StripeService {
         proration_behavior: 'create_prorations',
         metadata: { tenantId, planId },
       });
-      await this.prisma.subscription.update({ where: { tenantId }, data: { planId } });
+      // troca de plano = contrato novo: passa a valer o preço de tabela do plano escolhido
+      await this.prisma.subscription.update({ where: { tenantId }, data: { planId, priceMonth: plan.priceMonth } });
       return { url: `${env.WEB_ORIGIN}/plano?changed=1` };
     }
 
@@ -137,10 +141,14 @@ export class StripeService {
     const limits = (plan ?? existing?.plan)?.limits as { graceDays?: number } | undefined;
     const graceUntil = status === 'past_due' ? new Date(Date.now() + (limits?.graceDays ?? 5) * 86_400_000) : null;
 
+    // o preço contratado vem do próprio item da assinatura, não do catálogo: é o valor que o
+    // Stripe realmente cobra deste cliente, mesmo que o plano já tenha outro preço de tabela
+    const cobrado = item.price.unit_amount != null ? item.price.unit_amount / 100 : undefined;
+
     await this.prisma.subscription.upsert({
       where: { tenantId },
-      create: { tenantId, planId: plan?.id ?? existing?.planId ?? (await this.prisma.plan.findFirstOrThrow()).id, status, externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil },
-      update: { ...(plan && { planId: plan.id }), status, externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil, canceledAt: s.canceled_at ? new Date(s.canceled_at * 1000) : null },
+      create: { tenantId, planId: plan?.id ?? existing?.planId ?? (await this.prisma.plan.findFirstOrThrow()).id, status, externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil, priceMonth: cobrado },
+      update: { ...(plan && { planId: plan.id }), status, externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil, canceledAt: s.canceled_at ? new Date(s.canceled_at * 1000) : null, ...(cobrado !== undefined && { priceMonth: cobrado }) },
     });
     this.log.log(`assinatura ${s.id} → tenant ${tenantId}: ${status}`);
   }
@@ -266,6 +274,84 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
     this.log.log(`plano ${plan.name} reprecificado → ${price.id}`);
   }
 
+  // ---------- Reajuste de quem já assina ----------
+
+  /**
+   * Avisa os clientes de um plano que o preço deles vai mudar na data marcada.
+   *
+   * Mandado no momento do agendamento, não no dia: a graça do aviso prévio é o cliente ter
+   * tempo de decidir, inclusive de sair. Avisar no dia da cobrança é comunicado, não aviso.
+   */
+  async notifyPriceChange(planId: string, quando: Date) {
+    const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: planId }, include: { subscriptions: true } });
+    const novo = Number(plan.priceMonth);
+    for (const s of aReajustar(plan.subscriptions.map((x) => ({ id: x.id, status: x.status, priceMonth: x.priceMonth === null ? null : Number(x.priceMonth) })), novo)) {
+      const sub = plan.subscriptions.find((x) => x.id === s.id)!;
+      const to = await this.usage.adminEmails(sub.tenantId);
+      if (!to.length) continue;
+      const atual = s.priceMonth ?? novo;
+      const sobe = novo > atual;
+      await this.mail.send({
+        to,
+        subject: `Sua mensalidade ${sobe ? 'será reajustada' : 'vai mudar'} em ${porExtenso(quando)}`,
+        text: `A partir de ${porExtenso(quando)}, a mensalidade do plano ${plan.name} passa de ${brl(atual)} para ${brl(novo)}.
+
+A mudança vale a partir da sua próxima cobrança depois dessa data. Até lá, nada muda.
+
+Seu plano e seu uso: ${env.WEB_ORIGIN}/plano`,
+      }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Roda junto da reconciliação diária: aplica os reajustes cuja data chegou.
+   *
+   * No Stripe isto é trocar o `price` do item da assinatura **sem proporcional**
+   * (`proration_behavior: 'none'`): o valor novo entra na próxima fatura inteira, em vez de
+   * gerar uma cobrança quebrada no meio do mês que ninguém entende.
+   */
+  async applyDuePriceChanges() {
+    const plans = await this.prisma.plan.findMany({ where: { priceAppliesToExistingAt: { lte: new Date() } }, include: { subscriptions: true } });
+    for (const plan of plans) {
+      const novo = Number(plan.priceMonth);
+      const alvos = aReajustar(plan.subscriptions.map((x) => ({ id: x.id, status: x.status, priceMonth: x.priceMonth === null ? null : Number(x.priceMonth) })), novo);
+      for (const alvo of alvos) {
+        const sub = plan.subscriptions.find((x) => x.id === alvo.id)!;
+        try {
+          if (sub.externalId && plan.stripePriceId && this.enabled) {
+            const atual = await this.client.subscriptions.retrieve(sub.externalId);
+            const item = atual.items.data[0];
+            if (item) {
+              await this.client.subscriptions.update(sub.externalId, {
+                items: [{ id: item.id, price: plan.stripePriceId }],
+                proration_behavior: 'none',
+              });
+            }
+          }
+          await this.prisma.subscription.update({ where: { id: sub.id }, data: { priceMonth: plan.priceMonth } });
+          this.log.log(`reajuste aplicado: tenant ${sub.tenantId} ${alvo.priceMonth ?? '—'} → ${novo} (${plan.name})`);
+          const to = await this.usage.adminEmails(sub.tenantId);
+          if (to.length) {
+            await this.mail.send({
+              to,
+              subject: `Mensalidade atualizada para ${brl(novo)}`,
+              text: `Conforme avisamos, a mensalidade do plano ${plan.name} passou a ${brl(novo)} e vale a partir da sua próxima cobrança.
+
+Seu plano e seu uso: ${env.WEB_ORIGIN}/plano`,
+            }).catch(() => undefined);
+          }
+        } catch (err) {
+          // um cliente que falhou não pode impedir os outros, e tentar de novo amanhã é
+          // seguro: quem já está no preço novo sai da lista sozinho
+          this.log.error(`reajuste falhou para o tenant ${sub.tenantId}: ${(err as Error)?.message ?? err}`);
+        }
+      }
+      // some da fila mesmo com falhas: quem não migrou continua no preço antigo e aparece
+      // na tela como "no preço antigo", em vez de o sistema insistir calado todo dia
+      await this.prisma.plan.update({ where: { id: plan.id }, data: { priceAppliesToExistingAt: null } });
+    }
+  }
+
   /** Plano apagado: arquiva preço e produto, senão o painel do Stripe vira um cemitério. */
   async archivePlan(stripePriceId: string) {
     if (!this.enabled) return;
@@ -283,7 +369,8 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
     const byTenant = new Map(counters.map((c) => [c.tenantId, c]));
     return tenants.map((t) => {
       const c = byTenant.get(t.id);
-      const price = Number(t.subscription?.plan.priceMonth ?? 0);
+      // o que este cliente paga, não o preço de tabela (ver reprice.ts)
+      const price = Number(t.subscription?.priceMonth ?? t.subscription?.plan.priceMonth ?? 0);
       const overage = Number(c?.overageAmount ?? 0);
       const providerCost = Number(c?.providerCost ?? 0);
       const infra = t.numbers.reduce((a, n) => a + Number(n.infraCostMonth), 0);

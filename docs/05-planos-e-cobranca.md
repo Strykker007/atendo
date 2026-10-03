@@ -44,6 +44,24 @@ A tela cobre tudo que o `PlanLimits` aceita: limites de números e usuários, un
 
 **Mudar o valor de um plano existente** cria um preço novo no Stripe e arquiva o anterior: preço é imutável lá. **Quem já assina continua no antigo** até trocar de plano — reajustar por baixo seria mexer no que o cliente contratou sem avisar.
 
+### Reajuste de quem já assina
+
+No Stripe o preço de uma assinatura **não muda sozinho**: sem nada, quem entrou hoje pagaria o preço de hoje daqui a dez anos. Era a única parte do faturamento que só andava para trás.
+
+Ao mudar o preço de um plano que tem assinante, a tela pergunta o que fazer com ele:
+
+| Opção | O que acontece |
+|---|---|
+| **Manter** (padrão) | Ninguém é tocado. O valor novo vale só para quem assinar daqui para frente. |
+| **Avisar e reajustar** | Grava a data (`plans.priceAppliesToExistingAt = hoje + aviso prévio`, padrão 30 dias) e manda o e-mail **na hora do agendamento** — a graça do aviso prévio é o cliente ter tempo de decidir, inclusive de sair. |
+| **Aplicar agora** | Sem aviso. Existe para corrigir preço digitado errado, não para reajustar. |
+
+A rotina diária (`BillingProcessor`, 03:00 UTC) aplica os reajustes vencidos: troca o `price` do item da assinatura no Stripe com **`proration_behavior: 'none'`** — o valor novo entra na próxima fatura inteira, em vez de gerar uma cobrança quebrada no meio do mês —, grava `subscriptions.priceMonth` e manda a confirmação. Falha de um cliente não impede os outros, e o plano sai da fila mesmo assim: quem não migrou continua aparecendo como "no preço antigo" em vez de o sistema insistir calado todo dia.
+
+`subscriptions.priceMonth` é **o preço contratado por aquele cliente** e é a fonte da verdade do que ele paga: alimenta o painel dele, o MRR e a margem. Somar `plans.priceMonth` inflaria a receita com um valor que ninguém está pagando. É gravado em toda atribuição de plano (criação pelo dono, troca de plano, webhook do Stripe — neste último vindo do valor real do item da assinatura).
+
+Verificado em modo de teste com assinatura real no Stripe: agendamento mantém o cliente em R$ 597 e avisa; aplicação troca para R$ 697 com **zero itens de proporcional** e próxima fatura de R$ 697; e uma mudança sem aplicar deixa o cliente intacto no Stripe, marcado como "1 no preço antigo".
+
 **Apagar** só é permitido quando ninguém assina; com assinante, a API responde 400 e a tela desabilita o botão, porque apagar levaria junto o histórico de faturamento. O caminho é **desativar**: some do checkout e quem já assina continua. Ao apagar, o produto também é arquivado no Stripe.
 
 ## Preços do provider
