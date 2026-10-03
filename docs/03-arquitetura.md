@@ -153,3 +153,10 @@ Regras:
 ## O que ainda não está aqui (ver roadmap)
 
 2FA (campo existe, fluxo não), gateway de pagamento, e-mail de alerta, testes automatizados.
+
+## Divisão dos arquivos grandes
+
+Dois arquivos passaram do ponto e foram quebrados **por caminho do dado**, não por tipo de arquivo:
+
+- `conversations.service.ts` (816 linhas) perdeu tudo que **entra pelo provider** para `inbound.service.ts`: mensagem recebida, mensagem digitada no celular, confirmação de entrega e mudança de conexão. Ficou 579 + 273. `InboundService` depende de `ConversationsService`, nunca o contrário — quem recebe precisa reabrir conversa; quem atende nunca precisa saber de webhook.
+- `hooks.ts` (584 linhas, importado por toda tela) virou `lib/hooks/` com um arquivo por domínio e um **barril** em `hooks.ts` que reexporta tudo. Nenhuma tela mudou de import: a organização é interna, não um recado para quem consome. Maior arquivo agora: 324 linhas (`core`, com tipos e conversas).

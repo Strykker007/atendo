@@ -190,6 +190,12 @@ O chip **Esperando há mais tempo** reordena a lista (`sort=waiting`), e a escol
 
 O rótulo do número saiu da faixa de tags e foi para a linha da hora: embaixo, ele acrescentava uma faixa inteira só por estar vendo "todos os números", e a lista ficava com o dobro da altura. Agora a linha mede o mesmo nos dois casos (medido: 58px).
 
+## Aparência do chat
+
+O fundo era cinza chapado — e chapado é o que faz a tela parecer sem vida: os balões flutuam num vazio e a conversa não ganha lugar. Agora tem um ponto discreto a cada 18px (de perto quase não se vê, de longe o olho sente), o balão enviado tem degradê curto e sombra de contato, e os cantos ficaram mais arredondados.
+
+**Separador de dia** entre as mensagens: "Hoje", "Ontem", o dia da semana dentro dos últimos sete dias e a data depois disso. Sem ele a conversa é um rolo contínuo — o atendente lê "às 14:20" e não sabe se foi hoje ou há três semanas, e essa diferença muda o que ele responde.
+
 ## Responder mensagem (citação)
 
 O botão aparece no hover, **fora** da bolha, para não roubar espaço do texto. Escolhida a mensagem, uma faixa acima do campo mostra o que está sendo respondido; enviar manda o `quotedExternalId` e limpa a faixa.

@@ -3,6 +3,7 @@ import { Job } from 'bullmq';
 import { ProviderRegistry } from './providers/provider.registry';
 import { NumbersService } from './numbers.service';
 import { ConversationsService } from '../conversations/conversations.service';
+import { InboundService } from '../conversations/inbound.service';
 import { QUEUE_INBOUND, type InboundJob } from './queues';
 import { StorageService } from '../../common/storage/storage.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
@@ -19,6 +20,7 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     private readonly registry: ProviderRegistry,
     private readonly numbers: NumbersService,
     private readonly conversations: ConversationsService,
+    private readonly inbound: InboundService,
     private readonly storage: StorageService,
     private readonly flows: FlowEngineService,
     private readonly scheduling: SchedulingService,
@@ -61,7 +63,7 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
         continue;
       }
       enrichContext({ tenantId: number.tenantId }); // daqui para a frente o log sai com o tenant
-      const result = await this.conversations.ingestInbound(number, msg);
+      const result = await this.inbound.ingestInbound(number, msg);
       const saved = result?.message;
       // automação: avança fluxo ativo ou avalia gatilhos (nunca derruba a ingestão)
       // o que o cliente digitou no celular dele entra no histórico, mas não aciona nada:
@@ -91,21 +93,21 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
           if (media) {
             const key = this.storage.makeKey(number.tenantId, media.mimeType, media.fileName);
             await this.storage.put(key, media.data, media.mimeType);
-            await this.conversations.attachMedia(saved.id, number.tenantId, key, media.mimeType, media.fileName);
+            await this.inbound.attachMedia(saved.id, number.tenantId, key, media.mimeType, media.fileName);
           }
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           this.log.warn(`Mídia de ${msg.externalId} não baixada: ${reason}`);
-          await this.conversations.mediaFailed(saved.id, number.tenantId, reason);
+          await this.inbound.mediaFailed(saved.id, number.tenantId, reason);
         }
       }
     }
 
-    for (const st of parsed.statuses) await this.conversations.applyStatus(st);
+    for (const st of parsed.statuses) await this.inbound.applyStatus(st);
 
     if (parsed.connection) {
       const number = await this.numbers.findByExternal(job.data.provider, parsed.connection.externalNumberId);
-      if (number) await this.conversations.numberConnectionChanged(number, parsed.connection);
+      if (number) await this.inbound.numberConnectionChanged(number, parsed.connection);
     }
   }
 }

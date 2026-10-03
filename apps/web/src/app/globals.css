@@ -36,9 +36,13 @@
   --warn: #d97706;  --warn-soft: #fef3c7; --warn-ink: #92400e;
   --danger: #dc2626; --danger-soft: #fee2e2; --danger-ink: #991b1b;
 
-  --chat-bg: #e9edf5;
+  --chat-bg: #eef1f7;
+  /* ponto da textura do fundo: quase imperceptível de perto, dá profundidade de longe */
+  --chat-dot: #dbe1ec;
   --bub-in: #ffffff;  --bub-in-ink: #1e2433;
   --bub-out: #2f5bea; --bub-out-ink: #ffffff;
+  /* segunda cor do balão enviado: o leve degradê tira o aspecto de retângulo chapado */
+  --bub-out-2: #2550d8;
 
   --meta-soft: #e0e7ff; --meta-ink: #3730a3;
   --evo-soft: #fff3d6;  --evo-ink: #9a5b00;
@@ -79,8 +83,10 @@
   --danger: #f87171; --danger-soft: #4a1d1d; --danger-ink: #fecaca;
 
   --chat-bg: #0f1218;
+  --chat-dot: #182033;
   --bub-in: #1d2330;  --bub-in-ink: #e8ecf3;
-  --bub-out: #1b3a5c; --bub-out-ink: #dbeeff;
+  --bub-out: #1e4474; --bub-out-ink: #e2f0ff;
+  --bub-out-2: #16365e;
 
   --meta-soft: #2a1f3d; --meta-ink: #c4a8ff;
   --evo-soft: #3a2c0a;  --evo-ink: #fbbf24;
@@ -92,12 +98,34 @@
 html, body { height: 100%; }
 body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
 
-/* fundo do chat: claro liso; escuro com grade fina (sala de controle) */
-.chat-bg { background-color: var(--chat-bg); }
+/**
+ * Fundo do chat.
+ *
+ * Era cinza chapado, e chapado é o que faz a tela parecer sem vida: sem textura, os balões
+ * flutuam num vazio e a conversa não ganha "lugar". Um ponto discreto a cada 18px dá
+ * profundidade sem virar papel de parede — de perto quase não se vê, de longe o olho sente.
+ * No escuro continua a grade fina, que é a linguagem de sala de controle do tema.
+ */
+.chat-bg {
+  background-color: var(--chat-bg);
+  background-image: radial-gradient(var(--chat-dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
 .dark .chat-bg {
-  background-image: linear-gradient(#141926 1px, transparent 1px), linear-gradient(90deg, #141926 1px, transparent 1px);
+  background-image: linear-gradient(var(--chat-dot) 1px, transparent 1px), linear-gradient(90deg, var(--chat-dot) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+
+/* balão enviado: degradê curto no sentido da leitura, com sombra de contato */
+.bub-out {
+  background-image: linear-gradient(135deg, var(--bub-out), var(--bub-out-2));
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.18);
+}
+.bub-in { box-shadow: 0 1px 2px rgb(15 23 42 / 0.08); }
+.dark .bub-in { box-shadow: 0 1px 2px rgb(0 0 0 / 0.35); }
+
+/* separador de dia: a linha atravessa, a etiqueta fica por cima */
+.dia-sep::before, .dia-sep::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 
 @keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 .animate-fade-in { animation: fade-in .18s ease-out; }

@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConversationsService } from './conversations.service';
+import { InboundService } from './inbound.service';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsGateway } from './conversations.gateway';
 import { AuthModule } from '../auth/auth.module';
@@ -13,7 +14,7 @@ import { ConversationScopeGuard } from './conversation-scope.guard';
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_OUTBOUND }), AuthModule, BillingModule, forwardRef(() => WhatsAppModule), forwardRef(() => FlowsModule)],
   controllers: [ConversationsController],
-  providers: [ConversationsService, ConversationsGateway, ConversationScopeGuard],
-  exports: [ConversationsService, ConversationsGateway],
+  providers: [ConversationsService, InboundService, ConversationsGateway, ConversationScopeGuard],
+  exports: [ConversationsService, InboundService, ConversationsGateway],
 })
 export class ConversationsModule {}

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Download, X, RefreshCw, Reply, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -394,7 +394,7 @@ export function ChatPane() {
             ))}
           </div>
         )}
-        {mensagens.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} />)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} /></Fragment>)}
         <div ref={bottomRef} />
       </div>
 
@@ -541,7 +541,7 @@ function Bubble({ m, canResend, onVerImagem, onResponder, citada }: { m: Message
     <div className={cn('group flex items-center gap-1', out ? 'justify-end' : 'justify-start')}>
       {/* responder aparece no hover, do lado de fora da bolha, para não roubar espaço do texto */}
       {out && onResponder && m.externalId && <BotaoResponder m={m} onResponder={onResponder} />}
-      <div className={cn('max-w-[72%] px-2.5 py-1.5 text-[13px] shadow-sm', out ? 'bg-chat-out text-chat-out-ink rounded-xl rounded-br-sm' : 'bg-chat-in text-chat-in-ink rounded-xl rounded-bl-sm')}>
+      <div className={cn('max-w-[72%] px-2.5 py-1.5 text-[13px]', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
         <Citacao m={m} citada={citada} />
         <MediaBody m={m} onVerImagem={onVerImagem} />
         {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
@@ -563,6 +563,36 @@ function Bubble({ m, canResend, onVerImagem, onResponder, citada }: { m: Message
       {!out && onResponder && m.externalId && <BotaoResponder m={m} onResponder={onResponder} />}
     </div>
   );
+}
+
+/**
+ * Separador de dia, como no WhatsApp.
+ *
+ * Sem ele a conversa é um rolo contínuo: o atendente lê "às 14:20" e não sabe se foi hoje ou
+ * há três semanas — e essa diferença muda o que ele responde.
+ */
+function SeparadorDeDia({ data }: { data: string }) {
+  return (
+    <div className="dia-sep flex items-center gap-3 py-2 select-none">
+      <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted bg-panel/80 rounded-full px-2.5 py-0.5 shadow-sm">{rotuloDoDia(data)}</span>
+    </div>
+  );
+}
+
+function rotuloDoDia(iso: string) {
+  const d = new Date(iso);
+  const hoje = new Date();
+  const ontem = new Date(hoje); ontem.setDate(hoje.getDate() - 1);
+  if (d.toDateString() === hoje.toDateString()) return 'Hoje';
+  if (d.toDateString() === ontem.toDateString()) return 'Ontem';
+  // dentro da semana o dia da semana diz mais que a data: "terça" se localiza melhor que 30/09
+  if ((hoje.getTime() - d.getTime()) / 86_400_000 < 7) return d.toLocaleDateString('pt-BR', { weekday: 'long' });
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: d.getFullYear() === hoje.getFullYear() ? undefined : 'numeric' });
+}
+
+function mudouODia(anterior: Message | undefined, atual: Message) {
+  if (!anterior) return true;
+  return new Date(anterior.createdAt).toDateString() !== new Date(atual.createdAt).toDateString();
 }
 
 function BotaoResponder({ m, onResponder }: { m: Message; onResponder: (m: Message) => void }) {
