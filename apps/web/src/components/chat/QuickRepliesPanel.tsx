@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy } from 'lucide-react';
+import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { type QuickReplyItem, useFlows, useStartFlow, useHasFeature, useActiveRun } from '@/lib/hooks';
@@ -13,12 +13,19 @@ import { usePersistedState } from '@/lib/persisted';
 
 /** Painel direito: sessões (pastas) com mensagens pré-configuradas. Clique insere no composer. */
 export function QuickRepliesPanel() {
+  const { toggleRightPanel } = useUI();
   // a aba escolhida também fica guardada: trocar de conversa não deve devolver o painel ao padrão
   const [tab, setTab] = usePersistedState<'replies' | 'flows'>('painel-aba', 'replies');
   return (
     <>
-      <div className="h-12 px-2 flex items-center border-b border-line">
-        <div className="grid grid-cols-2 w-full rounded-lg bg-field p-0.5 text-[12px] font-semibold">
+      <div className="h-12 px-2 flex items-center gap-1.5 border-b border-line">
+        {/* recolher fica aqui dentro, como no menu da esquerda: quem quer mais espaço para a
+            conversa fecha de onde está olhando, sem procurar o botão no cabeçalho do chat
+            (que continua existindo, porque fechado é de lá que se reabre) */}
+        <button onClick={toggleRightPanel} className="shrink-0 p-1 rounded-md text-faint hover:text-ink hover:bg-field" title="Recolher painel">
+          <PanelRightClose size={17} />
+        </button>
+        <div className="grid grid-cols-2 flex-1 min-w-0 rounded-lg bg-field p-0.5 text-[12px] font-semibold">
           <button onClick={() => setTab('replies')} className={cn('rounded-md py-1 flex items-center justify-center gap-1.5', tab === 'replies' ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}><Zap size={13} /> Mensagens</button>
           <button onClick={() => setTab('flows')} className={cn('rounded-md py-1 flex items-center justify-center gap-1.5', tab === 'flows' ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}><Workflow size={13} /> Fluxos</button>
         </div>

@@ -139,6 +139,14 @@ A logo fica em `apps/web/public/marca/`, em três recortes: `vogo.png` (original
 
 Login, telas de convite/recuperação, título da aba e aviso de versão ainda dizem "Atendo".
 
+## Recolher os dois painéis
+
+O menu da esquerda e o painel da direita recolhem pelo **próprio topo**, cada um com o botão na sua borda interna — quem quer mais espaço para a conversa fecha de onde está olhando.
+
+Fechado, o painel da direita deixa uma **faixa de 36px com o botão de abrir**, do mesmo jeito que o menu recolhido mantém o dele. Sem essa faixa havia um beco: o outro botão de reabrir vive no cabeçalho do chat, que só existe com uma conversa aberta, então fechar o painel na tela de "selecione uma conversa" deixava a pessoa sem nenhuma forma de trazê-lo de volta. O botão do cabeçalho continua, porque é o caminho natural de quem está lendo uma conversa.
+
+O estado fica guardado (`atendo-ui`), junto com o do menu da esquerda.
+
 ## Painel direito: dados da conversa
 
 Abaixo das abas Mensagens/Fluxos, um bloco com nome, primeiro nome, telefone, e-mail, endereço e atendente. Clicar insere o valor no campo de mensagem **já resolvido** (vai "Tiago", não `{{contact.name}}`); o ícone ao lado copia. Campo sem valor não aparece.
