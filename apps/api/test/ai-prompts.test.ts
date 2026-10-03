@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aiCostUsd, priceOf } from '@atendo/shared';
-import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from '../src/modules/ai/prompts';
+import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, suggestSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from '../src/modules/ai/prompts';
 
 describe('toMessages — o que é enviado ao modelo', () => {
   it('traduz direção em papel', () => {
@@ -145,5 +145,25 @@ describe('toTranscript — formato usado pelo copiloto', () => {
     expect(m.content).toContain('<conversa>');
     expect(m.content).toContain('</conversa>');
     expect(m.content.endsWith('Resuma esta conversa.')).toBe(true);
+  });
+});
+
+describe('suggestSystemPrompt — quem é o cliente', () => {
+  it('diz o nome do cliente e manda tratar por ele', () => {
+    const p = suggestSystemPrompt({ businessName: 'Loja', agentName: 'Ana', contactName: 'João', contactPhone: '5511999999999' });
+    expect(p).toContain('O cliente desta conversa se chama João');
+    expect(p).toContain('5511999999999');
+  });
+
+  it('avisa que nome no meio da conversa é de terceiro — a confusão que trocava João por Maria', () => {
+    const p = suggestSystemPrompt({ businessName: 'Loja', agentName: 'Ana', contactName: 'João' });
+    expect(p).toMatch(/terceiros/i);
+    expect(p).toMatch(/Nunca trate o cliente por eles/i);
+  });
+
+  it('sem nome cadastrado, proíbe inventar em vez de ficar em silêncio', () => {
+    const p = suggestSystemPrompt({ businessName: 'Loja', agentName: 'Ana', contactName: null });
+    expect(p).toMatch(/não está cadastrado/i);
+    expect(p).toMatch(/Não invente um nome/i);
   });
 });

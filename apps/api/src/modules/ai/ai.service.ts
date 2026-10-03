@@ -96,7 +96,7 @@ export class AiService {
       where: { id: conversationId, tenantId },
       include: {
         tenant: { select: { name: true } },
-        contact: { select: { name: true } },
+        contact: { select: { name: true, phone: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: HISTORY_LIMIT, select: { direction: true, text: true, internal: true } },
       },
     });
@@ -114,7 +114,7 @@ export class AiService {
       kind: 'suggest',
       conversationId,
       userId: agent.id,
-      system: suggestSystemPrompt({ businessName: conv.tenant.name, agentName: agent.name }),
+      system: suggestSystemPrompt({ businessName: conv.tenant.name, agentName: agent.name, contactName: conv.contact.name, contactPhone: conv.contact.phone }),
       messages: [transcriptMessage(transcript, 'Escreva a próxima mensagem do ATENDIMENTO.')],
       temperature: 0.4,
     });

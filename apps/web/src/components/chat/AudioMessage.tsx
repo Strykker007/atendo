@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play } from 'lucide-react';
+import { Loader2, Pause, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { chaveDe, gravarOnda, lerOnda, type Onda } from '@/lib/wave-cache';
 
@@ -111,6 +111,8 @@ function obterPicos(src: string) {
 
 export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [carregando, setCarregando] = useState(false);
   const [picos, setPicos] = useState<number[] | null>(() => doCache(src)?.picos ?? null);
   const [tocando, setTocando] = useState(false);
   const [atual, setAtual] = useState(0);
@@ -140,17 +142,39 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
   const progresso = duracao > 0 ? atual / duracao : 0;
   const barras = picos?.length ? picos : Array(BARRAS).fill(0.35);
 
+  /**
+   * Tocar só depois de ter dados.
+   *
+   * `preload="metadata"` baixa só o cabeçalho: no primeiro clique o elemento costuma estar em
+   * `readyState` 1 (tem duração, não tem som). Chamar `play()` aí começa a reprodução sem
+   * áudio audível, e a tentativa anterior — `load()` + `play()` de novo — piorava, porque
+   * `load()` cancela a reprodução que tinha acabado de começar. Agora espera o `canplay`.
+   *
+   * O limite de 4s existe para o botão não ficar preso se o evento nunca vier (mídia que o
+   * navegador não decodifica): nesse caso o erro aparece escrito, em vez de silêncio.
+   */
   async function alternar() {
     const a = audioRef.current;
     if (!a) return;
     if (!a.paused) return a.pause();
+    setErro(null);
+    if (a.readyState < 2) {
+      setCarregando(true);
+      await new Promise<void>((resolve) => {
+        let feito = false;
+        const pronto = () => { if (feito) return; feito = true; a.removeEventListener('canplay', pronto); resolve(); };
+        a.addEventListener('canplay', pronto);
+        if (a.readyState === 0) a.load();
+        setTimeout(pronto, 4000);
+      });
+      setCarregando(false);
+    }
     try {
       await a.play();
-    } catch {
-      // a primeira tentativa pode falhar com a mídia ainda não carregada; recarregar a fonte
-      // e tentar de novo é melhor do que o botão ficar mudo e o usuário achar que quebrou
-      a.load();
-      await a.play().catch(() => undefined);
+    } catch (e) {
+      setErro('Não foi possível tocar este áudio.');
+      // eslint-disable-next-line no-console
+      console.warn('[áudio] falha ao tocar', e);
     }
   }
 
@@ -173,6 +197,7 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
         onEnded={() => { setTocando(false); setAtual(0); }}
         onTimeUpdate={(e) => setAtual(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setDuracao(e.currentTarget.duration)}
+        onError={() => setErro('Áudio indisponível — tente baixar.')}
         className="hidden"
       />
 
@@ -182,7 +207,7 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
         title={tocando ? 'Pausar' : 'Ouvir'}
         className={cn('w-8 h-8 rounded-full grid place-items-center shrink-0', mine ? 'bg-white/20 text-white' : 'bg-accent-soft text-accent-ink')}
       >
-        {tocando ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+        {carregando ? <Loader2 size={14} className="animate-spin" /> : tocando ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
       </button>
 
       <div className="flex-1 min-w-0">
@@ -205,6 +230,7 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
           {mmss(tocando || atual > 0 ? atual : duracao)}
         </div>
       </div>
+      {erro && <span className="text-[10.5px] text-danger shrink-0">{erro}</span>}
     </div>
   );
 }

@@ -176,6 +176,12 @@ Três comportamentos de rolagem, e tratá-los como um só é o que faz o chat pu
 
 Há ainda um `ResizeObserver`, para o caso de a bolha crescer depois (imagem que carrega, player de áudio que monta). Ele não substitui o efeito acima: **não dispara quando o elemento só é criado**, apenas quando muda de tamanho — foi o que fez a conversa abrir parada no topo na primeira tentativa.
 
+## Filtros da lista
+
+Busca e os três botões de status ficam sempre à vista; **tag, origem, ordem e atendente entram atrás do ícone de filtro**, porque são ajuste ocasional e ocupavam quatro faixas fixas no alto — espaço que a fila precisa mais (a lista começava 70px mais abaixo).
+
+O ícone mostra **um contador quando há filtro ligado**, e aparece "Limpar filtros". Sem esse aviso, esconder filtro vira armadilha: a lista some e ninguém lembra por quê.
+
 ## Fila por tempo de espera
 
 Cada conversa aberta mostra **há quanto tempo está sem resposta** (`awaitingSince`), com a cor subindo junto com o atraso (até 15min neutro, 15–60min âmbar, acima de 1h vermelho). Conversa já respondida ou encerrada não mostra nada: selo em tudo vira ruído e ninguém repara nos vermelhos.

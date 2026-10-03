@@ -79,9 +79,22 @@ export function classifySystemPrompt(input: { instructions: string; labels: { id
 }
 
 /** Copiloto: sugerir a próxima resposta para o atendente revisar. */
-export function suggestSystemPrompt(input: { businessName: string; agentName: string; instructions?: string }) {
+export function suggestSystemPrompt(input: { businessName: string; agentName: string; contactName?: string | null; contactPhone?: string; instructions?: string }) {
+  /**
+   * Quem é o cliente vai dito, não deduzido.
+   *
+   * Sem isto o modelo pescava o nome mais próximo no texto: uma conversa em que o atendente
+   * repassou o cadastro de outra pessoa ("Maria, placa ABC-1234") fazia a sugestão chamar o
+   * João de Maria. Nome no meio da conversa é dado de terceiro — cadastro, pedido, autorização
+   * — e precisa ser tratado como tal.
+   */
+  const cliente = input.contactName?.trim()
+    ? `O cliente desta conversa se chama ${input.contactName.trim()}${input.contactPhone ? ` (${input.contactPhone})` : ''}. Trate-o por esse nome.`
+    : 'O nome do cliente desta conversa não está cadastrado. Não invente um nome e não use nomes que apareçam no meio da conversa.';
   return [
     `Você ajuda ${input.agentName}, atendente de "${input.businessName}", a responder um cliente no WhatsApp.`,
+    cliente,
+    'Nomes, documentos e dados que aparecem NO MEIO da conversa são de terceiros (cadastros, pedidos, autorizações). Nunca trate o cliente por eles e nunca os repita sem necessidade.',
     BASE_RULES,
     'Você recebe a conversa até agora e escreve APENAS o texto da próxima resposta, pronto para enviar — sem saudação de e-mail, sem assinatura, sem aspas e sem comentários seus.',
     'Máximo 3 frases. Prefira resolver; se faltar informação, escreva uma pergunta objetiva ao cliente.',

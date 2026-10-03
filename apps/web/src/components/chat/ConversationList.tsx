@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock } from 'lucide-react';
+import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
@@ -51,12 +51,22 @@ export function ConversationList() {
   const tags = useTags();
   const counts = useConversationCounts(numberId);
   const agora = useMinuto();
+  /**
+   * Filtros escondidos atrás do ícone.
+   *
+   * Busca e os três status são o que se usa o tempo todo; tag, origem, ordem e atendente são
+   * ajuste ocasional e ocupavam quatro faixas fixas no alto da lista — espaço que a fila de
+   * conversas precisa mais. O ponto no ícone avisa quando há filtro ligado, senão esconder
+   * vira armadilha: a lista some e ninguém lembra por quê.
+   */
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   const [ordem, setOrdem] = usePersistedState<OrdemConversas>('ordem-conversas', 'recent');
   const [selecionando, setSelecionando] = useState(false);
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
   const conversations = useConversations({ status, numberId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
+  const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0);
 
   const visiveis = conversations.data ?? [];
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
@@ -114,12 +124,24 @@ export function ConversationList() {
         </div>
       </div>
 
-      {/* Busca por contato + filtro de tags */}
+      {/* Busca sempre à vista; o resto dos filtros atrás do ícone */}
       <div className="px-2.5 py-1.5 space-y-1.5 border-b border-line">
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-8 pr-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1 min-w-0">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-8 pr-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
+          </div>
+          <button
+            onClick={() => setFiltrosAbertos((v) => !v)}
+            title={filtrosAtivos ? `${filtrosAtivos} filtro(s) ligado(s)` : 'Filtros'}
+            className={cn('relative shrink-0 w-8 h-8 rounded-lg grid place-items-center', filtrosAbertos || filtrosAtivos ? 'bg-accent-soft text-accent-ink' : 'text-faint hover:text-ink hover:bg-field')}
+          >
+            <SlidersHorizontal size={15} />
+            {filtrosAtivos > 0 && <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-white text-[9px] font-bold grid place-items-center tnum">{filtrosAtivos}</span>}
+          </button>
         </div>
+        {filtrosAbertos && (
+        <>
         <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTags} placeholder="Filtrar por tag…" />
         {/* admin em "Atendendo": escolher de quem ver */}
         {isAdmin && status === 'in_progress' && (
@@ -152,6 +174,13 @@ export function ConversationList() {
             </button>
           ))}
         </div>
+        {filtrosAtivos > 0 && (
+          <button onClick={() => { setTags([]); setOrigin(null); setAssignee(null); setOrdem('recent'); }} className="text-[11px] text-accent-ink hover:underline">
+            Limpar filtros
+          </button>
+        )}
+        </>
+        )}
       </div>
 
       {/* Seleção em massa. Fora de "Encerrado" — ali não há o que encerrar. */}

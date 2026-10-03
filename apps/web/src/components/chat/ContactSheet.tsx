@@ -69,8 +69,14 @@ export function ContactSummary({ contact, onOpen }: { contact: Contato; onOpen: 
 
   if (!itens.length) {
     return (
-      <button onClick={onOpen} className="text-[11px] text-faint hover:text-accent inline-flex items-center gap-1" title="Preencher ficha do contato">
-        <UserRound size={11} /> preencher ficha
+      /* Era cinza-claro minúsculo e ninguém reparava que havia ficha para preencher — e ficha
+         vazia é cliente sem e-mail, sem endereço e sem observação na hora que precisa. */
+      <button
+        onClick={onOpen}
+        className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-accent/50 bg-accent-soft/50 px-2 py-0.5 text-[11.5px] font-medium text-accent-ink hover:bg-accent-soft"
+        title="Preencher a ficha: e-mail, endereço e observações do contato"
+      >
+        <UserRound size={12} /> Preencher ficha
       </button>
     );
   }
