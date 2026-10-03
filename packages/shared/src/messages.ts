@@ -87,6 +87,25 @@ export interface StatusUpdate {
   error?: string;
 }
 
+/**
+ * Mensagem citada, do jeito que a UI precisa para desenhar a bolha de citação.
+ * `messageId` é nulo quando a citada não está no nosso banco (resposta a status, ou
+ * mensagem anterior à adoção da ferramenta) — nesses casos só `preview` existe.
+ */
+export interface QuotedRef {
+  /** id local da mensagem citada, quando ela está no nosso banco (permite scroll-to) */
+  messageId: string | null;
+  /** id no provider — sempre presente, é o que o webhook nos deu */
+  externalId: string;
+  direction: MessageDirection | null;
+  type: MessageType | null;
+  /** texto/caption resumido para a bolha de citação */
+  preview: string | null;
+  authorName: string | null;
+  /** citação de status/story: some em 24h, não é mensagem da conversa */
+  fromStatus: boolean;
+}
+
 export interface MessageDTO {
   id: string;
   conversationId: string;
@@ -96,5 +115,7 @@ export interface MessageDTO {
   text: string | null;
   mediaUrl: string | null;
   authorName: string | null;
+  /** a mensagem que esta responde; null quando não é resposta */
+  quoted: QuotedRef | null;
   createdAt: string;
 }

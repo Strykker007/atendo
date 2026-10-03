@@ -491,7 +491,10 @@ model Message {
   mediaName      String?
   /// id no provider — usado para idempotência do webhook e status updates
   externalId     String?
+  /// id no provider da mensagem citada (pode apontar para algo que não temos)
   quotedId       String?
+  /// FK local da mensagem citada, quando ela está no nosso banco
+  quotedMessageId String?
   /// Texto do que foi citado, quando a mensagem citada não está no nosso banco.
   /// O caso que obriga isto a existir é a resposta a **status**: o story some em 24h e não é
   /// mensagem da conversa — sem guardar aqui, sobraria "quero esse" sem ninguém saber o quê.
@@ -509,9 +512,13 @@ model Message {
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   author       User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
   usage        MessageUsage?
+  /// Apagar a citada não pode apagar as respostas a ela — por isso SetNull.
+  quotedMessage Message?    @relation("MessageQuote", fields: [quotedMessageId], references: [id], onDelete: SetNull)
+  quotes        Message[]   @relation("MessageQuote")
 
   @@unique([externalId])
   @@index([conversationId, createdAt])
+  @@index([quotedMessageId])
   @@map("messages")
 }
 

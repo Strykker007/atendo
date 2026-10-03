@@ -5,7 +5,7 @@ import type { InboundMessage, StatusUpdate, NumberStatus } from '@atendo/shared'
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { ConversationsGateway } from './conversations.gateway';
-import { ConversationsService, inicioDaEspera } from './conversations.service';
+import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './conversations.service';
 import { decidirEntrada, voltandoDepoisDeEncerrado } from './reopen';
 
 /**
@@ -32,13 +32,13 @@ export class InboundService {
 
   /** Download da mídia falhou de vez: registra para a UI não ficar em "carregando". */
   async mediaFailed(messageId: string, tenantId: string, reason: string) {
-    const m = await this.prisma.message.update({ where: { id: messageId }, data: { error: `Mídia indisponível: ${reason}`.slice(0, 200) } });
+    const m = await this.prisma.message.update({ where: { id: messageId }, data: { error: `Mídia indisponível: ${reason}`.slice(0, 200) }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(tenantId, this.conversations.present(m));
   }
 
   /** Chamado pelo worker depois de baixar a mídia recebida. */
   async attachMedia(messageId: string, tenantId: string, key: string, mimeType: string, fileName?: string) {
-    const m = await this.prisma.message.update({ where: { id: messageId }, data: { mediaUrl: key, mediaMime: mimeType, mediaName: fileName } });
+    const m = await this.prisma.message.update({ where: { id: messageId }, data: { mediaUrl: key, mediaMime: mimeType, mediaName: fileName }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(tenantId, this.conversations.present(m));
   }
 
@@ -106,6 +106,7 @@ export class InboundService {
         mediaName: msg.media?.fileName,
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
+        quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
         quotedPreview: msg.quotedPreview,
         quotedFromStatus: msg.quotedFromStatus ?? false,
         // guarda o payload do provider + o id da opção já traduzido: é assim que o motor de
@@ -113,6 +114,7 @@ export class InboundService {
         raw: { ...(msg.raw as object), ...(msg.interactiveReplyId ? { interactiveReplyId: msg.interactiveReplyId } : {}) } as Prisma.InputJsonValue,
         createdAt: msg.timestamp,
       },
+      include: MESSAGE_INCLUDE,
     });
 
     conversation = await this.prisma.conversation.update({
@@ -136,7 +138,7 @@ export class InboundService {
       contactId: contact.id,
     });
 
-    this.gateway.emitMessage(number.tenantId, message);
+    this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
     this.gateway.emitConversation(number.tenantId, conversation);
     return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed, hoursSinceLastMessage };
   }
@@ -185,11 +187,13 @@ export class InboundService {
         mediaName: msg.media?.fileName,
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
+        quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
         quotedPreview: msg.quotedPreview,
         quotedFromStatus: msg.quotedFromStatus ?? false,
         raw: msg.raw as Prisma.InputJsonValue,
         createdAt: msg.timestamp,
       },
+      include: MESSAGE_INCLUDE,
     });
 
     // nada de lastInboundAt nem de não-lidas: quem falou foi o cliente, não o contato.
@@ -210,9 +214,19 @@ export class InboundService {
       contactId: contact.id,
     });
 
-    this.gateway.emitMessage(number.tenantId, message);
+    this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
     this.gateway.emitConversation(number.tenantId, conversation);
     return { message, conversation, isNew, isNewContact: false, returningAfterClosed: false, hoursSinceLastMessage: null, fromMe: true };
+  }
+
+  /**
+   * A citada pode não estar no banco (status/story, mensagem anterior à integração): aí fica só
+   * o `quotedId`. Filtra pelo tenant porque `externalId` é único global, mas o dado não é de todos.
+   */
+  private async resolveQuoted(tenantId: string, quotedExternalId?: string): Promise<string | null> {
+    if (!quotedExternalId) return null;
+    const q = await this.prisma.message.findFirst({ where: { externalId: quotedExternalId, conversation: { tenantId } }, select: { id: true } });
+    return q?.id ?? null;
   }
 
   private originOf(r?: InboundMessage['referral']) {
@@ -240,7 +254,7 @@ export class InboundService {
     const order = ['pending', 'sent', 'delivered', 'read', 'failed'];
     if (order.indexOf(st.status) <= order.indexOf(m.status) && st.status !== 'failed') return; // não regride
     if (st.status === 'failed' && (m.status === 'delivered' || m.status === 'read')) return; // já chegou: erro tardio é ruído
-    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error } });
+    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(m.conversation.tenantId, this.conversations.present(updated));
   }
 

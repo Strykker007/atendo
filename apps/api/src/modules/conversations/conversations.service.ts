@@ -3,11 +3,11 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import type { OutboundMessage } from '@atendo/shared';
+import type { OutboundMessage, QuotedRef } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { StorageService } from '../../common/storage/storage.service';
-import type { Message } from '@prisma/client';
+import type { Message, MessageDirection, MessageType } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import type { Permission } from '@atendo/shared';
@@ -22,6 +22,19 @@ const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permis
 
 
 const META_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** O que `present()` precisa para montar `quoted`. Use em todo create/update/find que vai para o navegador. */
+export const MESSAGE_INCLUDE = {
+  author: { select: { name: true } },
+  quotedMessage: {
+    select: { id: true, direction: true, type: true, text: true, mediaName: true, author: { select: { name: true } } },
+  },
+} satisfies Prisma.MessageInclude;
+
+type MessageRow = Message & {
+  author?: { name: string } | null;
+  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; author: { name: string } | null } | null;
+};
 
 @Injectable()
 export class ConversationsService {
@@ -38,8 +51,28 @@ export class ConversationsService {
    * Message.mediaUrl guarda a CHAVE no storage (privada). Antes de sair para o navegador
    * (HTTP ou socket) vira uma URL assinada e temporária.
    */
-  present(m: Message): Message {
-    return m.mediaUrl && !m.mediaUrl.startsWith('http') ? { ...m, mediaUrl: this.storage.signedUrl(m.mediaUrl) } : m;
+  present(m: MessageRow): MessageRow & { quoted: QuotedRef | null } {
+    const mediaUrl = m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl;
+    return { ...m, mediaUrl, quoted: this.quotedRef(m) };
+  }
+
+  /**
+   * Citação para a bolha. Com a citada no banco, usa os dados dela (e permite scroll-to);
+   * sem ela (status/story, mensagem anterior à integração), cai no `quotedPreview` salvo.
+   */
+  private quotedRef(m: MessageRow): QuotedRef | null {
+    if (!m.quotedId) return null;
+    const q = m.quotedMessage;
+    return {
+      messageId: q?.id ?? m.quotedMessageId ?? null,
+      externalId: m.quotedId,
+      direction: q?.direction ?? null,
+      type: q?.type ?? null,
+      preview: (q?.text ?? m.quotedPreview ?? q?.mediaName ?? null)?.slice(0, 120) ?? null,
+      // enviada pelo painel: nome do atendente. Recebida: null, o front usa o nome do contato.
+      authorName: q?.direction === 'out' ? q.author?.name ?? null : null,
+      fromStatus: m.quotedFromStatus,
+    };
   }
 
   /**
@@ -174,7 +207,7 @@ export class ConversationsService {
       orderBy: { createdAt: 'desc' },
       take,
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
-      include: { author: { select: { name: true } } },
+      include: MESSAGE_INCLUDE,
     });
     return rows.map((m) => this.present(m));
   }
@@ -288,6 +321,9 @@ export class ConversationsService {
       }
     }
 
+    const quoted = input.quotedExternalId
+      ? await this.prisma.message.findFirst({ where: { externalId: input.quotedExternalId, conversation: { tenantId } }, select: { id: true } })
+      : null;
     const message = await this.prisma.message.create({
       data: {
         conversationId: conv.id,
@@ -299,9 +335,11 @@ export class ConversationsService {
         mediaMime: input.media?.mimeType,
         mediaName: input.media?.fileName,
         quotedId: input.quotedExternalId,
+        quotedMessageId: quoted?.id,
         authorId,
         raw: input.template ? ({ template: input.template } as Prisma.InputJsonValue) : undefined,
       },
+      include: MESSAGE_INCLUDE,
     });
 
     const updatedConv = await this.prisma.conversation.update({
@@ -326,7 +364,7 @@ export class ConversationsService {
     const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
     if (!m) throw new NotFoundException('Mensagem não encontrada ou não está com falha');
     if (m.conversation.number.status !== 'connected') throw new BadRequestException(`O número "${m.conversation.number.label}" está desconectado.`);
-    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: 'pending', error: null } });
+    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: 'pending', error: null }, include: MESSAGE_INCLUDE });
     await this.outbound.add('send', { messageId: m.id });
     this.gateway.emitMessage(tenantId, this.present(updated));
     return this.present(updated);
