@@ -184,6 +184,14 @@ O chip **Esperando há mais tempo** reordena a lista (`sort=waiting`), e a escol
 
 O rótulo do número saiu da faixa de tags e foi para a linha da hora: embaixo, ele acrescentava uma faixa inteira só por estar vendo "todos os números", e a lista ficava com o dobro da altura. Agora a linha mede o mesmo nos dois casos (medido: 58px).
 
+## Responder mensagem (citação)
+
+O botão aparece no hover, **fora** da bolha, para não roubar espaço do texto. Escolhida a mensagem, uma faixa acima do campo mostra o que está sendo respondido; enviar manda o `quotedExternalId` e limpa a faixa.
+
+Dentro da bolha, o trecho citado vem de três origens, nesta ordem: a mensagem que temos no histórico, o texto que o provider mandou junto (`quotedPreview`) e um rótulo genérico.
+
+**Resposta a status (os "stories")** é o motivo de a segunda origem existir: o status não é mensagem da conversa e some em 24h. O conteúdo citado é guardado no momento em que a resposta chega, então meses depois a conversa ainda mostra *"Resposta ao status — 📷 Foto: Promoção 20%"* em cima do "quero esse". Só funciona no provider QR; a API oficial da Meta não entrega status.
+
 ## Barra do composer
 
 Os atalhos ficam **abaixo** do campo de texto, como no WhatsApp: a mão está no teclado, e atalho acima do texto obriga o olho a subir e voltar. Cada botão abre o seu menu ancorado ali mesmo (`ComposerBar`), que fecha com Esc ou clique fora.

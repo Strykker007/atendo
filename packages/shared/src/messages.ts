@@ -21,6 +21,10 @@ export interface InboundMessage {
   media?: { url?: string; mimeType?: string; fileName?: string; caption?: string; providerMediaId?: string };
   location?: { lat: number; lng: number; name?: string };
   quotedExternalId?: string;
+  /** texto do que foi citado, quando a citada não é uma mensagem nossa (resposta a status) */
+  quotedPreview?: string;
+  /** a citação era um status/story (some em 24h, não é mensagem da conversa) */
+  quotedFromStatus?: boolean;
   /** id da opção escolhida num menu interativo (botão/lista), quando o provider informa */
   interactiveReplyId?: string;
   /** De onde o lead veio, quando o provider informa (anúncio Click-to-WhatsApp, link com contexto). */

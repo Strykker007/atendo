@@ -28,11 +28,20 @@ export interface Conversation {
 export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
   text: string | null; mediaUrl: string | null; mediaMime: string | null; mediaName: string | null; createdAt: string; error?: string | null;
+  externalId?: string | null;
+  /** id da mensagem citada no provider */
+  quotedId?: string | null;
+  /** texto do que foi citado, quando a citada não está no nosso histórico (resposta a status) */
+  quotedPreview?: string | null;
+  quotedFromStatus?: boolean;
   /** nota interna (cadeado): só a equipe vê */
   internal?: boolean; authorId?: string | null; author?: { name: string } | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
-export type SendInput = { type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } };
+export type SendInput = ({ type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
+  /** responder citando uma mensagem (o id dela no provider) */
+  quotedExternalId?: string;
+};
 export interface QuickReplyItem { id: string; title: string; body: string; mediaKey?: string | null; mediaType?: 'image' | 'audio' | 'video' | 'document' | null; mediaName?: string | null; mediaMime?: string | null; mediaUrl?: string | null }
 export interface Folder { id: string; name: string; replies: QuickReplyItem[] }
 

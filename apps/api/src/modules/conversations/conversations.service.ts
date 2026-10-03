@@ -256,6 +256,8 @@ export class ConversationsService {
         mediaName: msg.media?.fileName,
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
+        quotedPreview: msg.quotedPreview,
+        quotedFromStatus: msg.quotedFromStatus ?? false,
         // guarda o payload do provider + o id da opção já traduzido: é assim que o motor de
         // fluxos e os lembretes sabem em qual botão o contato tocou, sem conhecer Meta/Evolution
         raw: { ...(msg.raw as object), ...(msg.interactiveReplyId ? { interactiveReplyId: msg.interactiveReplyId } : {}) } as Prisma.InputJsonValue,
@@ -333,6 +335,8 @@ export class ConversationsService {
         mediaName: msg.media?.fileName,
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
+        quotedPreview: msg.quotedPreview,
+        quotedFromStatus: msg.quotedFromStatus ?? false,
         raw: msg.raw as Prisma.InputJsonValue,
         createdAt: msg.timestamp,
       },

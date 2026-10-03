@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BillingCategory, MessageStatus, MessageType, NumberStatus } from '@atendo/shared';
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
+import { lerCitacao } from './quoted';
 import type { MediaPayload, NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError } from './provider-error';
 
@@ -259,6 +260,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     } else if (msg.locationMessage) {
       type = MessageType.LOCATION;
     }
+    const citacao = lerCitacao(msg);
     return {
       provider: 'evolution',
       externalId: m.key.id,
@@ -269,7 +271,9 @@ export class EvolutionProvider implements WhatsAppProvider {
       text: text ?? media?.caption,
       media: media ? { ...media, providerMediaId: m.key.id } : undefined,
       location: msg.locationMessage ? { lat: msg.locationMessage.degreesLatitude, lng: msg.locationMessage.degreesLongitude } : undefined,
-      quotedExternalId: msg.extendedTextMessage?.contextInfo?.stanzaId,
+      quotedExternalId: citacao?.externalId,
+      quotedPreview: citacao?.preview,
+      quotedFromStatus: citacao?.fromStatus,
       referral: this.referralOf(msg),
       timestamp: new Date(Number(m.messageTimestamp) * 1000),
       raw: m,

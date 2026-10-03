@@ -201,12 +201,14 @@ function RepliesTab() {
                 replies.map((r) => (
                   // uma linha por resposta: o trecho do corpo em duas linhas fazia dez
                   // respostas ocuparem a tela inteira, e procurar virava rolagem
-                  <button key={r.id} onClick={() => insert(r)} title={r.body || r.mediaName || r.title} className={cn('w-full text-left pl-8 pr-3 py-1.5 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent')}>
+                  <button key={r.id} onClick={() => insert(r)} title={r.body || r.mediaName || r.title} className={cn('w-full text-left pl-8 pr-3 py-1 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent')}>
+                    {/* só o título: o corpo vai no `title` do botão (tooltip). Dez respostas com
+                        duas linhas cada tomavam a tela, e o texto completo raramente é o que
+                        se procura — o título é que identifica */}
                     <div className="text-[12.5px] font-medium truncate flex items-center gap-1.5">
                       {r.mediaType && <MediaIcon type={r.mediaType} />}
                       <span className="truncate">{r.title}</span>
                     </div>
-                    <div className="text-[11px] text-muted truncate">{r.body || <span className="italic text-faint">{r.mediaName}</span>}</div>
                   </button>
                 ))}
             </div>

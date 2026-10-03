@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
@@ -85,6 +85,8 @@ export function ChatPane() {
    */
   const [assinando, setAssinando] = usePersistedState('assinar-mensagens', false);
   const campoRef = useRef<HTMLTextAreaElement>(null);
+  /** mensagem que está sendo respondida (citação), como no WhatsApp */
+  const [respondendo, setRespondendo] = useState<Message | null>(null);
 
   /** Insere no ponto do cursor, não no fim: emoji e menção entram no meio da frase. */
   function inserirNoTexto(trecho: string) {
@@ -142,7 +144,7 @@ export function ChatPane() {
   }
 
   // trocar de conversa recomeça: a próxima leva de mensagens é de outra pessoa
-  useEffect(() => { noFim.current = true; alturaAntes.current = 0; }, [conversationId]);
+  useEffect(() => { noFim.current = true; alturaAntes.current = 0; setRespondendo(null); }, [conversationId]);
 
   /**
    * Abriu a conversa = leu. Dispara uma vez por conversa aberta; mensagem que chegar depois,
@@ -260,11 +262,14 @@ export function ChatPane() {
     setText('');
     setAttachment(null);
     try {
+      // citação segue o id do provider: é ele que o WhatsApp entende do outro lado
+      const citando = respondendo?.externalId ? { quotedExternalId: respondendo.externalId } : {};
       if (att) {
-        await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName } });
+        await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando });
       } else {
-        await send.mutateAsync({ type: 'text', text: t });
+        await send.mutateAsync({ type: 'text', text: t, ...citando });
       }
+      setRespondendo(null);
       // responder tira a conversa de "Aguardando": acompanha o filtro para ela não sumir da lista
       if (status === 'waiting' && conv?.status === 'waiting') setFilterStatus('in_progress', true);
     } catch (err) {
@@ -386,7 +391,7 @@ export function ChatPane() {
             ))}
           </div>
         )}
-        {mensagens.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} />)}
+        {mensagens.map((m) => <Bubble key={m.id} m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} />)}
         <div ref={bottomRef} />
       </div>
 
@@ -455,6 +460,15 @@ export function ChatPane() {
               <button type="button" onClick={() => setAttachment(null)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
           )}
+          {respondendo && (
+            <div className="flex items-stretch gap-2 rounded-lg bg-field border-l-4 border-accent px-2.5 py-1.5">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold text-accent-ink">{respondendo.direction === 'out' ? 'Respondendo a você' : 'Respondendo ao contato'}</div>
+                <div className="text-[12px] text-muted truncate">{resumoDaMensagem(respondendo)}</div>
+              </div>
+              <button type="button" onClick={() => setRespondendo(null)} className="text-faint hover:text-ink self-center" title="Cancelar resposta"><X size={15} /></button>
+            </div>
+          )}
           <div className="flex items-end gap-2">
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept={accept} />
           {!gravando && (
@@ -496,7 +510,17 @@ export function ChatPane() {
   );
 }
 
-function Bubble({ m, canResend, onVerImagem }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void }) {
+/** Uma linha do que foi citado: texto curto, ou o rótulo da mídia. */
+export function resumoDaMensagem(m: Message): string {
+  if (m.text) return m.text;
+  if (m.type === 'image') return '📷 Foto';
+  if (m.type === 'video') return '🎥 Vídeo';
+  if (m.type === 'audio') return '🎤 Áudio';
+  if (m.type === 'document') return `📄 ${m.mediaName ?? 'Documento'}`;
+  return 'Mensagem';
+}
+
+function Bubble({ m, canResend, onVerImagem, onResponder, citada }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void; onResponder?: (m: Message) => void; citada?: Message }) {
   const out = m.direction === 'out';
   const resend = useResend();
   if (m.internal) {
@@ -511,8 +535,11 @@ function Bubble({ m, canResend, onVerImagem }: { m: Message; canResend: boolean;
     );
   }
   return (
-    <div className={cn('flex', out ? 'justify-end' : 'justify-start')}>
+    <div className={cn('group flex items-center gap-1', out ? 'justify-end' : 'justify-start')}>
+      {/* responder aparece no hover, do lado de fora da bolha, para não roubar espaço do texto */}
+      {out && onResponder && m.externalId && <BotaoResponder m={m} onResponder={onResponder} />}
       <div className={cn('max-w-[72%] px-2.5 py-1.5 text-[13px] shadow-sm', out ? 'bg-chat-out text-chat-out-ink rounded-xl rounded-br-sm' : 'bg-chat-in text-chat-in-ink rounded-xl rounded-bl-sm')}>
+        <Citacao m={m} citada={citada} />
         <MediaBody m={m} onVerImagem={onVerImagem} />
         {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
         <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>
@@ -530,6 +557,35 @@ function Bubble({ m, canResend, onVerImagem }: { m: Message; canResend: boolean;
           </p>
         )}
       </div>
+      {!out && onResponder && m.externalId && <BotaoResponder m={m} onResponder={onResponder} />}
+    </div>
+  );
+}
+
+function BotaoResponder({ m, onResponder }: { m: Message; onResponder: (m: Message) => void }) {
+  return (
+    <button type="button" onClick={() => onResponder(m)} title="Responder" aria-label="Responder" className="opacity-0 group-hover:opacity-100 text-faint hover:text-ink shrink-0 p-1">
+      <Reply size={14} />
+    </button>
+  );
+}
+
+/**
+ * O trecho citado dentro da bolha.
+ *
+ * Três origens, em ordem de preferência: a mensagem que temos no histórico, o texto que o
+ * provider mandou junto (`quotedPreview`) e, no fim, um rótulo genérico. A segunda existe
+ * por causa do **status**: o story some em 24h e não é mensagem da conversa, então sem o
+ * texto guardado sobraria "quero esse" sem ninguém saber o quê.
+ */
+function Citacao({ m, citada }: { m: Message; citada?: Message }) {
+  if (!m.quotedId && !m.quotedPreview) return null;
+  const texto = citada ? resumoDaMensagem(citada) : m.quotedPreview || 'Mensagem';
+  const autor = m.quotedFromStatus ? 'Resposta ao status' : citada ? (citada.direction === 'out' ? 'Você' : 'Contato') : 'Mensagem citada';
+  return (
+    <div className="mb-1 rounded-md border-l-[3px] border-accent bg-black/5 dark:bg-white/10 px-2 py-1">
+      <div className="text-[10.5px] font-semibold opacity-80">{autor}</div>
+      <div className="text-[11.5px] opacity-80 line-clamp-2 break-words">{texto}</div>
     </div>
   );
 }
