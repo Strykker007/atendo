@@ -79,7 +79,15 @@ export default function AdminPage() {
               <h3 className="font-display font-semibold text-ink text-sm mb-2">MRR por plano</h3>
               <ul className="divide-y divide-line">
                 {d.byPlan.map((p) => (
-                  <li key={p.plan} className="flex items-center justify-between py-2 text-sm"><span className="text-ink">{p.plan} <span className="text-muted">· {p.count}</span></span><b className="tnum">{brl(p.mrr)}</b></li>
+                  <li key={p.plan} className="flex items-center justify-between py-2 text-sm">
+                    <span className="text-ink">{p.plan} <span className="text-muted">· {p.count}</span></span>
+                    <span className="text-right">
+                      <b className="tnum block">{brl(p.mrr)}</b>
+                      {/* margem só aparece com custo cadastrado: "margem = receita" seria mentira
+                          confortável, e é o tipo de número que vira decisão de preço */}
+                      {p.cost > 0 && <span className={cn('text-[11px] tnum', p.margin >= 0 ? 'text-ok' : 'text-danger')}>margem {brl(p.margin)}</span>}
+                    </span>
+                  </li>
                 ))}
                 {d.byPlan.length === 0 && <li className="py-2 text-sm text-muted">Nenhuma assinatura ativa.</li>}
               </ul>

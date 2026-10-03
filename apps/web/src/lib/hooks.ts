@@ -7,7 +7,7 @@ import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permi
 
 export interface Tag { id: string; name: string; color: string }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; warmupStartedAt: string | null }
+export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; warmupStartedAt: string | null; infraCostMonth?: string | number }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -205,6 +205,7 @@ export interface PlanRow {
   billingModel: 'fixed' | 'usage' | 'hybrid';
   limits: PlanLimits;
   stripePriceId: string | null;
+  costMonth: number;
   isActive: boolean;
   subscribers: number;
   /** quantos ainda pagam valor diferente do atual (reajuste pendente ou nunca feito) */
@@ -217,6 +218,7 @@ export interface PlanRow {
 export interface PlanInput {
   name: string;
   priceMonth: number;
+  costMonth?: number;
   billingModel: 'fixed' | 'usage' | 'hybrid';
   limits: PlanLimits;
   isActive?: boolean;
@@ -316,7 +318,7 @@ export const useConnectNumber = () => {
 export const useUpdateNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; label?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; label?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };
@@ -457,7 +459,7 @@ export const useMargin = (period?: string) => useQuery({ queryKey: ['margin', pe
 // ---- Financeiro (dono) ----
 export interface FinanceOverview {
   now: { mrr: number; arr: number; activeTenants: number; trialing: number; pastDue: number; suspended: number; canceled: number; overdueAmount: number; monthCost: number; monthMargin: number };
-  byPlan: { plan: string; count: number; mrr: number }[];
+  byPlan: { plan: string; count: number; mrr: number; cost: number; margin: number }[];
   series: { period: string; invoiced: number; received: number; overdue: number; overage: number; providerCost: number; infraCost: number; messagesSent: number; newTenants: number; canceled: number }[];
   invoices: { id: string; tenant: string; period: string; total: number; overage: number; status: string; dueAt: string | null; paidAt: string | null; hostedUrl: string | null }[];
   subscriptions: { tenant: string; plan: string; price: number; status: string; periodEnd: string; cancelAtPeriodEnd: boolean; graceUntil: string | null }[];

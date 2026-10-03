@@ -45,6 +45,8 @@ class ApplyToExistingDto {
 class PlanDto {
   @IsString() @MaxLength(40) name: string;
   @IsNumber() @Min(0) @Max(99_999) priceMonth: number;
+  /** custo estimado para servir um cliente deste plano por mês */
+  @IsOptional() @IsNumber() @Min(0) @Max(99_999) costMonth?: number;
   @IsIn(['fixed', 'usage', 'hybrid']) billingModel: 'fixed' | 'usage' | 'hybrid';
   @ValidateNested() @Type(() => PlanLimitsDto) limits: PlanLimitsDto;
   @IsOptional() @IsBoolean() isActive?: boolean;
@@ -97,6 +99,7 @@ export class BillingController {
       return {
         ...p,
         priceMonth: preco,
+        costMonth: Number(p.costMonth),
         subscribers: subscriptions.length,
         // quantos pagam valor diferente do atual: é o número que mostra quanto está parado no
         // passado, e some sozinho quando o reajuste roda
@@ -110,7 +113,7 @@ export class BillingController {
   @NoTenantOk()
   @Roles('super_admin')
   async createPlan(@Body() dto: PlanDto) {
-    const plan = await this.prisma.plan.create({ data: { name: dto.name.trim(), priceMonth: dto.priceMonth, billingModel: dto.billingModel, limits: dto.limits as object, isActive: dto.isActive ?? true } });
+    const plan = await this.prisma.plan.create({ data: { name: dto.name.trim(), priceMonth: dto.priceMonth, costMonth: dto.costMonth ?? 0, billingModel: dto.billingModel, limits: dto.limits as object, isActive: dto.isActive ?? true } });
     // cria produto e preço no Stripe na hora: plano sem price não aparece no checkout, e
     // descobrir isso só quando o cliente clica em assinar é tarde. A falha não derruba a
     // criação — o plano já existe, e a tela mostra "sem Stripe" até sincronizar
@@ -125,7 +128,7 @@ export class BillingController {
     const atual = await this.prisma.plan.findUniqueOrThrow({ where: { id } });
     const plan = await this.prisma.plan.update({
       where: { id },
-      data: { name: dto.name.trim(), priceMonth: dto.priceMonth, billingModel: dto.billingModel, limits: dto.limits as object, ...(dto.isActive !== undefined && { isActive: dto.isActive }) },
+      data: { name: dto.name.trim(), priceMonth: dto.priceMonth, costMonth: dto.costMonth ?? 0, billingModel: dto.billingModel, limits: dto.limits as object, ...(dto.isActive !== undefined && { isActive: dto.isActive }) },
     });
     const mudouPreco = Number(atual.priceMonth) !== dto.priceMonth;
     // preço no Stripe é imutável: mudar valor exige criar outro price e apontar o plano para ele

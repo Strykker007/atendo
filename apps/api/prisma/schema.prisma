@@ -769,6 +769,11 @@ model Plan {
   id           String       @id @default(uuid())
   name         String       @unique
   priceMonth   Decimal      @db.Decimal(10, 2)
+  /// Quanto custa SERVIR um cliente deste plano por mês (suporte, infra rateada, licenças).
+  /// É estimativa do dono, não medição: o custo medido por mensagem vem do ledger e o de
+  /// linha vem de `whatsapp_numbers.infraCostMonth`. Sem este campo a margem por plano não
+  /// existe, porque custo por mensagem só aparece depois que o cliente começa a usar.
+  costMonth    Decimal      @default(0) @db.Decimal(10, 2)
   billingModel BillingModel @default(fixed)
   /// PlanLimits (packages/shared) — jsonb para criar planos sem migration
   limits       Json

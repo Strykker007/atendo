@@ -57,14 +57,20 @@ export class FinanceService {
     // que ele paga, não o que o plano custa hoje — somar o do catálogo inflaria o MRR
     const mrr = active.filter((s) => s.status !== 'trialing').reduce((a, s) => a + Number(s.priceMonth ?? s.plan.priceMonth), 0);
     const byPlan = Object.values(
-      active.reduce<Record<string, { plan: string; count: number; mrr: number }>>((acc, s) => {
+      active.reduce<Record<string, { plan: string; count: number; mrr: number; cost: number; margin: number }>>((acc, s) => {
         const k = s.plan.name;
-        acc[k] ??= { plan: k, count: 0, mrr: 0 };
+        acc[k] ??= { plan: k, count: 0, mrr: 0, cost: 0, margin: 0 };
         acc[k].count++;
+        // o custo conta inclusive em teste: cliente em trial consome suporte e infra do mesmo
+        // jeito, e esconder isso faria o período de teste parecer de graça
+        acc[k].cost += Number(s.plan.costMonth);
         if (s.status !== 'trialing') acc[k].mrr += Number(s.priceMonth ?? s.plan.priceMonth);
+        acc[k].margin = acc[k].mrr - acc[k].cost;
         return acc;
       }, {}),
     );
+    /** custo fixo cadastrado nos planos, somado por cliente ativo */
+    const planCost = active.reduce((a, s) => a + Number(s.plan.costMonth), 0);
     const current = series[series.length - 1];
     const statusCount = subs.reduce<Record<string, number>>((acc, s) => ((acc[s.status] = (acc[s.status] ?? 0) + 1), acc), {});
 
@@ -78,8 +84,9 @@ export class FinanceService {
         suspended: statusCount.suspended ?? 0,
         canceled: statusCount.canceled ?? 0,
         overdueAmount: invoices.filter((i) => i.status === 'failed' || (i.status === 'open' && i.dueAt && i.dueAt < new Date())).reduce((a, i) => a + Number(i.totalAmount), 0),
-        monthCost: current.providerCost + current.infraCost,
-        monthMargin: mrr + current.overage - (current.providerCost + current.infraCost),
+        monthCost: current.providerCost + current.infraCost + planCost,
+        planCost,
+        monthMargin: mrr + current.overage - (current.providerCost + current.infraCost + planCost),
       },
       byPlan,
       series,

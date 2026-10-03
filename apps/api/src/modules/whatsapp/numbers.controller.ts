@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsEnum, IsInt, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -27,6 +27,12 @@ class UpdateNumberDto {
   /** proteção contra bloqueio: ritmo de envio e teto diário */
   @IsOptional() @IsEnum(SendDelayProfile) sendDelay?: SendDelayProfile;
   @IsOptional() @IsInt() @Min(0) @Max(100_000) sendDailyLimit?: number;
+  /**
+   * Custo mensal desta linha (servidor, chip, taxa do provider). É o que faz a margem por
+   * cliente deixar de ser chute. Só o dono do sistema altera — para o cliente, o custo da
+   * operação não é informação dele, e deixá-lo editável permitiria "zerar" o próprio custo.
+   */
+  @IsOptional() @IsNumber() @Min(0) @Max(99_999) infraCostMonth?: number;
 }
 
 @Controller('numbers')
@@ -43,7 +49,7 @@ export class NumbersController {
   list(@CurrentUser() user: AuthUser) {
     return this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId },
-      select: { id: true, phone: true, label: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true },
+      select: { id: true, phone: true, label: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true, infraCostMonth: true },
       orderBy: { createdAt: 'asc' },
     });
   }
@@ -79,10 +85,18 @@ export class NumbersController {
   @Patch(':id')
   @RequirePermission('numbers.manage')
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
+    const { infraCostMonth, ...resto } = dto;
+    // Chega no corpo mas é descartado para quem não é o dono: devolver 403 vazaria que o campo
+    // existe, e ele não é assunto do cliente.
+    // `impersonatorId` entra porque o dono edita isto **entrando como o cliente** — o token de
+    // impersonação carrega papel de admin do cliente, então checar só o papel trancaria o
+    // próprio dono para fora do único lugar onde o campo aparece.
+    const ehDono = user.role === 'super_admin' || !!user.impersonatorId;
+    const custo = ehDono && infraCostMonth !== undefined ? { infraCostMonth } : {};
     return this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId },
-      data: dto,
-      select: { id: true, label: true, isActive: true, sendDelay: true, sendDailyLimit: true },
+      data: { ...resto, ...custo },
+      select: { id: true, label: true, isActive: true, sendDelay: true, sendDailyLimit: true, infraCostMonth: true },
     });
   }
 

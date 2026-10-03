@@ -34,6 +34,22 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
 
 Seed cria três: Starter (fixo, `hardLimit: true`), Pro e Business (híbridos com excedente).
 
+### Onde o custo é cadastrado
+
+O "custo do mês" do Financeiro soma três coisas, e duas delas precisavam de cadastro:
+
+| Custo | Onde se cadastra | Natureza |
+|---|---|---|
+| **Por cliente do plano** (`plans.costMonth`) | Planos → campo *Custo por cliente* | estimativa do dono: suporte, infra rateada, licenças |
+| **Por linha** (`whatsapp_numbers.infraCostMonth`) | Números → *Custo mensal desta linha*, visível **só para o dono** (inclusive entrando como o cliente) | servidor, chip, taxa do provider |
+| **Por mensagem** (`provider_pricing`) | tabela, por enquanto só no seed | medido no ledger a cada envio |
+
+Os dois primeiros não existiam em lugar nenhum: `infraCostMonth` estava no banco mas **nenhuma rota escrevia nele**, então o custo de infra era sempre zero, e não havia custo por plano. Resultado: a margem do Financeiro era, na prática, a receita.
+
+O campo da linha é descartado quando quem edita não é o dono — silenciosamente, porque um 403 confirmaria que o campo existe. Como o dono mexe nisso **entrando como o cliente**, a checagem aceita também o token de impersonação (que carrega papel de admin do cliente).
+
+Com custo cadastrado, **Planos** passa a mostrar a margem por plano no cartão e o **Financeiro** mostra margem por plano ao lado do MRR. Sem custo, a margem não aparece: "margem = receita" é mentira confortável, e é o tipo de número que vira decisão de preço.
+
 ### Criar e editar planos (dono do sistema)
 
 Tela **Planos**, na área do dono. Até então o catálogo só existia no seed: criar um pacote para um cliente exigia mexer no código, e por isso nenhum plano novo nascia — a transmissão em massa ficou pronta e trancada por falta de um plano que a liberasse.

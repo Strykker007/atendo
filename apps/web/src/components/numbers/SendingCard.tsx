@@ -3,7 +3,7 @@ import { ShieldAlert, Flame } from 'lucide-react';
 import { inputCls } from '@/components/ui/Modal';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
-import { useSendingStatus, useUpdateNumber, type NumberItem, type SendDelayProfile } from '@/lib/hooks';
+import { useMe, useSendingStatus, useUpdateNumber, type NumberItem, type SendDelayProfile } from '@/lib/hooks';
 
 const DELAY_LABEL: Record<SendDelayProfile, string> = {
   instant: 'Imediato — só API oficial',
@@ -18,6 +18,7 @@ const DELAY_LABEL: Record<SendDelayProfile, string> = {
  * decide se o cliente mantém a linha dele ou toma bloqueio.
  */
 export function SendingCard({ number }: { number: NumberItem }) {
+  const me = useMe();
   const update = useUpdateNumber();
   const status = useSendingStatus(number.id);
   const oficial = number.provider === 'meta';
@@ -61,6 +62,26 @@ export function SendingCard({ number }: { number: NumberItem }) {
           />
         </label>
       </div>
+
+      {/* Custo da linha: só o dono do sistema vê e edita. Para o cliente, quanto a operação
+          custa não é informação dele — e é esse número que faz a margem por cliente no
+          Financeiro deixar de ser estimativa. */}
+      {(me.data?.role === 'super_admin' || me.data?.impersonatorId) && (
+        <label className="flex items-center gap-2">
+          <span className="text-[11px] text-faint leading-tight flex-1">Custo mensal desta linha (R$)</span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            className={cn(inputCls, 'h-8 py-0 w-28 text-right')}
+            defaultValue={Number(number.infraCostMonth ?? 0)}
+            onBlur={(e) => {
+              const v = Number(e.target.value);
+              if (v !== Number(number.infraCostMonth ?? 0)) update.mutateAsync({ id: number.id, infraCostMonth: v }).then(() => toast.ok('Custo da linha salvo')).catch(toast.err);
+            }}
+          />
+        </label>
+      )}
 
       {status.data && (
         <div className="space-y-1">

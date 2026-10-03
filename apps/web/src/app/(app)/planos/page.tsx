@@ -23,6 +23,7 @@ const MODELOS: { id: PlanInput['billingModel']; label: string; desc: string }[] 
 const PADRAO: PlanInput = {
   name: '',
   priceMonth: 97,
+  costMonth: 0,
   billingModel: 'fixed',
   limits: {
     maxNumbers: 1,
@@ -74,7 +75,7 @@ export default function PlanosPage() {
   }
   async function alternarAtivo(p: PlanRow) {
     try {
-      await atualizar.mutateAsync({ id: p.id, name: p.name, priceMonth: p.priceMonth, billingModel: p.billingModel, limits: p.limits, isActive: !p.isActive });
+      await atualizar.mutateAsync({ id: p.id, name: p.name, priceMonth: p.priceMonth, costMonth: p.costMonth, billingModel: p.billingModel, limits: p.limits, isActive: !p.isActive });
       toast.ok(p.isActive ? 'Plano desativado — some do checkout, quem já assina continua' : 'Plano ativado');
     } catch (err) { toast.err(err); }
   }
@@ -100,7 +101,13 @@ export default function PlanosPage() {
               </div>
               <div className="text-right shrink-0">
                 <div className="font-display font-semibold text-ink tnum">{brl(p.priceMonth)}</div>
-                <div className="text-[10px] text-faint">por mês</div>
+                {p.costMonth > 0 ? (
+                  <div className="text-[10px] text-faint" title={`Custo cadastrado: ${brl(p.costMonth)} por cliente/mês`}>
+                    margem <span className={cn('tnum font-semibold', p.priceMonth - p.costMonth >= 0 ? 'text-ok' : 'text-danger')}>{brl(p.priceMonth - p.costMonth)}</span>
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-faint">por mês</div>
+                )}
               </div>
             </div>
 
@@ -136,7 +143,7 @@ export default function PlanosPage() {
                 )}
                 {p.billingEnabled && !p.stripePriceId && p.isActive && <span className="ml-2 text-warn" title="Sem preço no Stripe: o cliente não consegue assinar">· sem Stripe</span>}
               </span>
-              <button onClick={() => setForm({ id: p.id, name: p.name, priceMonth: p.priceMonth, billingModel: p.billingModel, limits: p.limits, isActive: p.isActive })} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={14} /></button>
+              <button onClick={() => setForm({ id: p.id, name: p.name, priceMonth: p.priceMonth, costMonth: p.costMonth, billingModel: p.billingModel, limits: p.limits, isActive: p.isActive })} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={14} /></button>
               <button onClick={() => void alternarAtivo(p)} className="text-faint hover:text-ink p-1" title={p.isActive ? 'Desativar' : 'Ativar'}><Power size={14} /></button>
               <button
                 onClick={() => setConfirmar(p)}
@@ -249,10 +256,13 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
   return (
     <Modal open onClose={() => setForm(null)} title={form.id ? 'Editar plano' : 'Novo plano'} width="max-w-2xl">
       <form onSubmit={onSubmit} className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-3 items-start">
+        <div className="grid sm:grid-cols-3 gap-3 items-start">
           <Field label="Nome"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={40} required autoFocus placeholder="Starter, Pro, Farmácia…" /></Field>
-          <Field label="Mensalidade (R$)" hint={form.id ? 'Mudar o valor cria um preço novo no Stripe. Quem já assina continua no antigo até trocar de plano.' : undefined}>
-            <input className={inputCls} inputMode="decimal" value={String(form.priceMonth)} onChange={(e) => setForm({ ...form, priceMonth: Number(e.target.value.replace(',', '.')) || 0 })} required />
+          <Field label="Mensalidade (R$)" hint={form.id ? 'Mudar o valor cria um preço novo no Stripe.' : undefined}>
+            <input className={inputCls} inputMode="decimal" value={String(form.priceMonth)} onChange={(e) => setForm({ ...form, priceMonth: Number(e.target.value.replace(',', '.')) || 0 })} required placeholder="97,00" />
+          </Field>
+          <Field label="Custo por cliente (R$/mês)" hint="O que te custa servir um cliente deste plano: suporte, infra rateada, licenças. É o que faz a margem por plano existir no Financeiro.">
+            <input className={inputCls} inputMode="decimal" value={String(form.costMonth ?? 0)} onChange={(e) => setForm({ ...form, costMonth: Number(e.target.value.replace(',', '.')) || 0 })} placeholder="0,00" />
           </Field>
         </div>
 
@@ -318,7 +328,10 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
         )}
 
         <Field label="Dias de tolerância no pagamento" hint="Depois que o pagamento falha, quantos dias o cliente continua atendendo antes de suspender. Vale para qualquer modelo de cobrança — é sobre a fatura, não sobre a quota.">
-          <input className={cn(inputCls, 'sm:w-32')} inputMode="numeric" value={String(form.limits.graceDays)} onChange={(e) => lim({ graceDays: Number(e.target.value) || 0 })} />
+          {/* `block` junto com a largura menor: `inputCls` é `w-full`, e trocar a largura sem
+              isso faz o campo virar inline e subir para a mesma linha do rótulo — ficava o
+              único campo do formulário fora do padrão */}
+          <input className={cn(inputCls, 'block sm:w-32')} inputMode="numeric" value={String(form.limits.graceDays)} onChange={(e) => lim({ graceDays: Number(e.target.value) || 0 })} />
         </Field>
 
         <Field label="Funcionalidades liberadas" hint="É isto que destrava o módulo na API e no painel. Sem marcar, o cliente nem vê a tela.">
