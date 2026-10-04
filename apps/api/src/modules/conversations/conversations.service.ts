@@ -13,6 +13,7 @@ import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import type { Permission } from '@atendo/shared';
 import { narrowTo, numberFilter } from '../auth/number-scope';
+import { BOT_PAUSE_CLEAR } from './bot-pause';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -125,7 +126,7 @@ export class ConversationsService {
     };
     const rows = await this.prisma.conversation.findMany({
       where,
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
       orderBy:
@@ -200,7 +201,7 @@ export class ConversationsService {
   async one(tenantId: string, id: string) {
     const row = await this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
     });
     return this.presentContact(row);
   }
@@ -270,17 +271,19 @@ export class ConversationsService {
     // conversa fechada: sendAsSystem exige aberta → abre, envia, fecha de novo (não polui a fila)
     if (conv.status === 'closed') await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'in_progress' } });
     const m = await this.sendAsSystem(conv.id, text);
-    if (opts?.closeAfter !== false) await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date() } });
+    if (opts?.closeAfter !== false) await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date(), ...BOT_PAUSE_CLEAR } });
     return m;
   }
 
   async setStatusSystem(conversationId: string, status: ConversationStatus) {
-    const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true } });
+    const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true, botPausedAt: true } });
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
         status,
         closedAt: status === 'closed' ? new Date() : null,
+        // encerrar limpa a pausa do robô: o próximo atendimento começa normal
+        ...(status === 'closed' && BOT_PAUSE_CLEAR),
         ...(status === 'waiting' && { assigneeId: null }),
         // sair de encerrado começa outro atendimento: o desfecho do anterior fica congelado no
         // histórico, e deixá-lo aqui marcaria o atendimento novo como se já tivesse resultado
@@ -289,6 +292,7 @@ export class ConversationsService {
     });
     // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria
     await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação' });
+    if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId: conv.tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     this.gateway.emitConversation(conv.tenantId, conv);
     return conv;
   }
@@ -556,12 +560,14 @@ export class ConversationsService {
             }
           : {};
 
-    const antes = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true } });
+    const antes = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true, botPausedAt: true } });
     const conv = await this.prisma.conversation.update({
       where: { id, tenantId },
       data: {
         status,
         closedAt: status === 'closed' ? new Date() : null,
+        // encerrar limpa a pausa do robô: o próximo atendimento começa normal
+        ...(status === 'closed' && BOT_PAUSE_CLEAR),
         // reabrir em "in_progress" = quem reabriu assume; reabrir em "waiting" = volta para a fila
         ...(status === 'in_progress' && { assigneeId: userId }),
         ...(status === 'waiting' && { assigneeId: null }),
@@ -581,6 +587,7 @@ export class ConversationsService {
       outcomeValue: conv.outcomeValue,
       reason: status === 'closed' ? outcome?.reason?.trim() || null : null,
     });
+    if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId, conversationId: id, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     this.gateway.emitConversation(tenantId, conv);
     return conv;
   }
@@ -614,7 +621,7 @@ export class ConversationsService {
         ...(escopo && { numberId: escopo }),
         ...(may(viewer, 'conversations.view_all') ? {} : { OR: [{ assigneeId: viewer.id }, { assigneeId: null }] }),
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, botPausedAt: true },
     });
     if (!alvos.length) return { closed: 0, ignored: pedidos.length };
 
@@ -626,6 +633,7 @@ export class ConversationsService {
       data: {
         status: 'closed',
         closedAt: new Date(),
+        ...BOT_PAUSE_CLEAR,
         // valor de venda não entra em massa: ele é por conversa, e um número repetido em
         // cinquenta atendimentos inflaria o faturamento do relatório
         ...(desfecho && desfecho.outcome !== 'none'
@@ -653,12 +661,61 @@ export class ConversationsService {
         reason: [desfecho?.outcome === 'lost' ? desfecho.reason?.trim() : null, 'encerrado em massa'].filter(Boolean).join(' · '),
       })),
     });
+    const pausadas = alvos.filter((a) => a.botPausedAt);
+    if (pausadas.length) {
+      await this.prisma.conversationEvent.createMany({
+        data: pausadas.map((a) => ({ tenantId, conversationId: a.id, type: 'bot_resumed' as const, reason: BOT_RESUMED_ON_CLOSE })),
+      });
+    }
 
     // cada conversa precisa ir pelo socket: quem está com o painel aberto vê a fila esvaziar
     const fechadas = await this.prisma.conversation.findMany({ where: { id: { in: idsAlvo } } });
     for (const c of fechadas) this.gateway.emitConversation(tenantId, c);
     this.log.log(`${fechadas.length} atendimento(s) encerrados em massa por ${viewer.id}`);
     return { closed: fechadas.length, ignored: pedidos.length - fechadas.length };
+  }
+
+  // ---------- robô pausado na conversa ----------
+
+  /**
+   * Grava a pausa (quem parou o fluxo em andamento e agenda o fim é o `FlowEngineService.pauseBot`).
+   * Pausar de novo com a pausa ativa troca a duração e conta a partir de agora.
+   */
+  async setBotPause(tenantId: string, id: string, by: { id: string }, minutes: number | null) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada: não há robô para pausar.');
+    // mesma regra do `registrar`: dono do sistema não tem linha em `users` deste tenant
+    const actorId = (await this.prisma.user.findFirst({ where: { id: by.id, tenantId }, select: { id: true } }))?.id ?? null;
+    const now = new Date();
+    const until = minutes ? new Date(now.getTime() + minutes * 60_000) : null;
+    const updated = await this.prisma.conversation.update({ where: { id }, data: { botPausedAt: now, botPausedById: actorId, botPausedUntil: until } });
+    // duração (e não o horário) no texto: o histórico não sabe o fuso de quem lê
+    await this.registrar({ tenantId, conversationId: id, type: 'bot_paused', actorId, reason: minutes ? `por ${minutes % 60 ? `${minutes} min` : `${minutes / 60} h`}` : 'até retomar manualmente' });
+    this.gateway.emitConversation(tenantId, updated);
+    return updated;
+  }
+
+  /**
+   * Retoma o robô. `by` nulo = fim automático do tempo. `pausedAt` (job do fim automático):
+   * só retoma se a pausa ainda é a mesma — pausar de novo deixa o job antigo sem efeito.
+   * Não retoma a execução interrompida: a próxima mensagem do contato segue as regras de entrada.
+   */
+  async clearBotPause(tenantId: string, id: string, by: { id: string } | null, pausedAt?: Date) {
+    const r = await this.prisma.conversation.updateMany({
+      where: { id, tenantId, ...(pausedAt ? { botPausedAt: pausedAt } : { botPausedAt: { not: null } }) },
+      data: BOT_PAUSE_CLEAR,
+    });
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId } });
+    if (!conv) {
+      // job do fim automático de conversa que foi apagada: nada a fazer
+      if (!by) return null;
+      throw new NotFoundException('Conversa não encontrada');
+    }
+    if (r.count === 0) return conv;
+    await this.registrar({ tenantId, conversationId: id, type: 'bot_resumed', actorId: by?.id, reason: by ? null : 'fim do tempo de pausa' });
+    this.gateway.emitConversation(tenantId, conv);
+    return conv;
   }
 
   // ---------- histórico (auditoria) ----------
@@ -781,6 +838,8 @@ export class ConversationsService {
  * Que nome dar à mudança de status. Reabrir é o caso que importa: sem ele, um atendimento
  * fechado e reaberto apareceria como dois encerramentos no relatório.
  */
+const BOT_RESUMED_ON_CLOSE = 'atendimento encerrado';
+
 export function tipoDaTransicao(de: ConversationStatus | null | undefined, para: ConversationStatus): ConversationEventType {
   if (para === 'closed') return 'closed';
   if (de === 'closed') return 'reopened';

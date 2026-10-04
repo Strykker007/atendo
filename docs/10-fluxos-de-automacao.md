@@ -100,6 +100,7 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 | POST | `/flows/:id/start` | todos* | `{conversationId}` — disparo manual |
 | GET | `/conversations/:id/flow` | todos | Run ativo ou `null` |
 | POST | `/conversations/:id/flow/stop` | todos | Para o run ativo |
+| POST | `/conversations/:id/bot/pause` · `/bot/resume` | todos | Pausa/retoma o robô só na conversa ([fluxos.md](fluxos.md#pausar-o-robô-na-conversa)) |
 
 \* exige `features: ['flows']` no plano (`FeatureGuard`) — 403 com mensagem "não está incluído no seu plano".
 

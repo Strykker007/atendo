@@ -9,6 +9,7 @@ import { NumbersService } from '../whatsapp/numbers.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { ConversationScopeGuard } from './conversation-scope.guard';
+import { BOT_PAUSE_MINUTES } from './bot-pause';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import type { SetPrimaryTagInput } from '@atendo/shared';
 
@@ -77,6 +78,10 @@ class ContactDto {
 }
 class TagsDto {
   @IsArray() @IsUUID('4', { each: true }) tagIds: string[];
+}
+class BotPauseDto {
+  /** minutos (30, 60, 240); ausente/nulo = até retomar manualmente */
+  @IsOptional() @IsIn([...BOT_PAUSE_MINUTES]) minutes?: number | null;
 }
 class PrimaryTagDto implements SetPrimaryTagInput {
   /** null = tirar da etapa (coluna "Sem etapa" do Kanban) */
@@ -190,6 +195,17 @@ export class ConversationsController {
       if (padrao) await this.flows.startOnClose(u.tenantId, id, padrao).catch(() => undefined);
     }
     return conv;
+  }
+
+  /** Pausar o robô (fluxos) só nesta conversa. Interrompe o fluxo em andamento. */
+  @Post(':id/bot/pause')
+  pauseBot(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: BotPauseDto) {
+    return this.flows.pauseBot(u.tenantId, id, u, dto.minutes ?? null);
+  }
+
+  @Post(':id/bot/resume')
+  resumeBot(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.flows.resumeBot(u.tenantId, id, u);
   }
 
   @Patch(':id/tags')

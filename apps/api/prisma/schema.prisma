@@ -83,6 +83,7 @@ model User {
   numbers       UserNumber[]
   events        ConversationEvent[] @relation("eventActor")
   eventsAbout   ConversationEvent[] @relation("eventTarget")
+  botPauses     Conversation[] @relation("botPausedBy")
 
   @@index([tenantId])
   @@index([profileId])
@@ -394,6 +395,13 @@ model Conversation {
   events   ConversationEvent[]
   /// execução de fluxo ativa (para marcar "em automação" na lista)
   activeFlowRunId String?
+  // ---- robô pausado SÓ nesta conversa (docs/fluxos.md → Pausar o robô) ----
+  /// preenchido = pausado: mensagens não iniciam nem avançam fluxos e jobs do fluxo não disparam
+  botPausedAt    DateTime?
+  botPausedById  String?
+  /// fim automático da pausa; nulo com `botPausedAt` preenchido = até retomar manualmente
+  botPausedUntil DateTime?
+  botPausedBy    User?     @relation("botPausedBy", fields: [botPausedById], references: [id], onDelete: SetNull)
 
   /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
@@ -444,6 +452,10 @@ enum ConversationEventType {
   released
   closed
   reopened
+  /// robô (fluxos) pausado só nesta conversa; `reason` = duração
+  bot_paused
+  /// robô retomado. Ator nulo = fim automático do tempo ou encerramento do atendimento
+  bot_resumed
 }
 
 /// Histórico do atendimento — quem fez o quê e quando.

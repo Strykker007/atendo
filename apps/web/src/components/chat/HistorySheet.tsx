@@ -1,5 +1,5 @@
 'use client';
-import { ArrowRightLeft, CheckCircle2, Hand, RotateCcw, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, BotOff, CheckCircle2, Hand, Play, RotateCcw, Undo2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useConversationEvents, type ConversationEvent } from '@/lib/hooks';
 
@@ -50,6 +50,8 @@ const META: Record<ConversationEvent['type'], { icon: React.ReactNode; texto: st
   released: { icon: <Undo2 size={14} />, texto: 'devolveu para a fila', cor: 'text-wait' },
   closed: { icon: <CheckCircle2 size={14} />, texto: 'encerrou', cor: 'text-done' },
   reopened: { icon: <RotateCcw size={14} />, texto: 'reabriu', cor: 'text-wait' },
+  bot_paused: { icon: <BotOff size={14} />, texto: 'pausou o robô', cor: 'text-warn-ink' },
+  bot_resumed: { icon: <Play size={14} />, texto: 'retomou o robô', cor: 'text-accent' },
 };
 
 const RESULTADO: Record<string, string> = { won: 'comprou', lost: 'não comprou', none: 'sem resultado' };
@@ -59,6 +61,8 @@ function Linha({ e }: { e: ConversationEvent }) {
   // ator nulo = foi a automação. Dizer "sistema" é melhor que deixar em branco: em auditoria,
   // campo vazio é interpretado como falha de registro
   const quem = e.actor?.name ?? 'Automação';
+  // retomada sem ator = fim do tempo ou atendimento encerrado (o motivo vem embaixo)
+  const automatico = e.type === 'bot_resumed' && !e.actor;
   const valor = e.outcomeValue ? Number(e.outcomeValue) : null;
 
   return (
@@ -66,7 +70,7 @@ function Linha({ e }: { e: ConversationEvent }) {
       <span className={`mt-0.5 shrink-0 ${m.cor}`}>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-ink">
-          <b>{quem}</b> {m.texto}
+          {automatico ? <>Robô retomado automaticamente</> : <><b>{quem}</b> {m.texto}</>}
           {e.type === 'transferred' && e.target && <> para <b>{e.target.name}</b></>}
           {e.type === 'closed' && e.outcome && <> · {RESULTADO[e.outcome] ?? e.outcome}</>}
           {valor != null && valor > 0 && <> · <span className="tnum">{valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></>}

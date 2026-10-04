@@ -21,6 +21,8 @@ export interface Conversation {
   id: string; status: ConversationStatus; unreadCount: number; lastMessageAt: string | null; lastMessagePreview: string | null;
   origin: ConversationOrigin; originData: LeadReferral | null;
   activeFlowRunId?: string | null;
+  /** robô pausado só nesta conversa (ver `botPaused`); `botPausedUntil` nulo = até retomar manualmente */
+  botPausedAt?: string | null; botPausedUntil?: string | null; botPausedBy?: { id: string; name: string } | null;
   lastInboundAt: string | null; numberId: string;
   /** desde quando o contato espera resposta; null = já respondemos */
   awaitingSince: string | null;
@@ -341,7 +343,7 @@ export const useDeletePlan = () => {
 
 export interface ConversationEvent {
   id: string;
-  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened';
+  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed';
   actor: { id: string; name: string } | null;
   target: { id: string; name: string } | null;
   fromStatus: ConversationStatus | null;

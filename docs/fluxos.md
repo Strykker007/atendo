@@ -36,7 +36,7 @@ Persistência: estado local (`useNodesState`/`useEdgesState`) → `save()` monta
 | `conditions.ts` | Avaliador da Condição (puro): registro `OPERANDS`, comparadores, `pickBranch` |
 | `variables.ts` | Operações do Manipulador (puro): `applyAssignments` |
 | `answer.ts`, `distribution.ts`, `webhook.ts`, `ai-turns.ts`, `default-flows.ts`, `schedule-misses.ts` | Helpers do motor |
-| `flows.module.ts` | Fila BullMQ `flows` (job `resume` do Atraso) |
+| `flows.module.ts` | Fila BullMQ `flows`: job `resume` (Atraso/intervalo do Conteúdo) e `unpause` (fim automático da pausa do robô) |
 
 Execução: um `FlowRun` por conversa (iniciar outro para o atual). `advance` executa nós em sequência (máx. 50 passos) até um que espera (`status: waiting`) ou termina. Saída por `goNext(handle)` → `edgeFrom`, que cai na saída sem handle se a pedida não existir; sem aresta = fluxo termina `done`.
 
@@ -67,6 +67,7 @@ Outros tipos existentes não pedidos: Início (`start`), Fim (`end`), IA (`ai`),
 ## Recursos do editor
 
 - **Ativar/desativar fluxo**: existe — checkbox "Fluxo ativo" no editor e interruptor direto na lista (`/fluxos`, só com `flows.manage`). Ativar valida o desenho salvo (400 com o motivo se inválido). Fluxo inativo não dispara nem aparece no chat; **conversas que já estão no meio dele continuam até o fim** (`onInbound` entrega a resposta ao run ativo sem olhar `isActive`).
+- **Pausar o robô numa conversa**: existe (tarefa 1.5) — ver [Pausar o robô na conversa](#pausar-o-robô-na-conversa).
 - **Duplicar fluxo**: existe (`POST /flows/:id/duplicate` e em lote; cópia nasce inativa).
 - **Duplicar bloco**: existe (tarefa 1.1) — botão no card, Ctrl/Cmd+D, menu de contexto. Sem ligações.
 - **Copiar/colar blocos** entre fluxos: existe (Ctrl+C/V, `localStorage`).
@@ -168,3 +169,29 @@ Dados: `{ flowId }` (`flowName` só no arquivo exportado). Sem saída: o fluxo a
 - **Excluir fluxo**: a lista chama `GET /flows/:id/references` antes de abrir a confirmação e cita os fluxos que apontam para ele.
 - **Exportar/importar**: `flowId` sai (vira `flowName`), card marcado *Reconfigurar*; a validação aceita o card sem destino enquanto marcado. Duplicar no mesmo cliente mantém o destino.
 
+
+## Pausar o robô na conversa
+
+Tarefa 1.5. O atendente desliga a automação **só na conversa aberta**; os outros contatos seguem com o robô normal.
+
+**O que já existia antes** (continua igual): botão "Parar e assumir" (faixa "Fluxo X está atendendo" e o ⏸ da barra do campo) — `POST /conversations/:id/flow/stop` para o run atual, mas a próxima mensagem do contato pode disparar gatilho/fluxo padrão de novo. **Nada para o robô sozinho** quando o atendente assume ou envia mensagem: o fluxo continua rodando junto. A pausa é o jeito de garantir silêncio do robô por um tempo.
+
+**Dados** (`Conversation`): `botPausedAt`, `botPausedById`, `botPausedUntil` (nulo com `botPausedAt` preenchido = até retomar manualmente). Pausado = `botPaused(conv)` (`conversations/bot-pause.ts`): `botPausedAt` preenchido e `botPausedUntil` nulo ou no futuro — pausa vencida conta como retomada mesmo se o job do fim atrasar.
+
+**API**: `POST /conversations/:id/bot/pause` `{ minutes: 30 | 60 | 240 | null }` e `POST /conversations/:id/bot/resume` (`ConversationScopeGuard`; sem permissão própria — quem vê a conversa pode pausar). Pausar de novo com a pausa ativa troca a duração, contando de agora. Conversa encerrada → 400.
+
+**Enquanto pausado** (`FlowEngineService`):
+- `pauseBot` grava a pausa e chama `stop` → o run ativo termina `stopped` com `error = "robô pausado na conversa"`.
+- `onInbound` retorna logo no início: mensagem não inicia fluxo (gatilho, padrão), não entrega resposta a run e **não manda o aviso de fora do expediente**. A resposta "1/2" a lembrete de agendamento (`SchedulingService.onInbound`) continua funcionando — não é fluxo.
+- `start` recusa (400 "O robô está pausado…") — inclui disparo manual pelo atendente; retome antes.
+- `resume` (job do Atraso/intervalo do Conteúdo) e cada passo de `advance` checam `botPaused(run.conversation)` e encerram o run como `stopped` em vez de executar. **Todo job novo do motor** (ex.: tempo limite do Salvar, quando existir) deve fazer a mesma checagem antes de agir.
+
+**Fim da pausa**:
+- Automático: job `unpause` na fila `flows` (delay até `botPausedUntil`, `jobId = unpause-<conversa>-<pausedAt ms>`). Só limpa se `botPausedAt` ainda é o da pausa que agendou — pausar de novo ou retomar à mão deixa o job antigo sem efeito. Se o job atrasar, a primeira mensagem do contato depois do horário já limpa a pausa (`onInbound`) e segue normal.
+- Manual: "Retomar robô".
+- Em ambos, **a execução interrompida não volta**: a próxima mensagem do contato passa pelas regras de entrada (gatilho, fluxo padrão, aviso de fora do expediente).
+- Encerrar o atendimento (`setStatus`, `setStatusSystem` — inclusive Fim com "encerrar conversa" —, encerrar em massa e `sendToPhone` com `closeAfter`) limpa a pausa. O fluxo de encerramento (pesquisa) roda normalmente, porque a pausa já foi limpa antes dele.
+
+**Histórico** (`conversation_events`): `bot_paused` (ator = quem pausou; `reason` = "por 30 min" / "por 1 h" / "por 4 h" / "até retomar manualmente") e `bot_resumed` (ator = quem retomou; nulo = automático, com `reason` "fim do tempo de pausa" ou "atendimento encerrado"). Aparece no "Histórico do atendimento".
+
+**Tela** (`components/chat/BotPauseBar.tsx`, só com a feature `flows`): botão "Pausar robô" abaixo do campo de mensagem → 30 min, 1 h, 4 h, até retomar. Pausado: no lugar dele, aviso "Robô pausado por <atendente> até <hora>" (ou "até retomar manualmente") + "Retomar robô". Selo "Robô pausado" no cabeçalho do chat e ícone no card da lista (no lugar do 🤖). Tempo real: toda mudança emite `conversation` pelo socket, que já invalida conversa, lista e histórico nos outros atendentes. A barra só aparece no campo normal de resposta (não no modo nota interna de gerente, número desconectado ou cota estourada); o selo aparece sempre.

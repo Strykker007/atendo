@@ -4,12 +4,12 @@ import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, H
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus } from '@/lib/hooks';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useCan, useTyping, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useCan, useTyping, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
@@ -19,6 +19,7 @@ import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { ComposerBar } from './ComposerBar';
 import { HistorySheet } from './HistorySheet';
+import { BotPauseBar } from './BotPauseBar';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
 import { AudioMessage } from './AudioMessage';
@@ -64,6 +65,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const activeRun = useActiveRun(conversationId);
   const stopFlow = useStopFlow();
   const sched = useHasFeature('scheduling');
+  const flowsFeature = useHasFeature('flows');
   const ai = useAiStatus();
   const [scheduling, setScheduling] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -381,6 +383,11 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             <span className="truncate">{conv.contact.name ?? `+${conv.contact.phone}`}</span>
             {/* por qual número esta conversa responde — ao lado do nome, para não passar batido */}
             <ChannelBadge channel={conv.number} phone="full" className="shrink-0" />
+            {botPaused(conv) && (
+              <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink" title="Automação pausada só nesta conversa">
+                <BotOff size={10} />Robô pausado
+              </span>
+            )}
             {/* etapa do atendimento (tag principal) — a mesma coluna em que ele está no Kanban */}
             {primaryTag && (
               <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-white rounded-full px-2 py-0.5" style={{ background: primaryTag.color }} title="Tag principal — etapa no Kanban">
@@ -614,6 +621,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
             />
           )}
+          {flowsFeature.has && <BotPauseBar conv={conv} />}
         </form>
       )}
     </>

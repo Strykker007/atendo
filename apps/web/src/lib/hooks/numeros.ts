@@ -75,6 +75,8 @@ export function useRealtime() {
       qc.invalidateQueries({ queryKey: ['conversation', c.id] });
       qc.invalidateQueries({ queryKey: ['conversation-counts'] });
       qc.invalidateQueries({ queryKey: ['active-run', c.id] });
+      // pausa/retomada do robô entra no histórico
+      qc.invalidateQueries({ queryKey: ['conversation-events', c.id] });
       // tag principal, posse, status e última mensagem mudam o quadro
       qc.invalidateQueries({ queryKey: ['kanban'] });
     });

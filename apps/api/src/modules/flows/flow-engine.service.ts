@@ -6,6 +6,7 @@ import { CONTENT_MAX_DELAY_SEC, MAX_FLOW_HOPS, normalizeCondition, normalizeCont
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { botPaused } from '../conversations/bot-pause';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { choose, interpolate, validAnswer, type InterpolateCtx } from './answer';
@@ -22,7 +23,11 @@ import { pickDefaultFlow, type InboundSituation } from './default-flows';
 
 export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
+/** Fim automático da pausa do robô. `pausedAt` (ISO) identifica a pausa: pausar de novo invalida o job antigo. */
+export interface BotUnpauseJob { conversationId: string; tenantId: string; pausedAt: string }
+export type FlowJob = FlowResumeJob | BotUnpauseJob;
 
+const BOT_PAUSED_REASON = 'robô pausado na conversa';
 const MAX_STEPS = 50; // proteção contra loop infinito num mesmo avanço
 
 /** Variáveis internas do motor (`_aiTurns`, `_sched`, `_content`) não seguem para o fluxo conectado. */
@@ -56,7 +61,7 @@ export class FlowEngineService {
     @Inject(forwardRef(() => SchedulingService)) private readonly scheduling: SchedulingService,
     private readonly ai: AiService,
     private readonly tenantSettings: TenantSettingsService,
-    @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowResumeJob>,
+    @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowJob>,
   ) {}
 
   // ---------- entrada ----------
@@ -70,6 +75,7 @@ export class FlowEngineService {
     if (!flow || !flow.isActive) throw new BadRequestException('Fluxo inexistente ou inativo');
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (!conv || conv.tenantId !== flow.tenantId) throw new BadRequestException('Conversa não encontrada');
+    if (botPaused(conv)) throw new BadRequestException('O robô está pausado nesta conversa. Retome o robô para iniciar um fluxo.');
     const def = flow.definition as unknown as FlowDefinition;
     const startNode = def.nodes.find((n) => n.type === 'start');
     if (!startNode) throw new BadRequestException('Fluxo sem nó de início');
@@ -119,10 +125,41 @@ export class FlowEngineService {
   }
 
   /**
+   * Pausa o robô SÓ nesta conversa: interrompe o run em andamento (sem retomar depois) e
+   * agenda o fim automático. `minutes` nulo = até retomar manualmente.
+   */
+  async pauseBot(tenantId: string, conversationId: string, by: { id: string }, minutes: number | null) {
+    const conv = await this.conversations.setBotPause(tenantId, conversationId, by, minutes);
+    await this.stop(conversationId, BOT_PAUSED_REASON);
+    if (conv.botPausedUntil && conv.botPausedAt) {
+      await this.queue.add('unpause', { conversationId, tenantId, pausedAt: conv.botPausedAt.toISOString() }, {
+        delay: Math.max(0, conv.botPausedUntil.getTime() - Date.now()),
+        jobId: `unpause-${conversationId}-${conv.botPausedAt.getTime()}`,
+        removeOnComplete: true,
+      });
+    }
+    return conv;
+  }
+
+  /** Retomar pelo botão. A execução interrompida não volta: a próxima mensagem segue as regras de entrada. */
+  resumeBot(tenantId: string, conversationId: string, by: { id: string }) {
+    return this.conversations.clearBotPause(tenantId, conversationId, by);
+  }
+
+  /** Job do fim automático da pausa. */
+  async autoResumeBot(job: BotUnpauseJob) {
+    await this.conversations.clearBotPause(job.tenantId, job.conversationId, null, new Date(job.pausedAt));
+  }
+
+  /**
    * Chamado pelo InboundProcessor para toda mensagem recebida.
    * 1) run ativo esperando → entrega a resposta. 2) senão, avalia gatilhos (nova conversa / palavra-chave).
    */
   async onInbound(number: WhatsAppNumber, conversation: Conversation, message: Message, isNewConversation: boolean, situation?: InboundSituation) {
+    // robô pausado nesta conversa: nada de fluxo, nem gatilho, nem aviso de fora do expediente
+    if (botPaused(conversation)) return;
+    // pausa vencida e o job do fim ainda não rodou (fila atrasada): encerra aqui e segue normal
+    if (conversation.botPausedAt) await this.conversations.clearBotPause(conversation.tenantId, conversation.id, null, conversation.botPausedAt);
     const active = await this.prisma.flowRun.findFirst({ where: { conversationId: conversation.id, status: { in: ['running', 'waiting'] } } });
     if (active) {
       if (active.status === 'waiting') await this.deliverAnswer(active, message);
@@ -179,8 +216,10 @@ export class FlowEngineService {
 
   /** Job de "Aguardar" (ou do intervalo entre mensagens do Conteúdo) venceu. */
   async resume(runId: string) {
-    const run = await this.prisma.flowRun.findUnique({ where: { id: runId } });
+    const run = await this.prisma.flowRun.findUnique({ where: { id: runId }, include: { conversation: { select: { botPausedAt: true, botPausedUntil: true } } } });
     if (!run || run.status !== 'waiting') return;
+    // a pausa já parou o run; isto cobre o job que venceu no meio do caminho
+    if (botPaused(run.conversation)) return this.finish(runId, 'stopped', BOT_PAUSED_REASON);
     await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'running', waitUntil: null } });
     // Conteúdo no meio da sequência: continua no mesmo nó, da mensagem em que parou
     if (run.currentNodeId && contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined) return this.advance(runId);
@@ -213,6 +252,7 @@ export class FlowEngineService {
     for (let step = 0; step < MAX_STEPS; step++) {
       const { run, def, node } = await this.load(runId);
       if (run.status !== 'running') return;
+      if (botPaused(run.conversation)) return this.finish(runId, 'stopped', BOT_PAUSED_REASON);
       if (!node) return this.finish(runId, 'failed', `nó ${run.currentNodeId} não existe`);
       const vars = run.vars as Record<string, string>;
       const ctx = { contact: run.conversation.contact, vars };

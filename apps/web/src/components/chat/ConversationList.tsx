@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star } from 'lucide-react';
+import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
@@ -263,7 +263,7 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: {
       <Avatar name={name} phone={c.contact.phone} src={c.contact.avatarUrl} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}</span>
+          <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{botPaused(c) ? <span title="Robô pausado nesta conversa" className="mr-1 inline-flex align-[-1px] text-warn-ink"><BotOff size={12} /></span> : c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}</span>
           {/* o canal fica aqui, na linha da hora: embaixo, junto das tags, ele acrescentava uma
               faixa inteira — a lista dobrava de altura. Sempre visível: é por ele que a resposta sai */}
           <ChannelBadge channel={c.number} phone="none" className="shrink-0 max-w-[120px]" />
