@@ -1,5 +1,5 @@
 import { WorkerHost } from '@nestjs/bullmq';
-import { DelayedError, type Job } from 'bullmq';
+import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { AppLogger } from './app-logger';
 import { runWithContext } from './request-context';
 import { captureError } from './sentry';
@@ -29,7 +29,8 @@ export abstract class TrackedWorkerHost<T = unknown, R = unknown> extends Worker
       } catch (err) {
         // job reagendado de propósito (ritmo de envio): não é falha
         if (err instanceof DelayedError) throw err;
-        const last = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+        // UnrecoverableError = falha definitiva por decisão do handler: o BullMQ não tenta de novo
+        const last = err instanceof UnrecoverableError || job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
         this.log.error(
           `${this.queue}:${job.name} falhou (tentativa ${job.attemptsMade + 1}${last ? ', última' : ''})`,
           err instanceof Error ? err.stack : String(err),

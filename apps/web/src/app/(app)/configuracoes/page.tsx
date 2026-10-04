@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/Toast';
 import { ScheduleSection } from '@/components/settings/ScheduleSection';
 import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
+import { QuickReplySection } from '@/components/settings/QuickReplySection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers } from '@/lib/hooks';
@@ -35,6 +36,7 @@ export default function ConfiguracoesPage() {
       {!isOwner && podeConfigurar && <ScheduleSection />}
       {!isOwner && podeConfigurar && <WelcomeSection />}
       {!isOwner && podeConfigurar && <DefaultFlowsSection />}
+      {!isOwner && podeConfigurar && <QuickReplySection />}
       {!me.data?.impersonatorId && <SecuritySection />}
 
     </PageShell>

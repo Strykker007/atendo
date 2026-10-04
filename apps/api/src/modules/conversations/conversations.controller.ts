@@ -40,6 +40,8 @@ class SendDto {
   /** número que a tela mostrava ao enviar — se a conversa estiver em outro, 409 sem enviar.
    *  Só confere: quem escolhe o número é a conversa, nunca o payload. */
   @IsOptional() @IsUUID() expectedNumberId?: string;
+  /** gerada pela tela por envio: repetir a requisição com a mesma chave devolve a mesma mensagem */
+  @IsOptional() @IsString() @MaxLength(100) idempotencyKey?: string;
 }
 class ReactDto {
   /** um emoji (pode ter vários code points, ex.: 👍🏽); vazio = retirar a reação */

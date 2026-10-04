@@ -11,6 +11,7 @@ import { useUI } from '@/lib/store';
 import { Settings2 } from 'lucide-react';
 import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
+import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './QuickReplyCountdown';
 
 /** Painel direito: sessões (pastas) com mensagens pré-configuradas. Clique insere no composer. */
 export function QuickRepliesPanel() {
@@ -160,20 +161,15 @@ function RepliesTab() {
   const conv = useConversation(conversationId).data;
 
   /**
-   * Manda a resposta para o composer. Com anexo, vai o arquivo + legenda; o atendente ainda
-   * revisa e clica em enviar, como em qualquer mensagem.
+   * Escolheu a resposta: o chat agenda o envio com contagem regressiva (Cancelar/Editar) —
+   * ver QuickReplyCountdown. Fora do modo de responder, ela só entra no campo.
    */
   const insert = (r: QuickReplyItem) => {
     const contactName = conv?.contact.name ?? conv?.contact.phone ?? '';
     const agentName = me.data?.name ?? '';
     const text = r.body.replace(/\{\{\s*contact\.name\s*\}\}/g, contactName).replace(/\{\{\s*agent\.name\s*\}\}/g, agentName);
-    if (r.mediaKey && r.mediaUrl) {
-      window.dispatchEvent(new CustomEvent('atendo:insert-media', {
-        detail: { key: r.mediaKey, url: r.mediaUrl, mimeType: r.mediaMime ?? '', fileName: r.mediaName ?? 'arquivo', size: 0, caption: text },
-      }));
-      return;
-    }
-    window.dispatchEvent(new CustomEvent('atendo:insert-text', { detail: text }));
+    const media = r.mediaKey && r.mediaUrl ? { key: r.mediaKey, url: r.mediaUrl, mimeType: r.mediaMime ?? '', fileName: r.mediaName ?? 'arquivo', size: 0 } : undefined;
+    window.dispatchEvent(new CustomEvent<QuickReplyEventDetail>(QUICK_REPLY_EVENT, { detail: { title: r.title, text, media } }));
   };
   const match = (s: string) => s.toLowerCase().includes(q.toLowerCase());
 

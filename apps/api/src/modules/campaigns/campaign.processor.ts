@@ -90,7 +90,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
 
       try {
         const text = interpolate(campaign.text, { contact: { name: target.contact.name, phone: target.contact.phone }, vars: {} });
-        const message = await this.conversations.sendToContact(campaign.tenantId, target.contactId, text, { preferredNumberId: campaign.numberId });
+        const message = await this.conversations.sendToContact(campaign.tenantId, target.contactId, text, { preferredNumberId: campaign.numberId, idempotencyKey: `campaign-${campaign.id}-${target.id}` });
         await this.prisma.campaignTarget.update({
           where: { id: target.id },
           data: { status: 'sent', messageId: (message as { id?: string })?.id ?? null, sentAt: new Date(), error: null },

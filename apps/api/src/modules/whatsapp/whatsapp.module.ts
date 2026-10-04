@@ -10,6 +10,7 @@ import { InboundProcessor } from './inbound.processor';
 import { OutboundProcessor } from './outbound.processor';
 import { QUEUE_INBOUND, QUEUE_OUTBOUND } from './queues';
 import { SendPacer } from './send-pacer';
+import { OUTBOUND_JOB_OPTS } from './send-queue';
 import { NumbersHealthScheduler, NumbersHealthProcessor, QUEUE_HEALTH } from './health.scheduler';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { BillingModule } from '../billing/billing.module';
@@ -21,7 +22,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
   imports: [
     BullModule.registerQueue(
       { name: QUEUE_INBOUND, defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 2000 } } },
-      { name: QUEUE_OUTBOUND, defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 3000 } } },
+      { name: QUEUE_OUTBOUND, defaultJobOptions: OUTBOUND_JOB_OPTS },
       { name: QUEUE_HEALTH, defaultJobOptions: { removeOnComplete: 20, removeOnFail: 20 } },
     ),
     forwardRef(() => ConversationsModule),

@@ -6,6 +6,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { NumbersService } from './numbers.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { QUEUE_OUTBOUND, type OutboundJob } from './queues';
+import { resumeNumber } from './send-queue';
 
 export const QUEUE_HEALTH = 'wa-health';
 
@@ -25,6 +27,7 @@ export class NumbersHealthProcessor extends TrackedWorkerHost {
     private readonly numbers: NumbersService,
     private readonly registry: ProviderRegistry,
     private readonly gateway: ConversationsGateway,
+    @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {
     super(QUEUE_HEALTH);
   }
@@ -38,6 +41,8 @@ export class NumbersHealthProcessor extends TrackedWorkerHost {
           await this.prisma.whatsAppNumber.update({ where: { id: n.id }, data: { status } });
           this.gateway.emitNumber(n.tenantId, { id: n.id, status });
           this.log.warn(`Número ${n.label}: ${n.status} → ${status}`);
+          // voltou sem passar pelo webhook de conexão: retoma a fila parada do número
+          if (status === 'connected') await resumeNumber(this.prisma, this.outbound, n.id);
         }
       } catch (err) {
         this.log.warn(`health ${n.label}: ${err instanceof Error ? err.message : err}`);

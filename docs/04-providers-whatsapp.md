@@ -195,6 +195,9 @@ empurraria para frente indefinidamente, sem nunca enviar.
 Envio que falha no provider **não** conta no teto do dia — o teto é sobre o que realmente
 saiu.
 
+Além destas, a fila aplica limites por minuto do número, intervalo mínimo e rajada por
+conversa, ordem por conversa e pausa quando o número cai — ver [Envio](envio.md).
+
 
 ## Mensagem enviada pelo celular do cliente
 

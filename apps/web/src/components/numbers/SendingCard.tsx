@@ -1,5 +1,7 @@
 'use client';
-import { ShieldAlert, Flame } from 'lucide-react';
+import { ShieldAlert, Flame, ChevronDown } from 'lucide-react';
+import { useState } from 'react';
+import { SEND_LIMIT_DEFAULTS, SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
 import { inputCls } from '@/components/ui/Modal';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
@@ -104,8 +106,59 @@ export function SendingCard({ number }: { number: NumberItem }) {
         </p>
       )}
 
+      <QueueLimits number={number} />
+
       {!oficial && number.sendDelay === 'fast' && (
         <p className="text-[11px] text-muted">No número não oficial, intervalo curto de verdade é o que evita bloqueio. Use <b>Rápido</b> só para atendimento, nunca para disparo.</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Limites da fila de envio desta conexão (docs/envio.md). Campo vazio = padrão do provider,
+ * que aparece como placeholder. Fica recolhido: o padrão serve para quase todo mundo.
+ */
+function QueueLimits({ number }: { number: NumberItem }) {
+  const update = useUpdateNumber();
+  const [aberto, setAberto] = useState(false);
+  const padrao = SEND_LIMIT_DEFAULTS[number.provider];
+  const atual = number.sendLimits ?? {};
+  const personalizados = Object.keys(atual).length;
+
+  function salvar(k: keyof SendLimits, raw: string) {
+    const v = raw.trim() === '' ? undefined : Number(raw);
+    if (v === atual[k]) return;
+    const next: Partial<SendLimits> = { ...atual };
+    if (v === undefined) delete next[k];
+    else next[k] = v;
+    update.mutateAsync({ id: number.id, sendLimits: Object.keys(next).length ? next : null }).then(() => toast.ok('Limite salvo')).catch(toast.err);
+  }
+
+  return (
+    <div>
+      <button type="button" onClick={() => setAberto((a) => !a)} className="flex items-center gap-1 text-[11px] text-muted hover:text-ink">
+        <ChevronDown size={12} className={cn('transition-transform', !aberto && '-rotate-90')} />
+        Limites da fila de envio {personalizados > 0 ? `(${personalizados} personalizado${personalizados > 1 ? 's' : ''})` : '(padrão)'}
+      </button>
+      {aberto && (
+        <div className="grid grid-cols-2 gap-2 mt-1.5 items-end">
+          {(Object.keys(SEND_LIMIT_RANGES) as (keyof SendLimits)[]).map((k) => (
+            <label key={k} className="flex flex-col gap-1">
+              <span className="text-[11px] text-faint leading-tight">{SEND_LIMIT_LABEL[k]}</span>
+              <input
+                type="number"
+                min={SEND_LIMIT_RANGES[k][0]}
+                max={SEND_LIMIT_RANGES[k][1]}
+                placeholder={`${padrao[k]} (padrão)`}
+                className={cn(inputCls, 'h-8 py-0')}
+                defaultValue={atual[k] ?? ''}
+                onBlur={(e) => salvar(k, e.target.value)}
+              />
+            </label>
+          ))}
+          <p className="col-span-2 text-[11px] text-muted">Vazio = padrão do {number.provider === 'meta' ? 'API oficial' : 'não oficial'}. O excedente nunca é descartado: espera a vez.</p>
+        </div>
       )}
     </div>
   );

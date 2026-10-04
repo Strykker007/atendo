@@ -163,14 +163,15 @@ export class SchedulingService {
     const soon = minutesBefore <= 120;
     if (soon) {
       // lembrete de última hora: só avisa, não pede resposta
-      await this.conversations.sendToContact(a.tenantId, a.contactId, `Olá ${a.contact.name ?? ''}! Lembrete: seu horário de *${a.service.name}* com ${a.professional.name} é hoje às ${when.hm}. Até já! 💈`);
+      await this.conversations.sendToContact(a.tenantId, a.contactId, `Olá ${a.contact.name ?? ''}! Lembrete: seu horário de *${a.service.name}* com ${a.professional.name} é hoje às ${when.hm}. Até já! 💈`, { idempotencyKey: `reminder-${a.id}-${minutesBefore}` });
       return;
     }
     await this.conversations.sendToContact(
       a.tenantId,
       a.contactId,
       `Olá ${a.contact.name ?? ''}! Você tem *${a.service.name}* com ${a.professional.name} marcado para ${when.label}.\n\nPosso confirmar?`,
-      { interactive: { options: REMINDER_OPTIONS } },
+      // chave por agendamento + antecedência: tick repetido do job não manda o lembrete duas vezes
+      { interactive: { options: REMINDER_OPTIONS }, idempotencyKey: `reminder-${a.id}-${minutesBefore}` },
     );
   }
 
@@ -179,7 +180,7 @@ export class SchedulingService {
     const hist = await this.contactHistory(a.contactId);
     const histText = hist.visits ? `Cliente há ${hist.visits} visita${hist.visits > 1 ? 's' : ''}${hist.last ? `, última em ${toLocal(hist.last.startAt, tz).label} (${hist.last.service.name})` : ''}.` : 'Primeira visita.';
     const text = `💈 Próximo: *${a.contact.name ?? a.contact.phone}* às ${when.hm} — ${a.service.name} (${a.service.durationMin} min).\n${histText}${a.notes ? `\nObs.: ${a.notes}` : ''}${a.status === 'confirmed' ? '\n✅ Confirmado pelo cliente.' : ''}`;
-    await this.conversations.sendToPhone(a.tenantId, a.professional.phone!, text, { closeAfter: true, contactName: a.professional.name });
+    await this.conversations.sendToPhone(a.tenantId, a.professional.phone!, text, { closeAfter: true, contactName: a.professional.name, idempotencyKey: `pro-reminder-${a.id}` });
   }
 
   /**

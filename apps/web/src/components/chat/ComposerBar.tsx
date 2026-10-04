@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
+import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './QuickReplyCountdown';
 import {
   useAgents, useActiveRun, useFlows, useStopFlow, useHasFeature, useMe, useQuickReplies, useConversation,
   type QuickReplyItem,
@@ -94,7 +95,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
           <ItemMenu icone={<FileText size={14} />} onClick={() => { onEscolherArquivo('application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt'); setAberto(null); }}>Documento</ItemMenu>
         </Menu>
       )}
-      {aberto === 'respostas' && <MenuRespostas conversationId={conversationId} onInserir={inserir} onFechar={() => setAberto(null)} />}
+      {aberto === 'respostas' && <MenuRespostas conversationId={conversationId} onFechar={() => setAberto(null)} />}
       {aberto === 'fluxos' && <MenuFluxos conversationId={conversationId} onStart={startFlow.run} onFechar={() => setAberto(null)} />}
       {startFlow.dialog}
       {aberto === 'emoji' && (
@@ -154,7 +155,7 @@ function ItemMenu({ icone, children, onClick }: { icone?: React.ReactNode; child
  * "Olá, {{contact.name}}". O painel da direita continua existindo; isto é para quem está
  * digitando e não quer tirar a mão do campo.
  */
-function MenuRespostas({ conversationId, onInserir, onFechar }: { conversationId: string; onInserir: (t: string) => void; onFechar: () => void }) {
+function MenuRespostas({ conversationId, onFechar }: { conversationId: string; onFechar: () => void }) {
   const folders = useQuickReplies();
   const me = useMe();
   const conv = useConversation(conversationId).data;
@@ -167,6 +168,12 @@ function MenuRespostas({ conversationId, onInserir, onFechar }: { conversationId
     return r.body.replace(/\{\{\s*contact\.name\s*\}\}/g, nome).replace(/\{\{\s*agent\.name\s*\}\}/g, me.data?.name ?? '');
   };
 
+  // mesmo caminho do painel da direita: contagem regressiva e envio (ou só insere, fora do modo de responder)
+  const escolher = (r: QuickReplyItem) => {
+    const media = r.mediaKey && r.mediaUrl ? { key: r.mediaKey, url: r.mediaUrl, mimeType: r.mediaMime ?? '', fileName: r.mediaName ?? 'arquivo', size: 0 } : undefined;
+    window.dispatchEvent(new CustomEvent<QuickReplyEventDetail>(QUICK_REPLY_EVENT, { detail: { title: r.title, text: resolver(r), media } }));
+  };
+
   return (
     <Menu largura="w-80">
       <div className="p-1.5 border-b border-line flex items-center gap-1.5">
@@ -176,7 +183,7 @@ function MenuRespostas({ conversationId, onInserir, onFechar }: { conversationId
       <div className="max-h-64 overflow-y-auto scrollbar-thin">
         {filtradas.length === 0 && <p className="px-3 py-3 text-[12px] text-faint">Nenhuma resposta encontrada.</p>}
         {filtradas.map((r) => (
-          <button key={r.id} type="button" onClick={() => { onInserir(resolver(r)); onFechar(); }} className="w-full text-left px-3 py-1.5 hover:bg-accent-soft">
+          <button key={r.id} type="button" onClick={() => { escolher(r); onFechar(); }} className="w-full text-left px-3 py-1.5 hover:bg-accent-soft">
             <div className="text-[12.5px] font-medium text-ink truncate">{r.title}</div>
             <div className="text-[11px] text-muted truncate">{r.body || r.mediaName}</div>
           </button>

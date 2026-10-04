@@ -1,4 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
+import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
+import { resumeNumber } from '../whatsapp/send-queue';
 import { Prisma } from '@prisma/client';
 import type { Conversation, Message, WhatsAppNumber } from '@prisma/client';
 import { messagePreview } from '@atendo/shared';
@@ -29,6 +33,7 @@ export class InboundService {
     private readonly usage: UsageService,
     private readonly gateway: ConversationsGateway,
     private readonly conversations: ConversationsService,
+    @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {}
 
   /** Download da mídia falhou de vez: registra para a UI não ficar em "carregando". */
@@ -333,6 +338,11 @@ export class InboundService {
       else throw err;
     });
     this.gateway.emitNumber(number.tenantId, { id: number.id, status: c.status, qrCode: c.qrCode });
+    // reconectou (QR lido): a fila do número, parada enquanto estava fora, retoma em ordem
+    if (c.status === 'connected' && number.status !== 'connected') {
+      const n = await resumeNumber(this.prisma, this.outbound, number.id);
+      if (n) this.log.log(`Número ${number.label} reconectou: retomando ${n} conversa(s) na fila de envio`);
+    }
   }
 
   // ---------- outbound (API) ----------

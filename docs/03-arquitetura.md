@@ -79,19 +79,23 @@ Painel ──POST /conversations/:id/messages──▶ ConversationsService.send
        número conectado                                                          (senão 422)
     2. se provider = meta e sem template: dentro da janela de 24h?  (senão 400)
     3. UsageService.canSend(tenant, 'messages' | 'templates')       (senão 403)
-    4. cria Message status=pending, conversa vira in_progress e é atribuída
-    5. outbound.add({ messageId })   fila "wa-outbound"
-    6. emite 'message' (o painel mostra com relógio de pendente)
+    4. idempotencyKey já usada na conversa → devolve a mesma mensagem
+    5. cria Message status=pending (queueSeq), conversa vira in_progress e é atribuída
+    6. enqueueOutbound()   fila "wa-outbound"
+    7. emite 'message' (o painel mostra com relógio de pendente)
                           │
-                          ▼  (worker, 3 tentativas com backoff)
+                          ▼  (worker; retry só em erro transitório)
                    OutboundProcessor
-    1. carrega Message + número + provider
-    2. provider.send(ctx, OutboundMessage) → externalId + billingCategory
-    3. Message status=sent, externalId
-    4. UsageService.record(...)
-    5. emite 'message'
-    (falha definitiva → status=failed + erro visível na bolha)
+    1. vez na conversa (só a pendente mais antiga sai), número conectado (senão pausa), prazo
+    2. teto do dia + reserva de ritmo (número e conversa)
+    3. provider.send(ctx, OutboundMessage) → externalId + billingCategory
+    4. Message status=sent, externalId
+    5. UsageService.record(...)
+    6. emite 'message' e promove a próxima da conversa
+    (falha definitiva → status=failed + erro visível na bolha + "Tentar novamente")
 ```
+
+Detalhes da fila (ordem, limites, reconexão, retry, valores padrão): [Envio](envio.md).
 
 Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avança, nunca regride.
 

@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus } from '@/lib/hooks';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useCan, useTyping, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
@@ -18,6 +18,8 @@ import { ChannelBadge, channelColor, channelOffline, formatPhone } from './Chann
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { ComposerBar } from './ComposerBar';
+import { QUICK_REPLY_EVENT, QuickReplyCountdown, type QuickReplyEventDetail, type QuickReplyPending } from './QuickReplyCountdown';
+import { QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
 import { HistorySheet } from './HistorySheet';
 import { BotPauseBar } from './BotPauseBar';
 import { AudioRecorder } from './AudioRecorder';
@@ -107,6 +109,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   /** mensagem que está sendo respondida (citação), como no WhatsApp */
   const [respondendo, setRespondendo] = useState<Message | null>(null);
   const [encaminhando, setEncaminhando] = useState<Message | null>(null);
+  /** resposta rápida na contagem para sair; trocar de conversa cancela (não vai para o contato errado) */
+  const tenantSettings = useTenantSettings();
+  const [rapida, setRapida] = useState<QuickReplyPending | null>(null);
+  useEffect(() => setRapida(null), [conversationId]);
+  /** o composer está no modo de responder ao contato? (senão a resposta rápida só entra no campo) */
+  const podeResponderRef = useRef(false);
 
   /** Insere no ponto do cursor, não no fim: emoji e menção entram no meio da frase. */
   function inserirNoTexto(trecho: string) {
@@ -179,7 +187,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     try {
       const up = await uploadFile(file);
       setPrevia(null);
-      await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName } });
+      await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, idempotencyKey: crypto.randomUUID() });
       if (status === 'waiting' && conv?.status === 'waiting') setFilterStatus('in_progress', true);
     } catch (err) {
       toast.err(err); // a prévia continua aberta: o arquivo escolhido não se perde no erro
@@ -312,6 +320,53 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     return () => window.removeEventListener('atendo:insert-media', h);
   }, []);
 
+  /**
+   * Resposta rápida escolhida: sai depois da contagem configurada, com Cancelar/Editar.
+   * Fora do modo de responder (nota interna, número caído…), só entra no campo como antes.
+   */
+  const atrasoRapida = tenantSettings.data?.quickReplyDelaySec ?? QUICK_REPLY_DELAY_DEFAULT_SEC;
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent<QuickReplyEventDetail>).detail;
+      if (!podeResponderRef.current) {
+        if (d.media) setAttachment(d.media);
+        setText((t) => (d.media ? d.text : (t ? `${t} ` : '') + d.text));
+        return;
+      }
+      setRapida({ ...d, at: Date.now() + atrasoRapida * 1000, key: crypto.randomUUID() });
+    };
+    window.addEventListener(QUICK_REPLY_EVENT, h);
+    return () => window.removeEventListener(QUICK_REPLY_EVENT, h);
+  }, [atrasoRapida]);
+
+  useEffect(() => {
+    if (!rapida) return;
+    const t = setTimeout(() => {
+      setRapida(null);
+      const r = rapida;
+      const input = r.media
+        ? { type: mediaTypeOf(r.media.mimeType), mediaKey: r.media.key, text: r.text || undefined, media: { url: r.media.url, mimeType: r.media.mimeType, fileName: r.media.fileName } } as const
+        : { type: 'text', text: r.text } as const;
+      send.mutateAsync({ ...input, idempotencyKey: r.key }).catch((err) => {
+        // não perde o texto: volta para o campo para revisar e mandar de novo
+        if (r.media) setAttachment(r.media);
+        setText(r.text);
+        toast.err(err);
+      });
+    }, Math.max(0, rapida.at - Date.now()));
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só a resposta agendada dispara o envio
+  }, [rapida]);
+
+  /** "Editar" na contagem: volta ao comportamento antigo — vai para o campo, sai quando a pessoa enviar. */
+  function editarRapida() {
+    if (!rapida) return;
+    if (rapida.media) setAttachment(rapida.media);
+    setText(rapida.media ? rapida.text : (t) => (t ? `${t} ` : '') + rapida.text);
+    setRapida(null);
+    campoRef.current?.focus();
+  }
+
   if (!conv) {
     return (
       <div className="flex-1 grid place-items-center chat-bg">
@@ -327,6 +382,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
   const numberOffline = channelOffline(conv.number);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
+  podeResponderRef.current = !noteMode && !(ownedByOther && !isAdmin) && !numberOffline && !quotaHit && conv.status !== 'closed';
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -346,13 +402,15 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     const att = attachment;
     setText('');
     setAttachment(null);
+    // uma chave por envio: se a requisição repetir (rede, clique duplo), a API devolve a mesma mensagem
+    const idempotencyKey = crypto.randomUUID();
     try {
       // citação segue o id do provider: é ele que o WhatsApp entende do outro lado
       const citando = respondendo?.externalId ? { quotedExternalId: respondendo.externalId } : {};
       if (att) {
-        await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando });
+        await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando, idempotencyKey });
       } else {
-        await send.mutateAsync({ type: 'text', text: t, ...citando });
+        await send.mutateAsync({ type: 'text', text: t, ...citando, idempotencyKey });
       }
       setRespondendo(null);
       // responder tira a conversa de "Aguardando": acompanha o filtro para ela não sumir da lista
@@ -560,6 +618,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted text-center">Conversa encerrada. Reabra para responder.</div>
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
+          {rapida && <QuickReplyCountdown pending={rapida} onCancel={() => setRapida(null)} onEdit={editarRapida} />}
           {/* de qual número a resposta vai sair: com vários canais, é o que evita responder pelo errado */}
           <div className="flex items-center gap-1.5 text-[11px] text-muted rounded-md px-2 py-1" style={{ background: `color-mix(in srgb, ${channelColor(conv.number.color)} 8%, transparent)` }}>
             <span className="shrink-0">Enviando via:</span>
@@ -681,7 +740,7 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, citada }
             <span className="flex-1">{m.error ?? 'Falha ao enviar'}</span>
             {m.status === 'failed' && canResend && (
               <button onClick={() => resend.mutateAsync({ conversationId: m.conversationId, messageId: m.id }).catch(toast.err)} disabled={resend.isPending} className="inline-flex items-center gap-1 rounded bg-panel/70 px-1.5 py-0.5 text-danger-ink hover:bg-panel">
-                <RefreshCw size={10} className={resend.isPending ? 'animate-spin' : ''} /> reenviar
+                <RefreshCw size={10} className={resend.isPending ? 'animate-spin' : ''} /> Tentar novamente
               </button>
             )}
           </p>

@@ -195,6 +195,8 @@ model TenantSettings {
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)
+  /// segundos entre escolher uma resposta rápida e ela sair (contagem com "Cancelar"); 0 = na hora
+  quickReplyDelaySec Int @default(3)
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -271,6 +273,8 @@ model WhatsAppNumber {
   sendDailyLimit Int          @default(1000)
   /// quando o número conectou pela primeira vez — número novo sobe o volume aos poucos
   warmupStartedAt DateTime?
+  /// Limites da fila de envio (`Partial<SendLimits>` do shared); o que faltar = padrão do provider
+  sendLimits     Json?
   isActive       Boolean      @default(true)
   /// quadro de horários próprio; nulo = o padrão do cliente
   scheduleId     String?
@@ -563,6 +567,13 @@ model Message {
   internal       Boolean          @default(false)
   error          String?
   raw            Json?
+  /// Ordem na fila de envio (docs/envio.md): numa conversa só sai a mensagem pendente de menor
+  /// `queueSeq`. "Tentar novamente" pega um número novo — volta para o fim da fila.
+  queueSeq       BigInt           @default(autoincrement())
+  /// quando entrou (ou voltou) na fila de envio — base do prazo de expiração
+  queuedAt       DateTime         @default(now())
+  /// chave de idempotência do envio (clique duplo, reenvio do front, retry do job): repetida = mesma mensagem
+  idempotencyKey String?
   createdAt      DateTime         @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -574,7 +585,9 @@ model Message {
   quotes        Message[]   @relation("MessageQuote")
 
   @@unique([externalId])
+  @@unique([conversationId, idempotencyKey])
   @@index([conversationId, createdAt])
+  @@index([conversationId, status, queueSeq])
   @@index([quotedMessageId])
   @@index([numberId])
   @@map("messages")

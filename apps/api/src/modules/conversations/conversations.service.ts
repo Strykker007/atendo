@@ -11,6 +11,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import type { Message, MessageDirection, MessageType } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
+import { enqueueOutbound, requeueSeq } from '../whatsapp/send-queue';
 import type { Permission } from '@atendo/shared';
 import { narrowTo, numberFilter } from '../auth/number-scope';
 import { BOT_PAUSE_CLEAR } from './bot-pause';
@@ -221,7 +222,13 @@ export class ConversationsService {
    * Envio pelo sistema (fluxos de automação): sem autor humano, não assume a conversa,
    * respeita quota e janela de 24h, passa pela mesma fila.
    */
-  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string; voice?: boolean }, interactive?: import('@atendo/shared').InteractiveMenu) {
+  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string; voice?: boolean }, interactive?: import('@atendo/shared').InteractiveMenu, opts?: { idempotencyKey?: string }) {
+    const key = opts?.idempotencyKey;
+    if (key) {
+      // mesmo envio repetido (job reprocessado, lote de campanha refeito): devolve o que já existe
+      const dup = await this.byIdempotencyKey(conversationId, key);
+      if (dup) return dup;
+    }
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true } });
     if (!conv || conv.status === 'closed') throw new BadRequestException('Conversa indisponível');
     if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
@@ -233,11 +240,13 @@ export class ConversationsService {
     if (!quota.ok) throw new ForbiddenException(quota.reason);
     // no histórico do painel a mensagem interativa aparece como texto + opções numeradas
     const shown = interactive?.options.length ? `${text ?? ''}\n\n${interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : text;
-    const message = await this.prisma.message.create({
-      data: { conversationId, numberId: conv.numberId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, raw: interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : media?.voice === false ? { voice: false } : undefined },
-    });
+    const created = await this.createOnce(conversationId, key, () => this.prisma.message.create({
+      data: { conversationId, numberId: conv.numberId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, idempotencyKey: key, raw: interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : media?.voice === false ? { voice: false } : undefined },
+    }));
+    if (!created.fresh) return created.message;
+    const message = created.message;
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: messagePreview({ type: media ? media.type : 'text', text: shown, mediaName: media?.name }).slice(0, 120), awaitingSince: null } });
-    await this.outbound.add('send', { messageId: message.id });
+    await enqueueOutbound(this.outbound, message);
     this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
   }
@@ -251,18 +260,18 @@ export class ConversationsService {
   }
 
   /** Manda uma mensagem do sistema para um contato: reaproveita a conversa aberta ou cria uma. */
-  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu }) {
+  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
     let conv = await this.prisma.conversation.findFirst({ where: { contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' } });
     if (!conv) {
       const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
       conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
     }
-    return this.sendAsSystem(conv.id, text, undefined, opts?.interactive);
+    return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, { idempotencyKey: opts?.idempotencyKey });
   }
 
   /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */
-  async sendToPhone(tenantId: string, phone: string, text: string, opts?: { closeAfter?: boolean; contactName?: string; preferredNumberId?: string | null }) {
+  async sendToPhone(tenantId: string, phone: string, text: string, opts?: { closeAfter?: boolean; contactName?: string; preferredNumberId?: string | null; idempotencyKey?: string }) {
     const clean = phone.replace(/\D/g, '');
     const contact = await this.prisma.contact.upsert({ where: { tenantId_phone: { tenantId, phone: clean } }, create: { tenantId, phone: clean, name: opts?.contactName }, update: {} });
     const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
@@ -270,7 +279,7 @@ export class ConversationsService {
     if (!conv) conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
     // conversa fechada: sendAsSystem exige aberta → abre, envia, fecha de novo (não polui a fila)
     if (conv.status === 'closed') await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'in_progress' } });
-    const m = await this.sendAsSystem(conv.id, text);
+    const m = await this.sendAsSystem(conv.id, text, undefined, undefined, { idempotencyKey: opts?.idempotencyKey });
     if (opts?.closeAfter !== false) await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date(), ...BOT_PAUSE_CLEAR } });
     return m;
   }
@@ -302,13 +311,20 @@ export class ConversationsService {
    * o número, e não há fallback para outro: se o canal não pode enviar, a mensagem não sai.
    * `expectedNumberId` é o canal que a tela mostrava; se a conversa não está mais nele, 409 sem enviar.
    */
-  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string }) {
+  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string; idempotencyKey?: string }) {
     const authorId = author.id;
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
       include: { number: true },
     });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
+    // clique duplo / reenvio do front com a mesma chave: devolve a mensagem que já foi criada,
+    // antes de qualquer regra (a primeira já passou por todas)
+    const key = input.idempotencyKey;
+    if (key) {
+      const dup = await this.byIdempotencyKey(conv.id, key);
+      if (dup) return this.present(dup);
+    }
     if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para responder.');
     // número de outro tenant nunca deveria acontecer, mas se acontecer é bloqueio, não envio
     if (!conv.number || conv.number.tenantId !== tenantId || !conv.number.isActive) {
@@ -344,8 +360,9 @@ export class ConversationsService {
     const quoted = input.quotedExternalId
       ? await this.prisma.message.findFirst({ where: { externalId: input.quotedExternalId, conversation: { tenantId } }, select: { id: true } })
       : null;
-    const message = await this.prisma.message.create({
+    const created = await this.createOnce(conv.id, key, () => this.prisma.message.create({
       data: {
+        idempotencyKey: key,
         conversationId: conv.id,
         numberId: conv.numberId,
         direction: 'out',
@@ -364,7 +381,9 @@ export class ConversationsService {
         raw: input.template ? ({ template: input.template } as Prisma.InputJsonValue) : undefined,
       },
       include: MESSAGE_INCLUDE,
-    });
+    }));
+    if (!created.fresh) return this.present(created.message);
+    const message = created.message;
 
     const updatedConv = await this.prisma.conversation.update({
       where: { id: conv.id },
@@ -377,7 +396,7 @@ export class ConversationsService {
       },
     });
 
-    await this.outbound.add('send', { messageId: message.id });
+    await enqueueOutbound(this.outbound, message);
     this.gateway.emitMessage(tenantId, this.present(message));
     this.gateway.emitConversation(tenantId, updatedConv);
     return this.present(message);
@@ -435,15 +454,45 @@ export class ConversationsService {
     return { type: 'text', text, forwarded: true };
   }
 
-  /** Reenvia uma mensagem que falhou: volta para pending e enfileira de novo. */
+  /**
+   * "Tentar novamente" numa mensagem com falha: volta para `pending` no FIM da fila da conversa
+   * (`queueSeq` novo) e o prazo de expiração recomeça. A troca de status é condicional —
+   * clique duplo não enfileira duas vezes. Sai pelo número da conversa; se a conversa mudou de
+   * canal desde a falha, 409 em vez de mandar pelo número antigo.
+   */
   async resend(tenantId: string, messageId: string) {
-    const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
+    const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', internal: false, conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
     if (!m) throw new NotFoundException('Mensagem não encontrada ou não está com falha');
+    if (m.numberId && m.numberId !== m.conversation.numberId) {
+      throw new ConflictException({ code: 'number_changed', message: `O canal desta conversa mudou para "${m.conversation.number.label}". Envie a mensagem de novo.` });
+    }
     if (m.conversation.number.status !== 'connected') throw new BadRequestException(`O número "${m.conversation.number.label}" está desconectado.`);
-    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: 'pending', error: null }, include: MESSAGE_INCLUDE });
-    await this.outbound.add('send', { messageId: m.id });
+    const r = await this.prisma.message.updateMany({ where: { id: m.id, status: 'failed' }, data: { status: 'pending', error: null } });
+    if (r.count === 0) throw new ConflictException('Esta mensagem já foi reenviada.');
+    const queueSeq = await requeueSeq(this.prisma, m.id);
+    await enqueueOutbound(this.outbound, { id: m.id, queueSeq: queueSeq ?? m.queueSeq });
+    const updated = await this.prisma.message.findUniqueOrThrow({ where: { id: m.id }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(tenantId, this.present(updated));
     return this.present(updated);
+  }
+
+  private byIdempotencyKey(conversationId: string, key: string) {
+    return this.prisma.message.findUnique({ where: { conversationId_idempotencyKey: { conversationId, idempotencyKey: key } }, include: MESSAGE_INCLUDE });
+  }
+
+  /**
+   * Cria a mensagem; se outra requisição com a mesma chave criou no mesmo instante (unique de
+   * `conversationId + idempotencyKey`), devolve a dela em vez de duplicar.
+   */
+  private async createOnce<M>(conversationId: string, key: string | undefined, create: () => Promise<M>): Promise<{ fresh: true; message: M } | { fresh: false; message: Prisma.MessageGetPayload<{ include: typeof MESSAGE_INCLUDE }> }> {
+    try {
+      return { fresh: true, message: await create() };
+    } catch (err) {
+      if (!key || !(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') throw err;
+      const dup = await this.byIdempotencyKey(conversationId, key);
+      if (!dup) throw err;
+      return { fresh: false, message: dup };
+    }
   }
 
   /**

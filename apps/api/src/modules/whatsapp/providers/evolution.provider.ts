@@ -6,7 +6,7 @@ import { env } from '../../../config/env';
 import { lerCitacao } from './quoted';
 import { contextInfoDe, desembrulhar, lerConteudo, lerEdicao } from './evolution-content';
 import type { MediaPayload, NumberContext, OutboundReaction, ParsedWebhook, WhatsAppProvider } from './provider.interface';
-import { describeProviderError } from './provider-error';
+import { describeProviderError, ProviderSendError } from './provider-error';
 
 /** providerConfig de um número Evolution */
 export interface EvolutionNumberConfig {
@@ -36,7 +36,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     });
     const json = (await res.json().catch(() => ({}))) as any;
     if (!res.ok) {
-      throw new BadRequestException(describeProviderError(json?.response?.message ?? json?.message ?? json, `Evolution ${res.status}`));
+      throw new ProviderSendError(describeProviderError(json?.response?.message ?? json?.message ?? json, `Evolution ${res.status}`), res.status);
     }
     return json as T;
   }

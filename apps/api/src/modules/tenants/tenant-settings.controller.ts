@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
-import type { ScheduleConfig, WelcomeMessage, WelcomeMode } from '@atendo/shared';
+import { QUICK_REPLY_DELAY_MAX_SEC, type ScheduleConfig, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -33,6 +33,8 @@ class SettingsDto {
   @IsOptional() @IsArray() @ArrayMaxSize(20) welcomeMessages?: WelcomeMessage[];
   @IsOptional() @IsIn(['random', 'sequential']) welcomeMode?: WelcomeMode;
   @IsOptional() @IsBoolean() welcomeEnabled?: boolean;
+  /** respostas rápidas: segundos entre escolher e enviar (contagem com Cancelar); 0 = na hora */
+  @IsOptional() @IsInt() @Min(0) @Max(QUICK_REPLY_DELAY_MAX_SEC) quickReplyDelaySec?: number;
 }
 class ScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(60) name?: string;
