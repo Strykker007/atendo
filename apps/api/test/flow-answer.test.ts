@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { choose, interpolate, validAnswer } from '../src/modules/flows/answer';
+import { choose, interpolate, jsonEscape, validAnswer } from '../src/modules/flows/answer';
 
 const SERVICOS = [
   { id: 'svc-1', title: 'Corte' },
@@ -64,6 +64,18 @@ describe('choose — como o contato escolhe uma opção', () => {
   });
 });
 
+describe('choose — Menu: texto sem acento/maiúsculas e número com pontuação', () => {
+  const OPCOES = [{ id: 'a', title: 'Promoção' }, { id: 'b', title: 'Falar com Atendente' }];
+  it('texto da opção ignora acentos, caixa e espaços extras', () => {
+    expect(choose(OPCOES, 'promocao')?.id).toBe('a');
+    expect(choose(OPCOES, '  FALAR   com atendente ')?.id).toBe('b');
+  });
+  it('número com ponto ou parêntese ("2." / "2)")', () => {
+    expect(choose(OPCOES, '2.')?.id).toBe('b');
+    expect(choose(OPCOES, '1)')?.id).toBe('a');
+  });
+});
+
 describe('validAnswer', () => {
   it('none aceita qualquer texto, menos vazio', () => {
     expect(validAnswer('qualquer coisa', 'none')).toBe(true);
@@ -108,6 +120,11 @@ describe('interpolate', () => {
 
   it('contato sem nome não escreve "null"', () => {
     expect(interpolate('Olá {{contact.name}}!', { ...ctx, contact: { name: null, phone: '55' } })).toBe('Olá !');
+  });
+
+  it('com escape de JSON, aspas e quebras no valor não quebram o corpo do webhook', () => {
+    const c = { contact: { name: 'Ana "Bia"\nSilva', phone: '' }, vars: {} };
+    expect(JSON.parse(interpolate('{"nome": "{{contact.name}}"}', c, jsonEscape))).toEqual({ nome: 'Ana "Bia"\nSilva' });
   });
 
   it('texto sem variáveis passa intacto', () => {

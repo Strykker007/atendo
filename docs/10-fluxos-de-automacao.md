@@ -18,16 +18,16 @@ o desenho de longe: roxo = estrutura, amarelo/laranja = decisão, azul = entrega
 |---|---|---|---|
 | — | **Início** (`start`) | Ponto de partida (um por fluxo; não pode ser apagado nem copiado) | 1 |
 | Estrutura e Conteúdo | **Conteúdo** (`message`) | **Várias mensagens em sequência**, reordenáveis: texto (variáveis + *negrito* _itálico_ ~tachado~), imagem/vídeo/documento com legenda, áudio gravado (PTT) ou como arquivo. Intervalo opcional entre elas (segundos). Detalhes em [fluxos.md](fluxos.md#conteúdo) | 1 |
-| Estrutura e Conteúdo | **Menu** (`menu`) | Envia as opções como **botões/lista** (Meta) ou texto numerado (Evolution). Aceita toque no botão, número ou texto da opção. Inválida → tentativa; estourou → saída *resposta inválida* (ou humano, se não ligada) | uma por opção + `fallback` |
+| Estrutura e Conteúdo | **Menu** (`menu`) | Envia as opções como **botões/lista** (Meta) ou texto numerado (Evolution). Aceita toque no botão, número (`2`, `2.`, `2)`) ou texto da opção, **sem diferenciar maiúsculas e acentos**. Inválida → mensagem + nova tentativa; estourou → saída *Tentativas esgotadas* (ou humano, se não ligada). **Tempo limite** opcional → saída *Não respondeu*. Detalhes em [fluxos.md](fluxos.md#menu) | uma por opção + `fallback` (tentativas esgotadas) + `timeout` (com tempo limite) |
 | Estrutura e Conteúdo | **Manipulador** (`variable`) | Operações sobre variáveis do fluxo, em ordem (a segunda já vê o resultado da primeira): definir, somar, subtrair, acrescentar texto, limpar, copiar de outra variável (ou dado do contato), data/hora atual (no fuso do cliente). Valores aceitam `{{…}}`. Antes chamado *Variável global* | 1 |
 | Estrutura e Conteúdo | **Conectar com outro fluxo** (`connect_flow`) | Termina este fluxo e começa outro (mesma empresa) do início, levando as variáveis. Sem retorno. Destino excluído/desativado ou loop → para e fica com o atendente atribuído (ou vai para a fila). Detalhes em [fluxos.md](fluxos.md#conectar-com-outro-fluxo) | 0 |
 | Estrutura e Conteúdo | **Fim** (`end`) | Encerra o fluxo; opcionalmente encerra a conversa | 0 |
-| Lógica e Decisão | **Ação** (`action`) | Aplicar/remover etiqueta (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **chamar webhook** · **entregar para humano** (encerra o fluxo). `set_var` (Definir variável) continua funcionando nos fluxos antigos, mas só aparece no seletor de quem já usa | 1 (handoff: nenhuma) |
+| Lógica e Decisão | **Ação** (`action`) | Aplicar/remover etiqueta (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **encerrar conversa** · **chamar webhook** (método, headers, corpo com variáveis, tempo limite, resposta em variável) · **transferir para atendente humano** (encerra o fluxo). `set_var` (Definir variável) continua funcionando nos fluxos antigos, mas só aparece no seletor de quem já usa. Detalhes em [fluxos.md](fluxos.md#ação) | 1 (handoff: nenhuma; webhook: normal + `error`) |
 | Lógica e Decisão | **Randomizador** (`randomizer`) | Sorteia um ramo pelo peso (teste A/B). Percentual = peso ÷ soma dos pesos; peso 0 nunca sai | uma por ramo |
 | Lógica e Decisão | **Condição** (`condition`) | **Ramos** avaliados em ordem, cada um com regras combinadas por **E/OU**; o primeiro verdadeiro define a saída. Operandos: variável do fluxo, campo do contato, mensagem recebida, data/hora atual, etiqueta, horário comercial. Detalhes em [fluxos.md](fluxos.md#condição) | uma por ramo (id do ramo) + `no` (**Senão**) |
-| Lógica e Decisão | **Atraso inteligente** (`wait`) | Espera X minutos/horas/dias. Com *só no horário comercial*, se o prazo vencer fora do expediente do cliente, espera até a próxima abertura | 1 |
+| Lógica e Decisão | **Atraso inteligente** (`wait`) | Espera X minutos/horas/dias (job persistente). Com *só no horário comercial*, se o prazo vencer fora do expediente do cliente, espera até a próxima abertura. Ou **até o próximo horário de atendimento**. Robô pausado / conversa encerrada antes do fim → o fluxo para | 1 |
 | Lógica e Decisão | **IA** (`ai`) | Responde o contato com as instruções e a base de conhecimento do cliente, ou classifica a mensagem. Exige feature `ai_flows` (ver [15](15-ia.md)) | `done` / um por rótulo, + `fallback` (**obrigatório**) |
-| Distribuição e Envio | **Salvar** (`question`) | Pergunta (opcional) e **espera a resposta**, guardando em `{{varName}}` e, se escolhido, num **campo da ficha do contato** (nome, e-mail, endereço, observações). Validação: qualquer / e-mail / telefone / número; estourou `maxRetries` → humano | 1 |
+| Distribuição e Envio | **Salvar** (`question`) | Pergunta (opcional) e **espera a resposta**, guardando em `{{varName}}` e, se escolhido, num **campo da ficha do contato** (nome, e-mail, endereço, observações). Validação: qualquer / e-mail / telefone / número; estourou `maxRetries` → saída *Tentativas esgotadas* (ou humano, se não ligada). **Tempo limite** opcional → saída *Não respondeu* (não ligada: o fluxo termina) | 1 + `fallback` (+ `timeout` com tempo limite) |
 | Distribuição e Envio | **Distribuidor** (`distributor`) | Entrega a conversa: **rodízio**, **menos ocupado** (menos conversas abertas) ou **fila** ("Aguardando"). Atendentes escolhidos no bloco ou todos os ativos — sempre só quem opera o número da conversa | `done` / `fallback` (ninguém disponível) |
 | Distribuição e Envio | **Agendar horário** (`schedule`) | Serviço → profissional → horário → confirma (ver [13](13-agendamento.md)). Exige feature `scheduling` | `done` / `fallback` |
 
@@ -39,11 +39,13 @@ precisam de migração.
 `reason = 'distribuído pelo fluxo'` (`distribution.ts`); o próximo da vez é o seguinte, em ordem
 de id, a quem recebeu o último desses eventos. O mesmo evento alimenta o relatório por atendente.
 
-**Webhook** (`webhook.ts`): `POST` JSON `{ event, flowId, conversationId, contact, vars }`
-(variáveis internas `_*` não vão). Só http/https nas portas 80/443, sem usuário/senha na URL,
-**nenhum IP privado/loopback/link-local** (conferido após o DNS) e sem seguir redirecionamento —
-a URL é digitada pelo cliente e o servidor não pode virar ponte para a rede interna. Timeout de
-8 s; falha não para o fluxo (a variável de resposta fica vazia).
+**Webhook** (`webhook.ts`): método GET/POST/PUT/PATCH/DELETE (padrão POST), headers e corpo com
+`{{variáveis}}`; corpo vazio = JSON `{ event, flowId, conversationId, contact, vars }` (variáveis
+internas `_*` não vão). Só http/https nas portas 80/443, sem usuário/senha na URL, **nenhum IP
+privado/loopback/link-local** (conferido após o DNS), sem seguir redirecionamento e sem header
+`Host` escolhido pelo cliente — a URL é digitada pelo cliente e o servidor não pode virar ponte
+para a rede interna. Tempo limite 1–30 s (padrão 8). Falha não para o fluxo: sai por **Erro** se
+ligada, senão pela saída normal (a variável de resposta fica vazia). Ver [fluxos.md](fluxos.md#ação).
 
 ## Variáveis
 
@@ -64,7 +66,7 @@ a URL é digitada pelo cliente e o servidor não pode virar ponte para a rede in
 ## Motor (`apps/api/src/modules/flows/flow-engine.service.ts`)
 
 - `FlowRun` = uma execução numa conversa: `currentNodeId`, `vars`, `retries`, `status` (`running | waiting | done | stopped | failed`). No máximo um run ativo por conversa (`Conversation.activeFlowRunId`).
-- `start()` cria o run no nó Início e chama `advance()`, que executa nós em sequência até um que **espere** (salvar/menu → `waiting`; atraso → `waiting` + job com delay até `waitUntil`) ou **termine**.
+- `start()` cria o run no nó Início e chama `advance()`, que executa nós em sequência até um que **espere** (salvar/menu → `waiting`, com tempo limite também `waitUntil` + job `reply-timeout`; atraso → `waiting` + job `resume` até `waitUntil`) ou **termine**.
 - Toda mensagem recebida passa por `onInbound()` (chamado pelo `InboundProcessor` logo após gravar a mensagem): run em `waiting` recebe a resposta (`deliverAnswer`) e continua; sem run, avalia os gatilhos.
 - Mensagens do robô saem por `ConversationsService.sendAsSystem` — sem autor humano, **não assumem a conversa**, respeitam quota e janela de 24h e passam pela mesma fila de envio.
 - Proteções: `MAX_STEPS = 50` por avanço (loop), erro em nó → `failed` com motivo, `stop()` pelo atendente → `stopped`.
@@ -82,7 +84,7 @@ React Flow (`@xyflow/react`). Paleta à esquerda em três categorias (clique adi
 - **Duplicar bloco**: botão de cópia no cabeçalho do card (aparece ao passar o mouse ou com o card selecionado), **Ctrl/Cmd+D** nos selecionados ou *Duplicar* no botão direito. Mesma configuração (via `cloneFlowFragment`), id novo, **sem ligações**, logo abaixo do original e descendo até não encostar em nenhum card. Início não duplica. O card chama o editor pelo contexto `FlowNodeActions` (`nodes.tsx`).
 - Card com a faixa amarela **Reconfigurar: …** veio de outro cliente sem uma referência (ver *Replicar*); editar o bloco tira a faixa.
 
-Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado; conexões válidas; Conteúdo com cada mensagem preenchida, anexo dentro do formato/tamanho do WhatsApp e intervalo de 0 a 300 s; Conectar com destino escolhido; Salvar com variável; Menu com texto e opção; Manipulador com ao menos uma variável (e origem em *copiar*); Condição com regras completas em todo ramo (formato antigo também é validado, após a conversão); Randomizador com 2+ ramos e algum peso; webhook com URL http(s) (exceto card marcado para reconfigurar).
+Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado; conexões válidas; Conteúdo com cada mensagem preenchida, anexo dentro do formato/tamanho do WhatsApp e intervalo de 0 a 300 s; Conectar com destino escolhido; Salvar com variável; Menu com texto e opção; tempo limite do Salvar/Menu de 0 a 30 dias; Manipulador com ao menos uma variável (e origem em *copiar*); Condição com regras completas em todo ramo (formato antigo também é validado, após a conversão); Randomizador com 2+ ramos e algum peso; webhook com URL http(s) (exceto card marcado para reconfigurar), método válido, tempo limite de 1 a 30 s e nomes de header válidos.
 
 ## API
 
@@ -93,6 +95,7 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 | POST / PATCH / DELETE | `/flows[/:id]` | admin, gerente | CRUD (valida a definição). `PATCH {isActive: true}` sem `definition` valida o desenho **salvo** — ativar pela lista não liga fluxo quebrado |
 | POST | `/flows/:id/duplicate` | admin, gerente | Cópia no mesmo cliente (legado; a tela usa o lote) |
 | POST | `/flows/duplicate` | admin, gerente | `{ids}` → `{flows}` — cópias em lote |
+| POST | `/flows/active` | admin, gerente | `{ids, isActive}` → `{updated, failed[{id,name,reason}]}` — ativar/desativar em lote; ativar valida cada desenho e os inválidos ficam como estavam |
 | GET | `/flows/:id/export` | admin, gerente | `{portable, warnings}` para outro cliente |
 | POST | `/flows/export` | admin, gerente | `{ids}` → `{bundle, warnings}` — vários num arquivo |
 | POST | `/flows/import` | admin, gerente | `{portable}` (individual **ou** lote) → `{flows, flow, warnings}` |
@@ -130,7 +133,9 @@ da segunda.
 destino não existem. A da mídia é a mais perigosa: a chave é `media/<tenantId>/arquivo`, então
 um fluxo copiado cru faria o cliente de destino **servir arquivo do cliente de origem**.
 
-`apps/api/src/modules/flows/portable.ts` resolve assim:
+O módulo único `packages/shared/src/portable.ts` (`scrubFlowDefinition` / `flowToPortable` na
+saída, `restoreFlowDefinition` / `flowFromPortable` na entrada) resolve assim — e é o mesmo
+usado pelo editor ao colar cards vindos de outra empresa:
 
 | Referência | No arquivo exportado |
 |---|---|
@@ -138,6 +143,10 @@ um fluxo copiado cru faria o cliente de destino **servir arquivo do cliente de o
 | `agentId` | removido, com aviso |
 | `agentIds` (Distribuidor) | removido, com aviso (no destino distribui entre todos) |
 | `url` do webhook | removida, com aviso — costuma levar token na query |
+| `headers` do webhook | os de credencial (`Authorization`, `X-Api-Key`, nome com `token`/`secret`) saem inteiros, com aviso; os demais ficam |
+| `body` do webhook | viaja; a tela avisa antes de baixar ("Este arquivo contém o corpo de webhooks…") |
+
+Na importação, todo webhook chega marcado **Reconfigurar: revisar configuração**.
 | `serviceId` / `professionalId` | removidos, com aviso (o fluxo passa a perguntar) |
 | `mediaKey` / `mediaType` / `mediaName` | removidos, com aviso (também o `mediaKey` de cada mensagem em `items`) |
 | `flowId` (Conectar com outro fluxo) | removido, com aviso; o nome do destino fica em `flowName` só para o card mostrar "Era: …" |
@@ -148,19 +157,22 @@ como a faixa **Reconfigurar** e apaga quando o bloco é editado. O motor ignora 
 
 **Lote**: a listagem tem checkbox por fluxo e "selecionar todos"; *Exportar selecionados* gera
 um arquivo `{ atendo: 'flow-bundle', version: 1, items: PortableFlow[] }` — cada item é
-exatamente o que a exportação individual gera. `parsePortableFile` aceita os dois formatos; a
+exatamente o que a exportação individual gera. `parsePortableFlowFile` aceita os dois formatos; a
 importação é **tudo ou nada** (um item inválido recusa o arquivo antes de criar qualquer fluxo) e
-nome repetido ganha " (cópia)". Os ids dos nós são mantidos na importação/duplicação (são por
-fluxo, e trocá-los quebraria `{{menu_<id>}}`); o fluxo em si sempre ganha id novo.
+nome repetido ganha " (cópia)". Na **importação** todos os nós (inclusive o Início) e ligações
+ganham **ids novos** (`renewFlowIds`, que reescreve `{{menu_<id>}}`); na duplicação no mesmo
+cliente os ids dos nós são mantidos. O fluxo em si sempre ganha id novo. A listagem também
+**ativa/desativa** e **duplica** em lote.
 
-**Copiar para outro workspace**: não existe — cada usuário pertence a um único cliente
+**Copiar para outra empresa**: não existe — cada usuário pertence a um único cliente
 (`User.tenantId`). Para levar a outro cliente, exporte e importe (o super admin faz isso
-entrando como cada cliente).
+entrando como cada cliente). Copiar/colar cards entre empresas no mesmo navegador (super admin)
+passa pela mesma limpeza — ver [fluxos.md](fluxos.md#exportação-importação-e-cópia).
 
 Na importação as etiquetas citadas são **criadas se faltarem**: sem isso o fluxo chegaria com
 os blocos de etiqueta vazios — pior que falhar, porque parece que funcionou.
 
-Todo fluxo duplicado ou importado nasce **desativado**, e `parsePortable` desconfia do arquivo
+Todo fluxo duplicado ou importado nasce **desativado**, e `parsePortableFlow` desconfia do arquivo
 (ele pode ter sido editado à mão entre exportar e importar).
 
 Os avisos vão para a tela: um fluxo que chega mudo no destino é pior do que um que chega

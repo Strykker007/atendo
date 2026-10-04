@@ -13,8 +13,8 @@ import { NodePanel } from './NodePanel';
 import { DeletableEdge } from './DeletableEdge';
 import { autoLayout, looksVertical } from './layout';
 import { collectFlowVars, SYSTEM_VARS } from './TextWithVars';
-import { useNumbers, useFlowRuns, useFlows, type Flow } from '@/lib/hooks';
-import { cloneFlowFragment, type FlowDefinition, type FlowEdge, type FlowNode, type FlowNodeType, type FlowTrigger } from '@atendo/shared';
+import { useNumbers, useFlowRuns, useFlows, useMe, useTags, type Flow } from '@/lib/hooks';
+import { cloneFlowFragment, restoreFlowDefinition, scrubFlowDefinition, type FlowDefinition, type FlowEdge, type FlowNode, type FlowNodeType, type FlowTrigger } from '@atendo/shared';
 
 const EMPTY: FlowDefinition = { nodes: [{ id: 'start', type: 'start', position: { x: 40, y: 200 }, data: {} as never }], edges: [] };
 const edgeTypes = { deletable: DeletableEdge };
@@ -24,14 +24,17 @@ const EDGE_DEFAULTS = { type: 'deletable', markerEnd: { type: MarkerType.ArrowCl
  * Área de transferência dos cards. Fica no localStorage para o Ctrl+V funcionar em OUTRO
  * fluxo aberto (outra aba ou depois de navegar); a variável do módulo cobre o navegador que
  * bloqueia o storage. Guarda o desenho cru — os ids novos são gerados na hora de colar.
+ * `tenantId` + nomes de etiquetas/fluxos: colar em OUTRA empresa (dono do sistema entrando
+ * como clientes diferentes no mesmo navegador) passa pela mesma limpeza da importação.
  */
 const CLIP_KEY = 'atendo.flow-clipboard';
-let memoryClip: { nodes: FlowNode[]; edges: FlowEdge[] } | null = null;
-function writeClip(c: { nodes: FlowNode[]; edges: FlowEdge[] }) {
+type Clip = { nodes: FlowNode[]; edges: FlowEdge[]; tenantId?: string | null; tagNames?: Record<string, string>; flowNames?: Record<string, string> };
+let memoryClip: Clip | null = null;
+function writeClip(c: Clip) {
   memoryClip = c;
   try { localStorage.setItem(CLIP_KEY, JSON.stringify(c)); } catch { /* storage bloqueado: fica só na memória */ }
 }
-function readClip(): { nodes: FlowNode[]; edges: FlowEdge[] } | null {
+function readClip(): Clip | null {
   try {
     const raw = localStorage.getItem(CLIP_KEY);
     if (raw) {
@@ -71,6 +74,8 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
   const numbers = useNumbers();
   const runs = useFlowRuns(flow.id ?? null);
   const flows = useFlows();
+  const me = useMe();
+  const tags = useTags();
   // links assinados dos anexos: os que vieram com o fluxo + os enviados nesta edição
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>(flow.mediaUrls ?? {});
   const refs = useMemo<FlowRefs>(() => {
@@ -143,6 +148,9 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
       nodes: sel.map(fromRf),
       // só as ligações entre os copiados; as que saem para fora da seleção ficam para trás
       edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)).map((e) => ({ id: e.id, source: e.source, sourceHandle: e.sourceHandle ?? null, target: e.target })),
+      tenantId: me.data?.tenantId,
+      tagNames: Object.fromEntries((tags.data ?? []).map((t) => [t.id, t.name])),
+      flowNames: Object.fromEntries((flows.data ?? []).map((f) => [f.id, f.name])),
     });
     toast.ok(sel.length === 1 ? 'Card copiado — Ctrl+V cola aqui ou em outro fluxo' : `${sel.length} cards copiados — Ctrl+V cola aqui ou em outro fluxo`);
   };
@@ -181,12 +189,21 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
     }
     const offset = freeOffset(clip.nodes, { x: origin.x - minX, y: origin.y - minY });
 
-    const frag = cloneFlowFragment(clip.nodes, clip.edges, { newId: newNodeId, offset });
+    // veio de outra empresa: etiqueta por nome, o resto do que é do cliente sai marcado "Reconfigurar"
+    let src: FlowDefinition = { nodes: clip.nodes, edges: clip.edges };
+    const foreign = !!clip.tenantId && !!me.data?.tenantId && clip.tenantId !== me.data.tenantId;
+    if (foreign) {
+      const out = scrubFlowDefinition(src, { tagNameById: clip.tagNames, flowNameById: clip.flowNames });
+      const back = restoreFlowDefinition(out.definition, Object.fromEntries((tags.data ?? []).map((t) => [t.name, t.id])));
+      src = back.definition;
+      [...out.warnings, ...back.warnings].forEach((w) => toast.err(w));
+    }
+    const frag = cloneFlowFragment(src.nodes, src.edges, { newId: newNodeId, offset });
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), ...frag.nodes.map((n) => ({ ...toRf(n), selected: true }))]);
     setEdges((es) => [...es, ...frag.edges.map((e) => ({ ...e, ...EDGE_DEFAULTS, sourceHandle: e.sourceHandle ?? undefined }))]);
     setSelectedId(null);
     setSide('settings');
-    toast.ok(frag.nodes.length === 1 ? 'Card colado' : `${frag.nodes.length} cards colados`);
+    toast.ok(`${frag.nodes.length === 1 ? 'Card colado' : `${frag.nodes.length} cards colados`}${foreign ? ' — vieram de outra empresa: revise os marcados "Reconfigurar"' : ''}`);
   };
 
   /**

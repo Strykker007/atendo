@@ -3,7 +3,7 @@ import { normalizeCondition, type ConditionBranch, type ConditionRule } from '@a
 import { evaluateRule, fold, pickBranch, toNumber, type RuleEnv } from '../src/modules/flows/conditions';
 import { applyAssignments, formatNow } from '../src/modules/flows/variables';
 import { validateDefinition } from '../src/modules/flows/flow-validation';
-import { toPortable, fromPortable, tagNamesOf } from '../src/modules/flows/portable';
+import { flowTagNames, flowToPortable, restoreFlowDefinition } from '@atendo/shared';
 
 // segunda-feira 2026-10-05 14:30 em São Paulo (UTC-3)
 const NOW = new Date('2026-10-05T17:30:00Z');
@@ -175,9 +175,9 @@ describe('Condição — validação e portabilidade', () => {
   it('etiqueta dentro das regras viaja pelo nome', () => {
     const data = { branches: [{ id: 'a', label: 'A', match: 'all', rules: [rule({ operand: 'tag', op: 'is_true', tagId: 't1' })] }] };
     const flow = { name: 'F', trigger: { type: 'manual' as const }, definition: def(data) };
-    const { portable } = toPortable(flow, { t1: 'VIP' });
-    expect(tagNamesOf(portable)).toEqual(['VIP']);
-    const back = fromPortable(portable, { VIP: 't9' });
+    const { portable } = flowToPortable(flow, { tagNameById: { t1: 'VIP' } });
+    expect(flowTagNames(portable.definition)).toEqual(['VIP']);
+    const back = restoreFlowDefinition(portable.definition, { VIP: 't9' });
     const r = (back.definition.nodes[1].data as { branches: ConditionBranch[] }).branches[0].rules[0];
     expect(r.tagId).toBe('t9');
     expect((r as { tagName?: string }).tagName).toBeUndefined();

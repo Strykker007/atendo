@@ -3,7 +3,7 @@ import { cloneFlowFragment, type FlowEdge, type FlowNode } from '@atendo/shared'
 import { leastBusy, nextInRotation, pickWeighted } from '../src/modules/flows/distribution';
 import { isPrivateAddress } from '../src/modules/flows/webhook';
 import { nextOpenAt } from '../src/modules/tenants/business-hours';
-import { parsePortableFile, toBundle, toPortable } from '../src/modules/flows/portable';
+import { flowToPortable as toPortable, parsePortableFlowFile as parsePortableFile, toBundle } from '@atendo/shared';
 import { parsePortableReplyFile, toPortableReply, toReplyBundle } from '../src/modules/quick-replies/portable';
 
 const n = (id: string, type: string, data: Record<string, unknown> = {}) => ({ id, type, position: { x: 0, y: 0 }, data }) as unknown as FlowNode;
@@ -88,7 +88,7 @@ describe('exportação em lote', () => {
   it('importação aceita o arquivo individual e o lote', () => {
     const { portable } = toPortable(flow);
     expect(parsePortableFile(portable)).toHaveLength(1);
-    expect(parsePortableFile(toBundle([portable, portable]))).toHaveLength(2);
+    expect(parsePortableFile(toBundle('flow', [portable, portable]))).toHaveLength(2);
     expect(() => parsePortableFile({ atendo: 'flow-bundle', version: 1, items: [portable, { atendo: 'x' }] })).toThrow(/Fluxo 2/);
   });
   it('respostas rápidas: anexo não viaja, lote e individual são aceitos', () => {

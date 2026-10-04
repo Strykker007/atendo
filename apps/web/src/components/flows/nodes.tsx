@@ -4,8 +4,8 @@ import { Handle, Position, useNodeId, type NodeProps } from '@xyflow/react';
 import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, normalizeCondition, normalizeContent,
-  type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
+  CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent,
+  type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
 
@@ -30,13 +30,13 @@ export const NODE_META: Record<FlowNodeType, { icon: React.ReactNode; color: str
   start: { icon: <Play size={13} />, color: 'bg-ok text-white', label: 'Início', hint: 'Onde o fluxo começa' },
   message: { icon: <MessageSquare size={13} />, color: PURPLE, label: 'Conteúdo', hint: 'Texto, imagem, vídeo, documento ou áudio — várias mensagens em sequência' },
   connect_flow: { icon: <Workflow size={13} />, color: PURPLE, label: 'Conectar com outro fluxo', hint: 'Termina este fluxo e começa outro do início, levando as variáveis' },
-  menu: { icon: <ListOrdered size={13} />, color: PURPLE, label: 'Menu', hint: 'Opções numeradas, cada uma com uma saída' },
+  menu: { icon: <ListOrdered size={13} />, color: PURPLE, label: 'Menu', hint: 'Opções numeradas, cada uma com uma saída; tentativas e tempo limite' },
   variable: { icon: <Variable size={13} />, color: PURPLE, label: 'Manipulador', hint: 'Define, soma, concatena, limpa ou copia variáveis do fluxo' },
   end: { icon: <Flag size={13} />, color: PURPLE, label: 'Fim', hint: 'Encerra o fluxo' },
-  action: { icon: <Zap size={13} />, color: ORANGE, label: 'Ação', hint: 'Etiqueta, status, atribuir, webhook ou humano' },
+  action: { icon: <Zap size={13} />, color: ORANGE, label: 'Ação', hint: 'Etiqueta, atribuir, status, encerrar, webhook ou humano' },
   randomizer: { icon: <Shuffle size={13} />, color: YELLOW, label: 'Randomizador', hint: 'Divide o tráfego por percentual (teste A/B)' },
   condition: { icon: <GitBranch size={13} />, color: YELLOW, label: 'Condição', hint: 'Vários caminhos por regras (E/OU) com variável, contato, mensagem ou horário' },
-  wait: { icon: <Clock size={13} />, color: ORANGE, label: 'Atraso inteligente', hint: 'Espera um tempo, respeitando o expediente se quiser' },
+  wait: { icon: <Clock size={13} />, color: ORANGE, label: 'Atraso inteligente', hint: 'Espera um tempo ou até o próximo horário de atendimento' },
   ai: { icon: <Sparkles size={13} />, color: YELLOW, label: 'IA', hint: 'Responde com suas instruções ou classifica a mensagem' },
   question: { icon: <Save size={13} />, color: BLUE, label: 'Salvar', hint: 'Espera a resposta e guarda numa variável ou no contato' },
   distributor: { icon: <Users size={13} />, color: BLUE, label: 'Distribuidor', hint: 'Entrega a conversa: rodízio, menos ocupado ou fila' },
@@ -112,8 +112,8 @@ const In = () => <Handle type="target" position={Position.Left} className={handl
 /** Saída única, no meio da lateral direita. */
 const Out = () => <Handle type="source" position={Position.Right} className={handleCls} />;
 
-/** Uma linha por saída, com a bolinha à direita alinhada à própria linha. */
-function OutRow({ id, children, tone = 'default' }: { id: string; children: React.ReactNode; tone?: 'default' | 'ok' | 'danger' | 'dashed' }) {
+/** Uma linha por saída, com a bolinha à direita alinhada à própria linha. Sem `id` = saída padrão (a mesma do `<Out/>`). */
+function OutRow({ id, children, tone = 'default' }: { id?: string; children: React.ReactNode; tone?: 'default' | 'ok' | 'danger' | 'dashed' }) {
   return (
     <div className={cn(
       'relative flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]',
@@ -219,17 +219,26 @@ export function ConnectFlowNodeView({ data, selected }: P) {
     </Shell>
   );
 }
+/** Saída "Não respondeu" do Salvar/Menu — só aparece com tempo limite. */
+const TimeoutRow = ({ minutes, unit }: { minutes?: number; unit?: DelayUnit }) =>
+  minutes ? <OutRow id={REPLY_TIMEOUT_HANDLE} tone="dashed"><Timer size={11} className="shrink-0" /> Não respondeu em {formatDelay(minutes, unit)}</OutRow> : null;
+
 export function QuestionNodeView({ data, selected }: P) {
-  const d = data as { text?: string; varName?: string; contactField?: string };
+  const d = data as { text?: string; varName?: string; contactField?: string; timeoutMinutes?: number; timeoutUnit?: DelayUnit };
   const dest = `→ {{${d.varName || '?'}}}${d.contactField ? ' + ficha do contato' : ''}`;
   return (
     <Shell type="question" data={data} selected={selected} summary={d.text ? `${d.text}\n${dest}` : `Espera a resposta\n${dest}`}>
-      <In /><Out />
+      <In />
+      <Rows>
+        <OutRow tone="ok">Respondeu</OutRow>
+        <OutRow id={RETRIES_EXHAUSTED_HANDLE} tone="dashed">Tentativas esgotadas</OutRow>
+        <TimeoutRow minutes={d.timeoutMinutes} unit={d.timeoutUnit} />
+      </Rows>
     </Shell>
   );
 }
 export function MenuNodeView({ data, selected }: P) {
-  const d = data as { text?: string; options?: { id: string; label: string }[] };
+  const d = data as { text?: string; options?: { id: string; label: string }[]; timeoutMinutes?: number; timeoutUnit?: DelayUnit };
   return (
     <Shell type="menu" data={data} selected={selected} summary={d.text}>
       <In />
@@ -237,7 +246,8 @@ export function MenuNodeView({ data, selected }: P) {
         {(d.options ?? []).map((o, i) => (
           <OutRow key={o.id} id={o.id}><span className="tnum font-mono text-faint">{i + 1}</span> <span className="truncate">{o.label || '(opção)'}</span></OutRow>
         ))}
-        <OutRow id="fallback" tone="dashed">resposta inválida (após tentativas)</OutRow>
+        <OutRow id={RETRIES_EXHAUSTED_HANDLE} tone="dashed">Tentativas esgotadas</OutRow>
+        <TimeoutRow minutes={d.timeoutMinutes} unit={d.timeoutUnit} />
       </Rows>
     </Shell>
   );
@@ -282,21 +292,26 @@ export function ConditionNodeView({ data, selected }: P) {
     </Shell>
   );
 }
+const STATUS_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado' };
 export function ActionNodeView({ data, selected }: P) {
-  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string };
-  const label = ({ add_tag: 'Aplicar etiqueta', remove_tag: 'Remover etiqueta', assign: 'Atribuir a atendente', set_status: 'Mudar status', handoff: 'Entregar para humano', webhook: 'Chamar webhook' } as Record<string, string>)[d.kind ?? ''] ?? '';
-  const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : d.kind === 'webhook' ? `${label}${d.url ? `\n${d.url}` : ''}` : label + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
+  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string };
+  const label = d.kind === 'set_status' && d.status === 'closed' ? 'Encerrar conversa'
+    : ({ add_tag: 'Aplicar etiqueta', remove_tag: 'Remover etiqueta', assign: 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook' } as Record<string, string>)[d.kind ?? ''] ?? '';
+  const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : d.kind === 'webhook' ? `${label}${d.url ? `\n${d.method ?? 'POST'} ${d.url}` : ''}` : label + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
   return (
     <Shell type="action" data={data} selected={selected} summary={txt}>
       <In />
-      {d.kind !== 'handoff' && <Out />}
+      {d.kind === 'webhook'
+        ? <Rows><OutRow tone="ok">Sucesso</OutRow><OutRow id={WEBHOOK_ERROR_HANDLE} tone="danger">Erro</OutRow></Rows>
+        : d.kind !== 'handoff' && <Out />}
     </Shell>
   );
 }
 export function WaitNodeView({ data, selected }: P) {
-  const d = data as { minutes?: number; unit?: 'minutes' | 'hours' | 'days'; businessHours?: boolean };
+  const d = data as { mode?: 'duration' | 'next_open'; minutes?: number; unit?: DelayUnit; businessHours?: boolean };
+  const summary = d.mode === 'next_open' ? 'Até o próximo horário de atendimento' : d.minutes ? `${formatDelay(d.minutes, d.unit)}${d.businessHours ? '\nsó no horário comercial' : ''}` : '';
   return (
-    <Shell type="wait" data={data} selected={selected} summary={d.minutes ? `${formatDelay(d.minutes, d.unit)}${d.businessHours ? '\nsó no horário comercial' : ''}` : ''}>
+    <Shell type="wait" data={data} selected={selected} summary={summary}>
       <In /><Out />
     </Shell>
   );
@@ -400,13 +415,13 @@ export const nodeTypes = {
   connect_flow: ConnectFlowNodeView,
 };
 
-export const DELAY_UNIT: Record<'minutes' | 'hours' | 'days', { label: string; factor: number }> = {
+export const DELAY_UNIT: Record<DelayUnit, { label: string; factor: number }> = {
   minutes: { label: 'minutos', factor: 1 },
   hours: { label: 'horas', factor: 60 },
   days: { label: 'dias', factor: 1440 },
 };
 /** `minutes` é sempre o total; a unidade só muda como aparece. */
-export function formatDelay(minutes: number, unit: 'minutes' | 'hours' | 'days' = 'minutes') {
+export function formatDelay(minutes: number, unit: DelayUnit = 'minutes') {
   const u = DELAY_UNIT[unit] ?? DELAY_UNIT.minutes;
   return `${+(minutes / u.factor).toFixed(2)} ${u.label}`;
 }

@@ -1,5 +1,8 @@
+import { parsePortableFile, toBundle, type PortableBundle } from '@atendo/shared';
+
 /**
- * Levar respostas rápidas de um cliente para outro — mesmo desenho do `flows/portable.ts`.
+ * Levar respostas rápidas de um cliente para outro. Envelope, lote e nomes vêm do módulo comum
+ * (`@atendo/shared` → `portable.ts`); aqui fica só o que é próprio da resposta.
  *
  * Uma resposta viaja com o NOME da pasta (no destino a pasta é achada ou criada por nome) e
  * sem o anexo: a chave de mídia carrega o tenant de origem (`media/<tenantId>/…`), e
@@ -17,11 +20,7 @@ export interface PortableQuickReply {
 }
 
 /** Lote: cada item é exatamente o arquivo individual. */
-export interface PortableQuickReplyBundle {
-  atendo: 'quick-reply-bundle';
-  version: number;
-  items: PortableQuickReply[];
-}
+export type PortableQuickReplyBundle = PortableBundle<'quick-reply', PortableQuickReply>;
 
 export function toPortableReply(r: { title: string; body: string; mediaKey: string | null }, folderName: string): { portable: PortableQuickReply; warnings: string[] } {
   return {
@@ -30,9 +29,7 @@ export function toPortableReply(r: { title: string; body: string; mediaKey: stri
   };
 }
 
-export function toReplyBundle(items: PortableQuickReply[]): PortableQuickReplyBundle {
-  return { atendo: 'quick-reply-bundle', version: PORTABLE_QR_VERSION, items };
-}
+export const toReplyBundle = (items: PortableQuickReply[]): PortableQuickReplyBundle => toBundle('quick-reply', items, PORTABLE_QR_VERSION);
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
 
@@ -49,20 +46,12 @@ export function parsePortableReply(raw: unknown): PortableQuickReply {
   return { atendo: 'quick-reply', version: PORTABLE_QR_VERSION, folder: str(o.folder, 60).trim() || 'Importadas', title, body };
 }
 
-/** Aceita o arquivo individual ou o lote; devolve sempre a lista. */
-export function parsePortableReplyFile(raw: unknown): PortableQuickReply[] {
-  const o = raw as Partial<PortableQuickReplyBundle> | null;
-  if (o && typeof o === 'object' && o.atendo === 'quick-reply-bundle') {
-    if (o.version !== PORTABLE_QR_VERSION) throw new Error(`Arquivo gerado por outra versão (${String(o.version)}).`);
-    if (!Array.isArray(o.items) || !o.items.length) throw new Error('O arquivo não tem nenhuma resposta.');
-    if (o.items.length > 500) throw new Error('No máximo 500 respostas por arquivo.');
-    return o.items.map((it, i) => {
-      try {
-        return parsePortableReply(it);
-      } catch (e) {
-        throw new Error(`Resposta ${i + 1} do arquivo: ${e instanceof Error ? e.message : 'inválida'}`);
-      }
-    });
-  }
-  return [parsePortableReply(raw)];
-}
+/** Aceita o arquivo individual ou o lote (até 500); devolve sempre a lista. */
+export const parsePortableReplyFile = (raw: unknown): PortableQuickReply[] =>
+  parsePortableFile(raw, {
+    kind: 'quick-reply',
+    version: PORTABLE_QR_VERSION,
+    max: 500,
+    parseItem: parsePortableReply,
+    text: { empty: 'O arquivo não tem nenhuma resposta.', tooMany: 'No máximo 500 respostas por arquivo.', item: (n) => `Resposta ${n} do arquivo` },
+  });

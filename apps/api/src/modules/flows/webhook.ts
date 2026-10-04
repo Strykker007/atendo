@@ -8,8 +8,9 @@ import { isIP } from 'node:net';
  * não é seguido, senão bastaria um 302 para dentro da rede.
  */
 
-const TIMEOUT_MS = 8_000;
 const MAX_BODY = 2_000;
+/** Headers que o cliente não escolhe: o fetch calcula, e mexer neles abre brecha (host = SSRF por vhost). */
+const FORBIDDEN_HEADERS = new Set(['host', 'content-length', 'connection', 'transfer-encoding', 'keep-alive', 'upgrade', 'te', 'trailer', 'proxy-authorization', 'proxy-connection']);
 
 export function isPrivateAddress(ip: string): boolean {
   if (isIP(ip) === 4) {
@@ -40,15 +41,36 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
   return url;
 }
 
-export async function callWebhook(raw: string, payload: unknown): Promise<{ status: number; body: string }> {
+export interface WebhookRequest {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /** já interpolados; nome vazio ou proibido é ignorado */
+  headers: { key: string; value: string }[];
+  /** já pronto; ignorado em GET/DELETE */
+  body?: string;
+  timeoutMs: number;
+}
+
+/**
+ * Chama o webhook. Lança (com mensagem em português) em rede/DNS, tempo limite, endereço interno
+ * ou status fora de 2xx — o motor transforma isso na saída "Erro".
+ */
+export async function callWebhook(raw: string, req: WebhookRequest): Promise<{ status: number; body: string }> {
   const url = await assertPublicUrl(raw);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'user-agent': 'Atendo-Flows/1' },
-    body: JSON.stringify(payload),
-    redirect: 'manual',
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const headers: Record<string, string> = { 'user-agent': 'Atendo-Flows/1' };
+  for (const h of req.headers) {
+    const key = h.key.trim().toLowerCase();
+    if (!key || !/^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(key) || FORBIDDEN_HEADERS.has(key)) continue;
+    headers[key] = h.value.replace(/[\r\n]/g, ' ');
+  }
+  const withBody = req.method !== 'GET' && req.method !== 'DELETE' && req.body !== undefined;
+  if (withBody && !headers['content-type']) headers['content-type'] = 'application/json';
+  let res: Response;
+  try {
+    res = await fetch(url, { method: req.method, headers, body: withBody ? req.body : undefined, redirect: 'manual', signal: AbortSignal.timeout(req.timeoutMs) });
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) throw new Error(`webhook não respondeu em ${Math.round(req.timeoutMs / 1000)} s`);
+    throw new Error(`webhook inacessível: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const body = (await res.text().catch(() => '')).slice(0, MAX_BODY);
   if (!res.ok) throw new Error(`webhook respondeu ${res.status}`);
   return { status: res.status, body };

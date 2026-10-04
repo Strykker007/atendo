@@ -2,14 +2,14 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import { CONTENT_MAX_DELAY_SEC, MAX_FLOW_HOPS, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { botPaused } from '../conversations/bot-pause';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
-import { choose, interpolate, validAnswer, type InterpolateCtx } from './answer';
+import { choose, interpolate, jsonEscape, validAnswer, type InterpolateCtx } from './answer';
 import { pickBranch, type RuleEnv } from './conditions';
 import { applyAssignments } from './variables';
 import { afterAiAnswer } from './ai-turns';
@@ -25,9 +25,23 @@ export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
 /** Fim automático da pausa do robô. `pausedAt` (ISO) identifica a pausa: pausar de novo invalida o job antigo. */
 export interface BotUnpauseJob { conversationId: string; tenantId: string; pausedAt: string }
-export type FlowJob = FlowResumeJob | BotUnpauseJob;
+/**
+ * Tempo limite de resposta (Salvar/Menu). `until` (ISO) identifica a espera: só vale se o run
+ * ainda está esperando no mesmo nó com o mesmo `waitUntil` — resposta, nova tentativa ou parada
+ * no meio tornam o job antigo inofensivo.
+ */
+export interface ReplyTimeoutJob { runId: string; nodeId: string; until: string }
+export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob;
 
 const BOT_PAUSED_REASON = 'robô pausado na conversa';
+const CLOSED_REASON = 'conversa encerrada';
+type JobConv = { botPausedAt: Date | null; botPausedUntil: Date | null; status: string };
+/**
+ * Checagem de todo job do motor (Atraso, intervalo do Conteúdo, tempo limite) antes de agir:
+ * robô pausado ou conversa encerrada encerram o run em vez de executar.
+ */
+const jobBlocked = (conv: JobConv) => (botPaused(conv) ? BOT_PAUSED_REASON : conv.status === 'closed' ? CLOSED_REASON : null);
+const JOB_CONV = { select: { botPausedAt: true, botPausedUntil: true, status: true } } as const;
 const MAX_STEPS = 50; // proteção contra loop infinito num mesmo avanço
 
 /** Variáveis internas do motor (`_aiTurns`, `_sched`, `_content`) não seguem para o fluxo conectado. */
@@ -216,14 +230,33 @@ export class FlowEngineService {
 
   /** Job de "Aguardar" (ou do intervalo entre mensagens do Conteúdo) venceu. */
   async resume(runId: string) {
-    const run = await this.prisma.flowRun.findUnique({ where: { id: runId }, include: { conversation: { select: { botPausedAt: true, botPausedUntil: true } } } });
+    const run = await this.prisma.flowRun.findUnique({ where: { id: runId }, include: { conversation: JOB_CONV } });
     if (!run || run.status !== 'waiting') return;
     // a pausa já parou o run; isto cobre o job que venceu no meio do caminho
-    if (botPaused(run.conversation)) return this.finish(runId, 'stopped', BOT_PAUSED_REASON);
+    const blocked = jobBlocked(run.conversation);
+    if (blocked) return this.finish(runId, 'stopped', blocked);
     await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'running', waitUntil: null } });
     // Conteúdo no meio da sequência: continua no mesmo nó, da mensagem em que parou
     if (run.currentNodeId && contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined) return this.advance(runId);
     await this.next(runId, undefined);
+  }
+
+  /**
+   * Tempo limite do Salvar/Menu venceu sem resposta. Disputa com a resposta do contato chegando
+   * na mesma hora: quem virar o run de `waiting` para `running` primeiro (update condicional)
+   * ganha; o outro não faz nada.
+   */
+  async replyTimeout(job: ReplyTimeoutJob) {
+    const run = await this.prisma.flowRun.findUnique({ where: { id: job.runId }, include: { conversation: JOB_CONV } });
+    if (!run || run.status !== 'waiting' || run.currentNodeId !== job.nodeId || run.waitUntil?.toISOString() !== job.until) return;
+    const blocked = jobBlocked(run.conversation);
+    if (blocked) return this.finish(run.id, 'stopped', blocked);
+    const claimed = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'waiting', currentNodeId: job.nodeId, waitUntil: new Date(job.until) }, data: { status: 'running', waitUntil: null, retries: 0 } });
+    if (!claimed.count) return;
+    const { def } = await this.load(run.id);
+    // sem a saída "Não respondeu" ligada, o fluxo termina (não cai na saída de resposta)
+    if (!def.edges.some((e) => e.source === job.nodeId && e.sourceHandle === REPLY_TIMEOUT_HANDLE)) return this.finish(run.id, 'done', 'contato não respondeu no tempo limite');
+    await this.next(run.id, REPLY_TIMEOUT_HANDLE);
   }
 
   // ---------- execução ----------
@@ -291,11 +324,11 @@ export class FlowEngineService {
           case 'question':
             // "Salvar" sem texto só espera: a pergunta veio de um bloco anterior
             if (node.data.text) await this.send(run.conversationId, interpolate(node.data.text, ctx));
-            await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
+            await this.awaitReply(runId, node);
             return; // espera resposta do contato
           case 'menu':
             await this.sendMenu(run.conversationId, interpolate(node.data.text, ctx), node.data.options.map((o) => ({ id: o.id, title: o.label })));
-            await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
+            await this.awaitReply(runId, node);
             return;
           case 'condition': {
             const handle = await this.evaluate(node, run.conversation, ctx);
@@ -303,9 +336,10 @@ export class FlowEngineService {
             continue;
           }
           case 'action': {
-            const ended = await this.act(node, run);
-            if (ended) return;
-            await this.goNext(runId, def, node.id);
+            const out = await this.act(node, run);
+            if (out === 'ended') return;
+            // webhook com falha: saída "Erro" se ligada (goNext cai na saída normal se não estiver)
+            await this.goNext(runId, def, node.id, out);
             continue;
           }
           case 'wait': {
@@ -376,6 +410,19 @@ export class FlowEngineService {
     await this.prisma.flowRun.update({ where: { id: runId }, data: { currentNodeId: edge.target, retries: 0 } });
   }
 
+  /**
+   * Espera a resposta do contato no Salvar/Menu. Com tempo limite, grava `waitUntil` e agenda o
+   * job `reply-timeout`; cada nova espera (nova tentativa) recomeça a contagem.
+   */
+  private async awaitReply(runId: string, node: Extract<FlowNode, { type: 'question' | 'menu' }>) {
+    const minutes = Math.max(0, Number(node.data.timeoutMinutes) || 0);
+    const until = minutes ? new Date(Date.now() + minutes * 60_000) : null;
+    await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: until } });
+    if (until) {
+      await this.queue.add('reply-timeout', { runId, nodeId: node.id, until: until.toISOString() }, { delay: minutes * 60_000, jobId: `timeout-${runId}-${node.id}-${until.getTime()}`, removeOnComplete: true });
+    }
+  }
+
   /** Resposta do contato chegou num nó Perguntar/Menu. */
   private async deliverAnswer(run: FlowRun, message: Message) {
     // o contato respondeu: saltos entre fluxos daqui em diante não são loop automático
@@ -389,8 +436,13 @@ export class FlowEngineService {
     const answer = (message.text ?? '').trim();
     const replyId = (message.raw as { interactiveReplyId?: string } | null)?.interactiveReplyId;
 
+    if (node.type === 'question' || node.type === 'menu') {
+      // disputa com o tempo limite: só segue quem tirar o run de "waiting" primeiro
+      const claimed = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'waiting', currentNodeId: node.id }, data: { status: 'running', waitUntil: null } });
+      if (!claimed.count) return;
+    }
     if (node.type === 'question') {
-      if (!validAnswer(answer, node.data.validation)) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Não entendi. Pode repetir?');
+      if (!validAnswer(answer, node.data.validation)) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Não entendi. Pode repetir?', RETRIES_EXHAUSTED_HANDLE);
       const vars = { ...(run.vars as Record<string, string>), [node.data.varName]: answer };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
       if (node.data.contactField) await this.saveContactField(run.conversationId, node.data.contactField, answer);
@@ -398,7 +450,7 @@ export class FlowEngineService {
     }
     if (node.type === 'menu') {
       const chosen = choose(node.data.options.map((o) => ({ id: o.id, title: o.label })), answer, replyId);
-      if (!chosen) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Opção inválida. Responda com o número da opção.', 'fallback');
+      if (!chosen) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Opção inválida. Responda com o número da opção.', RETRIES_EXHAUSTED_HANDLE);
       const vars = { ...(run.vars as Record<string, string>), [`menu_${node.id}`]: chosen.title };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
       return this.next(run.id, chosen.id);
@@ -619,13 +671,17 @@ export class FlowEngineService {
     }
     await this.prisma.flowRun.update({ where: { id: run.id }, data: { retries } });
     const { node: cur } = await this.load(run.id);
-    if (cur?.type === 'menu') await this.sendMenu(run.conversationId, invalidText, cur.data.options.map((o) => ({ id: o.id, title: o.label })));
+    if (cur?.type !== 'menu' && cur?.type !== 'question') return;
+    // volta a esperar ANTES de reenviar: resposta rápida do contato não pode achar o run "running"
+    await this.awaitReply(run.id, cur);
+    if (cur.type === 'menu') await this.sendMenu(run.conversationId, invalidText, cur.data.options.map((o) => ({ id: o.id, title: o.label })));
     else await this.send(run.conversationId, invalidText);
   }
 
   // ---------- nós ----------
 
-  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { conversation: Conversation & { contact: { name: string | null; phone: string } } }): Promise<boolean> {
+  /** Devolve 'ended' (o run acabou aqui), a saída a seguir ('error' do webhook) ou undefined (saída normal). */
+  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { conversation: Conversation & { contact: { name: string | null; phone: string } } }): Promise<'ended' | string | undefined> {
     const d = node.data;
     switch (d.kind) {
       case 'add_tag':
@@ -646,37 +702,56 @@ export class FlowEngineService {
         break;
       case 'handoff':
         await this.handoff(run.id, 'transferido para humano pelo fluxo', d.agentId);
-        return true;
-      case 'webhook': {
-        if (!d.url) return false;
-        const vars = { ...(run.vars as Record<string, string>) };
-        try {
-          const res = await callWebhook(d.url, {
-            event: 'flow.webhook',
-            flowId: run.flowId,
-            conversationId: run.conversationId,
-            contact: { name: run.conversation.contact.name, phone: run.conversation.contact.phone },
-            vars: Object.fromEntries(Object.entries(vars).filter(([k]) => !k.startsWith('_'))),
-          });
-          if (d.responseVar) vars[d.responseVar] = res.body;
-        } catch (err) {
-          // webhook fora do ar não para o atendimento: registra e segue
-          this.log.warn(`webhook do fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
-          if (d.responseVar) vars[d.responseVar] = '';
-        }
-        if (d.responseVar) await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
-        return false;
-      }
+        return 'ended';
+      case 'webhook':
+        return this.webhook(d, run);
       case 'set_var': {
         if (!d.varName) break;
         const vars = { ...(run.vars as Record<string, string>) };
         vars[d.varName] = interpolate(d.value ?? '', { contact: run.conversation.contact, vars });
         await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
-        return false;
+        return undefined;
       }
     }
     this.gateway.emitConversation(run.tenantId, await this.prisma.conversation.findUniqueOrThrow({ where: { id: run.conversationId } }));
-    return false;
+    return undefined;
+  }
+
+  /**
+   * Ação "Chamar webhook". Corpo vazio = JSON com o contexto da conversa (formato antigo); com
+   * corpo, as {{variáveis}} entram com escape de JSON quando o corpo é JSON. Falha (rede, tempo
+   * limite, endereço interno, status ≠ 2xx) → saída "Erro" (sem ela, segue pela normal, como
+   * antes); a resposta guardada fica vazia.
+   */
+  private async webhook(d: Extract<FlowNode, { type: 'action' }>['data'], run: FlowRun & { conversation: { contact: InterpolateCtx['contact'] } }): Promise<string | undefined> {
+    if (!d.url) return undefined; // URL removida na importação: o card mostra "Reconfigurar"
+    const vars = { ...(run.vars as Record<string, string>) };
+    const ctx = { contact: run.conversation.contact, vars };
+    const method = d.method ?? 'POST';
+    const headers = (d.headers ?? []).map((h) => ({ key: h.key, value: interpolate(h.value ?? '', ctx) }));
+    const contentType = headers.find((h) => h.key.trim().toLowerCase() === 'content-type')?.value ?? 'application/json';
+    const body = d.body?.trim()
+      ? interpolate(d.body, ctx, /json/i.test(contentType) ? jsonEscape : undefined)
+      : JSON.stringify({
+        event: 'flow.webhook',
+        flowId: run.flowId,
+        conversationId: run.conversationId,
+        contact: { name: run.conversation.contact.name, phone: run.conversation.contact.phone },
+        vars: Object.fromEntries(Object.entries(vars).filter(([k]) => !k.startsWith('_'))),
+      });
+    const timeoutSec = Math.min(WEBHOOK_MAX_TIMEOUT_SEC, Math.max(1, Number(d.timeoutSec) || WEBHOOK_DEFAULT_TIMEOUT_SEC));
+    let handle: string | undefined;
+    try {
+      const res = await callWebhook(interpolate(d.url, ctx, encodeURIComponent), { method, headers, body, timeoutMs: timeoutSec * 1000 });
+      if (d.responseVar) vars[d.responseVar] = res.body;
+    } catch (err) {
+      // webhook fora do ar não para o atendimento: registra e sai por "Erro"
+      this.log.warn(`webhook do fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
+      if (d.responseVar) vars[d.responseVar] = '';
+      handle = WEBHOOK_ERROR_HANDLE;
+    }
+    if (d.responseVar) await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
+    return handle;
   }
 
   /**
@@ -735,12 +810,20 @@ export class FlowEngineService {
     return pickBranch(normalizeCondition(node.data), env);
   }
 
-  /** Quando o Atraso inteligente vence: agora + tempo, empurrado para o expediente se pedido. */
+  /**
+   * Quando o Atraso inteligente vence. 'duration': agora + tempo, empurrado para o expediente se
+   * pedido. 'next_open': próxima abertura (agora, se já estiver aberto).
+   * Ponto de encaixe do módulo de horários: hoje o horário vem de Configurações → Horário
+   * (`tenantSettings`); um horário por setor/número entra trocando `hours` aqui.
+   */
   private async waitUntil(tenantId: string, node: Extract<FlowNode, { type: 'wait' }>): Promise<Date> {
+    const nextOpen = async (from: Date) => {
+      const t = await this.tenantSettings.get(tenantId);
+      return nextOpenAt({ from, timezone: t.timezone, hours: t.hours, attendanceActive: t.attendanceActive });
+    };
+    if (node.data.mode === 'next_open') return nextOpen(new Date());
     const due = new Date(Date.now() + Math.max(1, Number(node.data.minutes) || 1) * 60_000);
-    if (!node.data.businessHours) return due;
-    const t = await this.tenantSettings.get(tenantId);
-    return nextOpenAt({ from: due, timezone: t.timezone, hours: t.hours, attendanceActive: t.attendanceActive });
+    return node.data.businessHours ? nextOpen(due) : due;
   }
 
   /** Bloco "Salvar" com destino na ficha: o que o contato respondeu vira dado dele. */

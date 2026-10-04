@@ -81,11 +81,26 @@ export function normalizeContent(data: MessageNode['data']): ContentItem[] {
  * pergunta nada, só espera (a pergunta veio de um bloco anterior). `contactField` grava
  * também na ficha do contato, para valer fora deste fluxo.
  */
-export type QuestionNode = FlowNodeBase<'question', { text: string; varName: string; validation: 'none' | 'email' | 'phone' | 'number'; invalidText?: string; maxRetries: number; contactField?: ContactField }>;
+export type QuestionNode = FlowNodeBase<'question', { text: string; varName: string; validation: 'none' | 'email' | 'phone' | 'number'; invalidText?: string; maxRetries: number; contactField?: ContactField } & ReplyTimeout>;
+
+export type DelayUnit = 'minutes' | 'hours' | 'days';
+/**
+ * Tempo limite de resposta (Salvar e Menu). `timeoutMinutes` é o total (0/ausente = espera
+ * indefinidamente); `timeoutUnit` só diz como mostrar. Vencido, o fluxo sai por
+ * `REPLY_TIMEOUT_HANDLE` ("Não respondeu"); sem essa saída ligada, o fluxo termina.
+ */
+export interface ReplyTimeout { timeoutMinutes?: number; timeoutUnit?: DelayUnit }
+/** Saída "Não respondeu" (tempo limite) do Salvar e do Menu. */
+export const REPLY_TIMEOUT_HANDLE = 'timeout';
+/**
+ * Saída "Tentativas esgotadas" do Menu e do Salvar (no Menu, é o id antigo da "resposta
+ * inválida"). Sem ela ligada, entrega para humano.
+ */
+export const RETRIES_EXHAUSTED_HANDLE = 'fallback';
 /** Campos da ficha do contato que um fluxo pode preencher. */
 export type ContactField = 'name' | 'email' | 'address' | 'note1' | 'note2';
 export const CONTACT_FIELD_LABEL: Record<ContactField, string> = { name: 'Nome', email: 'E-mail', address: 'Endereço', note1: 'Observação 1', note2: 'Observação 2' };
-export type MenuNode = FlowNodeBase<'menu', { text: string; options: { id: string; label: string }[]; invalidText?: string; maxRetries: number }>;
+export type MenuNode = FlowNodeBase<'menu', { text: string; options: { id: string; label: string }[]; invalidText?: string; maxRetries: number } & ReplyTimeout>;
 /**
  * Condição: lista de ramos avaliados em ordem; o primeiro verdadeiro define a saída
  * (sourceHandle = id do ramo). Nenhum verdadeiro → saída "Senão" (`CONDITION_ELSE`).
@@ -198,14 +213,35 @@ function legacyRule(d: LegacyConditionData): ConditionRule | undefined {
 }
 
 /** scope: 'conversation' (padrão) = tag do atendimento; 'contact' = tag da pessoa, vale para sempre */
-/** set_var é legado: fluxos novos usam o bloco "Manipulador". webhook: POST com o contexto da conversa. */
-export type ActionNode = FlowNodeBase<'action', { kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook'; tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed'; /** set_var */ varName?: string; value?: string; /** webhook */ url?: string; /** webhook: guarda o corpo da resposta nesta variável */ responseVar?: string }>;
 /**
- * Atraso inteligente. `minutes` é sempre o total (compatível com fluxos antigos); `unit` só
- * diz como mostrar no editor. `businessHours`: se o prazo cair fora do expediente do cliente,
- * espera até a próxima abertura.
+ * set_var é legado: fluxos novos usam o bloco "Manipulador". "Encerrar conversa" no editor é
+ * `set_status` + `closed`.
+ * webhook: `method` (padrão POST), `headers` e `body` aceitam {{variáveis}}; `body` vazio = JSON
+ * com o contexto da conversa (formato antigo). Falha (rede, tempo limite, status ≠ 2xx) sai por
+ * `WEBHOOK_ERROR_HANDLE` se estiver ligada; senão segue pela saída normal.
  */
-export type WaitNode = FlowNodeBase<'wait', { minutes: number; unit?: 'minutes' | 'hours' | 'days'; businessHours?: boolean }>;
+export type ActionNode = FlowNodeBase<'action', {
+  kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook';
+  tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed';
+  /** set_var */ varName?: string; value?: string;
+  /** webhook */ url?: string; method?: WebhookMethod; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;
+  /** webhook: guarda o corpo da resposta nesta variável */ responseVar?: string;
+}>;
+export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export const WEBHOOK_METHODS: WebhookMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+export interface WebhookHeader { id: string; key: string; value: string }
+/** Saída "Erro" do webhook. */
+export const WEBHOOK_ERROR_HANDLE = 'error';
+export const WEBHOOK_DEFAULT_TIMEOUT_SEC = 8;
+export const WEBHOOK_MAX_TIMEOUT_SEC = 30;
+/**
+ * Atraso inteligente. `mode` ausente/'duration': espera `minutes` (sempre o total, compatível com
+ * fluxos antigos; `unit` só diz como mostrar). `businessHours`: se o prazo cair fora do
+ * expediente, espera até a próxima abertura. `mode: 'next_open'`: espera até o próximo horário
+ * de atendimento (segue na hora se já estiver aberto) — hoje o expediente de Configurações →
+ * Horário; o módulo de horários vai plugar aqui a origem do horário.
+ */
+export type WaitNode = FlowNodeBase<'wait', { mode?: 'duration' | 'next_open'; minutes: number; unit?: DelayUnit; businessHours?: boolean }>;
 /**
  * Manipulador (tipo interno 'variable', exibido como "Manipulador"): operações sobre as
  * variáveis do fluxo, executadas em ordem. `op` ausente = 'set' (fluxos antigos).
@@ -288,7 +324,8 @@ export const MAX_FLOW_HOPS = 5;
 export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode | AiNode | VariableNode | RandomizerNode | DistributorNode | ConnectFlowNode;
 
 /**
- * sourceHandle: menu → id da opção ou 'fallback'; condition → id do ramo | 'no' (Senão; antigo: 'yes' | 'no'); ai → 'done'/id do
+ * sourceHandle: menu → id da opção, 'fallback' (tentativas esgotadas) ou 'timeout'; question → null ou 'timeout';
+ * action webhook → null ou 'error'; condition → id do ramo | 'no' (Senão; antigo: 'yes' | 'no'); ai → 'done'/id do
  * rótulo ou 'fallback'; randomizer → id do ramo; distributor → 'done' | 'fallback'; demais → undefined
  */
 export interface FlowEdge {
@@ -334,14 +371,15 @@ const NODE_VAR_PREFIXES = ['menu_'];
  * Copia um pedaço do desenho (colar cards). Gera ids novos, mantém só as ligações entre os
  * nós copiados, desloca as posições e reescreve as variáveis que carregam o id do nó
  * (`{{menu_<id>}}`) — senão o card colado leria a escolha do menu original.
- * O nó Início nunca é copiado: o fluxo só pode ter um.
+ * O nó Início não é copiado (o fluxo só pode ter um), exceto com `includeStart` (importação,
+ * que renova os ids do fluxo inteiro).
  */
 export function cloneFlowFragment(
   nodes: FlowNode[],
   edges: FlowEdge[],
-  opts: { newId: (type: FlowNodeType) => string; offset?: { x: number; y: number } },
+  opts: { newId: (type: FlowNodeType) => string; offset?: { x: number; y: number }; includeStart?: boolean },
 ): FlowDefinition {
-  const src = nodes.filter((n) => n.type !== 'start');
+  const src = opts.includeStart ? nodes : nodes.filter((n) => n.type !== 'start');
   const map = new Map(src.map((n) => [n.id, opts.newId(n.type)]));
   const off = opts.offset ?? { x: 0, y: 0 };
   const rewrite = (data: unknown) => {

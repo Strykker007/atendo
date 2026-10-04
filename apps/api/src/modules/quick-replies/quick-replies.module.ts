@@ -7,7 +7,7 @@ import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
-import { copyName } from '../flows/portable';
+import { copyName } from '@atendo/shared';
 import { parsePortableReplyFile, toPortableReply, toReplyBundle, type PortableQuickReply } from './portable';
 
 class FolderDto {

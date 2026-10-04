@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, PortableFlow, PortableFlowBundle } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { invConv, useUsage } from './core';
 
@@ -25,15 +25,15 @@ export const useUpdateFlow = () => { const qc = useQueryClient(); return useMuta
 /** Fluxos com "Conectar com outro fluxo" apontando para este — aviso antes de excluir. */
 export const fetchFlowReferences = (id: string) => api<{ id: string; name: string }[]>(`/flows/${id}/references`);
 export const useDeleteFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/flows/${id}`, { method: 'DELETE' }), onSuccess: invFlows(qc) }); };
-export interface PortableFlow { atendo: 'flow'; version: number; name: string; description?: string; trigger: FlowTrigger; definition: FlowDefinition }
 /** Cópia dentro do mesmo cliente — mantém etiquetas, atendentes e anexos. */
 export const useDuplicateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Flow>(`/flows/${id}/duplicate`, { method: 'POST' }), onSuccess: invFlows(qc) }); };
 /** Arquivo para levar o fluxo a OUTRO cliente; `warnings` diz o que não viajou. */
 export const useExportFlow = () => useMutation({ mutationFn: (id: string) => api<{ portable: PortableFlow; warnings: string[] }>(`/flows/${id}/export`) });
-/** Lote: cada item é exatamente o arquivo individual. */
-export interface PortableFlowBundle { atendo: 'flow-bundle'; version: number; items: PortableFlow[] }
+/** Lote: cada item é exatamente o arquivo individual (`PortableFlowBundle`, shared/portable.ts). */
 export const useExportFlows = () => useMutation({ mutationFn: (ids: string[]) => api<{ bundle: PortableFlowBundle; warnings: string[] }>('/flows/export', { method: 'POST', body: JSON.stringify({ ids }) }) });
 export const useDuplicateFlows = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (ids: string[]) => api<{ flows: Flow[] }>('/flows/duplicate', { method: 'POST', body: JSON.stringify({ ids }) }), onSuccess: invFlows(qc) }); };
+/** Ativa/desativa vários. Ativar valida cada desenho: os inválidos voltam em `failed` com o motivo e ficam como estavam. */
+export const useSetFlowsActive = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { ids: string[]; isActive: boolean }) => api<{ updated: number; failed: { id: string; name: string; reason: string }[] }>('/flows/active', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
 /** Aceita o arquivo individual ou o lote — quem decide é a API. */
 export const useImportFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (portable: unknown) => api<{ flows: Flow[]; warnings: string[] }>('/flows/import', { method: 'POST', body: JSON.stringify({ portable }) }), onSuccess: invFlows(qc) }); };
 export const useStartFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ flowId, conversationId }: { flowId: string; conversationId: string }) => api(`/flows/${flowId}/start`, { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: (_, v) => { qc.refetchQueries({ queryKey: ['active-run', v.conversationId] }); invConv(qc, v.conversationId); } }); };

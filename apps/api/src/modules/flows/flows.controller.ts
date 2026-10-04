@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
-import { normalizeContent, type FlowDefinition, type FlowTrigger } from '@atendo/shared';
+import { randomUUID } from 'node:crypto';
+import { copyName, flowFromPortable, flowTagNames, flowToPortable, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -10,7 +11,6 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { FlowEngineService } from './flow-engine.service';
 import { assertOwnFlowMedia, validateDefinition } from './flow-validation';
-import { copyName, fromPortable, parsePortableFile, tagNamesOf, toBundle, toPortable, type PortableFlow } from './portable';
 
 class FlowDto {
   @IsString() @MaxLength(80) name: string;
@@ -22,6 +22,9 @@ class FlowDto {
 }
 class IdsDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(100) @IsUUID('all', { each: true }) ids: string[];
+}
+class ActiveDto extends IdsDto {
+  @IsBoolean() isActive: boolean;
 }
 class StartDto {
   @IsUUID() conversationId: string;
@@ -141,7 +144,34 @@ export class FlowsController {
     return created;
   }
 
-  /** Arquivo para levar o fluxo a OUTRO cliente. Ver `portable.ts` para o que não viaja. */
+  /**
+   * Ativa/desativa vários (seleção na listagem). Ativar valida o desenho de cada um; os inválidos
+   * ficam como estão e voltam em `failed` com o motivo — os demais são alterados.
+   */
+  @Post('active')
+  @RequirePermission('flows.manage')
+  async setActiveBatch(@CurrentUser() u: AuthUser, @Body() dto: ActiveDto) {
+    const flows = await this.prisma.flow.findMany({ where: { id: { in: dto.ids }, tenantId: u.tenantId }, select: { id: true, name: true, isActive: true, definition: true } });
+    if (flows.length !== new Set(dto.ids).size) throw new BadRequestException('Fluxo não encontrado.');
+    const ok: string[] = [];
+    const failed: { id: string; name: string; reason: string }[] = [];
+    for (const f of flows) {
+      if (f.isActive === dto.isActive) { ok.push(f.id); continue; }
+      if (dto.isActive) {
+        try {
+          validateDefinition(f.definition as unknown as FlowDefinition);
+        } catch (e) {
+          failed.push({ id: f.id, name: f.name, reason: e instanceof Error ? e.message : 'desenho inválido' });
+          continue;
+        }
+      }
+      ok.push(f.id);
+    }
+    if (ok.length) await this.prisma.flow.updateMany({ where: { id: { in: ok }, tenantId: u.tenantId }, data: { isActive: dto.isActive } });
+    return { updated: ok.length, failed };
+  }
+
+  /** Arquivo para levar o fluxo a OUTRO cliente. Ver `scrubFlowDefinition` (shared/portable.ts) para o que não viaja. */
   @Get(':id/export')
   @RequirePermission('flows.manage')
   async export(@CurrentUser() u: AuthUser, @Param('id') id: string) {
@@ -154,7 +184,7 @@ export class FlowsController {
   @RequirePermission('flows.manage')
   async exportBatch(@CurrentUser() u: AuthUser, @Body() dto: IdsDto) {
     const { items, warnings } = await this.exportMany(u.tenantId, dto.ids);
-    return { bundle: toBundle(items), warnings };
+    return { bundle: toBundle('flow', items), warnings };
   }
 
   private async exportMany(tenantId: string, ids: string[]) {
@@ -166,7 +196,7 @@ export class FlowsController {
     const items: PortableFlow[] = [];
     const warnings = new Set<string>();
     for (const flow of flows) {
-      const out = toPortable({ name: flow.name, description: flow.description, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, tagNameById, flowNameById);
+      const out = flowToPortable({ name: flow.name, description: flow.description, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, { tagNameById, flowNameById });
       items.push(out.portable);
       // num lote, o aviso diz de qual fluxo é
       out.warnings.forEach((w) => warnings.add(flows.length > 1 ? `${flow.name}: ${w}` : w));
@@ -176,27 +206,29 @@ export class FlowsController {
 
   /**
    * Traz fluxos exportados para este cliente — arquivo individual ou lote. As etiquetas
-   * citadas são criadas se faltarem (sem isso o fluxo chegaria mudo). Tudo ou nada: um item
-   * inválido recusa o arquivo inteiro antes de criar qualquer fluxo.
+   * citadas são criadas se faltarem (sem isso o fluxo chegaria mudo), os nós ganham ids novos e
+   * nome repetido vira "(cópia)". Tudo ou nada: um item inválido recusa o arquivo inteiro antes
+   * de criar qualquer fluxo.
    */
   @Post('import')
   @RequirePermission('flows.manage')
   async import(@CurrentUser() u: AuthUser, @Body() body: unknown) {
     let items: PortableFlow[];
     try {
-      items = parsePortableFile((body as { portable?: unknown })?.portable ?? body);
+      items = parsePortableFlowFile((body as { portable?: unknown })?.portable ?? body);
     } catch (e) {
       throw new BadRequestException(e instanceof Error ? e.message : 'Arquivo inválido.');
     }
 
-    const names = [...new Set(items.flatMap(tagNamesOf))];
+    const names = [...new Set(items.flatMap((p) => flowTagNames(p.definition)))];
     if (names.length) {
       await this.prisma.tag.createMany({ data: names.map((name) => ({ tenantId: u.tenantId, name })), skipDuplicates: true });
     }
     const tags = await this.prisma.tag.findMany({ where: { tenantId: u.tenantId, name: { in: names } }, select: { id: true, name: true } });
     const tagIdByName = Object.fromEntries(tags.map((t) => [t.name, t.id]));
 
-    const built = items.map((p) => fromPortable(p, tagIdByName));
+    const newId = (type: FlowNodeType) => `${type}-${randomUUID().slice(0, 6)}`;
+    const built = items.map((p) => flowFromPortable(p, tagIdByName, newId));
     built.forEach((b) => {
       validateDefinition(b.definition);
       // arquivo editado à mão pode apontar para anexo de outro cliente
@@ -207,7 +239,7 @@ export class FlowsController {
     const flows = [];
     const warnings = new Set<string>();
     for (const b of built) {
-      const name = taken.includes(b.name) ? copyName(b.name, taken) : b.name;
+      const name = uniqueName(b.name, taken);
       taken.push(name);
       flows.push(await this.prisma.flow.create({
         data: { tenantId: u.tenantId, name, description: b.description, isActive: false, trigger: b.trigger as object, definition: b.definition as object },

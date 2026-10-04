@@ -1,14 +1,15 @@
 'use client';
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin } from 'lucide-react';
+import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, Power, PowerOff } from 'lucide-react';
 import { cn, downloadJson, safeFileName } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useFlows, useDeleteFlow, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
+import { hasWebhookBody, type FlowDefinition } from '@atendo/shared';
+import { useFlows, useDeleteFlow, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useSetFlowsActive, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
@@ -24,6 +25,7 @@ export default function FluxosPage() {
   const exportFlow = useExportFlow();
   const exportFlows = useExportFlows();
   const importFlow = useImportFlow();
+  const setActive = useSetFlowsActive();
   const fileInput = useRef<HTMLInputElement>(null);
   // `refs`: fluxos que conectam a este (bloco "Conectar com outro fluxo"); listados no aviso
   const [deleting, setDeleting] = useState<(FlowSummary & { refs?: { id: string; name: string }[] }) | null>(null);
@@ -50,6 +52,16 @@ export default function FluxosPage() {
     } catch (err) { toast.err(err); }
   }
 
+  /** Liga/desliga a seleção. Os que não podem ser ativados (desenho inválido) ficam como estão, com o motivo. */
+  async function onSetActive(isActive: boolean) {
+    try {
+      const { updated, failed } = await setActive.mutateAsync({ ids: sel, isActive });
+      if (updated) toast.ok(isActive ? `${updated} fluxo(s) ativado(s).` : `${updated} fluxo(s) desativado(s) — não disparam mais sozinhos nem aparecem no chat.`);
+      failed.forEach((f) => toast.err(`"${f.name}" não foi ativado: ${f.reason}`));
+      if (!failed.length) setSelected([]);
+    } catch (err) { toast.err(err); }
+  }
+
   const [toggling, setToggling] = useState<string | null>(null);
   /** Liga/desliga direto da lista. A API recusa ativar um desenho inválido e diz o motivo. */
   async function onToggleActive(f: FlowSummary) {
@@ -61,11 +73,21 @@ export default function FluxosPage() {
     finally { setToggling(null); }
   }
 
+  /**
+   * Corpo de webhook viaja no arquivo (pode ter token escrito à mão): antes de baixar, a pessoa
+   * confirma que revisou. Sem corpo, baixa direto.
+   */
+  const [pendingDownload, setPendingDownload] = useState<{ data: unknown; file: string } | null>(null);
+  function download(data: unknown, file: string, defs: FlowDefinition[], warnings: string[]) {
+    warn(warnings);
+    if (defs.some(hasWebhookBody)) setPendingDownload({ data, file });
+    else downloadJson(data, file);
+  }
+
   async function onExport(f: FlowSummary) {
     try {
       const { portable, warnings } = await exportFlow.mutateAsync(f.id);
-      downloadJson(portable, `${safeFileName(f.name, 'fluxo')}.fluxo.json`);
-      warn(warnings);
+      download(portable, `${safeFileName(f.name, 'fluxo')}.fluxo.json`, [portable.definition], warnings);
     } catch (err) { toast.err(err); }
   }
 
@@ -73,8 +95,7 @@ export default function FluxosPage() {
   async function onExportSelected() {
     try {
       const { bundle, warnings } = await exportFlows.mutateAsync(sel);
-      downloadJson(bundle, `fluxos-${new Date().toISOString().slice(0, 10)}.fluxos.json`);
-      warn(warnings);
+      download(bundle, `fluxos-${new Date().toISOString().slice(0, 10)}.fluxos.json`, bundle.items.map((it) => it.definition), warnings);
     } catch (err) { toast.err(err); }
   }
 
@@ -119,6 +140,8 @@ export default function FluxosPage() {
               <span className="text-muted flex-1">{sel.length ? `${sel.length} selecionado(s)` : 'Selecionar todos'}</span>
               {sel.length > 0 && (
                 <>
+                  <Button size="sm" variant="ghost" icon={<Power size={13} />} loading={setActive.isPending && setActive.variables?.isActive} onClick={() => onSetActive(true)}>Ativar</Button>
+                  <Button size="sm" variant="ghost" icon={<PowerOff size={13} />} loading={setActive.isPending && !setActive.variables?.isActive} onClick={() => onSetActive(false)}>Desativar</Button>
                   <Button size="sm" variant="ghost" icon={<Copy size={13} />} loading={duplicate.isPending} onClick={() => onDuplicate(sel)}>Duplicar</Button>
                   <Button size="sm" variant="ghost" icon={<Download size={13} />} loading={exportFlows.isPending} onClick={onExportSelected}>Exportar selecionados</Button>
                 </>
@@ -171,6 +194,7 @@ export default function FluxosPage() {
           ))}
         </div>
       )}
+      <ConfirmDialog open={!!pendingDownload} onClose={() => setPendingDownload(null)} title="Exportar fluxo" confirmLabel="Baixar mesmo assim" text="Este arquivo contém o corpo de webhooks. Verifique se não há tokens ou senhas." onConfirm={() => { if (pendingDownload) downloadJson(pendingDownload.data, pendingDownload.file); }} />
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} title="Excluir fluxo" danger confirmLabel="Excluir" text={`"${deleting?.name}" e seu histórico de execuções serão removidos.${deleting?.refs?.length ? ` Atenção: ${deleting.refs.length === 1 ? 'o fluxo' : 'os fluxos'} ${deleting.refs.map((r) => `"${r.name}"`).join(', ')} ${deleting.refs.length === 1 ? 'conecta' : 'conectam'} a este — depois de excluído, nesse ponto a conversa vai para a fila de atendimento.` : ''}`} onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Fluxo excluído'); } catch (err) { toast.err(err); throw err; } }} />
     </PageShell>
   );

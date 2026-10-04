@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { CONTENT_MAX_DELAY_SEC, contentMediaError, normalizeCondition, normalizeContent, type FlowDefinition, type FlowNode } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, type FlowDefinition, type FlowNode } from '@atendo/shared';
+
+/** Tempo limite de resposta: até 30 dias (o job fica na fila esse tempo). */
+const MAX_REPLY_TIMEOUT_MIN = 30 * 1440;
 import { hhmm, opFitsOperand, toNumber } from './conditions';
 
 /** Regras mínimas para um fluxo poder ser salvo/executado. Erros em português para a UI. */
@@ -28,7 +31,11 @@ export function validateDefinition(def: FlowDefinition) {
     }
     if (n.type === 'condition') errors.push(...conditionErrors(n));
     if (n.type === 'randomizer' && ((n.data.branches?.length ?? 0) < 2 || !n.data.branches.some((b) => Number(b.weight) > 0))) errors.push(`"Randomizador" (${n.id}) precisa de pelo menos dois ramos, com algum peso maior que zero.`);
-    if (n.type === 'action' && n.data.kind === 'webhook' && !(n.data as { _reconfig?: unknown })._reconfig && !/^https?:\/\//i.test(n.data.url ?? '')) errors.push(`"Ação" (${n.id}) de webhook precisa de uma URL http(s).`);
+    if (n.type === 'action' && n.data.kind === 'webhook') errors.push(...webhookErrors(n));
+    if ((n.type === 'question' || n.type === 'menu') && n.data.timeoutMinutes !== undefined) {
+      const t = Number(n.data.timeoutMinutes);
+      if (Number.isNaN(t) || t < 0 || t > MAX_REPLY_TIMEOUT_MIN) errors.push(`"${n.type === 'menu' ? 'Menu' : 'Salvar'}" (${n.id}): o tempo limite deve ser de 1 minuto a 30 dias (0 = sem limite).`);
+    }
     if (n.type === 'menu' && (!n.data.text || !n.data.options?.length)) errors.push(`"Menu" (${n.id}) precisa de texto e ao menos uma opção.`);
     if (n.type === 'start' && !def.edges.some((e) => e.source === n.id)) errors.push('O nó "Início" não está conectado a nada.');
     if (n.type === 'ai') {
@@ -41,6 +48,21 @@ export function validateDefinition(def: FlowDefinition) {
     }
   }
   if (errors.length) throw new BadRequestException(errors.join(' '));
+}
+
+/** Webhook: URL http(s) (salvo o card marcado "Reconfigurar"), método, tempo limite e nomes de header. */
+function webhookErrors(n: Extract<FlowNode, { type: 'action' }>): string[] {
+  const d = n.data;
+  const out: string[] = [];
+  const name = `"Ação" (${n.id}) de webhook`;
+  if (!(d as { _reconfig?: unknown })._reconfig && !/^https?:\/\//i.test(d.url ?? '')) out.push(`${name} precisa de uma URL http(s).`);
+  if (d.method && !WEBHOOK_METHODS.includes(d.method)) out.push(`${name}: método inválido.`);
+  const t = d.timeoutSec === undefined ? 1 : Number(d.timeoutSec);
+  if (Number.isNaN(t) || t < 1 || t > WEBHOOK_MAX_TIMEOUT_SEC) out.push(`${name}: o tempo limite deve ser de 1 a ${WEBHOOK_MAX_TIMEOUT_SEC} segundos.`);
+  for (const h of d.headers ?? []) {
+    if (h.key && !/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(h.key.trim())) out.push(`${name}: o header "${h.key}" tem caracteres inválidos.`);
+  }
+  return out;
 }
 
 /** Condição: cada ramo com regras completas. Formato antigo passa pela mesma conversão do motor. */

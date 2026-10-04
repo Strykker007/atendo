@@ -10,7 +10,11 @@ Base para as tarefas do construtor de fluxos. Visão de produto e detalhes de ca
 - `FlowEdge.sourceHandle` identifica a saída: id da opção/ramo/rótulo, `no` (Senão da Condição; `yes` no formato antigo), `done`/`fallback`; `null` = saída única.
 - Condição: `normalizeCondition` (shared) lê o formato novo e o antigo; `CONDITION_OPERANDS`/`CONDITION_OPS` são a lista única de operandos e comparadores (editor e validação usam a mesma).
 - `FLOW_NODE_LABEL` (nome exibido), `cloneFlowFragment` (copiar/colar/duplicar com ids novos).
+- Tempo limite de resposta (Salvar/Menu): `ReplyTimeout`, `REPLY_TIMEOUT_HANDLE` (`'timeout'`); Salvar/Menu: `RETRIES_EXHAUSTED_HANDLE` (`'fallback'`, "Tentativas esgotadas"). Webhook: `WEBHOOK_METHODS`, `WEBHOOK_ERROR_HANDLE` (`'error'`), `WEBHOOK_DEFAULT_TIMEOUT_SEC`/`WEBHOOK_MAX_TIMEOUT_SEC`.
 - Conteúdo: `normalizeContent` (lê `items` e o formato antigo), `CONTENT_MEDIA_RULES` + `contentMediaError` (limites do WhatsApp, usados no editor e na validação), `CONTENT_MAX_DELAY_SEC`. Conectar: `MAX_FLOW_HOPS`.
+
+### Portável (`packages/shared/src/portable.ts`) — módulo único de exportar/importar/copiar
+Genérico: `PORTABLE_VERSION`, `PortableBundle`/`toBundle` (lote `'<tipo>-bundle'`), `parsePortableFile` (individual ou lote, tudo ou nada), `copyName`/`uniqueName` (conflito de nome), `flagReconfig`. Fluxos: `scrubFlowDefinition`, `flowToPortable`, `flowTagNames`, `restoreFlowDefinition`, `renewFlowIds`, `flowFromPortable`, `parsePortableFlow(File)`. Usado pela API (exportar/importar) e pelo editor (colar de outra empresa). Respostas Rápidas já usam o envelope/lote/nomes daqui (`quick-replies/portable.ts` só define o item). Ver [Exportação, importação e cópia](#exportação-importação-e-cópia).
 
 ### Editor (`apps/web/src/components/flows/`) — React Flow `@xyflow/react` v12
 | Arquivo | Papel |
@@ -30,13 +34,12 @@ Persistência: estado local (`useNodesState`/`useEdgesState`) → `save()` monta
 | Arquivo | Papel |
 |---|---|
 | `flow-engine.service.ts` | `start`, `onInbound`, `resume`, `advance` (switch por `node.type`), `deliverAnswer` (resposta em nó que espera), `retry`, `act`, `evaluate`, `distribute` |
-| `flows.controller.ts` | CRUD, duplicar/exportar/importar fluxo, execuções, disparo manual, parar. `GET /flows/:id` devolve também `mediaUrls` (link assinado de 1h por anexo, para a prévia); `GET /flows/:id/references` lista os fluxos que conectam a este |
+| `flows.controller.ts` | CRUD, duplicar/ativar/exportar/importar (individual e em lote), execuções, disparo manual, parar. `GET /flows/:id` devolve também `mediaUrls` (link assinado de 1h por anexo, para a prévia); `GET /flows/:id/references` lista os fluxos que conectam a este |
 | `flow-validation.ts` | `validateDefinition` — regras por tipo ao salvar; `assertOwnFlowMedia` — anexo só do próprio cliente (criar, editar, importar) |
-| `portable.ts` | Export/import entre clientes (marca `_reconfig`) |
 | `conditions.ts` | Avaliador da Condição (puro): registro `OPERANDS`, comparadores, `pickBranch` |
 | `variables.ts` | Operações do Manipulador (puro): `applyAssignments` |
 | `answer.ts`, `distribution.ts`, `webhook.ts`, `ai-turns.ts`, `default-flows.ts`, `schedule-misses.ts` | Helpers do motor |
-| `flows.module.ts` | Fila BullMQ `flows`: job `resume` (Atraso/intervalo do Conteúdo) e `unpause` (fim automático da pausa do robô) |
+| `flows.module.ts` | Fila BullMQ `flows`: job `resume` (Atraso/intervalo do Conteúdo), `reply-timeout` (tempo limite do Salvar/Menu) e `unpause` (fim automático da pausa do robô) |
 
 Execução: um `FlowRun` por conversa (iniciar outro para o atual). `advance` executa nós em sequência (máx. 50 passos) até um que espera (`status: waiting`) ou termina. Saída por `goNext(handle)` → `edgeFrom`, que cai na saída sem handle se a pedida não existir; sem aresta = fluxo termina `done`.
 
@@ -45,20 +48,21 @@ Execução: um `FlowRun` por conversa (iniciar outro para o atual). `advance` ex
 2. `nodes.tsx`: `NODE_META`, `PALETTE_GROUPS`, `XxxNodeView` (`<In/>` + `<Out/>` ou `<OutRow id>` por saída), `nodeTypes`, `defaultData`.
 3. `NodePanel.tsx`: formulário.
 4. `flow-engine.service.ts`: `case` em `advance` (e em `deliverAnswer` se esperar resposta).
-5. `flow-validation.ts` e, se tiver referências do tenant (tag, atendente, fluxo), `portable.ts`.
+5. `flow-validation.ts` e, se tiver referências do tenant (tag, atendente, fluxo, token), `scrubFlowDefinition` em `shared/portable.ts`.
+6. Se esperar tempo (job): checar `jobBlocked` (pausa + conversa encerrada) antes de agir e disputar o run com update condicional (ver [Tempo limite de resposta](#tempo-limite-de-resposta-salvar-e-menu)).
 
 ## Status dos blocos pedidos
 
 | Bloco | Status | Nome / tipo atual | Observações |
 |---|---|---|---|
 | Conteúdo | Existe (tarefa 1.4) | Conteúdo / `message` | Várias mensagens em sequência (texto, imagem, vídeo, documento, áudio PTT/arquivo), reordenáveis, intervalo opcional, prévia. Ver [Conteúdo](#conteúdo). Botões continuam no Menu. |
-| Menu | Existe | Menu / `menu` | Opções numeradas (uma saída cada) + saída "resposta inválida" após `maxRetries`. Escolha fica em `{{menu_<id>}}`. Sem tempo limite de resposta. |
+| Menu | Revisado (tarefa 1.7) | Menu / `menu` | Opções numeradas (uma saída cada); resposta por número ou texto sem diferenciar maiúsculas/acentos; mensagem de inválida + tentativas; saídas **Tentativas esgotadas** e **Não respondeu** (tempo limite). Ver [Menu](#menu). |
 | Manipulador | Existe (tarefa 1.2) | Manipulador / `variable` (e legado `action.set_var`) | Várias operações em ordem: definir, somar, subtrair, acrescentar texto, limpar, copiar, data/hora atual. Escopo: execução do fluxo (ver abaixo). Não grava na ficha do contato (isso é o *Salvar* com campo do contato). |
-| Ação | Existe | Ação / `action` | Etiqueta (conversa/contato), atribuir, status, entregar para humano, webhook. |
+| Ação | Revisado (tarefa 1.7) | Ação / `action` | Etiqueta (conversa/contato), atribuir, status, encerrar conversa, transferir para humano, webhook completo (método, headers, corpo, tempo limite, resposta, saída Erro). Ver [Ação](#ação). |
 | Randomizador | Existe | Randomizador / `randomizer` | Ramos com peso, uma saída por ramo. |
 | Condição | Existe (tarefa 1.2) | Condição / `condition` | Ramos em ordem com regras E/OU, saída por ramo + Senão. Texto, número, existência, dia da semana, faixa de horário, etiqueta, horário comercial. Formato antigo convertido na leitura. |
-| Atraso inteligente | Existe | Atraso inteligente / `wait` | Minutos/horas/dias, opcional respeitar expediente. Mensagem recebida durante o atraso é ignorada. |
-| Salvar (aguardar resposta com tempo limite) | Existe incompleto | Salvar / `question` | Espera resposta, valida (e-mail/telefone/número), grava em variável e opcionalmente na ficha. **Falta o tempo limite** e a saída de "não respondeu" — hoje espera indefinidamente. Tentativas esgotadas → entrega para humano (não tem saída própria). |
+| Atraso inteligente | Revisado (tarefa 1.7) | Atraso inteligente / `wait` | Minutos/horas/dias (job persistente), opcional respeitar expediente, ou **até o próximo horário de atendimento**. Checa pausa e conversa encerrada. Ver [Atraso inteligente](#atraso-inteligente). |
+| Salvar (aguardar resposta com tempo limite) | Existe | Salvar / `question` | Espera resposta, valida (e-mail/telefone/número), grava em variável e opcionalmente na ficha. Mesmas saídas do Menu: **Tentativas esgotadas** e **Não respondeu** (tempo limite) — implementadas na tarefa 1.7, ver [Tempo limite](#tempo-limite-de-resposta-salvar-e-menu). |
 | Distribuidor | Existe | Distribuidor / `distributor` | Rodízio, menos ocupado, fila; saídas Distribuído / Ninguém disponível. |
 | Conectar com outro fluxo | Existe (tarefa 1.4) | Conectar com outro fluxo / `connect_flow` | Sem retorno; variáveis seguem; proteção contra loop. Ver [Conectar com outro fluxo](#conectar-com-outro-fluxo). |
 
@@ -68,9 +72,10 @@ Outros tipos existentes não pedidos: Início (`start`), Fim (`end`), IA (`ai`),
 
 - **Ativar/desativar fluxo**: existe — checkbox "Fluxo ativo" no editor e interruptor direto na lista (`/fluxos`, só com `flows.manage`). Ativar valida o desenho salvo (400 com o motivo se inválido). Fluxo inativo não dispara nem aparece no chat; **conversas que já estão no meio dele continuam até o fim** (`onInbound` entrega a resposta ao run ativo sem olhar `isActive`).
 - **Pausar o robô numa conversa**: existe (tarefa 1.5) — ver [Pausar o robô na conversa](#pausar-o-robô-na-conversa).
+- **Ações em lote na listagem**: checkbox por fluxo + "selecionar todos" → Ativar, Desativar, Duplicar, Exportar selecionados (tarefa 1.7). Ver [Exportação, importação e cópia](#exportação-importação-e-cópia).
 - **Duplicar fluxo**: existe (`POST /flows/:id/duplicate` e em lote; cópia nasce inativa).
 - **Duplicar bloco**: existe (tarefa 1.1) — botão no card, Ctrl/Cmd+D, menu de contexto. Sem ligações.
-- **Copiar/colar blocos** entre fluxos: existe (Ctrl+C/V, `localStorage`).
+- **Copiar/colar blocos** entre fluxos: existe (Ctrl+C/V, `localStorage`) — confirmado na tarefa 1.7: ligações internas da seleção preservadas, as que saem dela descartadas; colar vindo de **outra empresa** passa pela limpeza da importação.
 - **Conexões laterais**: entrada à esquerda, saídas à direita, uma por opção (tarefa 1.1). Ids de handle iguais aos antigos, então fluxos salvos continuam ligados.
 - **Organizar automaticamente**: botão na barra; aviso quando o desenho parece vertical. Nunca roda sozinho.
 - **Cortar ligação**: tesoura no meio da aresta (hover/seleção) ou Delete/Backspace.
@@ -184,7 +189,7 @@ Tarefa 1.5. O atendente desliga a automação **só na conversa aberta**; os out
 - `pauseBot` grava a pausa e chama `stop` → o run ativo termina `stopped` com `error = "robô pausado na conversa"`.
 - `onInbound` retorna logo no início: mensagem não inicia fluxo (gatilho, padrão), não entrega resposta a run e **não manda o aviso de fora do expediente**. A resposta "1/2" a lembrete de agendamento (`SchedulingService.onInbound`) continua funcionando — não é fluxo.
 - `start` recusa (400 "O robô está pausado…") — inclui disparo manual pelo atendente; retome antes.
-- `resume` (job do Atraso/intervalo do Conteúdo) e cada passo de `advance` checam `botPaused(run.conversation)` e encerram o run como `stopped` em vez de executar. **Todo job novo do motor** (ex.: tempo limite do Salvar, quando existir) deve fazer a mesma checagem antes de agir.
+- `resume` (job do Atraso/intervalo do Conteúdo), `replyTimeout` (tempo limite do Salvar/Menu) e cada passo de `advance` checam `botPaused(run.conversation)` e encerram o run como `stopped` em vez de executar. Os jobs usam `jobBlocked`, que também encerra o run se a conversa estiver **encerrada**. **Todo job novo do motor** deve usar `jobBlocked` antes de agir.
 
 **Fim da pausa**:
 - Automático: job `unpause` na fila `flows` (delay até `botPausedUntil`, `jobId = unpause-<conversa>-<pausedAt ms>`). Só limpa se `botPausedAt` ainda é o da pausa que agendou — pausar de novo ou retomar à mão deixa o job antigo sem efeito. Se o job atrasar, a primeira mensagem do contato depois do horário já limpa a pausa (`onInbound`) e segue normal.
@@ -195,3 +200,78 @@ Tarefa 1.5. O atendente desliga a automação **só na conversa aberta**; os out
 **Histórico** (`conversation_events`): `bot_paused` (ator = quem pausou; `reason` = "por 30 min" / "por 1 h" / "por 4 h" / "até retomar manualmente") e `bot_resumed` (ator = quem retomou; nulo = automático, com `reason` "fim do tempo de pausa" ou "atendimento encerrado"). Aparece no "Histórico do atendimento".
 
 **Tela** (`components/chat/BotPauseBar.tsx`, só com a feature `flows`): botão "Pausar robô" abaixo do campo de mensagem → 30 min, 1 h, 4 h, até retomar. Pausado: no lugar dele, aviso "Robô pausado por <atendente> até <hora>" (ou "até retomar manualmente") + "Retomar robô". Selo "Robô pausado" no cabeçalho do chat e ícone no card da lista (no lugar do 🤖). Tempo real: toda mudança emite `conversation` pelo socket, que já invalida conversa, lista e histórico nos outros atendentes. A barra só aparece no campo normal de resposta (não no modo nota interna de gerente, número desconectado ou cota estourada); o selo aparece sempre.
+
+
+## Menu
+
+Tarefa 1.7. Dados: `{ text, options: {id,label}[], invalidText?, maxRetries, timeoutMinutes?, timeoutUnit? }`.
+
+- **Opções numeradas**, uma saída por opção (`sourceHandle` = id da opção). Meta: botões/lista; Evolution: texto numerado (`sendMenu`).
+- **Resposta aceita** (`answer.ts → choose`): toque no botão (id), **número** (`2`, `2.`, `2)`, com espaços) ou **texto da opção** sem diferenciar maiúsculas, acentos e espaços extras (`Promoção` = `promocao`); por último, texto contido no título (3+ letras). A escolha vai para `{{menu_<id>}}` (título da opção).
+- **Resposta inválida**: envia `invalidText` (padrão "Opção inválida. Responda com o número da opção.") **com as opções de novo** e conta tentativa. Passou de `maxRetries` → saída **Tentativas esgotadas** (`fallback`, mesmo id de antes: fluxos salvos continuam ligados); sem ela ligada → entrega para humano.
+- **Tempo limite**: o mesmo do Salvar — ver abaixo. Saída **Não respondeu** (`timeout`).
+
+**Salvar e Menu se comportam igual** nas saídas de exceção (decisão da tarefa 1.7):
+
+| Situação | Saída ligada | Saída não ligada |
+|---|---|---|
+| Tentativas esgotadas (`maxRetries` respostas inválidas) | **Tentativas esgotadas** (`fallback`) | entrega para humano (volta para a fila "Aguardando", sem atendente) |
+| Tempo limite vencido | **Não respondeu** (`timeout`) | o fluxo **termina** (`done`), sem passar para humano |
+
+No Salvar a resposta inválida é a que não passa na validação (e-mail/telefone/número) ou vazia; a mensagem é `invalidText` (padrão "Não entendi. Pode repetir?").
+
+## Tempo limite de resposta (Salvar e Menu)
+
+Tarefa 1.7. A tarefa 1.6 (Salvar) ainda não tinha sido feita; o mecanismo foi criado aqui, genérico, e vale para os dois blocos.
+
+- **Dados**: `timeoutMinutes` (total; 0/ausente = espera indefinidamente, como antes) + `timeoutUnit` (só exibição). Validação: 0 a 30 dias.
+- **Job**: ao esperar (`awaitReply`), o run fica `waiting` com `waitUntil = agora + tempo` e é agendado `reply-timeout` `{ runId, nodeId, until }` (`jobId = timeout-<run>-<nó>-<until ms>`). **Cada nova tentativa** (resposta inválida) recomeça a contagem: novo `waitUntil`, novo job; o antigo vira inofensivo.
+- **Ao vencer** (`replyTimeout`): só age se o run ainda está `waiting` no mesmo nó com o mesmo `waitUntil`. `jobBlocked`: robô pausado ou conversa encerrada → run `stopped` (motivo "robô pausado na conversa" / "conversa encerrada"). Senão segue pela saída **Não respondeu**; **sem ela ligada, o fluxo termina** (`done`, "contato não respondeu no tempo limite") — não cai na saída de resposta nem entrega para humano.
+- **Disputa** (contato responde no mesmo instante em que vence): os dois lados tiram o run de `waiting` com `updateMany` condicional (`status = waiting` + nó [+ `waitUntil`]). Quem conseguir segue; o outro não faz nada. Resposta que perde a disputa é só uma mensagem normal na conversa.
+- **Parar / pausar / substituir** o run no meio: o job encontra o run fora de `waiting` e não faz nada.
+- Tela: card mostra a linha **Não respondeu em X** só com tempo limite. O Salvar mostra **Respondeu** (a saída padrão, mesmo handle de sempre) e **Tentativas esgotadas**. A faixa do chat mostra "aguardando até HH:MM".
+
+## Ação
+
+Ações disponíveis (`ActionNode.kind`):
+
+| Ação na tela | Dado | Efeito |
+|---|---|---|
+| Aplicar / Remover etiqueta | `add_tag` / `remove_tag` + `tagId` + `scope` | Na conversa (padrão) ou 📌 no contato |
+| Atribuir a atendente | `assign` + `agentId` | Atribui e põe *Em atendimento*; o fluxo continua |
+| Mudar status | `set_status` + `waiting`/`in_progress` | `setStatusSystem` |
+| **Encerrar conversa** | `set_status` + `closed` | Mesmo dado de antes, só ganhou entrada própria no seletor. Encerra (fluxo de encerramento roda, pausa é limpa). Depois disso, jobs do fluxo (Atraso, tempo limite) param por `jobBlocked` |
+| Transferir para atendente humano | `handoff` + `agentId?` | Fila "Aguardando" ou atendente escolhido; **termina o fluxo** (sem saída) |
+| Chamar webhook | `webhook` | Ver abaixo |
+| Definir variável (legado) | `set_var` | Só aparece em fluxos antigos; use o Manipulador |
+
+**Webhook** (`webhook.ts → callWebhook`, `FlowEngineService.webhook`):
+- `method`: GET, POST (padrão), PUT, PATCH, DELETE. GET/DELETE vão sem corpo.
+- `url`: aceita `{{variáveis}}` (valores com `encodeURIComponent`). Proteção SSRF de sempre (só http/https, portas 80/443, sem IP interno após DNS, sem seguir redirecionamento).
+- `headers: {id,key,value}[]`: valor aceita `{{variáveis}}`. Ignorados: nome inválido e `Host`, `Content-Length`, `Connection`, `Transfer-Encoding`, `Proxy-*` e afins. Quebras de linha no valor viram espaço.
+- `body`: texto com `{{variáveis}}`. Se o `Content-Type` (header; padrão `application/json`) for JSON, cada valor entra com **escape de JSON** (`jsonEscape`) — aspas/quebras no nome do contato não quebram o corpo. **Vazio = formato antigo**: `{ event: 'flow.webhook', flowId, conversationId, contact, vars }` (sem as `_…`).
+- `timeoutSec`: 1–30 (padrão 8).
+- `responseVar`: guarda o corpo da resposta (até 2.000 caracteres); vazio em erro.
+- **Saídas**: normal (Sucesso — mesmo handle de antes) e **Erro** (`error`): rede/DNS, tempo esgotado, endereço interno, status ≠ 2xx (inclui 3xx). Sem *Erro* ligada, segue pela normal — comportamento antigo.
+
+## Atraso inteligente
+
+Dados: `{ mode?, minutes, unit?, businessHours? }`.
+
+- `mode` ausente/`duration`: espera `minutes` (total; `unit` só exibição). Com `businessHours`, se o prazo cair fora do expediente, empurra para a próxima abertura.
+- `mode: 'next_open'`: **até o próximo horário de atendimento** — segue na hora se já estiver aberto (ou com "atendimento ativo" desligado, como o `nextOpenAt` faz hoje).
+- Job persistente `resume` na fila `flows` (BullMQ/Redis, sobrevive a reinício da API). Ao vencer, `jobBlocked`: robô pausado ou conversa encerrada → run `stopped`. Mensagem do contato durante a espera é ignorada.
+- **Ponto de encaixe do módulo de horários** (próxima tarefa): `FlowEngineService.waitUntil` — hoje o horário vem de Configurações → Horário (`tenantSettings`); horário por setor/número entra trocando a origem de `hours` ali (e, se precisar, um campo novo no `WaitNode`, ex. `hoursId`).
+
+## Exportação, importação e cópia
+
+Tarefa 1.7. Tudo passa pelo módulo único `packages/shared/src/portable.ts` (puro, sem Prisma).
+
+- **Arquivo individual**: `{ atendo: 'flow', version: 1, name, description?, trigger, definition }`. **Lote**: `{ atendo: 'flow-bundle', version: 1, items: [<individual>…] }` (até 100).
+- **Listagem** (`/fluxos`): checkbox por fluxo + "selecionar todos" → **Ativar**, **Desativar** (`POST /flows/active`; ativar valida cada desenho, os inválidos ficam como estavam e aparecem com o motivo), **Duplicar** (`POST /flows/duplicate`), **Exportar selecionados** (`POST /flows/export`, um arquivo `.fluxos.json`). Importar aceita individual ou lote.
+- **Não sai do cliente** (`scrubFlowDefinition`, com aviso e marca `_reconfig` no card): etiqueta vira nome; atendente(s), serviço/profissional, anexos (chave com o tenant), destino do Conectar (fica o nome), URL do webhook, **headers sensíveis do webhook** (`isSensitiveHeader`: `Authorization`, `X-Api-Key` e qualquer nome com `token` ou `secret`, removidos inteiros — os demais headers viajam com valor), números do gatilho.
+- **Corpo do webhook** viaja (é conteúdo). Se algum webhook do arquivo tiver corpo (`hasWebhookBody`), a listagem mostra antes de baixar: *"Este arquivo contém o corpo de webhooks. Verifique se não há tokens ou senhas."* — baixa só se confirmar.
+- **Importação** (`flowFromPortable`): todo bloco de webhook ganha a marca **Reconfigurar: revisar configuração** (`WEBHOOK_REVIEW_FLAG`; some ao editar o bloco); etiquetas criadas se faltarem (sem correspondência → sai do bloco com `_reconfig`), **ids novos para todos os nós e ligações** (`renewFlowIds`, reescreve `{{menu_<id>}}`), nome repetido → " (cópia)" (`uniqueName`), nasce desativado, tudo ou nada.
+- **Copiar/colar cards** (Ctrl+C/V): a área de transferência guarda também o `tenantId` e os nomes de etiquetas/fluxos de origem. Colando na **mesma empresa**, cópia literal (ids novos, ligações internas preservadas, as que saem da seleção descartadas). Colando em **outra empresa** (super admin entrando como clientes diferentes no mesmo navegador), passa por `scrubFlowDefinition` + `restoreFlowDefinition` com as etiquetas do destino — mesmas regras da importação, avisos na tela.
+- **Copiar para outra empresa** (ação na listagem): **não implementado** — o sistema não tem usuário com acesso a mais de uma empresa (`User.tenantId` único; só o super admin entra como cliente). Caminho atual: exportar e importar. Se surgir multiempresa, a ação é `flowToPortable` na origem + `flowFromPortable` no destino, no servidor.
+- **Respostas Rápidas**: `quick-replies/portable.ts` já usa `parsePortableFile`/`toBundle`/`copyName` daqui; a tarefa delas acrescenta só a limpeza própria do item.

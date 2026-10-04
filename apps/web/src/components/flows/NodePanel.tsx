@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { NODE_META, DELAY_UNIT, FlowEditorRefs } from './nodes';
 import { useTags, useAgents, useServices, useProfessionals, useHasFeature } from '@/lib/hooks';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
-import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, normalizeCondition, normalizeContent, type ContactField, type FlowNode, type VariableAssignment, type VariableOp } from '@atendo/shared';
+import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, normalizeCondition, normalizeContent, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
 import { ContentPanel } from './ContentPanel';
 
@@ -18,6 +18,35 @@ const notNumber = (v: string) => {
   if (/\{\{/.test(t)) return false;
   return !t || Number.isNaN(Number(/,\d+$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')));
 };
+
+/**
+ * Tempo limite de resposta (Salvar e Menu). 0 = espera indefinidamente. Vencido, sai por
+ * "Não respondeu"; sem essa saída ligada, o fluxo termina.
+ */
+function ReplyTimeoutFields({ data, set }: { data: ReplyTimeout; set: (p: Record<string, unknown>) => void }) {
+  const unit: DelayUnit = data.timeoutUnit ?? 'minutes';
+  const f = DELAY_UNIT[unit].factor;
+  const on = !!data.timeoutMinutes;
+  return (
+    <div className="rounded-lg border border-line p-3 space-y-2">
+      <label className="flex items-center gap-2 text-ink text-[13px]">
+        <input type="checkbox" checked={on} onChange={(e) => set({ timeoutMinutes: e.target.checked ? 30 : undefined, timeoutUnit: e.target.checked ? 'minutes' : undefined })} />
+        Tempo limite para responder
+      </label>
+      {on && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <input type="number" min={1} className={inputCls} value={+(data.timeoutMinutes! / f).toFixed(2)} onChange={(e) => set({ timeoutMinutes: Math.max(1, Math.round(Number(e.target.value) * f)) })} />
+            <select className={inputCls} value={unit} onChange={(e) => set({ timeoutUnit: e.target.value })}>
+              {(Object.keys(DELAY_UNIT) as DelayUnit[]).map((k) => <option key={k} value={k}>{DELAY_UNIT[k].label}</option>)}
+            </select>
+          </div>
+          <p className="text-[11px] text-muted">Sem resposta nesse tempo, segue pela saída <b>Não respondeu</b> (sem ligação, o fluxo termina). Cada nova tentativa recomeça a contagem. Robô pausado ou conversa encerrada no meio: o fluxo para.</p>
+        </>
+      )}
+    </div>
+  );
+}
 
 /** Painel lateral: edita os dados do bloco selecionado. Cada tipo tem seus campos. */
 export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; onChange: (data: FlowNode['data']) => void; onDelete: () => void; vars: FlowVar[] }) {
@@ -101,7 +130,8 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               </select>
             </Field>
             <Field label="Mensagem se inválido"><TextWithVars multiline={false} value={node.data.invalidText ?? ''} onChange={(v) => set({ invalidText: v })} vars={vars} placeholder="Não entendi. Pode repetir?" /></Field>
-            <Field label="Tentativas antes de desistir" hint="Depois disso, entrega para humano"><input type="number" min={0} max={5} className={inputCls} value={node.data.maxRetries} onChange={(e) => set({ maxRetries: Number(e.target.value) })} /></Field>
+            <Field label="Tentativas antes de desistir" hint="Respostas inválidas aceitas antes de seguir pela saída 'Tentativas esgotadas' (sem ligação, entrega para humano)"><input type="number" min={0} max={5} className={inputCls} value={node.data.maxRetries} onChange={(e) => set({ maxRetries: Number(e.target.value) })} /></Field>
+            <ReplyTimeoutFields data={node.data} set={set} />
           </>
         )}
 
@@ -121,8 +151,9 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               </div>
             </Field>
             <Field label="Mensagem se inválido"><TextWithVars multiline={false} value={node.data.invalidText ?? ''} onChange={(v) => set({ invalidText: v })} vars={vars} placeholder="Opção inválida. Responda com o número." /></Field>
-            <p className="text-[11px] text-muted">A opção escolhida fica na variável <code className="font-mono bg-field rounded px-1">{`{{menu_${node.id}}}`}</code>.</p>
-            <Field label="Tentativas" hint="Depois disso segue pela saída 'resposta inválida' ou entrega para humano"><input type="number" min={0} max={5} className={inputCls} value={node.data.maxRetries} onChange={(e) => set({ maxRetries: Number(e.target.value) })} /></Field>
+            <p className="text-[11px] text-muted">O contato pode responder o <b>número</b> ou o <b>texto</b> da opção (maiúsculas e acentos não importam). A opção escolhida fica na variável <code className="font-mono bg-field rounded px-1">{`{{menu_${node.id}}}`}</code>.</p>
+            <Field label="Tentativas" hint="Respostas inválidas aceitas antes de seguir pela saída 'Tentativas esgotadas' (sem ligação, entrega para humano)"><input type="number" min={0} max={5} className={inputCls} value={node.data.maxRetries} onChange={(e) => set({ maxRetries: Number(e.target.value) })} /></Field>
+            <ReplyTimeoutFields data={node.data} set={set} />
           </>
         )}
 
@@ -138,18 +169,51 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         {node.type === 'action' && (
           <>
             <Field label="Ação">
-              <select className={inputCls} value={node.data.kind} onChange={(e) => set({ kind: e.target.value })}>
+              {/* "Encerrar conversa" é atalho para Mudar status → Encerrado (mesmo dado salvo) */}
+              <select className={inputCls} value={node.data.kind === 'set_status' && node.data.status === 'closed' ? 'close' : node.data.kind} onChange={(e) => set(e.target.value === 'close' ? { kind: 'set_status', status: 'closed' } : e.target.value === 'set_status' ? { kind: 'set_status', status: 'waiting' } : { kind: e.target.value })}>
                 {/* "Definir variável" virou o bloco Manipulador; continua aqui só para fluxos antigos */}
                 {node.data.kind === 'set_var' && <option value="set_var">Definir variável (antigo — prefira o bloco Manipulador)</option>}
-                <option value="add_tag">Aplicar etiqueta</option><option value="remove_tag">Remover etiqueta</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="webhook">Chamar webhook</option><option value="handoff">Entregar para humano (fim do fluxo)</option>
+                <option value="add_tag">Aplicar etiqueta</option><option value="remove_tag">Remover etiqueta</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="close">Encerrar conversa</option><option value="webhook">Chamar webhook</option><option value="handoff">Transferir para atendente humano (fim do fluxo)</option>
               </select>
             </Field>
-            {node.data.kind === 'webhook' && (
-              <>
-                <Field label="URL" hint="Recebe um POST com o contato e as variáveis do fluxo. Se falhar, o fluxo segue."><input className={inputCls} value={node.data.url ?? ''} onChange={(e) => set({ url: e.target.value.trim() })} placeholder="https://exemplo.com/webhook" /></Field>
-                <Field label="Guardar a resposta na variável (opcional)"><input className={inputCls} value={node.data.responseVar ?? ''} onChange={(e) => set({ responseVar: varName(e.target.value) || undefined })} placeholder="retorno_webhook" /></Field>
-              </>
-            )}
+            {node.data.kind === 'webhook' && (() => {
+              const d = node.data;
+              const method = d.method ?? 'POST';
+              const headers = d.headers ?? [];
+              const updH = (id: string, patch: Partial<WebhookHeader>) => set({ headers: headers.map((h) => (h.id === id ? { ...h, ...patch } : h)) });
+              return (
+                <>
+                  <div className="grid grid-cols-[90px_1fr] gap-2">
+                    <Field label="Método">
+                      <select className={inputCls} value={method} onChange={(e) => set({ method: e.target.value })}>{WEBHOOK_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+                    </Field>
+                    <Field label="URL"><TextWithVars multiline={false} value={d.url ?? ''} onChange={(v) => set({ url: v.trim() })} vars={vars} placeholder="https://exemplo.com/webhook" /></Field>
+                  </div>
+                  <Field label="Headers" hint="Ex.: Authorization. Valores aceitam {{variáveis}}. Authorization, X-Api-Key e nomes com token/secret não vão na exportação.">
+                    <div className="space-y-1.5">
+                      {headers.map((h) => (
+                        <div key={h.id} className="flex items-center gap-1.5">
+                          <input className={`${inputCls} w-2/5`} value={h.key} placeholder="Nome" onChange={(e) => updH(h.id, { key: e.target.value.replace(/[^\w!#$%&'*+.^`|~-]/g, '') })} />
+                          <TextWithVars multiline={false} value={h.value} vars={vars} placeholder="Valor" onChange={(v) => updH(h.id, { value: v })} />
+                          <button onClick={() => set({ headers: headers.filter((x) => x.id !== h.id) })} className="text-faint hover:text-danger p-1"><X size={14} /></button>
+                        </div>
+                      ))}
+                      <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ headers: [...headers, { id: shortId(), key: '', value: '' }] })}>Adicionar header</Button>
+                    </div>
+                  </Field>
+                  {method !== 'GET' && method !== 'DELETE' && (
+                    <Field label="Corpo (opcional)" hint="Vazio = JSON com o contato e as variáveis do fluxo. Em JSON, as {{variáveis}} entram já escapadas.">
+                      <TextWithVars value={d.body ?? ''} onChange={(v) => set({ body: v || undefined })} vars={vars} placeholder={'{"nome": "{{contact.name}}", "pedido": "{{pedido}}"}'} />
+                    </Field>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Tempo limite (s)"><input type="number" min={1} max={WEBHOOK_MAX_TIMEOUT_SEC} className={inputCls} value={d.timeoutSec ?? WEBHOOK_DEFAULT_TIMEOUT_SEC} onChange={(e) => set({ timeoutSec: Math.min(WEBHOOK_MAX_TIMEOUT_SEC, Math.max(1, Number(e.target.value) || 1)) })} /></Field>
+                    <Field label="Guardar resposta em"><input className={inputCls} value={d.responseVar ?? ''} onChange={(e) => set({ responseVar: varName(e.target.value) || undefined })} placeholder="retorno_webhook" /></Field>
+                  </div>
+                  <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Falha (fora do ar, tempo esgotado, endereço interno ou resposta diferente de 2xx) segue pela saída <b>Erro</b>; sem ela ligada, segue pela saída normal. A resposta guardada é o corpo (até 2.000 caracteres) — vazia em caso de erro.</p>
+                </>
+              );
+            })()}
             {node.data.kind === 'set_var' && (
               <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3 space-y-2">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-ink">Este bloco cria/atualiza uma variável</div>
@@ -174,9 +238,10 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                 <select className={inputCls} value={node.data.agentId ?? ''} onChange={(e) => set({ agentId: e.target.value || undefined })}><option value="">{node.data.kind === 'handoff' ? 'Fila (qualquer atendente)' : 'Escolha…'}</option>{agents.data?.filter((a) => a.isActive).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
               </Field>
             )}
-            {node.data.kind === 'set_status' && (
-              <Field label="Status"><select className={inputCls} value={node.data.status ?? 'waiting'} onChange={(e) => set({ status: e.target.value })}><option value="waiting">Aguardando</option><option value="in_progress">Em atendimento</option><option value="closed">Encerrado</option></select></Field>
+            {node.data.kind === 'set_status' && node.data.status !== 'closed' && (
+              <Field label="Status"><select className={inputCls} value={node.data.status ?? 'waiting'} onChange={(e) => set({ status: e.target.value })}><option value="waiting">Aguardando</option><option value="in_progress">Em atendimento</option></select></Field>
             )}
+            {node.data.kind === 'set_status' && node.data.status === 'closed' && <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Encerra o atendimento (dispara o fluxo de encerramento, se houver). Depois disso, Atraso e tempo limite deste fluxo param — a conversa está encerrada.</p>}
           </>
         )}
 
@@ -254,20 +319,34 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         {node.type === 'wait' && (() => {
           const unit = node.data.unit ?? 'minutes';
           const f = DELAY_UNIT[unit].factor;
+          const mode = node.data.mode ?? 'duration';
           return (
             <>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Esperar"><input type="number" min={1} className={inputCls} value={+(node.data.minutes / f).toFixed(2)} onChange={(e) => set({ minutes: Math.max(1, Math.round(Number(e.target.value) * f)) })} /></Field>
-                <Field label="Unidade">
-                  <select className={inputCls} value={unit} onChange={(e) => set({ unit: e.target.value })}>
-                    {(Object.keys(DELAY_UNIT) as (keyof typeof DELAY_UNIT)[]).map((k) => <option key={k} value={k}>{DELAY_UNIT[k].label}</option>)}
-                  </select>
-                </Field>
-              </div>
-              <label className="flex items-start gap-2 text-ink">
-                <input type="checkbox" className="mt-0.5" checked={!!node.data.businessHours} onChange={(e) => set({ businessHours: e.target.checked })} />
-                <span>Só seguir no horário comercial<span className="block text-[11px] text-muted">Se o tempo vencer fora do expediente (Configurações → Horário), espera até a próxima abertura.</span></span>
-              </label>
+              <Field label="Aguardar">
+                <select className={inputCls} value={mode} onChange={(e) => set({ mode: e.target.value === 'duration' ? undefined : e.target.value })}>
+                  <option value="duration">Um tempo definido</option>
+                  <option value="next_open">Até o próximo horário de atendimento</option>
+                </select>
+              </Field>
+              {mode === 'duration' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Esperar"><input type="number" min={1} className={inputCls} value={+(node.data.minutes / f).toFixed(2)} onChange={(e) => set({ minutes: Math.max(1, Math.round(Number(e.target.value) * f)) })} /></Field>
+                    <Field label="Unidade">
+                      <select className={inputCls} value={unit} onChange={(e) => set({ unit: e.target.value })}>
+                        {(Object.keys(DELAY_UNIT) as (keyof typeof DELAY_UNIT)[]).map((k) => <option key={k} value={k}>{DELAY_UNIT[k].label}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                  <label className="flex items-start gap-2 text-ink">
+                    <input type="checkbox" className="mt-0.5" checked={!!node.data.businessHours} onChange={(e) => set({ businessHours: e.target.checked })} />
+                    <span>Só seguir no horário comercial<span className="block text-[11px] text-muted">Se o tempo vencer fora do expediente (Configurações → Horário), espera até a próxima abertura.</span></span>
+                  </label>
+                </>
+              ) : (
+                <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Segue quando o expediente de Configurações → Horário abrir. Se já estiver aberto (ou com "atendimento ativo" desligado), segue na hora.</p>
+              )}
+              <p className="text-[11px] text-muted">Mensagem do contato durante a espera é ignorada. Robô pausado ou conversa encerrada antes do fim: o fluxo para.</p>
             </>
           );
         })()}
