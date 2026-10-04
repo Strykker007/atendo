@@ -6,6 +6,25 @@ const def = (nodes: unknown[]): FlowDefinition => ({ nodes, edges: [] } as unkno
 const node = (id: string, type: string, data: Record<string, unknown>) => ({ id, type, position: { x: 0, y: 0 }, data });
 const flow = (definition: FlowDefinition, trigger: FlowTrigger = { type: 'manual' }) => ({ name: 'Boas-vindas', description: 'oi', trigger, definition });
 
+describe('toPortable — Conteúdo e Conectar', () => {
+  it('remove os anexos das mensagens do Conteúdo (a chave carrega o tenant)', () => {
+    const items = [{ id: 'a', kind: 'text', text: 'oi' }, { id: 'b', kind: 'image', mediaKey: 'media/t1/2026-10/x.png', mediaName: 'x.png', text: 'legenda' }];
+    const { portable, warnings } = toPortable(flow(def([node('1', 'message', { items })])));
+    const d = (portable.definition.nodes[0] as unknown as { data: { items: Record<string, unknown>[]; _reconfig?: string[] } }).data;
+    expect(d.items[1].mediaKey).toBeUndefined();
+    expect(d.items[1].text).toBe('legenda');
+    expect(d._reconfig).toContain('anexo');
+    expect(warnings.length).toBe(1);
+  });
+  it('troca o id do fluxo de destino pelo nome, só como referência', () => {
+    const { portable } = toPortable(flow(def([node('1', 'connect_flow', { flowId: 'f2' })])), {}, { f2: 'Financeiro' });
+    const d = (portable.definition.nodes[0] as { data: Record<string, unknown> }).data;
+    expect(d.flowId).toBeUndefined();
+    expect(d.flowName).toBe('Financeiro');
+    expect(d._reconfig).toContain('fluxo de destino');
+  });
+});
+
 describe('toPortable', () => {
   it('troca a etiqueta pelo nome, que é o que existe nos dois clientes', () => {
     const { portable, warnings } = toPortable(flow(def([node('1', 'action', { kind: 'add_tag', tagId: 't1', scope: 'contact' })])), { t1: 'VIP' });

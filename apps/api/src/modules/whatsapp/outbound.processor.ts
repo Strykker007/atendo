@@ -45,12 +45,22 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       return;
     }
 
-    const ctx = await this.numbers.context(message.conversation.numberId);
+    // sai pelo número gravado na mensagem (o validado no envio), nunca por outro;
+    // mensagens anteriores à coluna caem no número da conversa
+    const numberId = message.numberId ?? message.conversation.numberId;
+    const ctx = await this.numbers.context(numberId);
+    if (ctx.tenantId !== message.conversation.tenantId) {
+      const reason = 'Número de outro cliente — envio bloqueado';
+      this.log.error(`${reason}: mensagem ${message.id}, número ${numberId}`);
+      const blocked = await this.prisma.message.update({ where: { id: message.id }, data: { status: 'failed', error: reason } });
+      this.gateway.emitMessage(message.conversation.tenantId, this.conversations.present(blocked));
+      throw new UnrecoverableError(reason);
+    }
     const provider = this.registry.get(ctx.provider);
 
     // ---- proteção do número (bloqueio/banimento) ----
     const num = await this.prisma.whatsAppNumber.findUniqueOrThrow({
-      where: { id: message.conversation.numberId },
+      where: { id: numberId },
       select: { id: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true },
     });
     const day = await this.pacer.dailyStatus(num);
@@ -73,7 +83,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
         throw new DelayedError();
       }
     }
-    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string };
+    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string; voice?: boolean };
 
     const outbound: OutboundMessage = {
       to: message.conversation.contact.phone,
@@ -81,7 +91,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       // interativo: o provider recebe o corpo original + opções (o texto numerado é só para o histórico)
       text: raw.interactive ? raw.body : (message.text ?? undefined),
       interactive: raw.interactive,
-      media: message.mediaUrl ? { url: message.mediaUrl, mimeType: message.mediaMime ?? undefined, fileName: message.mediaName ?? undefined, caption: message.text ?? undefined } : undefined,
+      media: message.mediaUrl ? { url: message.mediaUrl, mimeType: message.mediaMime ?? undefined, fileName: message.mediaName ?? undefined, caption: message.text ?? undefined, voice: raw.voice } : undefined,
       quotedExternalId: message.quotedId ?? undefined,
       template: raw.template,
     };

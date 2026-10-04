@@ -46,6 +46,10 @@ do `parseWebhook`; para envio, `vi.stubGlobal('fetch', ...)` e afirmar sobre o c
 
 O `pnpm typecheck` também cobre `test/` — teste que não compila quebra o CI.
 
+**Lint do front** (`apps/web/eslint.config.mjs`, ESLint 9 + `eslint-config-next`: regras do
+Next, React, hooks do React e TypeScript): `pnpm --filter @atendo/web lint`. Ignora `.next/` e
+`.next-build/` (build de produção). Ainda não roda no CI — há pendências antigas a zerar antes.
+
 ## Observabilidade
 
 Objetivo: **quando algo quebrar na casa do cliente, você descobrir antes dele ligar** — e,

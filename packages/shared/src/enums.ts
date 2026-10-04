@@ -31,6 +31,9 @@ export const MessageType = {
   LOCATION: 'location',
   CONTACT: 'contact',
   TEMPLATE: 'template',
+  /** botões, template com botões ou lista/menu — o desenho vem em `MessageDTO.content` */
+  INTERACTIVE: 'interactive',
+  /** último recurso: nem o fallback de texto achou o que mostrar. A UI nunca exibe a palavra crua. */
   UNKNOWN: 'unknown',
 } as const;
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];

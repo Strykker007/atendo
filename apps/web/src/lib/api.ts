@@ -58,6 +58,13 @@ async function doRefresh(): Promise<boolean> {
   return true;
 }
 
+/** Erro da API com o status HTTP e, quando a API manda, um `code` para a tela reagir sem comparar texto. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+  }
+}
+
 /** fetch com Bearer + refresh automático em 401 (uma tentativa). */
 export async function api<T = unknown>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const res = await fetch(`${API}${path}`, {
@@ -68,7 +75,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}, ret
   if (res.status === 401 && retry && (await refresh())) return api<T>(path, init, false);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message ?? `Erro ${res.status}`);
+    throw new ApiError(body.message ?? `Erro ${res.status}`, res.status, body.code);
   }
   // corpo vazio (204, ou o Nest devolvendo `null`) vira null em vez de erro de JSON
   const text = await res.text();

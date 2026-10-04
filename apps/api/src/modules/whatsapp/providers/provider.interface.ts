@@ -1,4 +1,4 @@
-import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate, NumberStatus } from '@atendo/shared';
+import type { InboundEdit, InboundMessage, InboundPresence, InboundReaction, OutboundMessage, SendResult, StatusUpdate, NumberStatus } from '@atendo/shared';
 
 /** Como o número está configurado no provider (descriptografado do banco). */
 export interface NumberContext {
@@ -15,9 +15,26 @@ export interface MediaPayload {
   fileName?: string;
 }
 
+/** Reação (emoji) que o atendente manda a uma mensagem da conversa. `emoji` vazio = retirar. */
+export interface OutboundReaction {
+  /** telefone do contato em E.164 */
+  to: string;
+  /** id no provider da mensagem reagida */
+  targetExternalId: string;
+  /** a reagida saiu de nós — a Evolution precisa disso para achar a mensagem */
+  targetFromMe: boolean;
+  emoji: string;
+}
+
 export interface ParsedWebhook {
   messages: InboundMessage[];
   statuses: StatusUpdate[];
+  /** reações a mensagens — não são mensagens, só marcam a reagida */
+  reactions: InboundReaction[];
+  /** mensagem editada: troca o texto da original, não cria outra. Só a Evolution informa. */
+  edits?: InboundEdit[];
+  /** "digitando…"/"gravando áudio…" do contato — efêmero, só repassado ao painel. Meta não manda. */
+  presences?: InboundPresence[];
   /** mudanças de conexão (QR lido, desconectou) */
   connection?: {
     externalNumberId: string;
@@ -61,6 +78,13 @@ export interface WhatsAppProvider {
    */
   fetchProfilePicture?(ctx: NumberContext, phone: string): Promise<MediaPayload | null>;
   markRead(ctx: NumberContext, externalMessageId: string): Promise<void>;
+  /** Reage a uma mensagem. Não é mensagem: não gera id, não entra no histórico. Lança se o provider recusar. */
+  react(ctx: NumberContext, reaction: OutboundReaction): Promise<void>;
+  /**
+   * Pede ao WhatsApp para avisar quando o contato digitar/gravar (`presence.update`). Sem
+   * isto o "digitando…" nunca chega. Opcional: a Meta não tem esse recurso.
+   */
+  subscribePresence?(ctx: NumberContext, phone: string): Promise<void>;
 
   /** Valida assinatura/autenticidade do webhook. Lança se inválido. */
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer): void;

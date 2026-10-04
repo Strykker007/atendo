@@ -135,12 +135,30 @@ export class AiService {
     });
   }
 
-  /** Resumo para quem vai assumir a conversa. */
-  async summary(tenantId: string, conversationId: string, agentId: string) {
+  /**
+   * Resumo para quem vai assumir a conversa. Fica em cache na conversa, amarrado à última
+   * mensagem: sem mensagem nova, devolve o salvo sem chamar a IA. `force` gera de novo.
+   */
+  async summary(tenantId: string, conversationId: string, agentId: string, force = false) {
+    const cached = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: {
+        summaryCache: true,
+        summaryLastMessageId: true,
+        summaryUpdatedAt: true,
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true } },
+      },
+    });
+    if (!cached) throw new BadRequestException('Conversa não encontrada');
+    const lastMessageId = cached.messages[0]?.id ?? null;
+    if (!force && cached.summaryCache && lastMessageId && cached.summaryLastMessageId === lastMessageId) {
+      return { text: cached.summaryCache, updatedAt: cached.summaryUpdatedAt, cached: true };
+    }
+
     const { history } = await this.conversationContext(tenantId, conversationId);
     const transcript = toTranscript(history);
     if (transcript.split('\n').length < 2) throw new BadRequestException('Conversa curta demais para resumir.');
-    return this.run({
+    const text = await this.run({
       tenantId,
       kind: 'summary',
       conversationId,
@@ -149,6 +167,13 @@ export class AiService {
       messages: [transcriptMessage(transcript, 'Resuma esta conversa.')],
       temperature: 0.2,
     });
+    const updatedAt = new Date();
+    // amarra à mensagem lida no início: se chegou outra durante a chamada, o próximo pedido regenera
+    await this.prisma.conversation.updateMany({
+      where: { id: conversationId, tenantId },
+      data: { summaryCache: text, summaryLastMessageId: lastMessageId, summaryUpdatedAt: updatedAt },
+    });
+    return { text, updatedAt, cached: false };
   }
 
   // ---------- usado pelo motor de fluxos ----------

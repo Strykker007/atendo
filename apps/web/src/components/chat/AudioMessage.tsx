@@ -205,7 +205,7 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
         type="button"
         onClick={alternar}
         title={tocando ? 'Pausar' : 'Ouvir'}
-        className={cn('w-8 h-8 rounded-full grid place-items-center shrink-0', mine ? 'bg-white/20 text-white' : 'bg-accent-soft text-accent-ink')}
+        className={cn('w-8 h-8 rounded-full grid place-items-center shrink-0', mine ? 'bg-white/20 text-white' : 'bg-accent text-white')}
       >
         {carregando ? <Loader2 size={14} className="animate-spin" /> : tocando ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
       </button>
@@ -219,14 +219,14 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
                 key={i}
                 className={cn(
                   'flex-1 rounded-full transition-colors',
-                  mine ? (passou ? 'bg-white' : 'bg-white/35') : passou ? 'bg-accent' : 'bg-muted/30',
+                  mine ? (passou ? 'bg-white' : 'bg-white/35') : passou ? 'bg-accent' : 'bg-muted/45',
                 )}
                 style={{ height: `${Math.max(12, p * 100)}%` }}
               />
             );
           })}
         </div>
-        <div className={cn('tnum font-mono text-[10px]', mine ? 'text-white/70' : 'text-faint')}>
+        <div className={cn('tnum font-mono text-[10px]', mine ? 'text-white/70' : 'text-muted')}>
           {mmss(tocando || atual > 0 ? atual : duracao)}
         </div>
       </div>

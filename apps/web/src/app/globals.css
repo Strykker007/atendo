@@ -36,13 +36,18 @@
   --warn: #d97706;  --warn-soft: #fef3c7; --warn-ink: #92400e;
   --danger: #dc2626; --danger-soft: #fee2e2; --danger-ink: #991b1b;
 
-  --chat-bg: #eef1f7;
+  /* off-white zinc-100: o branco estourado cansava; o balão recebido (branco) passa a se destacar */
+  --chat-bg: #f4f4f5;
   /* ponto da textura do fundo: quase imperceptível de perto, dá profundidade de longe */
-  --chat-dot: #dbe1ec;
+  --chat-dot: #e4e4e7;
   --bub-in: #ffffff;  --bub-in-ink: #1e2433;
-  --bub-out: #2f5bea; --bub-out-ink: #ffffff;
+  /* borda delicada do recebido (zinc-200/60) */
+  --bub-in-line: rgb(228 228 231 / 0.6);
+  --bub-out: #2563eb; --bub-out-ink: #ffffff;
   /* segunda cor do balão enviado: o leve degradê tira o aspecto de retângulo chapado */
-  --bub-out-2: #2550d8;
+  --bub-out-2: #1f57d8;
+  /* ✓✓ de "lido": o balão já é azul, então o azul do WhatsApp sumiria — ciano destaca */
+  --tick-read: #67e8f9;
 
   --meta-soft: #e0e7ff; --meta-ink: #3730a3;
   --evo-soft: #fff3d6;  --evo-ink: #9a5b00;
@@ -54,17 +59,18 @@
 
 .dark {
   color-scheme: dark;
-  --bg: #0f1218;
-  --panel: #151a23;
-  --field: #1d2330;
-  --line: #222836;
-  --line-strong: #2f3748;
-  --ink: #e8ecf3;
-  --muted: #8a93a6;
-  --faint: #5d6678;
+  /* tons slate um pouco mais claros e menos saturados: o preto quase puro com texto quase branco cansava */
+  --bg: #111620;
+  --panel: #171c27;
+  --field: #1f2531;
+  --line: #262c39;
+  --line-strong: #323a4a;
+  --ink: #e2e6ee;
+  --muted: #949db0;
+  --faint: #646d80;
 
-  --accent: #3b9eff;
-  --accent-hover: #63b3ff;
+  --accent: #4c9cf0;
+  --accent-hover: #6aaef5;
   --accent-soft: #1c2a3f;
   --accent-ink: #7cc4ff;
 
@@ -82,11 +88,15 @@
   --warn: #fbbf24;  --warn-soft: #3a2c0a; --warn-ink: #fde68a;
   --danger: #f87171; --danger-soft: #4a1d1d; --danger-ink: #fecaca;
 
-  --chat-bg: #0f1218;
-  --chat-dot: #182033;
-  --bub-in: #1d2330;  --bub-in-ink: #e8ecf3;
-  --bub-out: #1e4474; --bub-out-ink: #e2f0ff;
-  --bub-out-2: #16365e;
+  /* grafite zinc-900: menos breu que o slate anterior; balões ganham contraste confortável */
+  --chat-bg: #18181b;
+  --chat-dot: transparent;
+  --bub-in: #27272a;  --bub-in-ink: #f4f4f5;
+  --bub-in-line: rgb(63 63 70 / 0.6);
+  /* blue-600 com leve queda: legível com texto branco sem estourar o brilho */
+  --bub-out: #2563eb; --bub-out-ink: #ffffff;
+  --bub-out-2: #1e50c8;
+  --tick-read: #67e8f9;
 
   --meta-soft: #2a1f3d; --meta-ink: #c4a8ff;
   --evo-soft: #3a2c0a;  --evo-ink: #fbbf24;
@@ -104,25 +114,27 @@ body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antiali
  * Era cinza chapado, e chapado é o que faz a tela parecer sem vida: sem textura, os balões
  * flutuam num vazio e a conversa não ganha "lugar". Um ponto discreto a cada 18px dá
  * profundidade sem virar papel de parede — de perto quase não se vê, de longe o olho sente.
- * No escuro continua a grade fina, que é a linguagem de sala de controle do tema.
+ * No escuro o fundo é liso: a grade marcada poluía a tela e competia com os balões.
  */
 .chat-bg {
   background-color: var(--chat-bg);
   background-image: radial-gradient(var(--chat-dot) 1px, transparent 1px);
   background-size: 18px 18px;
 }
-.dark .chat-bg {
-  background-image: linear-gradient(var(--chat-dot) 1px, transparent 1px), linear-gradient(90deg, var(--chat-dot) 1px, transparent 1px);
-  background-size: 22px 22px;
-}
+.dark .chat-bg { background-image: none; }
 
 /* balão enviado: degradê curto no sentido da leitura, com sombra de contato */
 .bub-out {
   background-image: linear-gradient(135deg, var(--bub-out), var(--bub-out-2));
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.18);
 }
-.bub-in { box-shadow: 0 1px 2px rgb(15 23 42 / 0.08); }
-.dark .bub-in { box-shadow: 0 1px 2px rgb(0 0 0 / 0.35); }
+.bub-in { box-shadow: 0 1px 2px rgb(15 23 42 / 0.06); outline: 1px solid var(--bub-in-line); outline-offset: -1px; }
+.dark .bub-in { box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
+
+/* "digitando…": três pontos em onda (o atraso de cada um vem do componente) */
+@keyframes typing-wave { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-3px); opacity: 1; } }
+.typing-dot { animation: typing-wave 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .typing-dot { animation: none; opacity: .7; } }
 
 /* separador de dia: a linha atravessa, a etiqueta fica por cima */
 .dia-sep::before, .dia-sep::after { content: ''; flex: 1; height: 1px; background: var(--line); }

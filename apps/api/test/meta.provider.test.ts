@@ -83,8 +83,44 @@ describe('MetaProvider.parseWebhook', () => {
   });
 
   it('tipo desconhecido não quebra o parse', () => {
-    const out = provider.parseWebhook(webhook({ messages: [{ from: '551199', id: 'wamid.6', timestamp: '1758300000', type: 'reaction', reaction: { emoji: '👍' } }] }));
+    const out = provider.parseWebhook(webhook({ messages: [{ from: '551199', id: 'wamid.6', timestamp: '1758300000', type: 'ephemeral' }] }));
     expect(out.messages[0].type).toBe(MessageType.UNKNOWN);
+  });
+
+  it('tipo não suportado com texto usa o texto', () => {
+    const out = provider.parseWebhook(webhook({ messages: [{ from: '551199', id: 'wamid.7', timestamp: '1758300000', type: 'system', system: { body: 'Número alterado' } }] }));
+    expect(out.messages[0]).toMatchObject({ type: MessageType.TEXT, text: 'Número alterado' });
+  });
+
+  it('lê localização e contatos como content', () => {
+    const out = provider.parseWebhook(webhook({ messages: [
+      { from: '551199', id: 'wamid.8', timestamp: '1758300000', type: 'location', location: { latitude: -16.6, longitude: -49.2, name: 'Loja' } },
+      { from: '551199', id: 'wamid.9', timestamp: '1758300000', type: 'contacts', contacts: [{ name: { formatted_name: 'Maria' }, phones: [{ phone: '+55 11 9', wa_id: '55119' }] }] },
+    ] }));
+    expect(out.messages[0]).toMatchObject({ type: MessageType.LOCATION, content: { kind: 'location', lat: -16.6, lng: -49.2, name: 'Loja' } });
+    expect(out.messages[1]).toMatchObject({ type: MessageType.CONTACT, content: { kind: 'contacts', contacts: [{ name: 'Maria', phones: ['55119'] }] } });
+  });
+
+  it('encaminhada: marca e não confunde com citação', () => {
+    const out = provider.parseWebhook(webhook({ messages: [{ from: '551199', id: 'wamid.10', timestamp: '1758300000', type: 'text', text: { body: 'olha isso' }, context: { forwarded: true } }] }));
+    expect(out.messages[0]).toMatchObject({ forwarded: true });
+    expect(out.messages[0].quotedExternalId).toBeUndefined();
+  });
+
+  it('botão de template vira texto com o payload', () => {
+    const out = provider.parseWebhook(webhook({ messages: [{ from: '551199', id: 'wamid.11', timestamp: '1758300000', type: 'button', button: { text: 'Confirmar', payload: 'ok' } }] }));
+    expect(out.messages[0]).toMatchObject({ type: MessageType.TEXT, text: 'Confirmar', interactiveReplyId: 'ok' });
+  });
+
+  it('reação não vira mensagem: marca a reagida', () => {
+    const out = provider.parseWebhook(webhook({ messages: [{ from: '551199', id: 'wamid.7', timestamp: '1758300000', type: 'reaction', reaction: { message_id: 'wamid.1', emoji: '👍' } }] }));
+    expect(out.messages).toHaveLength(0);
+    expect(out.reactions).toEqual([expect.objectContaining({ targetExternalId: 'wamid.1', from: '551199', fromMe: false, emoji: '👍' })]);
+  });
+
+  it('reação retirada (sem emoji) chega com emoji vazio', () => {
+    const out = provider.parseWebhook(webhook({ messages: [{ from: '551199', id: 'wamid.8', timestamp: '1758300000', type: 'reaction', reaction: { message_id: 'wamid.1' } }] }));
+    expect(out.reactions[0].emoji).toBe('');
   });
 
   it('mapeia status de entrega e erro', () => {
@@ -105,7 +141,7 @@ describe('MetaProvider.parseWebhook', () => {
   it('corpo vazio ou inesperado devolve listas vazias em vez de estourar', () => {
     for (const body of [undefined, null, {}, { entry: null }, { entry: [{}] }, { entry: [{ changes: [{ value: {} }] }] }]) {
       const out = provider.parseWebhook(body);
-      expect(out).toEqual({ messages: [], statuses: [] });
+      expect(out).toEqual({ messages: [], statuses: [], reactions: [] });
     }
   });
 });
@@ -203,6 +239,15 @@ describe('MetaProvider.send', () => {
     } as any);
     expect(sent.type).toBe('template');
     expect(res.billingCategory).toBe(BillingCategory.UTILITY);
+  });
+
+  it('legenda só em imagem/vídeo/documento e nome só no documento — áudio com legenda a Meta recusa', async () => {
+    await provider.send(ctx, { to: '5511999999999', type: MessageType.AUDIO, text: 'oi', media: { url: 'https://x/a.ogg', caption: 'oi', fileName: 'a.ogg' } } as any);
+    expect(sent.audio).toEqual({ link: 'https://x/a.ogg' });
+    await provider.send(ctx, { to: '5511999999999', type: MessageType.DOCUMENT, media: { url: 'https://x/t.pdf', caption: 'tabela', fileName: 'tabela.pdf' } } as any);
+    expect(sent.document).toEqual({ link: 'https://x/t.pdf', caption: 'tabela', filename: 'tabela.pdf' });
+    await provider.send(ctx, { to: '5511999999999', type: MessageType.IMAGE, media: { url: 'https://x/i.png', caption: 'foto', fileName: 'i.png' } } as any);
+    expect(sent.image).toEqual({ link: 'https://x/i.png', caption: 'foto' });
   });
 
   it('erro da Meta vira exceção com a mensagem da API', async () => {

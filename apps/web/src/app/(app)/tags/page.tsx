@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, Tag as TagIcon } from 'lucide-react';
+import { Plus, Pencil, Trash2, Tag as TagIcon, Columns3 } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -28,8 +28,8 @@ export default function TagsPage() {
     e.preventDefault();
     if (!editing?.name) return;
     try {
-      if (editing.id) await update.mutateAsync({ id: editing.id, name: editing.name, color: editing.color });
-      else await create.mutateAsync({ name: editing.name, color: editing.color ?? PALETTE[0] });
+      if (editing.id) await update.mutateAsync({ id: editing.id, name: editing.name, color: editing.color, isKanban: editing.isKanban });
+      else await create.mutateAsync({ name: editing.name, color: editing.color ?? PALETTE[0], isKanban: editing.isKanban ?? true });
       toast.ok(editing.id ? 'Tag atualizada' : 'Tag criada');
       setEditing(null);
     } catch (err) {
@@ -41,7 +41,7 @@ export default function TagsPage() {
     <PageShell width="max-w-3xl">
       <PageHeader
         title="Tags"
-        subtitle="Classifique conversas durante o atendimento. As tags viram filtros e relatórios."
+        subtitle="Classifique conversas durante o atendimento. As tags viram filtros, relatórios e — marcadas como etapa — colunas do Kanban."
         action={isAdmin && <Button onClick={() => setEditing({ color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })} icon={<Plus size={16} />}>Nova tag</Button>}
       />
 
@@ -54,6 +54,7 @@ export default function TagsPage() {
             <div key={t.id} className="flex items-center gap-3 px-5 py-3">
               <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: t.color }} />
               <span className="flex-1 font-medium text-sm">{t.name}</span>
+              {t.isKanban !== false && <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted bg-field rounded-md px-1.5 py-0.5" title="Aparece como coluna no Kanban"><Columns3 size={11} />Kanban</span>}
               <span className="text-xs text-faint tnum">{t._count?.conversations ?? 0} conversa{(t._count?.conversations ?? 0) === 1 ? '' : 's'} · 📌 {t._count?.contacts ?? 0} contato{(t._count?.contacts ?? 0) === 1 ? '' : 's'}</span>
               {isAdmin && (
                 <>
@@ -76,6 +77,13 @@ export default function TagsPage() {
               ))}
             </div>
           </Field>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={editing?.isKanban ?? true} onChange={(e) => setEditing({ ...editing, isKanban: e.target.checked })} />
+            <span>
+              <span className="text-ink font-medium">Etapa no Kanban</span>
+              <span className="block text-xs text-faint">Vira uma coluna do quadro. Desmarcar tira os atendimentos dessa etapa (a tag continua neles).</span>
+            </span>
+          </label>
           <div className="flex items-center gap-2 text-sm text-muted">
             Prévia: <span className="text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: editing?.color }}>{editing?.name || 'nome da tag'}</span>
           </div>

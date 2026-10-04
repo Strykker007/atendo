@@ -1,14 +1,16 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import { ConversationsService } from './conversations.service';
+import { ConversationsService, FORWARD_MAX_TARGETS } from './conversations.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
+import { NumbersService } from '../whatsapp/numbers.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { ConversationScopeGuard } from './conversation-scope.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import type { SetPrimaryTagInput } from '@atendo/shared';
 
 class ListDto {
   @IsOptional() @IsEnum(ConversationStatus) status?: ConversationStatus;
@@ -33,6 +35,17 @@ class SendDto {
   @IsOptional() @IsString() mediaKey?: string;
   @IsOptional() @IsString() quotedExternalId?: string;
   @IsOptional() template?: any;
+  /** número que a tela mostrava ao enviar — se a conversa estiver em outro, 409 sem enviar.
+   *  Só confere: quem escolhe o número é a conversa, nunca o payload. */
+  @IsOptional() @IsUUID() expectedNumberId?: string;
+}
+class ReactDto {
+  /** um emoji (pode ter vários code points, ex.: 👍🏽); vazio = retirar a reação */
+  @IsString() @MaxLength(16) emoji: string;
+}
+class ForwardDto {
+  /** conversas de destino; o WhatsApp limita a 5 por encaminhamento */
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(FORWARD_MAX_TARGETS) @IsUUID('4', { each: true }) targetConversationIds: string[];
 }
 class NoteDto {
   @IsString() @MaxLength(4096) text: string;
@@ -65,11 +78,15 @@ class ContactDto {
 class TagsDto {
   @IsArray() @IsUUID('4', { each: true }) tagIds: string[];
 }
+class PrimaryTagDto implements SetPrimaryTagInput {
+  /** null = tirar da etapa (coluna "Sem etapa" do Kanban) */
+  @ValidateIf((_, v) => v !== null) @IsUUID() tagId: string | null;
+}
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard, PermissionsGuard, ConversationScopeGuard)
 export class ConversationsController {
-  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService) {}
+  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService, private readonly numbers: NumbersService) {}
 
   @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: ListDto) {
@@ -141,6 +158,26 @@ export class ConversationsController {
     return this.conversations.resend(u.tenantId, messageId);
   }
 
+  /**
+   * Reação do atendente a uma mensagem (emoji vazio = retirar). Só grava depois que o provider
+   * aceitou: reação que aparece no painel e não chegou no celular do contato engana quem atende.
+   */
+  @Post(':id/messages/:messageId/react')
+  async react(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string, @Body() dto: ReactDto) {
+    const alvo = await this.conversations.reactionTarget(u.tenantId, u, id, messageId);
+    await this.numbers.react(alvo.numberId, { to: alvo.to, targetExternalId: alvo.targetExternalId, targetFromMe: alvo.targetFromMe, emoji: dto.emoji });
+    return this.conversations.setReaction(u.tenantId, alvo.messageId, { fromMe: true, emoji: dto.emoji, at: new Date() });
+  }
+
+  /**
+   * Encaminha a mensagem para outras conversas. Cada destino é um envio normal (quota, janela
+   * da Meta, posse); o que falhar num destino volta em `failed` sem derrubar os outros.
+   */
+  @Post(':id/messages/:messageId/forward')
+  forward(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string, @Body() dto: ForwardDto) {
+    return this.conversations.forward(u.tenantId, u, id, messageId, dto.targetConversationIds);
+  }
+
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
     const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason } : undefined);
@@ -160,6 +197,12 @@ export class ConversationsController {
     return this.conversations.setTags(u.tenantId, id, dto.tagIds);
   }
 
+  /** Tag principal = coluna no Kanban. Arrastar o card e promover pílula caem aqui. */
+  @Patch(':id/primary-tag')
+  primaryTag(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: PrimaryTagDto) {
+    return this.conversations.setPrimaryTag(u.tenantId, id, dto.tagId);
+  }
+
   /** Ficha do contato: nome, e-mail, endereço e observações. */
   @Patch('contacts/:contactId')
   @RequirePermission('contacts.edit')
@@ -173,7 +216,12 @@ export class ConversationsController {
   }
 
   @Post(':id/read')
-  read(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    return this.conversations.markRead(u.tenantId, id);
+  async read(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    const conv = await this.conversations.markRead(u.tenantId, id);
+    // abrir a conversa = estar olhando: assina o "digitando…" do contato, sem esperar o provider
+    void this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { phone: true } })
+      .then((c) => c && this.numbers.subscribePresence(conv.numberId, c.phone))
+      .catch(() => undefined);
+    return conv;
   }
 }

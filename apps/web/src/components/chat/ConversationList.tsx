@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal } from 'lucide-react';
+import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
-import { cn } from '@/lib/utils';
+import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
+import { ChannelBadge, channelColor } from './ChannelBadge';
 import type { ConversationOrigin } from '@/lib/hooks';
 import { SkeletonConversations } from '@/components/ui/Skeleton';
 import { BulkCloseModal } from './BulkCloseModal';
@@ -30,7 +31,7 @@ const ORDER: ConversationStatus[] = ['waiting', 'in_progress', 'closed'];
  * aberto o dia inteiro, e "5min" ainda apareceria duas horas depois, que é pior do que não
  * mostrar nada.
  */
-function useMinuto() {
+export function useMinuto() {
   const [agora, setAgora] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setAgora(Date.now()), 30_000);
@@ -89,7 +90,7 @@ export function ConversationList() {
           >
             <option value="">Todos os números</option>
             {numbers.data?.map((n) => (
-              <option key={n.id} value={n.id}>{n.label} · +{n.phone}</option>
+              <option key={n.id} value={n.id}>{n.label} · {n.phone.slice(-4)}</option>
             ))}
           </select>
           <span className={cn('absolute left-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full ring-[3px]', selectedNumber ? (selectedNumber.status === 'connected' ? 'bg-ok ring-ok/25' : 'bg-warn ring-warn/25') : 'bg-faint ring-line')} />
@@ -230,7 +231,6 @@ export function ConversationList() {
             c={c}
             active={c.id === conversationId}
             onClick={() => (selecionando ? alternar(c.id) : setConversation(c.id))}
-            showNumber={!numberId}
             agora={agora}
             selecionando={selecionando}
             marcado={marcados.includes(c.id)}
@@ -245,7 +245,7 @@ export function ConversationList() {
   );
 }
 
-function ConversationRow({ c, active, onClick, showNumber, agora, selecionando, marcado }: { c: Conversation; active: boolean; onClick: () => void; showNumber: boolean; agora: number; selecionando: boolean; marcado: boolean }) {
+function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean }) {
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   const m = STATUS_META[c.status];
@@ -253,6 +253,8 @@ function ConversationRow({ c, active, onClick, showNumber, agora, selecionando, 
     <button onClick={onClick} className={cn('relative w-full text-left pl-3.5 pr-2.5 py-2 flex gap-2.5 border-b border-line hover:bg-field transition-colors', active && !selecionando && 'bg-accent-soft hover:bg-accent-soft', selecionando && marcado && 'bg-accent-soft')}>
       {/* faixa de status (semáforo) */}
       <span className={cn('absolute left-0 top-0 bottom-0 w-[5px]', m.bar)} aria-hidden />
+      {/* faixa do canal: na borda direita porque a esquerda já é do semáforo de status */}
+      <span className="absolute right-0 top-0 bottom-0 w-1" style={{ background: channelColor(c.number.color) }} title={`Canal: ${c.number.label}`} aria-hidden />
       {selecionando && (
         <span className="self-center shrink-0">
           {marcado ? <CheckSquare size={18} className="text-accent" /> : <Square size={18} className="text-faint" />}
@@ -262,20 +264,23 @@ function ConversationRow({ c, active, onClick, showNumber, agora, selecionando, 
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}</span>
-          {/* o número fica aqui, na linha da hora: embaixo, junto das tags, ele acrescentava uma
-              faixa inteira só por estar vendo "todos os números" — a lista dobrava de altura */}
-          {showNumber && <span className="text-[10px] text-faint shrink-0 max-w-[80px] truncate" title={`Número: ${c.number.label}`}>{c.number.label}</span>}
+          {/* o canal fica aqui, na linha da hora: embaixo, junto das tags, ele acrescentava uma
+              faixa inteira — a lista dobrava de altura. Sempre visível: é por ele que a resposta sai */}
+          <ChannelBadge channel={c.number} phone="none" className="shrink-0 max-w-[120px]" />
           <span className="tnum text-[10.5px] text-faint shrink-0 font-mono">{time}</span>
         </div>
         <div className="flex items-center justify-between gap-2 mt-0.5">
-          <span className={cn('text-xs truncate', c.unreadCount > 0 ? 'text-ink' : 'text-muted')}>{c.lastMessagePreview ?? '—'}</span>
+          <span className={cn('text-xs truncate', c.unreadCount > 0 ? 'text-ink' : 'text-muted')}>{formatPreview(c.lastMessagePreview)}</span>
           <SeloEspera desde={c.awaitingSince} encerrada={c.status === 'closed'} agora={agora} />
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
         {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || c.assignee || c.origin !== 'organic') && (
           <div className="flex flex-wrap items-center gap-1 mt-1">
             <OriginBadge origin={c.origin} data={c.originData} />
-            {c.tags.map(({ tag }) => (
+            {/* principal (etapa no Kanban) primeiro, cheia e com estrela; as outras em tom claro */}
+            {[...c.tags].sort((x, y) => Number(!!y.isPrimary) - Number(!!x.isPrimary)).map(({ tag, isPrimary }) => isPrimary ? (
+              <span key={tag.id} title="Tag principal — etapa no Kanban" className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md text-white" style={{ background: tag.color }}><Star size={8} className="fill-current" />{tag.name}</span>
+            ) : (
               <span key={tag.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `color-mix(in srgb, ${tag.color} 18%, transparent)`, color: tag.color }}>{tag.name}</span>
             ))}
             {(c.contact.tags ?? []).map(({ tag }) => (
@@ -299,7 +304,7 @@ function ConversationRow({ c, active, onClick, showNumber, agora, selecionando, 
  * Conversa já respondida (ou encerrada) não mostra nada: selo em tudo vira ruído e ninguém
  * mais repara nos vermelhos.
  */
-function SeloEspera({ desde, encerrada, agora }: { desde: string | null; encerrada: boolean; agora: number }) {
+export function SeloEspera({ desde, encerrada, agora }: { desde: string | null; encerrada: boolean; agora: number }) {
   if (!desde || encerrada) return null;
   const minutos = Math.max(0, Math.floor((agora - new Date(desde).getTime()) / 60_000));
   const cor = minutos >= 60 ? 'bg-danger-soft text-danger' : minutos >= 15 ? 'bg-wait-soft text-wait' : 'bg-field text-muted';
@@ -318,7 +323,7 @@ export function duracaoCurta(minutos: number) {
   return `${Math.floor(horas / 24)}d`;
 }
 
-function formatTime(iso: string) {
+export function formatTime(iso: string) {
   const d = new Date(iso);
   const today = new Date().toDateString() === d.toDateString();
   return today ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });

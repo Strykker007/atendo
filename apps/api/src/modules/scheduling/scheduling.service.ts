@@ -212,6 +212,6 @@ export class SchedulingService {
   }
 
   private emit(tenantId: string, appointmentId: string) {
-    this.gateway.server?.to(`tenant:${tenantId}`).emit('appointment', { id: appointmentId });
+    this.gateway.emitAppointment(tenantId, appointmentId);
   }
 }

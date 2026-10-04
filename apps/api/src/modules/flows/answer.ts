@@ -26,11 +26,23 @@ export function validAnswer(answer: string, validation: Validation) {
   return true;
 }
 
-/** {{contact.name}}, {{contact.phone}}, {{nome_da_variavel}} */
-export function interpolate(text: string, ctx: { contact: { name: string | null; phone: string }; vars: Record<string, string> }) {
+export interface InterpolateCtx {
+  contact: { name: string | null; phone: string; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null };
+  vars: Record<string, string>;
+}
+
+const CONTACT_KEYS = ['name', 'phone', 'email', 'address', 'note1', 'note2'] as const;
+
+/**
+ * `{{nome_da_variavel}}` (variável do fluxo) e `{{contact.<campo>}}` — name, phone, email,
+ * address, note1, note2. Chave desconhecida vira texto vazio.
+ */
+export function interpolate(text: string, ctx: InterpolateCtx) {
   return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => {
-    if (key === 'contact.name') return ctx.contact.name ?? '';
-    if (key === 'contact.phone') return ctx.contact.phone;
+    if (key.startsWith('contact.')) {
+      const field = key.slice(8) as (typeof CONTACT_KEYS)[number];
+      return CONTACT_KEYS.includes(field) ? (ctx.contact[field] ?? '') : '';
+    }
     return ctx.vars[key] ?? '';
   });
 }

@@ -4,8 +4,12 @@ import type { Config } from 'tailwindcss';
  * Todas as cores vêm de variáveis CSS definidas em globals.css.
  * Tema claro = direção "Semáforo" (C). Tema escuro = "Sala de controle" (B).
  * Nunca use hex direto em componente: use os tokens abaixo para funcionar nos dois temas.
+ *
+ * Os tokens são hex em variável, e o Tailwind não sabe aplicar transparência em `var(--x)`:
+ * sem o `<alpha-value>`, classes como `bg-muted/30` ou `ring-accent/40` simplesmente não eram
+ * geradas. Com `color-mix`, o modificador `/NN` funciona e, sem ele, a cor sai inteira (100%).
  */
-const v = (name: string) => `var(--${name})`;
+const v = (name: string) => `color-mix(in srgb, var(--${name}) calc(<alpha-value> * 100%), transparent)`;
 
 export default {
   darkMode: 'class',
@@ -41,7 +45,7 @@ export default {
         warn: { DEFAULT: v('warn'), soft: v('warn-soft'), ink: v('warn-ink') },
         danger: { DEFAULT: v('danger'), soft: v('danger-soft'), ink: v('danger-ink') },
         // chat
-        chat: { bg: v('chat-bg'), in: v('bub-in'), 'in-ink': v('bub-in-ink'), out: v('bub-out'), 'out-ink': v('bub-out-ink') },
+        chat: { bg: v('chat-bg'), in: v('bub-in'), 'in-ink': v('bub-in-ink'), out: v('bub-out'), 'out-ink': v('bub-out-ink'), 'tick-read': v('tick-read') },
         // provider
         meta: { soft: v('meta-soft'), ink: v('meta-ink') },
         evo: { soft: v('evo-soft'), ink: v('evo-ink') },

@@ -40,31 +40,43 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/numbers` | tenant_admin | Cria e conecta (respeita `maxNumbers`) |
 | PUT | `/numbers/:id/provider` | tenant_admin | **Troca de provider** |
 | POST | `/numbers/:id/connect` | tenant_admin | Reconecta / QR novo |
-| PATCH | `/numbers/:id` | tenant_admin | Label / ativo |
+| PATCH | `/numbers/:id` | tenant_admin | Label / cor (`color`, `#rrggbb`) / ativo |
 | DELETE | `/numbers/:id` | tenant_admin | Remove (cascade em conversas) |
 | **Conversas** | | | |
 | GET | `/conversations?status=&numberId=&tagIds=a,b&search=&origin=&assigneeId=&sort=&cursor=` | todos | Lista por cursor. Em `in_progress`, atendente vê só as suas; admin vê todas ou filtra por `assigneeId`. `sort=waiting` ordena por quem espera resposta há mais tempo (`awaitingSince` asc, já respondidas por último) |
 | GET | `/conversations/counts?numberId=` | todos | `{waiting, in_progress, closed, in_progress_mine, in_progress_all}` (`in_progress` já respeita a visão do usuário) |
 | GET | `/conversations/:id` | todos | Uma conversa (contato, tags, atendente, número) |
 | GET | `/conversations/:id/messages?cursor=` | todos | Mensagens (mais recentes primeiro, 50); `mediaUrl` já vem assinada. **Nada é apagado**: o painel carrega a última página e busca o passado conforme a pessoa rola, com `cursor` = id da última linha recebida |
-| POST | `/conversations/:id/messages` | todos | Envia: `{type:'text', text}` ou `{type:'image'|'audio'|'video'|'document', mediaKey, text?}` ou template |
+| POST | `/conversations/:id/messages` | todos | Envia: `{type:'text', text}` ou `{type:'image'|'audio'|'video'|'document', mediaKey, text?}` ou template. Sai **sempre** pelo número da conversa (nenhum campo escolhe o número; campo extra = 400). `expectedNumberId?` = canal mostrado na tela: divergiu → 409 `{code:'number_changed'}` sem enviar. Número inativo/de outro tenant ou desconectado → 422 |
 | POST | `/conversations/:id/claim` | todos | Assumir (atômico; 409 se outra pessoa assumiu) |
 | POST | `/conversations/:id/transfer` | dono ou admin | `{agentId}` |
 | POST | `/conversations/:id/release` | dono ou admin | Devolve à fila (waiting, sem dono) |
 | POST | `/conversations/:id/messages/:messageId/resend` | todos | Reenvia mensagem com status `failed` |
+| POST | `/conversations/:id/messages/:messageId/react` | todos | Reação do atendente `{ emoji }` (vazio = retirar). Manda pelo provider e **só grava se ele aceitar**; emite `message` no socket. Recusa: mensagem sem `externalId`/pendente/falha, conversa encerrada, número desconectado, conversa de outro atendente (409), fora da janela de 24h (Meta). Não assume a conversa e não passa pelo `UsageService` |
+| POST | `/conversations/:id/messages/:messageId/forward` | todos | Encaminhar `{ targetConversationIds: uuid[] }` (1–5). Cada destino é um `send` normal marcado `forwarded: true` (quota, janela da Meta, "responder = assumir", ledger). Mídia reaproveita o arquivo do storage; localização vira texto com link do Maps, contato vira nome + telefone, botões/lista viram o texto. Recusa figurinha e mídia ainda não baixada. Destino fora do escopo de números do usuário = "não encontrada". Devolve `{ sent: Message[], failed: { conversationId, error }[] }` — falha num destino não derruba os outros |
 | PATCH | `/conversations/:id/status` | todos | `waiting | in_progress | closed` |
 | POST | `/conversations/bulk/close` | todos | `{ids[], outcome?, reason?}` — encerra até 200. Devolve `{closed, ignored}`. O recorte (números do usuário; atendente comum só o que é dele ou está sem dono) é feito no service, porque o `ConversationScopeGuard` olha `:id` e aqui a lista vem no corpo. Sem valor de venda e sem fluxo, de propósito |
 | GET | `/conversations/:id/events` | todos | Histórico do atendimento: `claimed`, `transferred`, `released`, `closed`, `reopened`, com ator, alvo, desfecho congelado e data |
-| PATCH | `/conversations/:id/tags` | todos | `{tagIds: []}` substitui as tags |
+| PATCH | `/conversations/:id/tags` | todos | `{tagIds: []}` substitui as tags. A principal se mantém se continuar na lista; senão a primeira tag de coluna (ordem do Kanban) assume. Emite `conversation` |
+| PATCH | `/conversations/:id/primary-tag` | todos | `{tagId: uuid \| null}` troca a tag principal (mover card no Kanban). A antiga vira secundária; a nova entra se faltava. `null` = "Sem etapa". 400 se a tag não for `isKanban`. Emite `conversation` |
 | PATCH | `/conversations/contacts/:contactId/tags` | todos | `{tagIds}` substitui as tags **do contato** (permanentes) |
-| POST | `/conversations/:id/read` | todos | Zera não-lidas |
+| POST | `/conversations/:id/read` | todos | Zera não-lidas. Também assina o "digitando…" do contato no provider (Evolution; no máx. 1×/2 min por contato, sem esperar a resposta) |
 | **Tags** | | | |
 | GET | `/tags` | todos | Com contagem de conversas |
-| POST / PATCH / DELETE | `/tags[/:id]` | tenant_admin | `{name, color}` |
+| POST / PATCH / DELETE | `/tags[/:id]` | `tags.manage` | `{name, color, isKanban?, position?}`. Lista vem na ordem do Kanban (`position`, nome). Emite `kanban` |
+| **Kanban** | | | |
+| GET | `/kanban?numberId=` | todos | `KanbanBoard` (`packages/shared/src/kanban.ts`): colunas (tags `isKanban`) + cards dos atendimentos abertos que a pessoa enxerga (mesma regra de posse/número da lista). Até 500, mais recentes primeiro (`truncated`) |
+| PATCH | `/kanban/columns` | `tags.manage` | `{tagIds}` nova ordem das colunas. Emite `kanban` |
 | **Respostas rápidas** | | | |
 | GET | `/quick-replies` | todos | Pastas com respostas |
 | POST / PATCH / DELETE | `/quick-replies/folders[/:id]` | todos | Pastas |
 | POST / PATCH / DELETE | `/quick-replies[/:id]` | todos | Respostas |
+| PATCH | `/quick-replies/folders/reorder` | `quick_replies.manage` | `{ items: [{ id, position }] }` — ordem das pastas |
+| PATCH | `/quick-replies/reorder` | `quick_replies.manage` | `{ items: [{ id, position, folderId? }] }` — ordem das respostas; `folderId` move para outra pasta (do mesmo tenant) |
+| POST | `/quick-replies/duplicate` | `quick_replies.manage` | `{ ids }` → `{ replies }` — cópia na mesma pasta, título com " (cópia)", anexo mantido (mesmo cliente) |
+| GET | `/quick-replies/:id/export` | `quick_replies.manage` | `{ portable, warnings }` — `{ atendo: 'quick-reply', version, folder, title, body }`; anexo não vai (chave carrega o tenant), com aviso |
+| POST | `/quick-replies/export` | `quick_replies.manage` | `{ ids }` → `{ bundle, warnings }` — `{ atendo: 'quick-reply-bundle', version, items }`, cada item igual ao individual |
+| POST | `/quick-replies/import` | `quick_replies.manage` | `{ portable }` (individual ou lote) → `{ replies, warnings }`. Pasta achada pelo nome ou criada; título repetido na pasta ganha " (cópia)"; tudo ou nada (transação) |
 | **Mídia** | | | |
 | POST | `/uploads` | todos | multipart `file` → `{key, url, mimeType, fileName, size}` |
 | GET | `/media/*path?exp=&sig=` | — (assinatura) | Serve o arquivo se a assinatura for válida |
@@ -152,7 +164,7 @@ Exigem login e a feature `ai_copilot`. Ver [15](15-ia.md).
 | GET | `/ai/usage` | consumo do mês: interações, custo em BRL e quebra por tipo |
 | POST | `/ai/suggest` | `{ conversationId }` → `{ text }` — sugestão de resposta (não envia nada) |
 | POST | `/ai/rewrite` | `{ text, tone, conversationId? }` → `{ text }` — tons: `formal`, `friendly`, `short`, `clear` |
-| POST | `/ai/summary` | `{ conversationId }` → `{ text }` — resumo em tópicos |
+| POST | `/ai/summary` | `{ conversationId, force? }` → `{ text, updatedAt, cached }` resumo em tópicos. Fica em cache na conversa amarrado à última mensagem: sem mensagem nova devolve o salvo (`cached: true`, sem chamar nem cobrar a IA); `force: true` gera de novo |
 
 `503` = sem fornecedor configurado. `403` = sem a feature no plano, sem quota ou teto de
 gasto atingido (a mensagem diz qual).

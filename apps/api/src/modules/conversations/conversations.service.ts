@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import type { OutboundMessage, QuotedRef } from '@atendo/shared';
+import { messagePreview } from '@atendo/shared';
+import type { MessageContent, MessageReaction, OutboundMessage, QuotedRef } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -27,14 +28,17 @@ const META_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const MESSAGE_INCLUDE = {
   author: { select: { name: true } },
   quotedMessage: {
-    select: { id: true, direction: true, type: true, text: true, mediaName: true, author: { select: { name: true } } },
+    select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, author: { select: { name: true } } },
   },
 } satisfies Prisma.MessageInclude;
 
 type MessageRow = Message & {
   author?: { name: string } | null;
-  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; author: { name: string } | null } | null;
+  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; author: { name: string } | null } | null;
 };
+
+/** WhatsApp limita o encaminhamento a 5 conversas por vez; seguimos a mesma regra. */
+export const FORWARD_MAX_TARGETS = 5;
 
 @Injectable()
 export class ConversationsService {
@@ -68,7 +72,7 @@ export class ConversationsService {
       externalId: m.quotedId,
       direction: q?.direction ?? null,
       type: q?.type ?? null,
-      preview: (q?.text ?? m.quotedPreview ?? q?.mediaName ?? null)?.slice(0, 120) ?? null,
+      preview: (q ? messagePreview({ type: q.type, text: q.text, content: q.content as unknown as MessageContent | null, mediaName: q.mediaName }) : m.quotedPreview)?.slice(0, 120) ?? null,
       // enviada pelo painel: nome do atendente. Recebida: null, o front usa o nome do contato.
       authorName: q?.direction === 'out' ? q.author?.name ?? null : null,
       fromStatus: m.quotedFromStatus,
@@ -121,7 +125,7 @@ export class ConversationsService {
     };
     const rows = await this.prisma.conversation.findMany({
       where,
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
       orderBy:
@@ -196,7 +200,7 @@ export class ConversationsService {
   async one(tenantId: string, id: string) {
     const row = await this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
     });
     return this.presentContact(row);
   }
@@ -216,7 +220,7 @@ export class ConversationsService {
    * Envio pelo sistema (fluxos de automação): sem autor humano, não assume a conversa,
    * respeita quota e janela de 24h, passa pela mesma fila.
    */
-  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string }, interactive?: import('@atendo/shared').InteractiveMenu) {
+  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string; voice?: boolean }, interactive?: import('@atendo/shared').InteractiveMenu) {
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true } });
     if (!conv || conv.status === 'closed') throw new BadRequestException('Conversa indisponível');
     if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
@@ -229,9 +233,9 @@ export class ConversationsService {
     // no histórico do painel a mensagem interativa aparece como texto + opções numeradas
     const shown = interactive?.options.length ? `${text ?? ''}\n\n${interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : text;
     const message = await this.prisma.message.create({
-      data: { conversationId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, raw: interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : undefined },
+      data: { conversationId, numberId: conv.numberId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, raw: interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : media?.voice === false ? { voice: false } : undefined },
     });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: (shown ?? `[${media?.type}]`).slice(0, 120), awaitingSince: null } });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: messagePreview({ type: media ? media.type : 'text', text: shown, mediaName: media?.name }).slice(0, 120), awaitingSince: null } });
     await this.outbound.add('send', { messageId: message.id });
     this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
@@ -289,7 +293,12 @@ export class ConversationsService {
     return conv;
   }
 
-  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string }) {
+  /**
+   * Envio do atendente. Sai SEMPRE pelo número da conversa, lido do banco — nada no payload escolhe
+   * o número, e não há fallback para outro: se o canal não pode enviar, a mensagem não sai.
+   * `expectedNumberId` é o canal que a tela mostrava; se a conversa não está mais nele, 409 sem enviar.
+   */
+  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string }) {
     const authorId = author.id;
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
@@ -297,8 +306,15 @@ export class ConversationsService {
     });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para responder.');
+    // número de outro tenant nunca deveria acontecer, mas se acontecer é bloqueio, não envio
+    if (!conv.number || conv.number.tenantId !== tenantId || !conv.number.isActive) {
+      throw new UnprocessableEntityException('Esta conversa não tem um número de WhatsApp válido para responder.');
+    }
+    if (input.expectedNumberId && input.expectedNumberId !== conv.numberId) {
+      throw new ConflictException({ code: 'number_changed', message: `O canal desta conversa mudou para "${conv.number.label}". Confira antes de enviar de novo.` });
+    }
     if (conv.number.status !== 'connected') {
-      throw new BadRequestException(`O número "${conv.number.label}" está desconectado. Conecte-o em Números para responder.`);
+      throw new UnprocessableEntityException(`O número "${conv.number.label}" está desconectado. Conecte-o em Números para responder.`);
     }
 
     // Regra da Meta: fora da janela de 24h só sai template aprovado
@@ -327,6 +343,7 @@ export class ConversationsService {
     const message = await this.prisma.message.create({
       data: {
         conversationId: conv.id,
+        numberId: conv.numberId,
         direction: 'out',
         type: input.template ? 'template' : input.type,
         status: 'pending',
@@ -336,6 +353,9 @@ export class ConversationsService {
         mediaName: input.media?.fileName,
         quotedId: input.quotedExternalId,
         quotedMessageId: quoted?.id,
+        // só no nosso histórico: nem a Cloud API nem a Evolution aceitam marcar o envio como
+        // encaminhado, então no celular do contato chega como mensagem comum
+        forwarded: input.forwarded ?? false,
         authorId,
         raw: input.template ? ({ template: input.template } as Prisma.InputJsonValue) : undefined,
       },
@@ -347,7 +367,7 @@ export class ConversationsService {
       data: {
         status: conv.status === 'waiting' ? 'in_progress' : conv.status,
         lastMessageAt: new Date(),
-        lastMessagePreview: (input.text ?? `[${input.type}]`).slice(0, 120),
+        lastMessagePreview: messagePreview({ type: input.template ? 'template' : input.type, text: input.text, mediaName: input.media?.fileName }).slice(0, 120),
         awaitingSince: null,
         unreadCount: 0,
       },
@@ -359,6 +379,58 @@ export class ConversationsService {
     return this.present(message);
   }
 
+  /**
+   * Encaminha uma mensagem para outras conversas. Cada envio é um `send` normal — mesma
+   * quota, janela da Meta, posse da conversa ("responder = assumir") e ledger —, só marcado
+   * como encaminhado. Falha numa conversa não impede as outras: devolve o que saiu e o que não.
+   *
+   * O que o provider não sabe mandar do jeito original vira texto: localização sai como link do
+   * Maps, contato como nome + telefone, botões/lista como o texto da mensagem.
+   */
+  async forward(tenantId: string, author: Viewer, conversationId: string, messageId: string, targetIds: string[]) {
+    const src = await this.prisma.message.findFirst({ where: { id: messageId, conversationId, internal: false, conversation: { tenantId } } });
+    if (!src) throw new NotFoundException('Mensagem não encontrada');
+    const input = this.forwardInput(tenantId, src);
+
+    // o ConversationScopeGuard só olha `:id` (a origem); os destinos vêm no corpo e o recorte
+    // por número fica aqui — conversa fora do escopo responde igual a inexistente
+    const escopo = numberFilter(author);
+    const pedidos = [...new Set(targetIds)].filter((id) => id !== conversationId).slice(0, FORWARD_MAX_TARGETS);
+    const visiveis = await this.prisma.conversation.findMany({ where: { id: { in: pedidos }, tenantId, ...(escopo && { numberId: escopo }) }, select: { id: true } });
+    const ok = new Set(visiveis.map((v) => v.id));
+
+    const sent: ReturnType<ConversationsService['present']>[] = [];
+    const failed: { conversationId: string; error: string }[] = [];
+    for (const id of pedidos) {
+      if (!ok.has(id)) { failed.push({ conversationId: id, error: 'Conversa não encontrada' }); continue; }
+      try {
+        sent.push(await this.send(tenantId, author, id, input));
+      } catch (err) {
+        failed.push({ conversationId: id, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return { sent, failed };
+  }
+
+  private forwardInput(tenantId: string, m: Message): Parameters<ConversationsService['send']>[3] {
+    const media = ['image', 'video', 'audio', 'document'] as const;
+    if ((media as readonly string[]).includes(m.type)) {
+      // a mídia é reaproveitada do nosso storage; ainda baixando (ou falhou) não há o que mandar
+      if (!m.mediaUrl || !m.mediaUrl.startsWith(`media/${tenantId}/`)) throw new BadRequestException('A mídia desta mensagem ainda não está disponível para encaminhar.');
+      return {
+        type: m.type as (typeof media)[number],
+        text: m.text ?? undefined,
+        mediaKey: m.mediaUrl,
+        media: { url: m.mediaUrl, mimeType: m.mediaMime ?? undefined, fileName: m.mediaName ?? undefined },
+        forwarded: true,
+      };
+    }
+    if (m.type === 'sticker') throw new BadRequestException('Figurinha não pode ser encaminhada.');
+    const text = textoParaEncaminhar(m.text, m.content as unknown as MessageContent | null);
+    if (!text) throw new BadRequestException('Esta mensagem não tem conteúdo para encaminhar.');
+    return { type: 'text', text, forwarded: true };
+  }
+
   /** Reenvia uma mensagem que falhou: volta para pending e enfileira de novo. */
   async resend(tenantId: string, messageId: string) {
     const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
@@ -368,6 +440,53 @@ export class ConversationsService {
     await this.outbound.add('send', { messageId: m.id });
     this.gateway.emitMessage(tenantId, this.present(updated));
     return this.present(updated);
+  }
+
+  /**
+   * Confere se o atendente pode reagir a esta mensagem e devolve o que o provider precisa.
+   * Mesmas regras de responder (conversa aberta, número conectado, janela da Meta, conversa
+   * de outra pessoa não), mas sem assumir a conversa: reagir não é atender.
+   */
+  async reactionTarget(tenantId: string, author: Viewer, conversationId: string, messageId: string) {
+    const m = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId, internal: false, conversation: { tenantId } },
+      include: { conversation: { include: { number: true, contact: { select: { phone: true } } } } },
+    });
+    if (!m) throw new NotFoundException('Mensagem não encontrada');
+    if (!m.externalId || m.status === 'pending' || m.status === 'failed') throw new BadRequestException('Essa mensagem não chegou ao WhatsApp — não dá para reagir a ela.');
+    const conv = m.conversation;
+    if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para reagir.');
+    if (conv.number.status !== 'connected') throw new BadRequestException(`O número "${conv.number.label}" está desconectado.`);
+    if (conv.assigneeId && conv.assigneeId !== author.id) throw new ConflictException('Outro atendente está atendendo esta conversa.');
+    // reação é mensagem livre para a Meta: fora da janela de 24h ela recusa
+    if (conv.number.provider === 'meta') {
+      const inWindow = conv.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
+      if (!inWindow) throw new BadRequestException('Janela de 24h da Meta expirou — não dá para reagir.');
+    }
+    return { messageId: m.id, numberId: conv.numberId, to: conv.contact.phone, targetExternalId: m.externalId, targetFromMe: m.direction === 'out' };
+  }
+
+  /**
+   * Grava a reação de um lado na mensagem e avisa o painel. No 1:1 cada lado tem no máximo uma:
+   * a nova substitui a anterior do mesmo lado, e emoji vazio retira. Reação não é mensagem —
+   * não passa pelo `UsageService`, não é cobrada.
+   */
+  async setReaction(tenantId: string, messageId: string, r: { fromMe: boolean; emoji: string; at: Date }) {
+    const m = await this.prisma.message.findFirst({ where: { id: messageId, conversation: { tenantId } }, select: { reactions: true } });
+    if (!m) return null;
+    const atuais = (Array.isArray(m.reactions) ? m.reactions : []) as unknown as MessageReaction[];
+    const reactions = [
+      ...atuais.filter((x) => x.fromMe !== r.fromMe),
+      ...(r.emoji ? [{ emoji: r.emoji, fromMe: r.fromMe, at: r.at.toISOString() }] : []),
+    ];
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { reactions: reactions.length ? (reactions as unknown as Prisma.InputJsonValue) : Prisma.DbNull },
+      include: MESSAGE_INCLUDE,
+    });
+    const presented = this.present(updated);
+    this.gateway.emitMessage(tenantId, presented);
+    return presented;
   }
 
   /**
@@ -384,6 +503,17 @@ export class ConversationsService {
     });
     this.gateway.emitMessage(tenantId, this.present(message));
     return this.present(message);
+  }
+
+  /** Nota interna do sistema (sem autor): o robô avisando a equipe. Nunca vai ao WhatsApp. */
+  async systemNote(conversationId: string, text: string) {
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId }, select: { id: true, tenantId: true } });
+    const message = await this.prisma.message.create({
+      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text, internal: true },
+      include: { author: { select: { name: true } } },
+    });
+    this.gateway.emitMessage(conv.tenantId, this.present(message));
+    return message;
   }
 
   /** Atualiza a ficha do contato. Campo vazio limpa — o atendente apaga o que não vale mais. */
@@ -568,13 +698,66 @@ export class ConversationsService {
     });
   }
 
+  /**
+   * Tags do atendimento. A principal (coluna no Kanban) sobrevive à troca enquanto continuar
+   * na lista; se saiu — ou se ainda não havia — a primeira tag de coluna, na ordem do quadro,
+   * assume. Sem isso, marcar uma etapa pelo chat não moveria o card.
+   */
   async setTags(tenantId: string, id: string, tagIds: string[]) {
     await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId } });
-    await this.prisma.$transaction([
-      this.prisma.conversationTag.deleteMany({ where: { conversationId: id } }),
-      this.prisma.conversationTag.createMany({ data: tagIds.map((tagId) => ({ conversationId: id, tagId })) }),
-    ]);
-    return this.prisma.conversation.findUnique({ where: { id }, include: { tags: { include: { tag: true } } } });
+    // só tags deste tenant: o id vem do corpo da requisição
+    const validas = await this.prisma.tag.findMany({
+      where: { id: { in: [...new Set(tagIds)] }, tenantId },
+      select: { id: true, isKanban: true },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockConversation(tx, id);
+      const atual = await tx.conversationTag.findFirst({ where: { conversationId: id, isPrimary: true }, select: { tagId: true } });
+      const principal = atual && validas.some((t) => t.id === atual.tagId) ? atual.tagId : validas.find((t) => t.isKanban)?.id ?? null;
+      await tx.conversationTag.deleteMany({ where: { conversationId: id } });
+      await tx.conversationTag.createMany({ data: validas.map((t) => ({ conversationId: id, tagId: t.id, isPrimary: t.id === principal })) });
+    });
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id }, include: { tags: { include: { tag: true } } } });
+    // o Kanban e as outras telas abertas precisam ver a etapa mudar
+    this.gateway.emitConversation(tenantId, conv);
+    return conv;
+  }
+
+  /**
+   * Troca a tag principal — é o "mover card" do Kanban. A antiga continua no atendimento,
+   * rebaixada a secundária; a nova entra se ainda não estava. `null` tira da etapa.
+   * Só tag de coluna (`isKanban`) pode ser principal: as outras não têm onde aparecer no quadro.
+   */
+  async setPrimaryTag(tenantId: string, id: string, tagId: string | null) {
+    await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId } });
+    if (tagId) {
+      const tag = await this.prisma.tag.findFirst({ where: { id: tagId, tenantId }, select: { isKanban: true } });
+      if (!tag) throw new NotFoundException('Tag não encontrada');
+      if (!tag.isKanban) throw new BadRequestException('Essa tag não é uma etapa do Kanban');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockConversation(tx, id);
+      await tx.conversationTag.updateMany({ where: { conversationId: id, isPrimary: true }, data: { isPrimary: false } });
+      if (tagId) {
+        await tx.conversationTag.upsert({
+          where: { conversationId_tagId: { conversationId: id, tagId } },
+          create: { conversationId: id, tagId, isPrimary: true },
+          update: { isPrimary: true },
+        });
+      }
+    });
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id }, include: { tags: { include: { tag: true } } } });
+    this.gateway.emitConversation(tenantId, conv);
+    return conv;
+  }
+
+  /**
+   * Trava a linha da conversa até o fim da transação. Duas abas movendo o mesmo card ao mesmo
+   * tempo, sem isto, podiam terminar com duas tags principais — o atendimento em duas colunas.
+   */
+  private async lockConversation(tx: Prisma.TransactionClient, id: string) {
+    await tx.$queryRaw(Prisma.sql`SELECT 1 FROM "conversations" WHERE "id" = ${id} FOR UPDATE`);
   }
 
   /** Tags da pessoa (valem para todas as conversas dela). */
@@ -613,4 +796,18 @@ export function tipoDaTransicao(de: ConversationStatus | null | undefined, para:
  */
 export function inicioDaEspera(atual: Date | null, chegada: Date): Date {
   return atual ?? chegada;
+}
+
+/** Conteúdo estruturado → texto, para encaminhar o que o provider não manda no formato original. */
+export function textoParaEncaminhar(text: string | null, content: MessageContent | null): string | undefined {
+  if (content?.kind === 'location') {
+    const titulo = [content.name, content.address].filter(Boolean).join(' — ');
+    const link = `https://www.google.com/maps?q=${content.lat},${content.lng}`;
+    return [text, titulo && `📍 ${titulo}`, link].filter(Boolean).join('\n');
+  }
+  if (content?.kind === 'contacts') {
+    const linhas = content.contacts.map((c) => `👤 ${c.name}${c.phones.length ? `\n${c.phones.map((p) => `+${p.replace(/^\+/, '')}`).join('\n')}` : ''}`);
+    return [text, ...linhas].filter(Boolean).join('\n\n');
+  }
+  return text?.trim() || undefined;
 }

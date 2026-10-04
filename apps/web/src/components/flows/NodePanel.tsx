@@ -1,11 +1,23 @@
 'use client';
-import { Trash2, Plus, X } from 'lucide-react';
+import { useContext } from 'react';
+import { Trash2, Plus, X, ExternalLink } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { NODE_META } from './nodes';
+import { NODE_META, DELAY_UNIT, FlowEditorRefs } from './nodes';
 import { useTags, useAgents, useServices, useProfessionals, useHasFeature } from '@/lib/hooks';
-import { TextWithVars, type FlowVar } from './TextWithVars';
-import type { FlowNode } from '@atendo/shared';
+import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
+import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, normalizeCondition, normalizeContent, type ContactField, type FlowNode, type VariableAssignment, type VariableOp } from '@atendo/shared';
+import { ConditionPanel } from './ConditionPanel';
+import { ContentPanel } from './ContentPanel';
+
+const varName = (v: string) => v.replace(/[^\w]/g, '_').toLowerCase();
+const shortId = () => crypto.randomUUID().slice(0, 8);
+/** Valor fixo que não é número (com {{variável}} só dá para saber na execução). Mesma regra do `toNumber` da API. */
+const notNumber = (v: string) => {
+  const t = v.trim();
+  if (/\{\{/.test(t)) return false;
+  return !t || Number.isNaN(Number(/,\d+$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')));
+};
 
 /** Painel lateral: edita os dados do bloco selecionado. Cada tipo tem seus campos. */
 export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; onChange: (data: FlowNode['data']) => void; onDelete: () => void; vars: FlowVar[] }) {
@@ -15,8 +27,14 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
   const aiFeature = useHasFeature('ai_flows');
   const services = useServices();
   const pros = useProfessionals();
+  const refs = useContext(FlowEditorRefs);
   const m = NODE_META[node.type];
-  const set = (patch: Record<string, unknown>) => onChange({ ...(node.data as object), ...patch } as FlowNode['data']);
+  // editar o bloco é revisá-lo: some o aviso "Reconfigurar" que veio da importação
+  const set = (patch: Record<string, unknown>) => {
+    const { _reconfig, ...rest } = node.data as Record<string, unknown>;
+    void _reconfig;
+    onChange({ ...rest, ...patch } as FlowNode['data']);
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -32,21 +50,48 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         {node.type === 'start' && <p className="text-muted">O gatilho (manual, nova conversa ou palavra-chave) é definido nas configurações do fluxo, no topo da tela.</p>}
 
         {node.type === 'message' && (
-          <>
-            <Field label="Texto">
-              <TextWithVars value={node.data.text ?? ''} onChange={(v) => set({ text: v })} vars={vars} placeholder="Olá {{contact.name}}! …" />
-            </Field>
-            <p className="text-[11px] text-faint">Anexar imagem/arquivo ao bloco: em breve (use uma resposta rápida por enquanto).</p>
-          </>
+          <ContentPanel
+            items={normalizeContent(node.data)}
+            vars={vars}
+            // primeira edição de um bloco antigo grava no formato novo (`items`) e apaga os campos soltos
+            onChange={(items) => set({ items, text: undefined, mediaKey: undefined, mediaType: undefined, mediaName: undefined })}
+          />
         )}
+
+        {node.type === 'connect_flow' && (() => {
+          const target = refs.flows?.find((f) => f.id === node.data.flowId);
+          return (
+            <>
+              <Field label="Fluxo de destino" hint="Só fluxos desta empresa. Desativado não recebe a conversa.">
+                <select className={inputCls} value={node.data.flowId ?? ''} onChange={(e) => set({ flowId: e.target.value || undefined, flowName: undefined })}>
+                  <option value="">Escolha…</option>
+                  {node.data.flowId && refs.flows && !target && <option value={node.data.flowId}>(fluxo excluído)</option>}
+                  {refs.flows?.map((f) => <option key={f.id} value={f.id}>{f.name}{f.id === refs.flowId ? ' (este fluxo — recomeça)' : ''}{f.isActive ? '' : ' (desativado)'}</option>)}
+                </select>
+              </Field>
+              {target && <a href={`/fluxos/${target.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent-ink hover:underline"><ExternalLink size={12} /> Abrir "{target.name}" em nova aba</a>}
+              {target && !target.isActive && <p className="text-[11.5px] rounded-lg bg-warn-soft text-warn-ink px-3 py-2">O destino está desativado: enquanto estiver assim, a conversa não salta — a automação para e a conversa fica com o atendente atribuído (ou vai para a fila).</p>}
+              <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">
+                Este fluxo <b>termina aqui</b> e o destino começa do <b>início</b> — não há volta. As variáveis deste fluxo seguem para o destino.
+                Se o destino for excluído ou desativado, a automação para: a conversa fica com o atendente atribuído ou, sem ninguém, vai para a fila. Proteção contra loop: {MAX_FLOW_HOPS} saltos seguidos sem o contato responder encerram a automação.
+              </p>
+            </>
+          );
+        })()}
 
         {node.type === 'question' && (
           <>
-            <Field label="Pergunta"><TextWithVars value={node.data.text} onChange={(v) => set({ text: v })} vars={vars} placeholder="Qual o seu e-mail?" /></Field>
+            <Field label="Pergunta (opcional)" hint="Vazio = só espera a resposta (a pergunta foi feita num bloco anterior)"><TextWithVars value={node.data.text} onChange={(v) => set({ text: v })} vars={vars} placeholder="Qual o seu e-mail?" /></Field>
             <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3 space-y-2">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-ink">Este bloco cria uma variável</div>
-              <Field label="Nome da variável" hint="Só letras, números e _ . A resposta do contato fica guardada aqui.">
-                <input className={inputCls} value={node.data.varName} onChange={(e) => set({ varName: e.target.value.replace(/[^\w]/g, '_').toLowerCase() })} placeholder="email" />
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-ink">Onde salvar a resposta</div>
+              <Field label="Variável" hint="Só letras, números e _ . A resposta do contato fica guardada aqui.">
+                <input className={inputCls} value={node.data.varName} onChange={(e) => set({ varName: varName(e.target.value) })} placeholder="email" />
+              </Field>
+              <Field label="Também na ficha do contato" hint="Vale fora deste fluxo: aparece na ficha e nas próximas conversas">
+                <select className={inputCls} value={node.data.contactField ?? ''} onChange={(e) => set({ contactField: (e.target.value || undefined) as ContactField | undefined })}>
+                  <option value="">Não salvar no contato</option>
+                  {(Object.keys(CONTACT_FIELD_LABEL) as ContactField[]).map((k) => <option key={k} value={k}>{CONTACT_FIELD_LABEL[k]}</option>)}
+                </select>
               </Field>
               <p className="text-[11.5px] text-muted">Depois, em qualquer bloco, use <code className="font-mono bg-panel border border-line rounded px-1">{`{{${node.data.varName || 'nome'}}}`}</code> — ou clique em <b>Inserir variável</b> nos campos de texto.</p>
             </div>
@@ -82,54 +127,33 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         )}
 
         {node.type === 'condition' && (
-          <>
-            <Field label="Tipo">
-              <select className={inputCls} value={node.data.kind} onChange={(e) => set({ kind: e.target.value })}>
-                <option value="var_equals">Variável é igual a</option><option value="var_contains">Variável contém</option><option value="has_tag">Conversa tem a tag</option><option value="business_hours">Está no horário comercial</option>
-              </select>
-            </Field>
-            {(node.data.kind === 'var_equals' || node.data.kind === 'var_contains') && (
-              <>
-                <Field label="Variável">
-                  <select className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: e.target.value })}>
-                    <option value="">Escolha…</option>
-                    {vars.map((v) => <option key={v.key} value={v.key}>{v.key} — {v.label}</option>)}
-                  </select>
-                  {vars.length === 0 && <span className="text-[11px] text-faint">Nenhuma variável ainda: adicione um bloco Perguntar antes.</span>}
-                </Field>
-                <Field label="Valor"><input className={inputCls} value={node.data.value ?? ''} onChange={(e) => set({ value: e.target.value })} /></Field>
-              </>
-            )}
-            {node.data.kind === 'has_tag' && (
-              <Field label="Tag"><select className={inputCls} value={node.data.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}><option value="">Escolha…</option>{tags.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
-            )}
-            {node.data.kind === 'business_hours' && (
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Das"><input type="time" className={inputCls} value={node.data.hours?.start ?? '08:00'} onChange={(e) => set({ hours: { ...(node.data.hours ?? { days: [1, 2, 3, 4, 5], end: '18:00' }), start: e.target.value } })} /></Field>
-                <Field label="Até"><input type="time" className={inputCls} value={node.data.hours?.end ?? '18:00'} onChange={(e) => set({ hours: { ...(node.data.hours ?? { days: [1, 2, 3, 4, 5], start: '08:00' }), end: e.target.value } })} /></Field>
-                <div className="col-span-2 flex flex-wrap gap-1">
-                  {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((l, i) => {
-                    const days = node.data.hours?.days ?? [1, 2, 3, 4, 5];
-                    const on = days.includes(i);
-                    return <button key={i} type="button" onClick={() => set({ hours: { start: '08:00', end: '18:00', ...(node.data.hours ?? {}), days: on ? days.filter((d) => d !== i) : [...days, i] } })} className={`w-7 h-7 rounded-md text-xs font-semibold ${on ? 'bg-accent text-white' : 'bg-field text-muted'}`}>{l}</button>;
-                  })}
-                </div>
-              </div>
-            )}
-          </>
+          <ConditionPanel
+            branches={normalizeCondition(node.data)}
+            vars={vars}
+            // primeira edição de um bloco antigo grava no formato novo (ramo 'yes' + Senão 'no')
+            onChange={(branches) => set({ branches, kind: undefined, varName: undefined, value: undefined, tagId: undefined, hours: undefined })}
+          />
         )}
 
         {node.type === 'action' && (
           <>
             <Field label="Ação">
               <select className={inputCls} value={node.data.kind} onChange={(e) => set({ kind: e.target.value })}>
-                <option value="set_var">Definir variável</option><option value="add_tag">Aplicar tag</option><option value="remove_tag">Remover tag</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="handoff">Entregar para humano (fim do fluxo)</option>
+                {/* "Definir variável" virou o bloco Manipulador; continua aqui só para fluxos antigos */}
+                {node.data.kind === 'set_var' && <option value="set_var">Definir variável (antigo — prefira o bloco Manipulador)</option>}
+                <option value="add_tag">Aplicar etiqueta</option><option value="remove_tag">Remover etiqueta</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="webhook">Chamar webhook</option><option value="handoff">Entregar para humano (fim do fluxo)</option>
               </select>
             </Field>
+            {node.data.kind === 'webhook' && (
+              <>
+                <Field label="URL" hint="Recebe um POST com o contato e as variáveis do fluxo. Se falhar, o fluxo segue."><input className={inputCls} value={node.data.url ?? ''} onChange={(e) => set({ url: e.target.value.trim() })} placeholder="https://exemplo.com/webhook" /></Field>
+                <Field label="Guardar a resposta na variável (opcional)"><input className={inputCls} value={node.data.responseVar ?? ''} onChange={(e) => set({ responseVar: varName(e.target.value) || undefined })} placeholder="retorno_webhook" /></Field>
+              </>
+            )}
             {node.data.kind === 'set_var' && (
               <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3 space-y-2">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-ink">Este bloco cria/atualiza uma variável</div>
-                <Field label="Nome da variável"><input className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: e.target.value.replace(/[^\w]/g, '_').toLowerCase() })} placeholder="origem" /></Field>
+                <Field label="Nome da variável"><input className={inputCls} value={node.data.varName ?? ''} onChange={(e) => set({ varName: varName(e.target.value) })} placeholder="origem" /></Field>
                 <Field label="Valor" hint="Pode usar outras variáveis, ex.: Olá {{contact.name}}"><TextWithVars multiline={false} value={node.data.value ?? ''} onChange={(v) => set({ value: v })} vars={vars} placeholder="site" /></Field>
               </div>
             )}
@@ -227,7 +251,118 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
           )
         )}
 
-        {node.type === 'wait' && <Field label="Minutos"><input type="number" min={1} className={inputCls} value={node.data.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} /></Field>}
+        {node.type === 'wait' && (() => {
+          const unit = node.data.unit ?? 'minutes';
+          const f = DELAY_UNIT[unit].factor;
+          return (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Esperar"><input type="number" min={1} className={inputCls} value={+(node.data.minutes / f).toFixed(2)} onChange={(e) => set({ minutes: Math.max(1, Math.round(Number(e.target.value) * f)) })} /></Field>
+                <Field label="Unidade">
+                  <select className={inputCls} value={unit} onChange={(e) => set({ unit: e.target.value })}>
+                    {(Object.keys(DELAY_UNIT) as (keyof typeof DELAY_UNIT)[]).map((k) => <option key={k} value={k}>{DELAY_UNIT[k].label}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <label className="flex items-start gap-2 text-ink">
+                <input type="checkbox" className="mt-0.5" checked={!!node.data.businessHours} onChange={(e) => set({ businessHours: e.target.checked })} />
+                <span>Só seguir no horário comercial<span className="block text-[11px] text-muted">Se o tempo vencer fora do expediente (Configurações → Horário), espera até a próxima abertura.</span></span>
+              </label>
+            </>
+          );
+        })()}
+
+        {node.type === 'variable' && (() => {
+          const list = node.data.assignments;
+          const upd = (id: string, patch: Partial<VariableAssignment>) => set({ assignments: list.map((x) => (x.id === id ? { ...x, ...patch } : x)) });
+          return (
+            <Field label="Operações" hint="Executadas em ordem: cada uma já enxerga o resultado da anterior. Valores aceitam {{variáveis}}.">
+              <div className="space-y-2">
+                {list.map((a, i) => {
+                  const op = a.op ?? 'set';
+                  return (
+                    <div key={a.id} className="rounded-lg border border-line p-2 space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="tnum font-mono text-[11px] text-faint w-4">{i + 1}</span>
+                        <select className={inputCls} value={op} onChange={(e) => upd(a.id, { op: e.target.value as VariableOp })}>
+                          {(Object.keys(VARIABLE_OP_LABEL) as VariableOp[]).map((o) => <option key={o} value={o}>{VARIABLE_OP_LABEL[o]}</option>)}
+                        </select>
+                        <button onClick={() => set({ assignments: list.filter((x) => x.id !== a.id) })} disabled={list.length <= 1} className="text-faint hover:text-danger p-1"><X size={14} /></button>
+                      </div>
+                      <input className={inputCls} value={a.varName} placeholder="nome_da_variavel" onChange={(e) => upd(a.id, { varName: varName(e.target.value) })} />
+                      {(op === 'set' || op === 'append') && <TextWithVars multiline={false} value={a.value} vars={vars} placeholder={op === 'append' ? 'texto a acrescentar' : 'valor'} onChange={(v) => upd(a.id, { value: v })} />}
+                      {(op === 'add' || op === 'subtract') && (
+                        <>
+                          <TextWithVars multiline={false} value={a.value} vars={vars} placeholder="número (ex.: 1 ou {{outra}})" onChange={(v) => upd(a.id, { value: v })} />
+                          {notNumber(a.value) && <p className="text-[11px] text-danger">Só números podem ser somados ou subtraídos (ex.: 1, 10,5).</p>}
+                        </>
+                      )}
+                      {op === 'copy' && (
+                        <select className={inputCls} value={a.from ?? ''} onChange={(e) => upd(a.id, { from: e.target.value })}>
+                          <option value="">Copiar de…</option>
+                          <optgroup label="Dados do contato">{SYSTEM_VARS.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}</optgroup>
+                          {vars.length > 0 && <optgroup label="Criadas neste fluxo">{vars.filter((v) => v.key !== a.varName).map((v) => <option key={v.key} value={v.key}>{v.key} — {v.label}</option>)}</optgroup>}
+                        </select>
+                      )}
+                      {op === 'now' && (
+                        <select className={inputCls} value={a.format ?? 'datetime'} onChange={(e) => upd(a.id, { format: e.target.value as VariableAssignment['format'] })}>
+                          <option value="datetime">Data e hora (04/10/2026 14:30)</option>
+                          <option value="date">Só a data (04/10/2026)</option>
+                          <option value="time">Só a hora (14:30)</option>
+                        </select>
+                      )}
+                      {op === 'clear' && <p className="text-[11px] text-muted">A variável fica vazia.</p>}
+                    </div>
+                  );
+                })}
+                <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ assignments: [...list, { id: shortId(), varName: '', op: 'set', value: '' }] })}>Adicionar operação</Button>
+                <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Somar/subtrair: variável vazia conta como 0 e aceita vírgula decimal (10,5); se o valor não for número, a variável não muda. Variáveis valem só nesta execução do fluxo.</p>
+              </div>
+            </Field>
+          );
+        })()}
+
+        {node.type === 'randomizer' && (() => {
+          const total = node.data.branches.reduce((s, b) => s + Math.max(0, Number(b.weight) || 0), 0);
+          return (
+            <Field label="Ramos" hint="Cada ramo é uma saída. O percentual é o peso dividido pela soma dos pesos.">
+              <div className="space-y-1.5">
+                {node.data.branches.map((b) => (
+                  <div key={b.id} className="flex items-center gap-1.5">
+                    <input className={inputCls} value={b.label} placeholder="Nome" onChange={(e) => set({ branches: node.data.branches.map((x) => (x.id === b.id ? { ...x, label: e.target.value } : x)) })} />
+                    <input type="number" min={0} className={`${inputCls} w-20`} value={b.weight} onChange={(e) => set({ branches: node.data.branches.map((x) => (x.id === b.id ? { ...x, weight: Math.max(0, Number(e.target.value)) } : x)) })} />
+                    <span className="tnum text-xs text-faint w-9 text-right">{total ? Math.round((Math.max(0, Number(b.weight) || 0) / total) * 100) : 0}%</span>
+                    <button onClick={() => set({ branches: node.data.branches.filter((x) => x.id !== b.id) })} disabled={node.data.branches.length <= 2} className="text-faint hover:text-danger p-1"><X size={14} /></button>
+                  </div>
+                ))}
+                <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ branches: [...node.data.branches, { id: shortId(), label: String.fromCharCode(65 + node.data.branches.length), weight: 0 }] })}>Adicionar ramo</Button>
+              </div>
+            </Field>
+          );
+        })()}
+
+        {node.type === 'distributor' && (
+          <>
+            <Field label="Como distribuir">
+              <select className={inputCls} value={node.data.mode} onChange={(e) => set({ mode: e.target.value })}>
+                <option value="round_robin">Rodízio — um de cada vez, em ordem</option>
+                <option value="least_busy">Menos ocupado — quem tem menos conversas abertas</option>
+                <option value="queue">Fila — devolve para "Aguardando"</option>
+              </select>
+            </Field>
+            {node.data.mode !== 'queue' && (
+              <Field label="Entre quais atendentes" hint="Nenhum marcado = todos os ativos. Só recebe quem opera o número da conversa.">
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {agents.data?.filter((a) => a.isActive).map((a) => {
+                    const on = node.data.agentIds?.includes(a.id) ?? false;
+                    return <label key={a.id} className="flex items-center gap-2 text-ink"><input type="checkbox" checked={on} onChange={(e) => set({ agentIds: e.target.checked ? [...(node.data.agentIds ?? []), a.id] : (node.data.agentIds ?? []).filter((x) => x !== a.id) })} /> {a.name}</label>;
+                  })}
+                </div>
+              </Field>
+            )}
+            <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">A conversa fica com o atendente escolhido e o fluxo segue pela saída <b>Distribuído</b> (ex.: avisar o contato e terminar). <b>Ninguém disponível</b> é usada quando nenhum atendente pode receber.</p>
+          </>
+        )}
 
         {node.type === 'end' && (
           <label className="flex items-center gap-2 text-ink"><input type="checkbox" checked={node.data.closeConversation} onChange={(e) => set({ closeConversation: e.target.checked })} /> Encerrar a conversa ao terminar</label>

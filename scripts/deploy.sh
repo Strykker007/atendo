@@ -15,7 +15,7 @@ SSH="ssh -i $KEY -o BatchMode=yes"
 # --filter=':- .gitignore' faz o rsync obedecer o .gitignore. Sem isso, infra/volumes vai
 # junto e o Postgres do servidor sobe com o banco de desenvolvimento dentro — inclusive a
 # sessão do WhatsApp, que duas instâncias não podem compartilhar.
-echo "▶ Enviando código para $HOST…"
+echo "▶ Enviando código para ${HOST}…"
 rsync -az --delete -e "$SSH" \
   --filter=':- .gitignore' \
   --exclude '.git' \

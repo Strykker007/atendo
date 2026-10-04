@@ -5,9 +5,9 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingEvent } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
-import { Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, upsertMessageInCache } from './core';
+import { Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, upsertMessageInCache } from './core';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -15,7 +15,7 @@ const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.in
 export const useCreateNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { phone: string; label: string; provider: 'meta' | 'evolution'; config: ProviderConfig }) =>
+    mutationFn: (body: { phone: string; label: string; color?: string; provider: 'meta' | 'evolution'; config: ProviderConfig }) =>
       api<NumberItem & { qrCode?: string }>('/numbers', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
@@ -38,7 +38,7 @@ export const useConnectNumber = () => {
 export const useUpdateNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; label?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; label?: string; color?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };
@@ -61,13 +61,24 @@ export function useRealtime() {
     if (!getAccessToken()) return;
     // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
     const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: (cb) => cb({ token: getAccessToken() }), withCredentials: true, reconnectionDelayMax: 5000 });
-    socket.on('message', (m: Message) => upsertMessageInCache(qc, m));
+    socket.on('message', (m: Message) => {
+      upsertMessageInCache(qc, m);
+      // a mensagem chegou: quem estava digitando terminou (o "parou" pode vir depois ou nunca)
+      if (m.direction === 'in') qc.setQueryData<Typing>(['typing', m.conversationId], null);
+    });
+    socket.on('typing', (e: TypingEvent) => {
+      const next: Typing = e.state === 'paused' ? null : { state: e.state, at: Date.now() };
+      qc.setQueryData<Typing>(['typing', e.conversationId], next);
+    });
     socket.on('conversation', (c: { id: string }) => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', c.id] });
       qc.invalidateQueries({ queryKey: ['conversation-counts'] });
       qc.invalidateQueries({ queryKey: ['active-run', c.id] });
+      // tag principal, posse, status e última mensagem mudam o quadro
+      qc.invalidateQueries({ queryKey: ['kanban'] });
     });
+    socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     socket.on('appointment', () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['contact-card'] }); });
     socket.on('number', (n: { id: string; status: string; qrCode?: string }) => {
       if (n.qrCode) qc.setQueryData(['number-qr', n.id], n.qrCode);

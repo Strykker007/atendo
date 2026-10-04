@@ -15,6 +15,16 @@ import type { FlowDefinition, FlowTrigger } from '@atendo/shared';
 
 export const PORTABLE_VERSION = 1;
 
+/**
+ * Arquivo com vários fluxos. Cada item é exatamente um `PortableFlow` — o mesmo que a
+ * exportação individual gera —, então importar um lote é importar cada item.
+ */
+export interface PortableFlowBundle {
+  atendo: 'flow-bundle';
+  version: number;
+  items: PortableFlow[];
+}
+
 export interface PortableFlow {
   atendo: 'flow';
   version: number;
@@ -33,12 +43,34 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 type AnyNode = { id: string; type: string; data: Record<string, unknown> };
 
 /**
+ * Marca no próprio card o que precisa ser reconfigurado no destino. O editor mostra o aviso
+ * no card e apaga a marca quando o bloco é editado; o motor ignora o campo.
+ */
+const flag = (d: Record<string, unknown>, what: string) => {
+  const list = Array.isArray(d._reconfig) ? (d._reconfig as string[]) : [];
+  if (!list.includes(what)) d._reconfig = [...list, what];
+};
+
+/**
+ * Onde um nó guarda etiqueta: no próprio `data` (Ação, Condição antiga) e em cada regra dos
+ * ramos da Condição.
+ */
+function tagHolders(node: AnyNode): Record<string, unknown>[] {
+  const out = [node.data];
+  if (node.type === 'condition' && Array.isArray(node.data.branches)) {
+    for (const b of node.data.branches as { rules?: Record<string, unknown>[] }[]) out.push(...(b.rules ?? []));
+  }
+  return out;
+}
+
+/**
  * Prepara o fluxo para sair do cliente: `tagId` vira `tagName`, o resto das referências é
  * removido com aviso.
  */
 export function toPortable(
   flow: { name: string; description?: string | null; trigger: FlowTrigger; definition: FlowDefinition },
   tagNameById: Record<string, string> = {},
+  flowNameById: Record<string, string> = {},
 ): { portable: PortableFlow; warnings: Warning[] } {
   const warnings: Warning[] = [];
   const definition = clone(flow.definition);
@@ -47,22 +79,34 @@ export function toPortable(
   for (const node of definition.nodes as unknown as AnyNode[]) {
     const d = node.data;
 
-    if (typeof d.tagId === 'string') {
-      const name = tagNameById[d.tagId];
-      delete d.tagId;
-      if (name) d.tagName = name;
-      else warnings.push('Uma etiqueta não existe mais e foi removida de um bloco.');
+    for (const holder of tagHolders(node)) {
+      if (typeof holder.tagId !== 'string') continue;
+      const name = tagNameById[holder.tagId];
+      delete holder.tagId;
+      if (name) holder.tagName = name;
+      else {
+        warnings.push('Uma etiqueta não existe mais e foi removida de um bloco.');
+        flag(d, 'etiqueta');
+      }
     }
 
     if (typeof d.agentId === 'string') {
       delete d.agentId;
       warnings.push('Atribuição a um atendente específico foi removida — escolha o atendente no destino.');
+      flag(d, 'atendente');
+    }
+
+    if (Array.isArray(d.agentIds) && d.agentIds.length) {
+      delete d.agentIds;
+      warnings.push('Os atendentes do Distribuidor foram removidos — no destino ele distribui entre todos até você escolher.');
+      flag(d, 'atendentes');
     }
 
     if (typeof d.serviceId === 'string' || typeof d.professionalId === 'string') {
       delete d.serviceId;
       delete d.professionalId;
       warnings.push('Serviço/profissional fixos do bloco Agendar foram removidos — o fluxo vai perguntar ao contato.');
+      flag(d, 'serviço/profissional');
     }
 
     if (typeof d.mediaKey === 'string') {
@@ -70,6 +114,33 @@ export function toPortable(
       delete d.mediaType;
       delete d.mediaName;
       warnings.push('Um anexo foi removido — reenvie o arquivo no cliente de destino.');
+      flag(d, 'anexo');
+    }
+
+    // Conteúdo com várias mensagens: cada anexo carrega o tenant na chave
+    if (node.type === 'message' && Array.isArray(d.items)) {
+      for (const it of d.items as Record<string, unknown>[]) {
+        if (typeof it.mediaKey !== 'string') continue;
+        delete it.mediaKey;
+        warnings.push('Um anexo foi removido — reenvie o arquivo no cliente de destino.');
+        flag(d, 'anexo');
+      }
+    }
+
+    // o id do fluxo de destino não existe em outro cliente; o nome fica só como referência no card
+    if (node.type === 'connect_flow' && typeof d.flowId === 'string') {
+      const name = flowNameById[d.flowId];
+      delete d.flowId;
+      if (name) d.flowName = name;
+      warnings.push('O destino de "Conectar com outro fluxo" foi removido — escolha o fluxo no cliente de destino.');
+      flag(d, 'fluxo de destino');
+    }
+
+    // a URL do webhook costuma levar token na query: não sai do cliente
+    if (node.type === 'action' && typeof d.url === 'string' && d.url) {
+      delete d.url;
+      warnings.push('A URL de um webhook foi removida (pode conter token) — informe-a no destino.');
+      flag(d, 'URL do webhook');
     }
   }
 
@@ -94,7 +165,7 @@ export function toPortable(
 /** Nomes de etiqueta citados no arquivo — o destino precisa garantir que existam antes. */
 export function tagNamesOf(portable: PortableFlow): string[] {
   const names = (portable.definition.nodes as unknown as AnyNode[])
-    .map((n) => n.data.tagName)
+    .flatMap((n) => tagHolders(n).map((h) => h.tagName))
     .filter((v): v is string => typeof v === 'string' && v.trim() !== '');
   return [...new Set(names)];
 }
@@ -111,12 +182,12 @@ export function fromPortable(
   const definition = clone(portable.definition);
 
   for (const node of definition.nodes as unknown as AnyNode[]) {
-    const d = node.data;
-    if (typeof d.tagName === 'string') {
-      const name = d.tagName; // guardar antes de apagar: o aviso precisa dizer QUAL etiqueta
+    for (const holder of tagHolders(node)) {
+      if (typeof holder.tagName !== 'string') continue;
+      const name = holder.tagName; // guardar antes de apagar: o aviso precisa dizer QUAL etiqueta
       const id = tagIdByName[name];
-      delete d.tagName;
-      if (id) d.tagId = id;
+      delete holder.tagName;
+      if (id) holder.tagId = id;
       else warnings.push(`A etiqueta "${name}" não pôde ser criada e saiu do bloco.`);
     }
   }
@@ -128,6 +199,28 @@ export function fromPortable(
     definition,
     warnings: dedupe(warnings),
   };
+}
+
+export function toBundle(items: PortableFlow[]): PortableFlowBundle {
+  return { atendo: 'flow-bundle', version: PORTABLE_VERSION, items };
+}
+
+/** Aceita o arquivo individual ou o lote; devolve sempre a lista de fluxos. */
+export function parsePortableFile(raw: unknown): PortableFlow[] {
+  const o = raw as Partial<PortableFlowBundle> | null;
+  if (o && typeof o === 'object' && o.atendo === 'flow-bundle') {
+    if (o.version !== PORTABLE_VERSION) throw new Error(`Arquivo gerado por outra versão (${String(o.version)}).`);
+    if (!Array.isArray(o.items) || !o.items.length) throw new Error('O arquivo não tem nenhum fluxo.');
+    if (o.items.length > 100) throw new Error('No máximo 100 fluxos por arquivo.');
+    return o.items.map((it, i) => {
+      try {
+        return parsePortable(it);
+      } catch (e) {
+        throw new Error(`Fluxo ${i + 1} do arquivo: ${e instanceof Error ? e.message : 'inválido'}`);
+      }
+    });
+  }
+  return [parsePortable(raw)];
 }
 
 /**

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Underline, Image as ImageIcon, Video, FileText, Search } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Image as ImageIcon, Video, FileText, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
@@ -75,7 +75,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
       <Atalho
-        icone={<Underline size={16} />}
+        icone={<span className="text-[15px] font-bold underline underline-offset-2 decoration-2 leading-none">A</span>}
         titulo={assinando ? 'Assinatura ligada: seu nome vai junto' : 'Assinar as mensagens com o seu nome'}
         ativo={assinando}
         onClick={() => onAssinando(!assinando)}
@@ -97,7 +97,8 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
         <Menu largura="w-64">
           <div className="grid grid-cols-8 gap-0.5 p-1">
             {EMOJIS.map((e) => (
-              <button key={e} type="button" onClick={() => inserir(e)} className="text-lg rounded hover:bg-field leading-none p-1">{e}</button>
+              // fica aberto para emendar vários; mousedown sem default não tira o foco do campo
+              <button key={e} type="button" onMouseDown={(ev) => ev.preventDefault()} onClick={() => onInserir(e)} className="text-lg rounded hover:bg-field leading-none p-1">{e}</button>
             ))}
           </div>
         </Menu>

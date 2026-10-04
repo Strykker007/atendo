@@ -12,6 +12,7 @@
 | [08 — Front-end](08-frontend.md) | Dev | Estrutura do Next, layout de colunas, estado, tempo real |
 | [09 — Roadmap](09-roadmap.md) | Todos | O que está pronto e o que falta, em ordem |
 | [10 — Fluxos de automação](10-fluxos-de-automacao.md) | Dev / Cliente | Blocos, gatilhos, motor, editor, API |
+| [Fluxos — referência técnica](fluxos.md) | Dev | Arquitetura editor/motor, como criar um bloco, status dos blocos do construtor |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
 | [13 — Agendamento](13-agendamento.md) | Dev / Cliente | Profissionais, serviços, agenda, marcação pelo WhatsApp, lembretes ao cliente e ao profissional |

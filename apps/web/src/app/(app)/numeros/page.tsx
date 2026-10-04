@@ -10,6 +10,7 @@ import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/Num
 import { SendingCard } from '@/components/numbers/SendingCard';
 import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
+import { NUMBER_PALETTE } from '@/components/chat/ChannelBadge';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   connected: { label: 'Conectado', cls: 'bg-ok' },
@@ -68,6 +69,18 @@ export default function NumerosPage() {
     }
   }
 
+  async function setColor(n: NumberItem, color: string) {
+    if (n.color === color) return;
+    setBusyId(n.id);
+    try {
+      await update.mutateAsync({ id: n.id, color });
+    } catch (err) {
+      toast.err(err);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-5xl mx-auto p-6 md:p-8 space-y-6">
@@ -97,7 +110,10 @@ export default function NumerosPage() {
               <div key={n.id} className={cn('rounded-2xl bg-panel border border-line p-4 space-y-3', !n.isActive && 'opacity-60')}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="font-medium truncate">{n.label}</div>
+                    <div className="font-medium truncate flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ background: n.color }} aria-hidden />
+                      {n.label}
+                    </div>
                     <div className="text-sm text-muted">+{n.phone}</div>
                   </div>
                   <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', n.provider === 'meta' ? 'bg-meta-soft text-meta-ink' : 'bg-evo-soft text-evo-ink')}>
@@ -111,6 +127,25 @@ export default function NumerosPage() {
                   <span className="text-ink">{st.label}</span>
                   {!n.isActive && <span className="text-xs text-faint">· desativado</span>}
                 </div>
+
+                {/* cor do canal: é ela que identifica o número na lista de conversas e no chat */}
+                {podeGerenciar && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted mr-1">Cor</span>
+                    {NUMBER_PALETTE.map((c) => (
+                      <button
+                        type="button"
+                        key={c}
+                        title={c}
+                        aria-label={`Usar a cor ${c}`}
+                        onClick={() => setColor(n, c)}
+                        disabled={busyId === n.id}
+                        className="w-5 h-5 rounded-full transition"
+                        style={{ background: c, boxShadow: n.color === c ? `0 0 0 2px var(--panel, white), 0 0 0 4px ${c}` : undefined }}
+                      />
+                    ))}
+                  </div>
+                )}
 
                 {n.isActive && <SendingCard number={n} />}
 

@@ -5,13 +5,13 @@
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import { api, ApiError, getAccessToken, onAccessToken } from '../api';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
-export interface Tag { id: string; name: string; color: string }
+export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; warmupStartedAt: string | null; infraCostMonth?: string | number }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; warmupStartedAt: string | null; infraCostMonth?: string | number }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -25,9 +25,10 @@ export interface Conversation {
   /** desde quando o contato espera resposta; null = já respondemos */
   awaitingSince: string | null;
   contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[] };
-  tags: { tag: Tag }[];
+  /** `isPrimary` = etapa do atendimento no Kanban (no máximo uma) */
+  tags: { tag: Tag; isPrimary?: boolean }[];
   assignee: { id: string; name: string } | null;
-  number: { id: string; label: string; provider?: 'meta' | 'evolution'; status?: string };
+  number: { id: string; label: string; phone?: string; color?: string; provider?: 'meta' | 'evolution'; status?: string };
 }
 export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
@@ -38,8 +39,16 @@ export interface Message {
   /** texto do que foi citado, quando a citada não está no nosso histórico (resposta a status) */
   quotedPreview?: string | null;
   quotedFromStatus?: boolean;
+  /** citação já resolvida pela API (`present()`); preferir a ela os campos quoted* soltos */
+  quoted?: QuotedRef | null;
+  /** reações (emoji) — no 1:1 no máximo uma de cada lado; `fromMe` = feita pelo celular do cliente */
+  reactions?: { emoji: string; fromMe: boolean; at: string }[] | null;
   /** nota interna (cadeado): só a equipe vê */
   internal?: boolean; authorId?: string | null; author?: { name: string } | null;
+  /** botões, lista, localização ou contato; o corpo continua em `text` */
+  content?: MessageContent | null;
+  /** encaminhada (pelo contato ou pelo atendente); score ≥ 5 = "com frequência" */
+  forwarded?: boolean; forwardingScore?: number | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
 export type SendInput = ({ type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
@@ -156,6 +165,23 @@ export function upsertMessageInCache(qc: ReturnType<typeof useQueryClient>, m: M
   });
 }
 
+/** O que o contato está fazendo agora; `at` = quando o evento chegou. Alimentado pelo socket (`typing`). */
+export type Typing = { state: 'composing' | 'recording'; at: number } | null;
+/** Sem novo evento nesse tempo, o indicador some: o "parou" do WhatsApp às vezes não chega. */
+export const TYPING_TIMEOUT_MS = 5_000;
+
+/** "Digitando…"/"gravando áudio…" do contato nesta conversa. Some sozinho após `TYPING_TIMEOUT_MS`. */
+export function useTyping(conversationId: string | null): Typing {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['typing', conversationId], enabled: false, staleTime: Infinity, queryFn: () => null as Typing });
+  useEffect(() => {
+    if (!data) return;
+    const t = setTimeout(() => qc.setQueryData(['typing', conversationId], null), Math.max(0, data.at + TYPING_TIMEOUT_MS - Date.now()));
+    return () => clearTimeout(t);
+  }, [data, conversationId, qc]);
+  return data ?? null;
+}
+
 /**
  * Zera o contador de não lidas da conversa aberta.
  *
@@ -177,12 +203,23 @@ export const useMarkRead = () => {
   });
 };
 
-export const useSendMessage = (conversationId: string | null) => {
+/**
+ * Envio do atendente. `expectedNumberId` é o canal que a tela está mostrando: a API só confere
+ * (quem escolhe o número é a conversa) e devolve 409 `number_changed` se a conversa mudou de canal —
+ * aí recarrega a conversa para a tela mostrar o canal novo antes de qualquer reenvio.
+ */
+export const useSendMessage = (conversationId: string | null, expectedNumberId?: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify(input) }),
+    mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ ...input, expectedNumberId }) }),
     // aparece na hora, mesmo se o socket estiver reconectando
     onSuccess: (m) => { upsertMessageInCache(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); },
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === 'number_changed') {
+        qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
+        qc.invalidateQueries({ queryKey: ['conversations'] });
+      }
+    },
   });
 };
 
@@ -193,6 +230,30 @@ export const useSendNote = (conversationId: string | null) => {
 
 export const useResend = () =>
   useMutation({ mutationFn: ({ conversationId, messageId }: { conversationId: string; messageId: string }) => api<Message>(`/conversations/${conversationId}/messages/${messageId}/resend`, { method: 'POST' }) });
+
+/** Reação do atendente a uma mensagem. `emoji` vazio retira. */
+export const useReact = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, messageId, emoji }: { conversationId: string; messageId: string; emoji: string }) =>
+      api<Message>(`/conversations/${conversationId}/messages/${messageId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) }),
+    // aparece na hora, mesmo se o socket estiver reconectando
+    onSuccess: (m) => upsertMessageInCache(qc, m),
+  });
+};
+
+/**
+ * Encaminha uma mensagem para outras conversas. Cada destino é um envio normal; os que falharem
+ * voltam em `failed` (sem posse, fora da janela da Meta, número desconectado…).
+ */
+export const useForwardMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, messageId, targetConversationIds }: { conversationId: string; messageId: string; targetConversationIds: string[] }) =>
+      api<{ sent: Message[]; failed: { conversationId: string; error: string }[] }>(`/conversations/${conversationId}/messages/${messageId}/forward`, { method: 'POST', body: JSON.stringify({ targetConversationIds }) }),
+    onSuccess: (r) => { r.sent.forEach((m) => upsertMessageInCache(qc, m)); qc.invalidateQueries({ queryKey: ['usage'] }); },
+  });
+};
 
 /** Upload multipart (não passa pelo helper `api` porque o Content-Type é do FormData). */
 export async function uploadFile(file: File): Promise<Upload> {

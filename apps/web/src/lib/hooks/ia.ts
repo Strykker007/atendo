@@ -23,4 +23,6 @@ export const useAiUsage = () => useQuery({ queryKey: ['ai-usage'], queryFn: () =
 const invAi = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['ai-usage'] });
 export const useAiSuggest = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ text: string }>('/ai/suggest', { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: invAi(qc) }); };
 export const useAiRewrite = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { text: string; tone: RewriteTone; conversationId?: string }) => api<{ text: string }>('/ai/rewrite', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invAi(qc) }); };
-export const useAiSummary = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ text: string }>('/ai/summary', { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: invAi(qc) }); };
+export interface AiSummary { text: string; updatedAt: string; cached: boolean }
+/** Resumo vem do cache enquanto não há mensagem nova; `force` gera de novo (e cobra). */
+export const useAiSummary = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { conversationId: string; force?: boolean }) => api<AiSummary>('/ai/summary', { method: 'POST', body: JSON.stringify(b) }), onSuccess: (r) => { if (!r.cached) invAi(qc)(); } }); };

@@ -63,6 +63,8 @@ Contato ──WhatsApp──▶ Provider (Meta ou Evolution)
                       ├─ cria Message (direction in)
                       ├─ UsageService.record(...)     ← ledger de cobrança
                       └─ gateway.emit('message' | 'conversation')  → painel atualiza
+                 4. reações (`ParsedWebhook.reactions`) → InboundService.applyReaction
+                      └─ atualiza `reactions` da mensagem reagida e emite 'message' (sem criar mensagem nem cobrar)
 ```
 
 Por que fila? A Meta exige resposta rápida e reenvia se demorar; a Evolution também tem retry. Enfileirar garante que nunca perdemos evento e que picos não derrubam a API.
@@ -72,6 +74,9 @@ Por que fila? A Meta exige resposta rápida e reenvia se demorar; a Evolution ta
 ```
 Painel ──POST /conversations/:id/messages──▶ ConversationsService.send
     1. conversa existe e não está encerrada
+       número = o da conversa (do banco, nunca do payload), ativo, do mesmo tenant  (senão 422)
+       expectedNumberId diferente do número da conversa                           (senão 409)
+       número conectado                                                          (senão 422)
     2. se provider = meta e sem template: dentro da janela de 24h?  (senão 400)
     3. UsageService.canSend(tenant, 'messages' | 'templates')       (senão 403)
     4. cria Message status=pending, conversa vira in_progress e é atribuída
@@ -111,12 +116,19 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 | `message` | Message | criada ou mudou de status |
 | `conversation` | Conversation | criada, status, atribuição, tags |
 | `number` | `{id, status, qrCode?}` | QR novo, conectou, caiu |
+| `appointment` | `{id}` | agendamento criado/alterado |
+| `kanban` | `{}` | colunas do Kanban mudaram (ordem, tag virou/deixou de ser etapa, criada, excluída) |
+| `typing` | `TypingEvent` `{conversationId, state}` | contato digitando (`composing`), gravando (`recording`) ou parou (`paused`). Efêmero, só Evolution |
+
+Mover card no Kanban é trocar a tag principal e sai como `conversation`, como qualquer outra mudança no atendimento.
 
 No front, `useRealtime()` aplica os eventos direto no cache do react-query.
 
+Quem emite nem sempre é a API: os processors de fila (inbound, outbound, fluxos, agenda, health) rodam também no worker, que não tem servidor Socket.IO. Nesse caso o gateway publica direto no Redis via `@socket.io/redis-emitter` e o `RedisIoAdapter` da API entrega aos sockets da sala. Nunca emita por `gateway.server` direto — use os métodos `emit*` do gateway, senão o evento some em silêncio quando o job cai no worker.
+
 ## Processos
 
-- **API** (`main.ts`): HTTP + WebSocket. Em dev também roda os processors (mesmo processo).
+- **API** (`main.ts`): HTTP + WebSocket. Também registra os processors (o `WhatsAppModule` entra nos dois módulos), então com API e worker de pé o BullMQ divide os jobs entre eles.
 - **Worker** (`worker.ts`): só filas. Em produção rode separado (`pnpm --filter @atendo/api worker`) para escalar independentemente e para que envio pesado não afete latência da API.
 
 ## Segurança — decisões

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Braces, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { inputCls } from '@/components/ui/Modal';
+import { VARIABLE_OP_LABEL } from '@atendo/shared';
 
 export interface FlowVar { key: string; label: string; source: 'system' | 'question' | 'menu' | 'action' }
 
@@ -10,13 +11,25 @@ export interface FlowVar { key: string; label: string; source: 'system' | 'quest
 export const SYSTEM_VARS: FlowVar[] = [
   { key: 'contact.name', label: 'Nome do contato (como está no WhatsApp)', source: 'system' },
   { key: 'contact.phone', label: 'Telefone do contato', source: 'system' },
+  { key: 'contact.email', label: 'E-mail do contato (da ficha)', source: 'system' },
+  { key: 'contact.address', label: 'Endereço do contato (da ficha)', source: 'system' },
+  { key: 'contact.note1', label: 'Observação 1 do contato (da ficha)', source: 'system' },
+  { key: 'contact.note2', label: 'Observação 2 do contato (da ficha)', source: 'system' },
+];
+
+/** Marcadores de formatação do WhatsApp. */
+const WA_MARKS: { mark: string; label: string; title: string; cls: string }[] = [
+  { mark: '*', label: 'N', title: 'Negrito (*texto*)', cls: 'font-bold' },
+  { mark: '_', label: 'I', title: 'Itálico (_texto_)', cls: 'italic' },
+  { mark: '~', label: 'S', title: 'Tachado (~texto~)', cls: 'line-through' },
 ];
 
 /**
  * Campo de texto com botão "Inserir variável": insere {{chave}} na posição do cursor.
- * Mostra as variáveis do sistema e as criadas pelo fluxo (Perguntar / Menu).
+ * Mostra as variáveis do sistema e as criadas pelo fluxo (Salvar / Menu / Manipulador).
+ * `formatting`: botões de negrito/itálico/tachado do WhatsApp (envolvem a seleção).
  */
-export function TextWithVars({ value, onChange, vars, multiline = true, placeholder, className }: { value: string; onChange: (v: string) => void; vars: FlowVar[]; multiline?: boolean; placeholder?: string; className?: string }) {
+export function TextWithVars({ value, onChange, vars, multiline = true, placeholder, className, formatting }: { value: string; onChange: (v: string) => void; vars: FlowVar[]; multiline?: boolean; placeholder?: string; className?: string; formatting?: boolean }) {
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -38,6 +51,15 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
     requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + token.length, start + token.length); });
   }
 
+  function wrapSelection(mark: string) {
+    const el = ref.current;
+    if (!el) return onChange(`${value}${mark}${mark}`);
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? start;
+    onChange(value.slice(0, start) + mark + value.slice(start, end) + mark + value.slice(end));
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + 1, end + 1); });
+  }
+
   const all = [...SYSTEM_VARS, ...vars];
   const groups: [string, FlowVar[]][] = [['Do sistema', all.filter((v) => v.source === 'system')], ['Criadas neste fluxo', all.filter((v) => v.source !== 'system')]];
 
@@ -49,9 +71,14 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
         <input ref={ref as React.RefObject<HTMLInputElement>} className={cn(inputCls, className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
       )}
       <div className="mt-1 flex items-center justify-between">
-        <button type="button" onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-accent-ink hover:underline whitespace-nowrap">
-          <Braces size={12} /> Inserir variável <ChevronDown size={11} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-accent-ink hover:underline whitespace-nowrap">
+            <Braces size={12} /> Inserir variável <ChevronDown size={11} />
+          </button>
+          {formatting && WA_MARKS.map((f) => (
+            <button key={f.mark} type="button" title={f.title} onClick={() => wrapSelection(f.mark)} className={cn('w-5 h-5 rounded text-[11px] text-muted hover:bg-field hover:text-ink', f.cls)}>{f.label}</button>
+          ))}
+        </div>
         <span className="text-[10.5px] text-faint truncate ml-2" title="O texto entre {{ }} é trocado pelo valor na hora do envio">{'{{ }}'} vira o valor no envio</span>
       </div>
       {open && (
@@ -59,7 +86,7 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
           {groups.map(([title, list]) => (
             <div key={title}>
               <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{title}</div>
-              {list.length === 0 && <div className="px-3 pb-2 text-xs text-faint">Nenhuma ainda — adicione um bloco <b>Perguntar</b> para criar.</div>}
+              {list.length === 0 && <div className="px-3 pb-2 text-xs text-faint">Nenhuma ainda — adicione um bloco <b>Salvar</b> ou <b>Manipulador</b> para criar.</div>}
               {list.map((v) => (
                 <button type="button" key={v.key} onClick={() => insert(v.key)} className="w-full text-left px-3 py-1.5 hover:bg-field">
                   <div className="font-mono text-[12px] text-ink">{`{{${v.key}}}`}</div>
@@ -74,12 +101,21 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
   );
 }
 
-/** Variáveis criadas pelos blocos do fluxo (Perguntar → varName; Menu → escolha). */
+/** Variáveis criadas pelos blocos do fluxo (Salvar → varName; Menu → escolha; Manipulador; webhook). */
 export function collectFlowVars(nodes: { id: string; type: string; data: Record<string, unknown> }[]): FlowVar[] {
   const out: FlowVar[] = [];
   for (const n of nodes) {
     if (n.type === 'question' && typeof n.data.varName === 'string' && n.data.varName) {
-      out.push({ key: n.data.varName, label: `Resposta de "${String(n.data.text ?? '').slice(0, 40) || 'Perguntar'}"`, source: 'question' });
+      out.push({ key: n.data.varName, label: `Resposta de "${String(n.data.text ?? '').slice(0, 40) || 'Salvar'}"`, source: 'question' });
+    }
+    if (n.type === 'variable' && Array.isArray(n.data.assignments)) {
+      for (const a of n.data.assignments as { varName?: string; value?: string; op?: string }[]) {
+        const how = !a.op || a.op === 'set' ? `valor: "${String(a.value ?? '').slice(0, 30)}"` : (VARIABLE_OP_LABEL as Record<string, string>)[a.op]?.toLowerCase();
+        if (a.varName) out.push({ key: a.varName, label: `Manipulador (${how})`, source: 'action' });
+      }
+    }
+    if (n.type === 'action' && n.data.kind === 'webhook' && typeof n.data.responseVar === 'string' && n.data.responseVar) {
+      out.push({ key: n.data.responseVar, label: 'Resposta do webhook', source: 'action' });
     }
     if (n.type === 'menu') out.push({ key: `menu_${n.id}`, label: `Opção escolhida em "${String(n.data.text ?? '').slice(0, 40) || 'Menu'}"`, source: 'menu' });
     if (n.type === 'schedule') out.push({ key: 'agendamento', label: 'Horário agendado (bloco Agendar)', source: 'action' }, { key: 'servico', label: 'Serviço agendado', source: 'action' }, { key: 'profissional', label: 'Profissional agendado', source: 'action' });
@@ -87,5 +123,29 @@ export function collectFlowVars(nodes: { id: string; type: string; data: Record<
       out.push({ key: n.data.varName, label: `Definida pela ação (valor: "${String(n.data.value ?? '').slice(0, 30)}")`, source: 'action' });
     }
   }
-  return out;
+  // a mesma variável definida em dois blocos aparece uma vez só
+  return out.filter((v, i) => out.findIndex((x) => x.key === v.key) === i);
+}
+
+/**
+ * Prévia da formatação do WhatsApp: *negrito*, _itálico_, ~tachado~. O marcador só vale
+ * colado ao texto (`* x*` não formata), como no app.
+ */
+export function WaText({ text }: { text: string }) {
+  // {{variável}} entra antes na alternância: o "_" do nome não pode virar itálico
+  const parts = text.split(/(\{\{[^}]*\}\}|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_|~[^~\s][^~]*?~)/g);
+  return (
+    <>
+      {parts.map((p, i) => {
+        if (p.startsWith('{{')) return <span key={i} className="font-mono text-accent-ink">{p}</span>;
+        const inner = p.slice(1, -1);
+        if (p.length > 2 && !/\s$/.test(inner)) {
+          if (p.startsWith('*') && p.endsWith('*')) return <b key={i}>{inner}</b>;
+          if (p.startsWith('_') && p.endsWith('_')) return <i key={i}>{inner}</i>;
+          if (p.startsWith('~') && p.endsWith('~')) return <s key={i}>{inner}</s>;
+        }
+        return <span key={i}>{p}</span>;
+      })}
+    </>
+  );
 }

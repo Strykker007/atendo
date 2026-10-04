@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -25,6 +25,7 @@ const OWNER_ITEMS = [
  */
 const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission }[] = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
+  { href: '/kanban', label: 'Kanban', icon: Columns3 },
   { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: 'agenda.manage' },
   { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: 'flows.manage' },
   { href: '/respostas', label: 'Respostas', icon: Zap },

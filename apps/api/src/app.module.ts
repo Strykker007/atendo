@@ -19,6 +19,7 @@ import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { AiModule } from './modules/ai/ai.module';
 import { env } from './config/env';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { KanbanModule } from './modules/kanban/kanban.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
     WhatsAppModule,
     ConversationsModule,
     TagsModule,
+    KanbanModule,
     QuickRepliesModule,
     BillingModule,
     ReportsModule,

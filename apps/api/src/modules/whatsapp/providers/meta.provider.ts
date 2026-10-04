@@ -3,8 +3,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { MessageStatus, MessageType, NumberStatus, BillingCategory } from '@atendo/shared';
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
-import type { MediaPayload, NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { MediaPayload, NumberContext, OutboundReaction, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError } from './provider-error';
+import { textoQualquer } from './payload-text';
 
 /** providerConfig (criptografado) de um número Meta */
 export interface MetaNumberConfig {
@@ -92,10 +93,10 @@ export class MetaProvider implements WhatsAppProvider {
       // sobe o binário para a Meta e envia pelo id — sem expor URL do nosso storage
       const mediaId = await this.uploadMedia(cfg, media);
       body.type = m.type;
-      body[m.type] = { id: mediaId, caption: m.media?.caption ?? m.text, filename: media.fileName };
+      body[m.type] = { id: mediaId, ...metaMediaExtras(m.type, m.media?.caption ?? m.text, media.fileName) };
     } else if (m.media?.url) {
       body.type = m.type;
-      body[m.type] = { link: m.media.url, caption: m.media.caption, filename: m.media.fileName };
+      body[m.type] = { link: m.media.url, ...metaMediaExtras(m.type, m.media.caption, m.media.fileName) };
     } else {
       throw new BadRequestException(`Tipo não suportado pela Meta: ${m.type}`);
     }
@@ -138,6 +139,15 @@ export class MetaProvider implements WhatsAppProvider {
     });
   }
 
+  /** Reação é um tipo de mensagem na Cloud API, mas sem id útil para nós: só marca a reagida. */
+  async react(ctx: NumberContext, r: OutboundReaction) {
+    const cfg = this.cfg(ctx);
+    await this.graph(cfg, `${cfg.phoneNumberId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: r.to, type: 'reaction', reaction: { message_id: r.targetExternalId, emoji: r.emoji } }),
+    });
+  }
+
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer) {
     if (!env.META_APP_SECRET) return; // dev sem app secret
     const sig = String(headers['x-hub-signature-256'] ?? '');
@@ -148,13 +158,30 @@ export class MetaProvider implements WhatsAppProvider {
   }
 
   parseWebhook(body: any): ParsedWebhook {
-    const out: ParsedWebhook = { messages: [], statuses: [] };
+    const out: ParsedWebhook = { messages: [], statuses: [], reactions: [] };
     for (const entry of body?.entry ?? []) {
       for (const change of entry.changes ?? []) {
         const v = change.value;
         const externalNumberId: string = v?.metadata?.phone_number_id;
         const names = new Map<string, string>((v?.contacts ?? []).map((c: any) => [c.wa_id, c.profile?.name]));
-        for (const msg of v?.messages ?? []) out.messages.push(this.toInbound(msg, externalNumberId, names.get(msg.from)));
+        for (const msg of v?.messages ?? []) {
+          // reação não é mensagem: `emoji` ausente = o contato retirou a reação
+          if (msg.type === 'reaction') {
+            if (msg.reaction?.message_id) {
+              out.reactions.push({
+                provider: 'meta',
+                externalNumberId,
+                targetExternalId: msg.reaction.message_id,
+                from: msg.from,
+                fromMe: false,
+                emoji: msg.reaction.emoji ?? '',
+                timestamp: new Date(Number(msg.timestamp) * 1000),
+              });
+            }
+            continue;
+          }
+          out.messages.push(this.toInbound(msg, externalNumberId, names.get(msg.from)));
+        }
         for (const st of v?.statuses ?? []) {
           out.statuses.push({
             provider: 'meta',
@@ -170,29 +197,78 @@ export class MetaProvider implements WhatsAppProvider {
   }
 
   private toInbound(msg: any, externalNumberId: string, contactName?: string): InboundMessage {
-    // resposta a botão/lista: chega como type 'interactive' com o id e o título escolhidos
-    const reply = msg.type === 'interactive' ? (msg.interactive?.button_reply ?? msg.interactive?.list_reply) : undefined;
-    const type = reply ? MessageType.TEXT : (Object.values(MessageType) as string[]).includes(msg.type) ? (msg.type as MessageType) : MessageType.UNKNOWN;
-    const mediaObj = msg[msg.type];
+    const lido = this.lerTipo(msg);
+    // encaminhada: a Cloud API não dá o score, só se foi encaminhada "com frequência" (≥ 5)
+    const ctx = msg.context ?? {};
+    const forwarded = !!(ctx.forwarded || ctx.frequently_forwarded);
     return {
       provider: 'meta',
       externalId: msg.id,
       externalNumberId,
       from: msg.from,
       contactName,
-      type,
-      text: reply?.title ?? msg.text?.body ?? mediaObj?.caption,
-      interactiveReplyId: reply?.id,
-      media:
-        mediaObj?.id !== undefined
-          ? { providerMediaId: mediaObj.id, mimeType: mediaObj.mime_type, fileName: mediaObj.filename, caption: mediaObj.caption }
-          : undefined,
-      location: msg.location ? { lat: msg.location.latitude, lng: msg.location.longitude, name: msg.location.name } : undefined,
-      quotedExternalId: msg.context?.id,
+      ...lido,
+      forwarded: forwarded || undefined,
+      forwardingScore: ctx.frequently_forwarded ? 5 : undefined,
+      // mensagem encaminhada também traz `context`, mas sem `id`: não é citação
+      quotedExternalId: ctx.id,
       referral: this.referralOf(msg),
       timestamp: new Date(Number(msg.timestamp) * 1000),
       raw: msg,
     };
+  }
+
+  /** Tipo do webhook da Cloud API → tipo canônico. O que não for mapeado tenta o fallback de texto. */
+  private lerTipo(msg: any): Pick<InboundMessage, 'type' | 'text' | 'media' | 'content' | 'interactiveReplyId'> {
+    switch (msg.type) {
+      case 'text':
+        return { type: MessageType.TEXT, text: msg.text?.body };
+      case 'image':
+      case 'video':
+      case 'audio':
+      case 'document':
+      case 'sticker': {
+        const o = msg[msg.type] ?? {};
+        return {
+          type: msg.type as MessageType,
+          text: o.caption || undefined,
+          media: o.id !== undefined ? { providerMediaId: o.id, mimeType: o.mime_type, fileName: o.filename, caption: o.caption } : undefined,
+        };
+      }
+      case 'location': {
+        const l = msg.location ?? {};
+        return { type: MessageType.LOCATION, content: { kind: 'location', lat: Number(l.latitude), lng: Number(l.longitude), name: l.name || undefined, address: l.address || undefined } };
+      }
+      case 'contacts':
+        return {
+          type: MessageType.CONTACT,
+          content: {
+            kind: 'contacts',
+            contacts: (msg.contacts ?? []).map((c: any) => ({
+              name: c.name?.formatted_name ?? c.name?.first_name ?? 'Contato',
+              phones: (c.phones ?? []).map((p: any) => p.wa_id ?? p.phone).filter(Boolean),
+            })),
+          },
+        };
+      case 'interactive': {
+        // resposta a botão/lista/flow: chega com o id e o título escolhidos
+        const i = msg.interactive ?? {};
+        const reply = i.button_reply ?? i.list_reply;
+        if (reply) return { type: MessageType.TEXT, text: reply.title, interactiveReplyId: reply.id };
+        if (i.nfm_reply) return { type: MessageType.TEXT, text: i.nfm_reply.body ?? i.nfm_reply.name ?? 'Formulário respondido' };
+        break;
+      }
+      case 'button':
+        // toque em botão de resposta rápida de um template
+        return { type: MessageType.TEXT, text: msg.button?.text, interactiveReplyId: msg.button?.payload };
+      case 'order':
+        return { type: MessageType.TEXT, text: `🛒 Pedido (${msg.order?.product_items?.length ?? 0} itens)${msg.order?.text ? `\n${msg.order.text}` : ''}` };
+      case 'system':
+        return { type: MessageType.TEXT, text: msg.system?.body };
+    }
+    // `unsupported`, tipos novos: qualquer texto que houver, em vez de "unknown"
+    const text = textoQualquer(msg);
+    return text ? { type: MessageType.TEXT, text } : { type: MessageType.UNKNOWN };
   }
 
   /**
@@ -227,4 +303,17 @@ export class MetaProvider implements WhatsAppProvider {
         return MessageStatus.PENDING;
     }
   }
+}
+
+/**
+ * Campos aceitos por tipo na Cloud API: legenda só em imagem, vídeo e documento; nome do
+ * arquivo só em documento. Áudio e figurinha recusam o envio se vierem com `caption`.
+ * A Meta não tem "áudio como arquivo": o áudio sempre chega como player — e só OGG/Opus
+ * aparece como mensagem de voz.
+ */
+function metaMediaExtras(type: string, caption?: string, filename?: string) {
+  const out: { caption?: string; filename?: string } = {};
+  if ((type === MessageType.IMAGE || type === MessageType.VIDEO || type === MessageType.DOCUMENT) && caption) out.caption = caption;
+  if (type === MessageType.DOCUMENT && filename) out.filename = filename;
+  return out;
 }

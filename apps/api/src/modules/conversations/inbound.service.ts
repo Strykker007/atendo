@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Conversation, Message, WhatsAppNumber } from '@prisma/client';
-import type { InboundMessage, StatusUpdate, NumberStatus } from '@atendo/shared';
+import { messagePreview } from '@atendo/shared';
+import type { InboundEdit, InboundMessage, InboundPresence, InboundReaction, StatusUpdate, NumberStatus } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { ConversationsGateway } from './conversations.gateway';
@@ -98,12 +99,11 @@ export class InboundService {
     const message = await this.prisma.message.create({
       data: {
         conversationId: conversation.id,
+        numberId: number.id,
         direction: 'in',
         type: msg.type,
         status: 'delivered',
-        text: msg.text,
-        mediaMime: msg.media?.mimeType,
-        mediaName: msg.media?.fileName,
+        ...this.conteudo(msg),
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
         quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
@@ -123,7 +123,7 @@ export class InboundService {
         lastInboundAt: msg.timestamp,
         lastMessageAt: msg.timestamp,
         awaitingSince: inicioDaEspera(conversation.awaitingSince, msg.timestamp),
-        lastMessagePreview: (msg.text ?? `[${msg.type}]`).slice(0, 120),
+        lastMessagePreview: this.previa(msg),
         unreadCount: { increment: 1 },
       },
     });
@@ -179,12 +179,11 @@ export class InboundService {
     const message = await this.prisma.message.create({
       data: {
         conversationId: conversation.id,
+        numberId: number.id,
         direction: 'out',
         type: msg.type,
         status: 'sent',
-        text: msg.text,
-        mediaMime: msg.media?.mimeType,
-        mediaName: msg.media?.fileName,
+        ...this.conteudo(msg),
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
         quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
@@ -201,7 +200,7 @@ export class InboundService {
     conversation = await this.prisma.conversation.update({
       where: { id: conversation.id },
       // respondeu pelo celular também é resposta: a espera acabou
-      data: { lastMessageAt: msg.timestamp, lastMessagePreview: (msg.text ?? `[${msg.type}]`).slice(0, 120), awaitingSince: null },
+      data: { lastMessageAt: msg.timestamp, lastMessagePreview: this.previa(msg), awaitingSince: null },
     });
 
     await this.usage.record({
@@ -217,6 +216,22 @@ export class InboundService {
     this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
     this.gateway.emitConversation(number.tenantId, conversation);
     return { message, conversation, isNew, isNewContact: false, returningAfterClosed: false, hoursSinceLastMessage: null, fromMe: true };
+  }
+
+  /** Campos de conteúdo comuns às duas entradas (recebida e digitada no celular). */
+  private conteudo(msg: InboundMessage) {
+    return {
+      text: msg.text,
+      mediaMime: msg.media?.mimeType,
+      mediaName: msg.media?.fileName,
+      content: msg.content ? (msg.content as unknown as Prisma.InputJsonValue) : undefined,
+      forwarded: msg.forwarded ?? false,
+      forwardingScore: msg.forwardingScore,
+    };
+  }
+
+  private previa(msg: InboundMessage) {
+    return messagePreview({ type: msg.type, text: msg.text, content: msg.content, mediaName: msg.media?.fileName }).slice(0, 120);
   }
 
   /**
@@ -256,6 +271,43 @@ export class InboundService {
     if (st.status === 'failed' && (m.status === 'delivered' || m.status === 'read')) return; // já chegou: erro tardio é ruído
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(m.conversation.tenantId, this.conversations.present(updated));
+  }
+
+  /**
+   * Reação a uma mensagem. Antes ela entrava como mensagem nova ("[unknown]" citando a reagida);
+   * agora só marca a reagida (regras em `ConversationsService.setReaction`). Reação a algo que
+   * não está no banco é descartada.
+   */
+  async applyReaction(number: WhatsAppNumber, r: InboundReaction) {
+    // filtra pelo tenant: externalId é único global, mas o dado não é de todos
+    const m = await this.prisma.message.findFirst({ where: { externalId: r.targetExternalId, conversation: { tenantId: number.tenantId } }, select: { id: true } });
+    if (!m) return;
+    await this.conversations.setReaction(number.tenantId, m.id, { fromMe: r.fromMe, emoji: r.emoji, at: r.timestamp });
+  }
+
+  /**
+   * Mensagem editada no celular: troca o texto da original. Edição de algo que não está no
+   * banco é descartada — virar mensagem nova seria a bolha solta que o WhatsApp não mostra.
+   */
+  async applyEdit(number: WhatsAppNumber, e: InboundEdit) {
+    // filtra pelo tenant: externalId é único global, mas o dado não é de todos
+    const m = await this.prisma.message.findFirst({ where: { externalId: e.targetExternalId, conversation: { tenantId: number.tenantId } }, select: { id: true } });
+    if (!m) return;
+    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text: e.text }, include: MESSAGE_INCLUDE });
+    this.gateway.emitMessage(number.tenantId, this.conversations.present(updated));
+  }
+
+  /**
+   * "Digitando…" do contato. Só repassa ao painel: não cria contato nem conversa (alguém
+   * digitando pela primeira vez ainda não é atendimento) e não grava nada.
+   */
+  async applyPresence(number: WhatsAppNumber, p: InboundPresence) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { tenantId: number.tenantId, numberId: number.id, contact: { phone: p.from } },
+      orderBy: { lastMessageAt: 'desc' },
+      select: { id: true },
+    });
+    if (conversation) this.gateway.emitTyping(number.tenantId, { conversationId: conversation.id, state: p.state });
   }
 
   async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean }) {

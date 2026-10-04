@@ -101,6 +101,7 @@ services:
       WEBHOOK_EVENTS_MESSAGES_UPDATE: "true"
       WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
       WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
+      WEBHOOK_EVENTS_PRESENCE_UPDATE: "true"
       LOG_LEVEL: ERROR,WARN
     volumes: ["./volumes/evolution:/evolution/instances"]
 

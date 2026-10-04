@@ -60,8 +60,10 @@ src/
 ## Tempo real
 
 `useRealtime()` (em `hooks.ts`) abre o socket com `auth: { token }` e:
-- `message` → insere/atualiza no cache `['messages', conversationId]`.
-- `conversation` → invalida `['conversations']`.
+- `message` → insere/atualiza no cache `['messages', conversationId]`. Também é por aqui que chega a mudança de status (webhook de entrega/leitura): a mensagem vem inteira e o `StatusIcon` da bolha troca sozinho — 🕒 enviando, ✓ enviada, ✓✓ entregue, ✓✓ ciano (`--tick-read`) lida, ⚠ falha (tooltip com o erro).
+- `conversation` → invalida `['conversations']`, a conversa e `['kanban']`.
+- `kanban` → invalida `['kanban']` e `['tags']` (colunas mudaram).
+- `typing` → grava `{state, at}` em `['typing', conversationId]` (`paused` limpa). Mensagem recebida (`message` com `direction: 'in'`) também limpa.
 - `number` → guarda `qrCode` em `['number-qr', id]` e invalida `['numbers']`.
 
 ## Feedback de carregamento
@@ -90,7 +92,7 @@ Dois temas, escolhidos no rodapé do menu (claro / escuro / sistema), aplicados 
 
 | | Claro — "Semáforo" | Escuro — "Sala de controle" |
 |---|---|---|
-| Ideia | Menu azul-ardósia, área clara, status como faixa cheia | Painel escuro, cores de estado luminosas, grade fina no chat |
+| Ideia | Menu azul-ardósia, área clara, status como faixa cheia | Painel slate suave, cores de estado luminosas, fundo do chat liso em grafite zinc-900, recebido zinc-800, enviado blue-600 |
 | Ação (`accent`) | azul `#2f5bea` | azul `#3b9eff` |
 | Aguardando / Atendendo / Encerrado | laranja / azul / cinza | âmbar / turquesa / cinza |
 | Balão de saída | azul sólido, texto branco | azul-marinho |
@@ -106,7 +108,9 @@ Dois temas, escolhidos no rodapé do menu (claro / escuro / sistema), aplicados 
 | Status da conversa | `wait` / `prog` / `done` (+ `-soft`) — ver `STATUS_META` em `ConversationList.tsx` |
 | Semânticas | `ok`, `warn`, `danger` (+ `-soft`, `-ink`) |
 | Provider | `meta-soft`/`meta-ink` (oficial), `evo-soft`/`evo-ink` (QR) |
-| Chat | `bg-chat-in`/`bg-chat-out` e `text-chat-*-ink`; fundo `.chat-bg` |
+| Chat | `bg-chat-in`/`bg-chat-out` e `text-chat-*-ink`; fundo `.chat-bg`. Claro: fundo zinc-100, recebido branco com contorno `--bub-in-line` (zinc-200/60), enviado blue-600. Escuro: fundo zinc-900, recebido zinc-800, enviado blue-600 |
+
+**Transparência em token** (`bg-muted/30`, `ring-accent/40`…) funciona porque `tailwind.config.ts` expõe cada token como `color-mix(in srgb, var(--x) calc(<alpha-value> * 100%), transparent)`. Antes era só `var(--x)`, e o Tailwind 3 não sabe aplicar `/NN` nisso: a classe não era gerada e ~60 usos no app não faziam nada (inclusive a onda do áudio recebido, que sumia). Se mudar o helper `v()`, mantenha o `<alpha-value>`.
 
 Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `color-mix` para o fundo suave — funcionam nos dois temas. Avatar: cor estável por telefone (`lib/avatar.ts`).
 
@@ -120,6 +124,8 @@ Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `c
 - Seletor de número mostra **ponto de conexão** (verde/âmbar) e **badge do provider** (Oficial/QR).
 - Cabeçalho do chat: **pill de status** com a mesma cor da faixa.
 - Menu: item *Conversas* com badge laranja = quantas aguardando.
+
+Em **/respostas** e em **/fluxos** há seleção múltipla (checkbox por item, por pasta nas respostas, e "selecionar todos") com **Duplicar** e **Exportar selecionados** — um arquivo só —, além de duplicar/exportar um item pelos ícones da linha e **Importar** no cabeçalho (aceita o arquivo individual ou o lote). Os dois módulos usam o mesmo formato e comportamento; ver [10](10-fluxos-de-automacao.md#replicar-um-fluxo) e [07](07-api.md).
 
 Em **/respostas** as pastas também abrem e fecham, mas o que fica guardado são as **fechadas**, não as abertas — o inverso do painel do chat, e de propósito: no chat o atendente procura duas respostas entre muitas, na página de gestão a pessoa veio ver o catálogo. Assim a página nasce mostrando tudo.
 
@@ -171,8 +177,11 @@ Serve para o que acontece o tempo todo no atendimento: precisar do e-mail ou do 
 
 Três comportamentos de rolagem, e tratá-los como um só é o que faz o chat pular sozinho:
 - **carregou o passado**: a altura é medida *antes* do pedido e recomposta depois, em `useLayoutEffect`, para a pessoa continuar exatamente onde estava;
-- **abriu a conversa / chegou mensagem com a pessoa no fim**: vai para o fim;
+- **abriu/trocou de conversa**: vai para o fim na hora, sempre — a posição da conversa anterior é esquecida. Esse recomeço fica no próprio `useLayoutEffect`: num `useEffect` ele rodava *depois* da rolagem e a conversa nova abria parada no meio;
+- **chegou mensagem com a pessoa no fim**: rola suave até ela;
 - **a pessoa está lendo o passado**: não é arrastada para baixo porque o contato respondeu.
+
+"Está no fim" (`noFim`) só é desligado quando a rolagem **sobe**. A rolagem automática sempre desce, e uma imagem que carrega entre o `scrollTop = scrollHeight` e o evento de scroll aumentava a distância até o fim e desligava o acompanhamento — o chat parava no meio, sobretudo no mini-chat do Kanban (imagens já em cache). Kanban e tela de conversas usam o mesmo `ChatPane`, então valem as mesmas regras.
 
 Há ainda um `ResizeObserver`, para o caso de a bolha crescer depois (imagem que carrega, player de áudio que monta). Ele não substitui o efeito acima: **não dispara quando o elemento só é criado**, apenas quando muda de tamanho — foi o que fez a conversa abrir parada no topo na primeira tentativa.
 
@@ -190,6 +199,17 @@ O chip **Esperando há mais tempo** reordena a lista (`sort=waiting`), e a escol
 
 O rótulo do número saiu da faixa de tags e foi para a linha da hora: embaixo, ele acrescentava uma faixa inteira só por estar vendo "todos os números", e a lista ficava com o dobro da altura. Agora a linha mede o mesmo nos dois casos (medido: 58px).
 
+Esse rótulo é o `ChannelBadge` (`components/chat/ChannelBadge.tsx`, antigo `NumberBadge`): pílula com fundo suave na **cor do número**, ícone do WhatsApp e nome em negrito. O texto é a cor misturada com `--ink` (`color-mix`) para continuar legível em cor clara e no tema escuro. Cor ausente ou fora de `#RRGGBB` cai no verde `#25D366`; cor dinâmica vai sempre por `style` (Tailwind não gera classe em runtime). Número desconectado ganha um ponto vermelho. `formatPhone` tira sufixo de JID (`@s.whatsapp.net`) e formata BR como `+55 DD XXXXX-XXXX`.
+
+O canal aparece em três lugares, porque o atendente precisa saber **por qual número está respondendo**:
+- **Lista:** selo sempre visível (mesmo filtrando um número) + faixa de 4px na cor do canal na **borda direita** da linha — a esquerda já é do semáforo de status.
+- **Cabeçalho do chat:** selo ao lado do nome do contato, com o telefone inteiro (`🟢 Vendas • +55 11 99999-8888`).
+- **Composer:** faixa "Enviando via: 🟢 Vendas (+55 11 98888-7777)" acima do campo. Número desconectado troca o composer por um alerta vermelho e bloqueia o envio.
+
+O envio manda `expectedNumberId` (o canal mostrado). Se a conversa mudou de número, a API responde 409 `number_changed` sem enviar: o `useSendMessage` recarrega a conversa e a tela mostra o toast com o canal novo, com o texto devolvido ao campo. `api()` lança `ApiError` (`status` + `code`) para a tela reagir pelo código, não pelo texto.
+
+A cor é escolhida no card do número em *Números* (paleta das tags).
+
 ## Aparência do chat
 
 O fundo era cinza chapado — e chapado é o que faz a tela parecer sem vida: os balões flutuam num vazio e a conversa não ganha lugar. Agora tem um ponto discreto a cada 18px (de perto quase não se vê, de longe o olho sente), o balão enviado tem degradê curto e sombra de contato, e os cantos ficaram mais arredondados.
@@ -200,7 +220,9 @@ O fundo era cinza chapado — e chapado é o que faz a tela parecer sem vida: os
 
 O botão aparece no hover, **fora** da bolha, para não roubar espaço do texto. Escolhida a mensagem, uma faixa acima do campo mostra o que está sendo respondido; enviar manda o `quotedExternalId` e limpa a faixa.
 
-Dentro da bolha, o trecho citado vem de três origens, nesta ordem: a mensagem que temos no histórico, o texto que o provider mandou junto (`quotedPreview`) e um rótulo genérico.
+Dentro da bolha, a caixa de citação (`Citacao` em `ChatPane.tsx`) usa primeiro o `message.quoted` que a API já resolve (`preview` e `authorName`; autor nulo vira "Você"/"Contato" pela direção). Sem ele, cai nas origens antigas, nesta ordem: a mensagem que temos no histórico, o texto que o provider mandou junto (`quotedPreview`) e um rótulo genérico.
+
+Com `quoted.messageId` a caixa é clicável: rola até a bolha citada (`id="msg-<id>"`) e a destaca por um instante. Se ela ainda não foi carregada (paginação), um aviso pede para rolar para cima.
 
 **Resposta a status (os "stories")** é o motivo de a segunda origem existir: o status não é mensagem da conversa e some em 24h. O conteúdo citado é guardado no momento em que a resposta chega, então meses depois a conversa ainda mostra *"Resposta ao status — 📷 Foto: Promoção 20%"* em cima do "quero esse". Só funciona no provider QR; a API oficial da Meta não entrega status.
 
@@ -210,7 +232,21 @@ Os atalhos ficam **abaixo** do campo de texto, como no WhatsApp: a mão está no
 
 Da esquerda para a direita: **clipe** (foto, vídeo, documento — antes esses três eram botões soltos acima *e* o clipe repetia os mesmos), **raio** = respostas rápidas (ícone do raio em todo o sistema), **fluxo** para disparar, **pausar** (só aparece com fluxo rodando — botão que não faz nada ensina a ignorar a barra), **emoji**, **@** para mencionar a equipe e **A sublinhado** para assinatura. O copiloto de IA fica na ponta direita.
 
-Emoji, menção e resposta rápida entram **no ponto do cursor**, não no fim: emoji no meio da frase é o caso comum.
+O **resumo por IA** fica no cabeçalho do chat, como ícone ✨ ao lado de Transferir/Histórico, e abre um popover (antes virava uma faixa dentro da linha do cabeçalho e quebrava o alinhamento). Abrir sempre consulta a API, que devolve o cache se não chegou mensagem nova; o badge mostra há quanto tempo foi gerado e **Atualizar** força uma geração nova (cobra uma interação).
+
+Emoji, menção e resposta rápida entram **no ponto do cursor**, não no fim: emoji no meio da frase é o caso comum. O menu de emoji **não fecha** ao escolher (dá para emendar vários) e não tira o foco do campo; fecha com Esc, clique fora ou no próprio botão.
+
+**Colar imagem** (Ctrl/Cmd+V no campo): imagem no clipboard abre a mesma prévia do anexo (`MediaPreview`), com legenda e confirmação. Texto cola normal.
+
+**Digitando**: `useTyping(conversationId)` lê `['typing', id]`. Enquanto houver estado, o cabeçalho troca a linha do telefone por "Fulano está digitando…"/"está gravando áudio…" e o fim da lista ganha um balão com três pontos em onda (`.typing-dot`). Se nenhum evento novo chegar em 5 s (`TYPING_TIMEOUT_MS`), o indicador some sozinho — o "parou" do WhatsApp às vezes não vem.
+
+**Tipos de mensagem** (`components/chat/messages/`): `structuredBody(m)` decide o corpo da bolha pelo `m.content` — `ButtonsMessage` (texto + botões como prévia; "Copiar" copia o código/Pix para o atendente e `url` abre o link, o resto é só o que o contato vê), `ListMessage` (cabeçalho, texto e "Ver opções" que expande as linhas), `LocationMessage` (card com link para o Google Maps — sem mapa estático, que exigiria chave) e `ContactMessage` (avatar, nome, telefones e copiar número). Tipo sem `content` (linhas antigas) ou `unknown` cai em `UnknownMessageFallback`: mostra o texto se houver, senão "Mensagem interativa recebida"/"Conteúdo não suportado para visualização" — nunca a palavra `unknown`. Sem `content`, a bolha segue o caminho comum (`MediaBody` + texto).
+
+**Encaminhada**: `m.forwarded` põe no topo da bolha a seta + "_Encaminhada_" (`ForwardedLabel`; score ≥ 5 → "Encaminhada com frequência").
+
+**Encaminhar**: botão de seta no hover da bolha (junto de responder/reagir; não aparece para figurinha nem para mensagem sem `externalId`). Abre `ForwardModal`: busca nas conversas ativas (em atendimento + fila, menos a atual), escolhe até 5 e chama `useForwardMessage`. Os destinos que falharem (ex.: conversa de outro atendente, janela da Meta) voltam num toast e ficam selecionados para tentar de novo. No celular do contato chega como mensagem comum — os providers não aceitam a marca de encaminhada.
+
+**Reações**: o emoji com que o contato (ou o cliente, pelo celular) reagiu aparece num selo pendurado na borda da bolha reagida, atualizado pelo evento `message` do socket. Reação não vira bolha. O atendente reage pelo botão de carinha que aparece no hover ao lado da bolha (junto do responder): seis emojis rápidos; escolher o que já está lá retira. Só para mensagem que chegou ao WhatsApp (tem `externalId`, não está pendente/com falha) e com o número conectado.
 
 **Assinatura** liga/desliga e fica guardada por navegador — é preferência de quem atende, não configuração da empresa. Ligada, a mensagem sai com `*Nome*` na primeira linha, que é como o cliente sabe com quem está falando num número de empresa.
 
@@ -248,6 +284,7 @@ Ator vazio aparece como **Automação**, nunca em branco: em auditoria, campo va
 - Posse: em *Aguardando* o cabeçalho tem **Assumir**; em *Em atendimento* (dono ou admin) tem **Transferir** (menu com atendentes + *Devolver à fila*). Se outra atendente é dona, o composer vira um aviso. A aba *Em atendimento* chama-se **Minhas** para atendente comum; admin tem um seletor "Todos / Só as minhas / <atendente>".
 - Cadeado (gerente/admin em conversa alheia): botão de cadeado no lugar do composer; aberto → campo âmbar de nota interna (`POST …/notes`); bolha de nota centralizada com borda âmbar. Reseta ao trocar de conversa.
 - Número desconectado: o composer é substituído por um aviso com link para *Números* (o back também recusa o envio). Mensagens com `status: failed` têm botão **reenviar** (`POST …/resend`).
+- Prévia da última mensagem (lista e Kanban): sempre via `formatPreview` (`lib/utils.ts`) — a API grava `[tipo]` quando não há texto e o helper traduz (`[image]` → "📷 Imagem", `[unknown]` → "Mensagem"; vazio → "Sem mensagens"). Prévias novas já saem traduzidas da API (`messagePreview` do shared: texto, ou "📍 Nome do lugar", "👤 Maria", "Mensagem interativa"…); o helper fica para as linhas antigas.
 - Mídia: `MediaBody` renderiza imagem/áudio/vídeo/documento a partir de `mediaUrl` (assinada, expira em 1 h — ao expirar, refetch das mensagens renova). Anexo no composer: `uploadFile()` → prévia → envio com `mediaKey`.
 
 
@@ -336,6 +373,12 @@ horário ou segurança — não manter um catálogo que a equipe usa o dia intei
 Editar exige `quick_replies.manage`; sem a permissão a tela mostra o conteúdo e esconde as
 ações (a API checa de novo).
 
+Pastas e respostas se reordenam arrastando pelo `GripVertical` (`@hello-pangea/dnd`, o mesmo
+do Kanban). Resposta pode ir para outra pasta aberta; pasta fechada não recebe, porque não dá
+para ver onde ela cairia. A árvore nova vai direto para o cache `['quick-replies']` (sem
+"pulo" de volta) e só depois para `PATCH .../reorder`; se a API recusar, o cache é recarregado.
+O painel do chat e o menu `/` só repetem a ordem que vem da API.
+
 ## Preferências de tela
 
 `usePersistedState` (`lib/persisted.ts`) guarda no navegador o que o atendente ajusta e espera
@@ -346,3 +389,16 @@ Uma armadilha vale registrar: gravar a cada mudança de valor **apaga o que acab
 lido**. Na montagem, o efeito de escrita roda no mesmo ciclo do de leitura e ainda enxerga o
 valor inicial. Por isso o hook só grava depois que o usuário mexeu, marcado no próprio setter
 — depender da ordem dos efeitos não resolve.
+
+## Kanban (`/kanban`)
+
+`app/(app)/kanban/page.tsx` + `components/kanban/`. Uma coluna por tag com `isKanban`, na ordem de `position`, mais a coluna fixa "Sem etapa" (`KANBAN_NO_STAGE`, não é tag). O card fica **só** na coluna da tag principal; as outras tags do atendimento viram pílulas, e as do contato (📌) aparecem só para leitura.
+
+- Arrastar card (`@hello-pangea/dnd`) → `useSetPrimaryTag` → `PATCH /conversations/:id/primary-tag`, otimista no cache `['kanban']` e desfeito se a API recusar. Ordem dentro da coluna não é guardada (manda a última mensagem).
+- Clicar numa pílula que é etapa promove a tag e move o card. Pílula de tag que não é etapa fica desabilitada.
+- Arrastar colunas só para quem tem `tags.manage` (`PATCH /kanban/columns`); sem a permissão o arraste de colunas nem é montado.
+- Duplo clique (ou o botão no card, para o celular) abre `KanbanChatDialog`, que é o próprio `ChatPane` em modo embutido (`<ChatPane conversationId=…/>`): não lê nem mexe na seleção/filtros da tela de conversas. Envio, cota do plano, janela de 24h e posse são os mesmos do chat.
+- Não é feature paga e não tem limite próprio: se a cota de mensagens acabar, o `UsageBanner` global e o composer do mini-chat bloqueiam igual à tela de conversas.
+
+No chat, a tag principal aparece cheia e com estrela no cabeçalho, no `TagPicker` (clicar numa tag de coluna já selecionada a torna principal) e no card da `ConversationList`.
+

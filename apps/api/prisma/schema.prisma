@@ -237,6 +237,8 @@ model WhatsAppNumber {
   tenantId String
   phone    String // E.164
   label    String
+  /// Cor do canal: diferencia de relance, na lista e no chat, por qual número a conversa entrou
+  color    String @default("#64748b")
   /// A troca oficial <-> não-oficial é somente este campo.
   provider WhatsAppProvider @default(evolution)
   /// Identificador do número dentro do provider: phone_number_id (Meta) ou instanceName (Evolution)
@@ -259,6 +261,7 @@ model WhatsAppNumber {
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
+  messages      Message[]
   usage         MessageUsage[]
   users         UserNumber[]
   campaigns     Campaign[]
@@ -372,6 +375,12 @@ model Conversation {
   outcomeReason  String?
   outcomeAt      DateTime?
   outcomeById    String?
+  // ---- cache do resumo por IA ----
+  /// Último resumo gerado. Vale enquanto `summaryLastMessageId` for a última mensagem da
+  /// conversa — pedir de novo sem mensagem nova devolve isto sem chamar (nem cobrar) a IA.
+  summaryCache         String?
+  summaryLastMessageId String?
+  summaryUpdatedAt     DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -414,6 +423,7 @@ enum MessageType {
   location
   contact
   template
+  interactive
   unknown
 }
 
@@ -482,6 +492,10 @@ model ConversationEvent {
 model Message {
   id             String           @id @default(uuid())
   conversationId String
+  /// Número por onde a mensagem entrou/saiu. O worker envia por ESTE número, não pelo da
+  /// conversa no momento do envio — o que foi validado na tela é o que sai. Null = nota interna
+  /// ou mensagem anterior a esta coluna (o worker cai no número da conversa).
+  numberId       String?
   direction      MessageDirection
   type           MessageType
   status         MessageStatus    @default(pending)
@@ -501,6 +515,15 @@ model Message {
   quotedPreview  String?
   /// a citação era um status/story, não uma mensagem da conversa
   quotedFromStatus Boolean @default(false)
+  /// Reações (emoji) recebidas: `MessageReaction[]`. Reação não vira mensagem — só marca esta.
+  reactions      Json?
+  /// Estrutura que não cabe em text/media (`MessageContent` do shared): botões, lista,
+  /// localização, contatos. O corpo continua em `text`.
+  content        Json?
+  /// Encaminhada: pelo contato (o provider avisa) ou pelo atendente ("Encaminhar" no painel)
+  forwarded      Boolean          @default(false)
+  /// Quantas vezes já foi encaminhada (≥ 5 = "encaminhada com frequência"), quando o provider informa
+  forwardingScore Int?
   /// atendente que enviou (null = inbound)
   authorId       String?
   /// Nota interna (cadeado): só a equipe vê, nunca vai ao WhatsApp nem conta no uso
@@ -511,6 +534,7 @@ model Message {
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   author       User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  number       WhatsAppNumber? @relation(fields: [numberId], references: [id], onDelete: SetNull)
   usage        MessageUsage?
   /// Apagar a citada não pode apagar as respostas a ela — por isso SetNull.
   quotedMessage Message?    @relation("MessageQuote", fields: [quotedMessageId], references: [id], onDelete: SetNull)
@@ -519,6 +543,7 @@ model Message {
   @@unique([externalId])
   @@index([conversationId, createdAt])
   @@index([quotedMessageId])
+  @@index([numberId])
   @@map("messages")
 }
 
@@ -531,6 +556,10 @@ model Tag {
   tenantId  String
   name      String
   color     String   @default("#6366f1")
+  /// vira coluna no Kanban (tag principal do atendimento = etapa do funil)
+  isKanban  Boolean  @default(true)
+  /// ordem da coluna no Kanban
+  position  Int      @default(0)
   createdAt DateTime @default(now())
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -544,6 +573,10 @@ model Tag {
 model ConversationTag {
   conversationId String
   tagId          String
+  /// Tag principal: define a coluna do atendimento no Kanban. No máximo UMA por conversa —
+  /// garantido em `ConversationsService.setPrimaryTag` (troca dentro de transação com lock na
+  /// conversa). Sem índice parcial: o Prisma não o modela e o próximo `migrate dev` o apagaria.
+  isPrimary      Boolean  @default(false)
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

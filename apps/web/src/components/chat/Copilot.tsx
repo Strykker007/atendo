@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Wand2, ListChecks, X } from 'lucide-react';
+import { Sparkles, Wand2, ListChecks, X, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useAiRewrite, useAiSuggest, useAiSummary, type RewriteTone } from '@/lib/hooks';
+import { useAiRewrite, useAiSuggest, useAiSummary, type AiSummary, type RewriteTone } from '@/lib/hooks';
+import { cn } from '@/lib/utils';
 
 const TONES: { id: RewriteTone; label: string }[] = [
   { id: 'formal', label: 'Mais formal' },
@@ -82,35 +83,99 @@ export function CopilotBar({ conversationId, text, onText }: { conversationId: s
   );
 }
 
-/** Resumo da conversa para quem vai assumir. Aparece como faixa acima do composer. */
+/** "agora há pouco", "há 5 min", "há 2 h", "em 03/10" */
+function updatedLabel(iso: string) {
+  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (min < 1) return 'Atualizado agora há pouco';
+  if (min < 60) return `Atualizado há ${min} min`;
+  if (min < 24 * 60) return `Atualizado há ${Math.floor(min / 60)} h`;
+  return `Atualizado em ${new Date(iso).toLocaleDateString('pt-BR')}`;
+}
+
+/**
+ * Resumo da conversa para quem vai assumir: ícone no cabeçalho que abre um popover.
+ * Abrir é de graça quando não chegou mensagem nova (a API devolve o cache);
+ * "Atualizar" força uma geração nova e cobra uma interação.
+ */
 export function SummaryButton({ conversationId }: { conversationId: string }) {
   const summary = useAiSummary();
-  const [text, setText] = useState<string | null>(null);
-  useEffect(() => setText(null), [conversationId]);
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<AiSummary | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
-  if (text) {
-    return (
-      <div className="bg-accent-soft border-b border-accent/20 px-3 py-2 text-[12px] text-ink">
-        <div className="flex items-start gap-2">
-          <ListChecks size={14} className="text-accent mt-0.5 shrink-0" />
-          <p className="flex-1 whitespace-pre-wrap leading-snug">{text}</p>
-          <button onClick={() => setText(null)} className="text-faint hover:text-ink" title="Fechar"><X size={14} /></button>
-        </div>
-        <p className="text-[10px] text-faint mt-1 pl-6">Resumo gerado por IA a partir das últimas mensagens — confira antes de agir.</p>
-      </div>
-    );
-  }
+  useEffect(() => { setOpen(false); setData(null); }, [conversationId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [open]);
+
+  const load = (force = false) =>
+    summary.mutateAsync({ conversationId, force }).then(setData).catch((e) => { toast.err(e); if (!data) setOpen(false); });
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    // sempre pergunta à API ao abrir: se nada mudou, ela devolve o cache sem chamar a IA
+    if (next) load();
+  };
+
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      className="h-7 px-2 text-[11px] gap-1 text-muted"
-      loading={summary.isPending}
-      icon={<ListChecks size={13} />}
-      title="Resumir a conversa para quem vai assumir"
-      onClick={() => summary.mutateAsync(conversationId).then((r) => setText(r.text)).catch(toast.err)}
-    >
-      Resumir
-    </Button>
+    <div className="relative" ref={ref}>
+      <Button
+        size="sm"
+        variant="ghost"
+        icon={<Sparkles size={14} className="text-accent" />}
+        onClick={toggle}
+        aria-expanded={open}
+        title="Resumo da conversa por IA"
+      >
+        <span className="hidden lg:inline">Resumo</span>
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-30 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-line bg-panel shadow-lg">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+            <ListChecks size={14} className="text-accent shrink-0" />
+            <span className="text-sm font-semibold text-ink flex-1">Resumo da conversa</span>
+            <button onClick={() => setOpen(false)} className="text-faint hover:text-ink" title="Fechar"><X size={14} /></button>
+          </div>
+          <div className="px-3 py-2.5 max-h-80 overflow-y-auto">
+            {summary.isPending && !data ? (
+              <div className="space-y-2 animate-pulse" aria-label="Gerando resumo">
+                <div className="h-3 rounded bg-field w-11/12" />
+                <div className="h-3 rounded bg-field w-4/5" />
+                <div className="h-3 rounded bg-field w-2/3" />
+              </div>
+            ) : data ? (
+              <p className={cn('text-[12.5px] leading-relaxed text-ink whitespace-pre-wrap', summary.isPending && 'opacity-50')}>{data.text}</p>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 border-t border-line">
+            {data && (
+              <span className="inline-flex items-center rounded-full bg-accent-soft text-accent text-[10.5px] font-semibold px-2 py-0.5">
+                {updatedLabel(data.updatedAt)}
+              </span>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-6 px-2 text-[11px] gap-1 text-muted ml-auto"
+              loading={summary.isPending && !!data}
+              disabled={summary.isPending}
+              icon={<RefreshCw size={12} />}
+              title="Gerar o resumo de novo (conta como uma interação de IA)"
+              onClick={() => load(true)}
+            >
+              Atualizar
+            </Button>
+          </div>
+          <p className="text-[10px] text-faint px-3 pb-2">Gerado por IA a partir das últimas mensagens — confira antes de agir.</p>
+        </div>
+      )}
+    </div>
   );
 }

@@ -14,6 +14,8 @@ import { SendPacer } from './send-pacer';
 class CreateNumberDto {
   @Matches(/^\+?[1-9]\d{7,14}$/) phone: string;
   @IsString() label: string;
+  /** cor do canal no painel (#rrggbb) */
+  @IsOptional() @Matches(/^#[0-9a-fA-F]{6}$/) color?: string;
   @IsEnum(ProviderKind) provider: ProviderKind;
   @IsObject() config: Record<string, unknown>;
 }
@@ -23,6 +25,7 @@ class SwitchProviderDto {
 }
 class UpdateNumberDto {
   @IsOptional() @IsString() @MaxLength(60) label?: string;
+  @IsOptional() @Matches(/^#[0-9a-fA-F]{6}$/) color?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   /** proteção contra bloqueio: ritmo de envio e teto diário */
   @IsOptional() @IsEnum(SendDelayProfile) sendDelay?: SendDelayProfile;
@@ -49,7 +52,7 @@ export class NumbersController {
   list(@CurrentUser() user: AuthUser) {
     return this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId },
-      select: { id: true, phone: true, label: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true, infraCostMonth: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true, infraCostMonth: true },
       orderBy: { createdAt: 'asc' },
     });
   }
@@ -66,6 +69,7 @@ export class NumbersController {
         tenantId: user.tenantId,
         phone: dto.phone.replace(/^\+/, ''),
         label: dto.label,
+        ...(dto.color && { color: dto.color }),
         provider: dto.provider,
         externalId,
         providerConfig: this.crypto.encryptJson(config),
@@ -96,7 +100,7 @@ export class NumbersController {
     return this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId },
       data: { ...resto, ...custo },
-      select: { id: true, label: true, isActive: true, sendDelay: true, sendDailyLimit: true, infraCostMonth: true },
+      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, infraCostMonth: true },
     });
   }
 

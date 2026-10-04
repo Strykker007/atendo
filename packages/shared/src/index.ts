@@ -4,3 +4,4 @@ export * from './permissions.js';
 export * from './plans.js';
 export * from './flows.js';
 export * from './ai.js';
+export * from './kanban.js';

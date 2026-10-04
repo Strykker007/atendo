@@ -12,6 +12,8 @@
  * Isolado do provider porque é leitura de payload bruto — o lugar onde um campo que mudou de
  * nome vira texto vazio sem ninguém perceber.
  */
+import { contextInfoDe, desembrulhar } from './evolution-content';
+import { textoQualquer } from './payload-text';
 
 export interface Citacao {
   /** id da mensagem citada no provider, quando existe */
@@ -30,19 +32,27 @@ const ROTULO: Record<string, string> = {
   documentMessage: '📄 Documento',
   stickerMessage: 'Figurinha',
   locationMessage: '📍 Localização',
+  liveLocationMessage: '📍 Localização',
+  contactMessage: '👤 Contato',
+  contactsArrayMessage: '👤 Contatos',
+  buttonsMessage: 'Mensagem interativa',
+  templateMessage: 'Mensagem interativa',
+  interactiveMessage: 'Mensagem interativa',
+  listMessage: 'Lista de opções',
 };
 
-function textoDe(citada: any): string | undefined {
-  if (!citada || typeof citada !== 'object') return undefined;
+function textoDe(bruta: any): string | undefined {
+  if (!bruta || typeof bruta !== 'object') return undefined;
+  const citada = desembrulhar(bruta);
   const direto = citada.conversation ?? citada.extendedTextMessage?.text;
   if (typeof direto === 'string' && direto.trim()) return direto.trim();
   for (const [chave, rotulo] of Object.entries(ROTULO)) {
     const no = citada[chave];
     if (!no) continue;
-    const legenda = typeof no.caption === 'string' ? no.caption.trim() : '';
-    return legenda ? `${rotulo}: ${legenda}` : rotulo;
+    const legenda = [no.caption, no.contentText, no.hydratedTemplate?.hydratedContentText, no.body?.text, no.description, no.displayName].find((t) => typeof t === 'string' && t.trim());
+    return legenda ? `${rotulo}: ${legenda.trim()}` : rotulo;
   }
-  return undefined;
+  return textoQualquer(citada);
 }
 
 /**
@@ -50,13 +60,7 @@ function textoDe(citada: any): string | undefined {
  * mensagem, por isso a varredura: responder com foto põe o contexto em `imageMessage`.
  */
 export function lerCitacao(msg: any): Citacao | undefined {
-  const ctx =
-    msg?.extendedTextMessage?.contextInfo ??
-    msg?.imageMessage?.contextInfo ??
-    msg?.videoMessage?.contextInfo ??
-    msg?.audioMessage?.contextInfo ??
-    msg?.documentMessage?.contextInfo ??
-    msg?.stickerMessage?.contextInfo;
+  const ctx = contextInfoDe(desembrulhar(msg));
   if (!ctx) return undefined;
 
   // `status@broadcast` é o endereço dos status: é assim que se sabe que a pessoa respondeu

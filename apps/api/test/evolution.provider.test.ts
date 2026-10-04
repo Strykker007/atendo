@@ -71,7 +71,74 @@ describe('EvolutionProvider.parseWebhook — mensagens', () => {
 
   it('lê coordenadas de localização', () => {
     const m = provider.parseWebhook(upsert({ locationMessage: { degreesLatitude: -16.6, degreesLongitude: -49.2 } })).messages[0];
-    expect(m.location).toEqual({ lat: -16.6, lng: -49.2 });
+    expect(m.content).toEqual({ kind: 'location', lat: -16.6, lng: -49.2 });
+  });
+
+  it('figurinha tem mídia para baixar', () => {
+    expect(provider.parseWebhook(upsert({ stickerMessage: { mimetype: 'image/webp' } })).messages[0].media).toMatchObject({ mimeType: 'image/webp', providerMediaId: 'EVO1' });
+  });
+
+  it('lê contato (vCard) com o número do waid', () => {
+    const vcard = 'BEGIN:VCARD\nVERSION:3.0\nFN:Maria Silva\nitem1.TEL;waid=5511988887777:+55 11 98888-7777\nEND:VCARD';
+    const m = provider.parseWebhook(upsert({ contactMessage: { displayName: 'Maria', vcard } })).messages[0];
+    expect(m.type).toBe(MessageType.CONTACT);
+    expect(m.content).toEqual({ kind: 'contacts', contacts: [{ name: 'Maria', phones: ['5511988887777'] }] });
+  });
+
+  it('lê código de verificação (interactiveMessage com cta_copy) como botões', () => {
+    const m = provider.parseWebhook(upsert({
+      interactiveMessage: {
+        body: { text: 'Seu código é 123456' },
+        nativeFlowMessage: { buttons: [
+          { name: 'cta_copy', buttonParamsJson: JSON.stringify({ display_text: 'Copiar código', copy_code: '123456' }) },
+          { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Não pedi um código', id: 'nao' }) },
+        ] },
+      },
+    })).messages[0];
+    expect(m.type).toBe(MessageType.INTERACTIVE);
+    expect(m.text).toBe('Seu código é 123456');
+    expect(m.content).toMatchObject({ kind: 'buttons', buttons: [{ title: 'Copiar código', kind: 'copy', value: '123456' }, { title: 'Não pedi um código', kind: 'reply', id: 'nao' }] });
+  });
+
+  it('lê template com botões (hydratedTemplate)', () => {
+    const m = provider.parseWebhook(upsert({ templateMessage: { hydratedTemplate: { hydratedContentText: 'Pedido saiu', hydratedButtons: [{ urlButton: { displayText: 'Rastrear', url: 'https://x.y' } }] } } })).messages[0];
+    expect(m.type).toBe(MessageType.INTERACTIVE);
+    expect(m.text).toBe('Pedido saiu');
+    expect(m.content).toMatchObject({ kind: 'buttons', buttons: [{ title: 'Rastrear', kind: 'url', value: 'https://x.y' }] });
+  });
+
+  it('lê lista com seções', () => {
+    const m = provider.parseWebhook(upsert({ listMessage: { title: 'Cardápio', description: 'Escolha', buttonText: 'Ver', sections: [{ title: 'Lanches', rows: [{ rowId: 'x', title: 'X-Burger' }] }] } })).messages[0];
+    expect(m.type).toBe(MessageType.INTERACTIVE);
+    expect(m.content).toMatchObject({ kind: 'list', header: 'Cardápio', buttonText: 'Ver', sections: [{ title: 'Lanches', rows: [{ id: 'x', title: 'X-Burger' }] }] });
+  });
+
+  it('resposta a botão vira texto com o id da opção', () => {
+    const m = provider.parseWebhook(upsert({ buttonsResponseMessage: { selectedButtonId: 'sim', selectedDisplayText: 'Sim' } })).messages[0];
+    expect(m).toMatchObject({ type: MessageType.TEXT, text: 'Sim', interactiveReplyId: 'sim' });
+  });
+
+  it('desembrulha mensagem temporária e marca encaminhada', () => {
+    const m = provider.parseWebhook(upsert({ ephemeralMessage: { message: { extendedTextMessage: { text: 'repassando', contextInfo: { isForwarded: true, forwardingScore: 6 } } } } })).messages[0];
+    expect(m).toMatchObject({ type: MessageType.TEXT, text: 'repassando', forwarded: true, forwardingScore: 6 });
+    expect(m.quotedExternalId).toBeUndefined();
+  });
+
+  it('tipo desconhecido com texto em algum campo não vira unknown', () => {
+    const m = provider.parseWebhook(upsert({ algoNovoMessage: { hydratedContentText: 'conteúdo' } })).messages[0];
+    expect(m).toMatchObject({ type: MessageType.TEXT, text: 'conteúdo' });
+  });
+
+  it('edição troca o texto da original e não vira mensagem', () => {
+    const out = provider.parseWebhook(upsert({ protocolMessage: { type: 14, key: { id: 'EVO0' }, editedMessage: { conversation: 'corrigido' } } }));
+    expect(out.messages).toHaveLength(0);
+    expect(out.edits).toEqual([{ provider: 'evolution', externalNumberId: INSTANCE, targetExternalId: 'EVO0', text: 'corrigido' }]);
+  });
+
+  it('mensagem apagada (protocolMessage REVOKE) é descartada', () => {
+    const out = provider.parseWebhook(upsert({ protocolMessage: { type: 0, key: { id: 'EVO0' } } }));
+    expect(out.messages).toHaveLength(0);
+    expect(out.edits).toBeUndefined();
   });
 
   it('marca origem de anúncio pelo externalAdReply', () => {
@@ -94,6 +161,24 @@ describe('EvolutionProvider.parseWebhook — mensagens', () => {
   });
 });
 
+describe('EvolutionProvider.parseWebhook — reações', () => {
+  it('reação não vira mensagem: marca a reagida', () => {
+    const out = provider.parseWebhook(upsert({ reactionMessage: { key: { id: 'EVO0', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }, text: '❤️' } }));
+    expect(out.messages).toHaveLength(0);
+    expect(out.reactions).toEqual([expect.objectContaining({ targetExternalId: 'EVO0', from: '5511999999999', fromMe: false, emoji: '❤️', externalNumberId: INSTANCE })]);
+  });
+
+  it('reação retirada chega com emoji vazio', () => {
+    const [r] = provider.parseWebhook(upsert({ reactionMessage: { key: { id: 'EVO0' }, text: '' } })).reactions;
+    expect(r.emoji).toBe('');
+  });
+
+  it('reação feita pelo celular do cliente sai como fromMe', () => {
+    const [r] = provider.parseWebhook(upsert({ reactionMessage: { key: { id: 'EVO0' }, text: '👍' } }, { fromMe: true })).reactions;
+    expect(r.fromMe).toBe(true);
+  });
+});
+
 describe('EvolutionProvider.parseWebhook — status e conexão', () => {
   it('mapeia os acks numéricos e textuais', () => {
     const st = (status: unknown) => provider.parseWebhook({ event: 'messages.update', instance: INSTANCE, data: { keyId: 'EVO1', status } }).statuses[0].status;
@@ -102,7 +187,10 @@ describe('EvolutionProvider.parseWebhook — status e conexão', () => {
     expect(st('DELIVERY_ACK')).toBe(MessageStatus.DELIVERED);
     expect(st(3)).toBe(MessageStatus.DELIVERED);
     expect(st('SERVER_ACK')).toBe(MessageStatus.SENT);
+    expect(st('PLAYED')).toBe(MessageStatus.READ);
+    expect(st(5)).toBe(MessageStatus.READ);
     expect(st('ERROR')).toBe(MessageStatus.FAILED);
+    expect(st(0)).toBe(MessageStatus.FAILED);
     expect(st('QUALQUER_COISA')).toBe(MessageStatus.PENDING);
   });
 
@@ -137,7 +225,7 @@ describe('EvolutionProvider.parseWebhook — status e conexão', () => {
 
   it('evento desconhecido ou corpo vazio não quebra', () => {
     for (const body of [undefined, null, {}, { event: 'contacts.upsert', instance: INSTANCE, data: {} }]) {
-      expect(provider.parseWebhook(body)).toEqual({ messages: [], statuses: [] });
+      expect(provider.parseWebhook(body)).toEqual({ messages: [], statuses: [], reactions: [] });
     }
   });
 });
@@ -199,6 +287,13 @@ describe('EvolutionProvider.send', () => {
     expect(calls[0].body.audio).toBe(Buffer.from('audio').toString('base64'));
   });
 
+  it('áudio "como arquivo" vai como documento, sem legenda', async () => {
+    await provider.send(ctx, { to: '5511999999999', type: MessageType.AUDIO, media: { voice: false } } as any, { data: Buffer.from('audio'), mimeType: 'audio/mpeg', fileName: 'aviso.mp3' });
+    expect(calls[0].path).toContain('/message/sendMedia/');
+    expect(calls[0].body).toMatchObject({ mediatype: 'document', mimetype: 'audio/mpeg', fileName: 'aviso.mp3' });
+    expect(calls[0].body.caption).toBeUndefined();
+  });
+
   it('mídia sobe em base64 — nunca expõe a URL do nosso storage', async () => {
     await provider.send(ctx, { to: '5511999999999', type: MessageType.IMAGE, media: { caption: 'olha' } } as any, { data: Buffer.from('img'), mimeType: 'image/png', fileName: 'a.png' });
     expect(calls[0].path).toContain('/message/sendMedia/');
@@ -213,5 +308,38 @@ describe('EvolutionProvider.send', () => {
   it('erro da Evolution vira exceção com a mensagem da API', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ response: { message: ['Connection Closed'] } }) }) as any));
     await expect(provider.send(ctx, { to: '55119', type: MessageType.TEXT, text: 'x' } as any)).rejects.toThrow('Connection Closed');
+  });
+});
+
+describe('EvolutionProvider.parseWebhook — presença (digitando)', () => {
+  const JID = '5500999990000@s.whatsapp.net';
+  const presenca = (last: string, id = JID) => provider.parseWebhook({ event: 'presence.update', instance: INSTANCE, data: { id, presences: { [id]: { lastKnownPresence: last } } } }).presences;
+
+  it('digitando e gravando passam direto', () => {
+    expect(presenca('composing')).toEqual([{ provider: 'evolution', externalNumberId: INSTANCE, from: '5500999990000', state: 'composing' }]);
+    expect(presenca('recording')?.[0].state).toBe('recording');
+  });
+
+  it('paused/available/unavailable encerram o indicador', () => {
+    for (const s of ['paused', 'available', 'unavailable']) expect(presenca(s)?.[0].state).toBe('paused');
+  });
+
+  it('grupo fica de fora', () => {
+    expect(presenca('composing', '12036304@g.us')).toBeUndefined();
+  });
+});
+
+describe('EvolutionProvider.subscribePresence', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('assina via sendPresence com "paused" — o contato não vê "digitando" nosso', async () => {
+    const calls: { path: string; body: any }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      calls.push({ path: String(url), body: JSON.parse(init.body) });
+      return { ok: true, json: async () => ({}) } as any;
+    }));
+    await provider.subscribePresence(ctx, '5500999990000');
+    expect(calls[0].path).toContain(`/chat/sendPresence/${INSTANCE}`);
+    expect(calls[0].body).toEqual({ number: '5500999990000', presence: 'paused', delay: 0 });
   });
 });

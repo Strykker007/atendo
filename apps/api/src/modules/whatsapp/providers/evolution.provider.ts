@@ -4,7 +4,8 @@ import { BillingCategory, MessageStatus, MessageType, NumberStatus } from '@aten
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
 import { lerCitacao } from './quoted';
-import type { MediaPayload, NumberContext, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import { contextInfoDe, desembrulhar, lerConteudo, lerEdicao } from './evolution-content';
+import type { MediaPayload, NumberContext, OutboundReaction, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError } from './provider-error';
 
 /** providerConfig de um número Evolution */
@@ -116,7 +117,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         method: 'POST',
         body: JSON.stringify({ number: m.to, text, quoted: m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined }),
       }, this.shard(ctx));
-    } else if (m.type === MessageType.AUDIO && media) {
+    } else if (m.type === MessageType.AUDIO && media && m.media?.voice !== false) {
       // áudio como "mensagem de voz" (PTT), igual ao gravado no app
       r = await this.api(`/message/sendWhatsAppAudio/${name}`, {
         method: 'POST',
@@ -128,11 +129,12 @@ export class EvolutionProvider implements WhatsAppProvider {
         method: 'POST',
         body: JSON.stringify({
           number: m.to,
-          mediatype: m.type,
+          // áudio "como arquivo" vai como documento: o sendMedia não tem áudio comum
+          mediatype: m.type === MessageType.AUDIO ? 'document' : m.type,
           media: media ? media.data.toString('base64') : m.media?.url,
           mimetype: media?.mimeType ?? m.media?.mimeType,
           fileName: media?.fileName ?? m.media?.fileName,
-          caption: m.media?.caption ?? m.text,
+          caption: m.type === MessageType.AUDIO ? undefined : (m.media?.caption ?? m.text),
         }),
       }, this.shard(ctx));
     } else {
@@ -178,6 +180,28 @@ export class EvolutionProvider implements WhatsAppProvider {
     }, this.shard(ctx)).catch(() => undefined);
   }
 
+  /** A Evolution localiza a reagida pela key inteira: chat + id + se fomos nós que mandamos. */
+  async react(ctx: NumberContext, r: OutboundReaction) {
+    await this.api(`/message/sendReaction/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        key: { remoteJid: `${r.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: r.targetFromMe, id: r.targetExternalId },
+        reaction: r.emoji,
+      }),
+    }, this.shard(ctx));
+  }
+
+  /**
+   * A Evolution não tem rota só para assinar presença; `sendPresence` assina (`presenceSubscribe`)
+   * e depois manda o estado pedido. Com `paused` o contato não vê nada.
+   */
+  async subscribePresence(ctx: NumberContext, phone: string) {
+    await this.api(`/chat/sendPresence/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ number: phone, presence: 'paused', delay: 0 }),
+    }, this.shard(ctx));
+  }
+
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer) {
     const eq = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
     // 1) chamada manual/teste com a chave global no header
@@ -194,7 +218,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   parseWebhook(body: any): ParsedWebhook {
-    const out: ParsedWebhook = { messages: [], statuses: [] };
+    const out: ParsedWebhook = { messages: [], statuses: [], reactions: [] };
     const externalNumberId: string = body?.instance;
     const data = body?.data;
 
@@ -204,6 +228,29 @@ export class EvolutionProvider implements WhatsAppProvider {
         for (const m of items) {
           if (!m?.key) continue;
           if (m.key.remoteJid?.endsWith('@g.us')) continue; // grupos ficam fora do atendimento
+          // reação chega como mensagem, mas não é: vira marca na mensagem reagida
+          const reacao = desembrulhar(m.message)?.reactionMessage;
+          if (reacao) {
+            if (reacao.key?.id) {
+              out.reactions.push({
+                provider: 'evolution',
+                externalNumberId,
+                targetExternalId: reacao.key.id,
+                from: String(m.key.remoteJid).replace(/@.*$/, ''),
+                fromMe: !!m.key.fromMe,
+                emoji: reacao.text ?? '',
+                timestamp: new Date(Number(m.messageTimestamp) * 1000),
+              });
+            }
+            continue;
+          }
+          // protocolMessage (apagar, editar, config. de temporárias) também não é mensagem:
+          // edição troca o texto da original; o resto é descartado em vez de virar bolha solta
+          if (desembrulhar(m.message)?.protocolMessage) {
+            const edicao = lerEdicao(m.message);
+            if (edicao) (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...edicao });
+            continue;
+          }
           // `fromMe` cobre DOIS casos: o que o painel acabou de enviar (descartado adiante
           // pelo externalId, que já está no banco) e o que a pessoa digitou no celular, que
           // precisa aparecer no histórico. Filtrar aqui jogava os dois fora.
@@ -227,6 +274,18 @@ export class EvolutionProvider implements WhatsAppProvider {
         out.connection = { externalNumberId, status: this.mapConnection(data?.state), phone, transient: data?.state === 'connecting', loggedOut };
         break;
       }
+      case 'presence.update': {
+        // { id: '<jid do chat>', presences: { '<jid>': { lastKnownPresence: 'composing' | 'recording' | 'paused' | 'available' | ... } } }
+        const chat = String(data?.id ?? '');
+        if (!chat || chat.endsWith('@g.us')) break;
+        const presences = data?.presences ?? {};
+        const p = presences[chat] ?? Object.values(presences)[0];
+        const last = (p as any)?.lastKnownPresence;
+        // available/unavailable (online/offline) também encerram o "digitando"
+        const state = last === 'composing' || last === 'recording' ? last : 'paused';
+        out.presences = [{ provider: 'evolution', externalNumberId, from: chat.replace(/@.*$/, ''), state }];
+        break;
+      }
       case 'qrcode.updated':
         out.connection = { externalNumberId, status: NumberStatus.PENDING_QR, qrCode: data?.qrcode?.base64 };
         break;
@@ -235,31 +294,9 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   private toInbound(m: any, externalNumberId: string): InboundMessage {
-    const msg = m.message ?? {};
+    const msg = desembrulhar(m.message);
     const from = String(m.key.remoteJid).replace(/@.*$/, '');
-    let type: MessageType = MessageType.UNKNOWN;
-    let text: string | undefined;
-    let media: InboundMessage['media'];
-    if (msg.conversation || msg.extendedTextMessage) {
-      type = MessageType.TEXT;
-      text = msg.conversation ?? msg.extendedTextMessage?.text;
-    } else if (msg.imageMessage) {
-      type = MessageType.IMAGE;
-      media = { mimeType: msg.imageMessage.mimetype, caption: msg.imageMessage.caption };
-    } else if (msg.audioMessage) {
-      type = MessageType.AUDIO;
-      media = { mimeType: msg.audioMessage.mimetype };
-    } else if (msg.videoMessage) {
-      type = MessageType.VIDEO;
-      media = { mimeType: msg.videoMessage.mimetype, caption: msg.videoMessage.caption };
-    } else if (msg.documentMessage) {
-      type = MessageType.DOCUMENT;
-      media = { mimeType: msg.documentMessage.mimetype, fileName: msg.documentMessage.fileName };
-    } else if (msg.stickerMessage) {
-      type = MessageType.STICKER;
-    } else if (msg.locationMessage) {
-      type = MessageType.LOCATION;
-    }
+    const lido = lerConteudo(m.message);
     const citacao = lerCitacao(msg);
     return {
       provider: 'evolution',
@@ -267,10 +304,13 @@ export class EvolutionProvider implements WhatsAppProvider {
       externalNumberId,
       from,
       contactName: m.pushName,
-      type,
-      text: text ?? media?.caption,
-      media: media ? { ...media, providerMediaId: m.key.id } : undefined,
-      location: msg.locationMessage ? { lat: msg.locationMessage.degreesLatitude, lng: msg.locationMessage.degreesLongitude } : undefined,
+      type: lido.type,
+      text: lido.text,
+      media: lido.media ? { ...lido.media, providerMediaId: m.key.id } : undefined,
+      content: lido.content,
+      forwarded: lido.forwarded,
+      forwardingScore: lido.forwardingScore,
+      interactiveReplyId: lido.interactiveReplyId,
       quotedExternalId: citacao?.externalId,
       quotedPreview: citacao?.preview,
       quotedFromStatus: citacao?.fromStatus,
@@ -286,7 +326,7 @@ export class EvolutionProvider implements WhatsAppProvider {
    * mas suficiente para marcar a origem.
    */
   private referralOf(msg: any): InboundMessage['referral'] | undefined {
-    const ctx = msg.extendedTextMessage?.contextInfo ?? msg.imageMessage?.contextInfo ?? msg.videoMessage?.contextInfo ?? msg.conversation?.contextInfo;
+    const ctx = contextInfoDe(msg);
     const ad = ctx?.externalAdReply;
     if (ad) {
       const isAd = ad.sourceType === 'ad' || !!ad.ctwaClid || /facebook\.com\/ads|fb\.me\/ad|instagram\.com/i.test(ad.sourceUrl ?? '');
@@ -309,10 +349,12 @@ export class EvolutionProvider implements WhatsAppProvider {
 
   private mapAck(s: string | number): MessageStatus {
     const v = String(s).toUpperCase();
-    if (v === 'READ' || v === '4') return MessageStatus.READ;
+    // ordem do Baileys: 0 ERROR, 1 PENDING, 2 SERVER_ACK, 3 DELIVERY_ACK, 4 READ, 5 PLAYED.
+    // PLAYED (áudio ouvido) é lido para o painel; sem isso caía em PENDING e era ignorado.
+    if (v === 'READ' || v === '4' || v === 'PLAYED' || v === '5') return MessageStatus.READ;
     if (v === 'DELIVERY_ACK' || v === '3') return MessageStatus.DELIVERED;
     if (v === 'SERVER_ACK' || v === '2') return MessageStatus.SENT;
-    if (v === 'ERROR') return MessageStatus.FAILED;
+    if (v === 'ERROR' || v === '0') return MessageStatus.FAILED;
     return MessageStatus.PENDING;
   }
 

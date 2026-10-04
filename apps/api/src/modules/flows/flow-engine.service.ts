@@ -2,24 +2,43 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import type { FlowDefinition, FlowNode, FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, MAX_FLOW_HOPS, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
-import { choose, interpolate, validAnswer } from './answer';
+import { choose, interpolate, validAnswer, type InterpolateCtx } from './answer';
+import { pickBranch, type RuleEnv } from './conditions';
+import { applyAssignments } from './variables';
 import { afterAiAnswer } from './ai-turns';
 import { onScheduleMiss } from './schedule-misses';
 import { AiService } from '../ai/ai.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
-import { isOpenAt } from '../tenants/business-hours';
+import { isOpenAt, nextOpenAt } from '../tenants/business-hours';
+import { callWebhook } from './webhook';
+import { DISTRIBUTION_REASON, leastBusy, nextInRotation, pickWeighted } from './distribution';
 import { pickDefaultFlow, type InboundSituation } from './default-flows';
 
 export const QUEUE_FLOWS = 'flows';
 export interface FlowResumeJob { runId: string }
 
 const MAX_STEPS = 50; // proteção contra loop infinito num mesmo avanço
+
+/** Variáveis internas do motor (`_aiTurns`, `_sched`, `_content`) não seguem para o fluxo conectado. */
+const HOPS_VAR = '_flowHops';
+/** Conteúdo pausado no intervalo entre mensagens: `<id do nó>:<índice da próxima>`. */
+const CONTENT_VAR = '_content';
+const contentCursor = (vars: Record<string, string>, nodeId: string) => {
+  const [id, idx] = (vars[CONTENT_VAR] ?? '').split(':');
+  return id === nodeId && /^\d+$/.test(idx ?? '') ? Number(idx) : undefined;
+};
+
+/** Memoiza uma busca assíncrona: várias regras pedindo a mesma coisa = uma consulta. */
+const once = <T>(fn: () => Promise<T>) => {
+  let p: Promise<T> | undefined;
+  return () => (p ??= fn());
+};
 
 /**
  * Motor de fluxos. Um FlowRun anda pelo grafo até encontrar um nó que espera
@@ -42,8 +61,11 @@ export class FlowEngineService {
 
   // ---------- entrada ----------
 
-  /** Dispara um fluxo numa conversa (manual ou por gatilho). Substitui run ativo, se houver. */
-  async start(flowId: string, conversationId: string, startedById?: string) {
+  /**
+   * Dispara um fluxo numa conversa (manual ou por gatilho). Substitui run ativo, se houver.
+   * `vars`: variáveis iniciais (bloco "Conectar com outro fluxo" leva as do fluxo de origem).
+   */
+  async start(flowId: string, conversationId: string, startedById?: string, opts?: { vars?: Record<string, string> }) {
     const flow = await this.prisma.flow.findUnique({ where: { id: flowId } });
     if (!flow || !flow.isActive) throw new BadRequestException('Fluxo inexistente ou inativo');
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
@@ -54,7 +76,7 @@ export class FlowEngineService {
 
     await this.stop(conversationId, 'substituído por outro fluxo');
     const run = await this.prisma.flowRun.create({
-      data: { tenantId: flow.tenantId, flowId: flow.id, conversationId, currentNodeId: startNode.id, startedById, vars: {} },
+      data: { tenantId: flow.tenantId, flowId: flow.id, conversationId, currentNodeId: startNode.id, startedById, vars: opts?.vars ?? {} },
     });
     await this.markConversation(conversationId, run.id);
     /**
@@ -155,11 +177,13 @@ export class FlowEngineService {
     });
   }
 
-  /** Job de "Aguardar" venceu. */
+  /** Job de "Aguardar" (ou do intervalo entre mensagens do Conteúdo) venceu. */
   async resume(runId: string) {
     const run = await this.prisma.flowRun.findUnique({ where: { id: runId } });
     if (!run || run.status !== 'waiting') return;
     await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'running', waitUntil: null } });
+    // Conteúdo no meio da sequência: continua no mesmo nó, da mensagem em que parou
+    if (run.currentNodeId && contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined) return this.advance(runId);
     await this.next(runId, undefined);
   }
 
@@ -198,12 +222,35 @@ export class FlowEngineService {
           case 'start':
             await this.goNext(runId, def, node.id);
             continue;
-          case 'message':
-            await this.send(run.conversationId, node.data.text ? interpolate(node.data.text, ctx) : undefined, node.data);
+          case 'message': {
+            const items = normalizeContent(node.data);
+            const resumeAt = contentCursor(vars, node.id);
+            let paused = false;
+            for (let i = resumeAt ?? 0; i < items.length; i++) {
+              // intervalo antes da mensagem i (a primeira sai na hora; a retomada já esperou)
+              const delay = i > 0 && i !== resumeAt ? Math.min(CONTENT_MAX_DELAY_SEC, Math.max(0, Number(items[i].delay) || 0)) : 0;
+              if (delay > 0) {
+                await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: new Date(Date.now() + delay * 1000), vars: { ...vars, [CONTENT_VAR]: `${node.id}:${i}` } } });
+                await this.queue.add('resume', { runId }, { delay: delay * 1000, jobId: `resume-${runId}-${node.id}-${i}-${Date.now()}` });
+                paused = true;
+                break;
+              }
+              await this.sendItem(run.conversationId, items[i], ctx);
+            }
+            if (paused) return;
+            if (resumeAt !== undefined) {
+              const { [CONTENT_VAR]: _done, ...rest } = vars;
+              void _done;
+              await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: rest } });
+            }
             await this.goNext(runId, def, node.id);
             continue;
+          }
+          case 'connect_flow':
+            return this.connectFlow(run, node, vars);
           case 'question':
-            await this.send(run.conversationId, interpolate(node.data.text, ctx));
+            // "Salvar" sem texto só espera: a pergunta veio de um bloco anterior
+            if (node.data.text) await this.send(run.conversationId, interpolate(node.data.text, ctx));
             await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
             return; // espera resposta do contato
           case 'menu':
@@ -211,8 +258,8 @@ export class FlowEngineService {
             await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
             return;
           case 'condition': {
-            const yes = await this.evaluate(node, run.conversation, vars);
-            await this.goNext(runId, def, node.id, yes ? 'yes' : 'no');
+            const handle = await this.evaluate(node, run.conversation, ctx);
+            await this.goNext(runId, def, node.id, handle);
             continue;
           }
           case 'action': {
@@ -222,10 +269,32 @@ export class FlowEngineService {
             continue;
           }
           case 'wait': {
-            const ms = Math.max(1, node.data.minutes) * 60_000;
-            await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: new Date(Date.now() + ms) } });
+            const until = await this.waitUntil(run.tenantId, node);
+            const ms = Math.max(0, until.getTime() - Date.now());
+            await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: until } });
             await this.queue.add('resume', { runId }, { delay: ms, jobId: `resume-${runId}-${node.id}-${Date.now()}` });
             return;
+          }
+          case 'variable': {
+            const ops = node.data.assignments ?? [];
+            // fuso só é buscado se alguma operação gravar a data/hora atual
+            const timezone = ops.some((a) => a.op === 'now') ? (await this.tenantSettings.get(run.tenantId)).timezone : 'America/Sao_Paulo';
+            const { vars: next, problems } = applyAssignments(vars, ops, { contact: ctx.contact, now: new Date(), timezone });
+            if (problems.length) await this.warnTeam(run, `Manipulador: ${problems.join(' ')}`);
+            await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: next } });
+            await this.goNext(runId, def, node.id);
+            continue;
+          }
+          case 'randomizer': {
+            const branch = pickWeighted(node.data.branches ?? []);
+            if (!branch) return this.finish(runId, 'failed', 'randomizador sem ramos com peso');
+            await this.goNext(runId, def, node.id, branch.id);
+            continue;
+          }
+          case 'distributor': {
+            const ok = await this.distribute(node, run);
+            await this.goNext(runId, def, node.id, ok ? 'done' : 'fallback');
+            continue;
           }
           case 'end':
             if (node.data.closeConversation) await this.conversations.setStatusSystem(run.conversationId, 'closed');
@@ -269,6 +338,12 @@ export class FlowEngineService {
 
   /** Resposta do contato chegou num nó Perguntar/Menu. */
   private async deliverAnswer(run: FlowRun, message: Message) {
+    // o contato respondeu: saltos entre fluxos daqui em diante não são loop automático
+    if ((run.vars as Record<string, string>)[HOPS_VAR]) {
+      const { [HOPS_VAR]: _hops, ...rest } = run.vars as Record<string, string>;
+      void _hops;
+      run = await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars: rest } });
+    }
     const { def, node } = await this.load(run.id);
     if (!node) return this.finish(run.id, 'failed', 'nó atual inexistente');
     const answer = (message.text ?? '').trim();
@@ -278,6 +353,7 @@ export class FlowEngineService {
       if (!validAnswer(answer, node.data.validation)) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Não entendi. Pode repetir?');
       const vars = { ...(run.vars as Record<string, string>), [node.data.varName]: answer };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
+      if (node.data.contactField) await this.saveContactField(run.conversationId, node.data.contactField, answer);
       return this.next(run.id, undefined);
     }
     if (node.type === 'menu') {
@@ -531,6 +607,26 @@ export class FlowEngineService {
       case 'handoff':
         await this.handoff(run.id, 'transferido para humano pelo fluxo', d.agentId);
         return true;
+      case 'webhook': {
+        if (!d.url) return false;
+        const vars = { ...(run.vars as Record<string, string>) };
+        try {
+          const res = await callWebhook(d.url, {
+            event: 'flow.webhook',
+            flowId: run.flowId,
+            conversationId: run.conversationId,
+            contact: { name: run.conversation.contact.name, phone: run.conversation.contact.phone },
+            vars: Object.fromEntries(Object.entries(vars).filter(([k]) => !k.startsWith('_'))),
+          });
+          if (d.responseVar) vars[d.responseVar] = res.body;
+        } catch (err) {
+          // webhook fora do ar não para o atendimento: registra e segue
+          this.log.warn(`webhook do fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
+          if (d.responseVar) vars[d.responseVar] = '';
+        }
+        if (d.responseVar) await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
+        return false;
+      }
       case 'set_var': {
         if (!d.varName) break;
         const vars = { ...(run.vars as Record<string, string>) };
@@ -543,6 +639,29 @@ export class FlowEngineService {
     return false;
   }
 
+  /**
+   * Conectar com outro fluxo: este run termina e o destino começa do início, com as variáveis
+   * deste (menos as internas). Destino apagado/desativado ou saltos demais seguidos (A → B → A…)
+   * não saltam: registra, avisa a equipe e entrega a conversa para um atendente — quem já está
+   * atribuído continua com ela; sem ninguém, vai para "Aguardando".
+   */
+  private async connectFlow(run: FlowRun & { flow: { name: string }; conversation: { assigneeId: string | null } }, node: Extract<FlowNode, { type: 'connect_flow' }>, vars: Record<string, string>) {
+    const hops = Number(vars[HOPS_VAR] ?? 0) + 1;
+    const target = node.data.flowId ? await this.prisma.flow.findFirst({ where: { id: node.data.flowId, tenantId: run.tenantId }, select: { id: true, name: true, isActive: true } }) : null;
+    const problem = !target ? 'o fluxo de destino não existe mais (ou não foi escolhido)'
+      : !target.isActive ? `o fluxo de destino "${target.name}" está desativado`
+        : hops > MAX_FLOW_HOPS ? `${MAX_FLOW_HOPS} saltos seguidos entre fluxos sem resposta do contato (loop?)`
+          : null;
+    if (problem || !target) {
+      const assignee = run.conversation.assigneeId ?? undefined;
+      await this.warnTeam(run, `Conectar com outro fluxo: ${problem}. A automação parou e a conversa ${assignee ? 'ficou com o atendente atribuído' : 'foi para a fila'}.`);
+      return this.handoff(run.id, `conectar fluxo: ${problem}`.slice(0, 1000), assignee);
+    }
+    const carried = Object.fromEntries(Object.entries(vars).filter(([k]) => !k.startsWith('_')));
+    await this.finish(run.id, 'done', `seguiu para o fluxo "${target.name}"`);
+    await this.start(target.id, run.conversationId, undefined, { vars: { ...carried, [HOPS_VAR]: String(hops) } });
+  }
+
   /** Entrega para humano: volta para a fila (ou atribui) e encerra o run. */
   private async handoff(runId: string, reason: string, agentId?: string) {
     const run = await this.prisma.flowRun.findUniqueOrThrow({ where: { id: runId } });
@@ -550,40 +669,118 @@ export class FlowEngineService {
     await this.finish(runId, 'done', reason);
   }
 
-  private async evaluate(node: Extract<FlowNode, { type: 'condition' }>, conv: Conversation & { tags: { tagId: string }[] }, vars: Record<string, string>) {
-    const d = node.data;
-    switch (d.kind) {
-      case 'var_equals':
-        return (vars[d.varName ?? ''] ?? '').trim().toLowerCase() === (d.value ?? '').trim().toLowerCase();
-      case 'var_contains':
-        return (vars[d.varName ?? ''] ?? '').toLowerCase().includes((d.value ?? '').toLowerCase());
-      case 'has_tag': {
-        if (conv.tags.some((t) => t.tagId === d.tagId)) return true;
-        return !!(await this.prisma.contactTag.findFirst({ where: { contactId: conv.contactId, tagId: d.tagId ?? '' } }));
-      }
-      case 'business_hours': {
-        const tenant = await this.tenantSettings.get(conv.tenantId);
-        // sem horário no bloco, vale o expediente configurado em Configurações — inclusive
-        // a chave "atendimento ativo", que fecha tudo em feriado/férias
-        if (!d.hours) {
-          return isOpenAt({ now: new Date(), timezone: tenant.timezone, hours: tenant.hours, attendanceActive: tenant.attendanceActive });
-        }
-        // horário próprio do bloco (sobrepõe o do cliente), mas sempre no fuso dele
-        const hours = d.hours.days.map((weekday) => ({ weekday, start: d.hours!.start, end: d.hours!.end }));
-        return isOpenAt({ now: new Date(), timezone: tenant.timezone, hours, attendanceActive: tenant.attendanceActive });
-      }
-    }
-    return false;
+  /** Condição: devolve a saída (id do ramo ou Senão). Aceita o formato antigo via `normalizeCondition`. */
+  private async evaluate(node: Extract<FlowNode, { type: 'condition' }>, conv: Conversation & { tags: { tagId: string }[] }, ctx: InterpolateCtx) {
+    const tenant = once(() => this.tenantSettings.get(conv.tenantId));
+    const env: RuleEnv = {
+      ...ctx,
+      now: new Date(),
+      timezone: async () => (await tenant()).timezone,
+      lastMessage: once(async () => {
+        const m = await this.prisma.message.findFirst({ where: { conversationId: conv.id, direction: 'in' }, orderBy: { createdAt: 'desc' }, select: { text: true } });
+        return m?.text ?? '';
+      }),
+      hasTag: async (tagId) => {
+        if (conv.tags.some((t) => t.tagId === tagId)) return true;
+        return !!(await this.prisma.contactTag.findFirst({ where: { contactId: conv.contactId, tagId } }));
+      },
+      isOpen: async (hours) => {
+        const t = await tenant();
+        // sem horário próprio, vale o expediente de Configurações — inclusive a chave
+        // "atendimento ativo", que fecha tudo em feriado/férias. Com horário próprio, no fuso do cliente.
+        const list = hours ? hours.days.map((weekday) => ({ weekday, start: hours.start, end: hours.end })) : t.hours;
+        return isOpenAt({ now: new Date(), timezone: t.timezone, hours: list, attendanceActive: t.attendanceActive });
+      },
+    };
+    return pickBranch(normalizeCondition(node.data), env);
   }
 
-  private async send(conversationId: string, text?: string, media?: { mediaKey?: string; mediaType?: 'image' | 'document' | 'audio' | 'video'; mediaName?: string }) {
-    if (!text && !media?.mediaKey) return;
-    await this.conversations.sendAsSystem(conversationId, text, media?.mediaKey ? { key: media.mediaKey, type: media.mediaType ?? 'document', name: media.mediaName } : undefined);
+  /** Quando o Atraso inteligente vence: agora + tempo, empurrado para o expediente se pedido. */
+  private async waitUntil(tenantId: string, node: Extract<FlowNode, { type: 'wait' }>): Promise<Date> {
+    const due = new Date(Date.now() + Math.max(1, Number(node.data.minutes) || 1) * 60_000);
+    if (!node.data.businessHours) return due;
+    const t = await this.tenantSettings.get(tenantId);
+    return nextOpenAt({ from: due, timezone: t.timezone, hours: t.hours, attendanceActive: t.attendanceActive });
+  }
+
+  /** Bloco "Salvar" com destino na ficha: o que o contato respondeu vira dado dele. */
+  private async saveContactField(conversationId: string, field: 'name' | 'email' | 'address' | 'note1' | 'note2', value: string) {
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId }, select: { contactId: true } });
+    await this.prisma.contact.update({ where: { id: conv.contactId }, data: { [field]: value.slice(0, 500) } });
+  }
+
+  /**
+   * Distribuidor. Candidatos: os escolhidos no bloco (ou todos os ativos), sempre filtrados
+   * por quem opera o número da conversa — atribuir a quem não enxerga o número esconderia o
+   * atendimento. Devolve false quando ninguém pode receber (saída "Ninguém disponível").
+   */
+  private async distribute(node: Extract<FlowNode, { type: 'distributor' }>, run: FlowRun & { conversation: Conversation }): Promise<boolean> {
+    const conv = run.conversation;
+    if (node.data.mode === 'queue') {
+      await this.conversations.setStatusSystem(conv.id, 'waiting');
+      return true;
+    }
+    const users = await this.prisma.user.findMany({
+      where: {
+        tenantId: run.tenantId,
+        isActive: true,
+        role: { not: 'super_admin' },
+        ...(node.data.agentIds?.length && { id: { in: node.data.agentIds } }),
+        // sem linha em user_numbers = opera todos os números
+        OR: [{ numbers: { none: {} } }, { numbers: { some: { numberId: conv.numberId } } }],
+      },
+      select: { id: true },
+    });
+    const ids = users.map((u) => u.id);
+    let chosen: string | undefined;
+    if (node.data.mode === 'least_busy') {
+      const open = await this.prisma.conversation.groupBy({ by: ['assigneeId'], where: { tenantId: run.tenantId, assigneeId: { in: ids }, status: { not: 'closed' } }, _count: { _all: true } });
+      chosen = leastBusy(ids, Object.fromEntries(open.map((o) => [o.assigneeId!, o._count._all])));
+    } else {
+      const last = await this.prisma.conversationEvent.findFirst({
+        where: { tenantId: run.tenantId, type: 'transferred', reason: DISTRIBUTION_REASON, targetId: { in: ids } },
+        orderBy: { createdAt: 'desc' },
+        select: { targetId: true },
+      });
+      chosen = nextInRotation(ids, last?.targetId);
+    }
+    if (!chosen) return false;
+    const updated = await this.prisma.conversation.update({ where: { id: conv.id }, data: { assigneeId: chosen, status: conv.status === 'closed' ? 'closed' : 'in_progress' } });
+    await this.prisma.conversationEvent.create({ data: { tenantId: run.tenantId, conversationId: conv.id, type: 'transferred', targetId: chosen, fromStatus: conv.status, toStatus: updated.status, reason: DISTRIBUTION_REASON } });
+    this.gateway.emitConversation(run.tenantId, updated);
+    return true;
+  }
+
+  private async send(conversationId: string, text?: string) {
+    if (!text) return;
+    await this.conversations.sendAsSystem(conversationId, text);
+  }
+
+  /** Uma mensagem do Conteúdo. Anexo removido na importação (`_reconfig`) é pulado; áudio não leva legenda. */
+  private async sendItem(conversationId: string, it: ContentItem, ctx: InterpolateCtx) {
+    const text = it.text ? interpolate(it.text, ctx) : undefined;
+    if (it.kind === 'text') return this.send(conversationId, text);
+    if (!it.mediaKey) return;
+    const audio = it.kind === 'audio';
+    await this.conversations.sendAsSystem(conversationId, audio ? undefined : text || undefined, { key: it.mediaKey, type: it.kind, name: it.mediaName, ...(audio && { voice: it.voice !== false }) });
   }
 
   /** Pergunta com opções: botões/lista na Meta, lista numerada na Evolution. */
   private async sendMenu(conversationId: string, text: string, options: { id: string; title: string; description?: string }[], listButton?: string) {
     await this.conversations.sendAsSystem(conversationId, text, undefined, { options, listButton });
+  }
+
+  /**
+   * Algo no fluxo não saiu como desenhado, mas não é motivo para parar o atendimento.
+   * A equipe precisa saber: nota interna na conversa (só a equipe vê) + aviso na execução
+   * (aparece na lista de execuções do editor). Falhar em silêncio não é opção.
+   */
+  private async warnTeam(run: FlowRun & { flow: { name: string } }, text: string) {
+    this.log.warn(`fluxo ${run.flowId} run ${run.id}: ${text}`);
+    await this.prisma.flowRun.update({ where: { id: run.id }, data: { error: `aviso — ${text}`.slice(0, 1000) } });
+    await this.conversations.systemNote(run.conversationId, `Fluxo "${run.flow.name}" — ${text}`).catch((err) => {
+      this.log.warn(`nota de aviso do fluxo não gravada: ${err instanceof Error ? err.message : err}`);
+    });
   }
 
   private async finish(runId: string, status: 'done' | 'failed' | 'stopped', error?: string) {

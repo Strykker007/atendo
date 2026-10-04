@@ -12,11 +12,11 @@ import { Tag } from './core';
 // ---- Tags (admin) ----
 export const useCreateTag = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: { name: string; color: string }) => api<Tag>('/tags', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
+  return useMutation({ mutationFn: (b: { name: string; color: string; isKanban?: boolean }) => api<Tag>('/tags', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
 };
 export const useUpdateTag = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; color?: string }) => api<Tag>(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; color?: string; isKanban?: boolean }) => api<Tag>(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['kanban'] }); } });
 };
 export const useDeleteTag = () => {
   const qc = useQueryClient();

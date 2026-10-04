@@ -30,7 +30,7 @@ Para sentir a velocidade real localmente: `pnpm build && pnpm --filter @atendo/w
 ```
 
 Peças que já estão no código para isso funcionar em cluster:
-- **Socket.IO com adapter Redis** (`common/socket-io.adapter.ts`): evento emitido numa réplica chega aos sockets das outras.
+- **Socket.IO com adapter Redis** (`common/socket-io.adapter.ts`): evento emitido numa réplica chega aos sockets das outras. O worker, sem servidor Socket.IO, publica no mesmo canal via `@socket.io/redis-emitter` (ver `ConversationsGateway`).
 - **`trust proxy`** para IP real atrás do LB; cookies `secure` em produção.
 - **`GET /health`** (banco + Redis) para o LB e para o `HEALTHCHECK` do Docker.
 - **Worker separado** (`node dist/src/worker`): filas de envio/recepção/fluxos/cobrança escalam independente da API.

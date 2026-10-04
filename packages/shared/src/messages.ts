@@ -19,7 +19,12 @@ export interface InboundMessage {
   type: MessageType;
   text?: string;
   media?: { url?: string; mimeType?: string; fileName?: string; caption?: string; providerMediaId?: string };
-  location?: { lat: number; lng: number; name?: string };
+  /** estrutura de botões, lista, localização ou contato — o que não cabe em `text`/`media` */
+  content?: MessageContent;
+  /** o contato encaminhou esta mensagem (não foi ele quem escreveu) */
+  forwarded?: boolean;
+  /** quantas vezes já foi encaminhada; ≥ 5 o WhatsApp mostra "encaminhada com frequência" */
+  forwardingScore?: number;
   quotedExternalId?: string;
   /** texto do que foi citado, quando a citada não é uma mensagem nossa (resposta a status) */
   quotedPreview?: string;
@@ -31,6 +36,121 @@ export interface InboundMessage {
   referral?: LeadReferral;
   timestamp: Date;
   raw: unknown;
+}
+
+/**
+ * Reação (emoji) a uma mensagem. Não é mensagem: não entra no histórico, não conta no uso e
+ * não aciona fluxo — só marca a mensagem reagida. `emoji` vazio = a reação foi retirada.
+ */
+export interface InboundReaction {
+  provider: WhatsAppProviderKind;
+  externalNumberId: string;
+  /** id no provider da mensagem que recebeu a reação */
+  targetExternalId: string;
+  /** telefone do contato em E.164 */
+  from: string;
+  /** reação feita pelo celular do próprio cliente, não pelo contato */
+  fromMe: boolean;
+  emoji: string;
+  timestamp: Date;
+}
+
+/**
+ * O que o contato está fazendo agora na conversa. `paused` = parou (apagou, saiu do chat ou
+ * enviou). É efêmero: não vai para o banco, só atravessa o socket.
+ */
+export type PresenceState = 'composing' | 'recording' | 'paused';
+
+/** "Digitando…"/"gravando áudio…" do contato. Só a Evolution informa; a API da Meta não manda isto. */
+export interface InboundPresence {
+  provider: WhatsAppProviderKind;
+  externalNumberId: string;
+  /** telefone do contato em E.164 */
+  from: string;
+  state: PresenceState;
+}
+
+/**
+ * Mensagem editada pelo contato (ou pelo celular do cliente). Não é mensagem nova: só troca o
+ * texto da original. Hoje só a Evolution informa.
+ */
+export interface InboundEdit {
+  provider: WhatsAppProviderKind;
+  externalNumberId: string;
+  /** id no provider da mensagem editada */
+  targetExternalId: string;
+  text: string;
+}
+
+/** Botão de mensagem interativa/template. `kind` diz o que ele faz no celular do contato. */
+export interface ContentButton {
+  id?: string;
+  title: string;
+  /** reply = resposta rápida; url = abre link; call = liga; copy = copia `value` (código, Pix) */
+  kind: 'reply' | 'url' | 'call' | 'copy';
+  /** url, telefone ou o texto que o botão copia */
+  value?: string;
+}
+
+export interface ContentListRow {
+  id?: string;
+  title: string;
+  description?: string;
+}
+
+export interface ContentContact {
+  name: string;
+  /** só dígitos (E.164 sem +) quando o vCard informa o waid; senão como veio */
+  phones: string[];
+}
+
+/**
+ * O que não cabe em `text` + `media`. Discriminado por `kind`; o corpo da mensagem continua em
+ * `text` (assim busca, prévia, IA e fluxos seguem funcionando sem conhecer esta estrutura).
+ */
+export type MessageContent =
+  | { kind: 'buttons'; header?: string; footer?: string; buttons: ContentButton[] }
+  | { kind: 'list'; header?: string; footer?: string; buttonText?: string; sections: { title?: string; rows: ContentListRow[] }[] }
+  | { kind: 'location'; lat: number; lng: number; name?: string; address?: string; live?: boolean }
+  | { kind: 'contacts'; contacts: ContentContact[] };
+
+/** Rótulo em português de cada tipo, para prévia/citação de mensagem sem texto. Nunca "unknown". */
+export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {
+  text: 'Mensagem',
+  image: '📷 Foto',
+  audio: '🎤 Áudio',
+  video: '🎥 Vídeo',
+  document: '📄 Documento',
+  sticker: 'Figurinha',
+  location: '📍 Localização',
+  contact: '👤 Contato',
+  template: 'Modelo',
+  interactive: 'Mensagem interativa',
+  unknown: 'Conteúdo não suportado',
+};
+
+/** Prévia de uma linha (lista de conversas, citação): o texto, ou o rótulo do conteúdo. */
+export function messagePreview(m: { type: MessageType | string; text?: string | null; content?: MessageContent | null; mediaName?: string | null }): string {
+  const t = m.text?.trim();
+  if (t) return t;
+  const c = m.content;
+  if (c?.kind === 'location') return `📍 ${c.name ?? c.address ?? (c.live ? 'Localização em tempo real' : 'Localização')}`;
+  if (c?.kind === 'contacts') return `👤 ${c.contacts.map((x) => x.name).join(', ') || 'Contato'}`;
+  if (m.type === 'document' && m.mediaName) return `📄 ${m.mediaName}`;
+  return MESSAGE_TYPE_LABEL[m.type as MessageType] ?? 'Mensagem';
+}
+
+/** Evento `typing` do socket. */
+export interface TypingEvent {
+  conversationId: string;
+  state: PresenceState;
+}
+
+/** Reação guardada na mensagem. No 1:1 do WhatsApp cada lado tem no máximo uma. */
+export interface MessageReaction {
+  emoji: string;
+  fromMe: boolean;
+  at: string;
 }
 
 export interface LeadReferral {
@@ -53,7 +173,8 @@ export interface OutboundMessage {
   to: string;
   type: MessageType;
   text?: string;
-  media?: { url: string; mimeType?: string; fileName?: string; caption?: string };
+  /** `voice`: áudio como mensagem de voz (PTT, padrão) ou `false` = arquivo de áudio */
+  media?: { url: string; mimeType?: string; fileName?: string; caption?: string; voice?: boolean };
   quotedExternalId?: string;
   /** Somente Meta: template aprovado. Obrigatório fora da janela de 24h. */
   template?: { name: string; language: string; components?: unknown[]; category: BillingCategory };
@@ -117,5 +238,10 @@ export interface MessageDTO {
   authorName: string | null;
   /** a mensagem que esta responde; null quando não é resposta */
   quoted: QuotedRef | null;
+  reactions: MessageReaction[] | null;
+  /** botões, lista, localização ou contato; null para texto/mídia comuns */
+  content: MessageContent | null;
+  /** encaminhada (pelo contato, ou pelo atendente via "Encaminhar") */
+  forwarded: boolean;
   createdAt: string;
 }

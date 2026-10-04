@@ -2,13 +2,13 @@
 import Link from 'next/link';
 import { useRef, useState } from 'react';
 import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, downloadJson, safeFileName } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useFlows, useDeleteFlow, useDuplicateFlow, useExportFlow, useImportFlow, useUpdateFlow, useHasFeature, useMe, useCan, type FlowSummary } from '@/lib/hooks';
+import { useFlows, useDeleteFlow, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
@@ -19,41 +19,69 @@ export default function FluxosPage() {
   const feature = useHasFeature('flows');
   const flows = useFlows();
   const remove = useDeleteFlow();
-  const duplicate = useDuplicateFlow();
+  const duplicate = useDuplicateFlows();
   const update = useUpdateFlow();
   const exportFlow = useExportFlow();
+  const exportFlows = useExportFlows();
   const importFlow = useImportFlow();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [deleting, setDeleting] = useState<FlowSummary | null>(null);
+  // `refs`: fluxos que conectam a este (bloco "Conectar com outro fluxo"); listados no aviso
+  const [deleting, setDeleting] = useState<(FlowSummary & { refs?: { id: string; name: string }[] }) | null>(null);
+  const askDelete = async (f: FlowSummary) => {
+    const refs = await fetchFlowReferences(f.id).catch(() => undefined);
+    setDeleting({ ...f, refs });
+  };
+  const [selected, setSelected] = useState<string[]>([]);
+  // fluxo apagado some da seleção: exportar um id que não existe mais daria erro
+  const visible = flows.data?.map((f) => f.id) ?? [];
+  const sel = selected.filter((id) => visible.includes(id));
+  const allOn = visible.length > 0 && sel.length === visible.length;
+  const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   // o que não viaja entre clientes (anexo, atendente, serviço) vira aviso — melhor o usuário
   // saber o que ajustar do que descobrir com o fluxo mudo na frente do contato
   const warn = (warnings: string[]) => warnings.forEach((w) => toast.err(w));
 
-  async function onDuplicate(f: FlowSummary) {
+  async function onDuplicate(ids: string[]) {
     try {
-      const novo = await duplicate.mutateAsync(f.id);
-      toast.ok(`"${novo.name}" criado, desativado — ative quando terminar de ajustar.`);
+      const { flows: novos } = await duplicate.mutateAsync(ids);
+      toast.ok(novos.length === 1 ? `"${novos[0].name}" criado, desativado — ative quando terminar de ajustar.` : `${novos.length} cópias criadas, desativadas — ative quando terminar de ajustar.`);
+      setSelected([]);
     } catch (err) { toast.err(err); }
+  }
+
+  const [toggling, setToggling] = useState<string | null>(null);
+  /** Liga/desliga direto da lista. A API recusa ativar um desenho inválido e diz o motivo. */
+  async function onToggleActive(f: FlowSummary) {
+    setToggling(f.id);
+    try {
+      await update.mutateAsync({ id: f.id, isActive: !f.isActive });
+      toast.ok(f.isActive ? `"${f.name}" desativado — não dispara mais sozinho nem aparece no chat.` : `"${f.name}" ativado.`);
+    } catch (err) { toast.err(err); }
+    finally { setToggling(null); }
   }
 
   async function onExport(f: FlowSummary) {
     try {
       const { portable, warnings } = await exportFlow.mutateAsync(f.id);
-      const url = URL.createObjectURL(new Blob([JSON.stringify(portable, null, 2)], { type: 'application/json' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${f.name.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'fluxo'}.fluxo.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadJson(portable, `${safeFileName(f.name, 'fluxo')}.fluxo.json`);
+      warn(warnings);
+    } catch (err) { toast.err(err); }
+  }
+
+  /** Um arquivo só, com a lista de fluxos no mesmo formato da exportação individual. */
+  async function onExportSelected() {
+    try {
+      const { bundle, warnings } = await exportFlows.mutateAsync(sel);
+      downloadJson(bundle, `fluxos-${new Date().toISOString().slice(0, 10)}.fluxos.json`);
       warn(warnings);
     } catch (err) { toast.err(err); }
   }
 
   async function onImport(file: File) {
     try {
-      const { flow, warnings } = await importFlow.mutateAsync(JSON.parse(await file.text()));
-      toast.ok(`"${flow.name}" importado, desativado — confira antes de ativar.`);
+      const { flows: novos, warnings } = await importFlow.mutateAsync(JSON.parse(await file.text()));
+      toast.ok(novos.length === 1 ? `"${novos[0].name}" importado, desativado — confira antes de ativar.` : `${novos.length} fluxos importados, desativados — confira antes de ativar.`);
       warn(warnings);
     } catch (err) { toast.err(err instanceof SyntaxError ? 'Arquivo não é um JSON válido.' : err); }
   }
@@ -85,15 +113,44 @@ export default function FluxosPage() {
       {flows.data?.length === 0 && <Empty icon={<Workflow size={36} />} title="Nenhum fluxo" text="Crie o primeiro: por exemplo, uma triagem com menu 'Vendas / Suporte'." />}
       {!!flows.data?.length && (
         <div className="rounded-2xl bg-panel border border-line divide-y divide-line">
+          {isAdmin && (
+            <div className="flex items-center gap-3 px-4 py-2 bg-field/50 rounded-t-2xl text-xs">
+              <input type="checkbox" aria-label="Selecionar todos" checked={allOn} ref={(el) => { if (el) el.indeterminate = sel.length > 0 && !allOn; }} onChange={() => setSelected(allOn ? [] : visible)} />
+              <span className="text-muted flex-1">{sel.length ? `${sel.length} selecionado(s)` : 'Selecionar todos'}</span>
+              {sel.length > 0 && (
+                <>
+                  <Button size="sm" variant="ghost" icon={<Copy size={13} />} loading={duplicate.isPending} onClick={() => onDuplicate(sel)}>Duplicar</Button>
+                  <Button size="sm" variant="ghost" icon={<Download size={13} />} loading={exportFlows.isPending} onClick={onExportSelected}>Exportar selecionados</Button>
+                </>
+              )}
+            </div>
+          )}
           {flows.data.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 px-4 py-3">
+            <div key={f.id} className={cn('flex items-center gap-3 px-4 py-3', sel.includes(f.id) && 'bg-accent-soft/40')}>
+              {isAdmin && <input type="checkbox" aria-label={`Selecionar ${f.name}`} checked={sel.includes(f.id)} onChange={() => toggle(f.id)} />}
               <span className={cn('w-8 h-8 rounded-lg grid place-items-center shrink-0', f.isActive ? 'bg-accent-soft text-accent-ink' : 'bg-field text-faint')}><Zap size={15} /></span>
               <div className="min-w-0 flex-1">
                 <Link href={`/fluxos/${f.id}`} className="font-medium text-ink hover:text-accent-ink">{f.name}</Link>
                 <div className="text-xs text-muted truncate">{TRIGGER_LABEL[f.trigger.type]}{f.trigger.type === 'keyword' && f.trigger.keywords?.length ? ` · ${f.trigger.keywords.join(', ')}` : ''}{f.description ? ` · ${f.description}` : ''}</div>
               </div>
               <span className="text-xs text-faint tnum hidden sm:inline">{f._count.runs} execuções</span>
-              <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', f.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{f.isActive ? 'Ativo' : 'Inativo'}</span>
+              {isAdmin ? (
+                <button
+                  role="switch"
+                  aria-checked={f.isActive}
+                  disabled={toggling === f.id}
+                  title={f.isActive ? 'Ativo — clique para desativar' : 'Inativo — clique para ativar'}
+                  onClick={() => onToggleActive(f)}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-60"
+                >
+                  <span className={cn('relative w-7 h-4 rounded-full transition-colors', f.isActive ? 'bg-ok' : 'bg-line-strong')}>
+                    <span className={cn('absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform', f.isActive && 'translate-x-3')} />
+                  </span>
+                  <span className={cn('w-11 text-left', f.isActive ? 'text-ok' : 'text-muted')}>{f.isActive ? 'Ativo' : 'Inativo'}</span>
+                </button>
+              ) : (
+                <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', f.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{f.isActive ? 'Ativo' : 'Inativo'}</span>
+              )}
               {isAdmin && (
                 <>
                   {/* Sempre o MESMO ícone: o que muda é o destaque. O alfinete cortado era
@@ -105,16 +162,16 @@ export default function FluxosPage() {
                   >
                     <Pin size={15} className={cn(f.showInChat && 'fill-current')} />
                   </button>
-                  <button title="Duplicar neste cliente" onClick={() => onDuplicate(f)} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
+                  <button title="Duplicar neste cliente" onClick={() => onDuplicate([f.id])} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
                   <button title="Exportar para usar em outro cliente" onClick={() => onExport(f)} className="text-faint hover:text-accent-ink p-1"><Download size={15} /></button>
-                  <button title="Excluir" onClick={() => setDeleting(f)} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
+                  <button title="Excluir" onClick={() => void askDelete(f)} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
                 </>
               )}
             </div>
           ))}
         </div>
       )}
-      <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} title="Excluir fluxo" danger confirmLabel="Excluir" text={`"${deleting?.name}" e seu histórico de execuções serão removidos.`} onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Fluxo excluído'); } catch (err) { toast.err(err); throw err; } }} />
+      <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} title="Excluir fluxo" danger confirmLabel="Excluir" text={`"${deleting?.name}" e seu histórico de execuções serão removidos.${deleting?.refs?.length ? ` Atenção: ${deleting.refs.length === 1 ? 'o fluxo' : 'os fluxos'} ${deleting.refs.map((r) => `"${r.name}"`).join(', ')} ${deleting.refs.length === 1 ? 'conecta' : 'conectam'} a este — depois de excluído, nesse ponto a conversa vai para a fila de atendimento.` : ''}`} onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Fluxo excluído'); } catch (err) { toast.err(err); throw err; } }} />
     </PageShell>
   );
 }

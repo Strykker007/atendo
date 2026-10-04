@@ -11,27 +11,47 @@ Onde aparece:
 
 ## Blocos
 
-| Bloco | Faz | Saídas |
-|---|---|---|
-| **Início** | Ponto de partida (um por fluxo) | 1 |
-| **Enviar mensagem** | Texto com variáveis `{{contact.name}}`, `{{contact.phone}}`, `{{minha_var}}` | 1 |
-| **Perguntar** | Envia a pergunta, **espera a resposta** e guarda em `{{varName}}`. Validação: qualquer / e-mail / telefone / número. Resposta inválida → mensagem de erro e nova tentativa; estourou `maxRetries` → entrega para humano | 1 |
-| **Menu de opções** | Envia as opções como **botões/lista** (Meta) ou texto numerado (Evolution). Aceita toque no botão, número ou texto da opção. Inválida → tentativa; estourou → saída *resposta inválida* (ou humano, se não ligada) | uma por opção + `fallback` |
-| **Condição** | Variável igual/contém · conversa tem tag · dentro do horário comercial (fuso São Paulo) | `yes` / `no` |
-| **Ação** | **Definir variável** · aplicar/remover tag (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **entregar para humano** (encerra o fluxo; opcionalmente já atribui) | 1 (handoff: nenhuma) |
-| **Agendar horário** | Serviço → profissional → horário → confirma; cria o agendamento (ver [13](13-agendamento.md)). Exige feature `scheduling` | `done` / `fallback` |
-| **IA** | Responde o contato com as instruções e a base de conhecimento do cliente, ou classifica a mensagem para escolher o caminho. Exige feature `ai_flows` (ver [15](15-ia.md)) | `done` / um por rótulo, + `fallback` (**obrigatório**) |
-| **Aguardar** | Pausa de N minutos (job BullMQ com delay) | 1 |
-| **Fim** | Encerra o fluxo; opcionalmente encerra a conversa | 0 |
+A paleta agrupa os blocos em três categorias, e a cor do card é a da categoria — dá para ler
+o desenho de longe: roxo = estrutura, amarelo/laranja = decisão, azul = entrega.
 
-Um bloco sem saída ligada termina o fluxo (`done`).
+| Categoria | Bloco (`type`) | Faz | Saídas |
+|---|---|---|---|
+| — | **Início** (`start`) | Ponto de partida (um por fluxo; não pode ser apagado nem copiado) | 1 |
+| Estrutura e Conteúdo | **Conteúdo** (`message`) | **Várias mensagens em sequência**, reordenáveis: texto (variáveis + *negrito* _itálico_ ~tachado~), imagem/vídeo/documento com legenda, áudio gravado (PTT) ou como arquivo. Intervalo opcional entre elas (segundos). Detalhes em [fluxos.md](fluxos.md#conteúdo) | 1 |
+| Estrutura e Conteúdo | **Menu** (`menu`) | Envia as opções como **botões/lista** (Meta) ou texto numerado (Evolution). Aceita toque no botão, número ou texto da opção. Inválida → tentativa; estourou → saída *resposta inválida* (ou humano, se não ligada) | uma por opção + `fallback` |
+| Estrutura e Conteúdo | **Manipulador** (`variable`) | Operações sobre variáveis do fluxo, em ordem (a segunda já vê o resultado da primeira): definir, somar, subtrair, acrescentar texto, limpar, copiar de outra variável (ou dado do contato), data/hora atual (no fuso do cliente). Valores aceitam `{{…}}`. Antes chamado *Variável global* | 1 |
+| Estrutura e Conteúdo | **Conectar com outro fluxo** (`connect_flow`) | Termina este fluxo e começa outro (mesma empresa) do início, levando as variáveis. Sem retorno. Destino excluído/desativado ou loop → para e fica com o atendente atribuído (ou vai para a fila). Detalhes em [fluxos.md](fluxos.md#conectar-com-outro-fluxo) | 0 |
+| Estrutura e Conteúdo | **Fim** (`end`) | Encerra o fluxo; opcionalmente encerra a conversa | 0 |
+| Lógica e Decisão | **Ação** (`action`) | Aplicar/remover etiqueta (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **chamar webhook** · **entregar para humano** (encerra o fluxo). `set_var` (Definir variável) continua funcionando nos fluxos antigos, mas só aparece no seletor de quem já usa | 1 (handoff: nenhuma) |
+| Lógica e Decisão | **Randomizador** (`randomizer`) | Sorteia um ramo pelo peso (teste A/B). Percentual = peso ÷ soma dos pesos; peso 0 nunca sai | uma por ramo |
+| Lógica e Decisão | **Condição** (`condition`) | **Ramos** avaliados em ordem, cada um com regras combinadas por **E/OU**; o primeiro verdadeiro define a saída. Operandos: variável do fluxo, campo do contato, mensagem recebida, data/hora atual, etiqueta, horário comercial. Detalhes em [fluxos.md](fluxos.md#condição) | uma por ramo (id do ramo) + `no` (**Senão**) |
+| Lógica e Decisão | **Atraso inteligente** (`wait`) | Espera X minutos/horas/dias. Com *só no horário comercial*, se o prazo vencer fora do expediente do cliente, espera até a próxima abertura | 1 |
+| Lógica e Decisão | **IA** (`ai`) | Responde o contato com as instruções e a base de conhecimento do cliente, ou classifica a mensagem. Exige feature `ai_flows` (ver [15](15-ia.md)) | `done` / um por rótulo, + `fallback` (**obrigatório**) |
+| Distribuição e Envio | **Salvar** (`question`) | Pergunta (opcional) e **espera a resposta**, guardando em `{{varName}}` e, se escolhido, num **campo da ficha do contato** (nome, e-mail, endereço, observações). Validação: qualquer / e-mail / telefone / número; estourou `maxRetries` → humano | 1 |
+| Distribuição e Envio | **Distribuidor** (`distributor`) | Entrega a conversa: **rodízio**, **menos ocupado** (menos conversas abertas) ou **fila** ("Aguardando"). Atendentes escolhidos no bloco ou todos os ativos — sempre só quem opera o número da conversa | `done` / `fallback` (ninguém disponível) |
+| Distribuição e Envio | **Agendar horário** (`schedule`) | Serviço → profissional → horário → confirma (ver [13](13-agendamento.md)). Exige feature `scheduling` | `done` / `fallback` |
+
+Um bloco sem saída ligada termina o fluxo (`done`). Os nomes antigos (*Enviar mensagem*,
+*Perguntar*, *Aguardar*) mudaram só na tela: o `type` salvo é o mesmo, fluxos existentes não
+precisam de migração.
+
+**Rodízio sem tabela nova**: cada distribuição grava um evento `transferred` com
+`reason = 'distribuído pelo fluxo'` (`distribution.ts`); o próximo da vez é o seguinte, em ordem
+de id, a quem recebeu o último desses eventos. O mesmo evento alimenta o relatório por atendente.
+
+**Webhook** (`webhook.ts`): `POST` JSON `{ event, flowId, conversationId, contact, vars }`
+(variáveis internas `_*` não vão). Só http/https nas portas 80/443, sem usuário/senha na URL,
+**nenhum IP privado/loopback/link-local** (conferido após o DNS) e sem seguir redirecionamento —
+a URL é digitada pelo cliente e o servidor não pode virar ponte para a rede interna. Timeout de
+8 s; falha não para o fluxo (a variável de resposta fica vazia).
 
 ## Variáveis
 
-- **Do sistema**: `{{contact.name}}` (nome no WhatsApp), `{{contact.phone}}`.
-- **Criadas no fluxo**: o bloco **Perguntar** cria uma (campo "Nome da variável" — a resposta do contato fica nela); o **Menu** guarda a opção escolhida em `{{menu_<id>}}`; a ação **Definir variável** grava um valor fixo ou composto (`Olá {{contact.name}}`).
+- **Do sistema**: `{{contact.name}}` (nome no WhatsApp), `{{contact.phone}}`, `{{contact.email}}`, `{{contact.address}}`, `{{contact.note1}}`, `{{contact.note2}}` (da ficha).
+- **Criadas no fluxo**: o bloco **Salvar** cria uma (a resposta do contato fica nela); o **Menu** guarda a opção escolhida em `{{menu_<id>}}`; o bloco **Manipulador** grava/opera valores (`Olá {{contact.name}}`, contador +1, data de agora); o webhook pode guardar a resposta.
 - Todo campo de texto do editor tem o botão **Inserir variável**, que lista as do sistema e as criadas no fluxo e insere `{{…}}` no cursor. A lista completa fica nas configurações do fluxo (botão *Gatilho*). Ela é atualizada na hora: criou a variável num bloco, já aparece nos outros.
-- A **Condição** escolhe a variável num seletor (não precisa digitar).
+- A **Condição** escolhe o campo do contato num seletor e a variável por texto com sugestões das criadas no fluxo.
+- **Escopo**: as variáveis do fluxo vivem na execução (`FlowRun.vars`) — ver [fluxos.md](fluxos.md#variáveis-escopo-e-persistência).
 
 ## Gatilhos
 
@@ -44,7 +64,7 @@ Um bloco sem saída ligada termina o fluxo (`done`).
 ## Motor (`apps/api/src/modules/flows/flow-engine.service.ts`)
 
 - `FlowRun` = uma execução numa conversa: `currentNodeId`, `vars`, `retries`, `status` (`running | waiting | done | stopped | failed`). No máximo um run ativo por conversa (`Conversation.activeFlowRunId`).
-- `start()` cria o run no nó Início e chama `advance()`, que executa nós em sequência até um que **espere** (pergunta/menu → `waiting`; aguardar → `waiting` + job com delay) ou **termine**.
+- `start()` cria o run no nó Início e chama `advance()`, que executa nós em sequência até um que **espere** (salvar/menu → `waiting`; atraso → `waiting` + job com delay até `waitUntil`) ou **termine**.
 - Toda mensagem recebida passa por `onInbound()` (chamado pelo `InboundProcessor` logo após gravar a mensagem): run em `waiting` recebe a resposta (`deliverAnswer`) e continua; sem run, avalia os gatilhos.
 - Mensagens do robô saem por `ConversationsService.sendAsSystem` — sem autor humano, **não assumem a conversa**, respeitam quota e janela de 24h e passam pela mesma fila de envio.
 - Proteções: `MAX_STEPS = 50` por avanço (loop), erro em nó → `failed` com motivo, `stop()` pelo atendente → `stopped`.
@@ -52,9 +72,17 @@ Um bloco sem saída ligada termina o fluxo (`done`).
 
 ## Editor (`apps/web/src/components/flows/`)
 
-React Flow (`@xyflow/react`). Paleta à esquerda (clique adiciona; **arrastar e soltar** posiciona onde soltou), canvas no meio (arrastar, ligar bolinhas, Delete remove), painel de propriedades à direita (muda conforme o bloco). Uma saída só liga a um destino (ligar de novo substitui). Barra superior: nome, gatilho/configurações, execuções (contagem por status + últimas 20), Salvar. "Alterações não salvas" compara o conteúdo com o último salvo.
+React Flow (`@xyflow/react`). Paleta à esquerda em três categorias (clique adiciona à direita do último; **arrastar e soltar** posiciona onde soltou), canvas no meio, painel de propriedades à direita. Barra superior: nome, **Organizar automaticamente**, gatilho/configurações, execuções (contagem por status + últimas 20), Salvar. "Alterações não salvas" compara o conteúdo com o último salvo.
 
-Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado; conexões válidas; blocos de mensagem/pergunta/menu preenchidos.
+- **Fluxo horizontal**: entrada à **esquerda**, saída(s) à **direita**. Card com várias saídas (Menu, Condição, Randomizador, Distribuidor, IA, Agendar) tem uma linha por saída, com a bolinha alinhada à linha. Ligações em curva (bezier) com seta. Uma saída só liga a um destino (ligar de novo substitui).
+- **Fluxos antigos** (desenhados na vertical) abrem como estavam — posição salva nunca muda sozinha. Se a maioria das ligações desce, aparece a sugestão de **Organizar automaticamente** (`layout.ts`: coluna = distância até o Início por busca em largura, para laços não empurrarem o desenho; dentro da coluna, altura média dos pais na ordem das saídas). Organizar só vale depois de salvar.
+- **Cortar ligação**: passar o mouse ou selecionar mostra uma **tesoura** no meio da ligação (`DeletableEdge.tsx`); Delete/Backspace remove a selecionada. Os dois caminhos passam por `onEdgesChange`, então o fluxo fica "não salvo" e a remoção vai no próximo Salvar.
+- **Seleção múltipla**: Shift + clique (ou Ctrl/Cmd + clique) e Shift + arrastar no fundo.
+- **Copiar / colar cards**: Ctrl/Cmd+C e Ctrl/Cmd+V, ou botão direito (Copiar / Colar aqui / Excluir). A área de transferência fica no `localStorage`, então cola em **outro fluxo aberto** (outra aba ou depois de navegar). Colar usa `cloneFlowFragment` (`packages/shared/src/flows.ts`): ids novos, só as ligações **entre** os cards copiados, `{{menu_<id>}}` reescrito para o card novo, Início nunca copiado. Posição: abaixo dos originais (mesmo fluxo), no centro da tela (outro fluxo) ou no ponto clicado (menu), descendo até não encostar em nenhum card.
+- **Duplicar bloco**: botão de cópia no cabeçalho do card (aparece ao passar o mouse ou com o card selecionado), **Ctrl/Cmd+D** nos selecionados ou *Duplicar* no botão direito. Mesma configuração (via `cloneFlowFragment`), id novo, **sem ligações**, logo abaixo do original e descendo até não encostar em nenhum card. Início não duplica. O card chama o editor pelo contexto `FlowNodeActions` (`nodes.tsx`).
+- Card com a faixa amarela **Reconfigurar: …** veio de outro cliente sem uma referência (ver *Replicar*); editar o bloco tira a faixa.
+
+Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado; conexões válidas; Conteúdo com cada mensagem preenchida, anexo dentro do formato/tamanho do WhatsApp e intervalo de 0 a 300 s; Conectar com destino escolhido; Salvar com variável; Menu com texto e opção; Manipulador com ao menos uma variável (e origem em *copiar*); Condição com regras completas em todo ramo (formato antigo também é validado, após a conversão); Randomizador com 2+ ramos e algum peso; webhook com URL http(s) (exceto card marcado para reconfigurar).
 
 ## API
 
@@ -62,10 +90,12 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 |---|---|---|---|
 | GET | `/flows` | todos* | Lista (com contagem de execuções) |
 | GET | `/flows/:id` | todos* | Definição completa |
-| POST / PATCH / DELETE | `/flows[/:id]` | admin, gerente | CRUD (valida a definição) |
-| POST | `/flows/:id/duplicate` | admin, gerente | Cópia no mesmo cliente |
+| POST / PATCH / DELETE | `/flows[/:id]` | admin, gerente | CRUD (valida a definição). `PATCH {isActive: true}` sem `definition` valida o desenho **salvo** — ativar pela lista não liga fluxo quebrado |
+| POST | `/flows/:id/duplicate` | admin, gerente | Cópia no mesmo cliente (legado; a tela usa o lote) |
+| POST | `/flows/duplicate` | admin, gerente | `{ids}` → `{flows}` — cópias em lote |
 | GET | `/flows/:id/export` | admin, gerente | `{portable, warnings}` para outro cliente |
-| POST | `/flows/import` | admin, gerente | `{portable}` → `{flow, warnings}` |
+| POST | `/flows/export` | admin, gerente | `{ids}` → `{bundle, warnings}` — vários num arquivo |
+| POST | `/flows/import` | admin, gerente | `{portable}` (individual **ou** lote) → `{flows, flow, warnings}` |
 | GET | `/flows/:id/runs` | todos* | `byStatus` + últimas execuções |
 | POST | `/flows/:id/start` | todos* | `{conversationId}` — disparo manual |
 | GET | `/conversations/:id/flow` | todos | Run ativo ou `null` |
@@ -90,7 +120,7 @@ alfinete.
 
 Duas operações diferentes de propósito, porque o risco é diferente.
 
-**Duplicar** (`POST /flows/:id/duplicate`) copia dentro do **mesmo** cliente. Cópia literal:
+**Duplicar** (`POST /flows/duplicate`, um ou vários selecionados na listagem) copia dentro do **mesmo** cliente. Cópia literal:
 etiquetas, atendentes e anexos continuam válidos. O nome ganha " (cópia)", numerando a partir
 da segunda.
 
@@ -105,9 +135,26 @@ um fluxo copiado cru faria o cliente de destino **servir arquivo do cliente de o
 |---|---|
 | `tagId` | vira `tagName` — o nome é único por cliente (`@@unique([tenantId, name])`) |
 | `agentId` | removido, com aviso |
+| `agentIds` (Distribuidor) | removido, com aviso (no destino distribui entre todos) |
+| `url` do webhook | removida, com aviso — costuma levar token na query |
 | `serviceId` / `professionalId` | removidos, com aviso (o fluxo passa a perguntar) |
-| `mediaKey` / `mediaType` / `mediaName` | removidos, com aviso |
+| `mediaKey` / `mediaType` / `mediaName` | removidos, com aviso (também o `mediaKey` de cada mensagem em `items`) |
+| `flowId` (Conectar com outro fluxo) | removido, com aviso; o nome do destino fica em `flowName` só para o card mostrar "Era: …" |
 | `trigger.numberIds` | removido, com aviso |
+
+Cada remoção também marca o card com `data._reconfig` (ex.: `["anexo"]`), que o editor mostra
+como a faixa **Reconfigurar** e apaga quando o bloco é editado. O motor ignora o campo.
+
+**Lote**: a listagem tem checkbox por fluxo e "selecionar todos"; *Exportar selecionados* gera
+um arquivo `{ atendo: 'flow-bundle', version: 1, items: PortableFlow[] }` — cada item é
+exatamente o que a exportação individual gera. `parsePortableFile` aceita os dois formatos; a
+importação é **tudo ou nada** (um item inválido recusa o arquivo antes de criar qualquer fluxo) e
+nome repetido ganha " (cópia)". Os ids dos nós são mantidos na importação/duplicação (são por
+fluxo, e trocá-los quebraria `{{menu_<id>}}`); o fluxo em si sempre ganha id novo.
+
+**Copiar para outro workspace**: não existe — cada usuário pertence a um único cliente
+(`User.tenantId`). Para levar a outro cliente, exporte e importe (o super admin faz isso
+entrando como cada cliente).
 
 Na importação as etiquetas citadas são **criadas se faltarem**: sem isso o fluxo chegaria com
 os blocos de etiqueta vazios — pior que falhar, porque parece que funcionou.
@@ -135,8 +182,7 @@ dizendo o que falta ajustar.
 
 ## Limitações atuais / próximos passos
 
-- Bloco *Enviar mensagem* ainda não anexa mídia pelo editor (o motor já suporta `mediaKey`).
-- Sem "ir para outro fluxo" nem sub-fluxos.
+- "Conectar com outro fluxo" existe, mas sem retorno (não é sub-fluxo).
 - Sem teste/simulação dentro do editor (usar uma conversa de teste).
 - Estatísticas por bloco (onde os contatos abandonam) — futuro.
 

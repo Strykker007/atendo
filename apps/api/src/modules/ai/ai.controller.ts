@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { REWRITE_TONES, type RewriteTone } from '@atendo/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
@@ -14,6 +14,11 @@ class RewriteDto {
   @IsString() @MaxLength(2000) text: string;
   @IsIn(Object.keys(REWRITE_TONES)) tone: RewriteTone;
   @IsOptional() @IsUUID() conversationId?: string;
+}
+class SummaryDto {
+  @IsUUID() conversationId: string;
+  /** ignora o cache e gera de novo (cobra uma interação) */
+  @IsOptional() @IsBoolean() force?: boolean;
 }
 
 /**
@@ -48,7 +53,7 @@ export class AiController {
   }
 
   @Post('summary')
-  async summary(@CurrentUser() u: AuthUser, @Body() dto: SuggestDto) {
-    return { text: await this.ai.summary(u.tenantId, dto.conversationId, u.id) };
+  summary(@CurrentUser() u: AuthUser, @Body() dto: SummaryDto) {
+    return this.ai.summary(u.tenantId, dto.conversationId, u.id, dto.force);
   }
 }

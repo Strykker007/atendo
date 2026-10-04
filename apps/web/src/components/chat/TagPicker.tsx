@@ -1,14 +1,17 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Tag as TagIcon, X } from 'lucide-react';
+import { Star, Tag as TagIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Tag } from '@/lib/hooks';
 
 /**
  * Campo de tags: ao focar, exibe a lista para digitar ou clicar.
  * Usado tanto no filtro da lista quanto no cabeçalho do chat.
+ *
+ * Com `onPrimary`, a tag principal (etapa no Kanban) ganha estrela e anel, e clicar numa
+ * selecionada que seja coluna do Kanban a promove a principal.
  */
-export function TagPicker({ tags, value, onChange, placeholder, compact }: { tags: Tag[]; value: string[]; onChange: (ids: string[]) => void; placeholder?: string; compact?: boolean }) {
+export function TagPicker({ tags, value, onChange, placeholder, compact, primaryId, onPrimary }: { tags: Tag[]; value: string[]; onChange: (ids: string[]) => void; placeholder?: string; compact?: boolean; primaryId?: string | null; onPrimary?: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -28,7 +31,14 @@ export function TagPicker({ tags, value, onChange, placeholder, compact }: { tag
       <div className={cn('flex flex-wrap items-center gap-1 rounded-lg bg-field px-2 min-h-8 cursor-text', compact && 'bg-transparent px-0 min-h-7')} onClick={() => setOpen(true)}>
         <TagIcon size={14} className="text-faint ml-1" />
         {selected.map((t) => (
-          <span key={t.id} className="inline-flex items-center gap-1 text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: t.color }}>
+          <span
+            key={t.id}
+            className={cn('inline-flex items-center gap-1 text-[11px] text-white rounded px-1.5 py-0.5', t.id === primaryId && 'font-semibold', onPrimary && t.isKanban !== false && t.id !== primaryId && 'cursor-pointer hover:opacity-80')}
+            style={{ background: t.color, ...(t.id === primaryId ? { outline: `2px solid ${t.color}`, outlineOffset: 1 } : {}) }}
+            title={!onPrimary ? undefined : t.id === primaryId ? 'Tag principal — etapa no Kanban' : t.isKanban !== false ? 'Clique para tornar principal' : 'Esta tag não é etapa do Kanban'}
+            onClick={(e) => { if (!onPrimary || t.id === primaryId || t.isKanban === false) return; e.stopPropagation(); onPrimary(t.id); }}
+          >
+            {t.id === primaryId && <Star size={10} className="fill-current" />}
             {t.name}
             <X size={11} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); toggle(t.id); }} />
           </span>

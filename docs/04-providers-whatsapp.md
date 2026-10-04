@@ -13,6 +13,7 @@ interface WhatsAppProvider {
   getStatus(ctx): Promise<NumberStatus>;
   send(ctx, OutboundMessage): Promise<SendResult>;
   markRead(ctx, externalMessageId): Promise<void>;
+  react(ctx, { to, targetExternalId, targetFromMe, emoji }): Promise<void>; // emoji vazio = retirar. Meta: mensagem `type: 'reaction'`; Evolution: `POST /message/sendReaction` com a key (remoteJid + fromMe + id)
   verifyWebhook(headers, rawBody): void;        // lança se inválido
   parseWebhook(body): ParsedWebhook;            // → InboundMessage[], StatusUpdate[], connection?
 }
@@ -99,10 +100,36 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 
 | Evento | O que fazemos |
 |---|---|
-| `messages.upsert` | Mensagens de contatos (ignora `fromMe` e grupos `@g.us`) |
-| `messages.update` | Status: `SERVER_ACK`→sent, `DELIVERY_ACK`→delivered, `READ`→read |
+| `messages.upsert` | Mensagens de contatos e do celular do cliente (`fromMe`), reações e edições; ignora grupos `@g.us`. Tipos: ver [Tipos de mensagem recebida](#tipos-de-mensagem-recebida) |
+| `messages.update` | Status (texto ou número do Baileys): `SERVER_ACK`/2→sent, `DELIVERY_ACK`/3→delivered, `READ`/4 e `PLAYED`/5 (áudio ouvido)→read, `ERROR`/0→failed. `InboundService.applyStatus` não deixa regredir (e ignora falha tardia de algo já entregue) e reemite a mensagem pelo evento `message` do socket |
 | `connection.update` | `open`→connected; `connecting` é **transitório** (o WhatsApp reinicia o socket logo após parear) e não derruba um número já conectado; `close` com `statusReason 401`→ deslogado pelo celular (dispositivo removido). Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone é corrigido |
 | `qrcode.updated` | QR novo → painel atualiza pelo socket |
+| `presence.update` | "Digitando…"/"gravando áudio…" do contato (`composing`/`recording`; o resto vira `paused`). Não grava nada: acha a conversa do contato no número e emite `typing` no socket. Exige `WEBHOOK_EVENTS_PRESENCE_UPDATE=true` no compose **e** assinatura: o WhatsApp só manda o "digitando" de quem você assinou (`presenceSubscribe`), e a Evolution só assina nos chatbots dela. Por isso `POST /conversations/:id/read` (abrir a conversa) chama `NumbersService.subscribePresence` → `POST /chat/sendPresence` com `presence: 'paused'` (assina sem o contato ver nada), no máximo uma vez a cada 2 min por contato. A assinatura cai quando a sessão da Evolution reconecta; reabrir a conversa assina de novo. Grupos ignorados. **Meta não tem equivalente** — a Cloud API não avisa quando o contato digita, então números oficiais nunca mostram o indicador |
+
+### Tipos de mensagem recebida
+
+Nada deve virar bolha vazia. Cada adapter traduz o payload para `type` + `text` + `media` + `content` (`MessageContent` no shared: `buttons` | `list` | `location` | `contacts`). O corpo sempre vai em `text` — busca, prévia, IA, opt-out e fluxos continuam funcionando sem conhecer a estrutura.
+
+| Recebido | Evolution (Baileys) | Meta | Vira |
+|---|---|---|---|
+| Texto | `conversation`, `extendedTextMessage` | `text` | `text` |
+| Mídia | `image/video/ptv/audio/document/stickerMessage` (figurinha também é baixada) | `image/video/audio/document/sticker` | `image`… + `media` |
+| Localização | `locationMessage`, `liveLocationMessage` | `location` | `location` + `content.kind='location'` |
+| Contato (vCard) | `contactMessage`, `contactsArrayMessage` (telefone pelo `waid`) | `contacts` | `contact` + `content.kind='contacts'` |
+| Botões / template | `buttonsMessage`, `templateMessage` (hydrated), `interactiveMessage` (nativeFlow: `cta_copy`, `cta_url`, `cta_call`, `quick_reply`) | — (empresa não recebe) | `interactive` + `content.kind='buttons'` |
+| Lista | `listMessage`, `interactiveMessage` com `single_select` | — | `interactive` + `content.kind='list'` |
+| Resposta a botão/lista | `buttonsResponseMessage`, `listResponseMessage`, `templateButtonReplyMessage`, `interactiveResponseMessage` | `interactive` (`button_reply`/`list_reply`/`nfm_reply`), `button` | `text` + `interactiveReplyId` |
+| Enquete | `pollCreationMessage*` | — | `text` ("📊 pergunta + opções") |
+| Reação | `reactionMessage` | `reaction` | marca a reagida (não é mensagem) |
+| Edição | `protocolMessage` com `editedMessage` → `ParsedWebhook.edits` → `InboundService.applyEdit` troca o `text` da original | — | não cria mensagem |
+| Apagar / config. de temporárias | outros `protocolMessage` | — | descartado |
+| Qualquer outro | fallback `textoQualquer` (`providers/payload-text.ts`): primeiro `conversation`/`text`/`caption`/`hydratedContentText`/`contentText`/`body`/… achado no payload | idem (`unsupported`, `system`, tipos novos) | `text`; só sem texto nenhum fica `unknown` |
+
+Envelopes (`ephemeralMessage`, `viewOnceMessage*`, `documentWithCaptionMessage`, `editedMessage`) são desembrulhados antes (`desembrulhar` em `providers/evolution-content.ts`), e o `contextInfo` (citação, anúncio, encaminhada) é procurado em qualquer nó da mensagem.
+
+**Encaminhada**: Evolution lê `contextInfo.isForwarded` + `forwardingScore`; Meta lê `context.forwarded` / `context.frequently_forwarded` (sem score — `frequently` vira 5). Vai para `Message.forwarded`/`forwardingScore`. Mensagem encaminhada traz `context` sem `id` na Meta: não é citação.
+
+**Encaminhar pelo painel** (`POST /conversations/:id/messages/:messageId/forward`) é um envio comum por destino. Nenhum dos dois providers aceita marcar o envio como encaminhado (a Cloud API não tem o campo; os endpoints REST da Evolution não expõem `contextInfo`), então o contato recebe uma mensagem normal — o selo "Encaminhada" existe só no nosso histórico.
 
 ### Mídia
 
