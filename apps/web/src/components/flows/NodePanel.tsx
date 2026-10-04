@@ -102,7 +102,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                   {refs.flows?.map((f) => <option key={f.id} value={f.id}>{f.name}{f.id === refs.flowId ? ' (este fluxo — recomeça)' : ''}{f.isActive ? '' : ' (desativado)'}</option>)}
                 </select>
               </Field>
-              {target && <a href={`/fluxos/${target.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent-ink hover:underline"><ExternalLink size={12} /> Abrir "{target.name}" em nova aba</a>}
+              {target && <a href={`/fluxos/${target.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent-ink hover:underline"><ExternalLink size={12} /> Abrir “{target.name}” em nova aba</a>}
               {target && !target.isActive && <p className="text-[11.5px] rounded-lg bg-warn-soft text-warn-ink px-3 py-2">O destino está desativado: enquanto estiver assim, a conversa não salta — a automação para e a conversa fica com o atendente atribuído (ou vai para a fila).</p>}
               <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">
                 Este fluxo <b>termina aqui</b> e o destino começa do <b>início</b> — não há volta. As variáveis deste fluxo seguem para o destino.
@@ -250,7 +250,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         )}
 
         {node.type === 'schedule' && (
-          !sched.has && !sched.loading ? <p className="text-sm text-muted rounded-lg bg-warn-soft px-3 py-2">Agendamento não está incluído no plano deste cliente. O bloco será ignorado (saída "Não conseguiu").</p> : (
+          !sched.has && !sched.loading ? <p className="text-sm text-muted rounded-lg bg-warn-soft px-3 py-2">Agendamento não está incluído no plano deste cliente. O bloco será ignorado (saída “Não conseguiu”).</p> : (
           <>
             <Field label="Texto de abertura (opcional)"><TextWithVars value={node.data.intro ?? ''} onChange={(v) => set({ intro: v })} vars={vars} placeholder="Vamos agendar! Qual serviço você quer?" /></Field>
             <Field label="Serviço" hint="Fixo = não pergunta ao contato">
@@ -261,13 +261,13 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
             </Field>
             <Field label="Horários mostrados por vez"><input type="number" min={2} max={12} className={inputCls} value={node.data.maxSlots} onChange={(e) => set({ maxSlots: Number(e.target.value) })} /></Field>
             <Field label="Mensagem de confirmação" hint="Pode usar {{servico}}, {{profissional}}, {{horario}}"><TextWithVars value={node.data.confirmText ?? ''} onChange={(v) => set({ confirmText: v })} vars={vars} placeholder="Agendado! {{servico}} com {{profissional}} em {{horario}}. Te lembro um dia antes. 💈" /></Field>
-            <p className="text-[11px] text-muted">Depois de agendar, as variáveis <code className="font-mono bg-field rounded px-1">{'{{agendamento}}'}</code>, <code className="font-mono bg-field rounded px-1">{'{{servico}}'}</code> e <code className="font-mono bg-field rounded px-1">{'{{profissional}}'}</code> ficam disponíveis. O contato pode responder "cancelar" a qualquer momento.</p>
+            <p className="text-[11px] text-muted">Depois de agendar, as variáveis <code className="font-mono bg-field rounded px-1">{'{{agendamento}}'}</code>, <code className="font-mono bg-field rounded px-1">{'{{servico}}'}</code> e <code className="font-mono bg-field rounded px-1">{'{{profissional}}'}</code> ficam disponíveis. O contato pode responder “cancelar” a qualquer momento.</p>
           </>
           )
         )}
 
         {node.type === 'ai' && (
-          !aiFeature.has && !aiFeature.loading ? <p className="text-sm text-muted rounded-lg bg-warn-soft px-3 py-2">IA nos fluxos não está incluída no plano deste cliente. O bloco será ignorado (saída "Não conseguiu").</p> : (
+          !aiFeature.has && !aiFeature.loading ? <p className="text-sm text-muted rounded-lg bg-warn-soft px-3 py-2">IA nos fluxos não está incluída no plano deste cliente. O bloco será ignorado (saída “Não conseguiu”).</p> : (
           <>
             <Field label="O que a IA faz aqui">
               <select className={inputCls} value={node.data.mode} onChange={(e) => set({ mode: e.target.value, labels: e.target.value === 'classify' && !node.data.labels?.length ? [{ id: crypto.randomUUID().slice(0, 8), label: 'Quer agendar' }, { id: crypto.randomUUID().slice(0, 8), label: 'Perguntou preço' }] : node.data.labels })}>
@@ -430,7 +430,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               <select className={inputCls} value={node.data.mode} onChange={(e) => set({ mode: e.target.value })}>
                 <option value="round_robin">Rodízio — um de cada vez, em ordem</option>
                 <option value="least_busy">Menos ocupado — quem tem menos conversas abertas</option>
-                <option value="queue">Fila — devolve para "Aguardando"</option>
+                <option value="queue">Fila — devolve para “Aguardando”</option>
               </select>
             </Field>
             {node.data.mode !== 'queue' && (

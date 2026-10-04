@@ -147,7 +147,7 @@ export default function RelatoriosPage() {
           <section className="rounded-2xl bg-panel border border-line p-4 space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">Filtros</h3>
             <Field label="Status">
-              <select className={inputCls} value={def.filters.status ?? ''} onChange={(e) => setFilter('status', (e.target.value || undefined) as any)}>
+              <select className={inputCls} value={def.filters.status ?? ''} onChange={(e) => setFilter('status', (e.target.value || undefined) as ReportDefinition['filters']['status'])}>
                 <option value="">Todos</option><option value="waiting">Aguardando</option><option value="in_progress">Em atendimento</option><option value="closed">Encerrado</option>
               </select>
             </Field>
@@ -157,7 +157,7 @@ export default function RelatoriosPage() {
               </select>
             </Field>
             <Field label="Origem">
-              <select className={inputCls} value={def.filters.origin ?? ''} onChange={(e) => setFilter('origin', (e.target.value || undefined) as any)}>
+              <select className={inputCls} value={def.filters.origin ?? ''} onChange={(e) => setFilter('origin', (e.target.value || undefined) as ReportDefinition['filters']['origin'])}>
                 <option value="">Todas</option><option value="ad">Anúncio</option><option value="post">Publicação</option><option value="link">Link</option><option value="organic">Orgânico</option>
               </select>
             </Field>

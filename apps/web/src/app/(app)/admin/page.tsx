@@ -13,10 +13,10 @@ const periodOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 const mm = (p: string) => { const [y, m] = p.split('-'); return `${m}/${y.slice(2)}`; };
 const STATUS_PT: Record<string, string> = { trialing: 'Teste', active: 'Ativa', past_due: 'Pendente', suspended: 'Suspensa', canceled: 'Cancelada', draft: 'Rascunho', open: 'Em aberto', paid: 'Paga', failed: 'Falhou', void: 'Cancelada' };
 const axis = { fill: 'var(--muted)', fontSize: 11 };
-const Tip = ({ active, payload, label }: any) => active && payload?.length ? (
+const Tip = ({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number | string; color?: string }[]; label?: string }) => active && payload?.length ? (
   <div className="rounded-lg bg-panel border border-line shadow-lg px-3 py-2 text-xs space-y-0.5">
     <div className="text-muted">{label}</div>
-    {payload.map((p: any) => <div key={p.name} className="flex justify-between gap-4"><span style={{ color: p.color }}>{p.name}</span><b className="text-ink tnum">{typeof p.value === 'number' && p.name !== 'Clientes' ? brl(p.value) : p.value}</b></div>)}
+    {payload.map((p) => <div key={p.name} className="flex justify-between gap-4"><span style={{ color: p.color }}>{p.name}</span><b className="text-ink tnum">{typeof p.value === 'number' && p.name !== 'Clientes' ? brl(p.value) : p.value}</b></div>)}
   </div>
 ) : null;
 

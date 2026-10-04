@@ -89,7 +89,7 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
           {bandMissing && <option value={rule.band}>{rule.band} (não existe)</option>}
         </select>
       )}
-      {bandMissing && <p className="text-[11px] text-danger">A faixa "{rule.band}" não existe em nenhum quadro de horários: esta regra nunca casa. Escolha outra ou crie a faixa em Configurações.</p>}
+      {bandMissing && <p className="text-[11px] text-danger">A faixa “{rule.band}” não existe em nenhum quadro de horários: esta regra nunca casa. Escolha outra ou crie a faixa em Configurações.</p>}
 
       <select className={inputCls} value={rule.op} onChange={(e) => set({ op: e.target.value as ConditionRule['op'] })}>
         {CONDITION_OPS[kind].map((o) => (
@@ -119,7 +119,7 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
       {rule.operand === 'schedule_band' && <p className="text-[11px] text-muted">Faixa do quadro de horários do número da conversa (Configurações → Horários de atendimento). Comparada pelo nome.</p>}
       {rule.operand === 'business_hours' && (
         <>
-          {!rule.hours && <p className="text-[11px] text-muted">Faixas que contam como horário de atendimento no quadro do número da conversa. "Atendimento desativado" conta como fora.</p>}
+          {!rule.hours && <p className="text-[11px] text-muted">Faixas que contam como horário de atendimento no quadro do número da conversa. “Atendimento desativado” conta como fora.</p>}
           <label className="flex items-center gap-2 text-[11.5px] text-muted">
             <input type="checkbox" checked={!!rule.hours} onChange={(e) => set({ hours: e.target.checked ? { start: '08:00', end: '18:00', days: [1, 2, 3, 4, 5] } : undefined })} />
             Usar horário próprio (em vez do quadro de horários do número)

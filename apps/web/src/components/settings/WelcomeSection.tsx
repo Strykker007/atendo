@@ -40,7 +40,7 @@ export function WelcomeSection() {
       <div>
         <h3 className="font-display font-semibold text-ink flex items-center gap-2"><Hand size={16} /> Boas-vindas</h3>
         <p className="text-sm text-muted mt-0.5">
-          Enviada quando começa um atendimento (contato novo ou voltando depois de encerrado), antes do fluxo de entrada. Numa faixa de horário com <b>"enviar e parar"</b> (ex.: Fechado) não sai — vai só a mensagem da faixa.
+          Enviada quando começa um atendimento (contato novo ou voltando depois de encerrado), antes do fluxo de entrada. Numa faixa de horário com <b>“enviar e parar”</b> (ex.: Fechado) não sai — vai só a mensagem da faixa.
         </p>
       </div>
       <label className="flex items-center gap-2 text-[13px] text-ink">
@@ -55,7 +55,7 @@ export function WelcomeSection() {
       {duplicated && (
         <p className="flex items-start gap-1.5 text-[12px] text-warn-ink bg-warn-soft rounded-lg px-3 py-2">
           <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-          <span>O <b>Fluxo de boas-vindas</b> ("{welcomeFlow?.name}") também está ativo em Fluxos padrão: o contato novo recebe as mensagens daqui <b>e</b> o fluxo. Desligue um dos dois se o fluxo já cumprimenta.</span>
+          <span>O <b>Fluxo de boas-vindas</b> (“{welcomeFlow?.name}”) também está ativo em Fluxos padrão: o contato novo recebe as mensagens daqui <b>e</b> o fluxo. Desligue um dos dois se o fluxo já cumprimenta.</span>
         </p>
       )}
       {!s.welcomeEnabled && list.length > 0 && <p className="text-[12px] text-faint">Desligadas: as mensagens ficam guardadas, mas ninguém recebe.</p>}

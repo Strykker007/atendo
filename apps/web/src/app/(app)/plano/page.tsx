@@ -90,7 +90,7 @@ function PlanoInner() {
           <Button size="sm" variant="ghost" icon={<ExternalLink size={13} />} loading={portal.isPending} onClick={() => go(portal.mutateAsync())}>Pagamento e faturas</Button>
         )}
       </div>
-      {u.cancelAtPeriodEnd && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Cancelamento agendado: a assinatura termina em {u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}. Você pode reativar em "Pagamento e faturas".</p>}
+      {u.cancelAtPeriodEnd && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Cancelamento agendado: a assinatura termina em {u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}. Você pode reativar em “Pagamento e faturas”.</p>}
 
       {(u.status === 'past_due' || u.status === 'suspended') && (
         <div className="flex gap-2 rounded-xl bg-danger-soft border border-danger/30 p-4 text-sm text-danger-ink">

@@ -50,7 +50,7 @@ export default function FluxoEditorPage() {
         saving={create.isPending || update.isPending}
         onSave={async (f) => {
           if (isNew) {
-            const created = await create.mutateAsync(f as any);
+            const created = await create.mutateAsync(f as Parameters<typeof create.mutateAsync>[0]);
             router.replace(`/fluxos/${created.id}`);
             return;
           }

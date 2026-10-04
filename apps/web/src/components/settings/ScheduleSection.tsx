@@ -58,13 +58,12 @@ export function ScheduleSection() {
   const update = useUpdateTenantSettings();
   const create = useCreateSchedule();
   const [selected, setSelected] = useState<string | null>(null);
+  const [novoAberto, setNovoAberto] = useState(false);
 
   const list = schedules.data ?? [];
   const current = list.find((s) => s.id === selected) ?? list.find((s) => s.isDefault) ?? list[0];
   const s = settings.data;
   if (!s || !schedules.data) return null;
-
-  const [novoAberto, setNovoAberto] = useState(false);
 
   return (
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-4">
@@ -118,7 +117,7 @@ export function ScheduleSection() {
         <select className={`${inputCls} max-w-xs`} value={s.timezone} onChange={(e) => update.mutateAsync({ timezone: e.target.value }).then(() => toast.ok('Fuso atualizado')).catch(toast.err)}>
           {TIMEZONES.map((tz) => <option key={tz} value={tz}>{tzLabel(tz)}</option>)}
         </select>
-        <span className="block text-[11px] text-faint">Agenda, relatórios e "data/hora atual" nos fluxos. Cada quadro de horários tem o seu fuso.</span>
+        <span className="block text-[11px] text-faint">Agenda, relatórios e “data/hora atual” nos fluxos. Cada quadro de horários tem o seu fuso.</span>
       </label>
 
       <NewScheduleModal
@@ -146,7 +145,7 @@ function NewScheduleModal({ open, first, copyFrom, pending, onClose, onCreate }:
         </Field>
         {!first && copyFrom && (
           <div className="space-y-1.5 text-sm">
-            <label className="flex items-center gap-2"><input type="radio" checked={copy} onChange={() => setCopy(true)} /> Começar como cópia de "{copyFrom.name}"</label>
+            <label className="flex items-center gap-2"><input type="radio" checked={copy} onChange={() => setCopy(true)} /> Começar como cópia de “{copyFrom.name}”</label>
             <label className="flex items-center gap-2"><input type="radio" checked={!copy} onChange={() => setCopy(false)} /> Começar do zero (seg–sex, 8h–18h)</label>
           </div>
         )}
@@ -275,7 +274,7 @@ function BandsEditor({ cfg, setCfg, issues }: { cfg: ScheduleConfig; setCfg: (p:
             <div className="border-t border-line p-3 space-y-3">
               <label className="flex items-start gap-2 text-[12px] text-ink">
                 <input type="checkbox" className="mt-0.5" checked={b.open} onChange={(e) => upd(b.id, { open: e.target.checked })} />
-                <span>Conta como horário de atendimento <span className="block text-[11px] text-muted">Condição "dentro do horário de atendimento", Atraso "até o próximo horário" e tempo limite "só no horário". Desmarque em faixas como "Almoço".</span></span>
+                <span>Conta como horário de atendimento <span className="block text-[11px] text-muted">Condição “dentro do horário de atendimento”, Atraso “até o próximo horário” e tempo limite “só no horário”. Desmarque em faixas como “Almoço”.</span></span>
               </label>
               <ReplyEditor value={b} onChange={(p) => upd(b.id, p)} />
             </div>

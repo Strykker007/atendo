@@ -447,7 +447,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
                     <li key={v.key} className="flex items-baseline gap-2"><code className="font-mono text-[11.5px] bg-field rounded px-1 text-ink">{`{{${v.key}}}`}</code><span className="text-[11px] text-muted truncate">{v.label}</span></li>
                   ))}
                 </ul>
-                <p className="text-[11px] text-faint mt-1.5">Crie novas com os blocos <b>Salvar</b> e <b>Manipulador</b>. Use em qualquer texto pelo botão "Inserir variável".</p>
+                <p className="text-[11px] text-faint mt-1.5">Crie novas com os blocos <b>Salvar</b> e <b>Manipulador</b>. Use em qualquer texto pelo botão “Inserir variável”.</p>
               </div>
               <p className="text-[11px] text-faint">Um fluxo inativo não dispara automaticamente nem aparece no painel do chat.</p>
             </div>

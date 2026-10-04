@@ -68,7 +68,7 @@ export function AppointmentModal({ open, onClose, contact, conversationId, editi
               <div className="relative">
                 <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nome ou telefone" autoFocus />
                 {results.length > 0 && <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-48 overflow-y-auto">{results.map((r) => <button key={r.id} onClick={() => { setContactSel(r); setResults([]); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-field"><span className="text-ink">{r.name ?? '—'}</span> <span className="text-muted">+{r.phone}</span></button>)}</div>}
-                <p className="text-[11px] text-faint mt-1">Só contatos que já conversaram. Cliente novo: peça para mandar um "oi" no WhatsApp.</p>
+                <p className="text-[11px] text-faint mt-1">Só contatos que já conversaram. Cliente novo: peça para mandar um “oi” no WhatsApp.</p>
               </div>
             )}
           </Field>

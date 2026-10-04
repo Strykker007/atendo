@@ -5,8 +5,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, PortableFlow, PortableFlowBundle } from '@atendo/shared';
-import { ALL_PERMISSIONS } from '@atendo/shared';
+import type { ConversationStatus, PlanFeature, PlanLimits, FlowDefinition, FlowTrigger, PortableFlow, PortableFlowBundle } from '@atendo/shared';
 import { invConv, useUsage } from './core';
 
 // ---- Fluxos de automação ----
@@ -46,7 +45,7 @@ export const usePauseBot = () => { const qc = useQueryClient(); return useMutati
 export const useResumeBot = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api(`/conversations/${conversationId}/bot/resume`, { method: 'POST' }), onSuccess: (_, id) => { invConv(qc, id); qc.invalidateQueries({ queryKey: ['conversation-events', id] }); } }); };
 export const useActiveRun = (conversationId: string | null) => useQuery({ queryKey: ['active-run', conversationId], enabled: !!conversationId, queryFn: () => api<ActiveRun | null>(`/conversations/${conversationId}/flow`), refetchInterval: 15_000 });
 /** O plano inclui a funcionalidade? (usa /billing/usage já em cache) */
-export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as any), loading: u.isLoading }; };
+export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as PlanFeature), loading: u.isLoading }; };
 
 // ---- Clientes (dono) ----
 export interface TenantRow { id: string; name: string; slug: string; isActive: boolean; createdAt: string; subscription: { status: string; currentPeriodEnd: string; plan: { id: string; name: string; priceMonth: string } } | null; users: { email: string; name: string }[]; _count: { numbers: number; users: number; conversations: number } }
