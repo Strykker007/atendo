@@ -32,7 +32,7 @@ Não existe. O documento pede envio por lista, por etiqueta e por contatos selec
 com atraso configurável, restrição a horário comercial e teto diário. É provavelmente a
 funcionalidade mais vendável da lista, e depende do item 1 para não queimar o número.
 
-### 3. Horário de funcionamento do tenant — **FEITO** (2026-09-28)
+### 3. Horário de funcionamento do tenant — **FEITO** (2026-09-28; refeito na tarefa 2 como [quadro de horários com faixas](horarios.md))
 
 Em **Configurações → Horário de funcionamento**: intervalos por dia da semana (vários por
 dia, para almoço), fuso do cliente e a chave **Desativar atendimento** para feriado/férias.
@@ -46,7 +46,7 @@ não de um módulo. A agenda passou a ler de lá.
 ### 4. Fluxos padrão do tenant — **FEITO** (2026-09-28)
 
 Boas-vindas, conversa finalizada e resposta padrão (com período de inatividade), mais o
-aviso de fora do expediente. Em **Configurações → Fluxos padrão**. Ver [10](10-fluxos-de-automacao.md).
+aviso de fora do expediente (hoje: mensagem da faixa Fechado em [Horários](horarios.md)). Em **Configurações → Fluxos padrão**. Ver [10](10-fluxos-de-automacao.md).
 
 ### 5. Encerramento com resultado — **FEITO** (2026-09-28)
 

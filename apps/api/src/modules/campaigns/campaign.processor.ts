@@ -38,7 +38,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
 
     const pending = await this.prisma.campaignTarget.count({ where: { campaignId: campaign.id, status: 'pending' } });
     const [isOpen, dailyRemaining] = await Promise.all([
-      campaign.businessHoursOnly ? this.campaigns.isOpen(campaign.tenantId) : Promise.resolve(true),
+      campaign.businessHoursOnly ? this.campaigns.isOpen(campaign.tenantId, campaign.numberId) : Promise.resolve(true),
       this.campaigns.dailyRemaining(campaign.numberId),
     ]);
 

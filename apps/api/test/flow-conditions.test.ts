@@ -16,6 +16,7 @@ const env = (over: Partial<RuleEnv> = {}): RuleEnv => ({
   lastMessage: async () => 'Quero CANCELAR o pedido',
   hasTag: async (id) => id === 'vip',
   isOpen: async (hours) => !hours,
+  currentBand: async () => 'Entrega Encerrada',
   ...over,
 });
 const rule = (r: Partial<ConditionRule>): ConditionRule => ({ id: 'r', operand: 'var', key: 'cidade', op: 'eq', ...r });
@@ -227,5 +228,20 @@ describe('Manipulador', () => {
     const out = run(vars, [op({ varName: 'c', op: 'add', value: '1' }), op({ varName: 'c', op: 'add', value: '{{c}}' }), op({ varName: 'msg', op: 'set', value: 'total {{c}}' }), op({ varName: '' , op: 'clear' })]);
     expect(out).toEqual({ c: '4', msg: 'total 4' });
     expect(vars).toEqual({ c: '1' });
+  });
+});
+
+describe('Condição — faixa de horário', () => {
+  it('compara pelo nome, sem diferenciar maiúsculas/acentos', async () => {
+    expect(await ok({ operand: 'schedule_band', op: 'is_true', band: 'entrega encerrada' })).toBe(true);
+    expect(await ok({ operand: 'schedule_band', op: 'is_false', band: 'entrega encerrada' })).toBe(false);
+    expect(await ok({ operand: 'schedule_band', op: 'is_true', band: 'Aberto' })).toBe(false);
+  });
+  it('`closed` é a faixa Fechado', async () => {
+    const e = env({ currentBand: async () => 'Fechado' });
+    expect(await ok({ operand: 'schedule_band', op: 'is_true', band: 'closed' }, e)).toBe(true);
+  });
+  it('sem faixa escolhida nunca casa', async () => {
+    expect(await ok({ operand: 'schedule_band', op: 'is_true' })).toBe(false);
   });
 });

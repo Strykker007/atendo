@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_HOURS, isOpenAt, type BusinessInterval } from '../src/modules/tenants/business-hours';
+import { isOpenAt, type BusinessInterval } from '../src/modules/tenants/business-hours';
 
 const TZ = 'America/Sao_Paulo';
 // 2026-09-29 é uma terça-feira
@@ -58,11 +58,5 @@ describe('isOpenAt', () => {
   it('atendimento desativado fecha tudo, mesmo dentro do horário', () => {
     expect(aberto(em('2026-09-29T13:00:00Z'), COMERCIAL, false)).toBe(false);
     expect(aberto(em('2026-09-29T13:00:00Z'), [], false)).toBe(false);
-  });
-
-  it('o padrão sugerido é seg a sex, 8h às 18h', () => {
-    expect(DEFAULT_HOURS.map((h) => h.weekday)).toEqual([1, 2, 3, 4, 5]);
-    expect(aberto(em('2026-09-29T13:00:00Z'), DEFAULT_HOURS)).toBe(true);   // terça 10:00
-    expect(aberto(em('2026-10-03T13:00:00Z'), DEFAULT_HOURS)).toBe(false);  // sábado
   });
 });

@@ -108,12 +108,16 @@ Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
 ## Configurações do cliente
 
 **tenant_settings** — fuso horário do cliente (usado pela agenda, pelos fluxos e pelos
-relatórios), chave `attendanceActive` (feriado/férias: fecha tudo sem mexer nos horários) e
-texto de fora do expediente.
+relatórios), chave `attendanceActive` (feriado/férias: vale a faixa Fechado sem mexer nos
+horários) + `attendanceChangedAt`, fluxos padrão e **boas-vindas** (`welcomeEnabled`,
+`welcomeMessages`, `welcomeMode`, `welcomeCursor`).
 
-**business_hours** — uma linha por intervalo de atendimento (`weekday` 0 = domingo, `start`
-e `end` em "HH:MM" no fuso do cliente). Vários intervalos no mesmo dia cobrem o almoço.
-Dia sem linha = fechado; nenhum intervalo cadastrado = sempre aberto.
+**business_schedules** — quadros de horários ([Horários](horarios.md)): `name`, `timezone`,
+`isDefault` (um por cliente) e `config` (JSON `ScheduleConfig`: faixas, Fechado, grade semanal,
+exceções por data). `whatsapp_numbers.scheduleId` = quadro próprio do número (nulo = padrão).
+Cliente sem quadro = sempre aberto. `conversations.scheduleNoticeKey` = período da faixa cuja
+resposta já foi enviada (uma vez por conversa a cada período). Substituiu `business_hours` e
+`outsideHoursText` (migração `20261005000000_business_schedules`).
 
 
 **contacts** ganhou a ficha preenchida pelo atendente: `email`, `address`, `note1` e

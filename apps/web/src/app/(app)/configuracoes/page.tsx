@@ -7,7 +7,8 @@ import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { BusinessHoursSection } from '@/components/settings/BusinessHoursSection';
+import { ScheduleSection } from '@/components/settings/ScheduleSection';
+import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
@@ -27,11 +28,12 @@ export default function ConfiguracoesPage() {
 
   return (
     <PageShell width="max-w-4xl">
-      <PageHeader title="Configurações" subtitle="Aparência do painel, horário de funcionamento e segurança." />
+      <PageHeader title="Configurações" subtitle="Aparência do painel, horários de atendimento, boas-vindas e segurança." />
 
       {!isOwner && podeNumeros && <NumbersSection />}
       <AppearanceSection />
-      {!isOwner && podeConfigurar && <BusinessHoursSection />}
+      {!isOwner && podeConfigurar && <ScheduleSection />}
+      {!isOwner && podeConfigurar && <WelcomeSection />}
       {!isOwner && podeConfigurar && <DefaultFlowsSection />}
       {!me.data?.impersonatorId && <SecuritySection />}
 

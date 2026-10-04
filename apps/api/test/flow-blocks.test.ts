@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { cloneFlowFragment, type FlowEdge, type FlowNode } from '@atendo/shared';
 import { leastBusy, nextInRotation, pickWeighted } from '../src/modules/flows/distribution';
 import { isPrivateAddress } from '../src/modules/flows/webhook';
-import { nextOpenAt } from '../src/modules/tenants/business-hours';
+import { nextOpenFrom, type ScheduleSource } from '../src/modules/tenants/schedule-clock';
+import { defaultScheduleConfig } from '@atendo/shared';
 import { flowToPortable as toPortable, parsePortableFlowFile as parsePortableFile, toBundle } from '@atendo/shared';
 import { parsePortableReplyFile, toPortableReply, toReplyBundle } from '../src/modules/quick-replies/portable';
 
@@ -42,19 +43,20 @@ describe('webhook', () => {
 });
 
 describe('Atraso inteligente', () => {
-  const hours = [1, 2, 3, 4, 5].map((weekday) => ({ weekday, start: '08:00', end: '18:00' }));
+  // seg–sex 08:00–18:00
+  const src = (attendanceActive = true): ScheduleSource => ({ timezone: 'America/Sao_Paulo', config: defaultScheduleConfig(), attendanceActive });
   it('fora do expediente empurra para a próxima abertura', () => {
     // sexta 2026-10-02 22:00 em São Paulo (UTC-3) = 2026-10-03T01:00Z → segunda 08:00 = 11:00Z
-    const r = nextOpenAt({ from: new Date('2026-10-03T01:00:00Z'), timezone: 'America/Sao_Paulo', hours });
+    const r = nextOpenFrom(src(), new Date('2026-10-03T01:00:00Z'));
     expect(r.toISOString()).toBe('2026-10-05T11:00:00.000Z');
   });
   it('dentro do expediente não muda', () => {
     const from = new Date('2026-10-05T15:00:00Z');
-    expect(nextOpenAt({ from, timezone: 'America/Sao_Paulo', hours })).toBe(from);
+    expect(nextOpenFrom(src(), from)).toBe(from);
   });
   it('atendimento desligado não prende o fluxo', () => {
     const from = new Date('2026-10-03T01:00:00Z');
-    expect(nextOpenAt({ from, timezone: 'America/Sao_Paulo', hours, attendanceActive: false })).toBe(from);
+    expect(nextOpenFrom(src(false), from)).toBe(from);
   });
 });
 

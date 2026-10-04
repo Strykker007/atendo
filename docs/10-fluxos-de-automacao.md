@@ -25,7 +25,7 @@ o desenho de longe: roxo = estrutura, amarelo/laranja = decisão, azul = entrega
 | Lógica e Decisão | **Ação** (`action`) | Aplicar/remover etiqueta (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **encerrar conversa** · **chamar webhook** (método, headers, corpo com variáveis, tempo limite, resposta em variável) · **transferir para atendente humano** (encerra o fluxo). `set_var` (Definir variável) continua funcionando nos fluxos antigos, mas só aparece no seletor de quem já usa. Detalhes em [fluxos.md](fluxos.md#ação) | 1 (handoff: nenhuma; webhook: normal + `error`) |
 | Lógica e Decisão | **Randomizador** (`randomizer`) | Sorteia um ramo pelo peso (teste A/B). Percentual = peso ÷ soma dos pesos; peso 0 nunca sai | uma por ramo |
 | Lógica e Decisão | **Condição** (`condition`) | **Ramos** avaliados em ordem, cada um com regras combinadas por **E/OU**; o primeiro verdadeiro define a saída. Operandos: variável do fluxo, campo do contato, mensagem recebida, data/hora atual, etiqueta, horário comercial. Detalhes em [fluxos.md](fluxos.md#condição) | uma por ramo (id do ramo) + `no` (**Senão**) |
-| Lógica e Decisão | **Atraso inteligente** (`wait`) | Espera X minutos/horas/dias (job persistente). Com *só no horário comercial*, se o prazo vencer fora do expediente do cliente, espera até a próxima abertura. Ou **até o próximo horário de atendimento**. Robô pausado / conversa encerrada antes do fim → o fluxo para | 1 |
+| Lógica e Decisão | **Atraso inteligente** (`wait`) | Espera X minutos/horas/dias (job persistente). Com *só no horário de atendimento*, se o prazo vencer fora do horário (quadro do número), espera até a próxima abertura. Ou **até o próximo horário de atendimento**. Robô pausado / conversa encerrada antes do fim → o fluxo para | 1 |
 | Lógica e Decisão | **IA** (`ai`) | Responde o contato com as instruções e a base de conhecimento do cliente, ou classifica a mensagem. Exige feature `ai_flows` (ver [15](15-ia.md)) | `done` / um por rótulo, + `fallback` (**obrigatório**) |
 | Distribuição e Envio | **Salvar** (`question`) | Pergunta (opcional) e **espera a resposta**, guardando em `{{varName}}` e, se escolhido, num **campo da ficha do contato** (nome, e-mail, endereço, observações). Validação: qualquer / e-mail / telefone / número; estourou `maxRetries` → saída *Tentativas esgotadas* (ou humano, se não ligada). **Tempo limite** opcional → saída *Não respondeu* (não ligada: o fluxo termina) | 1 + `fallback` (+ `timeout` com tempo limite) |
 | Distribuição e Envio | **Distribuidor** (`distributor`) | Entrega a conversa: **rodízio**, **menos ocupado** (menos conversas abertas) ou **fila** ("Aguardando"). Atendentes escolhidos no bloco ou todos os ativos — sempre só quem opera o número da conversa | `done` / `fallback` (ninguém disponível) |
@@ -92,7 +92,7 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 |---|---|---|---|
 | GET | `/flows` | todos* | Lista (com contagem de execuções) |
 | GET | `/flows/:id` | todos* | Definição completa |
-| POST / PATCH / DELETE | `/flows[/:id]` | admin, gerente | CRUD (valida a definição). `PATCH {isActive: true}` sem `definition` valida o desenho **salvo** — ativar pela lista não liga fluxo quebrado |
+| POST / PATCH / DELETE | `/flows[/:id]` | admin, gerente | CRUD (valida a definição). `PATCH {isActive: true}` sem `definition` valida o desenho **salvo** — ativar pela lista não liga fluxo quebrado. `PATCH` com `version` diferente da do banco → 409 `flow_version_conflict` ([controle de versão](fluxos.md#controle-de-versão-ao-salvar)); toda escrita incrementa `version` |
 | POST | `/flows/:id/duplicate` | admin, gerente | Cópia no mesmo cliente (legado; a tela usa o lote) |
 | POST | `/flows/duplicate` | admin, gerente | `{ids}` → `{flows}` — cópias em lote |
 | POST | `/flows/active` | admin, gerente | `{ids, isActive}` → `{updated, failed[{id,name,reason}]}` — ativar/desativar em lote; ativar valida cada desenho e os inválidos ficam como estavam |
@@ -100,10 +100,10 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 | POST | `/flows/export` | admin, gerente | `{ids}` → `{bundle, warnings}` — vários num arquivo |
 | POST | `/flows/import` | admin, gerente | `{portable}` (individual **ou** lote) → `{flows, flow, warnings}` |
 | GET | `/flows/:id/runs` | todos* | `byStatus` + últimas execuções |
-| POST | `/flows/:id/start` | todos* | `{conversationId}` — disparo manual |
+| POST | `/flows/:id/start` | todos* | `{conversationId, resumeBot?}` — disparo manual. Robô pausado: 409 `bot_paused`; com `resumeBot: true` retoma o robô e inicia |
 | GET | `/conversations/:id/flow` | todos | Run ativo ou `null` |
 | POST | `/conversations/:id/flow/stop` | todos | Para o run ativo |
-| POST | `/conversations/:id/bot/pause` · `/bot/resume` | todos | Pausa/retoma o robô só na conversa ([fluxos.md](fluxos.md#pausar-o-robô-na-conversa)) |
+| POST | `/conversations/:id/bot/pause` · `/bot/resume` | todos (feature `flows`) | Pausa/retoma o robô só na conversa ([fluxos.md](fluxos.md#pausar-o-robô-na-conversa)) |
 
 \* exige `features: ['flows']` no plano (`FeatureGuard`) — 403 com mensagem "não está incluído no seu plano".
 
@@ -200,12 +200,11 @@ dizendo o que falta ajustar.
 - Estatísticas por bloco (onde os contatos abandonam) — futuro.
 
 
-## Condição "horário comercial"
+## Condição "dentro do horário de atendimento" e "faixa de horário atual"
 
-Sem horário preenchido no bloco, ela usa o expediente configurado em **Configurações →
-Horário de funcionamento**, inclusive a chave *Desativar atendimento*. Preenchendo o
-horário no bloco, ele sobrepõe o do cliente — mas a avaliação continua no **fuso do
-cliente**, nunca no do servidor.
+Usam o **quadro de horários do número da conversa** (Configurações → Horários de atendimento,
+ver [Horários](horarios.md)), inclusive a chave *Desativar atendimento*. Regra antiga com
+horário próprio no bloco continua valendo, no **fuso do cliente**.
 
 
 ## Fluxos padrão do cliente
@@ -224,6 +223,7 @@ O período de inatividade da resposta padrão existe para o robô **não falar p
 atendente**: sem ele, cada mensagem de uma conversa em andamento dispararia o fluxo. `0`
 responde sempre.
 
-Quando nada disso assume e o cliente está **fora do expediente** ([Configurações](16-lacunas-primeiro-cliente.md)),
-o sistema envia o *aviso de fora do expediente*, se configurado — **uma vez por conversa**.
-Repetir a cada mensagem é a forma mais rápida de irritar quem está esperando.
+Antes disso tudo vale a **faixa de horário** do quadro do número: boas-vindas, mensagem (ou
+fluxo) da faixa — ex.: Fechado — **uma vez por conversa a cada período**, e se o atendimento
+segue ou para. O antigo *aviso de fora do expediente* virou a mensagem da faixa Fechado com
+"enviar só se nenhum fluxo responder". Ver [Horários](horarios.md).

@@ -1,5 +1,4 @@
 'use client';
-import { useState } from 'react';
 import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles, Send } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { inputCls } from '@/components/ui/Modal';
@@ -15,7 +14,6 @@ export function DefaultFlowsSection() {
   const settings = useTenantSettings();
   const flows = useFlows();
   const update = useUpdateTenantSettings();
-  const [texto, setTexto] = useState<string | null>(null);
 
   if (!feature.has || !settings.data) return null;
   const s = settings.data;
@@ -51,8 +49,8 @@ export function DefaultFlowsSection() {
       <Select
         field="welcomeFlowId"
         icon={<Sparkles size={14} className="text-accent" />}
-        label="Boas-vindas"
-        hint="Dispara na primeira mensagem de um contato que nunca conversou com você."
+        label="Fluxo de boas-vindas"
+        hint="Dispara na primeira mensagem de um contato que nunca conversou com você. As mensagens de boas-vindas (seção acima) saem antes dele."
         value={s.welcomeFlowId}
       />
       <Select
@@ -95,18 +93,7 @@ export function DefaultFlowsSection() {
         </label>
       )}
 
-      <div className="pt-2 space-y-1">
-        <span className="text-[12px] text-muted">Aviso de fora do expediente (opcional)</span>
-        <textarea
-          rows={2}
-          className={inputCls}
-          placeholder="Estamos fora do horário de atendimento. Respondemos assim que abrirmos!"
-          defaultValue={s.outsideHoursText ?? ''}
-          onChange={(e) => setTexto(e.target.value)}
-          onBlur={() => { if (texto !== null && texto !== (s.outsideHoursText ?? '')) salvar({ outsideHoursText: texto }, 'Aviso salvo'); }}
-        />
-        <span className="block text-[11px] text-faint">Enviado <b>uma vez por conversa</b>, só quando está fechado e nenhum fluxo assumiu. Repetir a cada mensagem irrita quem está esperando.</span>
-      </div>
+      <p className="pt-2 text-[11.5px] text-muted">A mensagem de <b>fora do horário</b> (ou um fluxo para isso) agora fica em <b>Horários de atendimento → Fechado</b>.</p>
     </section>
   );
 }

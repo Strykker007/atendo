@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { TenantSettingsService } from '../tenants/tenant-settings.service';
+import { SchedulesService } from '../tenants/schedules.service';
 import { SendPacer } from '../whatsapp/send-pacer';
 import { AppLogger } from '../../common/observability/app-logger';
 import { QUEUE_CAMPAIGN, type CampaignJob } from './queues';
@@ -20,7 +20,7 @@ export class CampaignsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly settings: TenantSettingsService,
+    private readonly schedules: SchedulesService,
     private readonly pacer: SendPacer,
     @InjectQueue(QUEUE_CAMPAIGN) private readonly queue: Queue<CampaignJob>,
   ) {}
@@ -159,7 +159,8 @@ export class CampaignsService {
     return day.limit === 0 ? Number.MAX_SAFE_INTEGER : Math.max(0, day.limit - day.sent);
   }
 
-  isOpen(tenantId: string) {
-    return this.settings.isOpen(tenantId);
+  /** "Só no horário de atendimento": quadro de horários do número da campanha (ou o padrão). */
+  isOpen(tenantId: string, numberId?: string) {
+    return this.schedules.isOpen(tenantId, numberId);
   }
 }

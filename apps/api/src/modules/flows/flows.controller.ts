@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, IsInt, MaxLength, Min } from 'class-validator';
 import { randomUUID } from 'node:crypto';
 import { copyName, flowFromPortable, flowTagNames, flowToPortable, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -10,6 +10,7 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { FlowEngineService } from './flow-engine.service';
+import { botPaused } from '../conversations/bot-pause';
 import { assertOwnFlowMedia, validateDefinition } from './flow-validation';
 
 class FlowDto {
@@ -20,6 +21,16 @@ class FlowDto {
   @IsObject() trigger: FlowTrigger;
   @IsObject() definition: FlowDefinition;
 }
+class UpdateFlowDto {
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  @IsOptional() @IsString() @MaxLength(300) description?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsBoolean() showInChat?: boolean;
+  @IsOptional() @IsObject() trigger?: FlowTrigger;
+  @IsOptional() @IsObject() definition?: FlowDefinition;
+  /** versão que o editor carregou; diferente da do banco = 409 `flow_version_conflict`. Ausente (interruptor da lista) = sem checagem */
+  @IsOptional() @IsInt() @Min(1) version?: number;
+}
 class IdsDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(100) @IsUUID('all', { each: true }) ids: string[];
 }
@@ -28,6 +39,8 @@ class ActiveDto extends IdsDto {
 }
 class StartDto {
   @IsUUID() conversationId: string;
+  /** robô pausado na conversa: true = o atendente confirmou retomar o robô e iniciar o fluxo */
+  @IsOptional() @IsBoolean() resumeBot?: boolean;
 }
 
 /** Fluxos de automação — funcionalidade plugável no plano (`features: ['flows']`). */
@@ -91,7 +104,8 @@ export class FlowsController {
 
   @Patch(':id')
   @RequirePermission('flows.manage')
-  async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<FlowDto>) {
+  async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() body: UpdateFlowDto) {
+    const { version, ...dto } = body;
     if (dto.definition) {
       validateDefinition(dto.definition);
       assertOwnFlowMedia(u.tenantId, dto.definition);
@@ -99,7 +113,14 @@ export class FlowsController {
     const current = await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     // ativar pela lista não passa pelo editor: o desenho salvo (cópia, importado) precisa estar válido
     if (dto.isActive && !current.isActive && !dto.definition) validateDefinition(current.definition as unknown as FlowDefinition);
-    return this.prisma.flow.update({ where: { id }, data: { ...dto, trigger: dto.trigger as object | undefined, definition: dto.definition as object | undefined } });
+    // optimistic locking: só grava se ninguém salvou depois que o editor carregou (renomear faixa
+    // de horário também conta — docs/horarios.md). Toda escrita incrementa a versão.
+    const saved = await this.prisma.flow.updateMany({
+      where: { id, tenantId: u.tenantId, ...(version !== undefined && { version }) },
+      data: { ...dto, trigger: dto.trigger as object | undefined, definition: dto.definition as object | undefined, version: { increment: 1 } },
+    });
+    if (!saved.count) throw new ConflictException({ code: 'flow_version_conflict', message: 'Este fluxo foi alterado por outra pessoa ou pelo sistema. Recarregue para ver a versão atual.' });
+    return this.prisma.flow.findUniqueOrThrow({ where: { id } });
   }
 
   @Delete(':id')
@@ -167,7 +188,7 @@ export class FlowsController {
       }
       ok.push(f.id);
     }
-    if (ok.length) await this.prisma.flow.updateMany({ where: { id: { in: ok }, tenantId: u.tenantId }, data: { isActive: dto.isActive } });
+    if (ok.length) await this.prisma.flow.updateMany({ where: { id: { in: ok }, tenantId: u.tenantId }, data: { isActive: dto.isActive, version: { increment: 1 } } });
     return { updated: ok.length, failed };
   }
 
@@ -264,7 +285,12 @@ export class FlowsController {
   @Post(':id/start')
   async start(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StartDto) {
     await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
-    await this.prisma.conversation.findFirstOrThrow({ where: { id: dto.conversationId, tenantId: u.tenantId } });
+    const conv = await this.prisma.conversation.findFirstOrThrow({ where: { id: dto.conversationId, tenantId: u.tenantId } });
+    if (botPaused(conv)) {
+      // decisão da tarefa 1.5: a tela pede confirmação (409 `bot_paused`) e, confirmado, retoma o robô e inicia
+      if (!dto.resumeBot) throw new ConflictException({ code: 'bot_paused', message: 'O robô está pausado nesta conversa. Retomar o robô e iniciar o fluxo?' });
+      await this.engine.resumeBot(u.tenantId, conv.id, u);
+    }
     return this.engine.start(id, dto.conversationId, u.id);
   }
 }

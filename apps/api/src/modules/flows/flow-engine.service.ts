@@ -16,7 +16,10 @@ import { afterAiAnswer } from './ai-turns';
 import { onScheduleMiss } from './schedule-misses';
 import { AiService } from '../ai/ai.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
-import { isOpenAt, nextOpenAt } from '../tenants/business-hours';
+import { isOpenAt } from '../tenants/business-hours';
+import { SchedulesService } from '../tenants/schedules.service';
+import type { ScheduleNow } from '../tenants/schedule-clock';
+import { planInbound } from './hours-gate';
 import { callWebhook } from './webhook';
 import { DISTRIBUTION_REASON, leastBusy, nextInRotation, pickWeighted } from './distribution';
 import { pickDefaultFlow, type InboundSituation } from './default-flows';
@@ -31,7 +34,9 @@ export interface BotUnpauseJob { conversationId: string; tenantId: string; pause
  * no meio tornam o job antigo inofensivo.
  */
 export interface ReplyTimeoutJob { runId: string; nodeId: string; until: string }
-export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob;
+/** Intervalo entre mensagens automáticas (boas-vindas, faixa de horário): o resto da sequência, já interpolado. */
+export interface AutoContentJob { conversationId: string; items: ContentItem[] }
+export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob | AutoContentJob;
 
 const BOT_PAUSED_REASON = 'robô pausado na conversa';
 const CLOSED_REASON = 'conversa encerrada';
@@ -75,6 +80,7 @@ export class FlowEngineService {
     @Inject(forwardRef(() => SchedulingService)) private readonly scheduling: SchedulingService,
     private readonly ai: AiService,
     private readonly tenantSettings: TenantSettingsService,
+    private readonly schedules: SchedulesService,
     @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowJob>,
   ) {}
 
@@ -166,18 +172,44 @@ export class FlowEngineService {
   }
 
   /**
-   * Chamado pelo InboundProcessor para toda mensagem recebida.
-   * 1) run ativo esperando → entrega a resposta. 2) senão, avalia gatilhos (nova conversa / palavra-chave).
+   * Chamado pelo InboundProcessor para toda mensagem recebida (docs/horarios.md → Comportamento).
+   * 1) Faixa de horário atual do quadro do número decide: boas-vindas, resposta da faixa (uma vez
+   *    por período), seguir ou parar. 2) Atendimento normal: run ativo esperando → entrega a
+   *    resposta; senão gatilhos (nova conversa / palavra-chave) e fluxos padrão.
    */
   async onInbound(number: WhatsAppNumber, conversation: Conversation, message: Message, isNewConversation: boolean, situation?: InboundSituation) {
-    // robô pausado nesta conversa: nada de fluxo, nem gatilho, nem aviso de fora do expediente
-    if (botPaused(conversation)) return;
+    const paused = botPaused(conversation);
     // pausa vencida e o job do fim ainda não rodou (fila atrasada): encerra aqui e segue normal
-    if (conversation.botPausedAt) await this.conversations.clearBotPause(conversation.tenantId, conversation.id, null, conversation.botPausedAt);
-    const active = await this.prisma.flowRun.findFirst({ where: { conversationId: conversation.id, status: { in: ['running', 'waiting'] } } });
+    if (!paused && conversation.botPausedAt) await this.conversations.clearBotPause(conversation.tenantId, conversation.id, null, conversation.botPausedAt);
+    const [now, active] = await Promise.all([
+      this.schedules.now(number.tenantId, number.id),
+      this.prisma.flowRun.findFirst({ where: { conversationId: conversation.id, status: { in: ['running', 'waiting'] } } }),
+    ]);
+    const plan = planInbound({
+      behavior: now.band.behavior,
+      reply: now.band.reply,
+      paused,
+      newAttendance: isNewConversation || !!situation?.isNewContact || !!situation?.returningAfterClosed,
+      activeRun: !!active,
+    });
+
+    const auto = new AutoReply(this, conversation, now);
+    if (plan.welcome) await auto.welcome();
+    if (plan.notifyFirst && (await auto.band()) === 'flow') return; // o fluxo da faixa assumiu
+    await auto.flush();
+    if (!plan.proceed) return;
+    const handled = await this.normalEntry(number, conversation, message, isNewConversation, active, situation);
+    if (!handled && plan.notifyIfUnhandled) {
+      await auto.band();
+      await auto.flush();
+    }
+  }
+
+  /** Atendimento normal. Devolve se algum fluxo recebeu/assumiu a mensagem. */
+  private async normalEntry(number: WhatsAppNumber, conversation: Conversation, message: Message, isNewConversation: boolean, active: FlowRun | null, situation?: InboundSituation): Promise<boolean> {
     if (active) {
       if (active.status === 'waiting') await this.deliverAnswer(active, message);
-      return;
+      return true;
     }
     const flows = await this.prisma.flow.findMany({ where: { tenantId: number.tenantId, isActive: true } });
     const text = (message.text ?? '').toLowerCase();
@@ -185,47 +217,84 @@ export class FlowEngineService {
       const t = f.trigger as unknown as FlowTrigger;
       const numberOk = !t.numberIds?.length || t.numberIds.includes(number.id);
       if (!numberOk) continue;
-      if (t.type === 'new_conversation' && isNewConversation) return void (await this.start(f.id, conversation.id));
-      if (t.type === 'keyword' && t.keywords?.some((k) => text.includes(k.toLowerCase()))) return void (await this.start(f.id, conversation.id));
+      if (t.type === 'new_conversation' && isNewConversation) return !!(await this.start(f.id, conversation.id));
+      if (t.type === 'keyword' && t.keywords?.some((k) => text.includes(k.toLowerCase()))) return !!(await this.start(f.id, conversation.id));
     }
 
     // nenhum gatilho próprio casou: cai nos fluxos padrão do cliente
-    if (!situation) return;
+    if (!situation) return false;
     const settings = await this.tenantSettings.get(number.tenantId);
     const chosen = pickDefaultFlow(situation, settings);
-    if (chosen) {
-      const flow = flows.find((f) => f.id === chosen.flowId);
-      // fluxo apagado ou desativado: não trava a conversa, só registra
-      if (!flow) {
-        this.log.warn(`Fluxo padrão (${chosen.kind}) do tenant ${number.tenantId} não existe ou está inativo`);
-        return;
-      }
-      return void (await this.start(flow.id, conversation.id));
+    if (!chosen) return false;
+    const flow = flows.find((f) => f.id === chosen.flowId);
+    // fluxo apagado ou desativado: não trava a conversa, só registra
+    if (!flow) {
+      this.log.warn(`Fluxo padrão (${chosen.kind}) do tenant ${number.tenantId} não existe ou está inativo`);
+      return false;
     }
-
-    // fora do expediente, sem fluxo configurado: ao menos avisa, uma vez por conversa
-    await this.outsideHoursNotice(number.tenantId, conversation, settings);
+    return !!(await this.start(flow.id, conversation.id));
   }
 
   /**
-   * Aviso automático de fora do expediente. Enviado **uma vez por conversa**: repetir a
-   * cada mensagem do contato é a forma mais rápida de irritar quem está esperando.
+   * Resposta da faixa de horário (mensagem ou fluxo), **uma vez por conversa a cada período** da
+   * faixa: a conversa guarda a chave do período (`scheduleNoticeKey`) e o update condicional
+   * garante uma só mesmo com duas mensagens chegando juntas. Devolve o que foi feito.
    */
-  private async outsideHoursNotice(
-    tenantId: string,
-    conversation: Conversation,
-    settings: { timezone: string; attendanceActive: boolean; outsideHoursText: string | null; hours: { weekday: number; start: string; end: string }[] },
-  ) {
-    if (!settings.outsideHoursText?.trim()) return;
-    if (isOpenAt({ now: new Date(), timezone: settings.timezone, hours: settings.hours, attendanceActive: settings.attendanceActive })) return;
-    const jaAvisado = await this.prisma.message.findFirst({
-      where: { conversationId: conversation.id, direction: 'out', text: settings.outsideHoursText },
-      select: { id: true },
+  async claimBandNotice(conversation: Conversation, now: ScheduleNow): Promise<{ kind: 'flow'; flowId: string } | { kind: 'message'; items: ContentItem[] } | null> {
+    const band = now.band;
+    if (band.behavior === 'normal') return null;
+    let flowId: string | null = null;
+    if (band.reply === 'flow') {
+      const flow = band.flowId ? await this.prisma.flow.findFirst({ where: { id: band.flowId, tenantId: conversation.tenantId, isActive: true }, select: { id: true } }) : null;
+      if (!flow) {
+        this.log.warn(`Fluxo da faixa "${band.name}" (tenant ${conversation.tenantId}) não existe ou está inativo`);
+        return null;
+      }
+      flowId = flow.id;
+    } else if (!band.items.length) return null;
+    const claimed = await this.prisma.conversation.updateMany({
+      where: { id: conversation.id, OR: [{ scheduleNoticeKey: null }, { scheduleNoticeKey: { not: now.periodKey } }] },
+      data: { scheduleNoticeKey: now.periodKey },
     });
-    if (jaAvisado) return;
-    await this.conversations.sendAsSystem(conversation.id, settings.outsideHoursText).catch((err) => {
-      this.log.warn(`Aviso de fora do expediente não enviado: ${err instanceof Error ? err.message : err}`);
-    });
+    if (!claimed.count) return null;
+    return flowId ? { kind: 'flow', flowId } : { kind: 'message', items: band.items };
+  }
+
+  /**
+   * Mensagens automáticas (boas-vindas, resposta da faixa) fora de um fluxo: textos já
+   * interpolados, enviados em ordem; intervalo entre mensagens vira job `auto-content`.
+   * Não cria FlowRun — não aparece em execuções de fluxo.
+   */
+  async deliverAuto(conversationId: string, items: ContentItem[]) {
+    for (let i = 0; i < items.length; i++) {
+      const delay = i > 0 ? Math.min(CONTENT_MAX_DELAY_SEC, Math.max(0, Number(items[i].delay) || 0)) : 0;
+      if (delay > 0) {
+        const rest = items.slice(i).map((it, k) => (k === 0 ? { ...it, delay: 0 } : it));
+        await this.queue.add('auto-content', { conversationId, items: rest }, { delay: delay * 1000, removeOnComplete: true });
+        return;
+      }
+      await this.sendItem(conversationId, items[i], null).catch((err) => {
+        this.log.warn(`Mensagem automática não enviada: ${err instanceof Error ? err.message : err}`);
+      });
+    }
+  }
+
+  /** Job do intervalo entre mensagens automáticas. */
+  autoContent(job: AutoContentJob) {
+    return this.deliverAuto(job.conversationId, job.items);
+  }
+
+  /** Inicia o fluxo da faixa (chamado por `AutoReply`). */
+  startBandFlow(flowId: string, conversationId: string) {
+    return this.start(flowId, conversationId);
+  }
+
+  nextWelcome(tenantId: string) {
+    return this.tenantSettings.nextWelcome(tenantId);
+  }
+
+  contactOf(conversation: Conversation) {
+    return this.prisma.contact.findUniqueOrThrow({ where: { id: conversation.contactId } });
   }
 
   /** Job de "Aguardar" (ou do intervalo entre mensagens do Conteúdo) venceu. */
@@ -343,7 +412,7 @@ export class FlowEngineService {
             continue;
           }
           case 'wait': {
-            const until = await this.waitUntil(run.tenantId, node);
+            const until = await this.waitUntil(run.tenantId, run.conversation.numberId, node);
             const ms = Math.max(0, until.getTime() - Date.now());
             await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: until } });
             await this.queue.add('resume', { runId }, { delay: ms, jobId: `resume-${runId}-${node.id}-${Date.now()}` });
@@ -416,10 +485,17 @@ export class FlowEngineService {
    */
   private async awaitReply(runId: string, node: Extract<FlowNode, { type: 'question' | 'menu' }>) {
     const minutes = Math.max(0, Number(node.data.timeoutMinutes) || 0);
-    const until = minutes ? new Date(Date.now() + minutes * 60_000) : null;
+    let until: Date | null = null;
+    if (minutes && node.data.timeoutBusinessHours) {
+      // conta só dentro do horário de atendimento (quadro do número da conversa)
+      const run = await this.prisma.flowRun.findUniqueOrThrow({ where: { id: runId }, select: { tenantId: true, conversation: { select: { numberId: true } } } });
+      until = await this.schedules.addOpenMinutes(run.tenantId, run.conversation.numberId, new Date(), minutes);
+    } else if (minutes) {
+      until = new Date(Date.now() + minutes * 60_000);
+    }
     await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: until } });
     if (until) {
-      await this.queue.add('reply-timeout', { runId, nodeId: node.id, until: until.toISOString() }, { delay: minutes * 60_000, jobId: `timeout-${runId}-${node.id}-${until.getTime()}`, removeOnComplete: true });
+      await this.queue.add('reply-timeout', { runId, nodeId: node.id, until: until.toISOString() }, { delay: Math.max(0, until.getTime() - Date.now()), jobId: `timeout-${runId}-${node.id}-${until.getTime()}`, removeOnComplete: true });
     }
   }
 
@@ -787,6 +863,7 @@ export class FlowEngineService {
   /** Condição: devolve a saída (id do ramo ou Senão). Aceita o formato antigo via `normalizeCondition`. */
   private async evaluate(node: Extract<FlowNode, { type: 'condition' }>, conv: Conversation & { tags: { tagId: string }[] }, ctx: InterpolateCtx) {
     const tenant = once(() => this.tenantSettings.get(conv.tenantId));
+    const schedule = once(() => this.schedules.now(conv.tenantId, conv.numberId));
     const env: RuleEnv = {
       ...ctx,
       now: new Date(),
@@ -800,30 +877,28 @@ export class FlowEngineService {
         return !!(await this.prisma.contactTag.findFirst({ where: { contactId: conv.contactId, tagId } }));
       },
       isOpen: async (hours) => {
-        const t = await tenant();
-        // sem horário próprio, vale o expediente de Configurações — inclusive a chave
-        // "atendimento ativo", que fecha tudo em feriado/férias. Com horário próprio, no fuso do cliente.
-        const list = hours ? hours.days.map((weekday) => ({ weekday, start: hours.start, end: hours.end })) : t.hours;
-        return isOpenAt({ now: new Date(), timezone: t.timezone, hours: list, attendanceActive: t.attendanceActive });
+        // horário próprio na regra (formato antigo): no fuso do cliente. Sem ele, vale o quadro de
+        // horários do número da conversa — inclusive a chave "atendimento ativo".
+        if (hours) {
+          const t = await tenant();
+          return isOpenAt({ now: new Date(), timezone: t.timezone, hours: hours.days.map((weekday) => ({ weekday, start: hours.start, end: hours.end })), attendanceActive: t.attendanceActive });
+        }
+        return (await schedule()).open;
       },
+      currentBand: async () => (await schedule()).band.name,
     };
     return pickBranch(normalizeCondition(node.data), env);
   }
 
   /**
-   * Quando o Atraso inteligente vence. 'duration': agora + tempo, empurrado para o expediente se
-   * pedido. 'next_open': próxima abertura (agora, se já estiver aberto).
-   * Ponto de encaixe do módulo de horários: hoje o horário vem de Configurações → Horário
-   * (`tenantSettings`); um horário por setor/número entra trocando `hours` aqui.
+   * Quando o Atraso inteligente vence. 'duration': agora + tempo, empurrado para o horário de
+   * atendimento se pedido. 'next_open': próxima abertura (agora, se já estiver aberto). O horário
+   * é o quadro do número da conversa (ou o padrão do cliente) — docs/horarios.md.
    */
-  private async waitUntil(tenantId: string, node: Extract<FlowNode, { type: 'wait' }>): Promise<Date> {
-    const nextOpen = async (from: Date) => {
-      const t = await this.tenantSettings.get(tenantId);
-      return nextOpenAt({ from, timezone: t.timezone, hours: t.hours, attendanceActive: t.attendanceActive });
-    };
-    if (node.data.mode === 'next_open') return nextOpen(new Date());
+  private async waitUntil(tenantId: string, numberId: string, node: Extract<FlowNode, { type: 'wait' }>): Promise<Date> {
+    if (node.data.mode === 'next_open') return this.schedules.nextOpen(tenantId, numberId, new Date());
     const due = new Date(Date.now() + Math.max(1, Number(node.data.minutes) || 1) * 60_000);
-    return node.data.businessHours ? nextOpen(due) : due;
+    return node.data.businessHours ? this.schedules.nextOpen(tenantId, numberId, due) : due;
   }
 
   /** Bloco "Salvar" com destino na ficha: o que o contato respondeu vira dado dele. */
@@ -880,8 +955,9 @@ export class FlowEngineService {
   }
 
   /** Uma mensagem do Conteúdo. Anexo removido na importação (`_reconfig`) é pulado; áudio não leva legenda. */
-  private async sendItem(conversationId: string, it: ContentItem, ctx: InterpolateCtx) {
-    const text = it.text ? interpolate(it.text, ctx) : undefined;
+  private async sendItem(conversationId: string, it: ContentItem, ctx: InterpolateCtx | null) {
+    // ctx nulo = texto já interpolado (mensagens automáticas)
+    const text = it.text ? (ctx ? interpolate(it.text, ctx) : it.text) : undefined;
     if (it.kind === 'text') return this.send(conversationId, text);
     if (!it.mediaKey) return;
     const audio = it.kind === 'audio';
@@ -914,5 +990,54 @@ export class FlowEngineService {
   private async markConversation(conversationId: string, runId: string | null) {
     const conv = await this.prisma.conversation.update({ where: { id: conversationId }, data: { activeFlowRunId: runId } });
     this.gateway.emitConversation(conv.tenantId, conv);
+  }
+}
+
+/**
+ * Boas-vindas + resposta da faixa de uma mensagem recebida, numa sequência só: a resposta da
+ * faixa entra depois das boas-vindas com pelo menos 1 s de intervalo (ordem de chegada).
+ * Variáveis: `{{contact.*}}`, `{{faixa}}`, `{{proxima_abertura}}`.
+ */
+class AutoReply {
+  private items: ContentItem[] = [];
+  private ctx?: InterpolateCtx;
+  constructor(private readonly engine: FlowEngineService, private readonly conv: Conversation, private readonly now: ScheduleNow) {}
+
+  private async push(items: ContentItem[]) {
+    this.ctx ??= { contact: await this.engine.contactOf(this.conv), vars: { faixa: this.now.band.name, proxima_abertura: this.now.nextOpenLabel } };
+    const ctx = this.ctx;
+    items.forEach((it, i) => {
+      const delay = i === 0 && this.items.length ? Math.max(1, Number(it.delay) || 0) : it.delay;
+      this.items.push({ ...it, text: it.text ? interpolate(it.text, ctx) : it.text, delay });
+    });
+  }
+
+  async welcome() {
+    const w = await this.engine.nextWelcome(this.conv.tenantId);
+    if (w) await this.push(w.items);
+  }
+
+  /** Resposta da faixa, se ainda não saiu neste período. Fluxo: envia o que estiver pendente e inicia o fluxo. */
+  async band(): Promise<'flow' | 'message' | null> {
+    const r = await this.engine.claimBandNotice(this.conv, this.now);
+    if (!r) return null;
+    if (r.kind === 'message') {
+      await this.push(r.items);
+      return 'message';
+    }
+    await this.flush();
+    try {
+      await this.engine.startBandFlow(r.flowId, this.conv.id);
+      return 'flow';
+    } catch {
+      return null;
+    }
+  }
+
+  async flush() {
+    if (!this.items.length) return;
+    const items = this.items;
+    this.items = [];
+    await this.engine.deliverAuto(this.conv.id, items);
   }
 }

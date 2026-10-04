@@ -4,10 +4,11 @@ import { Handle, Position, useNodeId, type NodeProps } from '@xyflow/react';
 import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent,
+  CLOSED_BAND_ID, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent,
   type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
+import { useSchedules } from '@/lib/hooks';
 
 /**
  * Categorias da paleta. A cor é da categoria (roxo = estrutura, amarelo/laranja = lógica,
@@ -220,11 +221,11 @@ export function ConnectFlowNodeView({ data, selected }: P) {
   );
 }
 /** Saída "Não respondeu" do Salvar/Menu — só aparece com tempo limite. */
-const TimeoutRow = ({ minutes, unit }: { minutes?: number; unit?: DelayUnit }) =>
-  minutes ? <OutRow id={REPLY_TIMEOUT_HANDLE} tone="dashed"><Timer size={11} className="shrink-0" /> Não respondeu em {formatDelay(minutes, unit)}</OutRow> : null;
+const TimeoutRow = ({ minutes, unit, businessHours }: { minutes?: number; unit?: DelayUnit; businessHours?: boolean }) =>
+  minutes ? <OutRow id={REPLY_TIMEOUT_HANDLE} tone="dashed"><Timer size={11} className="shrink-0" /> Não respondeu em {formatDelay(minutes, unit)}{businessHours ? ' (no horário)' : ''}</OutRow> : null;
 
 export function QuestionNodeView({ data, selected }: P) {
-  const d = data as { text?: string; varName?: string; contactField?: string; timeoutMinutes?: number; timeoutUnit?: DelayUnit };
+  const d = data as { text?: string; varName?: string; contactField?: string; timeoutMinutes?: number; timeoutUnit?: DelayUnit; timeoutBusinessHours?: boolean };
   const dest = `→ {{${d.varName || '?'}}}${d.contactField ? ' + ficha do contato' : ''}`;
   return (
     <Shell type="question" data={data} selected={selected} summary={d.text ? `${d.text}\n${dest}` : `Espera a resposta\n${dest}`}>
@@ -232,13 +233,13 @@ export function QuestionNodeView({ data, selected }: P) {
       <Rows>
         <OutRow tone="ok">Respondeu</OutRow>
         <OutRow id={RETRIES_EXHAUSTED_HANDLE} tone="dashed">Tentativas esgotadas</OutRow>
-        <TimeoutRow minutes={d.timeoutMinutes} unit={d.timeoutUnit} />
+        <TimeoutRow minutes={d.timeoutMinutes} unit={d.timeoutUnit} businessHours={d.timeoutBusinessHours} />
       </Rows>
     </Shell>
   );
 }
 export function MenuNodeView({ data, selected }: P) {
-  const d = data as { text?: string; options?: { id: string; label: string }[]; timeoutMinutes?: number; timeoutUnit?: DelayUnit };
+  const d = data as { text?: string; options?: { id: string; label: string }[]; timeoutMinutes?: number; timeoutUnit?: DelayUnit; timeoutBusinessHours?: boolean };
   return (
     <Shell type="menu" data={data} selected={selected} summary={d.text}>
       <In />
@@ -247,7 +248,7 @@ export function MenuNodeView({ data, selected }: P) {
           <OutRow key={o.id} id={o.id}><span className="tnum font-mono text-faint">{i + 1}</span> <span className="truncate">{o.label || '(opção)'}</span></OutRow>
         ))}
         <OutRow id={RETRIES_EXHAUSTED_HANDLE} tone="dashed">Tentativas esgotadas</OutRow>
-        <TimeoutRow minutes={d.timeoutMinutes} unit={d.timeoutUnit} />
+        <TimeoutRow minutes={d.timeoutMinutes} unit={d.timeoutUnit} businessHours={d.timeoutBusinessHours} />
       </Rows>
     </Shell>
   );
@@ -267,15 +268,35 @@ export function ruleSummary(r: ConditionRule): string {
   if (r.op === 'weekday_in') return `${subject}: ${(r.days ?? []).slice().sort().map((d) => WEEKDAY_SHORT[d]).join(', ') || '?'}`;
   if (r.op === 'time_between') return `${subject} entre ${r.from || '?'} e ${r.to || '?'}`;
   if (r.operand === 'tag') return r.op === 'is_true' ? 'tem a etiqueta' : 'não tem a etiqueta';
-  if (r.operand === 'business_hours') return r.op === 'is_true' ? 'dentro do expediente' : 'fora do expediente';
+  if (r.operand === 'business_hours') return r.op === 'is_true' ? 'dentro do horário de atendimento' : 'fora do horário de atendimento';
+  if (r.operand === 'schedule_band') return `faixa ${r.op === 'is_true' ? 'é' : 'não é'} "${r.band === 'closed' ? 'Fechado' : r.band || '?'}"`;
   return `${subject} ${opLabel} "${r.value ?? ''}"`;
+}
+
+/**
+ * Faixas citadas em "Faixa de horário atual" que não existem em nenhum quadro do cliente
+ * (comparadas pelo nome, como no motor). Enquanto os quadros carregam, não acusa nada.
+ */
+function useMissingBands(branches: ConditionBranch[]): string[] {
+  const schedules = useSchedules();
+  if (!schedules.data) return [];
+  const known = new Set(schedules.data.flatMap((q) => q.config.bands.map((b) => bandKey(b.name))));
+  const wanted = branches.flatMap((b) => b.rules).filter((r) => r.operand === 'schedule_band' && r.band && r.band !== CLOSED_BAND_ID).map((r) => r.band!.trim());
+  return [...new Set(wanted.filter((n) => !known.has(bandKey(n))))];
 }
 
 export function ConditionNodeView({ data, selected }: P) {
   const branches = normalizeCondition(data as ConditionNode['data']);
+  const missing = useMissingBands(branches);
   return (
     <Shell type="condition" data={data} selected={selected}>
       <In />
+      {missing.length > 0 && (
+        <p className="mt-2 flex items-start gap-1 rounded-md bg-danger/10 px-2 py-1 text-[10.5px] text-danger">
+          <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+          <span>Faixa {missing.map((m) => `"${m}"`).join(', ')} não existe em nenhum quadro de horários: a regra nunca casa.</span>
+        </p>
+      )}
       <div className="pt-2"><Rows>
         {branches.map((b) => (
           <OutRow key={b.id} id={b.id}>
@@ -309,7 +330,7 @@ export function ActionNodeView({ data, selected }: P) {
 }
 export function WaitNodeView({ data, selected }: P) {
   const d = data as { mode?: 'duration' | 'next_open'; minutes?: number; unit?: DelayUnit; businessHours?: boolean };
-  const summary = d.mode === 'next_open' ? 'Até o próximo horário de atendimento' : d.minutes ? `${formatDelay(d.minutes, d.unit)}${d.businessHours ? '\nsó no horário comercial' : ''}` : '';
+  const summary = d.mode === 'next_open' ? 'Até o próximo horário de atendimento' : d.minutes ? `${formatDelay(d.minutes, d.unit)}${d.businessHours ? '\nsó no horário de atendimento' : ''}` : '';
   return (
     <Shell type="wait" data={data} selected={selected} summary={summary}>
       <In /><Out />

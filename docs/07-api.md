@@ -57,8 +57,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | PATCH | `/conversations/:id/status` | todos | `waiting | in_progress | closed` |
 | POST | `/conversations/bulk/close` | todos | `{ids[], outcome?, reason?}` — encerra até 200. Devolve `{closed, ignored}`. O recorte (números do usuário; atendente comum só o que é dele ou está sem dono) é feito no service, porque o `ConversationScopeGuard` olha `:id` e aqui a lista vem no corpo. Sem valor de venda e sem fluxo, de propósito |
 | GET | `/conversations/:id/events` | todos | Histórico do atendimento: `claimed`, `transferred`, `released`, `closed`, `reopened`, `bot_paused`, `bot_resumed`, com ator, alvo, desfecho congelado e data |
-| POST | `/conversations/:id/bot/pause` | todos | Pausa o robô só nesta conversa. Body `{ minutes?: 30 \| 60 \| 240 \| null }` (nulo = até retomar). Interrompe o fluxo em andamento. Ver [fluxos › Pausar o robô](fluxos.md#pausar-o-robô-na-conversa) |
-| POST | `/conversations/:id/bot/resume` | todos | Retoma o robô (o fluxo interrompido não volta) |
+| POST | `/conversations/:id/bot/pause` | todos (feature `flows`) | Pausa o robô só nesta conversa. Body `{ minutes?: 30 \| 60 \| 240 \| null }` (nulo = até retomar). Interrompe o fluxo em andamento. Ver [fluxos › Pausar o robô](fluxos.md#pausar-o-robô-na-conversa) |
+| POST | `/conversations/:id/bot/resume` | todos (feature `flows`) | Retoma o robô (o fluxo interrompido não volta) |
 | PATCH | `/conversations/:id/tags` | todos | `{tagIds: []}` substitui as tags. A principal se mantém se continuar na lista; senão a primeira tag de coluna (ordem do Kanban) assume. Emite `conversation` |
 | PATCH | `/conversations/:id/primary-tag` | todos | `{tagId: uuid \| null}` troca a tag principal (mover card no Kanban). A antiga vira secundária; a nova entra se faltava. `null` = "Sem etapa". 400 se a tag não for `isKanban`. Emite `conversation` |
 | PATCH | `/conversations/contacts/:contactId/tags` | todos | `{tagIds}` substitui as tags **do contato** (permanentes) |
@@ -79,6 +79,12 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/quick-replies/:id/export` | `quick_replies.manage` | `{ portable, warnings }` — `{ atendo: 'quick-reply', version, folder, title, body }`; anexo não vai (chave carrega o tenant), com aviso |
 | POST | `/quick-replies/export` | `quick_replies.manage` | `{ ids }` → `{ bundle, warnings }` — `{ atendo: 'quick-reply-bundle', version, items }`, cada item igual ao individual |
 | POST | `/quick-replies/import` | `quick_replies.manage` | `{ portable }` (individual ou lote) → `{ replies, warnings }`. Pasta achada pelo nome ou criada; título repetido na pasta ganha " (cópia)"; tudo ou nada (transação) |
+| **Configurações** | | | |
+| GET / PATCH | `/settings` | todos / `settings.manage` | Fuso, `attendanceActive`, fluxos padrão, boas-vindas (`welcomeEnabled`, `welcomeMessages`, `welcomeMode`). GET traz `isOpenNow`, `currentBand`, `nextOpenLabel` |
+| GET / POST | `/settings/schedules` | todos / `settings.manage` | Quadros de horários. POST `{ name, timezone?, config?, copyFromId? }` |
+| PUT / DELETE | `/settings/schedules/:id` | `settings.manage` | `{ name?, timezone?, config? }` validado (`validateSchedule`); devolve `renamedConditions` (faixa renomeada atualiza as condições dos fluxos); o padrão não pode ser excluído |
+| POST | `/settings/schedules/:id/default` | `settings.manage` | Torna o quadro padrão |
+| PUT | `/settings/numbers/:numberId/schedule` | `settings.manage` | `{ scheduleId \| null }` — quadro próprio do número. Ver [Horários](horarios.md#api) |
 | **Mídia** | | | |
 | POST | `/uploads` | todos | multipart `file` → `{key, url, mimeType, fileName, size}` |
 | GET | `/media/*path?exp=&sig=` | — (assinatura) | Serve o arquivo se a assinatura for válida |

@@ -6,3 +6,4 @@ export * from './flows.js';
 export * from './ai.js';
 export * from './kanban.js';
 export * from './portable.js';
+export * from './schedule.js';

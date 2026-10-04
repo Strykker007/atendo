@@ -4,8 +4,9 @@ import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Image as ImageIcon, Vid
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
+import { useStartFlowConfirm } from './useStartFlowConfirm';
 import {
-  useAgents, useActiveRun, useFlows, useStartFlow, useStopFlow, useHasFeature, useMe, useQuickReplies, useConversation,
+  useAgents, useActiveRun, useFlows, useStopFlow, useHasFeature, useMe, useQuickReplies, useConversation,
   type QuickReplyItem,
 } from '@/lib/hooks';
 
@@ -43,6 +44,8 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
   const activeRun = useActiveRun(conversationId);
   const stopFlow = useStopFlow();
   const flows = useHasFeature('flows');
+  // fora do menu: o menu fecha no clique, a confirmação de "robô pausado" precisa ficar
+  const startFlow = useStartFlowConfirm();
 
   // clique fora e Esc fecham: menu que só fecha no próprio botão prende a pessoa
   useEffect(() => {
@@ -92,7 +95,8 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
         </Menu>
       )}
       {aberto === 'respostas' && <MenuRespostas conversationId={conversationId} onInserir={inserir} onFechar={() => setAberto(null)} />}
-      {aberto === 'fluxos' && <MenuFluxos conversationId={conversationId} onFechar={() => setAberto(null)} />}
+      {aberto === 'fluxos' && <MenuFluxos conversationId={conversationId} onStart={startFlow.run} onFechar={() => setAberto(null)} />}
+      {startFlow.dialog}
       {aberto === 'emoji' && (
         <Menu largura="w-64">
           <div className="grid grid-cols-8 gap-0.5 p-1">
@@ -182,9 +186,8 @@ function MenuRespostas({ conversationId, onInserir, onFechar }: { conversationId
   );
 }
 
-function MenuFluxos({ conversationId, onFechar }: { conversationId: string; onFechar: () => void }) {
+function MenuFluxos({ conversationId, onStart, onFechar }: { conversationId: string; onStart: (f: { id: string; name: string }, conversationId: string) => Promise<unknown>; onFechar: () => void }) {
   const flows = useFlows();
-  const start = useStartFlow();
   const lista = (flows.data ?? []).filter((f) => f.isActive && f.showInChat);
   return (
     <Menu>
@@ -193,7 +196,7 @@ function MenuFluxos({ conversationId, onFechar }: { conversationId: string; onFe
         <ItemMenu
           key={f.id}
           icone={<Workflow size={14} />}
-          onClick={() => { start.mutateAsync({ flowId: f.id, conversationId }).then(() => toast.ok(`Fluxo "${f.name}" iniciado`)).catch(toast.err); onFechar(); }}
+          onClick={() => { void onStart(f, conversationId); onFechar(); }}
         >
           {f.name}
         </ItemMenu>

@@ -89,7 +89,12 @@ export type DelayUnit = 'minutes' | 'hours' | 'days';
  * indefinidamente); `timeoutUnit` só diz como mostrar. Vencido, o fluxo sai por
  * `REPLY_TIMEOUT_HANDLE` ("Não respondeu"); sem essa saída ligada, o fluxo termina.
  */
-export interface ReplyTimeout { timeoutMinutes?: number; timeoutUnit?: DelayUnit }
+export interface ReplyTimeout {
+  timeoutMinutes?: number;
+  timeoutUnit?: DelayUnit;
+  /** conta o tempo limite só dentro do horário de atendimento (quadro de horários da conversa) */
+  timeoutBusinessHours?: boolean;
+}
 /** Saída "Não respondeu" (tempo limite) do Salvar e do Menu. */
 export const REPLY_TIMEOUT_HANDLE = 'timeout';
 /**
@@ -125,7 +130,7 @@ export interface ConditionBranch {
  * de um setor): acrescente aqui, em `CONDITION_OPERANDS` e no registro `OPERANDS` do
  * avaliador (`apps/api/src/modules/flows/conditions.ts`).
  */
-export type ConditionOperand = 'var' | 'contact' | 'message' | 'now' | 'tag' | 'business_hours';
+export type ConditionOperand = 'var' | 'contact' | 'message' | 'now' | 'tag' | 'business_hours' | 'schedule_band';
 /** text = texto/número/existência; datetime = dia/horário; flag = verdadeiro/falso */
 export type ConditionValueKind = 'text' | 'datetime' | 'flag';
 
@@ -153,8 +158,14 @@ export interface ConditionRule {
   to?: string;
   /** tag: etiqueta da conversa ou do contato */
   tagId?: string;
-  /** business_hours: horário próprio (veio do formato antigo); sem ele vale Configurações → Horário */
+  /** business_hours: horário próprio (veio do formato antigo); sem ele vale o quadro de horários da conversa */
   hours?: { start: string; end: string; days: number[] };
+  /**
+   * schedule_band: **nome** da faixa (ou `closed` = Fechado). Pelo nome, não pelo id: cada número
+   * pode usar um quadro diferente, e "Entrega encerrada" é a mesma faixa para quem desenha o fluxo.
+   * Comparado sem diferenciar maiúsculas/acentos.
+   */
+  band?: string;
 }
 
 export type ConditionContactField = 'name' | 'phone' | 'email' | 'address' | 'note1' | 'note2';
@@ -166,7 +177,8 @@ export const CONDITION_OPERANDS: Record<ConditionOperand, { label: string; kind:
   message: { label: 'Mensagem recebida', kind: 'text' },
   now: { label: 'Data/hora atual', kind: 'datetime' },
   tag: { label: 'Etiqueta', kind: 'flag' },
-  business_hours: { label: 'Horário comercial', kind: 'flag' },
+  business_hours: { label: 'Dentro do horário de atendimento', kind: 'flag' },
+  schedule_band: { label: 'Faixa de horário atual', kind: 'flag' },
 };
 
 export const CONDITION_OPS: Record<ConditionValueKind, { op: ConditionOp; label: string }[]> = {

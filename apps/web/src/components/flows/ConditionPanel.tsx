@@ -2,12 +2,12 @@
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { useTags } from '@/lib/hooks';
+import { useSchedules, useTags } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { TextWithVars, type FlowVar } from './TextWithVars';
 import { newBranch, newRule } from './nodes';
 import {
-  CONDITION_CONTACT_FIELD_LABEL, CONDITION_OPERANDS, CONDITION_OPS,
+  CLOSED_BAND_ID, CLOSED_BAND_NAME, CONDITION_CONTACT_FIELD_LABEL, bandKey, CONDITION_OPERANDS, CONDITION_OPS,
   type ConditionBranch, type ConditionOperand, type ConditionRule,
 } from '@atendo/shared';
 
@@ -37,6 +37,10 @@ function TimeRange({ from, to, onChange }: { from?: string; to?: string; onChang
 
 function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: ConditionRule; vars: FlowVar[]; onChange: (r: ConditionRule) => void; onRemove: () => void; canRemove: boolean }) {
   const tags = useTags();
+  const schedules = useSchedules();
+  // faixas pelo nome: um número pode usar outro quadro, e a faixa é a mesma para quem desenha
+  const bandNames = [...new Set((schedules.data ?? []).flatMap((q) => q.config.bands.map((b) => b.name.trim())).filter(Boolean))];
+  const bandMissing = !!schedules.data && rule.operand === 'schedule_band' && !!rule.band && rule.band !== CLOSED_BAND_ID && !bandNames.some((n) => bandKey(n) === bandKey(rule.band!));
   const kind = CONDITION_OPERANDS[rule.operand]?.kind ?? 'text';
   const set = (patch: Partial<ConditionRule>) => onChange({ ...rule, ...patch });
   // trocar de operando zera o que só fazia sentido no anterior
@@ -77,11 +81,22 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
         </select>
       )}
 
+      {rule.operand === 'schedule_band' && (
+        <select className={inputCls} value={rule.band ?? ''} onChange={(e) => set({ band: e.target.value || undefined })}>
+          <option value="">Faixa…</option>
+          {bandNames.map((n) => <option key={n} value={n}>{n}</option>)}
+          <option value={CLOSED_BAND_ID}>{CLOSED_BAND_NAME}</option>
+          {bandMissing && <option value={rule.band}>{rule.band} (não existe)</option>}
+        </select>
+      )}
+      {bandMissing && <p className="text-[11px] text-danger">A faixa "{rule.band}" não existe em nenhum quadro de horários: esta regra nunca casa. Escolha outra ou crie a faixa em Configurações.</p>}
+
       <select className={inputCls} value={rule.op} onChange={(e) => set({ op: e.target.value as ConditionRule['op'] })}>
         {CONDITION_OPS[kind].map((o) => (
           <option key={o.op} value={o.op}>
             {rule.operand === 'tag' ? (o.op === 'is_true' ? 'conversa ou contato tem a etiqueta' : 'não tem a etiqueta')
-              : rule.operand === 'business_hours' ? (o.op === 'is_true' ? 'dentro do expediente' : 'fora do expediente')
+              : rule.operand === 'business_hours' ? (o.op === 'is_true' ? 'dentro do horário de atendimento' : 'fora do horário de atendimento')
+                : rule.operand === 'schedule_band' ? (o.op === 'is_true' ? 'é' : 'não é')
                 : o.label}
           </option>
         ))}
@@ -101,11 +116,13 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
       {rule.op === 'weekday_in' && <DaysPicker days={rule.days ?? []} onChange={(days) => set({ days })} />}
       {rule.op === 'time_between' && <TimeRange from={rule.from} to={rule.to} onChange={set} />}
       {rule.operand === 'now' && <p className="text-[11px] text-muted">No fuso do cliente (Configurações). Faixa que vira a meia-noite vale: 22:00 até 06:00.</p>}
+      {rule.operand === 'schedule_band' && <p className="text-[11px] text-muted">Faixa do quadro de horários do número da conversa (Configurações → Horários de atendimento). Comparada pelo nome.</p>}
       {rule.operand === 'business_hours' && (
         <>
+          {!rule.hours && <p className="text-[11px] text-muted">Faixas que contam como horário de atendimento no quadro do número da conversa. "Atendimento desativado" conta como fora.</p>}
           <label className="flex items-center gap-2 text-[11.5px] text-muted">
             <input type="checkbox" checked={!!rule.hours} onChange={(e) => set({ hours: e.target.checked ? { start: '08:00', end: '18:00', days: [1, 2, 3, 4, 5] } : undefined })} />
-            Usar horário próprio (em vez de Configurações → Horário)
+            Usar horário próprio (em vez do quadro de horários do número)
           </label>
           {rule.hours && (
             <>

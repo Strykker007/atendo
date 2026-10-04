@@ -12,7 +12,7 @@ import { invConv, useUsage } from './core';
 // ---- Fluxos de automação ----
 export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
 /** `mediaUrls`: link assinado de cada anexo do Conteúdo (só na leitura de um fluxo). */
-export interface Flow { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string; mediaUrls?: Record<string, string> }
+export interface Flow { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string; mediaUrls?: Record<string, string>; /** optimistic locking: mandar no PATCH do editor */ version: number }
 export interface ActiveRun { id: string; status: 'running' | 'waiting'; currentNodeId: string | null; flow: { id: string; name: string }; startedAt: string; waitUntil: string | null }
 export interface FlowRuns { byStatus: Record<string, number>; recent: { id: string; status: string; startedAt: string; endedAt: string | null; error: string | null; contact: { name: string | null; phone: string }; conversationId: string }[] }
 
@@ -36,7 +36,7 @@ export const useDuplicateFlows = () => { const qc = useQueryClient(); return use
 export const useSetFlowsActive = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { ids: string[]; isActive: boolean }) => api<{ updated: number; failed: { id: string; name: string; reason: string }[] }>('/flows/active', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
 /** Aceita o arquivo individual ou o lote — quem decide é a API. */
 export const useImportFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (portable: unknown) => api<{ flows: Flow[]; warnings: string[] }>('/flows/import', { method: 'POST', body: JSON.stringify({ portable }) }), onSuccess: invFlows(qc) }); };
-export const useStartFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ flowId, conversationId }: { flowId: string; conversationId: string }) => api(`/flows/${flowId}/start`, { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: (_, v) => { qc.refetchQueries({ queryKey: ['active-run', v.conversationId] }); invConv(qc, v.conversationId); } }); };
+export const useStartFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ flowId, conversationId, resumeBot }: { flowId: string; conversationId: string; resumeBot?: boolean }) => api(`/flows/${flowId}/start`, { method: 'POST', body: JSON.stringify({ conversationId, ...(resumeBot && { resumeBot }) }) }), onSuccess: (_, v) => { qc.refetchQueries({ queryKey: ['active-run', v.conversationId] }); invConv(qc, v.conversationId); } }); };
 export const useStopFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api(`/conversations/${conversationId}/flow/stop`, { method: 'POST' }), onSuccess: (_, id) => { qc.refetchQueries({ queryKey: ['active-run', id] }); invConv(qc, id); } }); };
 /** Robô pausado agora? Pausa vencida conta como retomada mesmo antes do aviso do servidor chegar. */
 export const botPaused = (c: { botPausedAt?: string | null; botPausedUntil?: string | null }, now = Date.now()) =>

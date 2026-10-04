@@ -1,4 +1,4 @@
-import { CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, type ConditionBranch, type ConditionOperand, type ConditionRule } from '@atendo/shared';
+import { bandKey, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, type ConditionBranch, type ConditionOperand, type ConditionRule } from '@atendo/shared';
 import { interpolate, type InterpolateCtx } from './answer';
 
 /**
@@ -14,6 +14,8 @@ export interface RuleEnv extends InterpolateCtx {
   lastMessage: () => Promise<string>;
   hasTag: (tagId: string) => Promise<boolean>;
   isOpen: (hours?: ConditionRule['hours']) => Promise<boolean>;
+  /** nome da faixa de horário atual do quadro da conversa ("Fechado" fora de qualquer intervalo) */
+  currentBand: () => Promise<string>;
 }
 
 /** O que um operando entrega para os comparadores. */
@@ -30,7 +32,13 @@ const OPERANDS: Record<ConditionOperand, (rule: ConditionRule, env: RuleEnv) => 
   now: async (_r, env) => ({ kind: 'datetime', ...clockAt(env.now, await env.timezone()) }),
   tag: async (r, env) => ({ kind: 'flag', value: r.tagId ? await env.hasTag(r.tagId) : false }),
   business_hours: async (r, env) => ({ kind: 'flag', value: await env.isOpen(r.hours) }),
+  schedule_band: async (r, env) => ({ kind: 'flag', value: !!r.band && sameBand(r.band, await env.currentBand()) }),
 };
+
+/** Faixa pelo nome, sem diferenciar maiúsculas/acentos; `closed` = Fechado. */
+function sameBand(wanted: string, current: string) {
+  return bandKey(wanted) === bandKey(current);
+}
 
 /** Remove acentos e caixa: "São Paulo" e "sao paulo" comparam iguais. */
 export function fold(s: string) {

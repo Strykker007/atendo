@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ApiError } from '@/lib/api';
 import { ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState, useReactFlow, MarkerType, type Connection, type Edge, type Node, BackgroundVariant } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Save, ArrowLeft, Settings2, Activity, LayoutGrid, Copy, CopyPlus, ClipboardPaste, Trash2 } from 'lucide-react';
@@ -47,6 +48,9 @@ function readClip(): Clip | null {
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
 
 /** Editor visual de fluxo: paleta à esquerda, canvas no meio, propriedades à direita. */
+/** 409 do PATCH /flows/:id quando outra pessoa (ou o sistema) salvou depois de o editor carregar. */
+export const FLOW_VERSION_CONFLICT = 'flow_version_conflict';
+
 export function FlowEditor(props: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
   return <ReactFlowProvider><FlowEditorInner {...props} /></ReactFlowProvider>;
 }
@@ -273,6 +277,8 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
       setDirty(false);
       toast.ok('Fluxo salvo');
     } catch (err) {
+      // versão desatualizada: a página mostra o aviso com "Recarregar"
+      if (err instanceof ApiError && err.code === FLOW_VERSION_CONFLICT) return;
       toast.err(err);
     }
   }

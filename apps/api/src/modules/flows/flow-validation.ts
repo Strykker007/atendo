@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { CONTENT_MAX_DELAY_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, type FlowDefinition, type FlowNode } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode } from '@atendo/shared';
 
 /** Tempo limite de resposta: até 30 dias (o job fica na fila esse tempo). */
 const MAX_REPLY_TIMEOUT_MIN = 30 * 1440;
@@ -80,6 +80,7 @@ function conditionErrors(n: Extract<FlowNode, { type: 'condition' }>): string[] 
       else if (r.op === 'time_between' && (Number.isNaN(hhmm(r.from)) || Number.isNaN(hhmm(r.to)))) out.push(`${name}: horário deve ser HH:MM.`);
       // etiqueta que saiu na importação: o card já mostra "Reconfigurar"; não trava o salvar
       else if (r.operand === 'tag' && !r.tagId && !(n.data as { _reconfig?: unknown })._reconfig) out.push(`${name}: escolha a etiqueta.`);
+      else if (r.operand === 'schedule_band' && !r.band?.trim()) out.push(`${name}: escolha a faixa de horário.`);
     }
   }
   return out;
@@ -88,15 +89,21 @@ function conditionErrors(n: Extract<FlowNode, { type: 'condition' }>): string[] 
 /** Conteúdo: cada mensagem preenchida e dentro dos limites do WhatsApp. Formato antigo passa pela mesma leitura do motor. */
 function contentErrors(n: Extract<FlowNode, { type: 'message' }>): string[] {
   const items = normalizeContent(n.data);
-  const reconfig = !!(n.data as { _reconfig?: unknown })._reconfig;
   if (!items.length) return [`"Conteúdo" (${n.id}) está vazio.`];
+  return contentItemErrors(items, `"Conteúdo" (${n.id})`, !!(n.data as { _reconfig?: unknown })._reconfig);
+}
+
+/**
+ * Regras de cada mensagem no formato do Conteúdo. Também usada nas mensagens automáticas
+ * (faixas de horário e boas-vindas). `reconfig`: anexo que saiu na importação não trava o salvar.
+ */
+export function contentItemErrors(items: ContentItem[], where: string, reconfig = false): string[] {
   const out: string[] = [];
   items.forEach((it, i) => {
-    const name = `"Conteúdo" (${n.id}), mensagem ${i + 1}`;
+    const name = `${where}, mensagem ${i + 1}`;
     if (it.kind === 'text') {
       if (!it.text?.trim()) out.push(`${name}: o texto está vazio.`);
     } else if (!it.mediaKey) {
-      // anexo que saiu na importação: o card já mostra "Reconfigurar"; não trava o salvar
       if (!reconfig) out.push(`${name}: envie o arquivo.`);
     } else {
       const err = contentMediaError(it.kind, it.mimeType, it.size);
@@ -106,6 +113,11 @@ function contentErrors(n: Extract<FlowNode, { type: 'message' }>): string[] {
     if (Number.isNaN(d) || d < 0 || d > CONTENT_MAX_DELAY_SEC) out.push(`${name}: o intervalo deve ser de 0 a ${CONTENT_MAX_DELAY_SEC} segundos.`);
   });
   return out;
+}
+
+/** Anexo das mensagens automáticas: só do próprio cliente (mesma regra do Conteúdo). */
+export function assertOwnMedia(tenantId: string, items: ContentItem[], where: string) {
+  for (const it of items) if (it.mediaKey && !it.mediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException(`${where}: arquivo inválido.`);
 }
 
 /**

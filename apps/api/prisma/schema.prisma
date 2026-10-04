@@ -39,7 +39,7 @@ model Tenant {
   alerts        UsageAlert[]
   aiUsage       AiUsage[]
   settings      TenantSettings?
-  businessHours BusinessHour[]
+  schedules     BusinessSchedule[]
   accessProfiles AccessProfile[]
   campaigns     Campaign[]
   conversationEvents ConversationEvent[]
@@ -171,10 +171,19 @@ model RefreshToken {
 model TenantSettings {
   tenantId String @id
   timezone String @default("America/Sao_Paulo")
-  /// desliga o atendimento inteiro sem precisar mexer em horário (feriado, férias)
+  /// desliga o atendimento inteiro sem precisar mexer em horário (feriado, férias): vale a faixa Fechado
   attendanceActive Boolean @default(true)
-  /// mensagem automática enviada uma vez quando chega mensagem fora do horário
-  outsideHoursText String?
+  /// quando `attendanceActive` mudou pela última vez — cada desligamento é um período próprio da faixa Fechado
+  attendanceChangedAt DateTime?
+  // ---- boas-vindas (docs/horarios.md) ----
+  /// liga/desliga as mensagens de boas-vindas sem apagá-las (nasce desligado para quem já tinha fluxo de boas-vindas ativo)
+  welcomeEnabled  Boolean @default(true)
+  /// WelcomeMessage[] (packages/shared/schedule.ts): mensagens enviadas ao começar um atendimento
+  welcomeMessages Json @default("[]")
+  /// random | sequential
+  welcomeMode     String @default("random")
+  /// próxima da vez no modo sequencial (incrementa a cada envio)
+  welcomeCursor   Int    @default(0)
   // ---- fluxos padrão do cliente (configurados uma vez, valem para todos os números) ----
   /// primeira mensagem de um contato novo
   welcomeFlowId String?
@@ -193,19 +202,25 @@ model TenantSettings {
   @@map("tenant_settings")
 }
 
-/// Expediente do cliente por dia da semana (0 = domingo). Sem linha = fechado naquele dia.
-model BusinessHour {
-  id       String @id @default(uuid())
-  tenantId String
-  weekday  Int
-  /// "HH:MM" no fuso do tenant
-  start    String
-  end      String
+/// Quadro de horários (docs/horarios.md). Um padrão por cliente (`isDefault`); um número pode
+/// usar outro (`WhatsAppNumber.scheduleId`). Cliente sem quadro = sempre aberto.
+model BusinessSchedule {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  /// fuso do quadro (os horários da grade são neste fuso)
+  timezone  String   @default("America/Sao_Paulo")
+  isDefault Boolean  @default(false)
+  /// ScheduleConfig (packages/shared/schedule.ts): faixas, Fechado, grade semanal e exceções
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  numbers WhatsAppNumber[]
 
-  @@index([tenantId, weekday])
-  @@map("business_hours")
+  @@index([tenantId])
+  @@map("business_schedules")
 }
 
 // ============================================================
@@ -257,10 +272,13 @@ model WhatsAppNumber {
   /// quando o número conectou pela primeira vez — número novo sobe o volume aos poucos
   warmupStartedAt DateTime?
   isActive       Boolean      @default(true)
+  /// quadro de horários próprio; nulo = o padrão do cliente
+  scheduleId     String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  schedule      BusinessSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   conversations Conversation[]
   messages      Message[]
   usage         MessageUsage[]
@@ -402,6 +420,9 @@ model Conversation {
   /// fim automático da pausa; nulo com `botPausedAt` preenchido = até retomar manualmente
   botPausedUntil DateTime?
   botPausedBy    User?     @relation("botPausedBy", fields: [botPausedById], references: [id], onDelete: SetNull)
+  /// período da faixa de horário cuja resposta já foi enviada (`<faixa>@<início>`, ver docs/horarios.md):
+  /// a resposta de Fechado/faixa especial sai uma vez por conversa a cada período
+  scheduleNoticeKey String?
 
   /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
@@ -647,6 +668,9 @@ model Flow {
   name        String
   description String?
   isActive    Boolean  @default(true)
+  /// controle de concorrência (optimistic locking): toda escrita incrementa; o editor salva
+  /// mandando a versão que carregou e recebe 409 se outra pessoa ou o sistema salvou antes
+  version     Int      @default(1)
   /// aparece como atalho na aba Fluxos do chat. Fluxo que roda sozinho (nova conversa,
   /// palavra-chave) não precisa estar lá — vira ruído para quem atende.
   showInChat  Boolean  @default(true)

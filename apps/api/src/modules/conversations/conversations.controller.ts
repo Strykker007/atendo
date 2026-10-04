@@ -5,6 +5,7 @@ import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@pr
 import { ConversationsService, FORWARD_MAX_TARGETS } from './conversations.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
+import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { NumbersService } from '../whatsapp/numbers.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -199,11 +200,15 @@ export class ConversationsController {
 
   /** Pausar o robô (fluxos) só nesta conversa. Interrompe o fluxo em andamento. */
   @Post(':id/bot/pause')
+  @UseGuards(FeatureGuard)
+  @RequireFeature('flows')
   pauseBot(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: BotPauseDto) {
     return this.flows.pauseBot(u.tenantId, id, u, dto.minutes ?? null);
   }
 
   @Post(':id/bot/resume')
+  @UseGuards(FeatureGuard)
+  @RequireFeature('flows')
   resumeBot(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.flows.resumeBot(u.tenantId, id, u);
   }

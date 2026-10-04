@@ -13,6 +13,7 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { BillingModule } from '../billing/billing.module';
 import { TenantSettingsService } from './tenant-settings.service';
 import { TenantSettingsController } from './tenant-settings.controller';
+import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 
 class CreateTenantDto {
@@ -211,7 +212,7 @@ class TenantsController {
 @Module({
   imports: [AuthModule, BillingModule],
   controllers: [TenantsController, TenantSettingsController, ProfilesController],
-  providers: [TenantSettingsService],
-  exports: [TenantSettingsService],
+  providers: [TenantSettingsService, SchedulesService],
+  exports: [TenantSettingsService, SchedulesService],
 })
 export class TenantsModule {}

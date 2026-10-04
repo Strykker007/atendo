@@ -28,18 +28,26 @@ Genérico: `PORTABLE_VERSION`, `PortableBundle`/`toBundle` (lote `'<tipo>-bundle
 | `layout.ts` | `autoLayout` (Organizar automaticamente) e `looksVertical` (detecta desenho antigo) |
 | `TextWithVars.tsx` | Campo de texto com "Inserir variável" (+ botões N/I/S com `formatting`); `WaText` (prévia da formatação do WhatsApp); `collectFlowVars`, `SYSTEM_VARS` |
 
-Persistência: estado local (`useNodesState`/`useEdgesState`) → `save()` monta o `FlowDefinition` → `onSave` (página `app/(app)/fluxos/[id]`) → `PATCH /flows/:id`. Nada é salvo sozinho; "não salvo" compara snapshot do conteúdo.
+Persistência: estado local (`useNodesState`/`useEdgesState`) → `save()` monta o `FlowDefinition` → `onSave` (página `app/(app)/fluxos/[id]`) → `PATCH /flows/:id` com a `version` carregada. Nada é salvo sozinho; "não salvo" compara snapshot do conteúdo.
+
+### Controle de versão ao salvar
+Optimistic locking em `Flow.version` (começa em 1).
+- **Toda escrita incrementa**: `PATCH /flows/:id` (editor e interruptores da lista), `POST /flows/active` (lote) e a troca do nome de faixa de horário nas condições ([Horários](horarios.md#integração-com-fluxos)).
+- O editor manda `version` = a que carregou (a página guarda num `ref`; só muda ao carregar, recarregar ou depois de salvar — refetch em segundo plano não adianta a versão). A API grava com `updateMany` condicional (`id` + `tenantId` + `version`); não casou → **409 `{ code: 'flow_version_conflict' }`**.
+- Na tela: modal "Este fluxo foi alterado por outra pessoa ou pelo sistema. Recarregue para ver a versão atual." com **Recarregar** (refaz o GET e remonta o editor, descartando as alterações locais). Fechar o aviso mantém o rascunho na tela, mas salvar vai dar 409 de novo até recarregar.
+- `PATCH` sem `version` (interruptor ativo/atalho da lista) não checa, só incrementa — o editor aberto daquele fluxo passa a receber 409.
 
 ### Motor (`apps/api/src/modules/flows/`)
 | Arquivo | Papel |
 |---|---|
-| `flow-engine.service.ts` | `start`, `onInbound`, `resume`, `advance` (switch por `node.type`), `deliverAnswer` (resposta em nó que espera), `retry`, `act`, `evaluate`, `distribute` |
+| `flow-engine.service.ts` | `start`, `onInbound` (faixa de horário → boas-vindas → atendimento normal), `resume`, `advance` (switch por `node.type`), `deliverAnswer` (resposta em nó que espera), `retry`, `act`, `evaluate`, `distribute` |
 | `flows.controller.ts` | CRUD, duplicar/ativar/exportar/importar (individual e em lote), execuções, disparo manual, parar. `GET /flows/:id` devolve também `mediaUrls` (link assinado de 1h por anexo, para a prévia); `GET /flows/:id/references` lista os fluxos que conectam a este |
 | `flow-validation.ts` | `validateDefinition` — regras por tipo ao salvar; `assertOwnFlowMedia` — anexo só do próprio cliente (criar, editar, importar) |
 | `conditions.ts` | Avaliador da Condição (puro): registro `OPERANDS`, comparadores, `pickBranch` |
 | `variables.ts` | Operações do Manipulador (puro): `applyAssignments` |
 | `answer.ts`, `distribution.ts`, `webhook.ts`, `ai-turns.ts`, `default-flows.ts`, `schedule-misses.ts` | Helpers do motor |
-| `flows.module.ts` | Fila BullMQ `flows`: job `resume` (Atraso/intervalo do Conteúdo), `reply-timeout` (tempo limite do Salvar/Menu) e `unpause` (fim automático da pausa do robô) |
+| `hours-gate.ts` | `planInbound`: o que fazer com a mensagem conforme a faixa de horário (boas-vindas, resposta da faixa, seguir/parar) — ver [Horários](horarios.md) |
+| `flows.module.ts` | Fila BullMQ `flows`: job `resume` (Atraso/intervalo do Conteúdo), `reply-timeout` (tempo limite do Salvar/Menu), `unpause` (fim automático da pausa do robô) e `auto-content` (intervalo das mensagens automáticas de boas-vindas/faixa) |
 
 Execução: um `FlowRun` por conversa (iniciar outro para o atual). `advance` executa nós em sequência (máx. 50 passos) até um que espera (`status: waiting`) ou termina. Saída por `goNext(handle)` → `edgeFrom`, que cai na saída sem handle se a pedida não existir; sem aresta = fluxo termina `done`.
 
@@ -60,7 +68,7 @@ Execução: um `FlowRun` por conversa (iniciar outro para o atual). `advance` ex
 | Manipulador | Existe (tarefa 1.2) | Manipulador / `variable` (e legado `action.set_var`) | Várias operações em ordem: definir, somar, subtrair, acrescentar texto, limpar, copiar, data/hora atual. Escopo: execução do fluxo (ver abaixo). Não grava na ficha do contato (isso é o *Salvar* com campo do contato). |
 | Ação | Revisado (tarefa 1.7) | Ação / `action` | Etiqueta (conversa/contato), atribuir, status, encerrar conversa, transferir para humano, webhook completo (método, headers, corpo, tempo limite, resposta, saída Erro). Ver [Ação](#ação). |
 | Randomizador | Existe | Randomizador / `randomizer` | Ramos com peso, uma saída por ramo. |
-| Condição | Existe (tarefa 1.2) | Condição / `condition` | Ramos em ordem com regras E/OU, saída por ramo + Senão. Texto, número, existência, dia da semana, faixa de horário, etiqueta, horário comercial. Formato antigo convertido na leitura. |
+| Condição | Existe (tarefa 1.2; operandos de horário na tarefa 2) | Condição / `condition` | Ramos em ordem com regras E/OU, saída por ramo + Senão. Texto, número, existência, dia da semana, horário entre, etiqueta, **dentro do horário de atendimento**, **faixa de horário atual é**. Formato antigo convertido na leitura. |
 | Atraso inteligente | Revisado (tarefa 1.7) | Atraso inteligente / `wait` | Minutos/horas/dias (job persistente), opcional respeitar expediente, ou **até o próximo horário de atendimento**. Checa pausa e conversa encerrada. Ver [Atraso inteligente](#atraso-inteligente). |
 | Salvar (aguardar resposta com tempo limite) | Existe | Salvar / `question` | Espera resposta, valida (e-mail/telefone/número), grava em variável e opcionalmente na ficha. Mesmas saídas do Menu: **Tentativas esgotadas** e **Não respondeu** (tempo limite) — implementadas na tarefa 1.7, ver [Tempo limite](#tempo-limite-de-resposta-salvar-e-menu). |
 | Distribuidor | Existe | Distribuidor / `distributor` | Rodízio, menos ocupado, fila; saídas Distribuído / Ninguém disponível. |
@@ -93,12 +101,13 @@ Regra `ConditionRule`: `operand` + `key` (variável ou campo) + `op` + parâmetr
 | `message` — última mensagem **recebida** do contato na conversa | texto | idem |
 | `now` — data/hora atual, **no fuso do cliente** | data/hora | dia da semana em lista (`days`, 0 = domingo) · horário entre `from` e `to` (HH:MM; início inclusivo, fim exclusivo; `22:00–06:00` atravessa a meia-noite) |
 | `tag` — conversa **ou** contato tem a etiqueta `tagId` | sim/não | `is_true` / `is_false` |
-| `business_hours` — expediente de Configurações → Horário (respeita "atendimento ativo"); `hours` opcional = horário próprio | sim/não | `is_true` / `is_false` |
+| `business_hours` — **dentro do horário de atendimento**: faixa atual do quadro do número da conversa conta como atendimento ([Horários](horarios.md); "atendimento desativado" = fora); `hours` opcional = horário próprio (formato antigo) | sim/não | `is_true` / `is_false` |
+| `schedule_band` — **faixa de horário atual é** `band` (nome da faixa, ou `closed` = Fechado; sem diferenciar maiúsculas/acentos) | sim/não | `is_true` (é) / `is_false` (não é) |
 
 - Texto: compara depois de `trim`, **sem diferenciar maiúsculas/minúsculas e acentos** (`fold`: NFD sem diacríticos + minúsculas). `caseSensitive: true` na regra compara exato.
 - Número: aceita vírgula decimal (`10,5`, `1.234,56`) e ponto (`10.5`). Se qualquer lado não for número (inclusive vazio), a regra é **falsa** — também para `≠`.
 - `value` aceita `{{variáveis}}` (comparar duas variáveis: `value = "{{outra}}"`).
-- **Plugar operando novo** (ex.: horário de atendimento de um setor, tarefa futura): acrescentar em `ConditionOperand` e `CONDITION_OPERANDS` (shared, com o `kind` — os comparadores do kind passam a valer sozinhos), uma entrada em `OPERANDS` (`conditions.ts`) e, se precisar de banco/config, uma função preguiçosa em `RuleEnv` montada em `FlowEngineService.evaluate`. Os dados externos só são buscados quando alguma regra usa o operando (`once` memoiza por avaliação). Operando desconhecido é avaliado como falso.
+- **Plugar operando novo** (como foi feito com `schedule_band` na tarefa 2): acrescentar em `ConditionOperand` e `CONDITION_OPERANDS` (shared, com o `kind` — os comparadores do kind passam a valer sozinhos), uma entrada em `OPERANDS` (`conditions.ts`) e, se precisar de banco/config, uma função preguiçosa em `RuleEnv` montada em `FlowEngineService.evaluate`. Os dados externos só são buscados quando alguma regra usa o operando (`once` memoiza por avaliação). Operando desconhecido é avaliado como falso.
 - **Compatibilidade**: nó salvo no formato antigo (`kind`/`varName`/`value`/`tagId`/`hours`) é lido por `normalizeCondition` como **um ramo de id `yes`** ("Sim") + Senão `no` — exatamente os handles antigos, então as ligações continuam valendo sem migração. `var_equals`→igual, `var_contains`→contém, `var_filled`→não vazio (`contact.x` vira operando `contact`), `has_tag`→etiqueta, `business_hours`→horário comercial (com `hours` se tinha). Diferença: a comparação de texto agora também ignora acentos. O banco só muda quando o bloco é editado e salvo (o painel grava `branches` e apaga os campos antigos).
 - Exportar/importar: `tagId` dentro das regras também vira `tagName` (`portable.ts`, `tagHolders`).
 
@@ -187,14 +196,15 @@ Tarefa 1.5. O atendente desliga a automação **só na conversa aberta**; os out
 
 **Enquanto pausado** (`FlowEngineService`):
 - `pauseBot` grava a pausa e chama `stop` → o run ativo termina `stopped` com `error = "robô pausado na conversa"`.
-- `onInbound` retorna logo no início: mensagem não inicia fluxo (gatilho, padrão), não entrega resposta a run e **não manda o aviso de fora do expediente**. A resposta "1/2" a lembrete de agendamento (`SchedulingService.onInbound`) continua funcionando — não é fluxo.
-- `start` recusa (400 "O robô está pausado…") — inclui disparo manual pelo atendente; retome antes.
+- `onInbound`: mensagem não inicia fluxo (gatilho, padrão), não entrega resposta a run e não manda boas-vindas. **A mensagem da faixa de horário (ex.: Fechado) continua saindo**, uma vez por período — mudança da tarefa 2 (antes, pausado não recebia nem o aviso de fora do expediente); fluxo de faixa não inicia. Ver [Horários](horarios.md#comportamento-ao-receber-mensagem). A resposta "1/2" a lembrete de agendamento (`SchedulingService.onInbound`) continua funcionando — não é fluxo.
+- `start` recusa (400 "O robô está pausado…"). **Disparo manual** pelo atendente (`POST /flows/:id/start`): responde 409 `{ code: 'bot_paused' }`; a tela pede confirmação ("Retomar o robô e iniciar o fluxo?", `components/chat/useStartFlowConfirm.tsx`) e, confirmado, reenvia com `resumeBot: true` — a API retoma o robô (evento `bot_resumed` com o atendente) e inicia.
+- Rotas de pausar/retomar exigem a feature `flows` do plano (`@RequireFeature('flows')`). O fim da pausa (`botPausedUntil`) é gravado em UTC e a tela mostra no fuso do navegador de quem lê.
 - `resume` (job do Atraso/intervalo do Conteúdo), `replyTimeout` (tempo limite do Salvar/Menu) e cada passo de `advance` checam `botPaused(run.conversation)` e encerram o run como `stopped` em vez de executar. Os jobs usam `jobBlocked`, que também encerra o run se a conversa estiver **encerrada**. **Todo job novo do motor** deve usar `jobBlocked` antes de agir.
 
 **Fim da pausa**:
 - Automático: job `unpause` na fila `flows` (delay até `botPausedUntil`, `jobId = unpause-<conversa>-<pausedAt ms>`). Só limpa se `botPausedAt` ainda é o da pausa que agendou — pausar de novo ou retomar à mão deixa o job antigo sem efeito. Se o job atrasar, a primeira mensagem do contato depois do horário já limpa a pausa (`onInbound`) e segue normal.
 - Manual: "Retomar robô".
-- Em ambos, **a execução interrompida não volta**: a próxima mensagem do contato passa pelas regras de entrada (gatilho, fluxo padrão, aviso de fora do expediente).
+- Em ambos, **a execução interrompida não volta**: a próxima mensagem do contato passa pelas regras de entrada (faixa de horário, gatilho, fluxo padrão).
 - Encerrar o atendimento (`setStatus`, `setStatusSystem` — inclusive Fim com "encerrar conversa" —, encerrar em massa e `sendToPhone` com `closeAfter`) limpa a pausa. O fluxo de encerramento (pesquisa) roda normalmente, porque a pausa já foi limpa antes dele.
 
 **Histórico** (`conversation_events`): `bot_paused` (ator = quem pausou; `reason` = "por 30 min" / "por 1 h" / "por 4 h" / "até retomar manualmente") e `bot_resumed` (ator = quem retomou; nulo = automático, com `reason` "fim do tempo de pausa" ou "atendimento encerrado"). Aparece no "Histórico do atendimento".
@@ -224,7 +234,7 @@ No Salvar a resposta inválida é a que não passa na validação (e-mail/telefo
 
 Tarefa 1.7. A tarefa 1.6 (Salvar) ainda não tinha sido feita; o mecanismo foi criado aqui, genérico, e vale para os dois blocos.
 
-- **Dados**: `timeoutMinutes` (total; 0/ausente = espera indefinidamente, como antes) + `timeoutUnit` (só exibição). Validação: 0 a 30 dias.
+- **Dados**: `timeoutMinutes` (total; 0/ausente = espera indefinidamente, como antes) + `timeoutUnit` (só exibição) + `timeoutBusinessHours` (tarefa 2: conta só dentro do horário de atendimento do quadro do número — `SchedulesService.addOpenMinutes`; atendimento desativado = tempo corrido). Validação: 0 a 30 dias.
 - **Job**: ao esperar (`awaitReply`), o run fica `waiting` com `waitUntil = agora + tempo` e é agendado `reply-timeout` `{ runId, nodeId, until }` (`jobId = timeout-<run>-<nó>-<until ms>`). **Cada nova tentativa** (resposta inválida) recomeça a contagem: novo `waitUntil`, novo job; o antigo vira inofensivo.
 - **Ao vencer** (`replyTimeout`): só age se o run ainda está `waiting` no mesmo nó com o mesmo `waitUntil`. `jobBlocked`: robô pausado ou conversa encerrada → run `stopped` (motivo "robô pausado na conversa" / "conversa encerrada"). Senão segue pela saída **Não respondeu**; **sem ela ligada, o fluxo termina** (`done`, "contato não respondeu no tempo limite") — não cai na saída de resposta nem entrega para humano.
 - **Disputa** (contato responde no mesmo instante em que vence): os dois lados tiram o run de `waiting` com `updateMany` condicional (`status = waiting` + nó [+ `waitUntil`]). Quem conseguir segue; o outro não faz nada. Resposta que perde a disputa é só uma mensagem normal na conversa.
@@ -258,10 +268,10 @@ Ações disponíveis (`ActionNode.kind`):
 
 Dados: `{ mode?, minutes, unit?, businessHours? }`.
 
-- `mode` ausente/`duration`: espera `minutes` (total; `unit` só exibição). Com `businessHours`, se o prazo cair fora do expediente, empurra para a próxima abertura.
-- `mode: 'next_open'`: **até o próximo horário de atendimento** — segue na hora se já estiver aberto (ou com "atendimento ativo" desligado, como o `nextOpenAt` faz hoje).
+- `mode` ausente/`duration`: espera `minutes` (total; `unit` só exibição). Com `businessHours`, se o prazo cair fora do horário de atendimento, empurra para a próxima abertura.
+- `mode: 'next_open'`: **até o próximo horário de atendimento** — segue na hora se já estiver aberto (ou com o atendimento desativado, ou se o quadro não abrir em 14 dias).
+- O horário é o **quadro de horários do número da conversa** (ou o padrão do cliente), faixas que contam como atendimento: `SchedulesService.nextOpen` ([Horários](horarios.md#integração-com-fluxos)).
 - Job persistente `resume` na fila `flows` (BullMQ/Redis, sobrevive a reinício da API). Ao vencer, `jobBlocked`: robô pausado ou conversa encerrada → run `stopped`. Mensagem do contato durante a espera é ignorada.
-- **Ponto de encaixe do módulo de horários** (próxima tarefa): `FlowEngineService.waitUntil` — hoje o horário vem de Configurações → Horário (`tenantSettings`); horário por setor/número entra trocando a origem de `hours` ali (e, se precisar, um campo novo no `WaitNode`, ex. `hoursId`).
 
 ## Exportação, importação e cópia
 

@@ -35,7 +35,7 @@ src/
 │       ├── tags/           CRUD com paleta de cores
 │       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha
 │       ├── plano/          medidores de uso, excedente, explicação do limite
-│       ├── configuracoes/  aparência + pastas e respostas rápidas (CRUD)
+│       ├── configuracoes/  aparência, horários de atendimento (quadros/faixas/simular), boas-vindas, fluxos padrão, segurança
 │       ├── admin/          Financeiro do dono (KPIs, série, assinaturas, faturas, margem)
 │       ├── clientes/       Clientes do dono: criar, plano/status, ativar, Entrar como
 │       └── relatorios/     abre com visão pronta (KPIs + 4 gráficos do período); 'Relatório personalizado' expande o construtor (métrica, agrupamento, filtros, tabela, CSV, salvos)

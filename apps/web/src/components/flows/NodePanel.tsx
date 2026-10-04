@@ -41,6 +41,10 @@ function ReplyTimeoutFields({ data, set }: { data: ReplyTimeout; set: (p: Record
               {(Object.keys(DELAY_UNIT) as DelayUnit[]).map((k) => <option key={k} value={k}>{DELAY_UNIT[k].label}</option>)}
             </select>
           </div>
+          <label className="flex items-start gap-2 text-ink text-[12px]">
+            <input type="checkbox" className="mt-0.5" checked={!!data.timeoutBusinessHours} onChange={(e) => set({ timeoutBusinessHours: e.target.checked || undefined })} />
+            <span>Contar só dentro do horário de atendimento<span className="block text-[11px] text-muted">Pelo quadro de horários do número da conversa: 30 min pedidos às 11:50 com almoço das 12h às 14h vencem às 14:20.</span></span>
+          </label>
           <p className="text-[11px] text-muted">Sem resposta nesse tempo, segue pela saída <b>Não respondeu</b> (sem ligação, o fluxo termina). Cada nova tentativa recomeça a contagem. Robô pausado ou conversa encerrada no meio: o fluxo para.</p>
         </>
       )}
@@ -340,11 +344,11 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                   </div>
                   <label className="flex items-start gap-2 text-ink">
                     <input type="checkbox" className="mt-0.5" checked={!!node.data.businessHours} onChange={(e) => set({ businessHours: e.target.checked })} />
-                    <span>Só seguir no horário comercial<span className="block text-[11px] text-muted">Se o tempo vencer fora do expediente (Configurações → Horário), espera até a próxima abertura.</span></span>
+                    <span>Só seguir no horário de atendimento<span className="block text-[11px] text-muted">Se o tempo vencer fora do horário (quadro de horários do número da conversa), espera até a próxima abertura.</span></span>
                   </label>
                 </>
               ) : (
-                <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Segue quando o expediente de Configurações → Horário abrir. Se já estiver aberto (ou com "atendimento ativo" desligado), segue na hora.</p>
+                <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Segue quando o quadro de horários do número da conversa entrar numa faixa que conta como atendimento. Se já estiver aberto (ou com o atendimento desativado), segue na hora.</p>
               )}
               <p className="text-[11px] text-muted">Mensagem do contato durante a espera é ignorada. Robô pausado ou conversa encerrada antes do fim: o fluxo para.</p>
             </>

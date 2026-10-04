@@ -3,13 +3,14 @@ import { useState } from 'react';
 import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { type QuickReplyItem, useFlows, useStartFlow, useHasFeature, useActiveRun } from '@/lib/hooks';
+import { type QuickReplyItem, useFlows, useHasFeature, useActiveRun } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { useQuickReplies, useConversation, useMe } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 import { Settings2 } from 'lucide-react';
 import { usePersistedState } from '@/lib/persisted';
+import { useStartFlowConfirm } from './useStartFlowConfirm';
 
 /** Painel direito: sessões (pastas) com mensagens pré-configuradas. Clique insere no composer. */
 export function QuickRepliesPanel() {
@@ -99,7 +100,7 @@ function FlowsTab() {
   const { conversationId } = useUI();
   const feature = useHasFeature('flows');
   const flows = useFlows();
-  const start = useStartFlow();
+  const { run, dialog, start } = useStartFlowConfirm();
   const active = useActiveRun(conversationId);
   // só os marcados como atalho: fluxo que roda sozinho não precisa poluir esta lista
   const list = flows.data?.filter((f) => f.isActive && f.showInChat) ?? [];
@@ -115,6 +116,7 @@ function FlowsTab() {
   }
   return (
     <div className="flex-1 overflow-y-auto scrollbar-thin">
+      {dialog}
       {!conversationId && <p className="p-5 text-xs text-muted text-center">Abra uma conversa para disparar um fluxo nela.</p>}
       {active.data && <div className="m-2.5 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">🤖 <b>{active.data.flow.name}</b> está rodando nesta conversa{active.data.status === 'waiting' ? ' (esperando o contato)' : ''}. Disparar outro substitui este.</div>}
       {list.length === 0 && flows.data && <p className="p-5 text-xs text-muted text-center">Nenhum fluxo marcado como atalho. Marque em <Link href="/fluxos" className="text-accent-ink underline">Fluxos</Link>.</p>}
@@ -127,7 +129,7 @@ function FlowsTab() {
                 <div className="text-[13px] font-medium text-ink truncate flex items-center gap-1.5">{running && <span className="animate-pulse">🤖</span>}{f.name}{running && <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-ink bg-accent-soft rounded px-1">rodando</span>}</div>
                 {f.description && <div className="text-[11px] text-muted truncate">{f.description}</div>}
               </div>
-              <Button size="sm" variant={running ? 'ghost' : 'primary'} icon={<Play size={12} />} disabled={!conversationId} loading={start.isPending && start.variables?.flowId === f.id} onClick={() => conversationId && start.mutateAsync({ flowId: f.id, conversationId }).then(() => toast.ok(`Fluxo "${f.name}" ${running ? 'reiniciado' : 'iniciado'}`)).catch(toast.err)}>{running ? 'Reiniciar' : 'Iniciar'}</Button>
+              <Button size="sm" variant={running ? 'ghost' : 'primary'} icon={<Play size={12} />} disabled={!conversationId} loading={start.isPending && start.variables?.flowId === f.id} onClick={() => conversationId && run(f, conversationId, `Fluxo "${f.name}" ${running ? 'reiniciado' : 'iniciado'}`)}>{running ? 'Reiniciar' : 'Iniciar'}</Button>
             </li>
           );
         })}
