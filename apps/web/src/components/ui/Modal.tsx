@@ -10,7 +10,7 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }: { 
   }, [onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] grid place-items-center px-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div data-overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] grid place-items-center px-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`w-full ${width} bg-panel rounded-2xl shadow-xl max-h-[90vh] flex flex-col`}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">
           <h2 className="font-semibold">{title}</h2>

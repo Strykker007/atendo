@@ -82,7 +82,7 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
         <span className="text-[10.5px] text-faint truncate ml-2" title="O texto entre {{ }} é trocado pelo valor na hora do envio">{'{{ }}'} vira o valor no envio</span>
       </div>
       {open && (
-        <div className="absolute z-30 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-64 overflow-y-auto text-sm">
+        <div data-overlay className="absolute z-30 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-64 overflow-y-auto text-sm">
           {groups.map(([title, list]) => (
             <div key={title}>
               <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{title}</div>

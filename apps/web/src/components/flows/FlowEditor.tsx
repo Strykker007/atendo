@@ -14,6 +14,8 @@ import { NodePanel } from './NodePanel';
 import { DeletableEdge } from './DeletableEdge';
 import { autoLayout, looksVertical } from './layout';
 import { collectFlowVars, SYSTEM_VARS } from './TextWithVars';
+import { useHistory } from './history';
+import { useUnsavedGuard } from '@/lib/unsaved-guard';
 import { useNumbers, useFlowRuns, useFlows, useMe, useTags, type Flow } from '@/lib/hooks';
 import { cloneFlowFragment, restoreFlowDefinition, scrubFlowDefinition, type FlowDefinition, type FlowEdge, type FlowNode, type FlowNodeType, type FlowTrigger } from '@atendo/shared';
 
@@ -45,7 +47,8 @@ function readClip(): Clip | null {
   } catch { /* cai na memória */ }
   return memoryClip;
 }
-const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+/** Foco num campo de texto: as teclas são do campo (desfazer/copiar o texto), não do canvas. */
+const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || ['TEXTAREA', 'SELECT'].includes(t.tagName) || (t instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'range'].includes(t.type)));
 
 /** Editor visual de fluxo: paleta à esquerda, canvas no meio, propriedades à direita. */
 /** 409 do PATCH /flows/:id quando outra pessoa (ou o sistema) salvou depois de o editor carregar. */
@@ -96,13 +99,27 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
 
   // "não salvo" = conteúdo (nós, arestas, config) diferente do último salvo. Medições do canvas não contam.
   const snapshot = useCallback(() => JSON.stringify({ n: nodes.map((n) => [n.id, n.type, Math.round(n.position.x), Math.round(n.position.y), n.data]), e: edges.map((e) => [e.source, e.sourceHandle ?? null, e.target]), meta }), [nodes, edges, meta]);
+  const snap = useMemo(() => snapshot(), [snapshot]);
   const saved = useRef<string | null>(null);
   useEffect(() => {
-    if (saved.current === null) { saved.current = snapshot(); return; }
-    setDirty(snapshot() !== saved.current);
-  }, [snapshot]);
+    if (saved.current === null) { saved.current = snap; return; }
+    setDirty(snap !== saved.current);
+  }, [snap]);
+  const guard = useUnsavedGuard(dirty);
+
+  // Desfazer/refazer: fotos de nós + ligações + configurações (ver history.ts)
+  const restore = useCallback((s: { nodes: Node[]; edges: Edge[]; meta: typeof meta }) => {
+    setNodes(s.nodes.map((n) => ({ ...n, selected: false })));
+    setEdges(s.edges.map((e) => ({ ...e, selected: false })));
+    setMeta(s.meta);
+  }, [setNodes, setEdges]);
+  const undoStack = useHistory({ nodes, edges, meta }, snap, restore, nodes.some((n) => n.dragging));
 
   const selected = useMemo(() => nodes.find((n) => n.id === selectedId), [nodes, selectedId]);
+  // o card aberto no painel sumiu (desfazer a criação dele, por exemplo): volta para as configurações
+  useEffect(() => {
+    if (selectedId && !selected) { setSelectedId(null); setSide((sd) => (sd === 'node' ? 'settings' : sd)); }
+  }, [selectedId, selected]);
   const flowVars = useMemo(() => collectFlowVars(nodes as { id: string; type: string; data: Record<string, unknown> }[]), [nodes]);
 
   const onConnect = useCallback((c: Connection) => {
@@ -236,13 +253,26 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
     setSide('settings');
   };
 
-  // Ctrl/Cmd + C / V / D no canvas. Digitando num campo, a área de transferência é do texto.
-  // Sem card selecionado / nada copiado, a tecla segue o comportamento normal do navegador.
-  const keys = useRef({ copy, paste, duplicate, selectedIds: [] as string[] });
-  keys.current = { copy, paste, duplicate, selectedIds: selectedNodes().map((n) => n.id) };
+  // Ctrl/Cmd + C / V / D / Z / Y no canvas. Digitando num campo, a tecla é do texto (copiar,
+  // desfazer a digitação…). Sem card selecionado / nada copiado, segue o normal do navegador.
+  // Ctrl/Cmd + S salva em qualquer lugar do editor, inclusive digitando.
+  const keys = useRef({ copy, paste, duplicate, save: () => {}, selectedIds: [] as string[] });
+  keys.current = { copy, paste, duplicate, save: () => { if (!saving) save(); }, selectedIds: selectedNodes().map((n) => n.id) };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || isTyping(e.target)) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      // modal, menu ou lista aberta por cima (`data-overlay`): nenhum atalho do editor age por trás
+      // (Ctrl+S só não deixa abrir o "salvar página" do navegador)
+      if (document.querySelector('[data-overlay]')) { if (e.key.toLowerCase() === 's') e.preventDefault(); return; }
+      // nunca o "salvar página" do navegador; tecla segurada não dispara vários saves
+      if (e.key.toLowerCase() === 's') { e.preventDefault(); if (!e.repeat) keys.current.save(); return; }
+      if (isTyping(e.target)) return;
+      if (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        const redo = e.key.toLowerCase() === 'y' || e.shiftKey;
+        (redo ? undoStack.redo : undoStack.undo)();
+        return;
+      }
       // texto selecionado na página (ex.: copiar um trecho do painel) também segue o normal
       if (e.key.toLowerCase() === 'c' && keys.current.selectedIds.length && !window.getSelection()?.toString()) { e.preventDefault(); keys.current.copy(); }
       // Ctrl+D é "favoritar" no navegador: só toma a tecla com card selecionado
@@ -251,7 +281,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [undoStack.undo, undoStack.redo]);
 
   const openMenu = (e: React.MouseEvent | MouseEvent) => {
     e.preventDefault();
@@ -290,11 +320,13 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
         <Link href="/fluxos" className="text-muted hover:text-ink"><ArrowLeft size={18} /></Link>
         <input value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} className="font-display font-semibold text-ink bg-transparent focus:outline-none focus:bg-field rounded px-1 min-w-0 flex-1" />
         <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', meta.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{meta.isActive ? 'Ativo' : 'Inativo'}</span>
-        <span className="text-[11px] text-faint hidden sm:inline">{dirty ? 'alterações não salvas' : 'salvo'}</span>
+        {dirty
+          ? <span className="text-[10.5px] font-semibold rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink whitespace-nowrap" title="Ctrl+S salva">Alterações não salvas</span>
+          : <span className="text-[11px] text-faint hidden sm:inline">salvo</span>}
         <Button size="sm" variant="ghost" icon={<LayoutGrid size={13} />} onClick={organize} title="Reposiciona os cards da esquerda para a direita a partir do Início">Organizar automaticamente</Button>
         <Button size="sm" variant="ghost" icon={<Settings2 size={13} />} onClick={() => setSide('settings')}>Gatilho</Button>
         {flow.id && <Button size="sm" variant="ghost" icon={<Activity size={13} />} onClick={() => setSide('runs')}>Execuções</Button>}
-        <Button size="sm" icon={<Save size={13} />} loading={saving} loadingText="Salvando…" onClick={save}>Salvar</Button>
+        <Button size="sm" icon={<Save size={13} />} loading={saving} loadingText="Salvando…" onClick={save} title="Ctrl+S">Salvar</Button>
       </div>
 
       <div className="flex-1 min-h-0 flex">
@@ -315,7 +347,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
             </div>
           ))}
           <p className="text-[10.5px] text-faint px-1 pt-2">Clique ou <b>arraste</b> um bloco para o canvas; ligue a bolinha da direita de um card à da esquerda de outro. Delete remove o card ou a ligação selecionada.</p>
-          <p className="text-[10.5px] text-faint px-1">Shift + clique ou Shift + arrastar seleciona vários; <b>Ctrl+C / Ctrl+V</b> copia e cola, inclusive em outro fluxo; <b>Ctrl+D</b> duplica. A tesoura no meio de uma ligação a corta. Botão direito abre o menu.</p>
+          <p className="text-[10.5px] text-faint px-1">Shift + clique ou Shift + arrastar seleciona vários; <b>Ctrl+C / Ctrl+V</b> copia e cola, inclusive em outro fluxo; <b>Ctrl+D</b> duplica; <b>Ctrl+Z</b> desfaz e <b>Ctrl+Shift+Z</b> (ou Ctrl+Y) refaz; <b>Ctrl+S</b> salva. No Mac, Cmd no lugar de Ctrl. A tesoura no meio de uma ligação a corta. Botão direito abre o menu.</p>
         </aside>
 
         {/* Canvas */}
@@ -357,7 +389,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
           </FlowNodeActions.Provider>
           </FlowEditorRefs.Provider>
           {menu && (
-            <div className="absolute z-20 min-w-44 rounded-lg border border-line bg-panel shadow-lg py-1 text-[13px]" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
+            <div data-overlay className="absolute z-20 min-w-44 rounded-lg border border-line bg-panel shadow-lg py-1 text-[13px]" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
               {selectedNodes().length > 0 && (
                 <>
                   <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-field text-ink" onClick={() => { copy(); setMenu(null); }}><Copy size={13} /> Copiar <span className="ml-auto text-[11px] text-faint">Ctrl+C</span></button>
@@ -439,6 +471,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
           )}
         </aside>
       </div>
+      {guard.modal}
     </div>
   );
 }

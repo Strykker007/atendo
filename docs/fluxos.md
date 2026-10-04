@@ -27,8 +27,14 @@ Genérico: `PORTABLE_VERSION`, `PortableBundle`/`toBundle` (lote `'<tipo>-bundle
 | `DeletableEdge.tsx` | Aresta com botão de tesoura (cortar ligação) |
 | `layout.ts` | `autoLayout` (Organizar automaticamente) e `looksVertical` (detecta desenho antigo) |
 | `TextWithVars.tsx` | Campo de texto com "Inserir variável" (+ botões N/I/S com `formatting`); `WaText` (prévia da formatação do WhatsApp); `collectFlowVars`, `SYSTEM_VARS` |
+| `history.ts` | `useHistory` — desfazer/refazer por fotos do estado (`HISTORY_LIMIT` = 100) |
 
 Persistência: estado local (`useNodesState`/`useEdgesState`) → `save()` monta o `FlowDefinition` → `onSave` (página `app/(app)/fluxos/[id]`) → `PATCH /flows/:id` com a `version` carregada. Nada é salvo sozinho; "não salvo" compara snapshot do conteúdo.
+
+### Atalhos, histórico e alterações não salvas
+- **Atalhos** (Cmd no Mac): Ctrl+Z desfaz; Ctrl+Shift+Z ou Ctrl+Y refaz; Ctrl+S salva (sempre bloqueia o "salvar página" do navegador; ignorado enquanto já está salvando ou com a tecla segurada); Ctrl+C/V/D copiam/colam/duplicam. Com o foco num campo de texto (input de texto, textarea, select, contenteditable), Z/Y/C/V/D ficam com o campo (desfazer a digitação, copiar o texto); **Ctrl+S salva mesmo digitando**. Com algo aberto por cima — modal, menu de contexto do canvas, lista "Inserir variável" (qualquer elemento com `data-overlay`; o `Modal` de `components/ui` já tem) — **nenhum atalho do editor age** (Ctrl+S só é barrado para o navegador não salvar a página).
+- **Histórico** (`history.ts`): guarda fotos de `{ nodes, edges, meta }` — cobre criar/apagar/mover cards, ligações, conteúdo dos blocos e configurações do fluxo. A chave da foto é o mesmo snapshot do "não salvo" (seleção, medidas e zoom não viram passo). Mudanças seguidas em 400 ms viram um passo só (digitação); arrastando, só grava ao soltar. Máximo de 100 passos; fazer algo novo depois de desfazer descarta o "refazer". Recarregar o editor (conflito de versão) zera o histórico. Salvar não zera: dá para desfazer além do último salvo (volta a marcar "não salvo").
+- **Não salvo** (`dirty`): etiqueta "Alterações não salvas" na barra superior. Proteção em `apps/web/src/lib/unsaved-guard.tsx` (`useUnsavedGuard`, genérico): `beforeunload` (recarregar/fechar a aba → aviso do navegador); clique em link interno (`<a>`/`next/link`, mesma origem, sem `target`/Ctrl/Cmd) interceptado na captura → modal "Você tem alterações não salvas. Deseja realmente sair sem salvar?" (*Sair sem salvar* / *Continuar editando*); botão Voltar → com alterações, o guarda empilha uma cópia da entrada atual (`history.state.__unsavedGuard`), o Voltar cai nela e abre o mesmo modal. Navegação por código (`router.push` fora do editor) **não** é interceptada.
 
 ### Controle de versão ao salvar
 Optimistic locking em `Flow.version` (começa em 1).
@@ -83,6 +89,7 @@ Outros tipos existentes não pedidos: Início (`start`), Fim (`end`), IA (`ai`),
 - **Ações em lote na listagem**: checkbox por fluxo + "selecionar todos" → Ativar, Desativar, Duplicar, Exportar selecionados (tarefa 1.7). Ver [Exportação, importação e cópia](#exportação-importação-e-cópia).
 - **Duplicar fluxo**: existe (`POST /flows/:id/duplicate` e em lote; cópia nasce inativa).
 - **Duplicar bloco**: existe (tarefa 1.1) — botão no card, Ctrl/Cmd+D, menu de contexto. Sem ligações.
+- **Desfazer/refazer, Ctrl+S e aviso de alterações não salvas**: existe — ver [Atalhos, histórico e alterações não salvas](#atalhos-histórico-e-alterações-não-salvas).
 - **Copiar/colar blocos** entre fluxos: existe (Ctrl+C/V, `localStorage`) — confirmado na tarefa 1.7: ligações internas da seleção preservadas, as que saem dela descartadas; colar vindo de **outra empresa** passa pela limpeza da importação.
 - **Conexões laterais**: entrada à esquerda, saídas à direita, uma por opção (tarefa 1.1). Ids de handle iguais aos antigos, então fluxos salvos continuam ligados.
 - **Organizar automaticamente**: botão na barra; aviso quando o desenho parece vertical. Nunca roda sozinho.
