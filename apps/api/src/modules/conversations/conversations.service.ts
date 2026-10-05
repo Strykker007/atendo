@@ -38,10 +38,19 @@ export const MESSAGE_INCLUDE = {
   },
 } satisfies Prisma.MessageInclude;
 
-type MessageRow = Message & {
+export type MessageRow = Message & {
   author?: { name: string } | null;
   quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; author: { name: string } | null } | null;
 };
+
+/**
+ * Mensagem já pronta para o navegador: é o que sai por HTTP e por socket.
+ *
+ * `queueSeq` (BigInt) e `raw` ficam de fora de propósito — ver `present()`. O tipo existe
+ * para o gateway exigir **isto**, e não a linha do Prisma: enquanto a assinatura aceitava
+ * `Message`, qualquer coluna nova entrava no payload sem ninguém decidir.
+ */
+export type PresentedMessage = Omit<MessageRow, 'queueSeq' | 'raw'> & { quoted: QuotedRef | null };
 
 /** WhatsApp limita o encaminhamento a 5 conversas por vez; seguimos a mesma regra. */
 export const FORWARD_MAX_TARGETS = 5;
@@ -61,9 +70,14 @@ export class ConversationsService {
    * Message.mediaUrl guarda a CHAVE no storage (privada). Antes de sair para o navegador
    * (HTTP ou socket) vira uma URL assinada e temporária.
    */
-  present(m: MessageRow): MessageRow & { quoted: QuotedRef | null } {
+  present(m: MessageRow): PresentedMessage {
     const mediaUrl = m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl;
-    return { ...m, mediaUrl, quoted: this.quotedRef(m) };
+    // `queueSeq` é BigInt e **nada** que fala com o navegador sabe serializar: `JSON.stringify`
+    // lança (a listagem virava 500) e o msgpack do adapter Redis também (o emit em tempo real
+    // morria dentro do `ingestInbound`). `raw` é o payload cru do provider — não tem por que
+    // sair daqui. Os dois ficam de fora explicitamente para o spread não os trazer de volta.
+    const { queueSeq: _queueSeq, raw: _raw, ...rest } = m;
+    return { ...rest, mediaUrl, quoted: this.quotedRef(m) };
   }
 
   /**

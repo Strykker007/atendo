@@ -4,7 +4,9 @@ import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { Emitter } from '@socket.io/redis-emitter';
 import Redis from 'ioredis';
-import type { Conversation, Message, WhatsAppNumber } from '@prisma/client';
+import type { Conversation, WhatsAppNumber } from '@prisma/client';
+// type-only: o service importa este gateway em tempo de execução, então um import de valor aqui fecharia o ciclo
+import type { PresentedMessage } from './conversations.service';
 import type { TypingEvent } from '@atendo/shared';
 import { env } from '../../config/env';
 
@@ -48,7 +50,7 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
     return this.emitter.to(room);
   }
 
-  emitMessage(tenantId: string, message: Message) {
+  emitMessage(tenantId: string, message: PresentedMessage) {
     this.room(tenantId).emit('message', message);
   }
   emitConversation(tenantId: string, conversation: Conversation) {
