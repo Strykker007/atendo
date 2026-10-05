@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
@@ -299,23 +300,89 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: {
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
         {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || c.assignee || c.origin !== 'organic' || c.department) && (
-          <div className="flex flex-wrap items-center gap-1 mt-1">
-            <DepartmentBadge department={c.department} className="max-w-[110px]" />
+          // linha única e de altura fixa: nada quebra para baixo, então todo card tem a mesma altura
+          <div className="flex flex-nowrap items-center gap-1 mt-1 h-5 min-w-0">
+            <DepartmentBadge department={c.department} className="max-w-[110px] shrink-0" />
             <OriginBadge origin={c.origin} data={c.originData} />
-            {/* principal (etapa no Kanban) primeiro, cheia e com estrela; as outras em tom claro */}
-            {[...c.tags].sort((x, y) => Number(!!y.isPrimary) - Number(!!x.isPrimary)).map(({ tag, isPrimary }) => isPrimary ? (
-              <span key={tag.id} title="Tag principal — etapa no Kanban" className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md text-white" style={{ background: tag.color }}><Star size={8} className="fill-current" />{tag.name}</span>
-            ) : (
-              <span key={tag.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `color-mix(in srgb, ${tag.color} 18%, transparent)`, color: tag.color }}>{tag.name}</span>
-            ))}
-            {(c.contact.tags ?? []).map(({ tag }) => (
-              <span key={`c-${tag.id}`} title="Tag do contato (permanente)" className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border" style={{ borderColor: tag.color, color: tag.color }}>📌 {tag.name}</span>
-            ))}
-            {c.assignee && c.status === 'in_progress' && <span className="ml-auto text-[10px] text-faint truncate">↳ {c.assignee.name}</span>}
+            <TagsDoCard c={c} />
+            {c.assignee && c.status === 'in_progress' && <span className="ml-auto text-[10px] text-faint truncate min-w-0">↳ {c.assignee.name}</span>}
           </div>
         )}
       </div>
     </button>
+  );
+}
+
+/** Quantas tags cabem no card da fila; o resto vira "+N". Cabeçalho e ficha mostram todas. */
+const TAGS_NO_CARD = 2;
+
+type TagDoCard = { id: string; name: string; color: string; tipo: 'principal' | 'atendimento' | 'contato' };
+
+/**
+ * Tags do card da lista: no máximo `TAGS_NO_CARD` visíveis, o excedente num "+N" com tooltip.
+ * Ordem: principal (etapa no Kanban), demais do atendimento, depois as do contato (📌).
+ */
+function TagsDoCard({ c }: { c: Conversation }) {
+  const todas: TagDoCard[] = [
+    ...[...c.tags]
+      .sort((x, y) => Number(!!y.isPrimary) - Number(!!x.isPrimary))
+      .map(({ tag, isPrimary }) => ({ id: tag.id, name: tag.name, color: tag.color, tipo: isPrimary ? 'principal' as const : 'atendimento' as const })),
+    ...(c.contact.tags ?? []).map(({ tag }) => ({ id: `c-${tag.id}`, name: tag.name, color: tag.color, tipo: 'contato' as const })),
+  ];
+  if (!todas.length) return null;
+  const visiveis = todas.slice(0, TAGS_NO_CARD);
+  const ocultas = todas.slice(TAGS_NO_CARD);
+  return (
+    <>
+      {visiveis.map((t) => <PilulaTag key={t.id} t={t} className="max-w-[96px] min-w-0" />)}
+      {ocultas.length > 0 && <MaisTags tags={ocultas} />}
+    </>
+  );
+}
+
+function PilulaTag({ t, className }: { t: TagDoCard; className?: string }) {
+  if (t.tipo === 'principal') {
+    return <span title={`${t.name} — tag principal (etapa no Kanban)`} className={cn('inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md text-white', className)} style={{ background: t.color }}><Star size={8} className="fill-current shrink-0" /><span className="truncate">{t.name}</span></span>;
+  }
+  if (t.tipo === 'contato') {
+    return <span title={`${t.name} — tag do contato (permanente)`} className={cn('truncate text-[10px] font-semibold px-1.5 py-0.5 rounded-md border', className)} style={{ borderColor: t.color, color: t.color }}>📌 {t.name}</span>;
+  }
+  return <span title={t.name} className={cn('truncate text-[10px] font-semibold px-1.5 py-0.5 rounded-md', className)} style={{ background: `color-mix(in srgb, ${t.color} 18%, transparent)`, color: t.color }}>{t.name}</span>;
+}
+
+/**
+ * Pílula "+N" com as tags ocultas no hover. O tooltip vai por portal com `position: fixed`
+ * porque a lista rola (`overflow-auto`) e cortaria um absoluto no primeiro/último card.
+ */
+function MaisTags({ tags }: { tags: TagDoCard[] }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; acima: boolean } | null>(null);
+  const abrir = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    // abre para baixo; perto do rodapé da janela, para cima
+    const acima = r.bottom + 160 > window.innerHeight;
+    setPos({ left: r.left, top: acima ? r.top - 4 : r.bottom + 4, acima });
+  };
+  return (
+    <span ref={ref} onMouseEnter={abrir} onMouseLeave={() => setPos(null)} className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-field text-muted border border-line cursor-default">
+      +{tags.length}
+      {pos && createPortal(
+        <div
+          role="tooltip"
+          className="fixed z-50 min-w-[140px] max-w-[240px] rounded-lg border border-line bg-surface shadow-lg p-1.5 flex flex-col gap-1 pointer-events-none"
+          style={{ left: pos.left, top: pos.top, transform: pos.acima ? 'translateY(-100%)' : undefined }}
+        >
+          {tags.map((t) => (
+            <span key={t.id} className="flex items-center gap-1.5 text-[11px] text-ink">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: t.color }} aria-hidden />
+              <span className="truncate">{t.tipo === 'contato' ? '📌 ' : ''}{t.name}</span>
+            </span>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </span>
   );
 }
 

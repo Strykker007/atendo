@@ -402,3 +402,5 @@ valor inicial. Por isso o hook só grava depois que o usuário mexeu, marcado no
 
 No chat, a tag principal aparece cheia e com estrela no cabeçalho, no `TagPicker` (clicar numa tag de coluna já selecionada a torna principal) e no card da `ConversationList`.
 
+No card da `ConversationList` a linha de tags é única e tem altura fixa (`flex-nowrap`, `h-5`, pílulas com `truncate`), para todos os cards terem a mesma altura. Aparecem no máximo **2 tags** (`TAGS_NO_CARD`), nesta ordem: principal, demais do atendimento, depois as do contato (📌). O resto vira uma pílula `+N`; no hover, um tooltip mostra nome e cor das ocultas. Ele é renderizado por portal com `position: fixed` para a rolagem da lista não cortá-lo. O limite vale **só para o card**: o cabeçalho do chat e a ficha do contato continuam mostrando todas as tags.
+
