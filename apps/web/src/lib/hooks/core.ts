@@ -6,7 +6,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, getAccessToken, onAccessToken } from '../api';
-import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits } from '@atendo/shared';
+import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
@@ -54,6 +54,10 @@ export interface Message {
   content?: MessageContent | null;
   /** encaminhada (pelo contato ou pelo atendente); score ≥ 5 = "com frequência" */
   forwarded?: boolean; forwardingScore?: number | null;
+  /** apagada: a API já manda sem conteúdo; o original só por `useDeletedOriginal` (conversations.view_deleted) */
+  deletedAt?: string | null; deletedByName?: string | null;
+  /** true = apagada também no celular do contato */
+  deletedForEveryone?: boolean;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
 export type SendInput = ({ type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
@@ -263,6 +267,38 @@ export const useReact = () => {
 };
 
 /**
+ * Apagar mensagem (docs/apagar-mensagens.md). `notice` preenchido = foi apagada só no painel
+ * (Meta, prazo do WhatsApp, recebida…) e a tela precisa dizer isso ao atendente.
+ */
+export const useDeleteMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, messageId }: { conversationId: string; messageId: string }) =>
+      api<{ message: Message; forEveryone: boolean; notice: string | null }>(`/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
+    onSuccess: (r) => { upsertMessageInCache(qc, r.message); qc.invalidateQueries({ queryKey: ['conversation-events', r.message.conversationId] }); },
+  });
+};
+
+/** Conteúdo original de uma apagada. Só busca quando quem audita pede para ver. */
+export const useDeletedOriginal = (m: Pick<Message, 'id' | 'conversationId'>, enabled: boolean) =>
+  useQuery({
+    queryKey: ['deleted-original', m.id],
+    enabled,
+    queryFn: () => api<DeletedMessageOriginal>(`/conversations/${m.conversationId}/messages/${m.id}/original`),
+    // URL de mídia assinada expira: não guardar por muito tempo
+    staleTime: 60_000,
+  });
+
+/** Limpar o histórico da conversa (só no painel). */
+export const useClearHistory = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (conversationId: string) => api<{ cleared: number; cancelled: number }>(`/conversations/${conversationId}/messages`, { method: 'DELETE' }),
+    onSuccess: (_, id) => { qc.invalidateQueries({ queryKey: ['messages', id] }); invConv(qc, id); qc.invalidateQueries({ queryKey: ['conversation-events', id] }); },
+  });
+};
+
+/**
  * Encaminha uma mensagem para outras conversas. Cada destino é um envio normal; os que falharem
  * voltam em `failed` (sem posse, fora da janela da Meta, número desconectado…).
  */
@@ -371,7 +407,7 @@ export const useDeletePlan = () => {
 
 export interface ConversationEvent {
   id: string;
-  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed' | 'department_changed';
+  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed' | 'department_changed' | 'message_deleted' | 'history_cleared';
   actor: { id: string; name: string } | null;
   target: { id: string; name: string } | null;
   fromStatus: ConversationStatus | null;

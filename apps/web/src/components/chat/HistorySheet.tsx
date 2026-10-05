@@ -1,5 +1,5 @@
 'use client';
-import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Hand, Play, RotateCcw, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Eraser, Hand, Play, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useConversationEvents, type ConversationEvent } from '@/lib/hooks';
 
@@ -54,6 +54,9 @@ const META: Record<ConversationEvent['type'], { icon: React.ReactNode; texto: st
   bot_resumed: { icon: <Play size={14} />, texto: 'retomou o robô', cor: 'text-accent' },
   // `reason` traz "Vendas → Suporte"
   department_changed: { icon: <Building2 size={14} />, texto: 'mudou o departamento', cor: 'text-accent' },
+  // `reason` diz o que e onde foi apagado — nunca o conteúdo (docs/apagar-mensagens.md)
+  message_deleted: { icon: <Trash2 size={14} />, texto: 'apagou uma mensagem', cor: 'text-danger' },
+  history_cleared: { icon: <Eraser size={14} />, texto: 'limpou o histórico da conversa', cor: 'text-danger' },
 };
 
 const RESULTADO: Record<string, string> = { won: 'comprou', lost: 'não comprou', none: 'sem resultado' };

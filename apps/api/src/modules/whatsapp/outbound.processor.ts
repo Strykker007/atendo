@@ -47,7 +47,8 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       where: { id: job.data.messageId },
       include: { conversation: { include: { contact: true } } },
     });
-    if (!message || message.status !== 'pending' || message.internal) return;
+    // apagada antes de sair (docs/apagar-mensagens.md): o cancelamento grava `failed` junto; isto é a 2ª barreira
+    if (!message || message.status !== 'pending' || message.internal || message.deletedAt) return;
     const tenantId = message.conversation.tenantId;
     enrichContext({ tenantId });
     // Já foi entregue ao provider numa tentativa anterior (ex.: falhou só a contabilidade):

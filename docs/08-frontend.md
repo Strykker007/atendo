@@ -63,6 +63,7 @@ src/
 - `message` → insere/atualiza no cache `['messages', conversationId]`. Também é por aqui que chega a mudança de status (webhook de entrega/leitura): a mensagem vem inteira e o `StatusIcon` da bolha troca sozinho — 🕒 enviando, ✓ enviada, ✓✓ entregue, ✓✓ ciano (`--tick-read`) lida, ⚠ falha (tooltip com o erro).
 - `conversation` → invalida `['conversations']`, a conversa e `['kanban']`.
 - `kanban` → invalida `['kanban']` e `['tags']` (colunas mudaram).
+- `messages_cleared` → histórico limpo: invalida `['messages', conversationId]`. Mensagem apagada chega pelo próprio `message` (já com `deletedAt` e sem conteúdo) e vira o aviso "Mensagem apagada por…" na bolha ([Apagar mensagens](apagar-mensagens.md)).
 - `typing` → grava `{state, at}` em `['typing', conversationId]` (`paused` limpa). Mensagem recebida (`message` com `direction: 'in'`) também limpa.
 - `number` → guarda `qrCode` em `['number-qr', id]` e invalida `['numbers']`.
 

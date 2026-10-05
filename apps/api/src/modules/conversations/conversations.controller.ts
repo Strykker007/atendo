@@ -1,8 +1,8 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import { ConversationsService, FORWARD_MAX_TARGETS } from './conversations.service';
+import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS } from './conversations.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
@@ -189,6 +189,41 @@ export class ConversationsController {
     const alvo = await this.conversations.reactionTarget(u.tenantId, u, id, messageId);
     await this.numbers.react(alvo.numberId, { to: alvo.to, targetExternalId: alvo.targetExternalId, targetFromMe: alvo.targetFromMe, emoji: dto.emoji });
     return this.conversations.setReaction(u.tenantId, alvo.messageId, { fromMe: true, emoji: dto.emoji, at: new Date() });
+  }
+
+  /**
+   * Apagar mensagem (docs/apagar-mensagens.md). Enviada por nós e dentro do prazo: pede ao
+   * provider "apagar para todos"; se ele não tiver a operação (Meta) ou recusar, apaga só no
+   * painel e devolve `notice` para a tela avisar. A mensagem nunca some: vira "apagada por X".
+   */
+  @Delete(':id/messages/:messageId')
+  async deleteMessage(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    const plan = await this.conversations.deletionPlan(u.tenantId, u, id, messageId);
+    let forEveryone = false;
+    let notice = plan.notice;
+    if (plan.revoke) {
+      try {
+        forEveryone = await this.numbers.revoke(plan.revoke.numberId, { to: plan.revoke.to, externalId: plan.revoke.externalId });
+        if (!forEveryone) notice = DELETE_NOTICE.unsupported;
+      } catch (err) {
+        notice = DELETE_NOTICE.refused(err instanceof Error ? err.message : String(err));
+      }
+    }
+    return this.conversations.markDeleted(u.tenantId, u, plan, { forEveryone, notice });
+  }
+
+  /** Conteúdo original de uma mensagem apagada — só para quem audita. */
+  @Get(':id/messages/:messageId/original')
+  @RequirePermission('conversations.view_deleted')
+  deletedOriginal(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    return this.conversations.deletedOriginal(u.tenantId, id, messageId);
+  }
+
+  /** Limpar o histórico da conversa (só no painel; a conversa continua existindo). */
+  @Delete(':id/messages')
+  @RequirePermission('conversations.delete_chat')
+  clearHistory(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.clearHistory(u.tenantId, u, id);
   }
 
   /**

@@ -97,7 +97,8 @@ export class AiService {
       include: {
         tenant: { select: { name: true } },
         contact: { select: { name: true, phone: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: HISTORY_LIMIT, select: { direction: true, text: true, internal: true } },
+        // apagada não entra no contexto da IA (docs/apagar-mensagens.md)
+        messages: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' }, take: HISTORY_LIMIT, select: { direction: true, text: true, internal: true } },
       },
     });
     if (!conv) throw new BadRequestException('Conversa não encontrada');

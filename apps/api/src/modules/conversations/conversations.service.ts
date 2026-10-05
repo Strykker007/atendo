@@ -3,15 +3,15 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import { messagePreview } from '@atendo/shared';
-import type { MessageContent, MessageReaction, OutboundMessage, QuotedRef } from '@atendo/shared';
+import { DELETED_MESSAGE_LABEL, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, messagePreview } from '@atendo/shared';
+import type { DeletedMessageOriginal, MessageContent, MessageReaction, OutboundMessage, QuotedRef } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { StorageService } from '../../common/storage/storage.service';
 import type { Message, MessageDirection, MessageType } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
-import { enqueueOutbound, requeueSeq } from '../whatsapp/send-queue';
+import { enqueueOutbound, promoteNext, requeueSeq } from '../whatsapp/send-queue';
 import type { Permission } from '@atendo/shared';
 import { narrowTo, numberFilter } from '../auth/number-scope';
 import { departmentWhere } from '../auth/department-scope';
@@ -34,13 +34,13 @@ const META_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const MESSAGE_INCLUDE = {
   author: { select: { name: true } },
   quotedMessage: {
-    select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, author: { select: { name: true } } },
+    select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, deletedAt: true, author: { select: { name: true } } },
   },
 } satisfies Prisma.MessageInclude;
 
 export type MessageRow = Message & {
   author?: { name: string } | null;
-  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; author: { name: string } | null } | null;
+  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; deletedAt?: Date | null; author: { name: string } | null } | null;
 };
 
 /**
@@ -54,6 +54,31 @@ export type PresentedMessage = Omit<MessageRow, 'queueSeq' | 'raw'> & { quoted: 
 
 /** WhatsApp limita o encaminhamento a 5 conversas por vez; seguimos a mesma regra. */
 export const FORWARD_MAX_TARGETS = 5;
+
+/**
+ * O que fazer para apagar uma mensagem (docs/apagar-mensagens.md). Quem fala com o provider é o
+ * controller (como na reação): o service decide, o `NumbersService` executa, `markDeleted` grava.
+ */
+export interface DeletionPlan {
+  messageId: string;
+  conversationId: string;
+  /** ainda na fila de envio: cancelar em vez de apagar no WhatsApp */
+  cancelPending: boolean;
+  /** pedir "apagar para todos" ao provider; null = só no painel */
+  revoke: { numberId: string; to: string; externalId: string } | null;
+  /** por que vai ser apagada só no painel — volta para a tela avisar o atendente */
+  notice: string | null;
+}
+
+const CANCELED_SEND = 'Envio cancelado: a mensagem foi apagada antes de sair.';
+export const DELETE_NOTICE = {
+  inbound: 'Mensagem recebida não sai do celular do contato: foi apagada só no painel.',
+  expired: 'Passou o prazo do WhatsApp para apagar para todos (cerca de 2 dias): a mensagem foi apagada só no painel e continua no celular do contato.',
+  offline: 'O número está desconectado: a mensagem foi apagada só no painel e continua no celular do contato.',
+  unsupported: 'A API oficial da Meta não permite apagar mensagens enviadas: a mensagem foi apagada só no painel e continua no celular do contato.',
+  refused: (motivo: string) => `O WhatsApp recusou apagar para todos (${motivo}): a mensagem foi apagada só no painel e continua no celular do contato.`,
+  alreadySent: 'A mensagem saiu antes do cancelamento: ela chegou ao contato e foi apagada só no painel.',
+} as const;
 
 @Injectable()
 export class ConversationsService {
@@ -71,12 +96,18 @@ export class ConversationsService {
    * (HTTP ou socket) vira uma URL assinada e temporária.
    */
   present(m: MessageRow): PresentedMessage {
-    const mediaUrl = m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl;
     // `queueSeq` é BigInt e **nada** que fala com o navegador sabe serializar: `JSON.stringify`
     // lança (a listagem virava 500) e o msgpack do adapter Redis também (o emit em tempo real
     // morria dentro do `ingestInbound`). `raw` é o payload cru do provider — não tem por que
     // sair daqui. Os dois ficam de fora explicitamente para o spread não os trazer de volta.
     const { queueSeq: _queueSeq, raw: _raw, ...rest } = m;
+    if (m.deletedAt) {
+      // Apagada: o original continua no banco (auditoria) e NÃO sai daqui — nem por socket,
+      // que vai para a sala do tenant inteiro. Quem tem `conversations.view_deleted` lê por
+      // `deletedOriginal()`. Reação e citação também saem: as duas carregam pedaço do conteúdo.
+      return { ...rest, text: null, mediaUrl: null, mediaMime: null, mediaName: null, content: null, reactions: null, error: null, quotedId: null, quotedMessageId: null, quotedPreview: null, quotedMessage: null, quoted: null };
+    }
+    const mediaUrl = m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl;
     return { ...rest, mediaUrl, quoted: this.quotedRef(m) };
   }
 
@@ -92,7 +123,7 @@ export class ConversationsService {
       externalId: m.quotedId,
       direction: q?.direction ?? null,
       type: q?.type ?? null,
-      preview: (q ? messagePreview({ type: q.type, text: q.text, content: q.content as unknown as MessageContent | null, mediaName: q.mediaName }) : m.quotedPreview)?.slice(0, 120) ?? null,
+      preview: (q?.deletedAt ? DELETED_MESSAGE_LABEL : q ? messagePreview({ type: q.type, text: q.text, content: q.content as unknown as MessageContent | null, mediaName: q.mediaName }) : m.quotedPreview)?.slice(0, 120) ?? null,
       // enviada pelo painel: nome do atendente. Recebida: null, o front usa o nome do contato.
       authorName: q?.direction === 'out' ? q.author?.name ?? null : null,
       fromStatus: m.quotedFromStatus,
@@ -477,7 +508,7 @@ export class ConversationsService {
    * Maps, contato como nome + telefone, botões/lista como o texto da mensagem.
    */
   async forward(tenantId: string, author: Viewer, conversationId: string, messageId: string, targetIds: string[]) {
-    const src = await this.prisma.message.findFirst({ where: { id: messageId, conversationId, internal: false, conversation: { tenantId } } });
+    const src = await this.prisma.message.findFirst({ where: { id: messageId, conversationId, internal: false, deletedAt: null, conversation: { tenantId } } });
     if (!src) throw new NotFoundException('Mensagem não encontrada');
     const input = this.forwardInput(tenantId, src);
 
@@ -528,7 +559,7 @@ export class ConversationsService {
    * canal desde a falha, 409 em vez de mandar pelo número antigo.
    */
   async resend(tenantId: string, messageId: string) {
-    const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', internal: false, conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
+    const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', internal: false, deletedAt: null, conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
     if (!m) throw new NotFoundException('Mensagem não encontrada ou não está com falha');
     if (m.numberId && m.numberId !== m.conversation.numberId) {
       throw new ConflictException({ code: 'number_changed', message: `O canal desta conversa mudou para "${m.conversation.number.label}". Envie a mensagem de novo.` });
@@ -569,7 +600,7 @@ export class ConversationsService {
    */
   async reactionTarget(tenantId: string, author: Viewer, conversationId: string, messageId: string) {
     const m = await this.prisma.message.findFirst({
-      where: { id: messageId, conversationId, internal: false, conversation: { tenantId } },
+      where: { id: messageId, conversationId, internal: false, deletedAt: null, conversation: { tenantId } },
       include: { conversation: { include: { number: true, contact: { select: { phone: true } } } } },
     });
     if (!m) throw new NotFoundException('Mensagem não encontrada');
@@ -607,6 +638,130 @@ export class ConversationsService {
     const presented = this.present(updated);
     this.gateway.emitMessage(tenantId, presented);
     return presented;
+  }
+
+  // ---------- apagar (docs/apagar-mensagens.md) ----------
+
+  /**
+   * Quem pode apagar e como. Quem enviou apaga a PRÓPRIA mensagem (ou nota) dentro da janela;
+   * o resto — do colega, do robô, recebida, antiga — exige `conversations.delete_message`.
+   * Nunca lança por causa do provider: o que não dá para apagar no WhatsApp vira `notice`.
+   */
+  async deletionPlan(tenantId: string, actor: Viewer, conversationId: string, messageId: string): Promise<DeletionPlan> {
+    const m = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId, conversation: { tenantId } },
+      select: {
+        id: true, direction: true, internal: true, authorId: true, status: true, externalId: true, createdAt: true, deletedAt: true,
+        number: { select: { id: true, status: true } },
+        conversation: { select: { number: { select: { id: true, status: true } }, contact: { select: { phone: true } } } },
+      },
+    });
+    if (!m) throw new NotFoundException('Mensagem não encontrada');
+    if (m.deletedAt) throw new ConflictException('Essa mensagem já foi apagada.');
+    const age = Date.now() - m.createdAt.getTime();
+    if (!may(actor, 'conversations.delete_message')) {
+      if (m.direction !== 'out' || m.authorId !== actor.id) throw new ForbiddenException('Seu perfil de acesso só permite apagar as suas próprias mensagens.');
+      if (age > OWN_MESSAGE_DELETE_WINDOW_MS) throw new ForbiddenException('Passou o prazo para apagar esta mensagem. Peça a um gerente.');
+    }
+    const plan: DeletionPlan = { messageId: m.id, conversationId, cancelPending: false, revoke: null, notice: null };
+    if (m.internal) return plan;
+    if (m.direction === 'in') return { ...plan, notice: DELETE_NOTICE.inbound };
+    if (m.status === 'pending') return { ...plan, cancelPending: true };
+    // falhou / nunca chegou ao WhatsApp: não há o que apagar no celular do contato
+    if (!m.externalId || m.status === 'failed') return plan;
+    if (age > MESSAGE_REVOKE_WINDOW_MS) return { ...plan, notice: DELETE_NOTICE.expired };
+    // sai pelo número que enviou, não pelo atual da conversa
+    const number = m.number ?? m.conversation.number;
+    if (number.status !== 'connected') return { ...plan, notice: DELETE_NOTICE.offline };
+    return { ...plan, revoke: { numberId: number.id, to: m.conversation.contact.phone, externalId: m.externalId } };
+  }
+
+  /**
+   * Grava a exclusão, o evento de auditoria e avisa o painel. A linha nunca sai do banco: é o
+   * ledger de uso (`MessageUsage`) e o registro do que foi dito.
+   */
+  async markDeleted(tenantId: string, actor: Viewer & { name: string }, plan: DeletionPlan, outcome: { forEveryone: boolean; notice: string | null }) {
+    let notice = outcome.notice;
+    const mark = { deletedAt: new Date(), deletedById: actor.id, deletedByName: actor.name, deletedForEveryone: outcome.forEveryone };
+    const cancelled = await this.prisma.$transaction(async (tx) => {
+      let cancelled = false;
+      if (plan.cancelPending) {
+        // só cancela o que ainda está na fila: se o worker já entregou, ela chegou ao contato
+        const c = await tx.message.updateMany({ where: { id: plan.messageId, status: 'pending', deletedAt: null }, data: { ...mark, status: 'failed', error: CANCELED_SEND } });
+        cancelled = c.count > 0;
+        if (!cancelled) notice = DELETE_NOTICE.alreadySent;
+      }
+      if (!cancelled) {
+        const r = await tx.message.updateMany({ where: { id: plan.messageId, deletedAt: null }, data: mark });
+        if (!r.count) throw new ConflictException('Essa mensagem já foi apagada.');
+      }
+      const m = await tx.message.findUniqueOrThrow({ where: { id: plan.messageId }, select: { internal: true, direction: true, authorId: true, externalId: true, deletedForEveryone: true } });
+      await this.registrar({ tenantId, conversationId: plan.conversationId, type: 'message_deleted', actorId: actor.id, reason: motivoDaExclusao(m, cancelled) }, tx);
+      return cancelled;
+    });
+    // a da frente da fila saiu: chama a próxima da conversa
+    if (cancelled) await promoteNext(this.prisma, this.outbound, plan.conversationId).catch(() => undefined);
+    const message = await this.prisma.message.findUniqueOrThrow({ where: { id: plan.messageId }, include: MESSAGE_INCLUDE });
+    const presented = this.present(message);
+    this.gateway.emitMessage(tenantId, presented);
+    await this.refreshAfterDeletion(tenantId, plan.conversationId);
+    return { message: presented, forEveryone: outcome.forEveryone, notice };
+  }
+
+  /** Conteúdo original de uma apagada. A rota exige `conversations.view_deleted`. */
+  async deletedOriginal(tenantId: string, conversationId: string, messageId: string): Promise<DeletedMessageOriginal> {
+    const m = await this.prisma.message.findFirst({ where: { id: messageId, conversationId, deletedAt: { not: null }, conversation: { tenantId } } });
+    if (!m?.deletedAt) throw new NotFoundException('Mensagem apagada não encontrada');
+    return {
+      id: m.id,
+      type: m.type,
+      text: m.text,
+      mediaUrl: m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl,
+      mediaMime: m.mediaMime,
+      mediaName: m.mediaName,
+      content: m.content as unknown as MessageContent | null,
+      deletedAt: m.deletedAt.toISOString(),
+      deletedByName: m.deletedByName,
+      deletedForEveryone: m.deletedForEveryone,
+    };
+  }
+
+  /**
+   * Limpar o histórico: apaga todas as mensagens da conversa **só no painel** (pedir ao provider
+   * uma a uma seria uma rajada de chamadas no número — risco de bloqueio). O que estava na fila
+   * é cancelado. A conversa continua existindo: é a linha do tempo com a pessoa, e se ela
+   * escrever de novo a conversa segue de onde está.
+   */
+  async clearHistory(tenantId: string, actor: Viewer & { name: string }, conversationId: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, select: { id: true } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    const mark = { deletedAt: new Date(), deletedById: actor.id, deletedByName: actor.name, deletedForEveryone: false };
+    const r = await this.prisma.$transaction(async (tx) => {
+      const cancelled = await tx.message.updateMany({ where: { conversationId, deletedAt: null, status: 'pending', direction: 'out', internal: false }, data: { ...mark, status: 'failed', error: CANCELED_SEND } });
+      const rest = await tx.message.updateMany({ where: { conversationId, deletedAt: null }, data: mark });
+      const total = cancelled.count + rest.count;
+      if (!total) throw new BadRequestException('Não há mensagens para apagar nesta conversa.');
+      const reason = `${total} ${total === 1 ? 'mensagem apagada' : 'mensagens apagadas'} só no painel${cancelled.count ? ` · ${cancelled.count} ${cancelled.count === 1 ? 'envio cancelado' : 'envios cancelados'}` : ''}`;
+      await this.registrar({ tenantId, conversationId, type: 'history_cleared', actorId: actor.id, reason }, tx);
+      return { cleared: total, cancelled: cancelled.count };
+    });
+    const updated = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { lastMessagePreview: '🚫 Histórico apagado', summaryCache: null, summaryLastMessageId: null, summaryUpdatedAt: null },
+    });
+    this.gateway.emitConversation(tenantId, updated);
+    this.gateway.emitMessagesCleared(tenantId, conversationId);
+    return r;
+  }
+
+  /** Prévia do card e resumo da IA não podem continuar mostrando o que foi apagado. */
+  private async refreshAfterDeletion(tenantId: string, conversationId: string) {
+    const last = await this.prisma.message.findFirst({ where: { conversationId, internal: false }, orderBy: { createdAt: 'desc' }, select: { deletedAt: true } });
+    const conv = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { summaryCache: null, summaryLastMessageId: null, summaryUpdatedAt: null, ...(last?.deletedAt && { lastMessagePreview: DELETED_MESSAGE_LABEL }) },
+    });
+    this.gateway.emitConversation(tenantId, conv);
   }
 
   /**
@@ -857,10 +1012,10 @@ export class ConversationsService {
     outcome?: ConversationOutcome | null;
     outcomeValue?: Prisma.Decimal | null;
     reason?: string | null;
-  }) {
+  }, db: Prisma.TransactionClient = this.prisma) {
     // super_admin não tem linha em `users` deste tenant: entra como sistema, senão a FK quebra
-    const actorId = e.actorId && (await this.prisma.user.findFirst({ where: { id: e.actorId, tenantId: e.tenantId }, select: { id: true } })) ? e.actorId : null;
-    await this.prisma.conversationEvent.create({ data: { ...e, actorId } });
+    const actorId = e.actorId && (await db.user.findFirst({ where: { id: e.actorId, tenantId: e.tenantId }, select: { id: true } })) ? e.actorId : null;
+    await db.conversationEvent.create({ data: { ...e, actorId } });
   }
 
   /** Linha do tempo do atendimento, do mais recente para o mais antigo. */
@@ -993,4 +1148,17 @@ export function textoParaEncaminhar(text: string | null, content: MessageContent
 /** Texto do histórico: "Vendas → Suporte", "Sem departamento → Vendas". */
 export function departmentChangeReason(from?: string | null, to?: string | null) {
   return `${from ?? 'Sem departamento'} → ${to ?? 'Sem departamento'}`;
+}
+
+/**
+ * Texto do evento de auditoria. Diz O QUE foi apagado e ONDE, nunca o conteúdo: o histórico do
+ * atendimento é aberto a quem vê a conversa, e o original é só para `conversations.view_deleted`.
+ */
+function motivoDaExclusao(m: { internal: boolean; direction: MessageDirection; authorId: string | null; externalId: string | null; deletedForEveryone: boolean }, cancelled: boolean) {
+  if (m.internal) return 'Nota interna';
+  if (m.direction === 'in') return 'Mensagem recebida do contato · apagada só no painel';
+  const quem = m.authorId ? 'Mensagem enviada pela equipe' : 'Mensagem enviada pela automação';
+  if (cancelled) return `${quem} · envio cancelado antes de sair`;
+  if (m.deletedForEveryone) return `${quem} · apagada também no WhatsApp do contato`;
+  return m.externalId ? `${quem} · apagada só no painel (continua no WhatsApp do contato)` : `${quem} · não tinha chegado ao contato`;
 }

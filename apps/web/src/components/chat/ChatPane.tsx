@@ -1,6 +1,7 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, Star, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2 } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, Star, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
@@ -10,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useDeletedOriginal, useClearHistory, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
@@ -20,7 +21,7 @@ import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { ComposerBar } from './ComposerBar';
 import { QUICK_REPLY_EVENT, QuickReplyCountdown, type QuickReplyEventDetail, type QuickReplyPending } from './QuickReplyCountdown';
-import { QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
+import { OWN_MESSAGE_DELETE_WINDOW_MS, QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
 import { HistorySheet } from './HistorySheet';
 import { BotPauseBar } from './BotPauseBar';
 import { AudioRecorder } from './AudioRecorder';
@@ -59,6 +60,17 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   // permissão, não papel (ver ConversationList)
   const podeTransferir = useCan('conversations.transfer_any');
   const podeNota = useCan('conversations.internal_note');
+  // Apagar (docs/apagar-mensagens.md): a própria mensagem recente qualquer um apaga; o resto é
+  // `delete_message`. A API corta de novo — aqui é só para não oferecer o que vai dar 403.
+  const podeApagarQualquer = useCan('conversations.delete_message');
+  const podeVerApagada = useCan('conversations.view_deleted');
+  const podeLimpar = useCan('conversations.delete_chat');
+  const [apagando, setApagando] = useState<Message | null>(null);
+  const [limpando, setLimpando] = useState(false);
+  const apagar = useDeleteMessage();
+  const limpar = useClearHistory();
+  const podeApagar = (m: Message) =>
+    !m.deletedAt && (podeApagarQualquer || (m.direction === 'out' && !!m.authorId && m.authorId === me.data?.id && Date.now() - new Date(m.createdAt).getTime() < OWN_MESSAGE_DELETE_WINDOW_MS));
   const mine = !!conv && conv.assignee?.id === me.data?.id;
   const ownedByOther = !!conv && !!conv.assignee && !mine;
   // Modo nota interna: o composer vira âmbar e o que sai é NOTA (só a equipe vê, nunca vai ao
@@ -555,6 +567,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <Button size="sm" variant="ghost" icon={<History size={14} />} onClick={() => setHistorico(true)} title="Quem assumiu, transferiu e encerrou — e quando">
           <span className="hidden lg:inline">Histórico</span>
         </Button>
+        {podeLimpar && (
+          <Button size="sm" variant="ghost" icon={<Eraser size={14} />} onClick={() => setLimpando(true)} title="Limpar o histórico desta conversa (fica registrado quem limpou)" aria-label="Limpar histórico" />
+        )}
         {conv.status !== 'closed' ? (
           <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
             <span className="hidden sm:inline">Encerrar</span>
@@ -611,13 +626,39 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} onEncaminhar={setEncaminhando} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} /></Fragment>)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
       </div>
 
       {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} />}
       {historico && <HistorySheet conversationId={conv.id} onClose={() => setHistorico(false)} />}
+      <ConfirmDialog
+        open={!!apagando}
+        title="Apagar mensagem?"
+        danger
+        confirmLabel="Apagar"
+        text={apagando?.internal
+          ? 'A nota sai do histórico e fica no lugar o registro de quem apagou e quando.'
+          : apagando?.direction === 'in'
+            ? 'A mensagem do contato some do painel (no celular dele ela continua). Fica no lugar o registro de quem apagou e quando.'
+            : 'Se foi enviada há menos de 2 dias, o WhatsApp também tenta apagar no celular do contato (a API oficial da Meta não permite). No painel fica o registro de quem apagou e quando.'}
+        onConfirm={() => apagando ? apagar.mutateAsync({ conversationId: apagando.conversationId, messageId: apagando.id })
+          .then((r) => (r.notice ? toast.warn(r.notice) : toast.ok(r.forEveryone ? 'Mensagem apagada para todos' : 'Mensagem apagada')))
+          .catch((err) => { toast.err(err); throw err; }) : undefined}
+        onClose={() => setApagando(null)}
+      />
+      <ConfirmDialog
+        open={limpando}
+        title="Limpar o histórico desta conversa?"
+        danger
+        confirmLabel="Limpar histórico"
+        text="Todas as mensagens somem do painel (no celular do contato continuam) e o que ainda estava na fila de envio é cancelado. Fica registrado quem limpou e quando. A conversa continua existindo."
+        onConfirm={() => limpar.mutateAsync(conv.id)
+          .then((r) => toast.ok(`${r.cleared} ${r.cleared === 1 ? 'mensagem apagada' : 'mensagens apagadas'}`))
+          .catch((err) => { toast.err(err); throw err; })}
+        onClose={() => setLimpando(false)}
+      />
 
       {encaminhando && <ForwardModal message={encaminhando} onClose={() => setEncaminhando(null)} />}
       {vendoImagem && indiceImagem >= 0 && (
@@ -778,10 +819,11 @@ export function resumoDaMensagem(m: Message): string {
   return messagePreview(m);
 }
 
-function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, citada }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; citada?: Message }) {
+function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, onApagar, podeVerApagada, citada }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message }) {
   const out = m.direction === 'out';
   const resend = useResend();
   const estruturado = structuredBody(m);
+  if (m.deletedAt) return <MensagemApagada m={m} podeVer={podeVerApagada} />;
   if (m.internal) {
     // `author` some se o usuário for removido; `authorName` é o nome gravado na nota.
     // Sem nenhum dos dois = aviso do sistema (fluxo, agenda).
@@ -793,6 +835,7 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, citada }
             <StickyNote size={12} className="shrink-0" />
             <span className="flex-1 min-w-0 truncate">{autor ? <>Nota interna adicionada por <b>{autor}</b></> : <b>Aviso automático do sistema</b>}</span>
             <span className="tnum font-mono text-[10px] text-warn-ink/70">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+            {onApagar && <button type="button" onClick={() => onApagar(m)} title="Apagar nota" aria-label="Apagar nota" className="text-warn-ink/70 hover:text-danger p-0.5"><Trash2 size={12} /></button>}
           </div>
           <p className="whitespace-pre-wrap break-words text-ink">{m.text}</p>
           <div className="flex items-center gap-1 text-[10px] text-warn-ink/70 mt-1"><Lock size={10} /> Visível apenas para a equipe</div>
@@ -802,7 +845,7 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, citada }
   }
   return (
     <div id={`msg-${m.id}`} className={cn('group flex items-center gap-1 rounded-lg transition-colors duration-700', out ? 'justify-end' : 'justify-start')}>
-      {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} podeReagir={canResend} />}
+      {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} podeReagir={canResend} />}
       <div className={cn('relative max-w-[72%] px-2.5 py-1.5 text-[13px]', m.reactions?.length && 'mb-3', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
         {m.forwarded && <ForwardedLabel score={m.forwardingScore} />}
         <Citacao m={m} citada={citada} />
@@ -833,7 +876,51 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, citada }
           </div>
         )}
       </div>
-      {!out && <AcoesDaBolha m={m} out={false} onResponder={onResponder} onEncaminhar={onEncaminhar} podeReagir={canResend} />}
+      {!out && <AcoesDaBolha m={m} out={false} onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} podeReagir={canResend} />}
+    </div>
+  );
+}
+
+/**
+ * O que fica no lugar da mensagem apagada: ela não some sem rastro (docs/apagar-mensagens.md).
+ * A API já manda sem conteúdo; quem tem `conversations.view_deleted` pode abrir o original.
+ */
+function MensagemApagada({ m, podeVer }: { m: Message; podeVer: boolean }) {
+  const [vendo, setVendo] = useState(false);
+  const original = useDeletedOriginal(m, podeVer && vendo);
+  const quando = new Date(m.deletedAt!).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const lado = m.internal ? 'justify-center' : m.direction === 'out' ? 'justify-end' : 'justify-start';
+  const o = original.data;
+  return (
+    <div id={`msg-${m.id}`} className={cn('flex my-0.5', lado)}>
+      <div className="max-w-[72%] rounded-2xl border border-dashed border-line bg-panel/70 px-2.5 py-1.5 text-[12px] text-muted italic">
+        <div className="flex items-center gap-1.5">
+          <Ban size={12} className="shrink-0" />
+          <span className="flex-1 min-w-0">
+            {m.internal ? 'Nota apagada' : 'Mensagem apagada'} por <b className="not-italic">{m.deletedByName ?? 'usuário removido'}</b> em <span className="tnum not-italic">{quando}</span>
+            {m.deletedForEveryone && ' · também no WhatsApp do contato'}
+          </span>
+          {podeVer && (
+            <button type="button" onClick={() => setVendo((v) => !v)} title={vendo ? 'Esconder o original' : 'Ver o conteúdo original (auditoria)'} aria-label={vendo ? 'Esconder o original' : 'Ver o original'} className="not-italic text-faint hover:text-ink p-0.5">
+              {vendo ? <EyeOff size={12} /> : <Eye size={12} />}
+            </button>
+          )}
+        </div>
+        {vendo && (
+          <div className="mt-1.5 not-italic text-ink border-t border-line pt-1.5">
+            {original.isLoading && <span className="text-muted">Carregando…</span>}
+            {original.error && <span className="text-danger">{original.error instanceof Error ? original.error.message : 'Não foi possível carregar o original'}</span>}
+            {o && (
+              <>
+                {o.mediaUrl && (o.type === 'image' || o.type === 'sticker'
+                  ? <img src={o.mediaUrl} alt="" className="rounded-md max-h-48 max-w-full object-contain mb-1" />
+                  : <a href={o.mediaUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-accent hover:underline mb-1"><FileText size={13} /> {o.mediaName ?? labelOf(o.type)}</a>)}
+                <p className="whitespace-pre-wrap break-words">{messagePreview({ type: o.type, text: o.text, content: o.content, mediaName: o.mediaName })}</p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -872,14 +959,16 @@ function mudouODia(anterior: Message | undefined, atual: Message) {
  * Ações que aparecem no hover, do lado de fora da bolha (para não roubar espaço do texto).
  * Ficam do lado de dentro da conversa: à esquerda das enviadas, à direita das recebidas.
  * Só para mensagem que chegou ao WhatsApp — sem `externalId` não há o que citar nem reagir.
+ * Apagar é a exceção: pendente (cancela o envio) e com falha também saem do histórico.
  */
-function AcoesDaBolha({ m, out, onResponder, onEncaminhar, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; podeReagir: boolean }) {
-  if (!m.externalId) return null;
+function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeReagir: boolean }) {
+  const apagar = onApagar && <BotaoAcao titulo="Apagar" onClick={() => onApagar(m)}><Trash2 size={14} /></BotaoAcao>;
+  if (!m.externalId) return apagar ? <div className="flex items-center shrink-0">{apagar}</div> : null;
   const reagir = podeReagir && m.status !== 'pending' && m.status !== 'failed' && <BotaoReagir m={m} out={out} />;
   const responder = onResponder && <BotaoResponder m={m} onResponder={onResponder} />;
   // figurinha não sai pelos providers; o resto vira envio normal (mídia, texto ou link)
   const encaminhar = onEncaminhar && m.type !== 'sticker' && <BotaoAcao titulo="Encaminhar" onClick={() => onEncaminhar(m)}><Forward size={14} /></BotaoAcao>;
-  return <div className="flex items-center shrink-0">{out ? <>{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}</>}</div>;
+  return <div className="flex items-center shrink-0">{out ? <>{apagar}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{apagar}</>}</div>;
 }
 
 function BotaoAcao({ titulo, onClick, children }: { titulo: string; onClick: () => void; children: React.ReactNode }) {

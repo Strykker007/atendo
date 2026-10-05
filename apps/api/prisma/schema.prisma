@@ -526,6 +526,10 @@ enum ConversationEventType {
   bot_resumed
   /// departamento trocado; `reason` = "Vendas → Suporte". Ator nulo = fluxo
   department_changed
+  /// mensagem apagada (docs/apagar-mensagens.md); `reason` = qual e se saiu do celular do contato
+  message_deleted
+  /// histórico da conversa limpo; `reason` = quantas mensagens
+  history_cleared
 }
 
 /// Histórico do atendimento — quem fez o quê e quando.
@@ -622,6 +626,16 @@ model Message {
   queuedAt       DateTime         @default(now())
   /// chave de idempotência do envio (clique duplo, reenvio do front, retry do job): repetida = mesma mensagem
   idempotencyKey String?
+  // ---- apagada (docs/apagar-mensagens.md) ----
+  /// Preenchido = apagada. A linha NUNCA sai do banco (é o ledger de uso e o registro de
+  /// auditoria): o conteúdo original continua aqui, `present()` o esconde de todo mundo e só
+  /// `conversations.view_deleted` o lê, por rota própria.
+  deletedAt          DateTime?
+  /// quem apagou. Sem FK de propósito: a marca sobrevive à remoção do usuário (o nome fica abaixo)
+  deletedById        String?
+  deletedByName      String?
+  /// true = o provider apagou também no celular do contato ("apagar para todos")
+  deletedForEveryone Boolean   @default(false)
   createdAt      DateTime         @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

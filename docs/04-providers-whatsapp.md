@@ -13,6 +13,7 @@ interface WhatsAppProvider {
   getStatus(ctx): Promise<NumberStatus>;
   send(ctx, OutboundMessage): Promise<SendResult>;
   markRead(ctx, externalMessageId): Promise<void>;
+  revoke?(ctx, { to, externalId }): Promise<void>; // "apagar para todos" de mensagem nossa. Só Evolution (`DELETE /chat/deleteMessageForEveryone`, key com fromMe: true); a Cloud API da Meta não tem — ver apagar-mensagens.md
   react(ctx, { to, targetExternalId, targetFromMe, emoji }): Promise<void>; // emoji vazio = retirar. Meta: mensagem `type: 'reaction'`; Evolution: `POST /message/sendReaction` com a key (remoteJid + fromMe + id)
   verifyWebhook(headers, rawBody): void;        // lança se inválido
   parseWebhook(body): ParsedWebhook;            // → InboundMessage[], StatusUpdate[], connection?

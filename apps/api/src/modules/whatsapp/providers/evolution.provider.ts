@@ -5,7 +5,7 @@ import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '
 import { env } from '../../../config/env';
 import { lerCitacao } from './quoted';
 import { contextInfoDe, desembrulhar, lerConteudo, lerEdicao } from './evolution-content';
-import type { MediaPayload, NumberContext, OutboundReaction, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { MediaPayload, NumberContext, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError, ProviderSendError } from './provider-error';
 
 /** providerConfig de um número Evolution */
@@ -188,6 +188,14 @@ export class EvolutionProvider implements WhatsAppProvider {
         key: { remoteJid: `${r.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: r.targetFromMe, id: r.targetExternalId },
         reaction: r.emoji,
       }),
+    }, this.shard(ctx));
+  }
+
+  /** Apagar para todos: a Evolution acha a mensagem pela key (chat + id + fromMe). */
+  async revoke(ctx: NumberContext, t: OutboundRevoke) {
+    await this.api(`/chat/deleteMessageForEveryone/${this.instance(ctx)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ id: t.externalId, remoteJid: `${t.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: true }),
     }, this.shard(ctx));
   }
 

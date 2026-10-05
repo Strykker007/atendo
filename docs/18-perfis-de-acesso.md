@@ -19,12 +19,12 @@ Quem autoriza é o **perfil de acesso** (`AccessProfile`), que cada cliente mont
 
 ### Catálogo (`packages/shared/src/permissions.ts`)
 
-Lista **fechada** de 14 permissões. Perfil nunca guarda permissão que o código não conheça —
+Lista **fechada** de 18 permissões. Perfil nunca guarda permissão que o código não conheça —
 senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 | Grupo | Permissões |
 |---|---|
-| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `contacts.edit` |
+| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.view_deleted`, `contacts.edit` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `agenda.manage` |
 | Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
 | Conta | `numbers.manage`, `billing.manage` |
@@ -34,7 +34,9 @@ perfis. Em particular, `agent` inclui `quick_replies.manage` e `reports.view`: n
 era restrito, e tirá-los na migração seria perder acesso sem ninguém pedir. Depois disso,
 `agent` ganhou `conversations.internal_note` (passagem de bastão entre atendentes): a migration
 `agent_internal_note` acrescenta a permissão aos perfis "Atendente" padrão **não editados**
-(`customized = false`); perfil editado pelo cliente fica como está.
+(`customized = false`); perfil editado pelo cliente fica como está. As três de apagar
+(`delete_message`, `delete_chat`, `view_deleted`) entraram do mesmo jeito nos perfis padrão Gerente e
+Administrador (migration `message_delete`) — regras em [Apagar mensagens](apagar-mensagens.md).
 
 ## Como é aplicado
 
@@ -136,6 +138,9 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `conversations.view_all` | aba "Atendendo" vs "Minhas", seletor de atendente na lista |
 | `conversations.transfer_any` | menu Transferir/Devolver no cabeçalho do chat |
 | `conversations.internal_note` | modo nota interna |
+| `conversations.delete_message` | lixeira no hover de qualquer mensagem (sem ela, só nas próprias com menos de 2 dias) |
+| `conversations.delete_chat` | botão "Limpar histórico" no cabeçalho do chat |
+| `conversations.view_deleted` | olho no aviso "Mensagem apagada por…" para ver o original |
 | `contacts.edit` | ficha do contato fica só de leitura, com o motivo escrito |
 | `tags.manage`, `flows.manage`, `agenda.manage`, `team.manage`, `reports.view`, `billing.manage` | item somem do menu lateral; `reports.view` também barra a rota direta |
 | `quick_replies.manage` | botões de editar em /respostas |

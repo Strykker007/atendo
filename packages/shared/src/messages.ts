@@ -130,7 +130,8 @@ export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {
 };
 
 /** Prévia de uma linha (lista de conversas, citação): o texto, ou o rótulo do conteúdo. */
-export function messagePreview(m: { type: MessageType | string; text?: string | null; content?: MessageContent | null; mediaName?: string | null }): string {
+export function messagePreview(m: { type: MessageType | string; text?: string | null; content?: MessageContent | null; mediaName?: string | null; deletedAt?: string | Date | null }): string {
+  if (m.deletedAt) return DELETED_MESSAGE_LABEL;
   const t = m.text?.trim();
   if (t) return t;
   const c = m.content;
@@ -244,4 +245,36 @@ export interface MessageDTO {
   /** encaminhada (pelo contato, ou pelo atendente via "Encaminhar") */
   forwarded: boolean;
   createdAt: string;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Apagar mensagem (docs/apagar-mensagens.md)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Até quando o WhatsApp aceita "apagar para todos" (cerca de 2 dias depois do envio). Passou
+ * disso, o provider recusa — a mensagem é apagada só no painel e o atendente é avisado.
+ */
+export const MESSAGE_REVOKE_WINDOW_MS = 48 * 60 * 60 * 1000;
+/**
+ * Quanto tempo quem enviou tem para apagar a PRÓPRIA mensagem sem `conversations.delete_message`.
+ * Igual à janela do provider: depois dela nem o WhatsApp apaga, e o que sobra é esconder do
+ * histórico — decisão de gerente.
+ */
+export const OWN_MESSAGE_DELETE_WINDOW_MS = MESSAGE_REVOKE_WINDOW_MS;
+export const DELETED_MESSAGE_LABEL = '🚫 Mensagem apagada';
+
+/** Conteúdo original de uma mensagem apagada — só para `conversations.view_deleted`. */
+export interface DeletedMessageOriginal {
+  id: string;
+  type: string;
+  text: string | null;
+  /** URL assinada e temporária (a chave no storage nunca sai da API) */
+  mediaUrl: string | null;
+  mediaMime: string | null;
+  mediaName: string | null;
+  content: MessageContent | null;
+  deletedAt: string;
+  deletedByName: string | null;
+  deletedForEveryone: boolean;
 }

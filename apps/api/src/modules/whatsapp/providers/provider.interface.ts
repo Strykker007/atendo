@@ -26,6 +26,14 @@ export interface OutboundReaction {
   emoji: string;
 }
 
+/** Mensagem nossa a apagar no celular do contato ("apagar para todos"). */
+export interface OutboundRevoke {
+  /** telefone do contato em E.164 */
+  to: string;
+  /** id no provider da mensagem enviada */
+  externalId: string;
+}
+
 export interface ParsedWebhook {
   messages: InboundMessage[];
   statuses: StatusUpdate[];
@@ -80,6 +88,12 @@ export interface WhatsAppProvider {
   markRead(ctx: NumberContext, externalMessageId: string): Promise<void>;
   /** Reage a uma mensagem. Não é mensagem: não gera id, não entra no histórico. Lança se o provider recusar. */
   react(ctx: NumberContext, reaction: OutboundReaction): Promise<void>;
+  /**
+   * "Apagar para todos" de uma mensagem que NÓS enviamos. Opcional: a Cloud API da Meta não
+   * tem essa operação — sem o método, a mensagem é apagada só no painel. Lança se o provider
+   * recusar (prazo do WhatsApp, mensagem inexistente).
+   */
+  revoke?(ctx: NumberContext, target: OutboundRevoke): Promise<void>;
   /**
    * Pede ao WhatsApp para avisar quando o contato digitar/gravar (`presence.update`). Sem
    * isto o "digitando…" nunca chega. Opcional: a Meta não tem esse recurso.

@@ -66,6 +66,10 @@ export function useRealtime() {
       // a mensagem chegou: quem estava digitando terminou (o "parou" pode vir depois ou nunca)
       if (m.direction === 'in') qc.setQueryData<Typing>(['typing', m.conversationId], null);
     });
+    // histórico limpo: um evento só, a conversa recarrega já sem o conteúdo
+    socket.on('messages_cleared', (e: { conversationId: string }) => {
+      qc.invalidateQueries({ queryKey: ['messages', e.conversationId] });
+    });
     socket.on('typing', (e: TypingEvent) => {
       const next: Typing = e.state === 'paused' ? null : { state: e.state, at: Date.now() };
       qc.setQueryData<Typing>(['typing', e.conversationId], next);

@@ -11,7 +11,7 @@ import type { TypingEvent } from '@atendo/shared';
 import { env } from '../../config/env';
 
 /**
- * Cada tenant tem uma "sala". Eventos: message, conversation, number, appointment, kanban, typing.
+ * Cada tenant tem uma "sala". Eventos: message, messages_cleared, conversation, number, appointment, kanban, typing.
  *
  * O worker (`worker.ts`) não tem servidor Socket.IO — sem isto, todo evento emitido por um job
  * que caiu lá (mensagem recebida, status do envio) sumia em silêncio. Nesse caso publicamos
@@ -65,6 +65,13 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
   /** Contato digitando/gravando. Efêmero: o painel esconde sozinho se o "parou" não chegar. */
   emitTyping(tenantId: string, event: TypingEvent) {
     this.room(tenantId).emit('typing', event);
+  }
+  /**
+   * Histórico da conversa limpo. Um evento só em vez de um `message` por mensagem apagada: o
+   * painel recarrega a conversa (que já vem redigida pelo `present()`).
+   */
+  emitMessagesCleared(tenantId: string, conversationId: string) {
+    this.room(tenantId).emit('messages_cleared', { conversationId });
   }
   /** Colunas do Kanban mudaram (ordem, tag virou/deixou de ser etapa, renomeada, excluída). */
   emitKanban(tenantId: string) {

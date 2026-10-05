@@ -3,7 +3,7 @@ import { WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { ProviderRegistry } from './providers/provider.registry';
-import type { NumberContext, OutboundReaction } from './providers/provider.interface';
+import type { NumberContext, OutboundReaction, OutboundRevoke } from './providers/provider.interface';
 import type { MetaNumberConfig } from './providers/meta.provider';
 import type { EvolutionNumberConfig } from './providers/evolution.provider';
 
@@ -38,6 +38,18 @@ export class NumbersService {
   async react(numberId: string, reaction: OutboundReaction) {
     const ctx = await this.context(numberId);
     await this.registry.get(ctx.provider).react(ctx, reaction);
+  }
+
+  /**
+   * Apagar para todos. `false` = o provider do número não tem essa operação (Meta); lança se o
+   * provider recusar. Quem chama decide o que fazer — apagar só no painel e avisar.
+   */
+  async revoke(numberId: string, target: OutboundRevoke): Promise<boolean> {
+    const ctx = await this.context(numberId);
+    const provider = this.registry.get(ctx.provider);
+    if (!provider.revoke) return false;
+    await provider.revoke(ctx, target);
+    return true;
   }
 
   async context(numberId: string): Promise<NumberContext & { provider: ProviderKind }> {
