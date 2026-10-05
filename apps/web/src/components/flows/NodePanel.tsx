@@ -461,7 +461,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                   </div>
                   {lockedTotal > 100 && <p className="font-medium text-danger-ink tnum">Os ramos fixados somam {lockedTotal}% — passa de 100%. Reduza algum valor para distribuir o restante.</p>}
                 </div>
-                <p className="text-[11px] text-muted">Dica: preencha os valores desejados e clique em "Distribuir restante" para ajustar os outros ramos.</p>
+                <p className="text-[11px] text-muted">Dica: preencha os valores desejados e clique em &ldquo;Distribuir restante&rdquo; para ajustar os outros ramos.</p>
               </div>
             </Field>
           );
