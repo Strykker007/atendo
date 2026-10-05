@@ -295,7 +295,7 @@ export class FlowsController {
     const conv = await this.prisma.conversation.findFirstOrThrow({ where: { id: dto.conversationId, tenantId: u.tenantId } });
     if (botPaused(conv)) {
       // decisão da tarefa 1.5: a tela pede confirmação (409 `bot_paused`) e, confirmado, retoma o robô e inicia
-      if (!dto.resumeBot) throw new ConflictException({ code: 'bot_paused', message: 'O robô está pausado nesta conversa. Retomar o robô e iniciar o fluxo?' });
+      if (!dto.resumeBot) throw new ConflictException({ code: 'bot_paused', message: 'Os fluxos estão pausados nesta conversa. Retomar e iniciar o fluxo?' });
       await this.engine.resumeBot(u.tenantId, conv.id, u);
     }
     return this.engine.start(id, dto.conversationId, u.id);

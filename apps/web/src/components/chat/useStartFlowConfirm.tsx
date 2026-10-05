@@ -23,11 +23,11 @@ export function useStartFlowConfirm() {
   const dialog = (
     <ConfirmDialog
       open={!!pending}
-      title="Robô pausado nesta conversa"
-      text={`Para iniciar "${pending?.flowName ?? ''}", o robô volta a funcionar nesta conversa. Retomar o robô e iniciar o fluxo?`}
+      title="Fluxo pausado nesta conversa"
+      text={`Para iniciar "${pending?.flowName ?? ''}", os fluxos voltam a funcionar nesta conversa. Retomar e iniciar o fluxo?`}
       confirmLabel="Retomar e iniciar"
       onClose={() => setPending(null)}
-      onConfirm={() => { if (!pending) return; return start.mutateAsync({ flowId: pending.flowId, conversationId: pending.conversationId, resumeBot: true }).then(() => toast.ok(`Robô retomado. ${pending.okText}`)).catch(toast.err); }}
+      onConfirm={() => { if (!pending) return; return start.mutateAsync({ flowId: pending.flowId, conversationId: pending.conversationId, resumeBot: true }).then(() => toast.ok(`Fluxo retomado. ${pending.okText}`)).catch(toast.err); }}
     />
   );
   return { run, dialog, start };

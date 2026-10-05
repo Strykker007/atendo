@@ -135,7 +135,7 @@ function FlowsTab() {
           );
         })}
       </ul>
-      <p className="px-3 py-3 text-[10.5px] text-faint">Enquanto o fluxo roda, o robô responde. Você pode parar a qualquer momento no cabeçalho da conversa. <Link href="/fluxos" className="underline">Gerenciar fluxos</Link></p>
+      <p className="px-3 py-3 text-[10.5px] text-faint">Enquanto o fluxo roda, ele responde sozinho. Você pode parar a qualquer momento no cabeçalho da conversa. <Link href="/fluxos" className="underline">Gerenciar fluxos</Link></p>
     </div>
   );
 }

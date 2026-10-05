@@ -212,19 +212,19 @@ Tarefa 1.5. O atendente desliga a automação **só na conversa aberta**; os out
 **Enquanto pausado** (`FlowEngineService`):
 - `pauseBot` grava a pausa e chama `stop` → o run ativo termina `stopped` com `error = "robô pausado na conversa"`.
 - `onInbound`: mensagem não inicia fluxo (gatilho, padrão), não entrega resposta a run e não manda boas-vindas. **A mensagem da faixa de horário (ex.: Fechado) continua saindo**, uma vez por período — mudança da tarefa 2 (antes, pausado não recebia nem o aviso de fora do expediente); fluxo de faixa não inicia. Ver [Horários](horarios.md#comportamento-ao-receber-mensagem). A resposta "1/2" a lembrete de agendamento (`SchedulingService.onInbound`) continua funcionando — não é fluxo.
-- `start` recusa (400 "O robô está pausado…"). **Disparo manual** pelo atendente (`POST /flows/:id/start`): responde 409 `{ code: 'bot_paused' }`; a tela pede confirmação ("Retomar o robô e iniciar o fluxo?", `components/chat/useStartFlowConfirm.tsx`) e, confirmado, reenvia com `resumeBot: true` — a API retoma o robô (evento `bot_resumed` com o atendente) e inicia.
+- `start` recusa (400 "Os fluxos estão pausados…"). **Disparo manual** pelo atendente (`POST /flows/:id/start`): responde 409 `{ code: 'bot_paused' }`; a tela pede confirmação ("Retomar e iniciar o fluxo?", `components/chat/useStartFlowConfirm.tsx`) e, confirmado, reenvia com `resumeBot: true` — a API retoma o robô (evento `bot_resumed` com o atendente) e inicia.
 - Rotas de pausar/retomar exigem a feature `flows` do plano (`@RequireFeature('flows')`). O fim da pausa (`botPausedUntil`) é gravado em UTC e a tela mostra no fuso do navegador de quem lê.
 - `resume` (job do Atraso/intervalo do Conteúdo), `replyTimeout` (tempo limite do Salvar/Menu) e cada passo de `advance` checam `botPaused(run.conversation)` e encerram o run como `stopped` em vez de executar. Os jobs usam `jobBlocked`, que também encerra o run se a conversa estiver **encerrada**. **Todo job novo do motor** deve usar `jobBlocked` antes de agir.
 
 **Fim da pausa**:
 - Automático: job `unpause` na fila `flows` (delay até `botPausedUntil`, `jobId = unpause-<conversa>-<pausedAt ms>`). Só limpa se `botPausedAt` ainda é o da pausa que agendou — pausar de novo ou retomar à mão deixa o job antigo sem efeito. Se o job atrasar, a primeira mensagem do contato depois do horário já limpa a pausa (`onInbound`) e segue normal.
-- Manual: "Retomar robô".
+- Manual: "Retomar fluxo".
 - Em ambos, **a execução interrompida não volta**: a próxima mensagem do contato passa pelas regras de entrada (faixa de horário, gatilho, fluxo padrão).
 - Encerrar o atendimento (`setStatus`, `setStatusSystem` — inclusive Fim com "encerrar conversa" —, encerrar em massa e `sendToPhone` com `closeAfter`) limpa a pausa. O fluxo de encerramento (pesquisa) roda normalmente, porque a pausa já foi limpa antes dele.
 
 **Histórico** (`conversation_events`): `bot_paused` (ator = quem pausou; `reason` = "por 30 min" / "por 1 h" / "por 4 h" / "até retomar manualmente") e `bot_resumed` (ator = quem retomou; nulo = automático, com `reason` "fim do tempo de pausa" ou "atendimento encerrado"). Aparece no "Histórico do atendimento".
 
-**Tela** (`components/chat/BotPauseBar.tsx`, só com a feature `flows`): botão "Pausar robô" abaixo do campo de mensagem → 30 min, 1 h, 4 h, até retomar. Pausado: no lugar dele, aviso "Robô pausado por <atendente> até <hora>" (ou "até retomar manualmente") + "Retomar robô". Selo "Robô pausado" no cabeçalho do chat e ícone no card da lista (no lugar do 🤖). Tempo real: toda mudança emite `conversation` pelo socket, que já invalida conversa, lista e histórico nos outros atendentes. A barra só aparece no campo normal de resposta (não no modo nota interna de gerente, número desconectado ou cota estourada); o selo aparece sempre.
+**Tela** (`components/chat/BotPauseBar.tsx`, só com a feature `flows`): botão "Pausar fluxo" abaixo do campo de mensagem → 30 min, 1 h, 4 h, até retomar. Pausado: no lugar dele, aviso "Fluxo pausado por <atendente> até <hora>" (ou "até retomar manualmente") + "Retomar fluxo". Selo "Fluxo pausado" no cabeçalho do chat e ícone no card da lista (no lugar do 🤖). Tempo real: toda mudança emite `conversation` pelo socket, que já invalida conversa, lista e histórico nos outros atendentes. A barra só aparece no campo normal de resposta (não no modo nota interna de gerente, número desconectado ou cota estourada); o selo aparece sempre.
 
 
 ## Menu

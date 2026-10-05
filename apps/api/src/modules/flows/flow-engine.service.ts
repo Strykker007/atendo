@@ -38,7 +38,7 @@ export interface ReplyTimeoutJob { runId: string; nodeId: string; until: string 
 export interface AutoContentJob { conversationId: string; items: ContentItem[] }
 export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob | AutoContentJob;
 
-const BOT_PAUSED_REASON = 'robô pausado na conversa';
+const BOT_PAUSED_REASON = 'fluxo pausado na conversa';
 const CLOSED_REASON = 'conversa encerrada';
 type JobConv = { botPausedAt: Date | null; botPausedUntil: Date | null; status: string };
 /**
@@ -95,7 +95,7 @@ export class FlowEngineService {
     if (!flow || !flow.isActive) throw new BadRequestException('Fluxo inexistente ou inativo');
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (!conv || conv.tenantId !== flow.tenantId) throw new BadRequestException('Conversa não encontrada');
-    if (botPaused(conv)) throw new BadRequestException('O robô está pausado nesta conversa. Retome o robô para iniciar um fluxo.');
+    if (botPaused(conv)) throw new BadRequestException('Os fluxos estão pausados nesta conversa. Retome para iniciar um fluxo.');
     const def = flow.definition as unknown as FlowDefinition;
     const startNode = def.nodes.find((n) => n.type === 'start');
     if (!startNode) throw new BadRequestException('Fluxo sem nó de início');

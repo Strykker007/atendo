@@ -202,10 +202,7 @@ O rótulo do número saiu da faixa de tags e foi para a linha da hora: embaixo, 
 
 Esse rótulo é o `ChannelBadge` (`components/chat/ChannelBadge.tsx`, antigo `NumberBadge`): pílula com fundo suave na **cor do número**, ícone do WhatsApp e nome em negrito. O texto é a cor misturada com `--ink` (`color-mix`) para continuar legível em cor clara e no tema escuro. Cor ausente ou fora de `#RRGGBB` cai no verde `#25D366`; cor dinâmica vai sempre por `style` (Tailwind não gera classe em runtime). Número desconectado ganha um ponto vermelho. `formatPhone` tira sufixo de JID (`@s.whatsapp.net`) e formata BR como `+55 DD XXXXX-XXXX`.
 
-O canal aparece em três lugares, porque o atendente precisa saber **por qual número está respondendo**:
-- **Lista:** selo sempre visível (mesmo filtrando um número) + faixa de 4px na cor do canal na **borda direita** da linha — a esquerda já é do semáforo de status.
-- **Cabeçalho do chat:** selo ao lado do nome do contato, com o telefone inteiro (`🟢 Vendas • +55 11 99999-8888`).
-- **Composer:** faixa "Enviando via: 🟢 Vendas (+55 11 98888-7777)" acima do campo. Número desconectado troca o composer por um alerta vermelho e bloqueia o envio.
+O canal aparece na **lista**: selo sempre visível (mesmo filtrando um número) + faixa de 4px na cor do canal na **borda direita** da linha — a esquerda já é do semáforo de status. Dentro do chat não há selo de canal (o do cabeçalho sobrepunha o nome e a faixa "Enviando via" acima do campo foi retirada a pedido). Número desconectado troca o composer por um alerta vermelho e bloqueia o envio.
 
 O envio manda `expectedNumberId` (o canal mostrado). Se a conversa mudou de número, a API responde 409 `number_changed` sem enviar: o `useSendMessage` recarrega a conversa e a tela mostra o toast com o canal novo, com o texto devolvido ao campo. `api()` lança `ApiError` (`status` + `code`) para a tela reagir pelo código, não pelo texto.
 
@@ -405,7 +402,7 @@ valor inicial. Por isso o hook só grava depois que o usuário mexeu, marcado no
 - Duplo clique (ou o botão no card, para o celular) abre `KanbanChatDialog`, que é o próprio `ChatPane` em modo embutido (`<ChatPane conversationId=…/>`): não lê nem mexe na seleção/filtros da tela de conversas. Envio, cota do plano, janela de 24h e posse são os mesmos do chat.
 - Não é feature paga e não tem limite próprio: se a cota de mensagens acabar, o `UsageBanner` global e o composer do mini-chat bloqueiam igual à tela de conversas.
 
-No chat, a tag principal aparece cheia e com estrela no cabeçalho, no `TagPicker` (clicar numa tag de coluna já selecionada a torna principal) e no card da `ConversationList`.
+No chat, a tag principal aparece cheia e com estrela no `TagPicker` (não fica mais repetida ao lado do nome no cabeçalho — sobrepunha o nome) (clicar numa tag de coluna já selecionada a torna principal) e no card da `ConversationList`.
 
 No card da `ConversationList` a linha de tags é única e tem altura fixa (`flex-nowrap`, `h-5`, pílulas com `truncate`), para todos os cards terem a mesma altura. Aparecem no máximo **2 tags** (`TAGS_NO_CARD`), nesta ordem: principal, demais do atendimento, depois as do contato (📌). O resto vira uma pílula `+N`; no hover, um tooltip mostra nome e cor das ocultas. Ele é renderizado por portal com `position: fixed` para a rolagem da lista não cortá-lo. O limite vale **só para o card**: o cabeçalho do chat e a ficha do contato continuam mostrando todas as tags.
 

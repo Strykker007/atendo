@@ -55,14 +55,14 @@ export function BotPauseBar({ conv }: { conv: Conversation }) {
     return (
       <div className="flex items-center gap-2 rounded-lg bg-warn-soft text-warn-ink px-2.5 py-1 text-[12px]">
         <BotOff size={14} className="shrink-0" />
-        <span className="flex-1 min-w-0 truncate">Robô pausado{quem && <> por <b>{quem}</b></>} {ate}</span>
+        <span className="flex-1 min-w-0 truncate">Fluxo pausado{quem && <> por <b>{quem}</b></>} {ate}</span>
         <button
           type="button"
           disabled={resume.isPending}
-          onClick={() => resume.mutateAsync(conv.id).then(() => toast.ok('Robô retomado nesta conversa')).catch(toast.err)}
+          onClick={() => resume.mutateAsync(conv.id).then(() => toast.ok('Fluxo retomado nesta conversa')).catch(toast.err)}
           className="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-semibold hover:bg-warn/15 disabled:opacity-50"
         >
-          <Play size={12} /> Retomar robô
+          <Play size={12} /> Retomar fluxo
         </button>
       </div>
     );
@@ -77,7 +77,7 @@ export function BotPauseBar({ conv }: { conv: Conversation }) {
         title="Pausar a automação só nesta conversa"
         className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-muted hover:text-ink hover:bg-field disabled:opacity-50"
       >
-        <BotOff size={14} /> Pausar robô
+        <BotOff size={14} /> Pausar fluxo
       </button>
       {aberto && (
         <div className="absolute bottom-full left-0 mb-1 z-30 w-56 rounded-xl border border-line bg-panel shadow-lg overflow-hidden py-1">
@@ -88,7 +88,7 @@ export function BotPauseBar({ conv }: { conv: Conversation }) {
               type="button"
               onClick={() => {
                 setAberto(false);
-                pause.mutateAsync({ conversationId: conv.id, minutes: d.minutes }).then(() => toast.ok('Robô pausado nesta conversa')).catch(toast.err);
+                pause.mutateAsync({ conversationId: conv.id, minutes: d.minutes }).then(() => toast.ok('Fluxo pausado nesta conversa')).catch(toast.err);
               }}
               className="w-full text-left px-3 py-1.5 text-[13px] text-ink hover:bg-field"
             >

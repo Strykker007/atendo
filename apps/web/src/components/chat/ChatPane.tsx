@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, Star, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -16,7 +16,7 @@ import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
 import { OriginBadge } from './OriginBadge';
-import { ChannelBadge, channelColor, channelOffline, formatPhone } from './ChannelBadge';
+import { channelOffline } from './ChannelBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { ComposerBar } from './ComposerBar';
@@ -478,18 +478,10 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-sm text-ink flex items-center gap-1.5 min-w-0">
             <span className="truncate">{conv.contact.name ?? `+${conv.contact.phone}`}</span>
-            {/* por qual número esta conversa responde — ao lado do nome, para não passar batido */}
-            <ChannelBadge channel={conv.number} phone="full" className="shrink-0" />
             <DepartmentBadge department={conv.department} className="shrink-0 max-w-[140px]" />
             {botPaused(conv) && (
               <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink" title="Automação pausada só nesta conversa">
-                <BotOff size={10} />Robô pausado
-              </span>
-            )}
-            {/* etapa do atendimento (tag principal) — a mesma coluna em que ele está no Kanban */}
-            {primaryTag && (
-              <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-white rounded-full px-2 py-0.5" style={{ background: primaryTag.color }} title="Tag principal — etapa no Kanban">
-                <Star size={9} className="fill-current" />{primaryTag.name}
+                <BotOff size={10} />Fluxo pausado
               </span>
             )}
           </div>
@@ -735,12 +727,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           {rapida && <QuickReplyCountdown pending={rapida} onCancel={() => setRapida(null)} onEdit={editarRapida} />}
-          {/* de qual número a resposta vai sair: com vários canais, é o que evita responder pelo errado */}
-          <div className="flex items-center gap-1.5 text-[11px] text-muted rounded-md px-2 py-1" style={{ background: `color-mix(in srgb, ${channelColor(conv.number.color)} 8%, transparent)` }}>
-            <span className="shrink-0">Enviando via:</span>
-            <ChannelBadge channel={conv.number} phone="none" className="min-w-0" />
-            {conv.number.phone && <span className="tnum shrink-0">({formatPhone(conv.number.phone)})</span>}
-          </div>
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
               {attachment.mimeType.startsWith('image/') ? <img src={attachment.url} alt="" className="w-12 h-12 rounded object-cover" /> : <FileText size={20} className="text-muted" />}

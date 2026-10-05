@@ -958,7 +958,7 @@ export class ConversationsService {
   async setBotPause(tenantId: string, id: string, by: { id: string }, minutes: number | null) {
     const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
-    if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada: não há robô para pausar.');
+    if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada: não há fluxo para pausar.');
     // mesma regra do `registrar`: dono do sistema não tem linha em `users` deste tenant
     const actorId = (await this.prisma.user.findFirst({ where: { id: by.id, tenantId }, select: { id: true } }))?.id ?? null;
     const now = new Date();

@@ -50,8 +50,8 @@ const META: Record<ConversationEvent['type'], { icon: React.ReactNode; texto: st
   released: { icon: <Undo2 size={14} />, texto: 'devolveu para a fila', cor: 'text-wait' },
   closed: { icon: <CheckCircle2 size={14} />, texto: 'encerrou', cor: 'text-done' },
   reopened: { icon: <RotateCcw size={14} />, texto: 'reabriu', cor: 'text-wait' },
-  bot_paused: { icon: <BotOff size={14} />, texto: 'pausou o robô', cor: 'text-warn-ink' },
-  bot_resumed: { icon: <Play size={14} />, texto: 'retomou o robô', cor: 'text-accent' },
+  bot_paused: { icon: <BotOff size={14} />, texto: 'pausou o fluxo', cor: 'text-warn-ink' },
+  bot_resumed: { icon: <Play size={14} />, texto: 'retomou o fluxo', cor: 'text-accent' },
   // `reason` traz "Vendas → Suporte"
   department_changed: { icon: <Building2 size={14} />, texto: 'mudou o departamento', cor: 'text-accent' },
   // `reason` diz o que e onde foi apagado — nunca o conteúdo (docs/apagar-mensagens.md)
@@ -75,7 +75,7 @@ function Linha({ e }: { e: ConversationEvent }) {
       <span className={`mt-0.5 shrink-0 ${m.cor}`}>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-ink">
-          {automatico ? <>Robô retomado automaticamente</> : <><b>{quem}</b> {m.texto}</>}
+          {automatico ? <>Fluxo retomado automaticamente</> : <><b>{quem}</b> {m.texto}</>}
           {e.type === 'transferred' && e.target && <> para <b>{e.target.name}</b></>}
           {e.type === 'closed' && e.outcome && <> · {RESULTADO[e.outcome] ?? e.outcome}</>}
           {valor != null && valor > 0 && <> · <span className="tnum">{valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></>}
