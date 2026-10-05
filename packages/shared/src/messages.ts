@@ -129,11 +129,14 @@ export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {
   unknown: 'Conteúdo não suportado',
 };
 
+const MEDIA_ICON: Partial<Record<MessageType, string>> = { image: '📷', video: '🎥', audio: '🎤', document: '📄' };
+
 /** Prévia de uma linha (lista de conversas, citação): o texto, ou o rótulo do conteúdo. */
 export function messagePreview(m: { type: MessageType | string; text?: string | null; content?: MessageContent | null; mediaName?: string | null; deletedAt?: string | Date | null }): string {
   if (m.deletedAt) return DELETED_MESSAGE_LABEL;
   const t = m.text?.trim();
-  if (t) return t;
+  // mídia com legenda leva o ícone na frente, como no WhatsApp: "📷 Promoção" e não só "Promoção"
+  if (t) return MEDIA_ICON[m.type as MessageType] ? `${MEDIA_ICON[m.type as MessageType]} ${t}` : t;
   const c = m.content;
   if (c?.kind === 'location') return `📍 ${c.name ?? c.address ?? (c.live ? 'Localização em tempo real' : 'Localização')}`;
   if (c?.kind === 'contacts') return `👤 ${c.contacts.map((x) => x.name).join(', ') || 'Contato'}`;

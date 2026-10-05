@@ -110,18 +110,20 @@ export class EvolutionProvider implements WhatsAppProvider {
   async send(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
     const name = this.instance(ctx);
     let r: any;
+    // citação vai em todo tipo de envio (texto, mídia e voz): a Evolution acha a citada pelo id
+    const quoted = m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined;
     if (m.type === MessageType.TEXT || m.interactive) {
       // Botões/listas não funcionam de forma confiável em contas não-oficiais: vira lista numerada
       const text = m.interactive?.options.length ? `${m.text ?? ''}\n\n${m.interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : (m.text ?? '');
       r = await this.api(`/message/sendText/${name}`, {
         method: 'POST',
-        body: JSON.stringify({ number: m.to, text, quoted: m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined }),
+        body: JSON.stringify({ number: m.to, text, quoted }),
       }, this.shard(ctx));
     } else if (m.type === MessageType.AUDIO && media && m.media?.voice !== false) {
       // áudio como "mensagem de voz" (PTT), igual ao gravado no app
       r = await this.api(`/message/sendWhatsAppAudio/${name}`, {
         method: 'POST',
-        body: JSON.stringify({ number: m.to, audio: media.data.toString('base64') }),
+        body: JSON.stringify({ number: m.to, audio: media.data.toString('base64'), quoted }),
       }, this.shard(ctx));
     } else if (media || m.media) {
       // a Evolution aceita `media` como URL ou base64 — mandamos base64 para não expor o storage
@@ -135,6 +137,7 @@ export class EvolutionProvider implements WhatsAppProvider {
           mimetype: media?.mimeType ?? m.media?.mimeType,
           fileName: media?.fileName ?? m.media?.fileName,
           caption: m.type === MessageType.AUDIO ? undefined : (m.media?.caption ?? m.text),
+          quoted,
         }),
       }, this.shard(ctx));
     } else {

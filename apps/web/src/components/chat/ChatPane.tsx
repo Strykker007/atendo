@@ -413,6 +413,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.limits.includedMessagesMonth != null && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
   const numberOffline = channelOffline(conv.number);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
+  /** quem aparece como autor da citação recebida e na faixa "Respondendo a …" */
+  const nomeContato = conv.contact.name ?? `+${conv.contact.phone}`;
   // conversa de outra pessoa: ninguém responde por ela (a API recusa) — só nota interna
   podeResponderRef.current = !noteMode && !ownedByOther && !numberOffline && !quotaHit && conv.status !== 'closed';
   /** atalho para a nota nas barras em que não dá para responder (encerrada, número caído, cota) */
@@ -626,7 +628,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
       </div>
@@ -752,7 +754,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           {respondendo && (
             <div className="flex items-stretch gap-2 rounded-lg bg-field border-l-4 border-accent px-2.5 py-1.5">
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-semibold text-accent-ink">{respondendo.direction === 'out' ? 'Respondendo a você' : 'Respondendo ao contato'}</div>
+                <div className="text-[11px] font-semibold text-accent-ink">{respondendo.direction === 'out' ? 'Respondendo a você' : `Respondendo a ${nomeContato}`}</div>
                 <div className="text-[12px] text-muted truncate">{resumoDaMensagem(respondendo)}</div>
               </div>
               <button type="button" onClick={() => setRespondendo(null)} className="text-faint hover:text-ink self-center" title="Cancelar resposta"><X size={15} /></button>
@@ -819,7 +821,7 @@ export function resumoDaMensagem(m: Message): string {
   return messagePreview(m);
 }
 
-function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, onApagar, podeVerApagada, citada }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message }) {
+function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, onApagar, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
   const estruturado = structuredBody(m);
@@ -848,7 +850,7 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, onApagar
       {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} podeReagir={canResend} />}
       <div className={cn('relative max-w-[72%] px-2.5 py-1.5 text-[13px]', m.reactions?.length && 'mb-3', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
         {m.forwarded && <ForwardedLabel score={m.forwardingScore} />}
-        <Citacao m={m} citada={citada} />
+        <Citacao m={m} citada={citada} contato={contato} />
         {estruturado ?? (
           <>
             <MediaBody m={m} onVerImagem={onVerImagem} />
@@ -1039,13 +1041,13 @@ function BotaoResponder({ m, onResponder }: { m: Message; onResponder: (m: Messa
  * por causa do **status**: o story some em 24h e não é mensagem da conversa, então sem o
  * texto guardado sobraria "quero esse" sem ninguém saber o quê.
  */
-function Citacao({ m, citada }: { m: Message; citada?: Message }) {
+function Citacao({ m, citada, contato }: { m: Message; citada?: Message; contato: string }) {
   const q = m.quoted;
   if (!q && !m.quotedId && !m.quotedPreview) return null;
   const texto = q?.preview || (citada ? resumoDaMensagem(citada) : m.quotedPreview) || 'Mensagem';
   const fromStatus = q?.fromStatus ?? m.quotedFromStatus;
   const direcao = q?.direction ?? citada?.direction;
-  const autor = fromStatus ? 'Resposta ao status' : q?.authorName ?? (direcao === 'out' ? 'Você' : direcao === 'in' ? 'Contato' : 'Mensagem citada');
+  const autor = fromStatus ? 'Resposta ao status' : q?.authorName ?? (direcao === 'out' ? 'Você' : direcao === 'in' ? contato : 'Mensagem citada');
   const alvo = q?.messageId ?? citada?.id;
   const conteudo = (
     <>

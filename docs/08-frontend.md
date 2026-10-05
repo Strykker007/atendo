@@ -219,9 +219,11 @@ O fundo era cinza chapado — e chapado é o que faz a tela parecer sem vida: os
 
 ## Responder mensagem (citação)
 
-O botão aparece no hover, **fora** da bolha, para não roubar espaço do texto. Escolhida a mensagem, uma faixa acima do campo mostra o que está sendo respondido; enviar manda o `quotedExternalId` e limpa a faixa.
+O botão aparece no hover, **fora** da bolha, para não roubar espaço do texto, e só em mensagem com `externalId` (pendente/falha/nota interna não têm o que citar). Escolhida a mensagem, uma faixa acima do campo mostra "Respondendo a você" / "Respondendo a <nome do contato>" e o resumo, com **X** para cancelar; enviar (texto ou anexo) manda o `quotedExternalId` e limpa a faixa. Trocar de conversa também limpa.
 
-Dentro da bolha, a caixa de citação (`Citacao` em `ChatPane.tsx`) usa primeiro o `message.quoted` que a API já resolve (`preview` e `authorName`; autor nulo vira "Você"/"Contato" pela direção). Sem ele, cai nas origens antigas, nesta ordem: a mensagem que temos no histórico, o texto que o provider mandou junto (`quotedPreview`) e um rótulo genérico.
+Dentro da bolha, a caixa de citação (`Citacao` em `ChatPane.tsx`) usa primeiro o `message.quoted` que a API já resolve (`preview` e `authorName`; autor nulo vira "Você" na enviada e o nome do contato — ou `+telefone` — na recebida). Sem ele, cai nas origens antigas, nesta ordem: a mensagem que temos no histórico, o texto que o provider mandou junto (`quotedPreview`) e um rótulo genérico.
+
+O resumo vem de `messagePreview` (shared): texto puro, ou o ícone do tipo na frente da legenda (`📷 Promoção`), ou só o rótulo da mídia (`📷 Foto`, `🎤 Áudio`, `📄 nome.pdf`) — o mesmo resumo da lista de conversas.
 
 Com `quoted.messageId` a caixa é clicável: rola até a bolha citada (`id="msg-<id>"`) e a destaca por um instante. Se ela ainda não foi carregada (paginação), um aviso pede para rolar para cima.
 

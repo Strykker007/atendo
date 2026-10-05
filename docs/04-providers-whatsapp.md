@@ -128,6 +128,11 @@ Nada deve virar bolha vazia. Cada adapter traduz o payload para `type` + `text` 
 
 Envelopes (`ephemeralMessage`, `viewOnceMessage*`, `documentWithCaptionMessage`, `editedMessage`) são desembrulhados antes (`desembrulhar` em `providers/evolution-content.ts`), e o `contextInfo` (citação, anúncio, encaminhada) é procurado em qualquer nó da mensagem.
 
+**Citação (responder mensagem)**:
+- *Recebida* — Evolution: `contextInfo.stanzaId` → `quotedExternalId`, `contextInfo.quotedMessage` → `quotedPreview` (texto ou rótulo da mídia, `providers/quoted.ts`), `remoteJid/participant = status@broadcast` → `quotedFromStatus`. Meta: `context.id` → `quotedExternalId` (a Meta não manda o conteúdo citado; sem a citada no banco a bolha mostra só o rótulo genérico).
+- *Gravada* — `Message.quotedId` (id no provider), `quotedMessageId` (FK para a citada, resolvida por `externalId` + tenant no `InboundService`/`send`; null se ela não está no banco), `quotedPreview`, `quotedFromStatus`. O `present()` monta `quoted: QuotedRef` (autor, tipo, resumo) a partir da citada ou, sem ela, do `quotedPreview`.
+- *Enviada* — o painel manda `quotedExternalId`; o `OutboundProcessor` repassa `message.quotedId`. Meta: `context: { message_id }` em qualquer tipo. Evolution: `quoted: { key: { id } }` em `sendText`, `sendMedia` e `sendWhatsAppAudio` (a Evolution acha a citada no próprio banco pelo id).
+
 **Encaminhada**: Evolution lê `contextInfo.isForwarded` + `forwardingScore`; Meta lê `context.forwarded` / `context.frequently_forwarded` (sem score — `frequently` vira 5). Vai para `Message.forwarded`/`forwardingScore`. Mensagem encaminhada traz `context` sem `id` na Meta: não é citação.
 
 **Encaminhar pelo painel** (`POST /conversations/:id/messages/:messageId/forward`) é um envio comum por destino. Nenhum dos dois providers aceita marcar o envio como encaminhado (a Cloud API não tem o campo; os endpoints REST da Evolution não expõem `contextInfo`), então o contato recebe uma mensagem normal — o selo "Encaminhada" existe só no nosso histórico.
