@@ -608,6 +608,9 @@ model Message {
   forwardingScore Int?
   /// atendente que enviou (null = inbound)
   authorId       String?
+  /// Nome do autor gravado no momento (só em nota interna): a nota continua assinada mesmo
+  /// depois que o usuário é removido (`authorId` vira null pelo SetNull)
+  authorName     String?
   /// Nota interna (cadeado): só a equipe vê, nunca vai ao WhatsApp nem conta no uso
   internal       Boolean          @default(false)
   error          String?

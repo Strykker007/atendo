@@ -31,7 +31,10 @@ senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 `DEFAULT_PERMISSIONS` reproduz **exatamente** o acesso que cada papel já tinha antes dos
 perfis. Em particular, `agent` inclui `quick_replies.manage` e `reports.view`: nenhum dos dois
-era restrito, e tirá-los na migração seria perder acesso sem ninguém pedir.
+era restrito, e tirá-los na migração seria perder acesso sem ninguém pedir. Depois disso,
+`agent` ganhou `conversations.internal_note` (passagem de bastão entre atendentes): a migration
+`agent_internal_note` acrescenta a permissão aos perfis "Atendente" padrão **não editados**
+(`customized = false`); perfil editado pelo cliente fica como está.
 
 ## Como é aplicado
 

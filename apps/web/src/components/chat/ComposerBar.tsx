@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Image as ImageIcon, Video, FileText, Search } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, StickyNote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
@@ -37,9 +37,11 @@ export interface ComposerBarProps {
   onAssinando: (v: boolean) => void;
   /** conteúdo extra à direita (copiloto de IA) */
   direita?: React.ReactNode;
+  /** liga o modo nota interna (só aparece com a permissão `conversations.internal_note`) */
+  onNotaInterna?: () => void;
 }
 
-export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita }: ComposerBarProps) {
+export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita, onNotaInterna }: ComposerBarProps) {
   const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'emoji' | 'mencao' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
   const activeRun = useActiveRun(conversationId);
@@ -78,6 +80,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       )}
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
+      {onNotaInterna && <Atalho icone={<StickyNote size={16} />} titulo="Nota interna — só a equipe vê (Alt+N)" onClick={onNotaInterna} />}
       <Atalho
         icone={<span className="text-[15px] font-bold underline underline-offset-2 decoration-2 leading-none">A</span>}
         titulo={assinando ? 'Assinatura ligada: seu nome vai junto' : 'Assinar as mensagens com o seu nome'}

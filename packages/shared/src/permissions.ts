@@ -56,8 +56,9 @@ export const DEFAULT_PERMISSIONS: Record<'tenant_admin' | 'manager' | 'agent', P
   manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'contacts.edit', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'team.manage', 'settings.manage'],
   // o padrão do atendente reproduz EXATAMENTE o que ele já podia antes dos perfis: respostas
   // rápidas e relatórios nunca foram restritos, e tirá-los agora seria perder acesso numa
-  // migração. Quem quiser restringir, cria um perfil sem eles.
-  agent: ['contacts.edit', 'quick_replies.manage', 'reports.view'],
+  // migração. Quem quiser restringir, cria um perfil sem eles. Nota interna entrou depois
+  // (passagem de bastão entre atendentes — ver docs/08-frontend.md).
+  agent: ['conversations.internal_note', 'contacts.edit', 'quick_replies.manage', 'reports.view'],
 };
 
 /** Nomes dos perfis criados junto com o cliente. */

@@ -196,6 +196,12 @@ describe('deduplicação', () => {
     expect(outboundJobId({ id: 'abc', queueSeq: 9n })).not.toBe(outboundJobId({ id: 'abc', queueSeq: 7n }));
   });
 
+  it('nota interna nunca entra na fila de envio externo', async () => {
+    const add = vi.fn();
+    await expect(enqueueOutbound({ add } as never, { id: 'n1', queueSeq: 1n, internal: true })).rejects.toThrow();
+    expect(add).not.toHaveBeenCalled();
+  });
+
   const existing = { id: 'm-1', conversationId: 'c1', mediaUrl: null, quotedMessage: null, idempotencyKey: 'k1' };
   const author = { id: 'u1', role: 'agent' } as never;
   const conv = { id: 'c1', tenantId: 't1', numberId: 'n1', status: 'in_progress', assigneeId: 'u1', lastInboundAt: new Date(), number: { id: 'n1', tenantId: 't1', isActive: true, status: 'connected', provider: 'evolution', label: 'Loja' } };

@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService, FORWARD_MAX_TARGETS } from './conversations.service';
@@ -58,7 +58,7 @@ class ForwardDto {
   @IsArray() @ArrayNotEmpty() @ArrayMaxSize(FORWARD_MAX_TARGETS) @IsUUID('4', { each: true }) targetConversationIds: string[];
 }
 class NoteDto {
-  @IsString() @MaxLength(4096) text: string;
+  @IsString() @IsNotEmpty() @MaxLength(4096) text: string;
 }
 class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;

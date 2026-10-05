@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, Star, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video, Building2 } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, Star, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2 } from 'lucide-react';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
@@ -57,17 +57,32 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const departments = useDepartments();
   const setDepartment = useSetConversationDepartment();
   // permissão, não papel (ver ConversationList)
-  const isAdmin = useCan('conversations.view_all');
   const podeTransferir = useCan('conversations.transfer_any');
   const podeNota = useCan('conversations.internal_note');
   const mine = !!conv && conv.assignee?.id === me.data?.id;
   const ownedByOther = !!conv && !!conv.assignee && !mine;
-  // Cadeado: gerente/admin numa conversa de outra pessoa. Fechado = não envia nada.
-  // Aberto = manda NOTA INTERNA (só a equipe vê). Reseta ao trocar de conversa.
-  const [unlocked, setUnlocked] = useState(false);
-  useEffect(() => setUnlocked(false), [conversationId]);
+  // Modo nota interna: o composer vira âmbar e o que sai é NOTA (só a equipe vê, nunca vai ao
+  // WhatsApp). Vale em qualquer conversa; na de outra pessoa é o único jeito de escrever (cadeado).
+  // Texto separado do da resposta: desligar o modo nunca manda a nota para o cliente por engano.
+  // Reseta ao trocar de conversa.
+  const [modoNota, setModoNota] = useState(false);
+  const [textoNota, setTextoNota] = useState('');
+  useEffect(() => { setModoNota(false); setTextoNota(''); }, [conversationId]);
+  const notaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (modoNota) notaRef.current?.focus(); }, [modoNota]);
+  // Alt+N liga/desliga. `code`, não `key`: no Mac Alt+N é tecla morta ("˜")
+  useEffect(() => {
+    if (!podeNota) return;
+    const h = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.code !== 'KeyN') return;
+      e.preventDefault();
+      setModoNota((v) => !v);
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [podeNota]);
   const sendNote = useSendNote(conversationId);
-  const noteMode = podeNota && ownedByOther;
+  const noteMode = podeNota && modoNota;
   const activeRun = useActiveRun(conversationId);
   const stopFlow = useStopFlow();
   const sched = useHasFeature('scheduling');
@@ -386,22 +401,28 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.limits.includedMessagesMonth != null && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
   const numberOffline = channelOffline(conv.number);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
-  podeResponderRef.current = !noteMode && !(ownedByOther && !isAdmin) && !numberOffline && !quotaHit && conv.status !== 'closed';
+  // conversa de outra pessoa: ninguém responde por ela (a API recusa) — só nota interna
+  podeResponderRef.current = !noteMode && !ownedByOther && !numberOffline && !quotaHit && conv.status !== 'closed';
+  /** atalho para a nota nas barras em que não dá para responder (encerrada, número caído, cota) */
+  const botaoNota = podeNota && (
+    <button type="button" onClick={() => setModoNota(true)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-warn-ink bg-warn-soft hover:bg-warn-soft/70 whitespace-nowrap" title="Nota interna — só a equipe vê (Alt+N)"><StickyNote size={13} /> Nota interna</button>
+  );
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
-    const t = assinando && !noteMode && text.trim() ? `*${me.data?.name ?? ''}*\n${text.trim()}` : text.trim();
     if (noteMode) {
-      if (!unlocked || !t || sendNote.isPending) return;
-      setText('');
+      const nota = textoNota.trim();
+      if (!nota || sendNote.isPending) return;
+      setTextoNota('');
       try {
-        await sendNote.mutateAsync(t);
+        await sendNote.mutateAsync(nota);
       } catch (err) {
-        setText(t);
+        setTextoNota(nota);
         toast.err(err);
       }
       return;
     }
+    const t = assinando && text.trim() ? `*${me.data?.name ?? ''}*\n${text.trim()}` : text.trim();
     if ((!t && !attachment) || send.isPending) return;
     const att = attachment;
     setText('');
@@ -621,18 +642,35 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
       {/* Composer */}
       {noteMode ? (
-        <form onSubmit={submit} className={cn('border-t px-3 py-2 flex items-end gap-2 transition-colors', unlocked ? 'bg-warn-soft border-warn/40' : 'bg-field border-line')}>
-          <Button type="button" variant="ghost" className={cn('w-9 h-9 rounded-full p-0 border-0', unlocked ? 'bg-warn text-white hover:bg-warn' : 'bg-transparent text-muted')} onClick={() => setUnlocked((u) => !u)} title={unlocked ? 'Fechar cadeado (parar de enviar notas)' : 'Abrir cadeado para enviar nota interna ao atendente'} icon={unlocked ? <Unlock size={18} /> : <Lock size={18} />} />
-          {unlocked ? (
-            <>
-              <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())} rows={1} placeholder={`Nota interna para ${conv.assignee?.name} — o cliente não vê`} className="flex-1 resize-none max-h-40 rounded-xl bg-panel text-ink placeholder:text-warn-ink/60 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-warn/50" />
-              <Button type="submit" className="w-9 h-9 rounded-full p-0 bg-warn hover:bg-warn/90" disabled={!text.trim()} loading={sendNote.isPending} icon={<Send size={18} />} title="Enviar nota interna" />
-            </>
-          ) : (
-            <div className="flex-1 text-sm text-muted py-2.5"><b className="text-ink">{conv.assignee?.name}</b> está atendendo. Abra o cadeado para mandar uma nota interna, ou transfira para você.</div>
-          )}
+        <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-warn-ink">
+            <StickyNote size={13} className="shrink-0" />
+            <span className="truncate">Nota interna — visível apenas para a equipe</span>
+            <span className="ml-auto font-normal text-warn-ink/70 hidden sm:inline whitespace-nowrap">Alt+N alterna · Esc sai</span>
+            <button type="button" onClick={() => setModoNota(false)} className="text-warn-ink/70 hover:text-warn-ink" title="Sair do modo nota"><X size={15} /></button>
+          </div>
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={notaRef}
+              value={textoNota}
+              onChange={(e) => setTextoNota(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') return setModoNota(false);
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
+              }}
+              rows={1}
+              placeholder={ownedByOther ? `Nota para ${conv.assignee?.name} — o cliente não vê` : 'Nota para a equipe — o cliente não vê'}
+              className="flex-1 resize-none max-h-40 rounded-xl bg-panel border border-warn/40 text-ink placeholder:text-warn-ink/60 px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-warn/50"
+            />
+            <Button type="submit" className="h-9 rounded-full px-3.5 bg-warn hover:bg-warn/90 text-white border-0" disabled={!textoNota.trim()} loading={sendNote.isPending} icon={<StickyNote size={15} />}>Adicionar nota</Button>
+          </div>
         </form>
-      ) : ownedByOther && !isAdmin ? (
+      ) : ownedByOther && podeNota ? (
+        <div className="bg-field border-t border-line px-3 py-2 flex items-center gap-2">
+          <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted hover:text-warn-ink" onClick={() => setModoNota(true)} title="Abrir cadeado para enviar nota interna (Alt+N)" icon={<Lock size={18} />} />
+          <div className="flex-1 text-sm text-muted py-2.5"><b className="text-ink">{conv.assignee?.name}</b> está atendendo. Abra o cadeado (Alt+N) para mandar uma nota interna, ou transfira para você.</div>
+        </div>
+      ) : ownedByOther ? (
         <div className="bg-field border-t border-line px-4 py-3 text-sm text-muted flex items-center gap-2">
           <UserRound size={16} className="shrink-0" />
           <span className="flex-1"><b className="text-ink">{conv.assignee?.name}</b> está atendendo esta conversa. Peça a transferência ou aguarde a devolução à fila.</span>
@@ -642,13 +680,15 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           <WifiOff size={16} className="shrink-0" />
           <span className="flex-1">O número <b>{conv.number.label}</b> está desconectado. Você continua recebendo, mas não consegue responder.</span>
           <Link href="/numeros" className="underline font-medium whitespace-nowrap">Conectar</Link>
+          {botaoNota}
         </div>
       ) : quotaHit ? (
-        <div className="bg-warn-soft border-t border-warn/30 px-4 py-3 text-sm text-warn-ink">
-          Limite de mensagens do plano <b>{usage.data?.plan}</b> atingido neste mês. Faça upgrade para continuar respondendo.
+        <div className="bg-warn-soft border-t border-warn/30 px-4 py-3 text-sm text-warn-ink flex items-center gap-2">
+          <span className="flex-1">Limite de mensagens do plano <b>{usage.data?.plan}</b> atingido neste mês. Faça upgrade para continuar respondendo.</span>
+          {botaoNota}
         </div>
       ) : conv.status === 'closed' ? (
-        <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted text-center">Conversa encerrada. Reabra para responder.</div>
+        <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted flex items-center justify-center gap-3">Conversa encerrada. Reabra para responder.{botaoNota}</div>
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           {rapida && <QuickReplyCountdown pending={rapida} onCancel={() => setRapida(null)} onEdit={editarRapida} />}
@@ -711,6 +751,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               assinando={assinando}
               onAssinando={setAssinando}
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
+              onNotaInterna={podeNota ? () => setModoNota(true) : undefined}
             />
           )}
           {flowsFeature.has && <BotPauseBar conv={conv} />}
@@ -742,12 +783,19 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, citada }
   const resend = useResend();
   const estruturado = structuredBody(m);
   if (m.internal) {
+    // `author` some se o usuário for removido; `authorName` é o nome gravado na nota.
+    // Sem nenhum dos dois = aviso do sistema (fluxo, agenda).
+    const autor = m.author?.name ?? m.authorName;
     return (
-      <div className="flex justify-center my-1">
-        <div className="max-w-[80%] rounded-xl border border-warn/40 bg-warn-soft px-3 py-2 text-sm shadow-sm">
-          <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-warn-ink mb-0.5"><Lock size={11} /> Nota interna · {m.author?.name ?? 'robô do fluxo'} <span className="text-warn-ink/60 normal-case tracking-normal font-normal">· só a equipe vê</span></div>
+      <div className="flex justify-center my-1.5">
+        <div className="max-w-[80%] min-w-[220px] rounded-lg border border-dashed border-warn/70 bg-warn-soft px-3 py-2 text-[13px] shadow-sm">
+          <div className="flex items-center gap-1.5 text-[11px] text-warn-ink mb-1">
+            <StickyNote size={12} className="shrink-0" />
+            <span className="flex-1 min-w-0 truncate">{autor ? <>Nota interna adicionada por <b>{autor}</b></> : <b>Aviso automático do sistema</b>}</span>
+            <span className="tnum font-mono text-[10px] text-warn-ink/70">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
           <p className="whitespace-pre-wrap break-words text-ink">{m.text}</p>
-          <div className="text-[10px] text-warn-ink/70 text-right tnum font-mono mt-0.5">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+          <div className="flex items-center gap-1 text-[10px] text-warn-ink/70 mt-1"><Lock size={10} /> Visível apenas para a equipe</div>
         </div>
       </div>
     );

@@ -48,8 +48,8 @@ export interface Message {
   quoted?: QuotedRef | null;
   /** reações (emoji) — no 1:1 no máximo uma de cada lado; `fromMe` = feita pelo celular do cliente */
   reactions?: { emoji: string; fromMe: boolean; at: string }[] | null;
-  /** nota interna (cadeado): só a equipe vê */
-  internal?: boolean; authorId?: string | null; author?: { name: string } | null;
+  /** nota interna (cadeado): só a equipe vê. `authorName` = nome gravado na nota (sobrevive à remoção do usuário) */
+  internal?: boolean; authorId?: string | null; author?: { name: string } | null; authorName?: string | null;
   /** botões, lista, localização ou contato; o corpo continua em `text` */
   content?: MessageContent | null;
   /** encaminhada (pelo contato ou pelo atendente); score ≥ 5 = "com frequência" */

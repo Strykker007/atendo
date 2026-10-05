@@ -613,13 +613,15 @@ export class ConversationsService {
    * Nota interna ("cadeado"): admin/gerente orienta o atendente dentro da conversa.
    * Fica no histórico com destaque, só a equipe vê, nunca vai ao WhatsApp, não conta no uso.
    */
-  async note(tenantId: string, author: Viewer, conversationId: string, text: string) {
+  async note(tenantId: string, author: Viewer & { name: string }, conversationId: string, text: string) {
     if (!may(author, 'conversations.internal_note')) throw new ForbiddenException('Seu perfil de acesso não permite escrever notas internas.');
+    const body = text.trim();
+    if (!body) throw new BadRequestException('A nota está vazia.');
     const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     const message = await this.prisma.message.create({
-      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text, authorId: author.id, internal: true },
-      include: { author: { select: { name: true } } },
+      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text: body, authorId: author.id, authorName: author.name, internal: true },
+      include: MESSAGE_INCLUDE,
     });
     this.gateway.emitMessage(tenantId, this.present(message));
     return this.present(message);
