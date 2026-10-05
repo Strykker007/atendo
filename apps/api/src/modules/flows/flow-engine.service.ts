@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import { CONTENT_MAX_DELAY_SEC, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
@@ -757,7 +757,7 @@ export class FlowEngineService {
   // ---------- nós ----------
 
   /** Devolve 'ended' (o run acabou aqui), a saída a seguir ('error' do webhook) ou undefined (saída normal). */
-  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { conversation: Conversation & { contact: { name: string | null; phone: string } } }): Promise<'ended' | string | undefined> {
+  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { flow: { name: string }; conversation: Conversation & { contact: { name: string | null; phone: string } } }): Promise<'ended' | string | undefined> {
     const d = node.data;
     switch (d.kind) {
       case 'add_tag':
@@ -779,6 +779,13 @@ export class FlowEngineService {
       case 'handoff':
         await this.handoff(run.id, 'transferido para humano pelo fluxo', d.agentId);
         return 'ended';
+      case 'set_department': {
+        // sem departamento escolhido = card importado ainda não reconfigurado: não mexe
+        if (!d.departmentId) break;
+        const ok = await this.conversations.setDepartmentSystem(run.conversationId, d.departmentId === DEPARTMENT_NONE ? null : d.departmentId);
+        if (!ok) await this.warnTeam(run, 'Definir departamento: o departamento não existe mais ou está desativado. A conversa ficou no departamento em que estava.');
+        break;
+      }
       case 'webhook':
         return this.webhook(d, run);
       case 'set_var': {
@@ -910,10 +917,20 @@ export class FlowEngineService {
   /**
    * Distribuidor. Candidatos: os escolhidos no bloco (ou todos os ativos), sempre filtrados
    * por quem opera o número da conversa — atribuir a quem não enxerga o número esconderia o
-   * atendimento. Devolve false quando ninguém pode receber (saída "Ninguém disponível").
+   * atendimento. Com departamento no bloco, a conversa entra nele e só quem é do departamento
+   * concorre. Devolve false quando ninguém pode receber (saída "Ninguém disponível").
    */
-  private async distribute(node: Extract<FlowNode, { type: 'distributor' }>, run: FlowRun & { conversation: Conversation }): Promise<boolean> {
+  private async distribute(node: Extract<FlowNode, { type: 'distributor' }>, run: FlowRun & { conversation: Conversation; flow: { name: string } }): Promise<boolean> {
     const conv = run.conversation;
+    const departmentId = node.data.departmentId;
+    if (departmentId) {
+      // departamento excluído/desativado: não distribui para ninguém de fora dele — vai pela
+      // saída "Ninguém disponível", com aviso para a equipe
+      if (!(await this.conversations.setDepartmentSystem(conv.id, departmentId))) {
+        await this.warnTeam(run, 'Distribuidor: o departamento escolhido não existe mais ou está desativado.');
+        return false;
+      }
+    }
     if (node.data.mode === 'queue') {
       await this.conversations.setStatusSystem(conv.id, 'waiting');
       return true;
@@ -926,6 +943,9 @@ export class FlowEngineService {
         ...(node.data.agentIds?.length && { id: { in: node.data.agentIds } }),
         // sem linha em user_numbers = opera todos os números
         OR: [{ numbers: { none: {} } }, { numbers: { some: { numberId: conv.numberId } } }],
+        // com departamento: só quem é dele (aqui não vale "sem vínculo = todos": distribuir
+        // Vendas para quem nunca foi posto em Vendas é justamente o que o bloco evita)
+        ...(departmentId && { departments: { some: { departmentId } } }),
       },
       select: { id: true },
     });

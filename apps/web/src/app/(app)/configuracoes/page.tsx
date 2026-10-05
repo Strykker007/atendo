@@ -11,6 +11,7 @@ import { ScheduleSection } from '@/components/settings/ScheduleSection';
 import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import { QuickReplySection } from '@/components/settings/QuickReplySection';
+import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers } from '@/lib/hooks';
@@ -24,15 +25,18 @@ export default function ConfiguracoesPage() {
   // e mostrar o formulário para quem não pode salvar é convite para perder trabalho digitado
   const podeConfigurar = useCan('settings.manage');
   const podeNumeros = useCan('numbers.manage');
+  // departamentos decidem quem vê o quê: é gestão de equipe, não configuração da empresa
+  const podeEquipe = useCan('team.manage');
 
 
 
   return (
     <PageShell width="max-w-4xl">
-      <PageHeader title="Configurações" subtitle="Aparência do painel, horários de atendimento, boas-vindas e segurança." />
+      <PageHeader title="Configurações" subtitle="Aparência do painel, departamentos, horários de atendimento, boas-vindas e segurança." />
 
       {!isOwner && podeNumeros && <NumbersSection />}
       <AppearanceSection />
+      {!isOwner && podeEquipe && <DepartmentsSection />}
       {!isOwner && podeConfigurar && <ScheduleSection />}
       {!isOwner && podeConfigurar && <WelcomeSection />}
       {!isOwner && podeConfigurar && <DefaultFlowsSection />}

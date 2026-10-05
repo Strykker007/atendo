@@ -1,5 +1,5 @@
 'use client';
-import { ArrowRightLeft, BotOff, CheckCircle2, Hand, Play, RotateCcw, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Hand, Play, RotateCcw, Undo2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useConversationEvents, type ConversationEvent } from '@/lib/hooks';
 
@@ -52,6 +52,8 @@ const META: Record<ConversationEvent['type'], { icon: React.ReactNode; texto: st
   reopened: { icon: <RotateCcw size={14} />, texto: 'reabriu', cor: 'text-wait' },
   bot_paused: { icon: <BotOff size={14} />, texto: 'pausou o robô', cor: 'text-warn-ink' },
   bot_resumed: { icon: <Play size={14} />, texto: 'retomou o robô', cor: 'text-accent' },
+  // `reason` traz "Vendas → Suporte"
+  department_changed: { icon: <Building2 size={14} />, texto: 'mudou o departamento', cor: 'text-accent' },
 };
 
 const RESULTADO: Record<string, string> = { won: 'comprou', lost: 'não comprou', none: 'sem resultado' };

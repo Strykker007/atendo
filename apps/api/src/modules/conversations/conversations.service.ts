@@ -14,13 +14,17 @@ import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import { enqueueOutbound, requeueSeq } from '../whatsapp/send-queue';
 import type { Permission } from '@atendo/shared';
 import { narrowTo, numberFilter } from '../auth/number-scope';
+import { departmentWhere } from '../auth/department-scope';
 import { BOT_PAUSE_CLEAR } from './bot-pause';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
  * sistema, que dá suporte entrando como o cliente e não tem perfil neste tenant.
  */
-type Viewer = { id: string; role: string; permissions?: readonly Permission[]; numberIds?: readonly string[] };
+type Viewer = { id: string; role: string; permissions?: readonly Permission[]; numberIds?: readonly string[]; departmentIds?: readonly string[] };
+
+/** O que a lista e o cabeçalho do chat mostram do departamento (etiqueta com cor). */
+export const DEPARTMENT_SELECT = { id: true, name: true, color: true, isActive: true } as const;
 const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permissions?.includes(p);
 
 
@@ -103,12 +107,15 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; numberId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number },
+    q: { status?: ConversationStatus; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
     const isAdmin = may(viewer, 'conversations.view_all');
     const scoped = narrowTo(viewer, q.numberId);
+    // departamento: escopo do usuário ∩ filtro da tela. Vai num AND porque o filtro de tags
+    // abaixo também usa OR, e dois OR no mesmo nível se sobrescreveriam
+    const dept = departmentWhere(viewer, q.departmentId);
     const ownership: Prisma.ConversationWhereInput =
       q.assigneeId && isAdmin ? { assigneeId: q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
@@ -119,6 +126,7 @@ export class ConversationsService {
       // o número pedido é interseccionado com o escopo do usuário; `null` = pediu um número
       // que ele não opera, e aí a lista vem vazia em vez de ignorar o pedido
       ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
+      ...(dept && { AND: [dept] }),
       // tag da conversa OU tag do contato
       ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
       ...(q.search && {
@@ -127,7 +135,7 @@ export class ConversationsService {
     };
     const rows = await this.prisma.conversation.findMany({
       where,
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
       orderBy:
@@ -140,10 +148,11 @@ export class ConversationsService {
     return rows.map((r) => this.presentContact(r));
   }
 
-  /** Contadores dos três filtros principais (opcionalmente por número). */
-  async counts(tenantId: string, viewer: Viewer, numberId?: string) {
+  /** Contadores dos três filtros principais (opcionalmente por número e departamento). */
+  async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string) {
     const scoped = narrowTo(viewer, numberId);
-    const base = { tenantId, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}) };
+    const dept = departmentWhere(viewer, departmentId);
+    const base: Prisma.ConversationWhereInput = { tenantId, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
     const [waiting, closed, mine, all] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
@@ -188,6 +197,49 @@ export class ConversationsService {
     return updated;
   }
 
+  /**
+   * Transferir para outro departamento (ou tirar de departamento, `null`).
+   *
+   * Vai para a **fila** do departamento: sem dono e em Aguardando — quem atendia normalmente
+   * não é do outro departamento, e deixar o atendimento com ele esconderia a conversa de
+   * quem deveria pegá-la. Encerrada continua encerrada (só muda o departamento).
+   * Mesma regra de quem pode do `release`: o dono, quem tem `transfer_any`, ou qualquer um
+   * que veja a conversa enquanto ela está sem dono.
+   */
+  async setDepartment(tenantId: string, id: string, departmentId: string | null, by: Viewer) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId }, include: { department: { select: { name: true } } } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (conv.assigneeId && conv.assigneeId !== by.id && !may(by, 'conversations.transfer_any')) throw new ForbiddenException('Só quem está atendendo (ou quem tem permissão) pode transferir.');
+    if ((conv.departmentId ?? null) === departmentId) return this.one(tenantId, id);
+    // departamento de outro cliente ou desativado não entra: o id vem do corpo da requisição
+    const target = departmentId ? await this.prisma.department.findFirst({ where: { id: departmentId, tenantId, isActive: true }, select: { id: true, name: true } }) : null;
+    if (departmentId && !target) throw new NotFoundException('Departamento não encontrado ou desativado');
+    const updated = await this.prisma.conversation.update({
+      where: { id },
+      data: { departmentId: target?.id ?? null, ...(conv.status !== 'closed' && { assigneeId: null, status: 'waiting' }) },
+    });
+    await this.registrar({ tenantId, conversationId: id, type: 'department_changed', actorId: by.id, fromStatus: conv.status, toStatus: updated.status, reason: departmentChangeReason(conv.department?.name, target?.name) });
+    this.gateway.emitConversation(tenantId, updated);
+    return this.one(tenantId, id);
+  }
+
+  /**
+   * Mesma troca feita pelo fluxo (bloco Distribuidor/Ação). Não mexe em dono nem status —
+   * quem decide isso é o resto do fluxo (o Distribuidor atribui logo em seguida).
+   * Devolve false se o departamento não existe ou está desativado.
+   */
+  async setDepartmentSystem(conversationId: string, departmentId: string | null): Promise<boolean> {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { department: { select: { name: true } } } });
+    if (!conv) return false;
+    const target = departmentId ? await this.prisma.department.findFirst({ where: { id: departmentId, tenantId: conv.tenantId, isActive: true }, select: { id: true, name: true } }) : null;
+    if (departmentId && !target) return false;
+    if ((conv.departmentId ?? null) === (target?.id ?? null)) return true;
+    const updated = await this.prisma.conversation.update({ where: { id: conversationId }, data: { departmentId: target?.id ?? null } });
+    await this.registrar({ tenantId: conv.tenantId, conversationId, type: 'department_changed', actorId: null, reason: departmentChangeReason(conv.department?.name, target?.name) });
+    this.gateway.emitConversation(conv.tenantId, updated);
+    return true;
+  }
+
   /** Devolver para a fila (sem dono, volta a Aguardando). */
   async release(tenantId: string, id: string, by: Viewer) {
     const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId } });
@@ -202,7 +254,7 @@ export class ConversationsService {
   async one(tenantId: string, id: string) {
     const row = await this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
     });
     return this.presentContact(row);
   }
@@ -418,8 +470,9 @@ export class ConversationsService {
     // o ConversationScopeGuard só olha `:id` (a origem); os destinos vêm no corpo e o recorte
     // por número fica aqui — conversa fora do escopo responde igual a inexistente
     const escopo = numberFilter(author);
+    const deptEscopo = departmentWhere(author);
     const pedidos = [...new Set(targetIds)].filter((id) => id !== conversationId).slice(0, FORWARD_MAX_TARGETS);
-    const visiveis = await this.prisma.conversation.findMany({ where: { id: { in: pedidos }, tenantId, ...(escopo && { numberId: escopo }) }, select: { id: true } });
+    const visiveis = await this.prisma.conversation.findMany({ where: { id: { in: pedidos }, tenantId, ...(escopo && { numberId: escopo }), ...deptEscopo }, select: { id: true } });
     const ok = new Set(visiveis.map((v) => v.id));
 
     const sent: ReturnType<ConversationsService['present']>[] = [];
@@ -668,7 +721,8 @@ export class ConversationsService {
         // o tempo de atendimento no relatório
         status: { not: 'closed' },
         ...(escopo && { numberId: escopo }),
-        ...(may(viewer, 'conversations.view_all') ? {} : { OR: [{ assigneeId: viewer.id }, { assigneeId: null }] }),
+        // departamento e posse usam OR: cada um no seu item do AND para não se sobrescreverem
+        AND: [departmentWhere(viewer) ?? {}, may(viewer, 'conversations.view_all') ? {} : { OR: [{ assigneeId: viewer.id }, { assigneeId: null }] }],
       },
       select: { id: true, status: true, botPausedAt: true },
     });
@@ -918,4 +972,9 @@ export function textoParaEncaminhar(text: string | null, content: MessageContent
     return [text, ...linhas].filter(Boolean).join('\n\n');
   }
   return text?.trim() || undefined;
+}
+
+/** Texto do histórico: "Vendas → Suporte", "Sem departamento → Vendas". */
+export function departmentChangeReason(from?: string | null, to?: string | null) {
+  return `${from ?? 'Sem departamento'} → ${to ?? 'Sem departamento'}`;
 }

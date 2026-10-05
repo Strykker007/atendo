@@ -10,7 +10,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 
 // ---- Equipe ----
 export type Role = 'tenant_admin' | 'manager' | 'agent' | 'super_admin';
-export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null; profile?: { id: string; name: string } | null; numbers?: { numberId: string }[] }
+export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null; profile?: { id: string; name: string } | null; numbers?: { numberId: string }[]; departments?: { departmentId: string }[] }
 export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
 export const useCreateAgent = () => {
   const qc = useQueryClient();

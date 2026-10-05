@@ -17,6 +17,8 @@ import type { SetPrimaryTagInput } from '@atendo/shared';
 class ListDto {
   @IsOptional() @IsEnum(ConversationStatus) status?: ConversationStatus;
   @IsOptional() @IsUUID() numberId?: string;
+  /** id do departamento ou `none` (só as sem departamento) */
+  @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;
   @IsOptional() @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean))) @IsArray() tagIds?: string[];
   @IsOptional() @IsString() @MaxLength(100) search?: string;
   @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
@@ -28,6 +30,10 @@ class ListDto {
 }
 class TransferDto {
   @IsUUID() agentId: string;
+}
+class DepartmentDto {
+  /** null = tirar de departamento */
+  @ValidateIf((_, v) => v !== null) @IsUUID() departmentId: string | null;
 }
 class SendDto {
   @IsIn(['text', 'image', 'audio', 'video', 'document']) type: 'text' | 'image' | 'audio' | 'video' | 'document';
@@ -128,14 +134,22 @@ export class ConversationsController {
     return this.conversations.transfer(u.tenantId, id, dto.agentId, u);
   }
 
+  /** Transferir para outro departamento: vai para a fila (Aguardando) dele. */
+  @Patch(':id/department')
+  department(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: DepartmentDto) {
+    return this.conversations.setDepartment(u.tenantId, id, dto.departmentId ?? null, u);
+  }
+
   @Post(':id/release')
   release(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.conversations.release(u.tenantId, id, u);
   }
 
   @Get('counts')
-  counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string) {
-    return this.conversations.counts(u.tenantId, u, numberId || undefined);
+  counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string, @Query('departmentId') departmentId?: string) {
+    // fora do DTO: valida aqui o mesmo formato do filtro da lista
+    const dept = departmentId === 'none' || (departmentId && /^[0-9a-f-]{36}$/i.test(departmentId)) ? departmentId : undefined;
+    return this.conversations.counts(u.tenantId, u, numberId || undefined, dept);
   }
 
   @Get(':id')

@@ -1,10 +1,12 @@
 import { CanActivate, ExecutionContext, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { unrestricted } from '../auth/number-scope';
+import { canUseNumber, unrestricted } from '../auth/number-scope';
+import { canSeeDepartment, departmentRestricted } from '../auth/department-scope';
 import type { AuthUser } from '../auth/current-user.decorator';
 
 /**
- * Impede que quem opera só alguns números abra uma conversa de outro número.
+ * Impede que quem opera só alguns números abra uma conversa de outro número — e que quem é
+ * só de alguns departamentos abra a de outro departamento (ver department-scope.ts).
  *
  * Fica num ponto só, no controller, em vez de repetido em cada método do service: são dez
  * rotas `:id` hoje e vão aparecer mais, e a que esquecessem de checar seria o furo.
@@ -20,12 +22,12 @@ export class ConversationScopeGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest<{ user?: AuthUser; params?: Record<string, string> }>();
     const user = req.user;
     const id = req.params?.id;
-    if (!user || !id || unrestricted(user)) return true;
+    if (!user || !id || (unrestricted(user) && !departmentRestricted(user))) return true;
 
-    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId: user.tenantId }, select: { numberId: true } });
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId: user.tenantId }, select: { numberId: true, departmentId: true } });
     // conversa inexistente segue o fluxo normal: quem responde 404 com a mensagem certa é o
     // service, e duplicar isso aqui só criaria duas mensagens para o mesmo caso
-    if (conv && !user.numberIds!.includes(conv.numberId)) throw new NotFoundException('Conversa não encontrada');
+    if (conv && (!canUseNumber(user, conv.numberId) || !canSeeDepartment(user, conv.departmentId))) throw new NotFoundException('Conversa não encontrada');
     return true;
   }
 }

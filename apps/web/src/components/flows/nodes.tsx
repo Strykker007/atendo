@@ -4,11 +4,11 @@ import { Handle, Position, useNodeId, type NodeProps } from '@xyflow/react';
 import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  CLOSED_BAND_ID, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent,
+  CLOSED_BAND_ID, DEPARTMENT_NONE, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent,
   type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
-import { useSchedules } from '@/lib/hooks';
+import { useDepartments, useSchedules } from '@/lib/hooks';
 
 /**
  * Categorias da paleta. A cor é da categoria (roxo = estrutura, amarelo/laranja = lógica,
@@ -315,9 +315,11 @@ export function ConditionNodeView({ data, selected }: P) {
 }
 const STATUS_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado' };
 export function ActionNodeView({ data, selected }: P) {
-  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string };
+  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string };
+  const departments = useDepartments();
+  const dept = d.departmentId === DEPARTMENT_NONE ? 'Sem departamento' : departments.data?.find((x) => x.id === d.departmentId)?.name ?? (d.departmentId && departments.data ? 'departamento excluído' : '?');
   const label = d.kind === 'set_status' && d.status === 'closed' ? 'Encerrar conversa'
-    : ({ add_tag: 'Aplicar etiqueta', remove_tag: 'Remover etiqueta', assign: 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook' } as Record<string, string>)[d.kind ?? ''] ?? '';
+    : ({ add_tag: 'Aplicar etiqueta', remove_tag: 'Remover etiqueta', assign: 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook', set_department: `Departamento → ${dept}` } as Record<string, string>)[d.kind ?? ''] ?? '';
   const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : d.kind === 'webhook' ? `${label}${d.url ? `\n${d.method ?? 'POST'} ${d.url}` : ''}` : label + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
   return (
     <Shell type="action" data={data} selected={selected} summary={txt}>
@@ -417,10 +419,14 @@ export function RandomizerNodeView({ data, selected }: P) {
 }
 
 export function DistributorNodeView({ data, selected }: P) {
-  const d = data as { mode?: string; agentIds?: string[] };
+  const d = data as { mode?: string; agentIds?: string[]; departmentId?: string };
+  const departments = useDepartments();
   const mode = ({ round_robin: 'Rodízio', least_busy: 'Menos ocupado', queue: 'Fila (qualquer atendente)' } as Record<string, string>)[d.mode ?? ''] ?? '';
+  const dept = d.departmentId ? departments.data?.find((x) => x.id === d.departmentId) : undefined;
+  const deptLine = d.departmentId ? `\nDepartamento: ${dept ? `${dept.name}${dept.isActive ? '' : ' (desativado)'}` : departments.data ? 'excluído' : '…'}` : '';
+  const who = d.agentIds?.length ? `${d.agentIds.length} atendente(s)` : d.departmentId ? 'todos do departamento' : 'todos os atendentes';
   return (
-    <Shell type="distributor" data={data} selected={selected} summary={d.mode === 'queue' ? mode : `${mode} · ${d.agentIds?.length ? `${d.agentIds.length} atendente(s)` : 'todos os atendentes'}`}>
+    <Shell type="distributor" data={data} selected={selected} summary={(d.mode === 'queue' ? mode : `${mode} · ${who}`) + deptLine}>
       <In />
       <Rows>
         <OutRow id="done" tone="ok">Distribuído</OutRow>

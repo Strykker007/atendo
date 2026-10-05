@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { narrowTo } from '../auth/number-scope';
+import { departmentWhere } from '../auth/department-scope';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
@@ -36,7 +37,7 @@ export class KanbanService {
   /**
    * Quadro: colunas = tags com `isKanban`; cards = atendimentos abertos que a pessoa enxerga.
    * Mesma regra de posse da lista de conversas: `waiting` todo mundo vê; `in_progress` só o
-   * dono, a não ser com `conversations.view_all`. E só dos números que ela opera.
+   * dono, a não ser com `conversations.view_all`. E só dos números e departamentos que ela opera.
    */
   async board(u: AuthUser, numberId?: string): Promise<KanbanBoard> {
     const viewAll = u.role === 'super_admin' || !!u.permissions?.includes('conversations.view_all');
@@ -45,7 +46,8 @@ export class KanbanService {
       tenantId: u.tenantId,
       status: { in: ['waiting', 'in_progress'] },
       ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
-      ...(!viewAll && { OR: [{ status: 'waiting' }, { assigneeId: u.id }] }),
+      // posse e departamento usam OR: cada um no seu item do AND
+      AND: [departmentWhere(u) ?? {}, viewAll ? {} : { OR: [{ status: 'waiting' }, { assigneeId: u.id }] }],
     };
     const [columns, rows] = await Promise.all([
       this.prisma.tag.findMany({

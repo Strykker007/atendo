@@ -28,7 +28,7 @@ o desenho de longe: roxo = estrutura, amarelo/laranja = decisão, azul = entrega
 | Lógica e Decisão | **Atraso inteligente** (`wait`) | Espera X minutos/horas/dias (job persistente). Com *só no horário de atendimento*, se o prazo vencer fora do horário (quadro do número), espera até a próxima abertura. Ou **até o próximo horário de atendimento**. Robô pausado / conversa encerrada antes do fim → o fluxo para | 1 |
 | Lógica e Decisão | **IA** (`ai`) | Responde o contato com as instruções e a base de conhecimento do cliente, ou classifica a mensagem. Exige feature `ai_flows` (ver [15](15-ia.md)) | `done` / um por rótulo, + `fallback` (**obrigatório**) |
 | Distribuição e Envio | **Salvar** (`question`) | Pergunta (opcional) e **espera a resposta**, guardando em `{{varName}}` e, se escolhido, num **campo da ficha do contato** (nome, e-mail, endereço, observações). Validação: qualquer / e-mail / telefone / número; estourou `maxRetries` → saída *Tentativas esgotadas* (ou humano, se não ligada). **Tempo limite** opcional → saída *Não respondeu* (não ligada: o fluxo termina) | 1 + `fallback` (+ `timeout` com tempo limite) |
-| Distribuição e Envio | **Distribuidor** (`distributor`) | Entrega a conversa: **rodízio**, **menos ocupado** (menos conversas abertas) ou **fila** ("Aguardando"). Atendentes escolhidos no bloco ou todos os ativos — sempre só quem opera o número da conversa | `done` / `fallback` (ninguém disponível) |
+| Distribuição e Envio | **Distribuidor** (`distributor`) | Entrega a conversa: **rodízio**, **menos ocupado** (menos conversas abertas) ou **fila** ("Aguardando"). Atendentes escolhidos no bloco ou todos os ativos — sempre só quem opera o número da conversa. **Departamento** opcional: a conversa entra nele e só os participantes concorrem ([Departamentos](departamentos.md)) | `done` / `fallback` (ninguém disponível) |
 | Distribuição e Envio | **Agendar horário** (`schedule`) | Serviço → profissional → horário → confirma (ver [13](13-agendamento.md)). Exige feature `scheduling` | `done` / `fallback` |
 
 Um bloco sem saída ligada termina o fluxo (`done`). Os nomes antigos (*Enviar mensagem*,
@@ -142,6 +142,7 @@ usado pelo editor ao colar cards vindos de outra empresa:
 | `tagId` | vira `tagName` — o nome é único por cliente (`@@unique([tenantId, name])`) |
 | `agentId` | removido, com aviso |
 | `agentIds` (Distribuidor) | removido, com aviso (no destino distribui entre todos) |
+| `departmentId` (Distribuidor, Ação "Definir departamento") | removido, com aviso e *Reconfigurar* |
 | `url` do webhook | removida, com aviso — costuma levar token na query |
 | `headers` do webhook | os de credencial (`Authorization`, `X-Api-Key`, nome com `token`/`secret`) saem inteiros, com aviso; os demais ficam |
 | `body` do webhook | viaja; a tela avisa antes de baixar ("Este arquivo contém o corpo de webhooks…") |

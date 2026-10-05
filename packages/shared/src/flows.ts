@@ -233,8 +233,9 @@ function legacyRule(d: LegacyConditionData): ConditionRule | undefined {
  * `WEBHOOK_ERROR_HANDLE` se estiver ligada; senão segue pela saída normal.
  */
 export type ActionNode = FlowNodeBase<'action', {
-  kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook';
+  kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook' | 'set_department';
   tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed';
+  /** set_department: id do departamento ou `DEPARTMENT_NONE` (tirar de departamento) */ departmentId?: string;
   /** set_var */ varName?: string; value?: string;
   /** webhook */ url?: string; method?: WebhookMethod; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;
   /** webhook: guarda o corpo da resposta nesta variável */ responseVar?: string;
@@ -280,9 +281,12 @@ export type RandomizerNode = FlowNodeBase<'randomizer', { branches: { id: string
 /**
  * Distribui a conversa. round_robin = rodízio entre os atendentes; least_busy = quem tem
  * menos conversas abertas; queue = devolve para a fila "Aguardando". `agentIds` vazio = todos
- * os atendentes ativos que operam o número da conversa. Saídas: 'done' e 'fallback' (ninguém disponível).
+ * os atendentes ativos que operam o número da conversa. `departmentId`: põe a conversa no
+ * departamento e só distribui entre quem é dele. Saídas: 'done' e 'fallback' (ninguém disponível).
  */
-export type DistributorNode = FlowNodeBase<'distributor', { mode: 'round_robin' | 'least_busy' | 'queue'; agentIds?: string[] }>;
+export type DistributorNode = FlowNodeBase<'distributor', { mode: 'round_robin' | 'least_busy' | 'queue'; agentIds?: string[]; departmentId?: string }>;
+/** Ação "Definir departamento" com este valor tira a conversa de departamento. */
+export const DEPARTMENT_NONE = 'none';
 export type EndNode = FlowNodeBase<'end', { closeConversation: boolean }>;
 /**
  * Agendar pelo WhatsApp: pergunta serviço → profissional → horário → confirma e cria o agendamento.

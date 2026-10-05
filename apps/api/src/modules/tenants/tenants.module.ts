@@ -126,7 +126,7 @@ class TenantsController {
   /** Todos podem listar (precisam para transferir); só admin gerencia. */
   @Get('me/agents')
   agents(@CurrentUser() u: AuthUser) {
-    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } } } });
+    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
   }
 
   @Post('me/agents')

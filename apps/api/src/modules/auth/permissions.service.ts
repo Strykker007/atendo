@@ -16,17 +16,18 @@ import type { Permission } from '@atendo/shared';
  */
 @Injectable()
 export class PermissionsService {
-  private readonly cache = new Map<string, { at: number; permissions: string[] | null; numberIds: string[] }>();
+  private readonly cache = new Map<string, { at: number; permissions: string[] | null; numberIds: string[]; departmentIds: string[] }>();
   private static readonly TTL_MS = 15_000;
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Permissões (o que pode fazer) e números (sobre quais dados) numa consulta só. */
-  async scope(user: { id: string; role: Principal['role'] }): Promise<{ permissions: Permission[]; numberIds: string[] }> {
+  /** Permissões (o que pode fazer), números e departamentos (sobre quais dados) numa consulta só. */
+  async scope(user: { id: string; role: Principal['role'] }): Promise<{ permissions: Permission[]; numberIds: string[]; departmentIds: string[] }> {
     const row = await this.load(user.id);
     return {
       permissions: permissionsOf({ role: user.role, profilePermissions: row.permissions }),
       numberIds: row.numberIds,
+      departmentIds: row.departmentIds,
     };
   }
 
@@ -35,14 +36,14 @@ export class PermissionsService {
     if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit;
     const row = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { profile: { select: { permissions: true } }, numbers: { select: { numberId: true } } },
+      select: { profile: { select: { permissions: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } },
     });
-    const entry = { at: Date.now(), permissions: row?.profile?.permissions ?? null, numberIds: (row?.numbers ?? []).map((n) => n.numberId) };
+    const entry = { at: Date.now(), permissions: row?.profile?.permissions ?? null, numberIds: (row?.numbers ?? []).map((n) => n.numberId), departmentIds: (row?.departments ?? []).map((d) => d.departmentId) };
     this.cache.set(userId, entry);
     return entry;
   }
 
-  /** Chamar sempre que um perfil for salvo ou um usuário trocar de perfil. */
+  /** Chamar sempre que um perfil for salvo, um usuário trocar de perfil ou de departamento. */
   invalidate() {
     this.cache.clear();
   }

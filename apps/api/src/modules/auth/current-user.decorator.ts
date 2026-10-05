@@ -15,6 +15,8 @@ export interface AuthUser {
   permissions?: Permission[];
   /** números que o usuário opera; vazio = todos (ver number-scope.ts) */
   numberIds?: string[];
+  /** departamentos do usuário; vazio = todos (ver department-scope.ts) */
+  departmentIds?: string[];
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthUser => {

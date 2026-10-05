@@ -30,6 +30,9 @@ export interface Conversation {
   /** `isPrimary` = etapa do atendimento no Kanban (no máximo uma) */
   tags: { tag: Tag; isPrimary?: boolean }[];
   assignee: { id: string; name: string } | null;
+  /** departamento da conversa; null = sem departamento */
+  departmentId?: string | null;
+  department?: { id: string; name: string; color: string; isActive: boolean } | null;
   number: { id: string; label: string; phone?: string; color?: string; provider?: 'meta' | 'evolution'; status?: string };
 }
 export interface Message {
@@ -85,12 +88,13 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export const useConversations = (q: { status: ConversationStatus; numberId: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas }) =>
+export const useConversations = (q: { status: ConversationStatus; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas }) =>
   useQuery({
     queryKey: ['conversations', q],
     queryFn: () => {
       const p = new URLSearchParams({ status: q.status });
       if (q.numberId) p.set('numberId', q.numberId);
+      if (q.departmentId) p.set('departmentId', q.departmentId);
       if (q.assigneeId) p.set('assigneeId', q.assigneeId);
       if (q.origin) p.set('origin', q.origin);
       if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
@@ -106,8 +110,17 @@ export const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
   qc.invalidateQueries({ queryKey: ['conversation-counts'] });
 };
 
-export const useConversationCounts = (numberId: string | null) =>
-  useQuery({ queryKey: ['conversation-counts', numberId], queryFn: () => api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number }>(`/conversations/counts${numberId ? `?numberId=${numberId}` : ''}`), refetchInterval: 30_000 });
+export const useConversationCounts = (numberId: string | null, departmentId: string | null = null) =>
+  useQuery({
+    queryKey: ['conversation-counts', numberId, departmentId],
+    queryFn: () => {
+      const p = new URLSearchParams();
+      if (numberId) p.set('numberId', numberId);
+      if (departmentId) p.set('departmentId', departmentId);
+      return api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number }>(`/conversations/counts${p.toString() ? `?${p}` : ''}`);
+    },
+    refetchInterval: 30_000,
+  });
 
 // ---- posse do atendimento ----
 export const useClaim = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/claim`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
@@ -345,7 +358,7 @@ export const useDeletePlan = () => {
 
 export interface ConversationEvent {
   id: string;
-  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed';
+  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed' | 'department_changed';
   actor: { id: string; name: string } | null;
   target: { id: string; name: string } | null;
   fromStatus: ConversationStatus | null;

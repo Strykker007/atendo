@@ -32,6 +32,8 @@ export function validateDefinition(def: FlowDefinition) {
     if (n.type === 'condition') errors.push(...conditionErrors(n));
     if (n.type === 'randomizer' && ((n.data.branches?.length ?? 0) < 2 || !n.data.branches.some((b) => Number(b.weight) > 0))) errors.push(`"Randomizador" (${n.id}) precisa de pelo menos dois ramos, com algum peso maior que zero.`);
     if (n.type === 'action' && n.data.kind === 'webhook') errors.push(...webhookErrors(n));
+    // departamento que saiu na importação: o card já mostra "Reconfigurar"; não trava o salvar
+    if (n.type === 'action' && n.data.kind === 'set_department' && !n.data.departmentId && !(n.data as { _reconfig?: unknown })._reconfig) errors.push(`"Ação" (${n.id}): escolha o departamento.`);
     if ((n.type === 'question' || n.type === 'menu') && n.data.timeoutMinutes !== undefined) {
       const t = Number(n.data.timeoutMinutes);
       if (Number.isNaN(t) || t < 0 || t > MAX_REPLY_TIMEOUT_MIN) errors.push(`"${n.type === 'menu' ? 'Menu' : 'Salvar'}" (${n.id}): o tempo limite deve ser de 1 minuto a 30 dias (0 = sem limite).`);

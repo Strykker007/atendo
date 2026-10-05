@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, Star, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, Star, ArrowRightLeft, Undo2, UserRound, Lock, Unlock, CalendarPlus, Image as ImageIcon, Video, Building2 } from 'lucide-react';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
@@ -8,7 +8,8 @@ import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, R
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useAiStatus } from '@/lib/hooks';
+import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
+import { DepartmentBadge } from './DepartmentBadge';
 import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
@@ -52,6 +53,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const transfer = useTransfer();
   const release = useRelease();
   const [transferOpen, setTransferOpen] = useState(false);
+  const [deptOpen, setDeptOpen] = useState(false);
+  const departments = useDepartments();
+  const setDepartment = useSetConversationDepartment();
   // permissão, não papel (ver ConversationList)
   const isAdmin = useCan('conversations.view_all');
   const podeTransferir = useCan('conversations.transfer_any');
@@ -441,6 +445,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             <span className="truncate">{conv.contact.name ?? `+${conv.contact.phone}`}</span>
             {/* por qual número esta conversa responde — ao lado do nome, para não passar batido */}
             <ChannelBadge channel={conv.number} phone="full" className="shrink-0" />
+            <DepartmentBadge department={conv.department} className="shrink-0 max-w-[140px]" />
             {botPaused(conv) && (
               <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink" title="Automação pausada só nesta conversa">
                 <BotOff size={10} />Robô pausado
@@ -493,6 +498,34 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
                 <button onClick={() => { setTransferOpen(false); release.mutateAsync(conv.id).then(() => { toast.ok('Devolvida para a fila'); setFilterStatus('waiting', true); }).catch(toast.err); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2">
                   <Undo2 size={13} className="text-faint" /> Devolver à fila
                 </button>
+              </div>
+            )}
+          </div>
+        )}
+        {/* Departamento: mesma regra de quem pode do "Devolver à fila" — o dono, quem tem
+            permissão, ou qualquer um enquanto a conversa está sem dono */}
+        {(departments.data?.some((d) => d.isActive) || conv.department) && (!conv.assignee || mine || podeTransferir) && (
+          <div className="relative">
+            <Button size="sm" variant="ghost" icon={<Building2 size={14} />} onClick={() => setDeptOpen((o) => !o)} title="Transferir para outro departamento">
+              <span className="hidden lg:inline">Departamento</span>
+            </Button>
+            {deptOpen && (
+              <div className="absolute right-0 top-full mt-1 z-20 w-60 rounded-xl bg-panel border border-line shadow-lg py-1 text-sm" onMouseLeave={() => setDeptOpen(false)}>
+                <div className="px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">Transferir para o departamento</div>
+                {departments.data?.filter((d) => d.isActive && d.id !== conv.department?.id).map((d) => (
+                  <button key={d.id} onClick={() => { setDeptOpen(false); setDepartment.mutateAsync({ id: conv.id, departmentId: d.id }).then(() => { toast.ok(conv.status === 'closed' ? `Departamento: ${d.name}` : `Enviada para a fila de ${d.name}`); if (conv.status !== 'closed') setFilterStatus('waiting', true); }).catch(toast.err); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} /> <span className="truncate">{d.name}</span>
+                  </button>
+                ))}
+                {conv.department && (
+                  <>
+                    <div className="border-t border-line my-1" />
+                    <button onClick={() => { setDeptOpen(false); setDepartment.mutateAsync({ id: conv.id, departmentId: null }).then(() => { toast.ok('Conversa sem departamento'); if (conv.status !== 'closed') setFilterStatus('waiting', true); }).catch(toast.err); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2">
+                      <X size={13} className="text-faint" /> Tirar do departamento
+                    </button>
+                  </>
+                )}
+                {conv.status !== 'closed' && <p className="px-3 pt-1.5 pb-1 text-[11px] text-muted border-t border-line mt-1">A conversa volta para a fila (Aguardando) do departamento escolhido.</p>}
               </div>
             )}
           </div>

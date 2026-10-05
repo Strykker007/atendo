@@ -4,7 +4,8 @@ import { Trash2, Plus, X, ExternalLink } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META, DELAY_UNIT, FlowEditorRefs } from './nodes';
-import { useTags, useAgents, useServices, useProfessionals, useHasFeature } from '@/lib/hooks';
+import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments } from '@/lib/hooks';
+import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
 import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, normalizeCondition, normalizeContent, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
@@ -56,6 +57,9 @@ function ReplyTimeoutFields({ data, set }: { data: ReplyTimeout; set: (p: Record
 export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; onChange: (data: FlowNode['data']) => void; onDelete: () => void; vars: FlowVar[] }) {
   const tags = useTags();
   const agents = useAgents();
+  const departments = useDepartments();
+  // desativado só aparece se já for o escolhido (para não sumir do select sem aviso)
+  const deptOptions = (current?: string) => (departments.data ?? []).filter((d) => d.isActive || d.id === current);
   const sched = useHasFeature('scheduling');
   const aiFeature = useHasFeature('ai_flows');
   const services = useServices();
@@ -177,7 +181,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               <select className={inputCls} value={node.data.kind === 'set_status' && node.data.status === 'closed' ? 'close' : node.data.kind} onChange={(e) => set(e.target.value === 'close' ? { kind: 'set_status', status: 'closed' } : e.target.value === 'set_status' ? { kind: 'set_status', status: 'waiting' } : { kind: e.target.value })}>
                 {/* "Definir variável" virou o bloco Manipulador; continua aqui só para fluxos antigos */}
                 {node.data.kind === 'set_var' && <option value="set_var">Definir variável (antigo — prefira o bloco Manipulador)</option>}
-                <option value="add_tag">Aplicar etiqueta</option><option value="remove_tag">Remover etiqueta</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="close">Encerrar conversa</option><option value="webhook">Chamar webhook</option><option value="handoff">Transferir para atendente humano (fim do fluxo)</option>
+                <option value="add_tag">Aplicar etiqueta</option><option value="remove_tag">Remover etiqueta</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="close">Encerrar conversa</option><option value="webhook">Chamar webhook</option><option value="set_department">Definir departamento</option><option value="handoff">Transferir para atendente humano (fim do fluxo)</option>
               </select>
             </Field>
             {node.data.kind === 'webhook' && (() => {
@@ -241,6 +245,18 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               <Field label={node.data.kind === 'handoff' ? 'Atribuir a (opcional)' : 'Atendente'} hint={node.data.kind === 'handoff' ? 'Vazio = volta para a fila "Aguardando"' : undefined}>
                 <select className={inputCls} value={node.data.agentId ?? ''} onChange={(e) => set({ agentId: e.target.value || undefined })}><option value="">{node.data.kind === 'handoff' ? 'Fila (qualquer atendente)' : 'Escolha…'}</option>{agents.data?.filter((a) => a.isActive).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
               </Field>
+            )}
+            {node.data.kind === 'set_department' && (
+              <>
+                <Field label="Departamento">
+                  <select className={inputCls} value={node.data.departmentId ?? ''} onChange={(e) => set({ departmentId: e.target.value || undefined })}>
+                    <option value="">Escolha…</option>
+                    {deptOptions(node.data.departmentId).map((d) => <option key={d.id} value={d.id}>{d.name}{d.isActive ? '' : ' (desativado)'}</option>)}
+                    <option value={DEPARTMENT_NONE}>Sem departamento (tirar do atual)</option>
+                  </select>
+                </Field>
+                <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Só muda o departamento da conversa — o atendente e o status continuam como estão e o fluxo segue. Para entregar a alguém do departamento, use depois o bloco <b>Distribuidor</b> (com o departamento) ou <b>Transferir para atendente humano</b> (vai para a fila).</p>
+              </>
             )}
             {node.data.kind === 'set_status' && node.data.status !== 'closed' && (
               <Field label="Status"><select className={inputCls} value={node.data.status ?? 'waiting'} onChange={(e) => set({ status: e.target.value })}><option value="waiting">Aguardando</option><option value="in_progress">Em atendimento</option></select></Field>
@@ -433,10 +449,16 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                 <option value="queue">Fila — devolve para “Aguardando”</option>
               </select>
             </Field>
+            <Field label="Departamento (opcional)" hint={node.data.departmentId ? 'A conversa entra neste departamento e só os participantes dele concorrem.' : 'Vazio = não mexe no departamento da conversa.'}>
+              <select className={inputCls} value={node.data.departmentId ?? ''} onChange={(e) => set({ departmentId: e.target.value || undefined, agentIds: [] })}>
+                <option value="">Nenhum</option>
+                {deptOptions(node.data.departmentId).map((d) => <option key={d.id} value={d.id}>{d.name}{d.isActive ? '' : ' (desativado)'}</option>)}
+              </select>
+            </Field>
             {node.data.mode !== 'queue' && (
-              <Field label="Entre quais atendentes" hint="Nenhum marcado = todos os ativos. Só recebe quem opera o número da conversa.">
+              <Field label="Entre quais atendentes" hint={node.data.departmentId ? 'Nenhum marcado = todos os participantes ativos do departamento. Só recebe quem opera o número da conversa.' : 'Nenhum marcado = todos os ativos. Só recebe quem opera o número da conversa.'}>
                 <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {agents.data?.filter((a) => a.isActive).map((a) => {
+                  {agents.data?.filter((a) => a.isActive && (!node.data.departmentId || a.departments?.some((x) => x.departmentId === node.data.departmentId))).map((a) => {
                     const on = node.data.agentIds?.includes(a.id) ?? false;
                     return <label key={a.id} className="flex items-center gap-2 text-ink"><input type="checkbox" checked={on} onChange={(e) => set({ agentIds: e.target.checked ? [...(node.data.agentIds ?? []), a.id] : (node.data.agentIds ?? []).filter((x) => x !== a.id) })} /> {a.name}</label>;
                   })}

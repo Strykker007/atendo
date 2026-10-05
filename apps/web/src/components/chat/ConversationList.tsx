@@ -4,7 +4,8 @@ import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { DepartmentBadge } from './DepartmentBadge';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
@@ -41,7 +42,7 @@ export function useMinuto() {
 }
 
 export function ConversationList() {
-  const { numberId, setNumber, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation } = useUI();
+  const { numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation } = useUI();
   const me = useMe();
   // quem vê a fila da equipe é decidido pela PERMISSÃO, não pelo papel: é isso que permite um
   // "atendente líder" enxergar a equipe, e um gerente com o acesso retirado deixar de ver
@@ -50,7 +51,10 @@ export function ConversationList() {
   const [search, setSearch] = useState('');
   const numbers = useNumbers();
   const tags = useTags();
-  const counts = useConversationCounts(numberId);
+  const departments = useDepartments();
+  // desativado sai do seletor, a não ser que seja o filtro atual (senão o select ficaria vazio)
+  const deptOptions = (departments.data ?? []).filter((d) => d.isActive || d.id === departmentId);
+  const counts = useConversationCounts(numberId, departmentId);
   const agora = useMinuto();
   /**
    * Filtros escondidos atrás do ícone.
@@ -65,14 +69,18 @@ export function ConversationList() {
   const [selecionando, setSelecionando] = useState(false);
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
-  const conversations = useConversations({ status, numberId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
+  const conversations = useConversations({ status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
   const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0);
 
   const visiveis = conversations.data ?? [];
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
-  useEffect(() => { setMarcados([]); setSelecionando(false); }, [status, numberId, origin, assigneeId]);
+  useEffect(() => { setMarcados([]); setSelecionando(false); }, [status, numberId, departmentId, origin, assigneeId]);
+  // filtro guardado de um departamento que foi excluído: volta para "todos" em vez de lista vazia
+  useEffect(() => {
+    if (departmentId && departmentId !== 'none' && departments.data && !departments.data.some((d) => d.id === departmentId)) setDepartment(null);
+  }, [departmentId, departments.data, setDepartment]);
   const marcadosVisiveis = marcados.filter((id) => visiveis.some((c) => c.id === id));
   const todosMarcados = visiveis.length > 0 && marcadosVisiveis.length === visiveis.length;
   const alternar = (id: string) => setMarcados((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
@@ -80,9 +88,10 @@ export function ConversationList() {
 
   return (
     <>
-      {/* Seletor de número (perfil): primeiro escolhe o número, depois vê as conversas dele */}
-      <div className="h-12 px-2.5 flex items-center border-b border-line">
-        <div className="relative w-full">
+      {/* Seletor de número (perfil): primeiro escolhe o número, depois vê as conversas dele.
+          Departamento ao lado, só quando o cliente tem algum cadastrado */}
+      <div className="h-12 px-2.5 flex items-center gap-1.5 border-b border-line">
+        <div className="relative flex-1 min-w-0">
           <select
             value={numberId ?? ''}
             onChange={(e) => setNumber(e.target.value || null)}
@@ -104,6 +113,21 @@ export function ConversationList() {
             <ChevronDown size={15} className="text-faint" />
           </div>
         </div>
+        {(deptOptions.length > 0 || departmentId) && (
+          <div className="relative w-[42%] shrink-0">
+            <select
+              value={departmentId ?? ''}
+              onChange={(e) => setDepartment(e.target.value || null)}
+              title="Filtrar por departamento"
+              className={cn('w-full appearance-none rounded-lg bg-field text-ink pl-2.5 pr-6 py-1.5 text-[12px] font-semibold truncate focus:outline-none focus:ring-2 focus:ring-accent/40', departmentId && 'ring-1 ring-accent')}
+            >
+              <option value="">Todos os departamentos</option>
+              {deptOptions.map((d) => <option key={d.id} value={d.id}>{d.name}{d.isActive ? '' : ' (desativado)'}</option>)}
+              <option value="none">Sem departamento</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-faint pointer-events-none" />
+          </div>
+        )}
       </div>
 
       {/* Filtro principal com contadores */}
@@ -274,8 +298,9 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: {
           <SeloEspera desde={c.awaitingSince} encerrada={c.status === 'closed'} agora={agora} />
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
-        {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || c.assignee || c.origin !== 'organic') && (
+        {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || c.assignee || c.origin !== 'organic' || c.department) && (
           <div className="flex flex-wrap items-center gap-1 mt-1">
+            <DepartmentBadge department={c.department} className="max-w-[110px]" />
             <OriginBadge origin={c.origin} data={c.originData} />
             {/* principal (etapa no Kanban) primeiro, cheia e com estrela; as outras em tom claro */}
             {[...c.tags].sort((x, y) => Number(!!y.isPrimary) - Number(!!x.isPrimary)).map(({ tag, isPrimary }) => isPrimary ? (

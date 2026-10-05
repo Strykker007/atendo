@@ -120,6 +120,10 @@ seria o furo.
 
 O dono do sistema nunca é restringido: é ele quem dá suporte entrando como o cliente.
 
+### Departamentos (outro escopo de dados)
+
+Mesmo desenho, em `auth/department-scope.ts` + `user_departments`: sem departamento = vê tudo; participante de algum (e sem `conversations.view_all`) vê os seus + os sem departamento. Aplicado nos mesmos pontos da tabela acima. Detalhes em [Departamentos](departamentos.md).
+
 ## Onde cada permissão aparece na tela
 
 A API sempre recusou o que o perfil não permite — o problema era a **tela continuar oferecendo**: a pessoa clicava, batia num 403 e parecia defeito do sistema. Auditoria feita permissão a permissão:

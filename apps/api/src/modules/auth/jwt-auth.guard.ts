@@ -29,6 +29,7 @@ export class JwtAuthGuard implements CanActivate {
     const scope = await this.permissions.scope(req.user);
     req.user.permissions = scope.permissions;
     req.user.numberIds = scope.numberIds;
+    req.user.departmentIds = scope.departmentIds;
 
     // dono do sistema (sem tenant) só entra em rotas marcadas com @NoTenantOk
     return this.tenantGuard.canActivate(ctx);

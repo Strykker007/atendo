@@ -19,3 +19,4 @@ export * from './hooks/agenda';
 export * from './hooks/ia';
 export * from './hooks/configuracoes';
 export * from './hooks/kanban';
+export * from './hooks/departamentos';

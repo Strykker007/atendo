@@ -8,6 +8,8 @@ interface UIState {
   rightPanelOpen: boolean;
   /** número (perfil) selecionado; null = todos */
   numberId: string | null;
+  /** filtro de departamento: id, 'none' (sem departamento) ou null = todos */
+  departmentId: string | null;
   status: ConversationStatus;
   tagIds: string[];
   /** filtro de origem do lead; null = todas */
@@ -18,6 +20,7 @@ interface UIState {
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
   setNumber: (id: string | null) => void;
+  setDepartment: (id: string | null) => void;
   /** keep = true mantém a conversa selecionada (usado ao responder) */
   setStatus: (s: ConversationStatus, keep?: boolean) => void;
   setTags: (ids: string[]) => void;
@@ -32,6 +35,7 @@ export const useUI = create<UIState>()(
       sidebarCollapsed: false,
       rightPanelOpen: true,
       numberId: null,
+      departmentId: null,
       status: 'waiting',
       tagIds: [],
       origin: null,
@@ -40,12 +44,13 @@ export const useUI = create<UIState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
       setNumber: (numberId) => set({ numberId, conversationId: null }),
+      setDepartment: (departmentId) => set({ departmentId }),
       setStatus: (status, keep) => set((s) => ({ status, conversationId: keep ? s.conversationId : null })),
       setTags: (tagIds) => set({ tagIds }),
       setOrigin: (origin) => set({ origin }),
       setAssignee: (assigneeId) => set({ assigneeId }),
       setConversation: (conversationId) => set({ conversationId }),
     }),
-    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, numberId: s.numberId, conversationId: s.conversationId, status: s.status }) },
+    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, status: s.status }) },
   ),
 );

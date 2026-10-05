@@ -1,4 +1,4 @@
-import { cloneFlowFragment, type FlowDefinition, type FlowNodeType, type FlowTrigger } from './flows.js';
+import { DEPARTMENT_NONE, cloneFlowFragment, type FlowDefinition, type FlowNodeType, type FlowTrigger } from './flows.js';
 
 /**
  * Levar itens (fluxos, respostas rápidas…) de um cliente para outro — módulo único de
@@ -161,6 +161,13 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
       delete d.agentId;
       warnings.push('Atribuição a um atendente específico foi removida — escolha o atendente no destino.');
       flagReconfig(d, 'atendente');
+    }
+
+    // departamento é do cliente de origem (id); o destino escolhe o dele
+    if (typeof d.departmentId === 'string' && d.departmentId !== DEPARTMENT_NONE) {
+      delete d.departmentId;
+      warnings.push('O departamento de um bloco foi removido — escolha o departamento no destino.');
+      flagReconfig(d, 'departamento');
     }
 
     if (Array.isArray(d.agentIds) && d.agentIds.length) {

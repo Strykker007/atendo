@@ -20,6 +20,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { env } from './config/env';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
+import { DepartmentsModule } from './modules/departments/departments.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { KanbanModule } from './modules/kanban/kanban.module';
     WhatsAppModule,
     ConversationsModule,
     TagsModule,
+    DepartmentsModule,
     KanbanModule,
     QuickRepliesModule,
     BillingModule,
