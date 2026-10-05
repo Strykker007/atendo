@@ -37,7 +37,8 @@ qualquer origem ──▶ ConversationsService.send / sendAsSystem
         queuedAt + prazo vencido            → falha "Expirou na fila"
         há pendente anterior na conversa    → espera a vez (job atrasado 5 s; promovido antes)
         número não conectado                → pausa (job atrasado 60 s, sem chamar o provider)
-   3. teto do dia (aquecimento)             → falha sem retry
+   3. teto do dia (aquecimento) — só envio proativo (contato sem mensagem nas últimas 24h);
+      resposta de atendimento pula esta etapa e não conta no contador → falha sem retry
    4. SendPacer.reserve (Lua atômico): perfil do número + máx/min do número
         + intervalo mínimo da conversa + rajada da conversa  → atrasa até a vaga
    5. provider.send

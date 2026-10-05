@@ -38,7 +38,7 @@ export const useConnectNumber = () => {
 export const useUpdateNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; label?: string; color?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; sendLimits?: Partial<SendLimits> | null; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; label?: string; color?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; endWarmup?: boolean; sendLimits?: Partial<SendLimits> | null; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };

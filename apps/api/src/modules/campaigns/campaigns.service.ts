@@ -153,7 +153,7 @@ export class CampaignsService {
   async dailyRemaining(numberId: string) {
     const number = await this.prisma.whatsAppNumber.findUniqueOrThrow({
       where: { id: numberId },
-      select: { id: true, sendDailyLimit: true, warmupStartedAt: true },
+      select: { id: true, provider: true, sendDailyLimit: true, warmupStartedAt: true },
     });
     const day = await this.pacer.dailyStatus(number);
     return day.limit === 0 ? Number.MAX_SAFE_INTEGER : Math.max(0, day.limit - day.sent);

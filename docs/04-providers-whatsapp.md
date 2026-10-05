@@ -185,8 +185,8 @@ número na tela **Números**:
 | Defesa | Como funciona |
 |---|---|
 | **Intervalo entre envios** | Faixas `instant` (só oficial), `fast` 1–7s, `short` 7–25s (padrão), `medium` 25–60s, `long` 60–250s. O valor é **sorteado dentro da faixa a cada envio** — intervalo fixo é assinatura de robô |
-| **Teto diário** | Máximo de envios por dia por número (0 = sem teto). Ao atingir, a mensagem falha com motivo claro e **sem retry** — não adianta tentar de novo hoje |
-| **Aquecimento** | Número novo começa em 20 envios/dia e dobra a cada dia por 7 dias, até o teto configurado. Começa sozinho na primeira conexão |
+| **Teto diário** | Máximo de envios **proativos** por dia por número (0 = sem teto, **padrão** desde a migration `send_daily_limit_sem_teto`; quem estava no antigo padrão 1000 virou 0). Proativo = conversa sem mensagem do contato nas últimas 24h (campanha, primeiro contato, retomada); **resposta dentro de 24h nunca é barrada nem contada** (`countsTowardDailyLimit`). Ao atingir, a mensagem falha com motivo claro e **sem retry** |
+| **Aquecimento** | Só Evolution (número Meta não aquece) e só envio proativo. Número novo começa em 20 proativos/dia e dobra a cada dia por 7 dias, até o teto configurado. Começa sozinho na primeira conexão; o cartão do número tem "Encerrar aquecimento" (`PATCH /numbers/:id { endWarmup: true }`) para chip antigo que só é novo no Atendo. A tela não mostra alerta de banimento — só um aviso neutro com esse link |
 
 Implementação: `sending-policy.ts` (puro e testado) decide faixa, teto e rampa;
 `SendPacer` reserva a vaga do próximo envio no Redis com **script Lua atômico** — com

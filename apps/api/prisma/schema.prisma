@@ -308,8 +308,8 @@ model WhatsAppNumber {
   // ---- proteção contra bloqueio/banimento (só faz sentido no não-oficial) ----
   /// intervalo entre envios deste número; `instant` só para a API oficial
   sendDelay      SendDelayProfile @default(short)
-  /// teto de envios por dia. 0 = sem teto (use só na oficial)
-  sendDailyLimit Int          @default(1000)
+  /// teto de envios PROATIVOS por dia (resposta dentro de 24h não conta). 0 = sem teto (padrão)
+  sendDailyLimit Int          @default(0)
   /// quando o número conectou pela primeira vez — número novo sobe o volume aos poucos
   warmupStartedAt DateTime?
   /// Limites da fila de envio (`Partial<SendLimits>` do shared); o que faltar = padrão do provider

@@ -48,9 +48,10 @@ export function warmupDay(startedAt: Date, now: Date) {
 export const WARMUP_DAY1 = 20;
 export const WARMUP_DAYS = 7;
 
-export function dailyLimit(input: { configured: number; warmupStartedAt?: Date | null; now?: Date }): number {
+export function dailyLimit(input: { configured: number; warmupStartedAt?: Date | null; provider?: string; now?: Date }): number {
   const configured = Math.max(0, input.configured);
-  if (!input.warmupStartedAt) return configured;
+  // a API oficial não bane por volume (a Meta tem os próprios limites de conversa): sem aquecimento
+  if (!input.warmupStartedAt || input.provider === 'meta') return configured;
   const day = warmupDay(input.warmupStartedAt, input.now ?? new Date());
   if (day > WARMUP_DAYS) return configured;
   const ramp = WARMUP_DAY1 * 2 ** Math.max(0, day - 1);
@@ -63,6 +64,18 @@ export interface SendDecision {
   reason?: string;
   /** quanto esperar antes de entregar ao provider */
   waitMs?: number;
+}
+
+/** Mesma janela da Meta: o contato escreveu nas últimas 24h, então o envio é resposta. */
+export const REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * O envio conta para o teto do dia / aquecimento? Só o **proativo** (campanha, primeiro
+ * contato, conversa parada há mais de 24h). Responder quem acabou de escrever é o uso normal
+ * de qualquer número — barrar isso travava o atendimento de número novo em 20 respostas no dia.
+ */
+export function countsTowardDailyLimit(lastInboundAt: Date | null | undefined, now = Date.now()): boolean {
+  return !lastInboundAt || now - lastInboundAt.getTime() >= REPLY_WINDOW_MS;
 }
 
 /** O envio cabe no teto do dia? `limit` 0 = sem teto. */

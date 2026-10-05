@@ -1,8 +1,9 @@
 'use client';
-import { ShieldAlert, Flame, ChevronDown } from 'lucide-react';
+import { ShieldAlert, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import { SEND_LIMIT_DEFAULTS, SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
 import { inputCls } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/Confirm';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useMe, useSendingStatus, useUpdateNumber, type NumberItem, type SendDelayProfile } from '@/lib/hooks';
@@ -23,10 +24,12 @@ export function SendingCard({ number }: { number: NumberItem }) {
   const me = useMe();
   const update = useUpdateNumber();
   const status = useSendingStatus(number.id);
+  const [encerrando, setEncerrando] = useState(false);
   const oficial = number.provider === 'meta';
   const pct = status.data && status.data.limit > 0 ? Math.min(100, (status.data.sent / status.data.limit) * 100) : 0;
 
-  const aquecendo = !!number.warmupStartedAt && !!status.data && status.data.limit < number.sendDailyLimit;
+  // em aquecimento enquanto o teto efetivo de hoje é menor que o configurado (0 = sem teto)
+  const aquecendo = !oficial && !!number.warmupStartedAt && !!status.data && status.data.limit > 0 && (number.sendDailyLimit === 0 || status.data.limit < number.sendDailyLimit);
 
   return (
     <div className="rounded-lg bg-field/60 p-2.5 space-y-2 text-[12px]">
@@ -51,7 +54,7 @@ export function SendingCard({ number }: { number: NumberItem }) {
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-faint leading-tight">Máximo por dia (0 = sem teto)</span>
+          <span className="text-[11px] text-faint leading-tight" title="Conta só envio proativo (campanha, primeiro contato). Resposta a quem escreveu nas últimas 24h nunca é barrada.">Máx. proativos/dia (0 = sem teto)</span>
           <input
             type="number"
             min={0}
@@ -88,7 +91,7 @@ export function SendingCard({ number }: { number: NumberItem }) {
       {status.data && (
         <div className="space-y-1">
           <div className="flex justify-between text-[11px] text-muted">
-            <span>Hoje: <b className="text-ink tnum">{status.data.sent}</b>{status.data.limit > 0 && <> de <span className="tnum">{status.data.limit}</span></>}</span>
+            <span>Proativos hoje: <b className="text-ink tnum">{status.data.sent}</b>{status.data.limit > 0 && <> de <span className="tnum">{status.data.limit}</span></>}</span>
             {!status.data.ok && <span className="text-danger">teto atingido</span>}
           </div>
           {status.data.limit > 0 && (
@@ -99,18 +102,24 @@ export function SendingCard({ number }: { number: NumberItem }) {
         </div>
       )}
 
+      {/* sem alerta amarelo nem falar em banimento: assustava o cliente. Só um link neutro. */}
       {aquecendo && (
-        <p className="flex items-start gap-1.5 text-[11px] text-warn-ink bg-warn-soft rounded-md px-2 py-1.5">
-          <Flame size={12} className="mt-0.5 shrink-0" />
-          <span>Número em aquecimento: o teto sobe sozinho a cada dia até chegar no configurado. Número novo com volume alto é banido rápido.</span>
+        <p className="text-[11px] text-muted">
+          Número novo: envios proativos aumentam a cada dia.{' '}
+          <button type="button" className="underline hover:text-ink" onClick={() => setEncerrando(true)}>Encerrar aquecimento</button>
         </p>
       )}
 
       <QueueLimits number={number} />
 
-      {!oficial && number.sendDelay === 'fast' && (
-        <p className="text-[11px] text-muted">No número não oficial, intervalo curto de verdade é o que evita bloqueio. Use <b>Rápido</b> só para atendimento, nunca para disparo.</p>
-      )}
+      <ConfirmDialog
+        open={encerrando}
+        title="Encerrar aquecimento?"
+        text="Os envios proativos deste número passam a seguir só o teto configurado. Use se o chip já é antigo no WhatsApp."
+        confirmLabel="Encerrar"
+        onConfirm={() => update.mutateAsync({ id: number.id, endWarmup: true }).then(() => { status.refetch(); toast.ok('Aquecimento encerrado'); }).catch((e) => { toast.err(e); throw e; })}
+        onClose={() => setEncerrando(false)}
+      />
     </div>
   );
 }

@@ -107,7 +107,7 @@ export class SendPacer {
     return Number((await this.redis.get(dayKey(numberId, day))) ?? 0);
   }
 
-  /** Conta o envio no dia. A chave expira sozinha em 48h. */
+  /** Conta o envio proativo no dia (resposta não conta). A chave expira sozinha em 48h. */
   async countSend(numberId: string, day = today()) {
     const key = dayKey(numberId, day);
     const n = await this.redis.incr(key);
@@ -116,8 +116,8 @@ export class SendPacer {
   }
 
   /** Teto efetivo de hoje (considerando aquecimento) e quanto já foi enviado. */
-  async dailyStatus(number: { id: string; sendDailyLimit: number; warmupStartedAt: Date | null }) {
-    const limit = dailyLimit({ configured: number.sendDailyLimit, warmupStartedAt: number.warmupStartedAt });
+  async dailyStatus(number: { id: string; provider: string; sendDailyLimit: number; warmupStartedAt: Date | null }) {
+    const limit = dailyLimit({ configured: number.sendDailyLimit, warmupStartedAt: number.warmupStartedAt, provider: number.provider });
     const sent = await this.sentToday(number.id);
     return { limit, sent, ...withinDailyLimit(sent, limit) };
   }

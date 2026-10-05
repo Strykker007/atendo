@@ -14,6 +14,7 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { enrichContext } from '../../common/observability/request-context';
 import { SendPacer } from './send-pacer';
+import { countsTowardDailyLimit } from './sending-policy';
 import { isTransientSendError, retryDelayMs } from './providers/provider-error';
 import { expiredReason, headOf, planSend, promoteNext } from './send-queue';
 
@@ -107,7 +108,9 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     }
 
     // ---- proteção do número (bloqueio/banimento) ----
-    const day = await this.pacer.dailyStatus(num);
+    // teto do dia e aquecimento valem só para envio proativo; resposta de atendimento nunca trava
+    const proativo = countsTowardDailyLimit(message.conversation.lastInboundAt);
+    const day = proativo ? await this.pacer.dailyStatus(num) : { ok: true as const };
     if (!day.ok) {
       // teto do dia: não adianta tentar de novo hoje, então nada de retry
       this.log.warn(`Número ${num.id}: ${day.reason}`, { sent: day.sent, limit: day.limit });
@@ -176,7 +179,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       where: { id: message.id },
       data: { status: result.status, externalId: result.externalId, error: null },
     });
-    await this.pacer.countSend(num.id).catch(() => undefined);
+    if (proativo) await this.pacer.countSend(num.id).catch(() => undefined);
     this.gateway.emitMessage(ctx.tenantId, this.conversations.present(updated));
     try {
       await this.usage.record({

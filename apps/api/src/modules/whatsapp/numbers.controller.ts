@@ -31,6 +31,8 @@ class UpdateNumberDto {
   /** proteção contra bloqueio: ritmo de envio e teto diário */
   @IsOptional() @IsEnum(SendDelayProfile) sendDelay?: SendDelayProfile;
   @IsOptional() @IsInt() @Min(0) @Max(100_000) sendDailyLimit?: number;
+  /** `true` encerra o aquecimento (chip antigo que só é novo no Atendo). Não dá para religar. */
+  @IsOptional() @IsBoolean() endWarmup?: boolean;
   /** limites da fila de envio (`Partial<SendLimits>`); campo ausente/null = padrão do provider. null limpa tudo */
   @IsOptional() @IsObject() sendLimits?: Partial<SendLimits> | null;
   /**
@@ -92,7 +94,7 @@ export class NumbersController {
   @Patch(':id')
   @RequirePermission('numbers.manage')
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
-    const { infraCostMonth, sendLimits, ...resto } = dto;
+    const { infraCostMonth, sendLimits, endWarmup, ...resto } = dto;
     const limites = sendLimits === undefined ? {} : { sendLimits: sendLimits === null ? Prisma.DbNull : (cleanSendLimits(sendLimits) as Prisma.InputJsonValue) };
     // Chega no corpo mas é descartado para quem não é o dono: devolver 403 vazaria que o campo
     // existe, e ele não é assunto do cliente.
@@ -103,8 +105,8 @@ export class NumbersController {
     const custo = ehDono && infraCostMonth !== undefined ? { infraCostMonth } : {};
     return this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId },
-      data: { ...resto, ...custo, ...limites },
-      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, infraCostMonth: true },
+      data: { ...resto, ...custo, ...limites, ...(endWarmup && { warmupStartedAt: null }) },
+      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
     });
   }
 
@@ -113,7 +115,7 @@ export class NumbersController {
   async sending(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const n = await this.prisma.whatsAppNumber.findFirstOrThrow({
       where: { id, tenantId: user.tenantId },
-      select: { id: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true },
+      select: { id: true, provider: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true },
     });
     const status = await this.pacer.dailyStatus(n);
     return { ...status, sendDelay: n.sendDelay, warmupStartedAt: n.warmupStartedAt };

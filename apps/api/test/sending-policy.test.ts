@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DELAY_RANGES, WARMUP_DAY1, dailyLimit, delayMs, warmupDay, withinDailyLimit, type SendDelayProfile } from '../src/modules/whatsapp/sending-policy';
+import { DELAY_RANGES, REPLY_WINDOW_MS, WARMUP_DAY1, countsTowardDailyLimit, dailyLimit, delayMs, warmupDay, withinDailyLimit, type SendDelayProfile } from '../src/modules/whatsapp/sending-policy';
 
 describe('delayMs — intervalo entre envios', () => {
   it('respeita a faixa de cada perfil', () => {
@@ -80,5 +80,25 @@ describe('aquecimento não pode pegar número já estabelecido', () => {
     // teria travado em 20 envios no dia
     expect(dailyLimit({ configured: 1000, warmupStartedAt: null })).toBe(1000);
     expect(dailyLimit({ configured: 1000, warmupStartedAt: undefined })).toBe(1000);
+  });
+});
+
+describe('o que conta para o teto do dia', () => {
+  const now = new Date('2026-10-05T12:00:00Z').getTime();
+
+  it('número da API oficial não aquece', () => {
+    const start = new Date(now);
+    expect(dailyLimit({ configured: 0, warmupStartedAt: start, provider: 'meta', now: new Date(now) })).toBe(0);
+    expect(dailyLimit({ configured: 0, warmupStartedAt: start, provider: 'evolution', now: new Date(now) })).toBe(WARMUP_DAY1);
+  });
+
+  it('resposta a quem escreveu nas últimas 24h não conta', () => {
+    expect(countsTowardDailyLimit(new Date(now - 60_000), now)).toBe(false);
+    expect(countsTowardDailyLimit(new Date(now - REPLY_WINDOW_MS + 1), now)).toBe(false);
+  });
+
+  it('envio proativo conta: sem mensagem do contato ou conversa parada há 24h+', () => {
+    expect(countsTowardDailyLimit(null, now)).toBe(true);
+    expect(countsTowardDailyLimit(new Date(now - REPLY_WINDOW_MS), now)).toBe(true);
   });
 });
