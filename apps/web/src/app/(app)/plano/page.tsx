@@ -1,5 +1,5 @@
 'use client';
-import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, Sparkles } from 'lucide-react';
+import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, Sparkles, Workflow, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
@@ -18,6 +18,10 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   canceled: { label: 'Cancelada', cls: 'bg-field text-muted' },
 };
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+/** Limite de quantidade para leitura: `null`/ausente = ilimitado. */
+/** Incluído no mês para leitura: `null` = ilimitado. */
+const qtdMes = (n: number | null, oque: string, ilimitado: string) => (n === null ? `${oque} ${ilimitado}/mês` : `${n.toLocaleString('pt-BR')} ${oque}/mês`);
+const qtd = (n: number | null | undefined, um: string, varios: string) => (n == null ? `${varios} ilimitados` : `${n} ${n === 1 ? um : varios}`);
 
 export default function PlanoPage() {
   return <Suspense><PlanoInner /></Suspense>;
@@ -52,6 +56,7 @@ function PlanoInner() {
 
   const L = u.limits;
   const st = STATUS[u.status ?? ''] ?? STATUS.active;
+  const fimGratis = u.freePlan?.durationDays && u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : null;
   const [y, m] = u.period.split('-');
   const periodLabel = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
@@ -68,7 +73,7 @@ function PlanoInner() {
         </div>
         <div>
           <div className="text-xs text-muted">Mensalidade</div>
-          <div className="font-medium">{u.priceMonth != null ? brl(u.priceMonth) : '—'}</div>
+          <div className="font-medium">{u.freePlan ? 'Gratuito' : u.priceMonth != null ? brl(u.priceMonth) : '—'}{u.billingCycle === 'yearly' && <span className="text-[11px] text-muted font-normal"> (plano anual)</span>}</div>
           {/* reajuste já avisado: aparece aqui também, não só no e-mail, porque e-mail se perde
               e a conta do mês que vem não pode ser surpresa */}
           {u.priceChange && (
@@ -77,16 +82,19 @@ function PlanoInner() {
             </div>
           )}
         </div>
+        {/* gratuito não tem excedente (a quota trava) nem renovação paga: mostrar isso seria ruído */}
+        {!u.freePlan && (
+          <div>
+            <div className="text-xs text-muted">Excedente até agora</div>
+            <div className={cn('font-medium', u.overageAmount > 0 && 'text-warn-ink')}>{brl(u.overageAmount)}</div>
+          </div>
+        )}
         <div>
-          <div className="text-xs text-muted">Excedente até agora</div>
-          <div className={cn('font-medium', u.overageAmount > 0 && 'text-warn-ink')}>{brl(u.overageAmount)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-muted">Renova em</div>
-          <div className="font-medium">{u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}</div>
+          <div className="text-xs text-muted">{u.freePlan ? 'Gratuidade' : 'Renova em'}</div>
+          <div className="font-medium">{u.freePlan ? (fimGratis ? `até ${fimGratis}` : 'Permanente') : u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}</div>
         </div>
         <span className={cn('text-xs rounded-full px-2.5 py-1', st.cls)}>{st.label}</span>
-        {isAdmin && u.billingEnabled && (
+        {isAdmin && u.billingEnabled && !u.freePlan && (
           <Button size="sm" variant="ghost" icon={<ExternalLink size={13} />} loading={portal.isPending} onClick={() => go(portal.mutateAsync())}>Pagamento e faturas</Button>
         )}
       </div>
@@ -95,20 +103,22 @@ function PlanoInner() {
       {(u.status === 'past_due' || u.status === 'suspended') && (
         <div className="flex gap-2 rounded-xl bg-danger-soft border border-danger/30 p-4 text-sm text-danger-ink">
           <AlertTriangle size={18} className="shrink-0" />
-          <span>{u.status === 'suspended' ? 'Assinatura suspensa: os números continuam recebendo mensagens, mas não é possível responder até regularizar o pagamento.' : 'Há um pagamento pendente. Regularize para evitar a suspensão.'}</span>
+          <span>{u.status === 'suspended' && u.freePlan ? 'O período gratuito terminou: os números continuam recebendo mensagens, mas para responder é preciso assinar um plano abaixo.' : u.status === 'suspended' ? 'Assinatura suspensa: os números continuam recebendo mensagens, mas não é possível responder até regularizar o pagamento.' : 'Há um pagamento pendente. Regularize para evitar a suspensão.'}</span>
         </div>
       )}
 
       {/* Medidores */}
       <div className="grid gap-4 md:grid-cols-2">
         {(L.billingUnit ?? 'messages') === 'conversations' ? (
-          <Meter icon={<MessageSquare size={18} />} label="Conversas" used={u.used.conversations ?? 0} max={L.includedConversationsMonth ?? 0} hard={L.hardLimit} overage={L.overagePricePerConversation} hint="Uma conversa = uma janela de 24h com o mesmo contato. Seu plano é cobrado por conversa; as mensagens dentro dela não contam." />
+          <Meter icon={<MessageSquare size={18} />} label="Conversas" used={u.used.conversations ?? 0} max={L.includedConversationsMonth === undefined ? 0 : L.includedConversationsMonth} hard={L.hardLimit} overage={L.overagePricePerConversation} hint="Uma conversa = uma janela de 24h com o mesmo contato. Seu plano é cobrado por conversa; as mensagens dentro dela não contam." />
         ) : (
           <Meter icon={<MessageSquare size={18} />} label="Mensagens enviadas" used={u.used.messages} max={L.includedMessagesMonth} hard={L.hardLimit} overage={L.overagePricePerMessage} hint={`${u.used.messagesIn.toLocaleString('pt-BR')} recebidas (não contam no limite) · ${(u.used.conversations ?? 0).toLocaleString('pt-BR')} conversas no mês`} />
         )}
         <Meter icon={<FileText size={18} />} label="Templates (Meta)" used={u.used.templates} max={L.includedTemplatesMonth} hard={L.hardLimit} overage={L.overagePricePerTemplate} hint="Só mensagens ativas pela API oficial custam template" />
         <Meter icon={<Smartphone size={18} />} label="Números" used={u.used.numbers} max={L.maxNumbers} hard />
         <Meter icon={<Users size={18} />} label="Atendentes" used={u.used.agents} max={L.maxAgents} hard />
+        {L.maxFlows != null && <Meter icon={<Workflow size={18} />} label="Fluxos ativos" used={u.used.flows} max={L.maxFlows} hard hint="Rascunhos desativados não contam." />}
+        {L.maxQuickReplies != null && <Meter icon={<Zap size={18} />} label="Respostas rápidas" used={u.used.quickReplies} max={L.maxQuickReplies} hard />}
         <AiMeter limits={L} />
       </div>
 
@@ -139,11 +149,15 @@ function PlanoInner() {
                     <div className="font-display font-semibold text-ink">{p.name}</div>
                     {current && <span className="text-[10px] font-bold uppercase tracking-wider text-accent-ink bg-accent-soft rounded px-1.5 py-0.5">Atual</span>}
                   </div>
-                  <div className="text-2xl font-semibold text-ink tnum">{brl(Number(p.priceMonth))}<span className="text-sm text-muted font-normal">/mês</span></div>
+                  {p.billingCycle === 'yearly' && p.priceYear != null ? (
+                    <div className="text-2xl font-semibold text-ink tnum">{brl(Number(p.priceYear))}<span className="text-sm text-muted font-normal">/ano</span><div className="text-xs text-muted font-normal">equivale a {brl(Number(p.priceMonth))}/mês</div></div>
+                  ) : (
+                    <div className="text-2xl font-semibold text-ink tnum">{brl(Number(p.priceMonth))}<span className="text-sm text-muted font-normal">/mês</span></div>
+                  )}
                   <ul className="text-sm text-muted space-y-1">
-                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.maxNumbers} número{L.maxNumbers > 1 ? 's' : ''} · {L.maxAgents} atendentes</li>
-                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.includedMessagesMonth.toLocaleString('pt-BR')} mensagens/mês</li>
-                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.includedTemplatesMonth.toLocaleString('pt-BR')} templates/mês</li>
+                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{qtd(L.maxNumbers, 'número', 'números')} · {qtd(L.maxAgents, 'atendente', 'atendentes')}</li>
+                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.billingUnit === 'conversations' ? qtdMes(L.includedConversationsMonth === undefined ? 0 : L.includedConversationsMonth, 'conversas', 'ilimitadas') : qtdMes(L.includedMessagesMonth, 'mensagens', 'ilimitadas')}</li>
+                    <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{qtdMes(L.includedTemplatesMonth, 'templates', 'ilimitados')}</li>
                     <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.hardLimit ? 'Bloqueia ao atingir o limite' : `Excedente ${brl(L.overagePricePerMessage ?? 0)}/msg`}</li>
                   </ul>
                   <Button className="w-full" variant={current ? 'ghost' : 'primary'} disabled={current || !u.billingEnabled || !p.stripePriceId} loading={checkout.isPending && checkout.variables === p.id} onClick={() => go(checkout.mutateAsync(p.id))}>
@@ -204,7 +218,8 @@ function AiMeter({ limits }: { limits: { includedAiInteractionsMonth?: number; o
   );
 }
 
-function Meter({ icon, label, used, max, hard, overage, hint }: { icon: React.ReactNode; label: string; used: number; max: number; hard: boolean; overage?: number | null; hint?: string }) {
+/** `max` null = ilimitado: mostra só o uso, sem barra de risco. */
+function Meter({ icon, label, used, max, hard, overage, hint }: { icon: React.ReactNode; label: string; used: number; max: number | null; hard: boolean; overage?: number | null; hint?: string }) {
   const ratio = max ? used / max : 0;
   const pct = Math.min(100, Math.round(ratio * 100));
   const tone = ratio >= 1 ? 'bg-danger' : ratio >= 0.8 ? 'bg-warn' : 'bg-accent';
@@ -213,7 +228,7 @@ function Meter({ icon, label, used, max, hard, overage, hint }: { icon: React.Re
       <div className="flex items-center gap-2 text-sm font-medium"><span className="text-faint">{icon}</span>{label}</div>
       <div className="flex items-baseline gap-1">
         <span className="text-2xl font-semibold">{used.toLocaleString('pt-BR')}</span>
-        <span className="text-sm text-faint">/ {max.toLocaleString('pt-BR')}</span>
+        <span className="text-sm text-faint">/ {max === null ? 'ilimitado' : max.toLocaleString('pt-BR')}</span>
         <span className={cn('ml-auto text-xs font-medium', ratio >= 1 ? 'text-danger' : ratio >= 0.8 ? 'text-warn' : 'text-faint')}>{pct}%</span>
       </div>
       <div className="h-2 rounded-full bg-field overflow-hidden"><div className={cn('h-full rounded-full transition-all', tone)} style={{ width: `${pct}%` }} /></div>

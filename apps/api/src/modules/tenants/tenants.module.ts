@@ -15,6 +15,8 @@ import { TenantSettingsService } from './tenant-settings.service';
 import { TenantSettingsController } from './tenant-settings.controller';
 import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
+import { StripeService } from '../billing/stripe.service';
+import { freePeriod } from '../billing/plan-rules';
 
 class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
@@ -58,6 +60,7 @@ class TenantsController {
     private readonly prisma: PrismaService,
     private readonly auth: AuthService,
     private readonly permissions: PermissionsService,
+    private readonly stripe: StripeService,
   ) {}
 
   @Get()
@@ -66,7 +69,7 @@ class TenantsController {
   list() {
     return this.prisma.tenant.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true } } } }, users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 }, _count: { select: { numbers: true, users: true, conversations: true } } },
+      include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true, isFree: true, billingCycle: true, durationDays: true } } } }, users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 }, _count: { select: { numbers: true, users: true, conversations: true } } },
     });
   }
 
@@ -76,19 +79,10 @@ class TenantsController {
   @Roles('super_admin')
   async updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
     if (dto.name !== undefined || dto.isActive !== undefined) await this.prisma.tenant.update({ where: { id }, data: { name: dto.name, isActive: dto.isActive } });
-    if (dto.planId || dto.subscriptionStatus) {
-      const now = new Date();
-      const end = new Date(now);
-      end.setMonth(end.getMonth() + 1);
-      // mudou de plano = preço contratado passa a ser o do plano novo. Sem isto o cliente
-      // ficaria com o preço do plano anterior registrado e o painel dele mostraria outro valor
-      const preco = dto.planId ? (await this.prisma.plan.findUniqueOrThrow({ where: { id: dto.planId } })).priceMonth : undefined;
-      await this.prisma.subscription.upsert({
-        where: { tenantId: id },
-        create: { tenantId: id, planId: dto.planId!, status: dto.subscriptionStatus ?? 'active', currentPeriodStart: now, currentPeriodEnd: end, priceMonth: preco },
-        update: { ...(dto.planId && { planId: dto.planId, priceMonth: preco }), ...(dto.subscriptionStatus && { status: dto.subscriptionStatus, graceUntil: null }) },
-      });
-    }
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId: id }, select: { planId: true } });
+    // troca de plano (inclusive para um gratuito, que cancela a cobrança no Stripe) — ver assignPlan
+    if (dto.planId && dto.planId !== sub?.planId) await this.stripe.assignPlan(id, dto.planId, dto.subscriptionStatus);
+    else if (dto.subscriptionStatus && sub) await this.prisma.subscription.update({ where: { tenantId: id }, data: { status: dto.subscriptionStatus, graceUntil: null } });
     return this.prisma.tenant.findUniqueOrThrow({ where: { id }, include: { subscription: { include: { plan: true } } } });
   }
 
@@ -104,14 +98,15 @@ class TenantsController {
   @NoTenantOk()
   @Roles('super_admin')
   async create(@Body() dto: CreateTenantDto) {
-    const now = new Date();
-    const end = new Date(now);
-    end.setMonth(end.getMonth() + 1);
+    const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: dto.planId } });
+    // gratuito nasce ativo, sem cartão, e com o fim da degustação (se houver) como fim do período;
+    // pago segue como antes: `trialing` até o primeiro checkout
+    const { start, end } = freePeriod(plan.isFree ? plan.durationDays : null);
     const tenant = await this.prisma.tenant.create({
       data: {
         name: dto.name,
         slug: dto.slug,
-        subscription: { create: { planId: dto.planId, status: 'trialing', currentPeriodStart: now, currentPeriodEnd: end } },
+        subscription: { create: { planId: dto.planId, status: plan.isFree ? 'active' : 'trialing', currentPeriodStart: start, currentPeriodEnd: end, ...(plan.isFree && { priceMonth: 0 }) } },
       },
       include: { subscription: true },
     });

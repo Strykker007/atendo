@@ -383,7 +383,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     );
   }
 
-  const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
+  const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.limits.includedMessagesMonth != null && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
   const numberOffline = channelOffline(conv.number);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
   podeResponderRef.current = !noteMode && !(ownedByOther && !isAdmin) && !numberOffline && !quotaHit && conv.status !== 'closed';

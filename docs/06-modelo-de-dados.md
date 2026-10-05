@@ -59,7 +59,7 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 ### Cobrança
 
-**plans** — `limits` jsonb (`PlanLimits`). `billingModel` informativo (`fixed | usage | hybrid`). `stripePriceId` (`price_…`) criado por `pnpm stripe:sync`.
+**plans** — `limits` jsonb (`PlanLimits`). `billingModel` informativo (`fixed | usage | hybrid`). `stripePriceId` (`price_…`) criado por `pnpm stripe:sync` (só `monthly`/`yearly`). `billingCycle` (`free | monthly | yearly | custom`), `isFree` (= `billingCycle = free`), `durationDays` (dias de gratuidade; null = permanente), `priceYear` (anual; `priceMonth` vira o equivalente mensal). Ver docs/05.
 
 **subscriptions** — 1:1 com tenant. `status`: `trialing | active | past_due | suspended | canceled`. `externalId` = `sub_…` do Stripe; `cancelAtPeriodEnd`; `graceUntil`.
 

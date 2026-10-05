@@ -6,22 +6,44 @@ export const BillingUnit = { MESSAGES: 'messages', CONVERSATIONS: 'conversations
 export type BillingUnit = (typeof BillingUnit)[keyof typeof BillingUnit];
 export const BILLING_UNIT_LABEL: Record<BillingUnit, string> = { messages: 'mensagens enviadas', conversations: 'conversas' };
 
+/**
+ * Modalidade de cobrança do plano. `free` = sem gateway nem fatura (cortesia, degustação,
+ * freemium); `custom` = valor negociado e cobrado por fora do Stripe (o dono atribui à mão).
+ */
+export const BillingCycle = { FREE: 'free', MONTHLY: 'monthly', YEARLY: 'yearly', CUSTOM: 'custom' } as const;
+export type BillingCycle = (typeof BillingCycle)[keyof typeof BillingCycle];
+export const BILLING_CYCLE_LABEL: Record<BillingCycle, string> = { free: 'Gratuito', monthly: 'Mensal', yearly: 'Anual', custom: 'Personalizado' };
+/** Só estas modalidades viram preço recorrente no Stripe e podem ir para o checkout. */
+export const isStripeBillable = (cycle: BillingCycle) => cycle === 'monthly' || cycle === 'yearly';
+
 /** Limites de um plano. Vive em jsonb para você criar planos sem migration. */
 export interface PlanLimits {
-  maxNumbers: number;
-  maxAgents: number;
+  /** números de WhatsApp (conexões). `null` = ilimitado */
+  maxNumbers: number | null;
+  /** atendentes/gerentes ativos. `null` = ilimitado */
+  maxAgents: number | null;
+  /** fluxos ATIVOS ao mesmo tempo (rascunho desativado não conta). Ausente/`null` = ilimitado */
+  maxFlows?: number | null;
+  /** respostas rápidas cadastradas. Ausente/`null` = ilimitado */
+  maxQuickReplies?: number | null;
   /**
    * Qual unidade conta para a quota deste plano. Ausente = `messages` (planos antigos).
    * O ledger registra **as duas** sempre; isto decide qual limita e qual vira excedente.
    */
   billingUnit?: BillingUnit;
-  /** mensagens ENVIADAS incluídas/mês (o que gera custo/infra) */
-  includedMessagesMonth: number;
-  /** conversas incluídas/mês — uma conversa é uma janela de 24h com o mesmo contato */
-  includedConversationsMonth?: number;
+  /** mensagens ENVIADAS incluídas/mês (o que gera custo/infra). `null` = ilimitado */
+  includedMessagesMonth: number | null;
+  /**
+   * conversas incluídas/mês — uma conversa é uma janela de 24h com o mesmo contato.
+   * `null` = ilimitado; **ausente = 0** (planos antigos, que limitavam por mensagem)
+   */
+  includedConversationsMonth?: number | null;
   overagePricePerConversation?: number | null;
-  /** templates Meta incluídos/mês — nunca ilimitado em plano fixo */
-  includedTemplatesMonth: number;
+  /**
+   * templates Meta incluídos/mês. `null` = ilimitado — cuidado: cada template custa à Meta,
+   * então ilimitado em plano fixo é custo sem teto
+   */
+  includedTemplatesMonth: number | null;
   /** null = bloqueia ao estourar; número = cobra excedente por mensagem */
   overagePricePerMessage: number | null;
   overagePricePerTemplate: number | null;
@@ -53,6 +75,15 @@ export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
   ai_flows: 'IA nos fluxos',
   ai_copilot: 'Copiloto de IA',
   campaigns: 'Transmissão em massa',
+};
+
+/** Limites de quantidade checados na criação/ativação (ver `PlanLimitGuard` na API). */
+export type CountLimit = 'maxNumbers' | 'maxAgents' | 'maxFlows' | 'maxQuickReplies';
+export const COUNT_LIMIT_LABEL: Record<CountLimit, string> = { maxNumbers: 'números de WhatsApp', maxAgents: 'usuários', maxFlows: 'fluxos ativos', maxQuickReplies: 'respostas rápidas' };
+/** Teto do limite; `null` = ilimitado. Campo ausente (plano antigo) também é ilimitado. */
+export const countLimit = (limits: PlanLimits, key: CountLimit): number | null => {
+  const v = limits[key];
+  return v === undefined || v === null ? null : Number(v);
 };
 
 export const USAGE_ALERT_THRESHOLDS = [0.8, 1.0] as const;

@@ -32,7 +32,8 @@ export default function NumerosPage() {
   const [qr, setQr] = useState<{ id: string; initial?: string } | null>(null);
   const [deleting, setDeleting] = useState<NumberItem | null>(null);
 
-  const max = usage.data?.limits?.maxNumbers as number | undefined;
+  // null = ilimitado; undefined = ainda carregando/sem plano
+  const max = usage.data?.limits?.maxNumbers;
   const count = numbers.data?.filter((n) => n.isActive).length ?? 0;
 
   const [busyId, setBusyId] = useState<string | null>(null); // qual card está com ação em andamento
@@ -88,10 +89,10 @@ export default function NumerosPage() {
           <div>
             <h1 className="text-xl font-semibold">Números</h1>
             <p className="text-sm text-muted">
-              Cada número é um canal de atendimento. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} números.</>}
+              Cada número é um canal de atendimento. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {max === null ? `${count} números (ilimitado)` : `${count}/${max} números`}.</>}
             </p>
           </div>
-          {podeGerenciar && <Button onClick={() => setCreating(true)} disabled={max !== undefined && count >= max} icon={<Plus size={16} />}>Novo número</Button>}
+          {podeGerenciar && <Button onClick={() => setCreating(true)} disabled={max != null && count >= max} icon={<Plus size={16} />}>Novo número</Button>}
         </header>
 
         {numbers.isLoading && <SkeletonCards count={2} />}

@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { BillingCategory, MessageDirection, WhatsAppProvider as ProviderKind } from '@prisma/client';
-import { USAGE_ALERT_THRESHOLDS, type PlanLimits } from '@atendo/shared';
+import { COUNT_LIMIT_LABEL, USAGE_ALERT_THRESHOLDS, countLimit, type CountLimit, type PlanLimits } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { PricingService } from './pricing.service';
@@ -13,6 +13,8 @@ const key = (tenantId: string, period: string, metric: string) => `usage:${tenan
 /** Janela de conversa aberta com este contato neste número (TTL = 24h). */
 const windowKey = (numberId: string, contactId: string) => `usage:conv:${numberId}:${contactId}`;
 const CONVERSATION_WINDOW_S = 86_400;
+/** Quanto passou do incluído. `null` = ilimitado: nunca há excedente (sem isto, null viraria 0 e tudo seria cobrado). */
+const excedente = (used: number, included: number | null) => (included === null ? 0 : Math.max(0, used - included));
 
 /**
  * Ledger (Postgres) é a fonte da verdade. Redis é o contador rápido lido no QuotaGuard.
@@ -112,6 +114,32 @@ export class UsageService {
     return { limits: sub.plan.limits as unknown as PlanLimits, status: sub.status };
   }
 
+  /** Quanto o tenant já usa de um limite de quantidade (o que conta para `CountLimit`). */
+  private countOf(tenantId: string, limit: CountLimit) {
+    switch (limit) {
+      case 'maxNumbers': return this.prisma.whatsAppNumber.count({ where: { tenantId, isActive: true } });
+      case 'maxAgents': return this.prisma.user.count({ where: { tenantId, isActive: true, role: { in: ['agent', 'manager'] } } });
+      case 'maxFlows': return this.prisma.flow.count({ where: { tenantId, isActive: true } });
+      case 'maxQuickReplies': return this.prisma.quickReply.count({ where: { folder: { tenantId } } });
+    }
+  }
+
+  /**
+   * Recusa (403) quando somar `adding` itens passaria do limite do plano. `null` = ilimitado.
+   * Chamado antes de criar/ativar — o `PlanLimitGuard` cobre os casos de um item só.
+   */
+  async assertRoom(tenantId: string, limit: CountLimit, adding = 1) {
+    if (adding <= 0) return;
+    const plan = await this.limits(tenantId);
+    if (!plan) throw new ForbiddenException('Sem assinatura ativa');
+    const max = countLimit(plan.limits, limit);
+    if (max === null) return;
+    const count = await this.countOf(tenantId, limit);
+    if (count + adding > max) {
+      throw new ForbiddenException(`Limite do plano atingido: ${max} ${COUNT_LIMIT_LABEL[limit]} (hoje: ${count}). Faça upgrade em Plano e uso.`);
+    }
+  }
+
   /** Verifica se o tenant pode enviar mais uma mensagem/template. */
   async canSend(tenantId: string, kind: QuotaKind): Promise<QuotaDecision> {
     const plan = await this.limits(tenantId);
@@ -127,7 +155,7 @@ export class UsageService {
       const included = metric === 'conversations'
         ? (plan.limits.includedConversationsMonth ?? 0)
         : metric === 'messages' ? plan.limits.includedMessagesMonth : plan.limits.includedTemplatesMonth;
-      if (!included) continue;
+      if (!included) continue; // 0 ou null (ilimitado): não há percentual a avisar
       const ratio = used[metric] / included;
       for (const threshold of USAGE_ALERT_THRESHOLDS) {
         if (ratio < threshold) continue;
@@ -201,9 +229,9 @@ ${env.WEB_ORIGIN}/plano`,
       const overUnit = !L
         ? 0
         : unidade === 'conversations'
-          ? Math.max(0, conversations - (L.includedConversationsMonth ?? 0)) * (L.overagePricePerConversation ?? 0)
-          : Math.max(0, t.sent - L.includedMessagesMonth) * (L.overagePricePerMessage ?? 0);
-      const overTpl = L ? Math.max(0, t.templates - L.includedTemplatesMonth) * (L.overagePricePerTemplate ?? 0) : 0;
+          ? excedente(conversations, L.includedConversationsMonth === undefined ? 0 : L.includedConversationsMonth) * (L.overagePricePerConversation ?? 0)
+          : excedente(t.sent, L.includedMessagesMonth) * (L.overagePricePerMessage ?? 0);
+      const overTpl = L ? excedente(t.templates, L.includedTemplatesMonth) * (L.overagePricePerTemplate ?? 0) : 0;
       await this.prisma.usageCounter.upsert({
         where: { tenantId_period: { tenantId, period } },
         create: { tenantId, period, messagesSent: t.sent, messagesIn: t.in, templatesSent: t.templates, conversations, providerCost: t.cost, overageAmount: overUnit + overTpl },

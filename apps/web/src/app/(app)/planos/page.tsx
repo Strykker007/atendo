@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Package, Pencil, Power, Trash2, Users } from 'lucide-react';
-import { PLAN_FEATURES, PLAN_FEATURE_LABEL, type PlanFeature, type PlanLimits } from '@atendo/shared';
+import { Plus, Package, Pencil, Power, Trash2, Users, Gift } from 'lucide-react';
+import { BILLING_CYCLE_LABEL, PLAN_FEATURES, PLAN_FEATURE_LABEL, type BillingCycle, type CountLimit, type PlanFeature, type PlanLimits } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +12,22 @@ import { toast } from '@/components/ui/Toast';
 import { useAllPlans, useCreatePlan, useUpdatePlan, useDeletePlan, useMe, type PlanInput, type PlanRow } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const centavos = (v: number) => Math.round(v * 100) / 100;
+/** Limite de quantidade para leitura: `null`/ausente = ilimitado. */
+const qtd = (n: number | null | undefined, um: string, varios: string) => (n == null ? `${varios} ilimitados` : `${n} ${n === 1 ? um : varios}`);
+
+/** Modalidades pagas (gratuito é o interruptor à parte). */
+const CICLOS: { id: Exclude<BillingCycle, 'free'>; desc: string }[] = [
+  { id: 'monthly', desc: 'Cobrança mensal no cartão (Stripe).' },
+  { id: 'yearly', desc: 'Um pagamento por ano (Stripe).' },
+  { id: 'custom', desc: 'Valor negociado, cobrado por fora. Você atribui em Clientes.' },
+];
+
+/** Linha da lista → formulário de edição (o mesmo objeto serve para ativar/desativar). */
+const toForm = (p: PlanRow): PlanInput & { id: string } => ({
+  id: p.id, name: p.name, priceMonth: p.priceMonth, priceYear: p.priceYear, isFree: p.isFree, billingCycle: p.billingCycle, durationDays: p.durationDays,
+  costMonth: p.costMonth, billingModel: p.billingModel, limits: p.limits, isActive: p.isActive,
+});
 
 const MODELOS: { id: PlanInput['billingModel']; label: string; desc: string }[] = [
   { id: 'fixed', label: 'Fixo', desc: 'Mensalidade só. Estourou o limite, bloqueia.' },
@@ -23,11 +39,17 @@ const MODELOS: { id: PlanInput['billingModel']; label: string; desc: string }[] 
 const PADRAO: PlanInput = {
   name: '',
   priceMonth: 97,
+  priceYear: null,
+  isFree: false,
+  billingCycle: 'monthly',
+  durationDays: null,
   costMonth: 0,
   billingModel: 'fixed',
   limits: {
     maxNumbers: 1,
     maxAgents: 2,
+    maxFlows: null,
+    maxQuickReplies: null,
     billingUnit: 'conversations',
     includedConversationsMonth: 500,
     overagePricePerConversation: null,
@@ -68,14 +90,14 @@ export default function PlanosPage() {
       const salvo = form.id ? await atualizar.mutateAsync({ ...form, id: form.id }) : await criar.mutateAsync(form);
       // sem price no Stripe o plano existe mas não dá para assinar — dizer isso agora evita
       // descobrir no momento em que o cliente clica em "assinar"
-      if (!salvo.stripePriceId && salvo.isActive) toast.ok('Plano salvo. Ainda sem preço no Stripe — se a cobrança estiver ligada, veja o log da API.');
+      if (!salvo.stripePriceId && salvo.isActive && (salvo.billingCycle === 'monthly' || salvo.billingCycle === 'yearly')) toast.ok('Plano salvo. Ainda sem preço no Stripe — se a cobrança estiver ligada, veja o log da API.');
       else toast.ok('Plano salvo');
       setForm(null);
     } catch (err) { toast.err(err); }
   }
   async function alternarAtivo(p: PlanRow) {
     try {
-      await atualizar.mutateAsync({ id: p.id, name: p.name, priceMonth: p.priceMonth, costMonth: p.costMonth, billingModel: p.billingModel, limits: p.limits, isActive: !p.isActive });
+      await atualizar.mutateAsync({ ...toForm(p), isActive: !p.isActive });
       toast.ok(p.isActive ? 'Plano desativado — some do checkout, quem já assina continua' : 'Plano ativado');
     } catch (err) { toast.err(err); }
   }
@@ -96,12 +118,20 @@ export default function PlanosPage() {
           <div key={p.id} className={cn('rounded-2xl bg-panel border border-line p-4 flex flex-col gap-2', !p.isActive && 'opacity-60')}>
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-ink truncate">{p.name}</div>
-                <div className="text-[11px] text-faint">{MODELOS.find((m) => m.id === p.billingModel)?.label}{!p.isActive && ' · inativo'}</div>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-display font-semibold text-ink truncate">{p.name}</span>
+                  {p.isFree && <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-ok-soft text-ok"><Gift size={10} /> Gratuito</span>}
+                </div>
+                <div className="text-[11px] text-faint">
+                  {p.isFree ? (p.durationDays ? `${p.durationDays} dias grátis` : 'Gratuito permanente') : `${BILLING_CYCLE_LABEL[p.billingCycle]} · ${MODELOS.find((m) => m.id === p.billingModel)?.label}`}
+                  {!p.isActive && ' · inativo'}
+                </div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-display font-semibold text-ink tnum">{brl(p.priceMonth)}</div>
-                {p.costMonth > 0 ? (
+                <div className="font-display font-semibold text-ink tnum">{p.isFree ? 'R$ 0' : p.billingCycle === 'yearly' && p.priceYear != null ? `${brl(p.priceYear)}/ano` : brl(p.priceMonth)}</div>
+                {p.isFree ? (
+                  <div className="text-[10px] text-faint">sem cobrança</div>
+                ) : p.costMonth > 0 ? (
                   <div className="text-[10px] text-faint" title={`Custo cadastrado: ${brl(p.costMonth)} por cliente/mês`}>
                     margem <span className={cn('tnum font-semibold', p.priceMonth - p.costMonth >= 0 ? 'text-ok' : 'text-danger')}>{brl(p.priceMonth - p.costMonth)}</span>
                   </div>
@@ -112,11 +142,14 @@ export default function PlanosPage() {
             </div>
 
             <ul className="text-[12px] text-muted space-y-0.5">
-              <li>{p.limits.maxNumbers} número(s) · {p.limits.maxAgents} usuário(s)</li>
+              <li>{qtd(p.limits.maxNumbers, 'número', 'números')} · {qtd(p.limits.maxAgents, 'usuário', 'usuários')}</li>
+              {(p.limits.maxFlows != null || p.limits.maxQuickReplies != null) && (
+                <li>{qtd(p.limits.maxFlows, 'fluxo ativo', 'fluxos ativos')} · {qtd(p.limits.maxQuickReplies, 'resposta rápida', 'respostas rápidas')}</li>
+              )}
               <li>
                 {p.limits.billingUnit === 'conversations'
-                  ? `${(p.limits.includedConversationsMonth ?? 0).toLocaleString('pt-BR')} conversas/mês`
-                  : `${p.limits.includedMessagesMonth.toLocaleString('pt-BR')} mensagens/mês`}
+                  ? p.limits.includedConversationsMonth === null ? 'conversas ilimitadas' : `${(p.limits.includedConversationsMonth ?? 0).toLocaleString('pt-BR')} conversas/mês`
+                  : p.limits.includedMessagesMonth === null ? 'mensagens ilimitadas' : `${p.limits.includedMessagesMonth.toLocaleString('pt-BR')} mensagens/mês`}
                 {p.limits.hardLimit ? ' · bloqueia ao estourar' : ' · cobra excedente'}
               </li>
               {(p.limits.features?.length ?? 0) > 0 && (
@@ -141,9 +174,9 @@ export default function PlanosPage() {
                     · reajusta {new Date(p.priceAppliesToExistingAt).toLocaleDateString('pt-BR')}
                   </span>
                 )}
-                {p.billingEnabled && !p.stripePriceId && p.isActive && <span className="ml-2 text-warn" title="Sem preço no Stripe: o cliente não consegue assinar">· sem Stripe</span>}
+                {p.billingEnabled && !p.stripePriceId && p.isActive && (p.billingCycle === 'monthly' || p.billingCycle === 'yearly') && <span className="ml-2 text-warn" title="Sem preço no Stripe: o cliente não consegue assinar">· sem Stripe</span>}
               </span>
-              <button onClick={() => setForm({ id: p.id, name: p.name, priceMonth: p.priceMonth, costMonth: p.costMonth, billingModel: p.billingModel, limits: p.limits, isActive: p.isActive })} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={14} /></button>
+              <button onClick={() => setForm(toForm(p))} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={14} /></button>
               <button onClick={() => void alternarAtivo(p)} className="text-faint hover:text-ink p-1" title={p.isActive ? 'Desativar' : 'Ativar'}><Power size={14} /></button>
               <button
                 onClick={() => setConfirmar(p)}
@@ -164,7 +197,7 @@ export default function PlanosPage() {
           setForm={setForm}
           onSubmit={salvar}
           salvando={criar.isPending || atualizar.isPending}
-          precoOriginal={plans.data?.find((p) => p.id === form.id)?.priceMonth ?? null}
+          precoOriginal={plans.data?.find((p) => p.id === form.id && !p.isFree)?.priceMonth ?? null}
           assinantes={plans.data?.find((p) => p.id === form.id)?.subscribers ?? 0}
         />
       )}
@@ -245,39 +278,103 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
   assinantes: number;
 }) {
   const lim = (patch: Partial<PlanLimits>) => setForm({ ...form, limits: { ...form.limits, ...patch } });
+  const gratis = !!form.isFree;
+  const ciclo: BillingCycle = gratis ? 'free' : (form.billingCycle ?? 'monthly');
+  const anual = ciclo === 'yearly';
+  // sem fatura no Stripe não há pagamento que falhe — a tolerância não se aplica
+  const semFatura = gratis || ciclo === 'custom';
+  // a API recusa trocar a modalidade com gente assinando (ver billing.controller): travar aqui
+  // evita o cliente descobrir isso só no "Salvar"
+  const travaModalidade = !!form.id && assinantes > 0;
+  // mensalidade que a API vai gravar: no anual é o equivalente mensal
+  const mensal = anual ? centavos((form.priceYear ?? 0) / 12) : form.priceMonth;
   // a pergunta do reajuste só faz sentido quando há preço anterior, ele mudou, e existe gente
   // pagando o antigo — perguntar fora disso é ruído num formulário que já é grande
-  const mudouPreco = precoOriginal !== null && form.priceMonth !== precoOriginal && assinantes > 0;
+  const mudouPreco = !gratis && precoOriginal !== null && mensal !== precoOriginal && assinantes > 0;
   const aplicar = form.applyToExisting ?? { mode: 'never' as const, days: 30 };
   const setAplicar = (p: Partial<NonNullable<PlanInput['applyToExisting']>>) => setForm({ ...form, applyToExisting: { ...aplicar, ...p } });
   const porConversa = form.limits.billingUnit === 'conversations';
   const features = form.limits.features ?? [];
 
+  /** Ligar "gratuito" zera os preços e trava a quota: plano sem fatura não tem onde cobrar excedente. */
+  function alternarGratis(on: boolean) {
+    if (on) setForm({ ...form, isFree: true, billingCycle: 'free', priceMonth: 0, priceYear: null, billingModel: 'fixed', limits: { ...form.limits, hardLimit: true } });
+    else setForm({ ...form, isFree: false, billingCycle: 'monthly', durationDays: null });
+  }
+
   return (
     <Modal open onClose={() => setForm(null)} title={form.id ? 'Editar plano' : 'Novo plano'} width="max-w-2xl">
       <form onSubmit={onSubmit} className="space-y-4">
-        <div className="grid sm:grid-cols-3 gap-3 items-start">
-          <Field label="Nome"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={40} required autoFocus placeholder="Starter, Pro, Farmácia…" /></Field>
-          <Field label="Mensalidade (R$)" hint={form.id ? 'Mudar o valor cria um preço novo no Stripe.' : undefined}>
-            <input className={inputCls} inputMode="decimal" value={String(form.priceMonth)} onChange={(e) => setForm({ ...form, priceMonth: Number(e.target.value.replace(',', '.')) || 0 })} required placeholder="97,00" />
+        <label className={cn('flex items-start gap-3 rounded-xl border p-3', gratis ? 'border-ok/50 bg-ok-soft/40' : 'border-line', travaModalidade ? 'opacity-60' : 'cursor-pointer')}>
+          <input type="checkbox" className="mt-1" checked={gratis} disabled={travaModalidade} onChange={(e) => alternarGratis(e.target.checked)} />
+          <span className="flex-1">
+            <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ink"><Gift size={14} /> Plano gratuito</span>
+            <span className="block text-[11px] text-muted">
+              {travaModalidade
+                ? `${assinantes} cliente(s) neste plano: para mudar a modalidade, crie um plano novo e troque os clientes.`
+                : 'Sem cartão, sem Stripe e sem fatura. A assinatura nasce ativa. Para cortesia, degustação ou freemium.'}
+            </span>
+          </span>
+        </label>
+
+        {gratis && (
+          <Field label="Duração da gratuidade">
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setForm({ ...form, durationDays: null })} className={cn('rounded-lg border px-3 py-1.5 text-[13px]', form.durationDays == null ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>Permanente</button>
+              <button type="button" onClick={() => setForm({ ...form, durationDays: form.durationDays ?? 14 })} className={cn('rounded-lg border px-3 py-1.5 text-[13px]', form.durationDays != null ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>Por período</button>
+              {form.durationDays != null && (
+                <label className="flex items-center gap-2 text-[13px] text-ink">
+                  <input className={cn(inputCls, 'w-20 py-1')} inputMode="numeric" value={String(form.durationDays)} onChange={(e) => setForm({ ...form, durationDays: Math.max(1, Number(e.target.value) || 1) })} />
+                  dias — depois o envio é pausado até o cliente assinar um plano pago
+                </label>
+              )}
+            </div>
           </Field>
+        )}
+
+        {!gratis && (
+          <Field label="Modalidade de cobrança">
+            <div className="grid sm:grid-cols-3 gap-2">
+              {CICLOS.map((c) => (
+                <button key={c.id} type="button" disabled={travaModalidade && c.id !== ciclo} onClick={() => setForm({ ...form, billingCycle: c.id, priceYear: c.id === 'yearly' ? (form.priceYear ?? centavos(form.priceMonth * 12)) : null })} className={cn('text-left rounded-xl border p-2.5 disabled:opacity-40', ciclo === c.id ? 'border-accent bg-accent-soft' : 'border-line hover:bg-field')}>
+                  <div className="text-[13px] font-semibold text-ink">{BILLING_CYCLE_LABEL[c.id]}</div>
+                  <div className="text-[11px] text-muted">{c.desc}</div>
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
+
+        <div className="grid sm:grid-cols-3 gap-3 items-start">
+          <Field label="Nome"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={40} required autoFocus placeholder="Starter, Pro, Cortesia…" /></Field>
+          {anual ? (
+            <Field label="Anuidade (R$)" hint={`Equivale a ${brl(mensal)}/mês — é o valor que entra no MRR.${form.id ? ' Mudar cria um preço novo no Stripe.' : ''}`}>
+              <input className={inputCls} inputMode="decimal" value={String(form.priceYear ?? 0)} onChange={(e) => setForm({ ...form, priceYear: Number(e.target.value.replace(',', '.')) || 0 })} required placeholder="970,00" />
+            </Field>
+          ) : (
+            <Field label="Mensalidade (R$)" hint={gratis ? 'Plano gratuito: sem cobrança.' : form.id && ciclo === 'monthly' ? 'Mudar o valor cria um preço novo no Stripe.' : undefined}>
+              <input className={cn(inputCls, gratis && 'opacity-60')} inputMode="decimal" disabled={gratis} value={String(gratis ? 0 : form.priceMonth)} onChange={(e) => setForm({ ...form, priceMonth: Number(e.target.value.replace(',', '.')) || 0 })} required placeholder="97,00" />
+            </Field>
+          )}
           <Field label="Custo por cliente (R$/mês)" hint="O que te custa servir um cliente deste plano: suporte, infra rateada, licenças. É o que faz a margem por plano existir no Financeiro.">
             <input className={inputCls} inputMode="decimal" value={String(form.costMonth ?? 0)} onChange={(e) => setForm({ ...form, costMonth: Number(e.target.value.replace(',', '.')) || 0 })} placeholder="0,00" />
           </Field>
         </div>
 
-        {mudouPreco && <ReajusteDosAtuais aplicar={aplicar} setAplicar={setAplicar} assinantes={assinantes} de={precoOriginal!} para={form.priceMonth} />}
+        {mudouPreco && <ReajusteDosAtuais aplicar={aplicar} setAplicar={setAplicar} assinantes={assinantes} de={precoOriginal!} para={mensal} />}
 
-        <Field label="Modelo de cobrança">
-          <div className="grid sm:grid-cols-3 gap-2">
-            {MODELOS.map((m) => (
-              <button key={m.id} type="button" onClick={() => setForm({ ...form, billingModel: m.id })} className={cn('text-left rounded-xl border p-2.5', form.billingModel === m.id ? 'border-accent bg-accent-soft' : 'border-line hover:bg-field')}>
-                <div className="text-[13px] font-semibold text-ink">{m.label}</div>
-                <div className="text-[11px] text-muted">{m.desc}</div>
-              </button>
-            ))}
-          </div>
-        </Field>
+        {!gratis && (
+          <Field label="Modelo de cobrança">
+            <div className="grid sm:grid-cols-3 gap-2">
+              {MODELOS.map((m) => (
+                <button key={m.id} type="button" onClick={() => setForm({ ...form, billingModel: m.id })} className={cn('text-left rounded-xl border p-2.5', form.billingModel === m.id ? 'border-accent bg-accent-soft' : 'border-line hover:bg-field')}>
+                  <div className="text-[13px] font-semibold text-ink">{m.label}</div>
+                  <div className="text-[11px] text-muted">{m.desc}</div>
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
 
         <Field label="O que conta para a quota" hint="A conversa é a janela de 24h com o mesmo contato — é como a Meta cobra. O ledger registra as duas sempre; isto decide qual limita.">
           <div className="flex gap-2">
@@ -287,20 +384,30 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
           </div>
         </Field>
 
-        <div className="grid sm:grid-cols-4 gap-3 items-start">
-          <Field label="Números"><input className={inputCls} inputMode="numeric" value={String(form.limits.maxNumbers)} onChange={(e) => lim({ maxNumbers: Number(e.target.value) || 0 })} /></Field>
-          <Field label="Usuários"><input className={inputCls} inputMode="numeric" value={String(form.limits.maxAgents)} onChange={(e) => lim({ maxAgents: Number(e.target.value) || 0 })} /></Field>
-          <Field label={porConversa ? 'Conversas/mês' : 'Mensagens/mês'}>
-            <input
-              className={inputCls}
-              inputMode="numeric"
-              value={String(porConversa ? form.limits.includedConversationsMonth ?? 0 : form.limits.includedMessagesMonth)}
-              onChange={(e) => lim(porConversa ? { includedConversationsMonth: Number(e.target.value) || 0 } : { includedMessagesMonth: Number(e.target.value) || 0 })}
-            />
-          </Field>
-          <Field label="Templates/mês"><input className={inputCls} inputMode="numeric" value={String(form.limits.includedTemplatesMonth)} onChange={(e) => lim({ includedTemplatesMonth: Number(e.target.value) || 0 })} /></Field>
+        <div className="grid sm:grid-cols-2 gap-3 items-start">
+          {porConversa
+            ? <Limite rotulo="Conversas/mês" chave="includedConversationsMonth" limits={form.limits} lim={lim} padrao={500} />
+            : <Limite rotulo="Mensagens/mês" chave="includedMessagesMonth" limits={form.limits} lim={lim} padrao={2000} />}
+          <Limite
+            rotulo="Templates/mês"
+            chave="includedTemplatesMonth"
+            limits={form.limits}
+            lim={lim}
+            padrao={100}
+            aviso="Cada template custa à Meta: ilimitado é custo sem teto."
+          />
         </div>
 
+        <Field label="Limites de quantidade" hint="Checados na hora de criar (ou ativar, no caso dos fluxos). O que já existe acima do limite continua funcionando.">
+          <div className="grid sm:grid-cols-4 gap-3 items-start">
+            <Limite rotulo="Números (conexões)" chave="maxNumbers" limits={form.limits} lim={lim} padrao={1} />
+            <Limite rotulo="Usuários" chave="maxAgents" limits={form.limits} lim={lim} padrao={2} />
+            <Limite rotulo="Fluxos ativos" chave="maxFlows" limits={form.limits} lim={lim} padrao={5} />
+            <Limite rotulo="Respostas rápidas" chave="maxQuickReplies" limits={form.limits} lim={lim} padrao={50} />
+          </div>
+        </Field>
+
+        {!gratis && (<>
         <Field label="Ao estourar o incluído" hint="Bloquear protege o cliente de uma conta surpresa; cobrar excedente mantém o atendimento de pé. Escolha sabendo qual dos dois dói menos para esse cliente.">
           <div className="flex gap-2">
             <button type="button" onClick={() => lim({ hardLimit: true })} className={cn('rounded-lg border px-3 py-1.5 text-[13px]', form.limits.hardLimit ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>Bloquear envios</button>
@@ -327,14 +434,18 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
           </div>
         )}
 
+        </>)}
+
+        {!semFatura && (
         <Field label="Dias de tolerância no pagamento" hint="Depois que o pagamento falha, quantos dias o cliente continua atendendo antes de suspender. Vale para qualquer modelo de cobrança — é sobre a fatura, não sobre a quota.">
           {/* `block` junto com a largura menor: `inputCls` é `w-full`, e trocar a largura sem
               isso faz o campo virar inline e subir para a mesma linha do rótulo — ficava o
               único campo do formulário fora do padrão */}
           <input className={cn(inputCls, 'block sm:w-32')} inputMode="numeric" value={String(form.limits.graceDays)} onChange={(e) => lim({ graceDays: Number(e.target.value) || 0 })} />
         </Field>
+        )}
 
-        <Field label="Funcionalidades liberadas" hint="É isto que destrava o módulo na API e no painel. Sem marcar, o cliente nem vê a tela.">
+        <Field label="Funcionalidades liberadas" hint="É isto que destrava o módulo na API e no painel (IA inclusive: Copiloto = sugestão, reescrita e resumo; IA nos fluxos = robô). Sem marcar, o cliente nem vê a tela.">
           <div className="flex flex-wrap gap-2">
             {PLAN_FEATURES.map((f) => {
               const on = features.includes(f);
@@ -355,7 +466,7 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
         {(features.includes('ai_copilot') || features.includes('ai_flows')) && (
           <div className="grid sm:grid-cols-3 gap-3 items-start">
             <Field label="Interações de IA/mês"><input className={inputCls} inputMode="numeric" value={String(form.limits.includedAiInteractionsMonth ?? 0)} onChange={(e) => lim({ includedAiInteractionsMonth: Number(e.target.value) || 0 })} /></Field>
-            <Field label="R$ por interação extra"><input className={inputCls} inputMode="decimal" value={String(form.limits.overagePricePerAiInteraction ?? '')} onChange={(e) => lim({ overagePricePerAiInteraction: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) || 0 })} /></Field>
+            {!gratis && <Field label="R$ por interação extra"><input className={inputCls} inputMode="decimal" value={String(form.limits.overagePricePerAiInteraction ?? '')} onChange={(e) => lim({ overagePricePerAiInteraction: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) || 0 })} /></Field>}
             <Field label="Teto de custo de IA (R$)" hint="Corta o uso mesmo pagando excedente: a IA pode entrar em laço e queimar dinheiro em minutos.">
               <input className={inputCls} inputMode="decimal" value={String(form.limits.aiMonthlyCostCap ?? '')} onChange={(e) => lim({ aiMonthlyCostCap: e.target.value === '' ? undefined : Number(e.target.value.replace(',', '.')) || 0 })} />
             </Field>
@@ -368,5 +479,25 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Campos numéricos do plano que aceitam "Ilimitado" (`null`). */
+type ChaveIlimitavel = CountLimit | 'includedMessagesMonth' | 'includedConversationsMonth' | 'includedTemplatesMonth';
+
+/** Um limite com a opção "Ilimitado" (grava `null`). */
+function Limite({ rotulo, chave, limits, lim, padrao, aviso }: { rotulo: string; chave: ChaveIlimitavel; limits: PlanLimits; lim: (p: Partial<PlanLimits>) => void; padrao: number; aviso?: string }) {
+  const v = limits[chave];
+  // conversas ausentes = 0 (planos antigos limitavam por mensagem); nos limites de quantidade, ausente = ilimitado
+  const ilimitado = v === null || (v === undefined && chave !== 'includedConversationsMonth');
+  return (
+    <div className="space-y-1">
+      <div className="text-[12px] text-muted">{rotulo}</div>
+      <input className={cn(inputCls, ilimitado && 'opacity-50')} inputMode="numeric" disabled={ilimitado} value={ilimitado ? '∞' : String(v ?? 0)} onChange={(e) => lim({ [chave]: Number(e.target.value) || 0 } as Partial<PlanLimits>)} />
+      <label className="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer">
+        <input type="checkbox" checked={ilimitado} onChange={(e) => lim({ [chave]: e.target.checked ? null : padrao } as Partial<PlanLimits>)} /> Ilimitado
+      </label>
+      {ilimitado && aviso && <p className="text-[11px] text-warn-ink">{aviso}</p>}
+    </div>
   );
 }

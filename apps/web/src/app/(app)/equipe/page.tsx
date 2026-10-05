@@ -46,13 +46,13 @@ export default function EquipePage() {
 
   const max = usage.data?.limits?.maxAgents;
   const count = usage.data?.used.agents ?? 0;
-  const full = max !== undefined && count >= max;
+  const full = max != null && count >= max;
 
   return (
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Equipe"
-        subtitle={<>Atendentes atendem; gerentes veem tudo, transferem e orientam por nota interna. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {count}/{max} membros.</>}</>}
+        subtitle={<>Atendentes atendem; gerentes veem tudo, transferem e orientam por nota interna. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {max === null ? `${count} membros (ilimitado)` : `${count}/${max} membros`}.</>}</>}
         action={isAdmin && <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo atendente</Button>}
       />
 

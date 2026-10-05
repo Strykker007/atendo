@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanFeature, PlanLimits, FlowDefinition, FlowTrigger, PortableFlow, PortableFlowBundle } from '@atendo/shared';
+import type { BillingCycle, ConversationStatus, PlanFeature, PlanLimits, FlowDefinition, FlowTrigger, PortableFlow, PortableFlowBundle } from '@atendo/shared';
 import { invConv, useUsage } from './core';
 
 // ---- Fluxos de automação ----
@@ -48,7 +48,7 @@ export const useActiveRun = (conversationId: string | null) => useQuery({ queryK
 export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as PlanFeature), loading: u.isLoading }; };
 
 // ---- Clientes (dono) ----
-export interface TenantRow { id: string; name: string; slug: string; isActive: boolean; createdAt: string; subscription: { status: string; currentPeriodEnd: string; plan: { id: string; name: string; priceMonth: string } } | null; users: { email: string; name: string }[]; _count: { numbers: number; users: number; conversations: number } }
+export interface TenantRow { id: string; name: string; slug: string; isActive: boolean; createdAt: string; subscription: { status: string; currentPeriodEnd: string; plan: { id: string; name: string; priceMonth: string; isFree: boolean; billingCycle: BillingCycle; durationDays: number | null } } | null; users: { email: string; name: string }[]; _count: { numbers: number; users: number; conversations: number } }
 export const useTenants = () => useQuery({ queryKey: ['tenants'], queryFn: () => api<TenantRow[]>('/tenants') });
 export const useCreateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; slug: string; planId: string; adminEmail: string; adminName: string; adminPassword?: string }) => api('/tenants', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tenants'] }) }); };
 export const useUpdateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) => api(`/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); } }); };

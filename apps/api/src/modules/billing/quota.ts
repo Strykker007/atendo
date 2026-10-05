@@ -17,9 +17,10 @@ export const unitOf = (limits: PlanLimits): BillingUnit => limits.billingUnit ??
 
 const LABEL: Record<QuotaKind, string> = { messages: 'mensagens', templates: 'templates', conversations: 'conversas' };
 
-function limitsFor(limits: PlanLimits, kind: QuotaKind): { included: number; overage: number | null } {
+/** `included` null = ilimitado (o plano não tem teto para esta unidade). */
+function limitsFor(limits: PlanLimits, kind: QuotaKind): { included: number | null; overage: number | null } {
   if (kind === 'templates') return { included: limits.includedTemplatesMonth, overage: limits.overagePricePerTemplate };
-  if (kind === 'conversations') return { included: limits.includedConversationsMonth ?? 0, overage: limits.overagePricePerConversation ?? null };
+  if (kind === 'conversations') return { included: limits.includedConversationsMonth === undefined ? 0 : limits.includedConversationsMonth, overage: limits.overagePricePerConversation ?? null };
   return { included: limits.includedMessagesMonth, overage: limits.overagePricePerMessage };
 }
 
@@ -36,7 +37,7 @@ export function decideCanSend(
   const efetiva: QuotaKind = kind === 'templates' ? 'templates' : unitOf(plan.limits);
   const { included, overage } = limitsFor(plan.limits, efetiva);
 
-  if ((used[efetiva] ?? 0) < included) return { ok: true };
+  if (included === null || (used[efetiva] ?? 0) < included) return { ok: true };
   if (!plan.limits.hardLimit && overage !== null) return { ok: true, overage: true };
   return { ok: false, reason: `Limite de ${LABEL[efetiva]} do plano atingido (${included}/mês)` };
 }

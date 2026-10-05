@@ -10,9 +10,12 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { impersonation, setAccessToken } from '@/lib/api';
-import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, type TenantRow } from '@/lib/hooks';
+import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, type Plan, type TenantRow } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+/** Rótulo do plano nos seletores: gratuito aparece como tal (e com o prazo), não como "R$ 0,00". */
+const planoLabel = (p: Plan, sufixo = '') =>
+  p.isFree ? `${p.name} · Gratuito${p.durationDays ? ` (${p.durationDays} dias)` : ''}` : p.billingCycle === 'custom' ? `${p.name} · Personalizado` : `${p.name} · ${brl(Number(p.priceMonth))}${sufixo}`;
 const STATUS: Record<string, [string, string]> = { trialing: ['Teste', 'bg-warn-soft text-warn-ink'], active: ['Ativa', 'bg-ok-soft text-ok'], past_due: ['Pendente', 'bg-warn-soft text-warn-ink'], suspended: ['Suspensa', 'bg-danger-soft text-danger-ink'], canceled: ['Cancelada', 'bg-field text-muted'] };
 
 /** Gestão de clientes pelo dono: criar, plano/status, entrar como. */
@@ -62,8 +65,13 @@ export default function ClientesPage() {
                     <td className="px-3 py-2.5">
                       <select value={t.subscription?.plan.id ?? ''} disabled={busy === t.id} onChange={(e) => patch(t, { planId: e.target.value })} className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1">
                         {!t.subscription && <option value="">Sem plano</option>}
-                        {plans.data?.map((p) => <option key={p.id} value={p.id}>{p.name} · {brl(Number(p.priceMonth))}</option>)}
+                        {plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p)}</option>)}
                       </select>
+                      {t.subscription?.plan.isFree && (
+                        <div className="text-[10px] font-semibold text-ok mt-0.5">
+                          Gratuito{t.subscription.plan.durationDays ? ` até ${new Date(t.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')}` : ' permanente'}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5">
                       <select value={t.subscription?.status ?? ''} disabled={busy === t.id || !t.subscription} onChange={(e) => patch(t, { subscriptionStatus: e.target.value })} className={cn('rounded-full text-xs px-2 py-0.5 border-0', st[1])}>
@@ -108,7 +116,7 @@ function CreateTenantModal({ open, onClose }: { open: boolean; onClose: () => vo
           </Field>
         </div>
         <Field label="Plano inicial">
-          <select className={inputCls} value={f.planId} onChange={(e) => setF({ ...f, planId: e.target.value })}>{plans.data?.map((p) => <option key={p.id} value={p.id}>{p.name} · {brl(Number(p.priceMonth))}/mês</option>)}</select>
+          <select className={inputCls} value={f.planId} onChange={(e) => setF({ ...f, planId: e.target.value })}>{plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p, '/mês')}</option>)}</select>
         </Field>
         <div className="text-xs font-semibold uppercase tracking-wider text-muted pt-1">Administrador do cliente</div>
         <p className="text-[11px] text-muted -mt-2">É a pessoa que vai gerenciar a conta: cadastra os números, a equipe e as respostas. Ela entra com o e-mail abaixo.</p>
@@ -162,10 +170,15 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
           <Field label="Plano">
             <select className={inputCls} value={f.planId} onChange={(e) => setF({ ...f, planId: e.target.value })}>
               {!tenant.subscription && <option value="">Sem plano</option>}
-              {plans.data?.map((p) => <option key={p.id} value={p.id}>{p.name} · {brl(Number(p.priceMonth))}/mês</option>)}
+              {plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p, '/mês')}</option>)}
             </select>
           </Field>
-          <Field label="Assinatura" hint="Trocar de plano passa a valer o preço de tabela do novo.">
+          <Field
+            label="Assinatura"
+            hint={plans.data?.find((p) => p.id === f.planId)?.isFree && f.planId !== tenant.subscription?.plan.id
+              ? 'Plano gratuito: a assinatura fica ativa, sem cartão. Se o cliente pagava pelo Stripe, essa cobrança é cancelada.'
+              : 'Trocar de plano passa a valer o preço de tabela do novo.'}
+          >
             <select className={inputCls} value={f.subscriptionStatus} onChange={(e) => setF({ ...f, subscriptionStatus: e.target.value })} disabled={!tenant.subscription}>
               {Object.entries(STATUS).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}
             </select>

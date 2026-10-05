@@ -6,7 +6,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits } from '@atendo/shared';
+import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
@@ -74,10 +74,13 @@ export interface Usage {
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
   planId: string | null;
-  used: { messages: number; templates: number; numbers: number; agents: number; messagesIn: number; conversations: number };
+  used: { messages: number; templates: number; numbers: number; agents: number; flows: number; quickReplies: number; messagesIn: number; conversations: number };
   limits: PlanLimits | null;
   status: string | null;
   plan: string | null;
+  /** plano gratuito: sem fatura. `durationDays` null = permanente; senão termina em `currentPeriodEnd` */
+  freePlan: { durationDays: number | null } | null;
+  billingCycle: BillingCycle | null;
   priceMonth: number | null;
   /** reajuste já avisado e ainda não aplicado */
   priceChange: { priceMonth: number; at: string } | null;
@@ -313,7 +316,13 @@ export const useBulkClose = () => {
 export interface PlanRow {
   id: string;
   name: string;
+  /** em plano anual, o equivalente mensal */
   priceMonth: number;
+  priceYear: number | null;
+  isFree: boolean;
+  billingCycle: BillingCycle;
+  /** dias de gratuidade; null em plano gratuito = permanente */
+  durationDays: number | null;
   billingModel: 'fixed' | 'usage' | 'hybrid';
   limits: PlanLimits;
   stripePriceId: string | null;
@@ -330,6 +339,10 @@ export interface PlanRow {
 export interface PlanInput {
   name: string;
   priceMonth: number;
+  priceYear?: number | null;
+  isFree?: boolean;
+  billingCycle?: BillingCycle;
+  durationDays?: number | null;
   costMonth?: number;
   billingModel: 'fixed' | 'usage' | 'hybrid';
   limits: PlanLimits;

@@ -1,11 +1,19 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import Stripe from 'stripe';
-import type { InvoiceStatus, SubscriptionStatus } from '@prisma/client';
+import type { InvoiceStatus, Plan, SubscriptionStatus } from '@prisma/client';
+import { isStripeBillable } from '@atendo/shared';
 import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService, periodOf } from './usage.service';
 import { MailService } from '../../common/mail/mail.service';
 import { aReajustar, porExtenso } from './reprice';
+import { freePeriod, rollMonthly } from './plan-rules';
+
+/** Price do Stripe de um plano: anual cobra `priceYear` por ano; o resto, a mensalidade. */
+const stripePriceOf = (p: Plan) =>
+  p.billingCycle === 'yearly'
+    ? { unit_amount: Math.round(Number(p.priceYear ?? 0) * 100), recurring: { interval: 'year' as const } }
+    : { unit_amount: Math.round(Number(p.priceMonth) * 100), recurring: { interval: 'month' as const } };
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -49,6 +57,9 @@ export class StripeService {
   /** Cria uma sessão de Checkout para assinar/trocar de plano. Devolve a URL para redirecionar. */
   async checkout(tenantId: string, planId: string) {
     const plan = await this.prisma.plan.findFirst({ where: { id: planId, isActive: true } });
+    // gratuito/personalizado não passam pelo gateway: quem atribui é o dono, em Clientes.
+    // Sem esta trava um cliente pagante se rebaixaria sozinho para a cortesia
+    if (plan && !isStripeBillable(plan.billingCycle)) throw new BadRequestException('Este plano não é assinado online. Fale com a equipe para ativá-lo.');
     if (!plan?.stripePriceId) throw new BadRequestException('Plano não disponível para assinatura online');
     const customer = await this.customerFor(tenantId);
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
@@ -138,12 +149,19 @@ export class StripeService {
     const end = new Date(item.current_period_end * 1000);
 
     const existing = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true } });
+    // o dono passou o cliente para um plano gratuito e a assinatura paga antiga foi cancelada
+    // no Stripe: o evento desse cancelamento não pode tirar o cliente da cortesia
+    if (existing?.plan.isFree && existing.externalId !== s.id && !['active', 'trialing'].includes(status)) {
+      return this.log.log(`assinatura ${s.id} (${status}) ignorada: tenant ${tenantId} está em plano gratuito`);
+    }
     const limits = (plan ?? existing?.plan)?.limits as { graceDays?: number } | undefined;
     const graceUntil = status === 'past_due' ? new Date(Date.now() + (limits?.graceDays ?? 5) * 86_400_000) : null;
 
     // o preço contratado vem do próprio item da assinatura, não do catálogo: é o valor que o
     // Stripe realmente cobra deste cliente, mesmo que o plano já tenha outro preço de tabela
-    const cobrado = item.price.unit_amount != null ? item.price.unit_amount / 100 : undefined;
+    // anual vira equivalente mensal, como `plans.priceMonth` (MRR e reajuste comparam mensal)
+    const porAno = item.price.recurring?.interval === 'year';
+    const cobrado = item.price.unit_amount != null ? Math.round(item.price.unit_amount / (porAno ? 12 : 1)) / 100 : undefined;
 
     await this.prisma.subscription.upsert({
       where: { tenantId },
@@ -240,14 +258,81 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
     }
   }
 
+  // ---------- Atribuição manual (dono) e planos gratuitos ----------
+
+  /**
+   * O dono põe o cliente num plano sem passar pelo checkout (tela Clientes).
+   *
+   * Gratuito: a assinatura nasce `active`, sem cartão, preço 0 e sem vínculo com o Stripe. Se
+   * o cliente tinha assinatura paga, ela é **cancelada no Stripe antes** — senão ele seguiria
+   * sendo cobrado num plano de cortesia. Se o cancelamento falhar, nada muda aqui.
+   */
+  async assignPlan(tenantId: string, planId: string, status?: SubscriptionStatus) {
+    const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: planId } });
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    if (plan.isFree) {
+      if (sub?.externalId && this.enabled && ['active', 'past_due', 'trialing', 'suspended'].includes(sub.status)) {
+        await this.client.subscriptions.cancel(sub.externalId, { prorate: false });
+        this.log.log(`tenant ${tenantId}: assinatura ${sub.externalId} cancelada no Stripe (plano gratuito ${plan.name})`);
+      }
+      const { start, end } = freePeriod(plan.durationDays);
+      // sempre `active`: o status que vinha do formulário era o do plano anterior (ex.: past_due)
+      const data = { planId, status: 'active' as const, currentPeriodStart: start, currentPeriodEnd: end, priceMonth: 0, externalId: null, cancelAtPeriodEnd: false, graceUntil: null, canceledAt: null };
+      return this.prisma.subscription.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
+    }
+    const now = new Date();
+    const end = new Date(now);
+    end.setMonth(end.getMonth() + 1);
+    // mudou de plano = preço contratado passa a ser o do plano novo. Sem isto o cliente
+    // ficaria com o preço do plano anterior registrado e o painel dele mostraria outro valor
+    return this.prisma.subscription.upsert({
+      where: { tenantId },
+      create: { tenantId, planId, status: status ?? 'active', currentPeriodStart: now, currentPeriodEnd: end, priceMonth: plan.priceMonth },
+      update: { planId, priceMonth: plan.priceMonth, ...(status && { status, graceUntil: null }) },
+    });
+  }
+
+  /**
+   * Job diário. Gratuito por período que venceu → `suspended` (envio bloqueado, recebimento
+   * segue, o cliente assina um plano pago em /plano). Gratuito permanente → só rola a data.
+   * Lê o `durationDays` ATUAL do plano: tornar o plano permanente estende quem já está nele.
+   */
+  async expireFreePlans() {
+    const vencidas = await this.prisma.subscription.findMany({
+      where: { status: 'active', externalId: null, currentPeriodEnd: { lt: new Date() }, plan: { isFree: true } },
+      include: { plan: true },
+    });
+    for (const s of vencidas) {
+      if (!s.plan.durationDays) {
+        const { start, end } = rollMonthly(s.currentPeriodStart, s.currentPeriodEnd);
+        await this.prisma.subscription.update({ where: { id: s.id }, data: { currentPeriodStart: start, currentPeriodEnd: end } });
+        continue;
+      }
+      await this.prisma.subscription.update({ where: { id: s.id }, data: { status: 'suspended' } });
+      this.log.warn(`tenant ${s.tenantId}: período gratuito do plano ${s.plan.name} terminou — suspenso`);
+      const to = await this.usage.adminEmails(s.tenantId);
+      if (!to.length) continue;
+      this.mail.send({
+        to,
+        subject: 'Seu período gratuito no Atendo terminou',
+        text: `O período gratuito do plano ${s.plan.name} terminou e o envio de mensagens foi pausado.
+
+Suas conversas continuam chegando. Para voltar a responder, escolha um plano:
+
+${env.WEB_ORIGIN}/plano`,
+      }).catch(() => undefined);
+    }
+  }
+
   // ---------- Sincronizar planos → Stripe (Products/Prices) ----------
 
   async syncPlans() {
-    const plans = await this.prisma.plan.findMany({ where: { isActive: true } });
+    // gratuito e personalizado nunca viram price: não há o que cobrar pelo gateway
+    const plans = await this.prisma.plan.findMany({ where: { isActive: true, billingCycle: { in: ['monthly', 'yearly'] } } });
     for (const p of plans) {
       if (p.stripePriceId) continue;
       const product = await this.client.products.create({ name: `Atendo ${p.name}`, metadata: { planId: p.id } });
-      const price = await this.client.prices.create({ product: product.id, unit_amount: Math.round(Number(p.priceMonth) * 100), currency: env.STRIPE_CURRENCY, recurring: { interval: 'month' }, metadata: { planId: p.id } });
+      const price = await this.client.prices.create({ product: product.id, ...stripePriceOf(p), currency: env.STRIPE_CURRENCY, metadata: { planId: p.id } });
       await this.prisma.plan.update({ where: { id: p.id }, data: { stripePriceId: price.id } });
       this.log.log(`plano ${p.name} → ${price.id}`);
     }
@@ -262,6 +347,7 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
   async repricePlan(planId: string) {
     if (!this.enabled) return;
     const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: planId } });
+    if (!isStripeBillable(plan.billingCycle)) return;
     let productId: string | undefined;
     if (plan.stripePriceId) {
       const anterior = await this.client.prices.retrieve(plan.stripePriceId);
@@ -269,7 +355,7 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
       await this.client.prices.update(plan.stripePriceId, { active: false }).catch(() => undefined);
     }
     const product = productId ?? (await this.client.products.create({ name: `Atendo ${plan.name}`, metadata: { planId: plan.id } })).id;
-    const price = await this.client.prices.create({ product, unit_amount: Math.round(Number(plan.priceMonth) * 100), currency: env.STRIPE_CURRENCY, recurring: { interval: 'month' }, metadata: { planId: plan.id } });
+    const price = await this.client.prices.create({ product, ...stripePriceOf(plan), currency: env.STRIPE_CURRENCY, metadata: { planId: plan.id } });
     await this.prisma.plan.update({ where: { id: plan.id }, data: { stripePriceId: price.id } });
     this.log.log(`plano ${plan.name} reprecificado → ${price.id}`);
   }

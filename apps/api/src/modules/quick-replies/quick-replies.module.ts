@@ -4,6 +4,8 @@ import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsOptional, IsString,
 import { StorageService } from '../../common/storage/storage.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
+import { UsageService } from '../billing/usage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -47,6 +49,7 @@ class QuickRepliesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly usage: UsageService,
   ) {}
 
   /** A chave do storage nunca sai crua: vira URL assinada e temporária. */
@@ -96,6 +99,7 @@ class QuickRepliesController {
   async create(@CurrentUser() u: AuthUser, @Body() dto: ReplyDto) {
     await this.prisma.quickReplyFolder.findFirstOrThrow({ where: { id: dto.folderId, tenantId: u.tenantId } });
     this.assertOwnMedia(u.tenantId, dto.mediaKey);
+    await this.usage.assertRoom(u.tenantId, 'maxQuickReplies');
     const last = await this.prisma.quickReply.aggregate({ where: { folderId: dto.folderId }, _max: { position: true } });
     return this.present(await this.prisma.quickReply.create({ data: { position: (last._max.position ?? -1) + 1, ...dto } }));
   }
@@ -126,6 +130,7 @@ class QuickRepliesController {
   @RequirePermission('quick_replies.manage')
   async duplicate(@CurrentUser() u: AuthUser, @Body() dto: IdsDto) {
     const src = await this.ownReplies(u.tenantId, dto.ids);
+    await this.usage.assertRoom(u.tenantId, 'maxQuickReplies', src.length);
     const created = [];
     for (const r of src) {
       const taken = (await this.prisma.quickReply.findMany({ where: { folderId: r.folderId }, select: { title: true } })).map((x) => x.title);
@@ -166,6 +171,8 @@ class QuickRepliesController {
     } catch (e) {
       throw new BadRequestException(e instanceof Error ? e.message : 'Arquivo inválido.');
     }
+    // tudo ou nada também no limite do plano: importar metade seria pior que recusar
+    await this.usage.assertRoom(u.tenantId, 'maxQuickReplies', items.length);
     return this.prisma.$transaction(async (tx) => {
       const folders = await tx.quickReplyFolder.findMany({ where: { tenantId: u.tenantId }, include: { replies: { select: { title: true, position: true } } } });
       const byName = new Map(folders.map((f) => [f.name, { id: f.id, titles: f.replies.map((r) => r.title), next: Math.max(-1, ...f.replies.map((r) => r.position)) + 1 }]));
@@ -215,5 +222,5 @@ class QuickRepliesController {
   }
 }
 
-@Module({ imports: [AuthModule], controllers: [QuickRepliesController] })
+@Module({ imports: [AuthModule, BillingModule], controllers: [QuickRepliesController] })
 export class QuickRepliesModule {}

@@ -10,6 +10,7 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { FlowEngineService } from './flow-engine.service';
+import { UsageService } from '../billing/usage.service';
 import { botPaused } from '../conversations/bot-pause';
 import { assertOwnFlowMedia, validateDefinition } from './flow-validation';
 
@@ -52,6 +53,7 @@ export class FlowsController {
     private readonly prisma: PrismaService,
     private readonly engine: FlowEngineService,
     private readonly storage: StorageService,
+    private readonly usage: UsageService,
   ) {}
 
   @Get()
@@ -85,9 +87,11 @@ export class FlowsController {
 
   @Post()
   @RequirePermission('flows.manage')
-  create(@CurrentUser() u: AuthUser, @Body() dto: FlowDto) {
-    validateDefinition(dto.definition);
+  async create(@CurrentUser() u: AuthUser, @Body() dto: FlowDto) {
+    validateDefinition(dto.definition, { strict: true });
     assertOwnFlowMedia(u.tenantId, dto.definition);
+    // `maxFlows` conta fluxos ATIVOS: criar desativado (rascunho) sempre pode
+    if (dto.isActive ?? true) await this.usage.assertRoom(u.tenantId, 'maxFlows');
     return this.prisma.flow.create({
       data: {
         tenantId: u.tenantId,
@@ -107,12 +111,13 @@ export class FlowsController {
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() body: UpdateFlowDto) {
     const { version, ...dto } = body;
     if (dto.definition) {
-      validateDefinition(dto.definition);
+      validateDefinition(dto.definition, { strict: true });
       assertOwnFlowMedia(u.tenantId, dto.definition);
     }
     const current = await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     // ativar pela lista não passa pelo editor: o desenho salvo (cópia, importado) precisa estar válido
     if (dto.isActive && !current.isActive && !dto.definition) validateDefinition(current.definition as unknown as FlowDefinition);
+    if (dto.isActive && !current.isActive) await this.usage.assertRoom(u.tenantId, 'maxFlows');
     // optimistic locking: só grava se ninguém salvou depois que o editor carregou (renomear faixa
     // de horário também conta — docs/horarios.md). Toda escrita incrementa a versão.
     const saved = await this.prisma.flow.updateMany({
@@ -188,6 +193,8 @@ export class FlowsController {
       }
       ok.push(f.id);
     }
+    // só os que vão de fato ligar contam para `maxFlows`; o lote inteiro é recusado se não couber
+    if (dto.isActive) await this.usage.assertRoom(u.tenantId, 'maxFlows', ok.filter((id) => !flows.find((f) => f.id === id)!.isActive).length);
     if (ok.length) await this.prisma.flow.updateMany({ where: { id: { in: ok }, tenantId: u.tenantId }, data: { isActive: dto.isActive, version: { increment: 1 } } });
     return { updated: ok.length, failed };
   }

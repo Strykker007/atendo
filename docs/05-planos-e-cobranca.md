@@ -20,10 +20,13 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
 
 ```ts
 {
-  maxNumbers: 3,                  // números de WhatsApp
-  maxAgents: 6,                   // atendentes
-  includedMessagesMonth: 10000,   // mensagens ENVIADAS incluídas
-  includedTemplatesMonth: 500,    // templates incluídos
+  maxNumbers: 3,                  // números de WhatsApp (conexões) — null = ilimitado
+  maxAgents: 6,                   // atendentes/gerentes ativos — null = ilimitado
+  maxFlows: 10,                   // fluxos ATIVOS (rascunho desativado não conta) — ausente/null = ilimitado
+  maxQuickReplies: 200,           // respostas rápidas — ausente/null = ilimitado
+  includedMessagesMonth: 10000,   // mensagens ENVIADAS incluídas — null = ilimitado
+  includedTemplatesMonth: 500,    // templates incluídos — null = ilimitado (custo Meta sem teto!)
+  // includedConversationsMonth: null = ilimitado; AUSENTE = 0 (planos antigos limitavam por mensagem)
   overagePricePerMessage: 0.02,   // null = não permite excedente
   overagePricePerTemplate: 0.6,
   hardLimit: false,               // true = bloqueia ao estourar; false = cobra excedente
@@ -33,6 +36,45 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
 ```
 
 Seed cria três: Starter (fixo, `hardLimit: true`), Pro e Business (híbridos com excedente).
+
+Incluído ilimitado (`null`) nunca bloqueia nem gera excedente (`quota.ts`, `reconcile`) e não dispara alerta de 80%/100%. Na tela de Planos, conversas/mês, mensagens/mês e templates/mês têm o mesmo marcador "Ilimitado" dos limites de quantidade; templates ilimitados mostram aviso de custo.
+
+IA não tem um `aiEnabled` à parte: liga/desliga pelas funcionalidades `ai_copilot` (sugestão, reescrita, resumo) e `ai_flows` (IA no robô), como qualquer recurso cobrado à parte.
+
+### Modalidade de cobrança e planos gratuitos
+
+Colunas em `plans` (não em `limits`, porque mudam o comportamento do gateway):
+
+| Campo | Valores | Efeito |
+|---|---|---|
+| `billingCycle` | `free \| monthly \| yearly \| custom` | `monthly`/`yearly` viram price recorrente no Stripe e vão para o checkout. `free` e `custom` **nunca** têm price e não aparecem para o cliente em `/plano` |
+| `isFree` | bool | Sempre igual a `billingCycle = free` — a API mantém os dois em sincronia (`plan-rules.ts → normalizePlan`) |
+| `durationDays` | int ou null | Só em gratuito: dias de degustação. `null` = **gratuito permanente** |
+| `priceYear` | decimal ou null | Só em anual: valor cobrado por ano. `priceMonth` guarda o **equivalente mensal** (`priceYear / 12`), que é o que MRR, margem e reajuste somam |
+
+**Gratuito** (cortesia, degustação, freemium):
+
+- Ao salvar, a API zera os preços, força `billingModel: fixed`, `hardLimit: true` e anula os excedentes — plano sem fatura não tem onde cobrar excedente, e `hardLimit: false` viraria uso sem limite.
+- Só o dono atribui (Clientes → plano). O checkout recusa plano gratuito/personalizado: sem isso um cliente pagante se rebaixaria sozinho para a cortesia.
+- Ao atribuir (`StripeService.assignPlan`): assinatura `active` na hora, `priceMonth = 0`, `externalId = null`, período = degustação (ou um mês rolante, se permanente). **Se o cliente tinha assinatura paga no Stripe, ela é cancelada antes** (sem proporcional); se o cancelamento falhar, nada muda. O webhook desse cancelamento é ignorado para não tirar o cliente da cortesia.
+- Sem Stripe não há fatura nem `invoice.created`, logo nenhum excedente é cobrado.
+- Criar cliente já num plano gratuito: assinatura nasce `active` (os pagos seguem nascendo `trialing`).
+- Job diário (`expireFreePlans`, junto da reconciliação): degustação vencida → `suspended` + e-mail "seu período gratuito terminou" (recebe mensagens, não envia; o cliente assina um plano pago em `/plano` e o webhook reativa). Permanente → só rola `currentPeriodEnd` um mês. O job lê o `durationDays` **atual** do plano: tornar o plano permanente estende quem já está nele.
+
+**Personalizado** (`custom`): valor negociado e cobrado por fora. Sem Stripe, sem checkout; o dono atribui em Clientes como hoje (status manual).
+
+**Trocar a modalidade** de um plano com assinantes é recusado (400): deixaria assinatura no Stripe cobrando um plano gratuito, ou cliente "pago" sem cobrança. O caminho é criar outro plano e mover os clientes. Sem assinantes, virar gratuito/personalizado arquiva o price no Stripe; mensal↔anual cria um price novo com o intervalo certo.
+
+### Limites de quantidade
+
+`UsageService.assertRoom(tenantId, limite, adicionando)` conta o uso atual e recusa com 403 quando passaria do teto (`null`/ausente = ilimitado). O que já existe acima do limite (ex.: plano rebaixado) continua funcionando — o limite só barra criar/ativar.
+
+| Limite | Conta | Onde é checado |
+|---|---|---|
+| `maxNumbers` | números ativos | `POST /numbers` (`@RequireLimit`) |
+| `maxAgents` | agentes + gerentes ativos | `POST /tenants/me/agents` (`@RequireLimit`) |
+| `maxFlows` | fluxos com `isActive` | criar ativo, ativar no `PATCH`, ativar em lote (o lote inteiro é recusado se não couber). Duplicar/importar criam desativados e não contam |
+| `maxQuickReplies` | respostas rápidas | criar, duplicar e importar (tudo ou nada) |
 
 ### Onde o custo é cadastrado
 
@@ -54,9 +96,11 @@ Com custo cadastrado, **Planos** passa a mostrar a margem por plano no cartão e
 
 Tela **Planos**, na área do dono. Até então o catálogo só existia no seed: criar um pacote para um cliente exigia mexer no código, e por isso nenhum plano novo nascia — a transmissão em massa ficou pronta e trancada por falta de um plano que a liberasse.
 
-A tela cobre tudo que o `PlanLimits` aceita: limites de números e usuários, unidade de cobrança (conversa ou mensagem), incluídos, excedentes, bloquear x cobrar, tolerância no pagamento, funcionalidades plugáveis e os três controles de IA (interações incluídas, excedente e **teto de custo**).
+A tela cobre tudo que o `PlanLimits` aceita: interruptor **Plano gratuito** (permanente ou por N dias — desabilita e zera o preço), modalidade (mensal, anual, personalizado), limites de números, usuários, fluxos ativos e respostas rápidas (cada um com "Ilimitado"), unidade de cobrança (conversa ou mensagem), incluídos, excedentes, bloquear x cobrar, tolerância no pagamento, funcionalidades plugáveis e os três controles de IA (interações incluídas, excedente e **teto de custo**).
 
-**Stripe:** ao salvar, o produto e o preço recorrente são criados automaticamente. Quando a cobrança está ligada e o plano fica sem preço, o cartão mostra "sem Stripe" — porque sem preço o cliente não consegue assinar, e descobrir isso no clique do checkout é tarde.
+Na lista, plano gratuito leva o selo **Gratuito** e mostra "N dias grátis" ou "Gratuito permanente"; anual mostra o valor por ano.
+
+**Stripe:** ao salvar (mensal/anual), o produto e o preço recorrente são criados automaticamente. Quando a cobrança está ligada e o plano fica sem preço, o cartão mostra "sem Stripe" — porque sem preço o cliente não consegue assinar, e descobrir isso no clique do checkout é tarde.
 
 **Mudar o valor de um plano existente** cria um preço novo no Stripe e arquiva o anterior: preço é imutável lá. **Quem já assina continua no antigo** até trocar de plano — reajustar por baixo seria mexer no que o cliente contratou sem avisar.
 
@@ -114,7 +158,7 @@ senão                   → bloqueia com mensagem "Limite do plano atingido (N/
 
 O front mostra um banner no lugar do campo de digitação quando estourou (`ChatPane`).
 
-Limites de **quantidade** (números, atendentes) usam `PlanLimitGuard` + `@RequireLimit('maxNumbers')` nos endpoints de criação.
+Limites de **quantidade** (números, atendentes, fluxos ativos, respostas rápidas): ver *Limites de quantidade* acima. `PlanLimitGuard` + `@RequireLimit('maxNumbers')` nos endpoints de um item só; `UsageService.assertRoom` nos de lote.
 
 ## Alertas
 

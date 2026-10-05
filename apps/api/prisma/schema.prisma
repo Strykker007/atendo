@@ -911,10 +911,28 @@ enum BillingModel {
   hybrid
 }
 
+/// Modalidade de cobrança. `free` e `custom` não têm price no Stripe nem passam pelo checkout.
+enum BillingCycle {
+  free
+  monthly
+  yearly
+  custom
+}
+
 model Plan {
   id           String       @id @default(uuid())
   name         String       @unique
+  /// Mensalidade. Em plano anual é o EQUIVALENTE mensal (priceYear / 12) — é o que MRR,
+  /// margem e reajuste comparam, para não misturar anual com mensal nas contas.
   priceMonth   Decimal      @db.Decimal(10, 2)
+  /// Valor cobrado por ano quando `billingCycle = yearly` (vira o price anual no Stripe).
+  priceYear    Decimal?     @db.Decimal(10, 2)
+  /// Plano 100% gratuito: sem gateway, sem fatura, assinatura nasce `active`.
+  /// Sempre igual a `billingCycle = free` (a API mantém os dois em sincronia).
+  isFree       Boolean      @default(false)
+  billingCycle BillingCycle @default(monthly)
+  /// Dias de gratuidade (período de teste). Null em plano gratuito = gratuito permanente.
+  durationDays Int?
   /// Quanto custa SERVIR um cliente deste plano por mês (suporte, infra rateada, licenças).
   /// É estimativa do dono, não medição: o custo medido por mensagem vem do ledger e o de
   /// linha vem de `whatsapp_numbers.infraCostMonth`. Sem este campo a margem por plano não
