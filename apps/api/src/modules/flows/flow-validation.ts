@@ -1,12 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
-import { CONTENT_MAX_DELAY_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, randomizerTotal, type ContentItem, type FlowDefinition, type FlowNode } from '@atendo/shared';
 
 /** Tempo limite de resposta: até 30 dias (o job fica na fila esse tempo). */
 const MAX_REPLY_TIMEOUT_MIN = 30 * 1440;
 import { hhmm, opFitsOperand, toNumber } from './conditions';
 
-/** Regras mínimas para um fluxo poder ser salvo/executado. Erros em português para a UI. */
-export function validateDefinition(def: FlowDefinition) {
+/**
+ * Regras mínimas para um fluxo poder ser salvo/executado. Erros em português para a UI.
+ * `strict` (salvar pelo editor): Randomizador precisa somar exatamente 100%. Sem ele (ativar um
+ * desenho já gravado, importar), pesos antigos proporcionais continuam valendo — a engine sorteia
+ * proporcionalmente e o editor converte para percentual ao abrir.
+ */
+export function validateDefinition(def: FlowDefinition, { strict = false }: { strict?: boolean } = {}) {
   const errors: string[] = [];
   const starts = def.nodes.filter((n) => n.type === 'start');
   if (starts.length !== 1) errors.push('O fluxo precisa de exatamente um nó "Início".');
@@ -30,7 +35,11 @@ export function validateDefinition(def: FlowDefinition) {
       }
     }
     if (n.type === 'condition') errors.push(...conditionErrors(n));
-    if (n.type === 'randomizer' && ((n.data.branches?.length ?? 0) < 2 || !n.data.branches.some((b) => Number(b.weight) > 0))) errors.push(`"Randomizador" (${n.id}) precisa de pelo menos dois ramos, com algum peso maior que zero.`);
+    if (n.type === 'randomizer') {
+      const branches = n.data.branches ?? [];
+      if (branches.length < 2 || !branches.some((b) => Number(b.weight) > 0)) errors.push(`"Randomizador" (${n.id}) precisa de pelo menos dois ramos, com algum percentual maior que zero.`);
+      else if (strict && (randomizerTotal(branches) !== 100 || branches.some((b) => !Number.isInteger(Number(b.weight)) || Number(b.weight) < 0 || Number(b.weight) > 100))) errors.push(`"Randomizador" (${n.id}): a soma dos ramos deve ser igual a 100% (percentuais inteiros de 0 a 100).`);
+    }
     if (n.type === 'action' && n.data.kind === 'webhook') errors.push(...webhookErrors(n));
     // departamento que saiu na importação: o card já mostra "Reconfigurar"; não trava o salvar
     if (n.type === 'action' && n.data.kind === 'set_department' && !n.data.departmentId && !(n.data as { _reconfig?: unknown })._reconfig) errors.push(`"Ação" (${n.id}): escolha o departamento.`);

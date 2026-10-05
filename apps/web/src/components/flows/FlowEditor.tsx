@@ -4,7 +4,6 @@ import { ApiError } from '@/lib/api';
 import { ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState, useReactFlow, MarkerType, type Connection, type Edge, type Node, BackgroundVariant } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Save, ArrowLeft, Settings2, Activity, LayoutGrid, Copy, CopyPlus, ClipboardPaste, Trash2 } from 'lucide-react';
-import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Field, inputCls } from '@/components/ui/Modal';
@@ -17,7 +16,7 @@ import { collectFlowVars, SYSTEM_VARS } from './TextWithVars';
 import { useHistory } from './history';
 import { useUnsavedGuard } from '@/lib/unsaved-guard';
 import { useNumbers, useFlowRuns, useFlows, useMe, useTags, type Flow } from '@/lib/hooks';
-import { cloneFlowFragment, restoreFlowDefinition, scrubFlowDefinition, type FlowDefinition, type FlowEdge, type FlowNode, type FlowNodeType, type FlowTrigger } from '@atendo/shared';
+import { cloneFlowFragment, randomizerPercents, randomizerTotal, restoreFlowDefinition, scrubFlowDefinition, type FlowDefinition, type FlowEdge, type FlowNode, type FlowNodeType, type FlowTrigger } from '@atendo/shared';
 
 const EMPTY: FlowDefinition = { nodes: [{ id: 'start', type: 'start', position: { x: 40, y: 200 }, data: {} as never }], edges: [] };
 const edgeTypes = { deletable: DeletableEdge };
@@ -301,6 +300,13 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
       nodes: nodes.map(fromRf),
       edges: edges.map((e) => ({ id: e.id, source: e.source, sourceHandle: e.sourceHandle ?? null, target: e.target })),
     };
+    const badRandom = definition.nodes.find((n) => n.type === 'randomizer' && randomizerTotal(n.data.branches ?? []) !== 100);
+    if (badRandom) {
+      setSelectedId(badRandom.id);
+      setSide('node');
+      toast.err('Randomizador: a soma dos ramos deve ser igual a 100%.');
+      return;
+    }
     try {
       await onSave({ ...meta, description: meta.description || undefined, definition });
       saved.current = snapshot();
@@ -317,7 +323,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
     <div className="flex-1 min-w-0 flex flex-col">
       {/* Barra superior */}
       <div className="h-12 shrink-0 flex items-center gap-3 px-3 border-b border-line bg-panel">
-        <Link href="/fluxos" className="text-muted hover:text-ink"><ArrowLeft size={18} /></Link>
+        <button type="button" onClick={() => guard.leaveTo('/fluxos')} className="text-muted hover:text-ink" title="Voltar para os fluxos" aria-label="Voltar para os fluxos"><ArrowLeft size={18} /></button>
         <input value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} className="font-display font-semibold text-ink bg-transparent focus:outline-none focus:bg-field rounded px-1 min-w-0 flex-1" />
         <span className={cn('text-[10.5px] font-semibold rounded-full px-2 py-0.5', meta.isActive ? 'bg-ok-soft text-ok' : 'bg-field text-muted')}>{meta.isActive ? 'Ativo' : 'Inativo'}</span>
         {dirty
@@ -477,8 +483,10 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
 }
 
 function toRf(n: FlowNode): Node {
+  // Randomizador antigo guardava pesos livres (1/1): abre já em percentual, mesma proporção
+  const data = n.type === 'randomizer' && n.data.branches ? { ...n.data, branches: randomizerPercents(n.data.branches) } : n.data;
   // o Início não sai pela tecla Delete: o fluxo precisa de exatamente um
-  return { id: n.id, type: n.type, position: n.position, data: n.data as Record<string, unknown>, deletable: n.type !== 'start' };
+  return { id: n.id, type: n.type, position: n.position, data: data as Record<string, unknown>, deletable: n.type !== 'start' };
 }
 function fromRf(n: Node): FlowNode {
   return { id: n.id, type: n.type as FlowNodeType, position: n.position, data: n.data } as FlowNode;

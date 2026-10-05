@@ -17,7 +17,8 @@ const atGuard = () => typeof window !== 'undefined' && !!(window.history.state a
  * - botão Voltar: com alterações, empilha uma cópia da entrada atual (mesma URL). O Voltar cai
  *   nela em vez de sair; aí o modal decide entre ficar (empilha de novo) ou sair (volta mais um).
  *
- * Navegação feita por código (`router.push` em outro lugar) não passa por aqui.
+ * Navegação feita por código (`router.push` em outro lugar) não passa por aqui — botões que
+ * navegam usam `leaveTo(href)`, que abre o mesmo modal.
  */
 export function useUnsavedGuard(dirty: boolean) {
   const router = useRouter();
@@ -79,6 +80,15 @@ export function useUnsavedGuard(dirty: boolean) {
     };
   }, []);
 
+  /** Navegação por botão (ex.: Voltar do editor): com alterações, passa pelo mesmo modal. */
+  const leaveTo = (href: string) => {
+    if (dirtyRef.current) return setPending({ kind: 'link', href });
+    leaving.current = true;
+    // em cima da cópia: substitui, para o Voltar da próxima tela trazer de volta para cá
+    if (atGuard()) router.replace(href);
+    else router.push(href);
+  };
+
   const stay = () => {
     if (pending?.kind === 'back') arm();
     setPending(null);
@@ -104,5 +114,5 @@ export function useUnsavedGuard(dirty: boolean) {
       </div>
     </Modal>
   );
-  return { modal };
+  return { modal, leaveTo };
 }

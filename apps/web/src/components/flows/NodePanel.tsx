@@ -1,13 +1,13 @@
 'use client';
 import { useContext } from 'react';
-import { Trash2, Plus, X, ExternalLink } from 'lucide-react';
+import { Trash2, Plus, X, ExternalLink, Lock, LockOpen } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META, DELAY_UNIT, FlowEditorRefs } from './nodes';
 import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
-import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, normalizeCondition, normalizeContent, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
+import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
 import { ContentPanel } from './ContentPanel';
 
@@ -422,19 +422,46 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         })()}
 
         {node.type === 'randomizer' && (() => {
-          const total = node.data.branches.reduce((s, b) => s + Math.max(0, Number(b.weight) || 0), 0);
+          const branches = node.data.branches;
+          const total = randomizerTotal(branches);
+          const lockedTotal = randomizerLockedTotal(branches);
+          const freeCount = branches.filter((b) => !b.locked).length;
+          const canSpread = lockedTotal <= 100 && freeCount > 0;
+          // digitar um valor fixa o ramo; só o cadeado solta (nenhum botão desfaz o que foi fixado)
+          const setPct = (id: string, v: string) => set({ branches: branches.map((x) => (x.id === id ? { ...x, weight: Math.min(100, Math.max(0, Math.round(Number(v) || 0))), locked: true } : x)) });
+          const toggleLock = (id: string) => set({ branches: branches.map((x) => (x.id === id ? { ...x, locked: !x.locked } : x)) });
+          const linkCls = 'text-xs font-medium text-accent hover:underline disabled:text-faint disabled:no-underline disabled:cursor-not-allowed';
           return (
-            <Field label="Ramos" hint="Cada ramo é uma saída. O percentual é o peso dividido pela soma dos pesos.">
+            <Field label="Ramos" hint="Cada ramo é uma saída. Informe o percentual de conversas que vai para cada um.">
               <div className="space-y-1.5">
-                {node.data.branches.map((b) => (
+                <div className="flex justify-end">
+                  <button type="button" onClick={() => set({ branches: distributeRemaining(branches) })} disabled={!canSpread} className={linkCls}
+                    title={freeCount ? 'Divide o que falta para 100% igualmente entre os ramos livres; os fixados (cadeado) são mantidos. Sem nenhum fixado, divide 100% por todos.' : 'Todos os ramos estão fixados: solte algum cadeado'}>Distribuir restante</button>
+                </div>
+                {branches.map((b) => (
                   <div key={b.id} className="flex items-center gap-1.5">
-                    <input className={inputCls} value={b.label} placeholder="Nome" onChange={(e) => set({ branches: node.data.branches.map((x) => (x.id === b.id ? { ...x, label: e.target.value } : x)) })} />
-                    <input type="number" min={0} className={`${inputCls} w-20`} value={b.weight} onChange={(e) => set({ branches: node.data.branches.map((x) => (x.id === b.id ? { ...x, weight: Math.max(0, Number(e.target.value)) } : x)) })} />
-                    <span className="tnum text-xs text-faint w-9 text-right">{total ? Math.round((Math.max(0, Number(b.weight) || 0) / total) * 100) : 0}%</span>
-                    <button onClick={() => set({ branches: node.data.branches.filter((x) => x.id !== b.id) })} disabled={node.data.branches.length <= 2} className="text-faint hover:text-danger p-1"><X size={14} /></button>
+                    <input className={inputCls} value={b.label} placeholder="Nome" onChange={(e) => set({ branches: branches.map((x) => (x.id === b.id ? { ...x, label: e.target.value } : x)) })} />
+                    <div className="relative w-24 shrink-0">
+                      <input type="number" min={0} max={100} step={1} className={`${inputCls} pr-6`} value={b.weight} onChange={(e) => setPct(b.id, e.target.value)} aria-label={`Percentual do ramo ${b.label}`} />
+                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted">%</span>
+                    </div>
+                    <button type="button" onClick={() => toggleLock(b.id)} className={b.locked ? 'text-accent p-1' : 'text-faint hover:text-ink p-1'}
+                      title={b.locked ? 'Fixado: "Distribuir restante" não altera este ramo. Clique para soltar.' : 'Livre: recebe parte do restante. Clique para fixar.'}
+                      aria-label={b.locked ? `Soltar ramo ${b.label}` : `Fixar ramo ${b.label}`} aria-pressed={!!b.locked}>
+                      {b.locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                    </button>
+                    <button onClick={() => set({ branches: branches.filter((x) => x.id !== b.id) })} disabled={branches.length <= 2} className="text-faint hover:text-danger p-1"><X size={14} /></button>
                   </div>
                 ))}
-                <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ branches: [...node.data.branches, { id: shortId(), label: String.fromCharCode(65 + node.data.branches.length), weight: 0 }] })}>Adicionar ramo</Button>
+                <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ branches: [...branches, { id: shortId(), label: String.fromCharCode(65 + branches.length), weight: 0 }] })}>Adicionar ramo</Button>
+                <div className={`space-y-0.5 rounded-lg px-3 py-2 text-xs ${total === 100 ? 'bg-field text-muted' : 'bg-danger-soft text-danger-ink'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold tnum">Total: {total}% / 100%</span>
+                    {total !== 100 && <span>A soma dos ramos deve ser igual a 100%</span>}
+                  </div>
+                  {lockedTotal > 100 && <p className="font-medium text-danger-ink tnum">Os ramos fixados somam {lockedTotal}% — passa de 100%. Reduza algum valor para distribuir o restante.</p>}
+                </div>
+                <p className="text-[11px] text-muted">Dica: preencha os valores desejados e clique em "Distribuir restante" para ajustar os outros ramos.</p>
               </div>
             </Field>
           );

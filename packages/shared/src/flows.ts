@@ -276,8 +276,60 @@ export const VARIABLE_OP_LABEL: Record<VariableOp, string> = {
   set: 'Definir valor', add: 'Somar', subtract: 'Subtrair', append: 'Acrescentar texto',
   clear: 'Limpar', copy: 'Copiar de outra variável', now: 'Data/hora atual',
 };
-/** Divide o tráfego por peso (teste A/B). Cada ramo é uma saída (sourceHandle = id do ramo). */
-export type RandomizerNode = FlowNodeBase<'randomizer', { branches: { id: string; label: string; weight: number }[] }>;
+/**
+ * Divide o tráfego por percentual (teste A/B). Cada ramo é uma saída (sourceHandle = id do ramo).
+ * `weight` é o percentual inteiro (0–100) e a soma dos ramos deve ser 100. Fluxos antigos guardavam
+ * pesos livres (ex.: 1/1): a engine sorteia proporcionalmente, então continuam funcionando, e o
+ * editor converte para percentual ao abrir (`randomizerPercents`).
+ */
+export type RandomizerNode = FlowNodeBase<'randomizer', { branches: RandomizerBranch[] }>;
+/** `locked`: valor fixado pelo usuário no editor (só UI — a engine ignora). */
+export type RandomizerBranch = { id: string; label: string; weight: number; locked?: boolean };
+
+/** `total` ÷ N em inteiros; a sobra vai para o último (100 em 3 → 33/33/34). */
+export function evenPercents(n: number, total = 100): number[] {
+  if (n <= 0) return [];
+  const base = Math.floor(total / n);
+  return Array.from({ length: n }, (_, i) => (i === n - 1 ? total - base * (n - 1) : base));
+}
+
+/** Soma dos ramos fixados (`locked`). */
+export function randomizerLockedTotal(branches: RandomizerBranch[]): number {
+  return randomizerTotal(branches.filter((b) => b.locked));
+}
+
+/**
+ * "Distribuir restante": mantém os ramos fixados e divide 100 − soma deles igualmente entre os
+ * demais (sobra no último). Sem ramo livre ou fixados acima de 100 → devolve como está.
+ */
+export function distributeRemaining(branches: RandomizerBranch[]): RandomizerBranch[] {
+  const rest = 100 - randomizerLockedTotal(branches);
+  const free = branches.filter((b) => !b.locked);
+  if (rest < 0 || !free.length) return branches;
+  const parts = evenPercents(free.length, rest);
+  let k = 0;
+  return branches.map((b) => (b.locked ? b : { ...b, weight: parts[k++] }));
+}
+
+/** Soma dos percentuais dos ramos (valores inválidos contam como 0). */
+export function randomizerTotal(branches: RandomizerBranch[]): number {
+  return branches.reduce((s, b) => s + Math.max(0, Number(b.weight) || 0), 0);
+}
+
+/**
+ * Converte pesos livres (formato antigo) em percentuais inteiros que somam 100, mantendo a
+ * proporção (maiores restos). Já somando 100, ou tudo zero, devolve como está.
+ */
+export function randomizerPercents(branches: RandomizerBranch[]): RandomizerBranch[] {
+  const total = randomizerTotal(branches);
+  if (total === 0 || (total === 100 && branches.every((b) => Number.isInteger(Number(b.weight))))) return branches;
+  const raw = branches.map((b) => (Math.max(0, Number(b.weight) || 0) / total) * 100);
+  const out = raw.map(Math.floor);
+  let rest = 100 - out.reduce((s, v) => s + v, 0);
+  const order = raw.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((a, b) => b.frac - a.frac);
+  for (let k = 0; rest > 0; k++, rest--) out[order[k % order.length].i]++;
+  return branches.map((b, i) => ({ ...b, weight: out[i] }));
+}
 /**
  * Distribui a conversa. round_robin = rodízio entre os atendentes; least_busy = quem tem
  * menos conversas abertas; queue = devolve para a fila "Aguardando". `agentIds` vazio = todos

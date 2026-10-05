@@ -4,7 +4,8 @@ import { Handle, Position, useNodeId, type NodeProps } from '@xyflow/react';
 import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  CLOSED_BAND_ID, DEPARTMENT_NONE, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent,
+  CLOSED_BAND_ID, DEPARTMENT_NONE, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent, randomizerTotal,
+  type RandomizerBranch,
   type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
@@ -400,9 +401,8 @@ export function VariableNodeView({ data, selected }: P) {
 }
 
 export function RandomizerNodeView({ data, selected }: P) {
-  const d = data as { branches?: { id: string; label: string; weight: number }[] };
-  const branches = d.branches ?? [];
-  const total = branches.reduce((s, b) => s + Math.max(0, Number(b.weight) || 0), 0);
+  const branches = (data as { branches?: RandomizerBranch[] }).branches ?? [];
+  const total = randomizerTotal(branches);
   return (
     <Shell type="randomizer" data={data} selected={selected}>
       <In />
@@ -410,9 +410,10 @@ export function RandomizerNodeView({ data, selected }: P) {
         {branches.map((b) => (
           <OutRow key={b.id} id={b.id}>
             <span className="truncate flex-1">{b.label || '(ramo)'}</span>
-            <span className="tnum text-faint">{total ? Math.round((Math.max(0, Number(b.weight) || 0) / total) * 100) : 0}%</span>
+            <span className="tnum">{Math.max(0, Number(b.weight) || 0)}%</span>
           </OutRow>
         ))}
+        {total !== 100 && <div className="flex items-center gap-1 text-[10.5px] font-semibold text-danger tnum px-1"><AlertTriangle size={11} /> Total: {total}% / 100%</div>}
       </Rows></div>
     </Shell>
   );
