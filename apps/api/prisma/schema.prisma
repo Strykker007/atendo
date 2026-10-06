@@ -617,6 +617,8 @@ enum ConversationEventType {
   message_deleted
   /// histórico da conversa limpo; `reason` = quantas mensagens
   history_cleared
+  /// atendente editou a própria mensagem (docs/editar-mensagens.md); `reason` = texto anterior
+  message_edited
 }
 
 /// Histórico do atendimento — quem fez o quê e quando.
@@ -723,6 +725,8 @@ model Message {
   deletedByName      String?
   /// true = o provider apagou também no celular do contato ("apagar para todos")
   deletedForEveryone Boolean   @default(false)
+  /// texto editado depois do envio (pelo atendente no painel ou no celular); o anterior fica no evento `message_edited`
+  editedAt           DateTime?
   createdAt      DateTime         @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

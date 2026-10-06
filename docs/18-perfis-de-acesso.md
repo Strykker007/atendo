@@ -24,7 +24,7 @@ senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 | Grupo | Permissões |
 |---|---|
-| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit` |
+| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `variables.manage`, `agenda.manage`, `campaigns.manage` |
 | Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
 | Conta | `numbers.manage`, `billing.manage` |
@@ -142,6 +142,7 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `conversations.view_all` | aba "Atendendo" vs "Minhas", seletor de atendente na lista |
 | `conversations.transfer_any` | menu Transferir/Devolver no cabeçalho do chat |
 | `conversations.internal_note` | modo nota interna |
+| `conversations.edit_message` | lápis no hover das próprias mensagens de texto (fila ou até 15 min, só Evolution) — [Editar mensagens](editar-mensagens.md). Ligada nos três perfis padrão (migration `edit_message`) |
 | `conversations.delete_message` | lixeira no hover de qualquer mensagem (sem ela, só nas próprias com menos de 2 dias) |
 | `conversations.delete_chat` | botão "Limpar histórico" no cabeçalho do chat |
 | `conversations.view_deleted` | olho no aviso "Mensagem apagada por…" para ver o original |

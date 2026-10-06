@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import { DELETED_MESSAGE_LABEL, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, messagePreview } from '@atendo/shared';
+import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, messagePreview } from '@atendo/shared';
 import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -873,6 +873,65 @@ export class ConversationsService {
     this.gateway.emitMessage(tenantId, presented);
     await this.refreshAfterDeletion(tenantId, plan.conversationId);
     return { message: presented, forEveryone: outcome.forEveryone, notice };
+  }
+
+  /**
+   * O que fazer para editar uma mensagem (docs/editar-mensagens.md). Mesma divisão do apagar: o
+   * service decide, o controller fala com o provider, `markEdited` grava.
+   *
+   * Só a PRÓPRIA mensagem de texto do atendente, com `conversations.edit_message`. Ainda na fila
+   * (`pending`) edita só aqui — o worker manda o texto novo. Já enviada: precisa do provider
+   * (Evolution; a Meta não edita) e do prazo do WhatsApp (15 min).
+   */
+  async editPlan(tenantId: string, actor: Viewer, conversationId: string, messageId: string, text: string) {
+    if (!may(actor, 'conversations.edit_message')) throw new ForbiddenException('Seu perfil de acesso não permite editar mensagens.');
+    const novo = text.trim();
+    if (!novo) throw new BadRequestException('A mensagem não pode ficar vazia. Para tirar, apague.');
+    const m = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId, conversation: { tenantId } },
+      select: {
+        id: true, direction: true, internal: true, authorId: true, status: true, externalId: true, createdAt: true, deletedAt: true, type: true, text: true, raw: true, content: true,
+        number: { select: { id: true, status: true, provider: true } },
+        conversation: { select: { number: { select: { id: true, status: true, provider: true } }, contact: { select: { phone: true } } } },
+      },
+    });
+    if (!m) throw new NotFoundException('Mensagem não encontrada');
+    if (m.deletedAt) throw new ConflictException('Essa mensagem foi apagada.');
+    if (m.internal || m.direction !== 'out' || m.authorId !== actor.id) throw new ForbiddenException('Só dá para editar as suas próprias mensagens enviadas.');
+    const raw = (m.raw ?? {}) as { template?: unknown; interactive?: unknown };
+    if (m.type !== 'text' || raw.template || raw.interactive || m.content) throw new BadRequestException('Só mensagens de texto podem ser editadas.');
+    if (m.text === novo) throw new BadRequestException('O texto não mudou.');
+    const base = { messageId: m.id, conversationId, before: m.text ?? '' };
+    if (m.status === 'pending') return { ...base, provider: null };
+    if (m.status === 'failed' || !m.externalId) throw new ConflictException('Essa mensagem não foi entregue. Apague e envie de novo.');
+    if (Date.now() - m.createdAt.getTime() > MESSAGE_EDIT_WINDOW_MS) throw new ConflictException('Passou o prazo do WhatsApp para editar (15 minutos depois do envio).');
+    // sai pelo número que enviou, não pelo atual da conversa
+    const number = m.number ?? m.conversation.number;
+    if (number.provider === 'meta') throw new UnprocessableEntityException('A API oficial da Meta não permite editar mensagens enviadas.');
+    if (number.status !== 'connected') throw new UnprocessableEntityException('O número está desconectado: não dá para editar no WhatsApp do contato agora.');
+    return { ...base, provider: { numberId: number.id, to: m.conversation.contact.phone, externalId: m.externalId } };
+  }
+
+  /**
+   * Grava o texto novo, o evento de auditoria (com o texto anterior) e avisa o painel.
+   * Ainda na fila: só troca se continuar `pending` — se o worker entregou no meio tempo, o
+   * contato recebeu o texto antigo e a tela precisa tentar de novo (agora pelo provider).
+   */
+  async markEdited(tenantId: string, actor: Viewer, plan: { messageId: string; conversationId: string; before: string; provider: unknown }, text: string) {
+    const novo = text.trim();
+    const r = await this.prisma.message.updateMany({ where: { id: plan.messageId, deletedAt: null, ...(!plan.provider && { status: 'pending' }) }, data: { text: novo, editedAt: new Date() } });
+    if (!r.count) throw new ConflictException('A mensagem acabou de ser enviada. Tente editar de novo.');
+    await this.registrar({ tenantId, conversationId: plan.conversationId, type: 'message_edited', actorId: actor.id, reason: `Antes: "${plan.before.slice(0, 300)}${plan.before.length > 300 ? '…' : ''}"` });
+    const message = await this.prisma.message.findUniqueOrThrow({ where: { id: plan.messageId }, include: MESSAGE_INCLUDE });
+    // era a última da conversa: a prévia da lista mostra o texto novo
+    const ultima = await this.prisma.message.findFirst({ where: { conversationId: plan.conversationId, internal: false, deletedAt: null }, orderBy: [{ createdAt: 'desc' }, { queueSeq: 'desc' }], select: { id: true } });
+    if (ultima?.id === message.id) {
+      const conv = await this.prisma.conversation.update({ where: { id: plan.conversationId }, data: { lastMessagePreview: messagePreview({ type: message.type, text: novo }).slice(0, 120) } });
+      this.gateway.emitConversation(tenantId, conv);
+    }
+    const presented = this.present(message);
+    this.gateway.emitMessage(tenantId, presented);
+    return presented;
   }
 
   /** Conteúdo original de uma apagada. A rota exige `conversations.view_deleted`. */

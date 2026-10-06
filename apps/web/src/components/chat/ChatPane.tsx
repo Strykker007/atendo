@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2 } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useDeletedOriginal, useClearHistory, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { Avatar } from './Avatar';
@@ -19,11 +19,12 @@ import { OriginBadge } from './OriginBadge';
 import { channelOffline } from './ChannelBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
+import { Modal, inputCls } from '@/components/ui/Modal';
 import { ComposerBar } from './ComposerBar';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, QuickReplyCountdown, type QuickReplyEventDetail, type QuickReplyPending } from './QuickReplyCountdown';
-import { OWN_MESSAGE_DELETE_WINDOW_MS, QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
+import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
 import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
@@ -74,6 +75,14 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const limpar = useClearHistory();
   const podeApagar = (m: Message) =>
     !m.deletedAt && (podeApagarQualquer || (m.direction === 'out' && !!m.authorId && m.authorId === me.data?.id && Date.now() - new Date(m.createdAt).getTime() < OWN_MESSAGE_DELETE_WINDOW_MS));
+  // Editar (docs/editar-mensagens.md): só a própria mensagem de texto, com a permissão, e na
+  // Evolution dentro dos 15 min do WhatsApp (na fila, a qualquer momento). A API corta de novo.
+  const podeEditarPerfil = useCan('conversations.edit_message');
+  const [editando, setEditando] = useState<Message | null>(null);
+  const podeEditar = (m: Message) =>
+    podeEditarPerfil && !m.deletedAt && !m.internal && m.direction === 'out' && !!m.authorId && m.authorId === me.data?.id
+    && m.type === 'text' && !m.content && m.status !== 'failed' && conv?.number.provider !== 'meta'
+    && (m.status === 'pending' || Date.now() - new Date(m.createdAt).getTime() < MESSAGE_EDIT_WINDOW_MS);
   const mine = !!conv && conv.assignee?.id === me.data?.id;
   const ownedByOther = !!conv && !!conv.assignee && !mine;
   // Modo nota interna: o composer vira âmbar e o que sai é NOTA (só a equipe vê, nunca vai ao
@@ -365,6 +374,11 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
    * Fora do modo de responder (nota interna, número caído…), só entra no campo como antes.
    */
   const atrasoRapida = tenantSettings.data?.quickReplyDelaySec ?? QUICK_REPLY_DELAY_DEFAULT_SEC;
+  /**
+   * Assinatura do atendente (`*Nome:*` na 1ª linha) quando ligada. Um ponto só para o campo e
+   * para a resposta rápida — antes a rápida saía pelo timer sem passar por aqui e ia sem nome.
+   */
+  const assinar = (t: string) => (assinando && t.trim() ? `*${me.data?.name ?? ''}:*\n${t.trim()}` : t.trim());
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent<QuickReplyEventDetail>).detail;
@@ -385,8 +399,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       setRapida(null);
       const r = rapida;
       const input = r.media
-        ? { type: mediaTypeOf(r.media.mimeType), mediaKey: r.media.key, text: r.text || undefined, media: { url: r.media.url, mimeType: r.media.mimeType, fileName: r.media.fileName } } as const
-        : { type: 'text', text: r.text } as const;
+        ? { type: mediaTypeOf(r.media.mimeType), mediaKey: r.media.key, text: assinar(r.text) || undefined, media: { url: r.media.url, mimeType: r.media.mimeType, fileName: r.media.fileName } } as const
+        : { type: 'text', text: assinar(r.text) } as const;
       send.mutateAsync({ ...input, idempotencyKey: r.key }).catch((err) => {
         // não perde o texto: volta para o campo para revisar e mandar de novo
         if (r.media) setAttachment(r.media);
@@ -447,7 +461,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       }
       return;
     }
-    const t = assinando && text.trim() ? `*${me.data?.name ?? ''}:*\n${text.trim()}` : text.trim();
+    const t = assinar(text);
     if ((!t && !attachment) || send.isPending) return;
     const att = attachment;
     setText('');
@@ -631,13 +645,14 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
       </div>
 
       {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} />}
       {historico && <HistorySheet conversationId={conv.id} onClose={() => setHistorico(false)} />}
+      {editando && <EditMessageModal m={editando} onClose={() => setEditando(null)} />}
       <ConfirmDialog
         open={!!apagando}
         title="Apagar mensagem?"
@@ -858,7 +873,7 @@ export function resumoDaMensagem(m: Message): string {
   return messagePreview(m);
 }
 
-function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
+function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
   const estruturado = structuredBody(m);
@@ -884,7 +899,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
   }
   return (
     <div id={`msg-${m.id}`} className={cn('group flex items-center gap-1 rounded-lg transition-colors duration-700', out ? 'justify-end' : 'justify-start')}>
-      {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} podeReagir={canResend} />}
+      {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onEditar={onEditar} podeReagir={canResend} />}
       <div className={cn('relative max-w-[72%] px-2.5 py-1.5 text-[13px]', m.reactions?.length && 'mb-3', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
         {m.forwarded && <ForwardedLabel score={m.forwardingScore} />}
         <Citacao m={m} citada={citada} contato={contato} />
@@ -895,6 +910,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
           </>
         )}
         <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>
+          {m.editedAt && <span className="italic font-sans" title={`Editada em ${new Date(m.editedAt).toLocaleString('pt-BR')}`}>editada</span>}
           {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           {out && <StatusIcon status={m.status} error={m.error} />}
         </div>
@@ -1000,14 +1016,16 @@ function mudouODia(anterior: Message | undefined, atual: Message) {
  * Só para mensagem que chegou ao WhatsApp — sem `externalId` não há o que citar nem reagir.
  * Apagar é a exceção: pendente (cancela o envio) e com falha também saem do histórico.
  */
-function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeReagir: boolean }) {
+function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, onEditar, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; podeReagir: boolean }) {
   const apagar = onApagar && <BotaoAcao titulo="Apagar" onClick={() => onApagar(m)}><Trash2 size={14} /></BotaoAcao>;
-  if (!m.externalId) return apagar ? <div className="flex items-center shrink-0">{apagar}</div> : null;
+  // editar vale também na fila (sem `externalId`): o texto novo é o que sai
+  const editar = onEditar && <BotaoAcao titulo="Editar" onClick={() => onEditar(m)}><Pencil size={14} /></BotaoAcao>;
+  if (!m.externalId) return apagar || editar ? <div className="flex items-center shrink-0">{apagar}{editar}</div> : null;
   const reagir = podeReagir && m.status !== 'pending' && m.status !== 'failed' && <BotaoReagir m={m} out={out} />;
   const responder = onResponder && <BotaoResponder m={m} onResponder={onResponder} />;
   // figurinha não sai pelos providers; o resto vira envio normal (mídia, texto ou link)
   const encaminhar = onEncaminhar && m.type !== 'sticker' && <BotaoAcao titulo="Encaminhar" onClick={() => onEncaminhar(m)}><Forward size={14} /></BotaoAcao>;
-  return <div className="flex items-center shrink-0">{out ? <>{apagar}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{apagar}</>}</div>;
+  return <div className="flex items-center shrink-0">{out ? <>{apagar}{editar}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{apagar}</>}</div>;
 }
 
 function BotaoAcao({ titulo, onClick, children }: { titulo: string; onClick: () => void; children: React.ReactNode }) {
@@ -1157,4 +1175,42 @@ function StatusIcon({ status, error }: { status: string; error?: string | null }
   if (status === 'delivered') return <span title="Entregue"><CheckCheck size={13} /></span>;
   if (status === 'read') return <span title="Lida"><CheckCheck size={13} className="text-chat-tick-read" /></span>;
   return <span title={error ? `Falha no envio: ${error}` : 'Falha no envio'}><AlertCircle size={12} className="text-danger" /></span>;
+}
+
+/**
+ * Editar a própria mensagem. A assinatura do atendente (`*Nome:*` na 1ª linha) fica de fora do
+ * campo e volta igual no envio — editar não pode "desassinar" a mensagem.
+ */
+function EditMessageModal({ m, onClose }: { m: Message; onClose: () => void }) {
+  const assinatura = ASSINATURA.exec(m.text ?? '')?.[0] ?? '';
+  const [texto, setTexto] = useState((m.text ?? '').slice(assinatura.length));
+  const editar = useEditMessage();
+  const mudou = texto.trim() && assinatura + texto.trim() !== m.text;
+  async function salvar() {
+    try {
+      await editar.mutateAsync({ conversationId: m.conversationId, messageId: m.id, text: assinatura + texto.trim() });
+      toast.ok(m.status === 'pending' ? 'Mensagem editada antes de sair' : 'Mensagem editada também no WhatsApp do contato');
+      onClose();
+    } catch (err) { toast.err(err); }
+  }
+  return (
+    <Modal open onClose={onClose} title="Editar mensagem">
+      <div className="space-y-3">
+        <textarea
+          autoFocus
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (mudou) void salvar(); } }}
+          rows={4}
+          maxLength={4096}
+          className={cn(inputCls, 'resize-none')}
+        />
+        <p className="text-xs text-faint">O WhatsApp aceita editar até 15 minutos depois do envio. O contato vê o texto novo marcado como editado, e o anterior fica no histórico do atendimento.</p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button onClick={salvar} disabled={!mudou} loading={editar.isPending} loadingText="Salvando…">Salvar</Button>
+        </div>
+      </div>
+    </Modal>
+  );
 }

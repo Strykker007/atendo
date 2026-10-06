@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, UnprocessableEntityException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
@@ -63,6 +63,9 @@ class StartDto {
   /** template aprovado — obrigatório na Meta fora da janela */
   @IsOptional() @ValidateNested() @Type(() => TemplateChoiceDto) template?: TemplateChoiceDto;
   @IsOptional() @IsString() @MaxLength(100) idempotencyKey?: string;
+}
+class EditMessageDto {
+  @IsString() @IsNotEmpty() @MaxLength(4096) text: string;
 }
 class ReactDto {
   /** um emoji (pode ter vários code points, ex.: 👍🏽); vazio = retirar a reação */
@@ -254,6 +257,27 @@ export class ConversationsController {
       }
     }
     return this.conversations.markDeleted(u.tenantId, u, plan, { forEveryone, notice });
+  }
+
+  /**
+   * Editar a própria mensagem de texto (docs/editar-mensagens.md). Enviada: edita no WhatsApp do
+   * contato primeiro (Evolution, até 15 min) e só grava se o provider aceitar — texto novo no
+   * painel que não chegou ao contato engana quem atende. Na fila: só troca o texto.
+   */
+  @Patch(':id/messages/:messageId')
+  @RequirePermission('conversations.edit_message')
+  async editMessage(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string, @Body() dto: EditMessageDto) {
+    const plan = await this.conversations.editPlan(u.tenantId, u, id, messageId, dto.text);
+    if (plan.provider) {
+      try {
+        const ok = await this.numbers.editMessage(plan.provider.numberId, { ...plan.provider, text: dto.text.trim() });
+        if (!ok) throw new UnprocessableEntityException('Este número não permite editar mensagens enviadas.');
+      } catch (err) {
+        if (err instanceof UnprocessableEntityException) throw err;
+        throw new UnprocessableEntityException(`O WhatsApp recusou a edição: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return this.conversations.markEdited(u.tenantId, u, plan, dto.text);
   }
 
   /** Conteúdo original de uma mensagem apagada — só para quem audita. */

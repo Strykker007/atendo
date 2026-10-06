@@ -34,6 +34,15 @@ export interface OutboundRevoke {
   externalId: string;
 }
 
+/** Novo texto para uma mensagem que NÓS enviamos. */
+export interface OutboundEdit {
+  /** telefone do contato em E.164 */
+  to: string;
+  /** id no provider da mensagem enviada */
+  externalId: string;
+  text: string;
+}
+
 export interface InboundContactName {
   externalNumberId: string;
   /** telefone do contato, só dígitos */
@@ -106,6 +115,11 @@ export interface WhatsAppProvider {
    * recusar (prazo do WhatsApp, mensagem inexistente).
    */
   revoke?(ctx: NumberContext, target: OutboundRevoke): Promise<void>;
+  /**
+   * Editar o texto de uma mensagem que NÓS enviamos. Opcional: a Cloud API da Meta não tem essa
+   * operação. Lança se o provider recusar (prazo de 15 min do WhatsApp, mensagem inexistente).
+   */
+  editMessage?(ctx: NumberContext, target: OutboundEdit): Promise<void>;
   /**
    * Pede ao WhatsApp para avisar quando o contato digitar/gravar (`presence.update`). Sem
    * isto o "digitando…" nunca chega. Opcional: a Meta não tem esse recurso.

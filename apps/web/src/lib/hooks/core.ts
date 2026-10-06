@@ -58,6 +58,8 @@ export interface Message {
   deletedAt?: string | null; deletedByName?: string | null;
   /** true = apagada também no celular do contato */
   deletedForEveryone?: boolean;
+  /** texto trocado depois do envio (pelo atendente ou no celular) — a bolha mostra "editada" */
+  editedAt?: string | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
 export type SendInput = ({ type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
@@ -289,6 +291,16 @@ export const useDeleteMessage = () => {
   });
 };
 
+/** Editar a própria mensagem de texto (docs/editar-mensagens.md). */
+export const useEditMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, messageId, text }: { conversationId: string; messageId: string; text: string }) =>
+      api<Message>(`/conversations/${conversationId}/messages/${messageId}`, { method: 'PATCH', body: JSON.stringify({ text }) }),
+    onSuccess: (m) => { upsertMessageInCache(qc, m); qc.invalidateQueries({ queryKey: ['conversation-events', m.conversationId] }); qc.invalidateQueries({ queryKey: ['conversations'] }); },
+  });
+};
+
 /** Conteúdo original de uma apagada. Só busca quando quem audita pede para ver. */
 export const useDeletedOriginal = (m: Pick<Message, 'id' | 'conversationId'>, enabled: boolean) =>
   useQuery({
@@ -417,7 +429,7 @@ export const useDeletePlan = () => {
 
 export interface ConversationEvent {
   id: string;
-  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed' | 'department_changed' | 'message_deleted' | 'history_cleared';
+  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed' | 'department_changed' | 'message_deleted' | 'history_cleared' | 'message_edited';
   actor: { id: string; name: string } | null;
   target: { id: string; name: string } | null;
   fromStatus: ConversationStatus | null;

@@ -266,6 +266,11 @@ export const MESSAGE_REVOKE_WINDOW_MS = 48 * 60 * 60 * 1000;
  */
 export const OWN_MESSAGE_DELETE_WINDOW_MS = MESSAGE_REVOKE_WINDOW_MS;
 export const DELETED_MESSAGE_LABEL = '🚫 Mensagem apagada';
+/**
+ * Até quando o WhatsApp aceita editar uma mensagem enviada (15 min). Depois disso o provider
+ * recusa — e editar só no painel mostraria ao atendente um texto que o contato nunca leu.
+ */
+export const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 /** Conteúdo original de uma mensagem apagada — só para `conversations.view_deleted`. */
 export interface DeletedMessageOriginal {

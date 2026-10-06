@@ -1,5 +1,5 @@
 'use client';
-import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Eraser, Hand, Play, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Eraser, Hand, Pencil, Play, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useConversationEvents, type ConversationEvent } from '@/lib/hooks';
 
@@ -57,6 +57,8 @@ const META: Record<ConversationEvent['type'], { icon: React.ReactNode; texto: st
   // `reason` diz o que e onde foi apagado — nunca o conteúdo (docs/apagar-mensagens.md)
   message_deleted: { icon: <Trash2 size={14} />, texto: 'apagou uma mensagem', cor: 'text-danger' },
   history_cleared: { icon: <Eraser size={14} />, texto: 'limpou o histórico da conversa', cor: 'text-danger' },
+  // `reason` traz o texto anterior: é o que permite auditar o que o contato leu antes
+  message_edited: { icon: <Pencil size={14} />, texto: 'editou uma mensagem', cor: 'text-accent' },
 };
 
 const RESULTADO: Record<string, string> = { won: 'comprou', lost: 'não comprou', none: 'sem resultado' };

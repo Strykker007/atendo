@@ -3,7 +3,7 @@ import { WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { ProviderRegistry } from './providers/provider.registry';
-import type { NumberContext, OutboundReaction, OutboundRevoke } from './providers/provider.interface';
+import type { NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke } from './providers/provider.interface';
 import type { MetaNumberConfig } from './providers/meta.provider';
 import type { EvolutionNumberConfig } from './providers/evolution.provider';
 import { defaultSendDelay } from './sending-policy';
@@ -76,6 +76,15 @@ export class NumbersService {
     const t = match(await this.templates(numberId)) ?? match(await this.templates(numberId, true));
     if (!t) throw new BadRequestException(`Template "${name}" (${language}) não está aprovado neste número.`);
     return t;
+  }
+
+  /** Editar mensagem enviada. `false` = o provider do número não edita (Meta); lança se recusar. */
+  async editMessage(numberId: string, target: OutboundEdit): Promise<boolean> {
+    const ctx = await this.context(numberId);
+    const provider = this.registry.get(ctx.provider);
+    if (!provider.editMessage) return false;
+    await provider.editMessage(ctx, target);
+    return true;
   }
 
   async context(numberId: string): Promise<NumberContext & { provider: ProviderKind }> {

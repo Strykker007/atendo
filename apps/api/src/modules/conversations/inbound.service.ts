@@ -300,7 +300,7 @@ export class InboundService {
     // filtra pelo tenant: externalId é único global, mas o dado não é de todos
     const m = await this.prisma.message.findFirst({ where: { externalId: e.targetExternalId, conversation: { tenantId: number.tenantId } }, select: { id: true } });
     if (!m) return;
-    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text: e.text }, include: MESSAGE_INCLUDE });
+    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text: e.text, editedAt: new Date() }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(number.tenantId, this.conversations.present(updated));
   }
 

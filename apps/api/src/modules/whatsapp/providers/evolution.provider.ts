@@ -5,7 +5,7 @@ import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '
 import { env } from '../../../config/env';
 import { lerCitacao } from './quoted';
 import { contextInfoDe, desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
-import type { MediaPayload, NumberContext, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError, ProviderSendError } from './provider-error';
 
 /** providerConfig de um número Evolution */
@@ -200,6 +200,15 @@ export class EvolutionProvider implements WhatsAppProvider {
     await this.api(`/chat/deleteMessageForEveryone/${this.instance(ctx)}`, {
       method: 'DELETE',
       body: JSON.stringify({ id: t.externalId, remoteJid: `${t.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: true }),
+    }, this.shard(ctx));
+  }
+
+  /** Editar mensagem nossa (`POST /chat/updateMessage`). O WhatsApp só aceita até ~15 min depois do envio. */
+  async editMessage(ctx: NumberContext, t: OutboundEdit) {
+    const number = t.to.replace(/\D/g, '');
+    await this.api(`/chat/updateMessage/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ number, text: t.text, key: { id: t.externalId, remoteJid: `${number}@s.whatsapp.net`, fromMe: true } }),
     }, this.shard(ctx));
   }
 
