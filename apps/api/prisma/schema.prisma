@@ -47,6 +47,7 @@ model Tenant {
   departments   Department[]
 
   scheduledMessages ScheduledMessage[]
+  globalVariables GlobalVariable[]
   @@map("tenants")
 }
 
@@ -281,6 +282,8 @@ enum SendDelayProfile {
   instant
   fast
   short
+  /// 3–5s sorteado a cada envio
+  moderate
   medium
   long
 }
@@ -435,6 +438,23 @@ model ContactAttribute {
   @@index([contactId])
   @@index([tenantId, label])
   @@map("contact_attributes")
+}
+
+/// Variável da empresa (docs/variaveis.md): `{{global.<key>}}` / `{{<key>}}` vira `value` no envio.
+model GlobalVariable {
+  id        String   @id @default(uuid())
+  tenantId  String
+  /// minúsculas, números e `_` (`globalVarKeyError` no shared)
+  key       String
+  label     String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@map("global_variables")
 }
 
 /// Tag "colada" na pessoa: vale para todas as conversas dela (ex.: comprador recorrente).

@@ -11,6 +11,7 @@ const DELAY_LABEL: Record<SendDelayProfile, string> = {
   instant: 'Imediato — só API oficial',
   fast: 'Rápido — 1 a 2s',
   short: 'Curto — 3 a 4s',
+  moderate: 'Moderado — 3 a 5s',
   medium: 'Médio — 25 a 60s',
   long: 'Longo — 60 a 250s',
 };

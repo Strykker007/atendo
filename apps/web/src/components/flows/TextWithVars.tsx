@@ -1,10 +1,11 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Braces, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { inputCls } from '@/components/ui/Modal';
 import { CONTACT_FIXED_KEYS, SYSTEM_VARIABLES, VARIABLE_OP_LABEL, VARIABLE_SHORTCUTS, attributeVarKey } from '@atendo/shared';
 import { useContactAttributeLabels } from '@/lib/hooks';
+import { GlobalVarsMenuSection } from '@/components/variables/GlobalVariables';
 
 export interface FlowVar { key: string; label: string; source: 'shortcut' | 'system' | 'attribute' | 'question' | 'menu' | 'action' }
 
@@ -48,7 +49,8 @@ const WA_MARKS: { mark: string; label: string; title: string; cls: string }[] = 
 
 /**
  * Campo de texto com botão "Inserir variável": insere {{chave}} na posição do cursor.
- * Mostra as variáveis do sistema e as criadas pelo fluxo (Salvar / Menu / Manipulador).
+ * Mostra as variáveis do sistema, as da empresa (com "Criar nova variável global" ali mesmo) e
+ * as criadas pelo fluxo (Salvar / Menu / Manipulador).
  * `formatting`: botões de negrito/itálico/tachado do WhatsApp (envolvem a seleção).
  */
 export function TextWithVars({ value, onChange, vars, multiline = true, placeholder, className, formatting, flowVarsGroup = true, required, maxLength }: { value: string; onChange: (v: string) => void; vars: FlowVar[]; multiline?: boolean; placeholder?: string; className?: string; formatting?: boolean; /** fora do editor de fluxos (respostas rápidas) não existe "criadas neste fluxo" */ flowVarsGroup?: boolean; required?: boolean; maxLength?: number }) {
@@ -111,7 +113,8 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
       {open && (
         <div data-overlay className="absolute z-30 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-64 overflow-y-auto text-sm">
           {groups.map(([title, list]) => (
-            <div key={title}>
+            <Fragment key={title}>
+            <div>
               <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{title}</div>
               {list.length === 0 && title === 'Criadas neste fluxo' && <div className="px-3 pb-2 text-xs text-faint">Nenhuma ainda — adicione um bloco <b>Salvar</b> ou <b>Manipulador</b> para criar.</div>}
               {list.map((v) => (
@@ -121,6 +124,9 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
                 </button>
               ))}
             </div>
+            {/* logo depois das mais usadas: é o que a empresa cadastrou para usar sempre */}
+            {title === 'Mais usadas' && <GlobalVarsMenuSection keyFirst onPick={insert} />}
+            </Fragment>
           ))}
           <VarSyntaxHint />
         </div>

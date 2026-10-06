@@ -4,8 +4,11 @@ import { PERMISSIONS, type Permission } from '@atendo/shared';
 import type { AuthUser } from './current-user.decorator';
 
 export const PERMISSION_KEY = 'permission';
-/** Exige uma permissão do catálogo. Substitui `@Roles` onde a regra é "o que pode fazer". */
-export const RequirePermission = (permission: Permission) => SetMetadata(PERMISSION_KEY, permission);
+/**
+ * Exige uma permissão do catálogo. Substitui `@Roles` onde a regra é "o que pode fazer".
+ * Com mais de uma, basta ter **qualquer** delas.
+ */
+export const RequirePermission = (...permissions: [Permission, ...Permission[]]) => SetMetadata(PERMISSION_KEY, permissions);
 
 /**
  * Só compara: quem resolve a lista é o `JwtAuthGuard`, que a deixa em `user.permissions`
@@ -16,13 +19,13 @@ export class PermissionsGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(ctx: ExecutionContext) {
-    const required = this.reflector.getAllAndOverride<Permission>(PERMISSION_KEY, [ctx.getHandler(), ctx.getClass()]);
-    if (!required) return true;
+    const required = this.reflector.getAllAndOverride<Permission[]>(PERMISSION_KEY, [ctx.getHandler(), ctx.getClass()]);
+    if (!required?.length) return true;
     const user: AuthUser | undefined = ctx.switchToHttp().getRequest().user;
     if (!user) throw new ForbiddenException('Sem permissão');
     // o dono do sistema dá suporte entrando como o cliente: passa por qualquer checagem
     if (user.role === 'super_admin') return true;
-    if (!user.permissions?.includes(required)) throw new ForbiddenException(`Seu perfil de acesso não inclui: ${PERMISSIONS[required]}`);
+    if (!required.some((p) => user.permissions?.includes(p))) throw new ForbiddenException(`Seu perfil de acesso não inclui: ${required.map((p) => PERMISSIONS[p]).join(' ou ')}`);
     return true;
   }
 }

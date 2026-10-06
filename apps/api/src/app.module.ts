@@ -10,6 +10,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { TagsModule } from './modules/tags/tags.module';
 import { ContactAttributesModule } from './modules/contact-attributes/contact-attributes.module';
+import { GlobalVariablesModule } from './modules/global-variables/global-variables.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -36,6 +37,7 @@ import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-
     ConversationsModule,
     TagsModule,
     ContactAttributesModule,
+    GlobalVariablesModule,
     DepartmentsModule,
     KanbanModule,
     QuickRepliesModule,

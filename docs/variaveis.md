@@ -17,8 +17,35 @@ horário, campanhas, respostas rápidas, mensagens digitadas no chat e mensagens
 | `{{empresa}}` ou `{{company.name}}` | Nome da empresa (tenant) |
 | `{{saudacao}}` ou `{{greeting}}` | "Bom dia" (05h–11h59), "Boa tarde" (12h–17h59), "Boa noite" (18h–04h59), **no fuso do cliente** (Configurações), na hora em que a mensagem sai |
 | `{{agent.name}}` | Quem enviou (chat, resposta rápida, agendada) |
+| `{{global.<chave>}}` ou `{{<chave>}}` | **Variável da empresa** (Configurações → Variáveis globais): valor fixo como chave PIX, horário, link do catálogo. Ver abaixo |
 | `{{nome_da_variavel}}` | Variável criada no fluxo (Salvar, Menu, Manipulador, webhook) |
 | `{{faixa}}` `{{proxima_abertura}}` | Só nas respostas automáticas de horário ([Horários](horarios.md)) |
+
+## Variáveis da empresa (globais customizadas)
+
+Cadastradas pela empresa em **Configurações → Variáveis globais** (tabela com busca, criar,
+editar, excluir) ou direto no menu "Inserir variável" de qualquer tela (fluxos, mensagens
+automáticas, respostas rápidas, agendamento, botão `{ }` do chat): grupo **Variáveis da
+empresa** → **+ Criar nova variável global** abre um mini-formulário ali mesmo (Nome, Chave —
+preenchida sozinha a partir do nome, em snake_case —, Valor). Salvou, `{{chave}}` entra no
+texto onde estava o cursor e a lista atualiza no sistema todo.
+
+- Tabela `global_variables`: `key` única por empresa, `label`, `value`. Até 200 por empresa.
+- Chave: minúsculas sem acento, números e `_`, começando por letra, até 40 (`globalVarKey` /
+  `globalVarKeyError`). Reservadas (recusadas): `empresa`, `saudacao`, `greeting`, `faixa`,
+  `proxima_abertura`, `agendamento`, `servico`, `profissional`, `global`, `contact`, `agent`,
+  `company`.
+- No envio valem `{{global.pix_chave}}` (sempre) e `{{pix_chave}}`. Sem prefixo, **variável do
+  fluxo de mesmo nome vence** (regra de sempre); com `global.` é sempre a da empresa. O menu
+  insere a forma curta.
+- Filtros e padrão valem igual: `{{pix_chave | upper}}`, `{{horario | default: '08h às 18h'}}`.
+- Mudou o valor, vale no próximo envio (é lido a cada mensagem — nada fica salvo no texto).
+  Excluiu: fluxo/campanha/automático enviam vazio; no chat fica como foi escrito.
+- Listar: todos da equipe (os menus precisam). Criar: `variables.manage` **ou** `flows.manage`
+  (o "+ Criar nova variável global" aparece para os dois). Editar/excluir (tela em
+  Configurações): só `variables.manage` (padrão: Administrador e Gerente) —
+  [Perfis de acesso](18-perfis-de-acesso.md).
+- API: `GET/POST /tenants/me/global-variables`, `PUT/DELETE …/:id` ([API](07-api.md)).
 
 ## Filtros e valor padrão
 
@@ -64,11 +91,13 @@ Regras:
 |---|---|
 | Catálogo (`SYSTEM_VARIABLES`, `VARIABLE_SHORTCUTS`), `attributeVarKey`, `greetingAt`, `firstName`/`lastName`/`titleCase`/`formatPhone`, filtros (`VARIABLE_FILTERS`, `parseVariableExpr`, `applyVariableFilters`) — iguais no front e na API | `packages/shared/src/variables.ts` |
 | Troca (pura): `interpolate(text, ctx, escape?, { keepUnknown? })` | `apps/api/src/modules/flows/answer.ts` |
-| Testes | `apps/api/test/interpolation.test.ts` (filtros/padrão), `apps/api/test/variables.test.ts` |
-| Monta o contexto (empresa, fuso, campos livres, atendente): `InterpolationService.context` / `forContact` | `apps/api/src/common/interpolation/interpolation.service.ts` (global, no `CoreModule`) |
+| Testes | `apps/api/test/interpolation.test.ts` (filtros/padrão), `apps/api/test/variables.test.ts`, `apps/api/test/global-variables.test.ts` |
+| Monta o contexto (empresa, fuso, campos livres, atendente, variáveis da empresa): `InterpolationService.context` / `forContact` | `apps/api/src/common/interpolation/interpolation.service.ts` (global, no `CoreModule`) |
 | Chat: `ConversationsService.send` troca quando o texto tem `{{` | `apps/api/src/modules/conversations/conversations.service.ts` |
-| Menu "Inserir variável" (**Mais usadas** + sistema + **campos da ficha** já usados na empresa + do fluxo; rodapé com a sintaxe dos filtros) | `apps/web/src/components/flows/TextWithVars.tsx` (`useAttributeVars`, `SHORTCUT_VARS`, `VarSyntaxHint`) |
-| Botão `{ }` da barra do chat (só as "Mais usadas") | `apps/web/src/components/chat/ComposerBar.tsx` |
+| Menu "Inserir variável" (**Mais usadas** + **variáveis da empresa** + sistema + **campos da ficha** já usados na empresa + do fluxo; rodapé com a sintaxe dos filtros) | `apps/web/src/components/flows/TextWithVars.tsx` (`useAttributeVars`, `SHORTCUT_VARS`, `VarSyntaxHint`) |
+| Botão `{ }` da barra do chat ("Mais usadas" + variáveis da empresa) | `apps/web/src/components/chat/ComposerBar.tsx` |
+| Variáveis da empresa: API (CRUD) | `apps/api/src/modules/global-variables/global-variables.module.ts` |
+| Variáveis da empresa: grupo do menu + criação rápida (`GlobalVarsMenuSection`, `GlobalVariableForm`), tela em Configurações | `apps/web/src/components/variables/GlobalVariables.tsx`, `apps/web/src/components/settings/GlobalVariablesSection.tsx` |
 
 O menu "Inserir variável" abre com o grupo **Mais usadas** (`VARIABLE_SHORTCUTS`): Primeiro
 nome do cliente (`{{contact.first_name}}`), Nome completo (`{{contact.name}}`), Nome da
@@ -79,7 +108,7 @@ respostas rápidas (`/respostas`) e no modal de agendar mensagem; na barra do ch
 (a API troca no envio). Os campos livres listados vêm
 de `GET /contact-attributes/labels`.
 
-**Nova variável global**: acrescentar em `SYSTEM_VARIABLES` (shared, para o menu) e em
+**Nova variável global do sistema** (não confundir com as da empresa, que o cliente cadastra): acrescentar em `SYSTEM_VARIABLES` (shared, para o menu) e em
 `InterpolationService.context` (`globals`).
 
 No chat, a resposta rápida já entra no campo com `{{contact.name}}` e `{{agent.name}}` (só a

@@ -6,13 +6,14 @@
  * alto num número recém-conectado. As três defesas aqui são exatamente contra isso.
  */
 
-export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
+export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
 
 /** Faixas em segundos. O intervalo real é sorteado dentro da faixa a cada envio. */
 export const DELAY_RANGES: Record<SendDelayProfile, [number, number]> = {
   instant: [0, 0], // só para a API oficial, que não bane por ritmo
   fast: [1, 2],
   short: [3, 4],
+  moderate: [3, 5], // 3000–5000ms
   medium: [25, 60],
   long: [60, 250],
 };
@@ -21,6 +22,7 @@ export const DELAY_LABEL: Record<SendDelayProfile, string> = {
   instant: 'Imediato (só API oficial)',
   fast: 'Rápido (1–2s)',
   short: 'Curto (3–4s)',
+  moderate: 'Moderado (3–5s)',
   medium: 'Médio (25–60s)',
   long: 'Longo (60–250s)',
 };

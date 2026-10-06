@@ -21,6 +21,12 @@ describe('delayMs — intervalo entre envios', () => {
     expect(amostras.size).toBeGreaterThan(10);
   });
 
+  it('moderado sorteia entre 3000 e 5000ms', () => {
+    expect(delayMs('moderate', () => 0)).toBe(3000);
+    expect(delayMs('moderate', () => 0.5)).toBe(4000);
+    expect(delayMs('moderate', () => 0.9999)).toBeLessThanOrEqual(5000);
+  });
+
   it('perfil desconhecido cai no curto em vez de enviar em rajada', () => {
     expect(delayMs('inexistente' as SendDelayProfile, () => 0)).toBe(3000);
   });

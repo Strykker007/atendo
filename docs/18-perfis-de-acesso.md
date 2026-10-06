@@ -19,13 +19,13 @@ Quem autoriza é o **perfil de acesso** (`AccessProfile`), que cada cliente mont
 
 ### Catálogo (`packages/shared/src/permissions.ts`)
 
-Lista **fechada** de 18 permissões. Perfil nunca guarda permissão que o código não conheça —
+Lista **fechada** de 19 permissões. Perfil nunca guarda permissão que o código não conheça —
 senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 | Grupo | Permissões |
 |---|---|
 | Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit` |
-| Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `agenda.manage` |
+| Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `variables.manage`, `agenda.manage`, `campaigns.manage` |
 | Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
 | Conta | `numbers.manage`, `billing.manage` |
 
@@ -37,6 +37,8 @@ era restrito, e tirá-los na migração seria perder acesso sem ninguém pedir. 
 (`customized = false`); perfil editado pelo cliente fica como está. As três de apagar
 (`delete_message`, `delete_chat`, `view_deleted`) entraram do mesmo jeito nos perfis padrão Gerente e
 Administrador (migration `message_delete`) — regras em [Apagar mensagens](apagar-mensagens.md).
+`variables.manage` (variáveis da empresa) idem, nos perfis padrão Gerente e Administrador não
+editados (migration `global_variables`) — ver [Variáveis](variaveis.md).
 
 ## Como é aplicado
 
@@ -49,6 +51,8 @@ quando um perfil ou um vínculo muda.
 
 **`@RequirePermission('x')` + `PermissionsGuard`** substituem `@Roles` onde a regra é "o que
 pode fazer". `@Roles('super_admin')` continua onde a regra é "quem é" (área do dono).
+`@RequirePermission('a', 'b')` aceita quem tiver **qualquer** delas (ex.: criar variável da
+empresa com `variables.manage` ou `flows.manage`).
 
 **Dentro dos services.** As regras de conversa viviam como `role !== 'agent'` espalhadas pelo
 `conversations.service.ts` — quem vê os atendimentos da equipe, quem transfere os dos outros,
@@ -147,6 +151,7 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `quick_replies.manage` | botões de editar em /respostas |
 | `numbers.manage` | botões em Números e o atalho em Configurações |
 | `settings.manage` | horário de funcionamento e fluxos padrão |
+| `variables.manage` | seção "Variáveis globais" em Configurações (editar/excluir) e o "+ Criar nova variável global" nos menus de variável — este também aparece para `flows.manage` (listar/inserir é de todos) |
 | `profiles.manage` | edição de perfis |
 | `campaigns.manage` | ainda sem tela (módulo sem interface) |
 

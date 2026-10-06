@@ -73,6 +73,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Campos livres da ficha (por contato)** | | | |
 | GET | `/contact-attributes/labels` | todos | Nomes já usados na empresa (`{label, type}`), mais usados primeiro — sugestão ao digitar |
 | GET | `/contact-attributes/:contactId` | todos | Campos do contato, na ordem: `{id, label, type: text\|number\|date, value}[]` |
+| GET | `/tenants/me/global-variables` | todos | Variáveis da empresa: `{id, key, label, value, updatedAt}[]`, por nome |
+| POST | `/tenants/me/global-variables` | `variables.manage` ou `flows.manage` | `{label, key?, value}` — sem `key`, gerada do nome ("Chave PIX" → `chave_pix`). Chave inválida/reservada (`empresa`, `saudacao`…) = 400; repetida = 409; até 200 por empresa |
+| PUT | `/tenants/me/global-variables/:id` | `variables.manage` | `{label?, key?, value?}` (trocar a chave quebra os textos que usam a antiga) |
+| DELETE | `/tenants/me/global-variables/:id` | `variables.manage` | Remove |
 | PUT | `/contact-attributes/:contactId` | `contacts.edit` | `{items: {label, type, value}[]}` (até 50) **substitui** a lista. Linha toda em branco é ignorada; nome sem valor (ou o contrário), número/data inválidos e nome repetido = 400 |
 | POST | `/conversations/:id/read` | todos | Zera não-lidas. Também assina o "digitando…" do contato no provider (Evolution; no máx. 1×/2 min por contato, sem esperar a resposta) |
 | **Departamentos** | | | |

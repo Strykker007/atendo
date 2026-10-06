@@ -183,3 +183,36 @@ export function applyVariableFilters(value: string | undefined, filters: Variabl
   }
   return v;
 }
+
+/**
+ * Variáveis da empresa (`GlobalVariable`, docs/variaveis.md): valor fixo cadastrado pelo cliente
+ * — chave PIX, horário, link do catálogo. Valem como `{{global.<chave>}}` sempre e como
+ * `{{<chave>}}` quando não colidem com uma global do sistema.
+ */
+export const GLOBAL_VARIABLE_PREFIX = 'global.';
+export const GLOBAL_VARIABLE_KEY_MAX = 40;
+export const GLOBAL_VARIABLE_VALUE_MAX = 2000;
+/** Limite por empresa: o contexto de toda mensagem carrega todas. */
+export const GLOBAL_VARIABLES_MAX = 200;
+
+/**
+ * Nomes que já significam outra coisa no envio: globais do sistema e variáveis que os blocos
+ * do fluxo/horário criam. Uma variável da empresa com um desses nomes ficaria escondida.
+ */
+export const RESERVED_GLOBAL_KEYS = [
+  'empresa', 'saudacao', 'greeting', 'faixa', 'proxima_abertura', 'agendamento', 'servico', 'profissional', 'global', 'contact', 'agent', 'company',
+] as const;
+
+/** "Chave PIX da Loja" → `chave_pix_da_loja` (mesma regra do campo da ficha), cortada no limite. */
+export function globalVarKey(label: string) {
+  return attributeVarKey(label).slice(0, GLOBAL_VARIABLE_KEY_MAX).replace(/_+$/, '');
+}
+
+/** Erro de uma chave digitada à mão, ou `null` se serve. */
+export function globalVarKeyError(key: string): string | null {
+  if (!key) return 'Informe a chave';
+  if (key.length > GLOBAL_VARIABLE_KEY_MAX) return `Chave com até ${GLOBAL_VARIABLE_KEY_MAX} caracteres`;
+  if (!/^[a-z][a-z0-9_]*$/.test(key)) return 'Use só letras minúsculas sem acento, números e _ (começando por letra)';
+  if ((RESERVED_GLOBAL_KEYS as readonly string[]).includes(key)) return `"${key}" já é uma variável do sistema`;
+  return null;
+}

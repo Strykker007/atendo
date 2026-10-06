@@ -10,7 +10,7 @@ import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, Flow
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
-export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
+export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
 export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };

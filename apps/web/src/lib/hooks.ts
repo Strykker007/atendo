@@ -22,3 +22,4 @@ export * from './hooks/kanban';
 export * from './hooks/departamentos';
 export * from './hooks/campos';
 export * from './hooks/agendadas';
+export * from './hooks/variaveis';

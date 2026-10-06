@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock, Braces } from 'lucide-react';
 import { SHORTCUT_VARS, VarSyntaxHint } from '@/components/flows/TextWithVars';
+import { GlobalVarsMenuSection } from '@/components/variables/GlobalVariables';
 import { ScheduleMessageModal } from './ScheduledMessages';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
@@ -133,6 +134,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
               <div className="font-mono text-[11px] text-muted">{`{{${v.key}}}`}</div>
             </button>
           ))}
+          <GlobalVarsMenuSection onPick={(k) => inserir(`{{${k}}}`)} />
           <VarSyntaxHint />
         </Menu>
       )}

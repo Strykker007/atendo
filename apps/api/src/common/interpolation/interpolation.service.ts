@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { attributeVarKey, greetingAt } from '@atendo/shared';
+import { GLOBAL_VARIABLE_PREFIX, attributeVarKey, greetingAt } from '@atendo/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import type { InterpolateCtx } from '../../modules/flows/answer';
 
@@ -11,7 +11,8 @@ type ContactLike = InterpolateCtx['contact'] & { id: string };
  *
  * Globais: `empresa`/`company.name`, `saudacao`/`greeting` (no fuso do cliente, na hora do
  * envio) e `agent.name` quando há atendente. Campos livres da ficha entram em
- * `contact.attributes`, pela chave de `attributeVarKey`.
+ * `contact.attributes`, pela chave de `attributeVarKey`. Variáveis da empresa (`GlobalVariable`)
+ * entram como `global.<key>` e também como `<key>` quando não colidem com uma global do sistema.
  */
 @Injectable()
 export class InterpolationService {
@@ -23,10 +24,11 @@ export class InterpolationService {
     vars: Record<string, string> = {},
     extra?: { agentName?: string | null; now?: Date },
   ): Promise<InterpolateCtx> {
-    const [tenant, settings, attrs] = await Promise.all([
+    const [tenant, settings, attrs, companyVars] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }),
       this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { timezone: true } }),
       this.prisma.contactAttribute.findMany({ where: { tenantId, contactId: contact.id }, orderBy: { position: 'asc' }, select: { label: true, value: true } }),
+      this.prisma.globalVariable.findMany({ where: { tenantId }, select: { key: true, value: true } }),
     ]);
     const attributes: Record<string, string> = {};
     // dois rótulos com a mesma chave ("CPF" e "C P F"): vale o primeiro da ficha
@@ -38,6 +40,11 @@ export class InterpolationService {
     const greeting = greetingAt(extra?.now ?? new Date(), settings?.timezone || 'America/Sao_Paulo');
     const globals: Record<string, string> = { empresa: company, 'company.name': company, saudacao: greeting, greeting };
     if (extra?.agentName) globals['agent.name'] = extra.agentName;
+    for (const v of companyVars) {
+      globals[GLOBAL_VARIABLE_PREFIX + v.key] = v.value;
+      // a do sistema vence (a API já recusa essas chaves; isto cobre uma reservada no futuro)
+      if (!(v.key in globals)) globals[v.key] = v.value;
+    }
     return { contact: { ...contact, attributes }, vars, globals };
   }
 

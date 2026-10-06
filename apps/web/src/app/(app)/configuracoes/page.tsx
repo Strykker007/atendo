@@ -12,6 +12,7 @@ import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import { QuickReplySection } from '@/components/settings/QuickReplySection';
 import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
+import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers } from '@/lib/hooks';
@@ -27,12 +28,14 @@ export default function ConfiguracoesPage() {
   const podeNumeros = useCan('numbers.manage');
   // departamentos decidem quem vê o quê: é gestão de equipe, não configuração da empresa
   const podeEquipe = useCan('team.manage');
+  // a lista é de todos (aparece nos menus de variável); criar/editar/excluir é de quem tem a permissão
+  const podeVariaveis = useCan('variables.manage');
 
 
 
   return (
     <PageShell width="max-w-4xl">
-      <PageHeader title="Configurações" subtitle="Aparência do painel, departamentos, horários de atendimento, boas-vindas e segurança." />
+      <PageHeader title="Configurações" subtitle="Aparência do painel, departamentos, horários de atendimento, boas-vindas, variáveis globais e segurança." />
 
       {!isOwner && podeNumeros && <NumbersSection />}
       <AppearanceSection />
@@ -41,6 +44,7 @@ export default function ConfiguracoesPage() {
       {!isOwner && podeConfigurar && <WelcomeSection />}
       {!isOwner && podeConfigurar && <DefaultFlowsSection />}
       {!isOwner && podeConfigurar && <QuickReplySection />}
+      {!isOwner && podeVariaveis && <GlobalVariablesSection />}
       {!me.data?.impersonatorId && <SecuritySection />}
 
     </PageShell>
