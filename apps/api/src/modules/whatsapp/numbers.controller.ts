@@ -14,6 +14,7 @@ import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { SendPacer } from './send-pacer';
 import { canUseNumber } from '../auth/number-scope';
 import { ContactsSyncScheduler } from './contacts-sync';
+import { textSearch } from '../../common/text-search';
 
 class CreateNumberDto {
   @Matches(/^\+?[1-9]\d{7,14}$/) phone: string;
@@ -140,19 +141,15 @@ export class NumbersController {
 
   /**
    * Agenda do celular deste número (sincronizada da Evolution), em ordem alfabética, 50 por
-   * página. `q` filtra por nome ou telefone. Cada linha diz se a pessoa já é contato
+   * página. `q` filtra por nome ou telefone (sem acento, palavras em qualquer ordem). Cada linha diz se a pessoa já é contato
    * (`contactId`) — o "Nova conversa" usa o contato existente em vez de criar outro.
    */
   @Get(':id/phonebook')
   async phonebook(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('q') q?: string, @Query('cursor') cursor?: string) {
     const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId }, select: { id: true } });
     if (!canUseNumber(user, n.id)) throw new ForbiddenException('Você não opera este número.');
-    const termo = String(q ?? '').trim().slice(0, 100);
-    const digitos = termo.replace(/\D/g, '');
-    const where: Prisma.PhonebookEntryWhereInput = {
-      numberId: n.id,
-      ...(termo && { OR: [{ name: { contains: termo, mode: 'insensitive' } }, ...(digitos.length >= 3 ? [{ phone: { contains: digitos } }] : [])] }),
-    };
+    // sem acento, por palavras em qualquer ordem, telefone com ou sem máscara (common/text-search.ts)
+    const where: Prisma.PhonebookEntryWhereInput = { numberId: n.id, ...textSearch(q) };
     const PAGE = 50;
     const [rows, total] = await Promise.all([
       this.prisma.phonebookEntry.findMany({

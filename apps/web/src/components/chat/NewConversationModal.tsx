@@ -1,19 +1,17 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, QrCode, UserPlus, BookUser } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ShieldCheck, QrCode, UserPlus, BookUser, Loader2 } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { PhoneInput, formatPhone } from '@/components/ui/PhoneInput';
 import { toast } from '@/components/ui/Toast';
-import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useNumbers, usePhonebook, useStartConversation, type PhonebookItem } from '@/lib/hooks';
+import { useDebounced, useNumbers, usePhonebook, useStartCandidates, useStartConversation, type PhonebookItem, type StartCandidates } from '@/lib/hooks';
 import { TemplateFields, useTemplateChoice } from './TemplateFields';
 
 type ContatoSel = { id: string; name: string | null; phone: string };
-/** nome da agenda do aparelho (Evolution) que ainda não é contato */
-type AgendaSel = { phone: string; name: string; numberId: string };
+const SEM_RESULTADOS: StartCandidates = { contacts: [], phonebook: [] };
 
 /**
  * Iniciar conversa (disparo ativo). Contato da base ou telefone novo, número de saída e a
@@ -30,7 +28,6 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
 
   const [contato, setContato] = useState<ContatoSel | null>(null);
   const [busca, setBusca] = useState('');
-  const [resultados, setResultados] = useState<{ contacts: ContatoSel[]; phonebook: AgendaSel[] }>({ contacts: [], phonebook: [] });
   const [novoTelefone, setNovoTelefone] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState('');
   // agenda do celular aberta: o campo de busca passa a filtrar a lista dela
@@ -52,15 +49,19 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
   // a agenda é do aparelho: número oficial não tem
   useEffect(() => { if (isMeta) setAgendaAberta(false); }, [isMeta]);
 
-  // busca: contatos da base e a agenda do aparelho sincronizada (quem ainda não é contato)
-  useEffect(() => {
-    if (contato || agendaAberta || busca.trim().length < 2) { setResultados({ contacts: [], phonebook: [] }); return; }
-    const t = setTimeout(async () => {
-      try { setResultados(await api<{ contacts: ContatoSel[]; phonebook: AgendaSel[] }>(`/conversations/start/contacts?q=${encodeURIComponent(busca.trim())}`)); }
-      catch { setResultados({ contacts: [], phonebook: [] }); }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [busca, contato, agendaAberta]);
+  // busca no servidor (sem acento, palavras em qualquer ordem, telefone com ou sem máscara),
+  // 300ms depois da última tecla. Fechada a agenda: contatos da base + agenda do aparelho
+  // (quem ainda não é contato). Aberta: o mesmo campo filtra a agenda inteira, paginada.
+  const termo = busca.trim();
+  const termoAtrasado = useDebounced(termo, 300);
+  const escolhendo = !contato && !novoTelefone;
+  const candidatos = useStartCandidates(termoAtrasado, escolhendo && !agendaAberta);
+  const agenda = usePhonebook(number?.id ?? null, termoAtrasado, escolhendo && agendaAberta && !isMeta);
+  const resultados = escolhendo && !agendaAberta && termo.length >= 2 && candidatos.data ? candidatos.data : SEM_RESULTADOS;
+  // spinner no campo: digitou e o atraso não venceu, ou a requisição está no ar
+  const buscando = escolhendo && (agendaAberta
+    ? termo !== termoAtrasado || (agenda.isFetching && !agenda.isFetchingNextPage)
+    : termo.length >= 2 && (termo !== termoAtrasado || candidatos.isFetching));
 
   const digitos = busca.replace(/\D/g, '');
   const pareceTelefone = digitos.length >= 10 && /^[\d\s()+-]+$/.test(busca.trim());
@@ -98,7 +99,8 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="relative">
-              <input autoFocus value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={agendaAberta ? 'Filtrar a agenda por nome ou telefone' : 'Buscar por nome ou digitar o telefone'} className={inputCls} />
+              <input autoFocus value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={agendaAberta ? 'Filtrar a agenda por nome ou telefone' : 'Buscar por nome ou digitar o telefone'} className={cn(inputCls, 'pr-8')} />
+              {buscando && <Loader2 size={14} aria-label="Buscando" className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-faint pointer-events-none" />}
               {!agendaAberta && (resultados.contacts.length > 0 || resultados.phonebook.length > 0 || pareceTelefone) && (
                 <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-64 overflow-y-auto">
                   {resultados.contacts.map((r) => (
@@ -128,8 +130,8 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
           )}
           {agendaAberta && !contato && !novoTelefone && number && (
             <AgendaDoCelular
-              numberId={number.id}
-              filtro={busca}
+              agenda={agenda}
+              filtrando={!!termoAtrasado}
               onPick={(r) => {
                 if (r.contactId) setContato({ id: r.contactId, name: r.name, phone: r.phone });
                 else { setNovoTelefone(r.phone); setNovoNome(r.name); }
@@ -185,46 +187,65 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** altura fixa da linha da agenda: é o que permite virtualizar sem medir cada uma */
+const LINHA = 32;
+/** altura visível da lista (max-h-72) */
+const JANELA = 288;
+/** linhas extras desenhadas acima/abaixo para a rolagem rápida não mostrar buraco */
+const FOLGA = 8;
+
 /**
  * Agenda do celular do número, inteira e em ordem alfabética — para quem não lembra o nome
- * exato. O campo de busca do modal filtra (com atraso, para não buscar a cada tecla); a lista
- * carrega de 50 em 50. Quem já é contato vem marcado e abre o contato existente.
+ * exato. O campo de busca do modal filtra (no servidor, com debounce); a lista carrega de 50
+ * em 50 conforme rola e só desenha as linhas visíveis, então agenda de 10 mil nomes não pesa.
+ * Quem já é contato vem marcado e abre o contato existente.
  */
-function AgendaDoCelular({ numberId, filtro, onPick }: { numberId: string; filtro: string; onPick: (r: PhonebookItem) => void }) {
-  const [q, setQ] = useState(filtro.trim());
-  useEffect(() => { const t = setTimeout(() => setQ(filtro.trim()), 300); return () => clearTimeout(t); }, [filtro]);
-  const agenda = usePhonebook(numberId, q);
-  const itens = agenda.data?.pages.flatMap((p) => p.items) ?? [];
+function AgendaDoCelular({ agenda, filtrando, onPick }: { agenda: ReturnType<typeof usePhonebook>; filtrando: boolean; onPick: (r: PhonebookItem) => void }) {
+  const itens = useMemo(() => agenda.data?.pages.flatMap((p) => p.items) ?? [], [agenda.data]);
   const total = agenda.data?.pages[0]?.total;
+  const [topo, setTopo] = useState(0);
+  const lista = useRef<HTMLDivElement>(null);
+  // resultado novo (outro filtro): volta ao topo. A 1ª página mantém a referência quando só
+  // chega a próxima página, então rolar e carregar mais não dispara isto
+  const primeiraPagina = agenda.data?.pages[0];
+  useEffect(() => { if (lista.current) lista.current.scrollTop = 0; setTopo(0); }, [primeiraPagina]);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = agenda;
+  const primeira = Math.max(0, Math.floor(topo / LINHA) - FOLGA);
+  const ultima = Math.min(itens.length, Math.ceil((topo + JANELA) / LINHA) + FOLGA);
+
+  function rolou(el: HTMLDivElement) {
+    setTopo(el.scrollTop);
+    // faltando ~10 linhas para o fim, já pede a próxima página
+    if (hasNextPage && !isFetchingNextPage && el.scrollTop + el.clientHeight >= el.scrollHeight - LINHA * 10) fetchNextPage();
+  }
+
   return (
     <div className="mt-2 rounded-lg border border-line">
       <div className="px-3 py-1.5 border-b border-line text-[11px] text-faint flex justify-between">
-        <span>{q ? 'Resultado na agenda' : 'Agenda do celular'}</span>
+        <span>{filtrando ? 'Resultado na agenda' : 'Agenda do celular'}</span>
         {total !== undefined && <span className="tnum">{total} contato{total === 1 ? '' : 's'}</span>}
       </div>
-      <ul className="max-h-72 overflow-y-auto py-1">
-        {agenda.isLoading && <li className="px-3 py-2 text-sm text-muted">Carregando agenda…</li>}
-        {agenda.isError && <li className="px-3 py-2 text-sm text-danger-ink">Não foi possível carregar a agenda.</li>}
-        {!agenda.isLoading && !agenda.isError && !itens.length && (
-          <li className="px-3 py-2 text-sm text-muted">{q ? 'Ninguém na agenda com esse nome ou telefone.' : 'Agenda vazia. Em Números, use "Sincronizar agenda".'}</li>
-        )}
-        {itens.map((r) => (
-          <li key={r.id}>
-            <button type="button" onClick={() => onPick(r)} className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-sm hover:bg-field">
-              <span className="text-ink truncate">{r.name}</span>
-              <span className="text-muted tnum shrink-0">{formatPhone(r.phone)}</span>
-              {r.contactId && <span className="ml-auto shrink-0 text-[10px] font-semibold rounded px-1.5 py-0.5 bg-accent-soft text-accent-ink">já é contato</span>}
-            </button>
-          </li>
-        ))}
-        {agenda.hasNextPage && (
-          <li className="px-3 py-1.5">
-            <button type="button" onClick={() => agenda.fetchNextPage()} disabled={agenda.isFetchingNextPage} className="text-xs text-accent-ink hover:underline disabled:opacity-60">
-              {agenda.isFetchingNextPage ? 'Carregando…' : 'Carregar mais'}
-            </button>
-          </li>
-        )}
-      </ul>
+      {agenda.isLoading && <p className="px-3 py-2 text-sm text-muted">Carregando agenda…</p>}
+      {agenda.isError && <p className="px-3 py-2 text-sm text-danger-ink">Não foi possível carregar a agenda.</p>}
+      {!agenda.isLoading && !agenda.isError && !itens.length && (
+        <p className="px-3 py-2 text-sm text-muted">{filtrando ? 'Ninguém na agenda com esse nome ou telefone.' : 'Agenda vazia. Em Números, use "Sincronizar agenda".'}</p>
+      )}
+      {itens.length > 0 && (
+        <div ref={lista} className="max-h-72 overflow-y-auto" onScroll={(e) => rolou(e.currentTarget)}>
+          <ul className="relative" style={{ height: itens.length * LINHA }}>
+            {itens.slice(primeira, ultima).map((r, i) => (
+              <li key={r.id} className="absolute inset-x-0" style={{ top: (primeira + i) * LINHA, height: LINHA }}>
+                <button type="button" onClick={() => onPick(r)} className="w-full h-full flex items-center gap-2 text-left px-3 text-sm hover:bg-field">
+                  <span className="text-ink truncate">{r.name}</span>
+                  <span className="text-muted tnum shrink-0">{formatPhone(r.phone)}</span>
+                  {r.contactId && <span className="ml-auto shrink-0 text-[10px] font-semibold rounded px-1.5 py-0.5 bg-accent-soft text-accent-ink">já é contato</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {isFetchingNextPage && <p className="px-3 py-1.5 text-xs text-muted">Carregando…</p>}
+        </div>
+      )}
     </div>
   );
 }

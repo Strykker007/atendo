@@ -378,7 +378,15 @@ model Contact {
   attributes      ContactAttribute[]
 
   scheduledMessages ScheduledMessage[]
+
+  /// nome + e-mail + telefone sem acento e minúsculo. Coluna GERADA no banco (migração
+  /// contact_search) — só para filtrar via `textSearch`, nunca escrever. Omitida das respostas
+  /// (ver PrismaService). O `dbgenerated` só existe para o migrate não ver drift (sem ele, gera
+  /// um DROP DEFAULT que o Postgres recusa em coluna gerada).
+  searchText String? @default(dbgenerated("lower(translate(((((COALESCE(name, ''::text) || ' '::text) || COALESCE(email, ''::text)) || ' '::text) || phone), 'áàâãäåéèêëíìîïóòôõöúùûüçñýÿÁÀÂÃÄÅÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑÝ'::text, 'aaaaaaeeeeiiiiooooouuuucnyyaaaaaaeeeeiiiiooooouuuucny'::text))"))
+
   @@unique([tenantId, phone])
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
   @@map("contacts")
 }
 
@@ -407,8 +415,12 @@ model PhonebookEntry {
 
   number WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
 
+  /// nome + telefone sem acento e minúsculo. Coluna GERADA no banco, como `Contact.searchText`
+  searchText String? @default(dbgenerated("lower(translate(((name || ' '::text) || phone), 'áàâãäåéèêëíìîïóòôõöúùûüçñýÿÁÀÂÃÄÅÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑÝ'::text, 'aaaaaaeeeeiiiiooooouuuucnyyaaaaaaeeeeiiiiooooouuuucny'::text))"))
+
   @@unique([numberId, phone])
   @@index([tenantId, phone])
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
   @@map("phonebook_entries")
 }
 

@@ -19,6 +19,7 @@ import { phoneVariants } from './phone-variants';
 import { canSeeDepartment, departmentWhere } from '../auth/department-scope';
 import { BOT_PAUSE_CLEAR } from './bot-pause';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
+import { textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
 
 /**
@@ -181,9 +182,8 @@ export class ConversationsService {
       ...(dept && { AND: [dept] }),
       // tag da conversa OU tag do contato
       ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
-      ...(q.search && {
-        contact: { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }] },
-      }),
+      // nome/e-mail/telefone do contato, sem acento e por palavras (common/text-search.ts)
+      ...(q.search && { contact: textSearch(q.search) }),
     };
     const rows = await this.prisma.conversation.findMany({
       where,
@@ -546,21 +546,18 @@ export class ConversationsService {
    * por eles, e só a agenda dos números que opera — a busca não pode furar o escopo da lista.
    */
   async startCandidates(tenantId: string, viewer: Viewer, q: string) {
-    const termo = q.trim();
-    if (termo.length < 2) return { contacts: [], phonebook: [] };
-    const digitos = termo.replace(/\D/g, '');
-    const porTexto = (campo: 'name') => ({ [campo]: { contains: termo, mode: 'insensitive' as const } });
-    const match = [porTexto('name'), ...(digitos.length >= 3 ? [{ phone: { contains: digitos } }] : [])];
+    if (q.trim().length < 2) return { contacts: [], phonebook: [] };
+    const match = textSearch(q);
     const numeros = numberFilter(viewer);
     const dept = departmentWhere(viewer);
     const contacts = await this.prisma.contact.findMany({
-      where: { tenantId, OR: match, ...((numeros || dept) && { conversations: { some: { ...(numeros && { numberId: numeros }), ...dept } } }) },
+      where: { tenantId, ...match, ...((numeros || dept) && { conversations: { some: { ...(numeros && { numberId: numeros }), ...dept } } }) },
       select: { id: true, name: true, phone: true, avatarUrl: true },
       orderBy: { updatedAt: 'desc' },
       take: 8,
     });
     const agenda = await this.prisma.phonebookEntry.findMany({
-      where: { tenantId, OR: match, ...(numeros && { numberId: numeros }) },
+      where: { tenantId, ...match, ...(numeros && { numberId: numeros }) },
       select: { phone: true, name: true, numberId: true },
       orderBy: { name: 'asc' },
       take: 20,

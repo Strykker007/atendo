@@ -1,7 +1,7 @@
 'use client';
 /** Números de WhatsApp. */
 'use client';
-import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
@@ -141,19 +141,47 @@ export const useSendTemplate = (conversationId: string | null, expectedNumberId?
 /** Reler agora a agenda de contatos do celular (Evolution). Roda no worker. */
 export const useSyncPhonebook = () => useMutation({ mutationFn: (numberId: string) => api<{ queued: boolean }>(`/numbers/${numberId}/contacts/sync`, { method: 'POST' }) });
 
+/**
+ * Valor que só muda depois de `ms` sem mexer — para a busca não disparar uma requisição por tecla.
+ * Use o valor atrasado na queryKey e compare com o original para saber se há busca pendente.
+ */
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
+}
+
+/** Sugestões do "Nova conversa": contatos da base + agenda do aparelho (quem ainda não é contato). */
+export interface StartCandidates {
+  contacts: { id: string; name: string | null; phone: string }[];
+  phonebook: { phone: string; name: string; numberId: string }[];
+}
+/** `q` já com debounce; menos de 2 letras não busca. Mantém o resultado anterior enquanto o novo chega. */
+export const useStartCandidates = (q: string, enabled = true) =>
+  useQuery({
+    queryKey: ['start-candidates', q],
+    enabled: enabled && q.length >= 2,
+    queryFn: () => api<StartCandidates>(`/conversations/start/contacts?q=${encodeURIComponent(q)}`),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+
 /** Linha da agenda do celular; `contactId` = a pessoa já é contato no painel. */
 export interface PhonebookItem { id: string; phone: string; name: string; contactId: string | null }
-/** Agenda do celular de um número (Evolution), paginada em ordem alfabética. `q` filtra nome/telefone. */
+interface PhonebookPage { items: PhonebookItem[]; nextCursor: string | null; total?: number }
+/** Agenda do celular de um número (Evolution), paginada em ordem alfabética. `q` (já com debounce) filtra nome/telefone. */
 export const usePhonebook = (numberId: string | null, q: string, enabled = true) =>
   useInfiniteQuery({
     queryKey: ['phonebook', numberId, q],
     enabled: !!numberId && enabled,
+    // filtro novo: a lista anterior fica na tela até chegar a nova (só do mesmo número)
+    placeholderData: (prev: InfiniteData<PhonebookPage, string | null> | undefined, prevQuery) => (prevQuery?.queryKey[1] === numberId ? prev : undefined),
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) => {
       const p = new URLSearchParams();
       if (q) p.set('q', q);
       if (pageParam) p.set('cursor', pageParam);
-      return api<{ items: PhonebookItem[]; nextCursor: string | null; total?: number }>(`/numbers/${numberId}/phonebook${p.toString() ? `?${p}` : ''}`);
+      return api<PhonebookPage>(`/numbers/${numberId}/phonebook${p.toString() ? `?${p}` : ''}`);
     },
     getNextPageParam: (last) => last.nextCursor,
   });
