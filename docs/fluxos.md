@@ -26,7 +26,7 @@ Genérico: `PORTABLE_VERSION`, `PortableBundle`/`toBundle` (lote `'<tipo>-bundle
 | `ConditionPanel.tsx` | Editor de ramos/regras da Condição |
 | `DeletableEdge.tsx` | Aresta com botão de tesoura (cortar ligação) |
 | `layout.ts` | `autoLayout` (Organizar automaticamente) e `looksVertical` (detecta desenho antigo) |
-| `TextWithVars.tsx` | Campo de texto com "Inserir variável" (+ botões N/I/S com `formatting`); `WaText` (prévia da formatação do WhatsApp); `collectFlowVars`, `SYSTEM_VARS` |
+| `TextWithVars.tsx` | Campo de texto com "Inserir variável" (+ botões N/I/S com `formatting`); `WaText` (prévia da formatação do WhatsApp); `collectFlowVars`, `SYSTEM_VARS` (de `SYSTEM_VARIABLES` do shared), `useAttributeVars` (campos da ficha) — ver [Variáveis](variaveis.md) |
 | `history.ts` | `useHistory` — desfazer/refazer por fotos do estado (`HISTORY_LIMIT` = 100) |
 
 Persistência: estado local (`useNodesState`/`useEdgesState`) → `save()` monta o `FlowDefinition` → `onSave` (página `app/(app)/fluxos/[id]`) → `PATCH /flows/:id` com a `version` carregada. Nada é salvo sozinho; "não salvo" compara snapshot do conteúdo.

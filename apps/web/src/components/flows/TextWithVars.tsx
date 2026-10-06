@@ -3,19 +3,33 @@ import { useEffect, useRef, useState } from 'react';
 import { Braces, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { inputCls } from '@/components/ui/Modal';
-import { VARIABLE_OP_LABEL } from '@atendo/shared';
+import { CONTACT_FIXED_KEYS, SYSTEM_VARIABLES, VARIABLE_OP_LABEL, attributeVarKey } from '@atendo/shared';
+import { useContactAttributeLabels } from '@/lib/hooks';
 
-export interface FlowVar { key: string; label: string; source: 'system' | 'question' | 'menu' | 'action' }
+export interface FlowVar { key: string; label: string; source: 'system' | 'attribute' | 'question' | 'menu' | 'action' }
 
-/** Variáveis sempre disponíveis. */
-export const SYSTEM_VARS: FlowVar[] = [
-  { key: 'contact.name', label: 'Nome do contato (como está no WhatsApp)', source: 'system' },
-  { key: 'contact.phone', label: 'Telefone do contato', source: 'system' },
-  { key: 'contact.email', label: 'E-mail do contato (da ficha)', source: 'system' },
-  { key: 'contact.address', label: 'Endereço do contato (da ficha)', source: 'system' },
-  { key: 'contact.note1', label: 'Observação 1 do contato (da ficha)', source: 'system' },
-  { key: 'contact.note2', label: 'Observação 2 do contato (da ficha)', source: 'system' },
-];
+/**
+ * Variáveis sempre disponíveis (catálogo em `@atendo/shared`, docs/variaveis.md). Os apelidos
+ * (`{{company.name}}`, `{{greeting}}`) valem igual no envio, mas o menu oferece só um nome.
+ */
+export const SYSTEM_VARS: FlowVar[] = SYSTEM_VARIABLES.map((v) => ({ key: v.key, label: v.label, source: 'system' }));
+
+/**
+ * Campos livres da ficha já usados em algum contato da empresa → `{{contact.<chave>}}`.
+ * Contato que não tem o campo recebe vazio.
+ */
+export function useAttributeVars(): FlowVar[] {
+  const labels = useContactAttributeLabels().data ?? [];
+  const seen = new Set<string>(CONTACT_FIXED_KEYS);
+  const out: FlowVar[] = [];
+  for (const l of labels) {
+    const k = attributeVarKey(l.label);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push({ key: `contact.${k}`, label: `${l.label} (campo da ficha)`, source: 'attribute' });
+  }
+  return out;
+}
 
 /** Marcadores de formatação do WhatsApp. */
 const WA_MARKS: { mark: string; label: string; title: string; cls: string }[] = [
@@ -29,7 +43,7 @@ const WA_MARKS: { mark: string; label: string; title: string; cls: string }[] = 
  * Mostra as variáveis do sistema e as criadas pelo fluxo (Salvar / Menu / Manipulador).
  * `formatting`: botões de negrito/itálico/tachado do WhatsApp (envolvem a seleção).
  */
-export function TextWithVars({ value, onChange, vars, multiline = true, placeholder, className, formatting }: { value: string; onChange: (v: string) => void; vars: FlowVar[]; multiline?: boolean; placeholder?: string; className?: string; formatting?: boolean }) {
+export function TextWithVars({ value, onChange, vars, multiline = true, placeholder, className, formatting, flowVarsGroup = true, required, maxLength }: { value: string; onChange: (v: string) => void; vars: FlowVar[]; multiline?: boolean; placeholder?: string; className?: string; formatting?: boolean; /** fora do editor de fluxos (respostas rápidas) não existe "criadas neste fluxo" */ flowVarsGroup?: boolean; required?: boolean; maxLength?: number }) {
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -60,15 +74,20 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
     requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + 1, end + 1); });
   }
 
-  const all = [...SYSTEM_VARS, ...vars];
-  const groups: [string, FlowVar[]][] = [['Do sistema', all.filter((v) => v.source === 'system')], ['Criadas neste fluxo', all.filter((v) => v.source !== 'system')]];
+  const attributeVars = useAttributeVars();
+  const all = [...SYSTEM_VARS, ...attributeVars, ...vars];
+  const groups: [string, FlowVar[]][] = [
+    ['Do sistema', all.filter((v) => v.source === 'system')],
+    ...(attributeVars.length ? [['Campos da ficha', attributeVars] as [string, FlowVar[]]] : []),
+    ...(flowVarsGroup ? [['Criadas neste fluxo', all.filter((v) => v.source !== 'system' && v.source !== 'attribute')] as [string, FlowVar[]]] : []),
+  ];
 
   return (
     <div ref={wrap} className="relative">
       {multiline ? (
-        <textarea ref={ref as React.RefObject<HTMLTextAreaElement>} className={cn(inputCls, 'min-h-24 pr-2', className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+        <textarea ref={ref as React.RefObject<HTMLTextAreaElement>} className={cn(inputCls, 'min-h-24 pr-2', className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} required={required} maxLength={maxLength} />
       ) : (
-        <input ref={ref as React.RefObject<HTMLInputElement>} className={cn(inputCls, className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+        <input ref={ref as React.RefObject<HTMLInputElement>} className={cn(inputCls, className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} required={required} maxLength={maxLength} />
       )}
       <div className="mt-1 flex items-center justify-between">
         <div className="flex items-center gap-1">
@@ -86,7 +105,7 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
           {groups.map(([title, list]) => (
             <div key={title}>
               <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{title}</div>
-              {list.length === 0 && <div className="px-3 pb-2 text-xs text-faint">Nenhuma ainda — adicione um bloco <b>Salvar</b> ou <b>Manipulador</b> para criar.</div>}
+              {list.length === 0 && title === 'Criadas neste fluxo' && <div className="px-3 pb-2 text-xs text-faint">Nenhuma ainda — adicione um bloco <b>Salvar</b> ou <b>Manipulador</b> para criar.</div>}
               {list.map((v) => (
                 <button type="button" key={v.key} onClick={() => insert(v.key)} className="w-full text-left px-3 py-1.5 hover:bg-field">
                   <div className="font-mono text-[12px] text-ink">{`{{${v.key}}}`}</div>

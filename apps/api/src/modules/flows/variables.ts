@@ -11,13 +11,13 @@ import { toNumber } from './conditions';
 export function applyAssignments(
   vars: Record<string, string>,
   assignments: VariableAssignment[],
-  env: { contact: InterpolateCtx['contact']; now: Date; timezone: string },
+  env: { contact: InterpolateCtx['contact']; globals?: InterpolateCtx['globals']; now: Date; timezone: string },
 ): { vars: Record<string, string>; problems: string[] } {
   const next = { ...vars };
   const problems: string[] = [];
   for (const a of assignments) {
     if (!a.varName) continue;
-    const value = () => interpolate(a.value ?? '', { contact: env.contact, vars: next });
+    const value = () => interpolate(a.value ?? '', { contact: env.contact, globals: env.globals, vars: next });
     switch (a.op ?? 'set') {
       case 'set':
         next[a.varName] = value();
@@ -45,7 +45,7 @@ export function applyAssignments(
         break;
       case 'copy':
         // mesma resolução do texto: aceita também contact.<campo>
-        next[a.varName] = a.from ? interpolate(`{{${a.from}}}`, { contact: env.contact, vars: next }) : '';
+        next[a.varName] = a.from ? interpolate(`{{${a.from}}}`, { contact: env.contact, globals: env.globals, vars: next }) : '';
         break;
       case 'now':
         next[a.varName] = formatNow(env.now, env.timezone, a.format ?? 'datetime');

@@ -208,7 +208,7 @@ describe('deduplicação', () => {
 
   function service(prisma: Record<string, unknown>) {
     const queue = { add: vi.fn() };
-    const svc = new ConversationsService(prisma as never, { canSend: vi.fn().mockResolvedValue({ ok: true }) } as never, { emitMessage: vi.fn(), emitConversation: vi.fn() } as never, { signedUrl: (k: string) => k } as never, queue as never);
+    const svc = new ConversationsService(prisma as never, { canSend: vi.fn().mockResolvedValue({ ok: true }) } as never, { emitMessage: vi.fn(), emitConversation: vi.fn() } as never, { signedUrl: (k: string) => k } as never, {} as never, queue as never);
     return { svc, queue };
   }
 

@@ -24,7 +24,14 @@ Sem `contacts.edit` tudo fica só para leitura.
 
 ## Ainda não
 
-- Não aparecem no resumo de uma linha do cabeçalho do chat nem viram variável de fluxo.
+- Não aparecem no resumo de uma linha do cabeçalho do chat.
+
+## Como variável
+
+Cada campo vira `{{contact.<chave>}}` em fluxos, respostas rápidas, campanhas, chat e
+mensagens agendadas — "Placa do carro" → `{{contact.placa_do_carro}}`. O menu "Inserir
+variável" lista os nomes já usados na empresa. Contato sem o campo recebe vazio. Ver
+[Variáveis](variaveis.md).
 
 Endpoints em [07-api](07-api.md). Histórico: a primeira versão (campos definidos pela empresa
 em Configurações, migração `20261014000000_contact_custom_fields`) foi trocada por esta na

@@ -6,11 +6,15 @@ import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { TextWithVars, type FlowVar } from '@/components/flows/TextWithVars';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { usePersistedState } from '@/lib/persisted';
 import { cn, downloadJson, safeFileName } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { uploadFile, mediaTypeOf, useCan, useMe, useQuickReplies, useCreateFolder, useUpdateFolder, useDeleteFolder, useCreateReply, useUpdateReply, useDeleteReply, useReorderFolders, useReorderReplies, useExportReply, useExportReplies, useDuplicateReplies, useImportReplies, type QuickReplyItem, type Folder as FolderT } from '@/lib/hooks';
+
+/** Além das do sistema e dos campos da ficha (que o TextWithVars já traz). */
+const REPLY_VARS: FlowVar[] = [{ key: 'agent.name', label: 'Nome de quem está atendendo', source: 'system' }];
 
 type Reply = FolderT['replies'][number];
 
@@ -151,7 +155,7 @@ export default function RespostasPage() {
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Respostas rápidas"
-        subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Variáveis: <code className="bg-field px-1 rounded">{'{{contact.name}}'}</code> <code className="bg-field px-1 rounded">{'{{agent.name}}'}</code></>}
+        subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Use “Inserir variável” para nome do cliente, saudação, empresa e campos da ficha.</>}
         action={podeEditar && (
           <div className="flex gap-2">
             <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onImport(f); }} />
@@ -254,7 +258,16 @@ export default function RespostasPage() {
         <form onSubmit={saveReply} className="space-y-4">
           <Field label="Título" hint="Como aparece na lista do painel"><input className={inputCls} value={replyModal?.title ?? ''} onChange={(e) => setReplyModal({ ...replyModal!, title: e.target.value })} maxLength={80} required autoFocus /></Field>
           <Field label="Mensagem">
-            <textarea className={`${inputCls} min-h-32`} value={replyModal?.body ?? ''} onChange={(e) => setReplyModal({ ...replyModal!, body: e.target.value })} maxLength={4096} required={!replyModal?.mediaKey} />
+            <TextWithVars
+              value={replyModal?.body ?? ''}
+              onChange={(body) => setReplyModal((m) => m && { ...m, body })}
+              vars={REPLY_VARS}
+              flowVarsGroup={false}
+              formatting
+              className="min-h-32"
+              maxLength={4096}
+              required={!replyModal?.mediaKey}
+            />
           </Field>
           <Field label="Anexo (opcional)" hint="Áudio, foto, vídeo ou arquivo. Com anexo, a mensagem acima vira a legenda.">
             {replyModal?.mediaKey ? (
@@ -287,12 +300,6 @@ export default function RespostasPage() {
             )}
           </Field>
 
-          <div className="flex flex-wrap gap-1 text-xs">
-            <span className="text-faint mr-1">Inserir:</span>
-            {['{{contact.name}}', '{{agent.name}}'].map((v) => (
-              <button type="button" key={v} onClick={() => setReplyModal({ ...replyModal!, body: (replyModal?.body ?? '') + v })} className="rounded bg-field px-1.5 py-0.5 font-mono hover:bg-line-strong">{v}</button>
-            ))}
-          </div>
           <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={() => setReplyModal(null)}>Cancelar</Button><Button type="submit" loading={createReply.isPending || updateReply.isPending} loadingText="Salvando…">Salvar</Button></div>
         </form>
       </Modal>

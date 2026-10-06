@@ -12,7 +12,7 @@ import { nodeTypes, NODE_META, PALETTE_GROUPS, defaultData, FlowNodeActions, Flo
 import { NodePanel } from './NodePanel';
 import { DeletableEdge } from './DeletableEdge';
 import { autoLayout, looksVertical } from './layout';
-import { collectFlowVars, SYSTEM_VARS } from './TextWithVars';
+import { collectFlowVars, SYSTEM_VARS, useAttributeVars } from './TextWithVars';
 import { useHistory } from './history';
 import { useUnsavedGuard } from '@/lib/unsaved-guard';
 import { useNumbers, useFlowRuns, useFlows, useMe, useTags, type Flow } from '@/lib/hooks';
@@ -120,6 +120,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
     if (selectedId && !selected) { setSelectedId(null); setSide((sd) => (sd === 'node' ? 'settings' : sd)); }
   }, [selectedId, selected]);
   const flowVars = useMemo(() => collectFlowVars(nodes as { id: string; type: string; data: Record<string, unknown> }[]), [nodes]);
+  const attributeVars = useAttributeVars();
 
   const onConnect = useCallback((c: Connection) => {
     // uma saída (source+handle) só liga a um destino: substitui a anterior
@@ -449,7 +450,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
               <div className="pt-2 border-t border-line">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">Variáveis disponíveis</div>
                 <ul className="space-y-1">
-                  {[...SYSTEM_VARS, ...flowVars].map((v) => (
+                  {[...SYSTEM_VARS, ...attributeVars, ...flowVars].map((v) => (
                     <li key={v.key} className="flex items-baseline gap-2"><code className="font-mono text-[11.5px] bg-field rounded px-1 text-ink">{`{{${v.key}}}`}</code><span className="text-[11px] text-muted truncate">{v.label}</span></li>
                   ))}
                 </ul>

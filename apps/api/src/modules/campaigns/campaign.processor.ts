@@ -5,6 +5,7 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { enrichContext } from '../../common/observability/request-context';
 import { interpolate } from '../flows/answer';
+import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { CampaignsService } from './campaigns.service';
 import { afterBatch, decideDispatch, eligible, type CampaignStatus } from './dispatch';
 import { QUEUE_CAMPAIGN, type CampaignJob } from './queues';
@@ -24,6 +25,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     private readonly prisma: PrismaService,
     private readonly campaigns: CampaignsService,
     private readonly conversations: ConversationsService,
+    private readonly interpolation: InterpolationService,
   ) {
     super(QUEUE_CAMPAIGN);
   }
@@ -89,7 +91,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
       }
 
       try {
-        const text = interpolate(campaign.text, { contact: { name: target.contact.name, phone: target.contact.phone }, vars: {} });
+        const text = interpolate(campaign.text, await this.interpolation.context(campaign.tenantId, target.contact));
         const message = await this.conversations.sendToContact(campaign.tenantId, target.contactId, text, { preferredNumberId: campaign.numberId, idempotencyKey: `campaign-${campaign.id}-${target.id}` });
         await this.prisma.campaignTarget.update({
           where: { id: target.id },

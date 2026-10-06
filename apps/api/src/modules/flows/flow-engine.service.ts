@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
 import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { botPaused } from '../conversations/bot-pause';
@@ -83,6 +84,7 @@ export class FlowEngineService {
     private readonly ai: AiService,
     private readonly tenantSettings: TenantSettingsService,
     private readonly schedules: SchedulesService,
+    private readonly interpolation: InterpolationService,
     @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowJob>,
   ) {}
 
@@ -341,6 +343,11 @@ export class FlowEngineService {
     return this.tenantSettings.nextWelcome(tenantId);
   }
 
+  /** Contexto das variáveis das respostas automáticas (boas-vindas/faixa). */
+  async autoReplyCtx(conversation: Conversation, vars: Record<string, string>) {
+    return this.interpolation.context(conversation.tenantId, await this.contactOf(conversation), vars);
+  }
+
   contactOf(conversation: Conversation) {
     return this.prisma.contact.findUniqueOrThrow({ where: { id: conversation.contactId } });
   }
@@ -412,7 +419,8 @@ export class FlowEngineService {
       }
       if (!node) return this.finish(runId, 'failed', `nó ${run.currentNodeId} não existe`);
       const vars = run.vars as Record<string, string>;
-      const ctx = { contact: run.conversation.contact, vars };
+      // empresa, saudação e campos livres da ficha (docs/variaveis.md)
+      const ctx = await this.interpolation.context(run.tenantId, run.conversation.contact, vars);
 
       try {
         switch (node.type) {
@@ -477,7 +485,7 @@ export class FlowEngineService {
             const ops = node.data.assignments ?? [];
             // fuso só é buscado se alguma operação gravar a data/hora atual
             const timezone = ops.some((a) => a.op === 'now') ? (await this.tenantSettings.get(run.tenantId)).timezone : 'America/Sao_Paulo';
-            const { vars: next, problems } = applyAssignments(vars, ops, { contact: ctx.contact, now: new Date(), timezone });
+            const { vars: next, problems } = applyAssignments(vars, ops, { contact: ctx.contact, globals: ctx.globals, now: new Date(), timezone });
             if (problems.length) await this.warnTeam(run, `Manipulador: ${problems.join(' ')}`);
             await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: next } });
             await this.goNext(runId, def, node.id);
@@ -812,7 +820,7 @@ export class FlowEngineService {
   // ---------- nós ----------
 
   /** Devolve 'ended' (o run acabou aqui), a saída a seguir ('error' do webhook) ou undefined (saída normal). */
-  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { flow: { name: string }; conversation: Conversation & { contact: { name: string | null; phone: string } } }): Promise<'ended' | string | undefined> {
+  private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { flow: { name: string }; conversation: Conversation & { contact: InterpolateCtx['contact'] & { id: string } } }): Promise<'ended' | string | undefined> {
     const d = node.data;
     switch (d.kind) {
       case 'add_tag':
@@ -846,7 +854,7 @@ export class FlowEngineService {
       case 'set_var': {
         if (!d.varName) break;
         const vars = { ...(run.vars as Record<string, string>) };
-        vars[d.varName] = interpolate(d.value ?? '', { contact: run.conversation.contact, vars });
+        vars[d.varName] = interpolate(d.value ?? '', await this.interpolation.context(run.tenantId, run.conversation.contact, vars));
         await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
         return undefined;
       }
@@ -861,10 +869,10 @@ export class FlowEngineService {
    * limite, endereço interno, status ≠ 2xx) → saída "Erro" (sem ela, segue pela normal, como
    * antes); a resposta guardada fica vazia.
    */
-  private async webhook(d: Extract<FlowNode, { type: 'action' }>['data'], run: FlowRun & { conversation: { contact: InterpolateCtx['contact'] } }): Promise<string | undefined> {
+  private async webhook(d: Extract<FlowNode, { type: 'action' }>['data'], run: FlowRun & { conversation: { contact: InterpolateCtx['contact'] & { id: string } } }): Promise<string | undefined> {
     if (!d.url) return undefined; // URL removida na importação: o card mostra "Reconfigurar"
     const vars = { ...(run.vars as Record<string, string>) };
-    const ctx = { contact: run.conversation.contact, vars };
+    const ctx = await this.interpolation.context(run.tenantId, run.conversation.contact, vars);
     const method = d.method ?? 'POST';
     const headers = (d.headers ?? []).map((h) => ({ key: h.key, value: interpolate(h.value ?? '', ctx) }));
     const contentType = headers.find((h) => h.key.trim().toLowerCase() === 'content-type')?.value ?? 'application/json';
@@ -1072,7 +1080,7 @@ export class FlowEngineService {
 /**
  * Boas-vindas + resposta da faixa de uma mensagem recebida, numa sequência só: a resposta da
  * faixa entra depois das boas-vindas com pelo menos 1 s de intervalo (ordem de chegada).
- * Variáveis: `{{contact.*}}`, `{{faixa}}`, `{{proxima_abertura}}`.
+ * Variáveis: `{{contact.*}}`, `{{empresa}}`, `{{saudacao}}`, `{{faixa}}`, `{{proxima_abertura}}`.
  */
 class AutoReply {
   private items: ContentItem[] = [];
@@ -1080,7 +1088,7 @@ class AutoReply {
   constructor(private readonly engine: FlowEngineService, private readonly conv: Conversation, private readonly now: ScheduleNow) {}
 
   private async push(items: ContentItem[]) {
-    this.ctx ??= { contact: await this.engine.contactOf(this.conv), vars: { faixa: this.now.band.name, proxima_abertura: this.now.nextOpenLabel } };
+    this.ctx ??= await this.engine.autoReplyCtx(this.conv, { faixa: this.now.band.name, proxima_abertura: this.now.nextOpenLabel });
     const ctx = this.ctx;
     items.forEach((it, i) => {
       const delay = i === 0 && this.items.length ? Math.max(1, Number(it.delay) || 0) : it.delay;

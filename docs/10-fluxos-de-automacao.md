@@ -49,7 +49,8 @@ ligada, senão pela saída normal (a variável de resposta fica vazia). Ver [flu
 
 ## Variáveis
 
-- **Do sistema**: `{{contact.name}}` (nome no WhatsApp), `{{contact.phone}}`, `{{contact.email}}`, `{{contact.address}}`, `{{contact.note1}}`, `{{contact.note2}}` (da ficha).
+- **Do sistema**: `{{contact.name}}` (nome no WhatsApp), `{{contact.first_name}}`, `{{contact.phone}}`, `{{contact.email}}`, `{{contact.address}}`, `{{contact.note1}}`, `{{contact.note2}}` (da ficha), `{{empresa}}`/`{{company.name}}`, `{{saudacao}}`/`{{greeting}}` (Bom dia/Boa tarde/Boa noite no fuso do cliente).
+- **Campos da ficha**: `{{contact.<chave>}}` de cada campo livre ("Placa do carro" → `{{contact.placa_do_carro}}`). Referência completa em [Variáveis](variaveis.md).
 - **Criadas no fluxo**: o bloco **Salvar** cria uma (a resposta do contato fica nela); o **Menu** guarda a opção escolhida em `{{menu_<id>}}`; o bloco **Manipulador** grava/opera valores (`Olá {{contact.name}}`, contador +1, data de agora); o webhook pode guardar a resposta.
 - Todo campo de texto do editor tem o botão **Inserir variável**, que lista as do sistema e as criadas no fluxo e insere `{{…}}` no cursor. A lista completa fica nas configurações do fluxo (botão *Gatilho*). Ela é atualizada na hora: criou a variável num bloco, já aparece nos outros.
 - A **Condição** escolhe o campo do contato num seletor e a variável por texto com sugestões das criadas no fluxo.

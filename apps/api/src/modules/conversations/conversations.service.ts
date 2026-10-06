@@ -16,6 +16,8 @@ import type { Permission } from '@atendo/shared';
 import { narrowTo, numberFilter } from '../auth/number-scope';
 import { departmentWhere } from '../auth/department-scope';
 import { BOT_PAUSE_CLEAR } from './bot-pause';
+import { InterpolationService } from '../../common/interpolation/interpolation.service';
+import { interpolate } from '../flows/answer';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -88,6 +90,7 @@ export class ConversationsService {
     private readonly usage: UsageService,
     private readonly gateway: ConversationsGateway,
     private readonly storage: StorageService,
+    private readonly interpolation: InterpolationService,
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {}
 
@@ -460,6 +463,13 @@ export class ConversationsService {
     const quoted = input.quotedExternalId
       ? await this.prisma.message.findFirst({ where: { externalId: input.quotedExternalId, conversation: { tenantId } }, select: { id: true } })
       : null;
+    // {{saudacao}}, {{contact.first_name}}… de resposta rápida / mensagem agendada / digitada.
+    // Chave desconhecida fica como foi escrita; encaminhada e template saem intactos.
+    if (input.text?.includes('{{') && !input.template && !input.forwarded) {
+      const agent = await this.prisma.user.findUnique({ where: { id: authorId }, select: { name: true } });
+      const ctx = await this.interpolation.forContact(tenantId, conv.contactId, {}, { agentName: agent?.name });
+      input = { ...input, text: interpolate(input.text, ctx, undefined, { keepUnknown: true }) };
+    }
     const created = await this.createOnce(conv.id, key, () => this.prisma.message.create({
       data: {
         idempotencyKey: key,

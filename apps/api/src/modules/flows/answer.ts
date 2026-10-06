@@ -1,3 +1,5 @@
+import { firstName } from '@atendo/shared';
+
 /**
  * Interpretação da resposta do contato. Isolado (sem Nest/Prisma) porque é o ponto
  * em que o fluxo decide o caminho — e onde um erro manda o cliente para a opção errada.
@@ -33,25 +35,43 @@ export function validAnswer(answer: string, validation: Validation) {
 }
 
 export interface InterpolateCtx {
-  contact: { name: string | null; phone: string; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null };
+  contact: {
+    name: string | null; phone: string; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null;
+    /** campos livres da ficha, pela chave de `attributeVarKey` ("placa_do_carro") */
+    attributes?: Record<string, string>;
+  };
   vars: Record<string, string>;
+  /** empresa, saudação, atendente… (`InterpolationService`). A variável do fluxo vence em nome igual. */
+  globals?: Record<string, string>;
 }
 
 const CONTACT_KEYS = ['name', 'phone', 'email', 'address', 'note1', 'note2'] as const;
 
 /**
- * `{{nome_da_variavel}}` (variável do fluxo) e `{{contact.<campo>}}` — name, phone, email,
- * address, note1, note2. Chave desconhecida vira texto vazio. `escape` trata cada valor antes de
- * entrar no texto (ex.: corpo JSON do webhook, onde uma aspa no nome quebraria o JSON).
+ * `{{nome_da_variavel}}` (variável do fluxo), `{{contact.<campo>}}` — name, first_name, phone,
+ * email, address, note1, note2 ou a chave de um campo livre da ficha — e as globais
+ * (`{{empresa}}`, `{{saudacao}}`…). Chave desconhecida vira texto vazio; com `keepUnknown`
+ * (mensagem digitada no chat) fica como estava. `escape` trata cada valor antes de entrar no
+ * texto (ex.: corpo JSON do webhook, onde uma aspa no nome quebraria o JSON).
  */
-export function interpolate(text: string, ctx: InterpolateCtx, escape: (v: string) => string = (v) => v) {
-  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => {
-    if (key.startsWith('contact.')) {
-      const field = key.slice(8) as (typeof CONTACT_KEYS)[number];
-      return escape(CONTACT_KEYS.includes(field) ? (ctx.contact[field] ?? '') : '');
-    }
-    return escape(ctx.vars[key] ?? '');
+export function interpolate(text: string, ctx: InterpolateCtx, escape: (v: string) => string = (v) => v, opts?: { keepUnknown?: boolean }) {
+  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (raw, key: string) => {
+    const value = resolveVar(key, ctx);
+    if (value === undefined) return opts?.keepUnknown ? raw : '';
+    return escape(value);
   });
+}
+
+function resolveVar(key: string, ctx: InterpolateCtx): string | undefined {
+  if (key.startsWith('contact.')) {
+    const field = key.slice(8);
+    if (field === 'first_name') return firstName(ctx.contact.name);
+    if ((CONTACT_KEYS as readonly string[]).includes(field)) return ctx.contact[field as (typeof CONTACT_KEYS)[number]] ?? '';
+    // campo livre que este contato não tem: vazio (outro cliente pode ter)
+    if (ctx.contact.attributes) return ctx.contact.attributes[field] ?? '';
+    return undefined;
+  }
+  return ctx.vars[key] ?? ctx.globals?.[key];
 }
 
 /** Valor dentro de uma string JSON: `"{{nome}}"` continua JSON válido com aspas/quebras no nome. */
