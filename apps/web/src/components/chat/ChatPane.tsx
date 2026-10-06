@@ -49,7 +49,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const ui = useUI();
   const embedded = !!embeddedId;
   const conversationId = embeddedId ?? ui.conversationId;
-  const { setConversation, status } = ui;
+  const { setConversation } = ui;
   const setFilterStatus: typeof ui.setStatus = embedded ? () => undefined : ui.setStatus;
   const conv = useConversation(conversationId).data;
   const me = useMe();
@@ -238,7 +238,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       const up = await uploadFile(file);
       setPrevia(null);
       await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, idempotencyKey: crypto.randomUUID() });
-      if (status === 'waiting' && conv?.status === 'waiting') setFilterStatus('in_progress', true);
     } catch (err) {
       toast.err(err); // a prévia continua aberta: o arquivo escolhido não se perde no erro
     } finally {
@@ -478,8 +477,10 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         await send.mutateAsync({ type: 'text', text: t, ...citando, idempotencyKey });
       }
       setRespondendo(null);
-      // responder tira a conversa de "Aguardando": acompanha o filtro para ela não sumir da lista
-      if (status === 'waiting' && conv?.status === 'waiting') setFilterStatus('in_progress', true);
+      // Responder NÃO troca a aba da lista. Trocava para "Em atendimento" para a conversa não
+      // sumir de "Aguardando" — mas lá só estava ela: depois de restaurar o histórico (tudo
+      // volta para a fila), cada resposta "apagava" a lista inteira. Quem segura a conversa
+      // aberta na tela agora é a própria lista (ConversationList → `fixada`).
     } catch (err) {
       setText(t);
       setAttachment(att);

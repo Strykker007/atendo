@@ -194,8 +194,11 @@ export class ConversationsService {
       // as já respondidas para o fim em vez de empilhá-las no topo
       orderBy:
         q.sort === 'waiting'
-          ? [{ awaitingSince: { sort: 'asc', nulls: 'last' } }, { lastMessageAt: 'desc' }]
-          : [{ lastMessageAt: 'desc' }],
+          ? [{ awaitingSince: { sort: 'asc', nulls: 'last' } }, { lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
+          // `nulls: 'last'`: no Postgres o DESC põe nulo PRIMEIRO, e conversa sem mensagem
+          // (criada e nunca usada) encabeçava a lista para sempre. `id` desempata: com hora
+          // igual (histórico importado em lote) a ordem variava entre páginas e o cursor pulava linha
+          : [{ lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
       take: q.take ?? 50,
       ...(q.cursor && { cursor: { id: q.cursor }, skip: 1 }),
     });

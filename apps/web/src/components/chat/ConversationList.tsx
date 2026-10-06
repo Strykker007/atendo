@@ -5,7 +5,7 @@ import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { useConversation, useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
@@ -78,6 +78,22 @@ export function ConversationList() {
   const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0);
 
   const visiveis = conversations.data ?? [];
+
+  // A conversa aberta não some da lista quando deixa de casar com o filtro (respondeu uma de
+  // "Aguardando" e ela foi para "Em atendimento"): fica fixada no topo até trocar de conversa
+  // ou de filtro. O resto da lista continua a do filtro — trocar de aba sozinho era o que fazia
+  // a lista inteira "sumir" depois de responder.
+  const aberta = useConversation(conversationId).data;
+  const [fixada, setFixada] = useState<Conversation | null>(null);
+  useEffect(() => { setFixada(null); }, [status, numberId, departmentId, origin, assigneeId, tagIds, search, ordem]);
+  useEffect(() => {
+    const c = conversations.data?.find((x) => x.id === conversationId);
+    if (c) setFixada(c);
+  }, [conversations.data, conversationId]);
+  const fixadaFora = fixada && fixada.id === conversationId && conversations.data && !conversations.data.some((c) => c.id === fixada.id)
+    ? { ...fixada, ...(aberta?.id === fixada.id ? aberta : {}) }
+    : null;
+  const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
   useEffect(() => { setMarcados([]); setSelecionando(false); }, [status, numberId, departmentId, origin, assigneeId]);
@@ -250,13 +266,13 @@ export function ConversationList() {
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {conversations.isLoading && <SkeletonConversations />}
         {conversations.isFetching && !conversations.isLoading && <div className="h-0.5 bg-accent/40 animate-pulse" />}
-        {conversations.data?.length === 0 && (
+        {conversations.data?.length === 0 && !fixadaFora && (
           <div className="p-8 text-center">
             <div className={cn('mx-auto w-10 h-10 rounded-full grid place-items-center mb-2', STATUS_META[status].soft, STATUS_META[status].color)}>0</div>
             <p className="text-sm text-muted">Nenhuma conversa em <b className="text-ink">{STATUS_META[status].short.toLowerCase()}</b>.</p>
           </div>
         )}
-        {visiveis.map((c) => (
+        {linhas.map((c) => (
           <ConversationRow
             key={c.id}
             c={c}

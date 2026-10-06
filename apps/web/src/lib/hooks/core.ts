@@ -249,7 +249,7 @@ export const useSendMessage = (conversationId: string | null, expectedNumberId?:
   return useMutation({
     mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ ...input, expectedNumberId }) }),
     // aparece na hora, mesmo se o socket estiver reconectando
-    onSuccess: (m) => { upsertMessageInCache(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); },
+    onSuccess: (m) => { upsertMessageInCache(qc, m); moverConversaParaTopo(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); },
     onError: (err) => {
       if (err instanceof ApiError && err.code === 'number_changed') {
         qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
@@ -258,6 +258,22 @@ export const useSendMessage = (conversationId: string | null, expectedNumberId?:
     },
   });
 };
+
+/**
+ * Atualiza só a conversa da mensagem enviada nas listas em cache (prévia, hora e, na ordem
+ * "recentes", sobe para o topo). As outras linhas ficam como estão — nada de trocar a lista
+ * inteira pelo que veio no envio. O refetch que o socket dispara depois corrige o resto.
+ */
+function moverConversaParaTopo(qc: ReturnType<typeof useQueryClient>, m: Message) {
+  for (const [key, lista] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
+    const i = lista?.findIndex((c) => c.id === m.conversationId) ?? -1;
+    if (!lista || i < 0) continue;
+    const atual = { ...lista[i], lastMessageAt: m.createdAt, lastMessagePreview: m.text || lista[i].lastMessagePreview, awaitingSince: null };
+    const ordem = (key[1] as { sort?: OrdemConversas } | undefined)?.sort ?? 'recent';
+    const resto = lista.filter((_, j) => j !== i);
+    qc.setQueryData<Conversation[]>(key, ordem === 'recent' ? [atual, ...resto] : lista.map((c, j) => (j === i ? atual : c)));
+  }
+}
 
 export const useSendNote = (conversationId: string | null) => {
   const qc = useQueryClient();
