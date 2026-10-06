@@ -37,6 +37,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | PATCH | `/tenants/me/agents/:id` | tenant_admin | Nome / ativo / `password` (redefine e revoga sessões) |
 | **Números** | | | |
 | GET | `/numbers` | todos | Números do tenant |
+| GET | `/numbers/:id/phonebook?q=&cursor=` | quem opera o número | Agenda do celular do número (sincronizada da Evolution), alfabética, 50 por página: `{ items: [{id, phone, name, contactId}], nextCursor, total? }` (`total` só na 1ª página). `q` filtra por nome ou telefone (≥ 3 dígitos). `contactId` preenchido = a pessoa já é contato |
 | POST | `/numbers/:id/contacts/sync` | `numbers.manage` | Relê agora a agenda de contatos do celular (só Evolution conectado; senão 400). Entra na fila do worker — devolve `{ queued: true }`. Também roda sozinho a cada 6 h ([Providers](04-providers-whatsapp.md)) |
 | GET | `/numbers/:id/templates?refresh=1` | quem opera o número | Templates **aprovados** (HSM) da WABA do número, normalizados em `MessageTemplate` (`@atendo/shared`): nome, idioma, categoria, cabeçalho/corpo/rodapé, botões e variáveis (`headerParams`, `bodyParams` — `1`, `2`… ou nomes). Cache de 5 min por número no processo da API; `refresh=1` busca de novo na Meta. Evolution = `[]`. O que o painel ainda não preenche (cabeçalho de mídia, botão com URL dinâmica, autenticação) vem com `unsupported` (motivo) |
 | POST | `/numbers` | tenant_admin | Cria e conecta (respeita `maxNumbers`) |

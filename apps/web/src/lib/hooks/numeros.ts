@@ -140,3 +140,20 @@ export const useSendTemplate = (conversationId: string | null, expectedNumberId?
 
 /** Reler agora a agenda de contatos do celular (Evolution). Roda no worker. */
 export const useSyncPhonebook = () => useMutation({ mutationFn: (numberId: string) => api<{ queued: boolean }>(`/numbers/${numberId}/contacts/sync`, { method: 'POST' }) });
+
+/** Linha da agenda do celular; `contactId` = a pessoa já é contato no painel. */
+export interface PhonebookItem { id: string; phone: string; name: string; contactId: string | null }
+/** Agenda do celular de um número (Evolution), paginada em ordem alfabética. `q` filtra nome/telefone. */
+export const usePhonebook = (numberId: string | null, q: string, enabled = true) =>
+  useInfiniteQuery({
+    queryKey: ['phonebook', numberId, q],
+    enabled: !!numberId && enabled,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => {
+      const p = new URLSearchParams();
+      if (q) p.set('q', q);
+      if (pageParam) p.set('cursor', pageParam);
+      return api<{ items: PhonebookItem[]; nextCursor: string | null; total?: number }>(`/numbers/${numberId}/phonebook${p.toString() ? `?${p}` : ''}`);
+    },
+    getNextPageParam: (last) => last.nextCursor,
+  });

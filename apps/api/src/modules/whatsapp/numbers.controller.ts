@@ -139,6 +139,43 @@ export class NumbersController {
   }
 
   /**
+   * Agenda do celular deste número (sincronizada da Evolution), em ordem alfabética, 50 por
+   * página. `q` filtra por nome ou telefone. Cada linha diz se a pessoa já é contato
+   * (`contactId`) — o "Nova conversa" usa o contato existente em vez de criar outro.
+   */
+  @Get(':id/phonebook')
+  async phonebook(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('q') q?: string, @Query('cursor') cursor?: string) {
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId }, select: { id: true } });
+    if (!canUseNumber(user, n.id)) throw new ForbiddenException('Você não opera este número.');
+    const termo = String(q ?? '').trim().slice(0, 100);
+    const digitos = termo.replace(/\D/g, '');
+    const where: Prisma.PhonebookEntryWhereInput = {
+      numberId: n.id,
+      ...(termo && { OR: [{ name: { contains: termo, mode: 'insensitive' } }, ...(digitos.length >= 3 ? [{ phone: { contains: digitos } }] : [])] }),
+    };
+    const PAGE = 50;
+    const [rows, total] = await Promise.all([
+      this.prisma.phonebookEntry.findMany({
+        where,
+        select: { id: true, phone: true, name: true },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        take: PAGE + 1,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+      }),
+      // total só na primeira página: é o "788 contatos" do cabeçalho
+      cursor ? Promise.resolve(undefined) : this.prisma.phonebookEntry.count({ where }),
+    ]);
+    const page = rows.slice(0, PAGE);
+    const contatos = await this.prisma.contact.findMany({ where: { tenantId: user.tenantId, phone: { in: page.map((r) => r.phone) } }, select: { id: true, phone: true } });
+    const porTelefone = new Map(contatos.map((c) => [c.phone, c.id]));
+    return {
+      items: page.map((r) => ({ id: r.id, phone: r.phone, name: r.name, contactId: porTelefone.get(r.phone) ?? null })),
+      nextCursor: rows.length > PAGE ? page[page.length - 1].id : null,
+      total,
+    };
+  }
+
+  /**
    * Reler agora a agenda de contatos do aparelho (Evolution). Roda no worker — a agenda pode ter
    * milhares de nomes; a resposta só confirma que entrou na fila. Também roda sozinho a cada 6 h.
    */

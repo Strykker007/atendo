@@ -8,7 +8,7 @@ import { toast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useNumbers, useStartConversation } from '@/lib/hooks';
+import { useNumbers, usePhonebook, useStartConversation, type PhonebookItem } from '@/lib/hooks';
 import { TemplateFields, useTemplateChoice } from './TemplateFields';
 
 type ContatoSel = { id: string; name: string | null; phone: string };
@@ -33,6 +33,8 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
   const [resultados, setResultados] = useState<{ contacts: ContatoSel[]; phonebook: AgendaSel[] }>({ contacts: [], phonebook: [] });
   const [novoTelefone, setNovoTelefone] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState('');
+  // agenda do celular aberta: o campo de busca passa a filtrar a lista dela
+  const [agendaAberta, setAgendaAberta] = useState(false);
 
   const [modo, setModo] = useState<'template' | 'texto'>('template');
   const [texto, setTexto] = useState('');
@@ -47,16 +49,18 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
     setNumberId(conectados.find((n) => n.id === filtroNumero)?.id ?? conectados[0].id);
   }, [conectados, filtroNumero, numberId]);
   useEffect(() => { setModo('template'); }, [numberId]);
+  // a agenda é do aparelho: número oficial não tem
+  useEffect(() => { if (isMeta) setAgendaAberta(false); }, [isMeta]);
 
   // busca: contatos da base e a agenda do aparelho sincronizada (quem ainda não é contato)
   useEffect(() => {
-    if (contato || busca.trim().length < 2) { setResultados({ contacts: [], phonebook: [] }); return; }
+    if (contato || agendaAberta || busca.trim().length < 2) { setResultados({ contacts: [], phonebook: [] }); return; }
     const t = setTimeout(async () => {
       try { setResultados(await api<{ contacts: ContatoSel[]; phonebook: AgendaSel[] }>(`/conversations/start/contacts?q=${encodeURIComponent(busca.trim())}`)); }
       catch { setResultados({ contacts: [], phonebook: [] }); }
     }, 300);
     return () => clearTimeout(t);
-  }, [busca, contato]);
+  }, [busca, contato, agendaAberta]);
 
   const digitos = busca.replace(/\D/g, '');
   const pareceTelefone = digitos.length >= 10 && /^[\d\s()+-]+$/.test(busca.trim());
@@ -94,8 +98,8 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="relative">
-              <input autoFocus value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou digitar o telefone" className={inputCls} />
-              {(resultados.contacts.length > 0 || resultados.phonebook.length > 0 || pareceTelefone) && (
+              <input autoFocus value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={agendaAberta ? 'Filtrar a agenda por nome ou telefone' : 'Buscar por nome ou digitar o telefone'} className={inputCls} />
+              {!agendaAberta && (resultados.contacts.length > 0 || resultados.phonebook.length > 0 || pareceTelefone) && (
                 <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-64 overflow-y-auto">
                   {resultados.contacts.map((r) => (
                     <button key={r.id} type="button" onClick={() => setContato(r)} className="w-full text-left px-3 py-1.5 text-sm hover:bg-field">
@@ -116,6 +120,22 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </div>
+          )}
+          {!contato && !novoTelefone && number && !isMeta && (
+            <button type="button" onClick={() => setAgendaAberta((v) => !v)} className={cn('mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium', agendaAberta ? 'text-ink' : 'text-accent-ink hover:underline')}>
+              <BookUser size={13} /> {agendaAberta ? 'Fechar agenda do celular' : `Ver agenda do celular (${number.label})`}
+            </button>
+          )}
+          {agendaAberta && !contato && !novoTelefone && number && (
+            <AgendaDoCelular
+              numberId={number.id}
+              filtro={busca}
+              onPick={(r) => {
+                if (r.contactId) setContato({ id: r.contactId, name: r.name, phone: r.phone });
+                else { setNovoTelefone(r.phone); setNovoNome(r.name); }
+                setAgendaAberta(false);
+              }}
+            />
           )}
         </Field>
         {novoTelefone && !contato && (
@@ -162,5 +182,49 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Agenda do celular do número, inteira e em ordem alfabética — para quem não lembra o nome
+ * exato. O campo de busca do modal filtra (com atraso, para não buscar a cada tecla); a lista
+ * carrega de 50 em 50. Quem já é contato vem marcado e abre o contato existente.
+ */
+function AgendaDoCelular({ numberId, filtro, onPick }: { numberId: string; filtro: string; onPick: (r: PhonebookItem) => void }) {
+  const [q, setQ] = useState(filtro.trim());
+  useEffect(() => { const t = setTimeout(() => setQ(filtro.trim()), 300); return () => clearTimeout(t); }, [filtro]);
+  const agenda = usePhonebook(numberId, q);
+  const itens = agenda.data?.pages.flatMap((p) => p.items) ?? [];
+  const total = agenda.data?.pages[0]?.total;
+  return (
+    <div className="mt-2 rounded-lg border border-line">
+      <div className="px-3 py-1.5 border-b border-line text-[11px] text-faint flex justify-between">
+        <span>{q ? 'Resultado na agenda' : 'Agenda do celular'}</span>
+        {total !== undefined && <span className="tnum">{total} contato{total === 1 ? '' : 's'}</span>}
+      </div>
+      <ul className="max-h-72 overflow-y-auto py-1">
+        {agenda.isLoading && <li className="px-3 py-2 text-sm text-muted">Carregando agenda…</li>}
+        {agenda.isError && <li className="px-3 py-2 text-sm text-danger-ink">Não foi possível carregar a agenda.</li>}
+        {!agenda.isLoading && !agenda.isError && !itens.length && (
+          <li className="px-3 py-2 text-sm text-muted">{q ? 'Ninguém na agenda com esse nome ou telefone.' : 'Agenda vazia. Em Números, use "Sincronizar agenda".'}</li>
+        )}
+        {itens.map((r) => (
+          <li key={r.id}>
+            <button type="button" onClick={() => onPick(r)} className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-sm hover:bg-field">
+              <span className="text-ink truncate">{r.name}</span>
+              <span className="text-muted tnum shrink-0">{formatPhone(r.phone)}</span>
+              {r.contactId && <span className="ml-auto shrink-0 text-[10px] font-semibold rounded px-1.5 py-0.5 bg-accent-soft text-accent-ink">já é contato</span>}
+            </button>
+          </li>
+        ))}
+        {agenda.hasNextPage && (
+          <li className="px-3 py-1.5">
+            <button type="button" onClick={() => agenda.fetchNextPage()} disabled={agenda.isFetchingNextPage} className="text-xs text-accent-ink hover:underline disabled:opacity-60">
+              {agenda.isFetchingNextPage ? 'Carregando…' : 'Carregar mais'}
+            </button>
+          </li>
+        )}
+      </ul>
+    </div>
   );
 }
