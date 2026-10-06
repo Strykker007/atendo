@@ -113,7 +113,7 @@ Dois temas, escolhidos no rodapé do menu (claro / escuro / sistema), aplicados 
 
 **Transparência em token** (`bg-muted/30`, `ring-accent/40`…) funciona porque `tailwind.config.ts` expõe cada token como `color-mix(in srgb, var(--x) calc(<alpha-value> * 100%), transparent)`. Antes era só `var(--x)`, e o Tailwind 3 não sabe aplicar `/NN` nisso: a classe não era gerada e ~60 usos no app não faziam nada (inclusive a onda do áudio recebido, que sumia). Se mudar o helper `v()`, mantenha o `<alpha-value>`.
 
-Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `color-mix` para o fundo suave — funcionam nos dois temas. Avatar: cor estável por telefone (`lib/avatar.ts`).
+Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `color-mix` para o fundo suave — funcionam nos dois temas. Avatar: cor estável por telefone (`lib/avatar.ts`). Foto ampliada: no cabeçalho do chat e na ficha do contato o avatar é clicável (`ZoomableAvatar`, dica "Clique para ampliar") e abre o `AvatarViewer` (`components/chat/AvatarViewer.tsx`) — foto grande ou, sem foto/URL expirada, a inicial grande com "Sem foto de perfil"; nome e telefone formatado embaixo; fecha com Esc (só ele, mesmo aberto dentro da ficha), clique fora ou X. Portal com `z-[60]`, animação em CSS (`.avatar-in/.avatar-out`, respeita `prefers-reduced-motion`). Na lista de conversas não: a linha inteira já é um botão.
 
 **Tipografia**: Sora (marca, títulos — `font-display`), Source Sans 3 (interface — padrão), IBM Plex Mono (horários, contadores, telefones — `font-mono` + `.tnum`). Carregadas por `next/font`.
 

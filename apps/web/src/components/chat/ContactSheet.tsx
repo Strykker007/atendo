@@ -5,6 +5,8 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
+import { ZoomableAvatar } from './AvatarViewer';
+import { formatPhone } from './ChannelBadge';
 import {
   useCan, useUpdateContact, useContactAttributes, useContactAttributeLabels, useSetContactAttributes,
   type Conversation, type ContactAttribute, type ContactAttributeType,
@@ -60,7 +62,13 @@ export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: 
   return (
     <Modal open onClose={onClose} title="Ficha do contato">
       <form onSubmit={salvar} className="space-y-3">
-        <div className="text-[12px] text-muted tnum">+{contact.phone}</div>
+        <div className="flex items-center gap-3">
+          <ZoomableAvatar name={contact.name ?? `+${contact.phone}`} phone={contact.phone} src={contact.avatarUrl} className="w-12 h-12 text-[18px]" />
+          <div className="min-w-0">
+            <div className="font-semibold text-sm text-ink truncate">{contact.name ?? 'Sem nome'}</div>
+            <div className="text-[12px] text-muted tnum">{formatPhone(contact.phone)}</div>
+          </div>
+        </div>
         <Field label="Nome"><input readOnly={!podeEditar} className={inputCls} value={form.name} onChange={set('name')} maxLength={80} placeholder="Como o cliente se chama" /></Field>
         <Field label="E-mail"><input readOnly={!podeEditar} className={inputCls} type="email" value={form.email} onChange={set('email')} maxLength={160} placeholder="para orçamento, nota fiscal…" /></Field>
         <Field label="Endereço"><input readOnly={!podeEditar} className={inputCls} value={form.address} onChange={set('address')} maxLength={300} placeholder="Rua, número, bairro, cidade" /></Field>

@@ -14,7 +14,7 @@ import { DepartmentBadge } from './DepartmentBadge';
 import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
-import { Avatar } from './Avatar';
+import { ZoomableAvatar } from './AvatarViewer';
 import { OriginBadge } from './OriginBadge';
 import { channelOffline } from './ChannelBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
@@ -500,7 +500,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             <ArrowLeft size={20} />
           </button>
         )}
-        <Avatar name={conv.contact.name ?? conv.contact.phone} phone={conv.contact.phone} src={conv.contact.avatarUrl} />
+        <ZoomableAvatar name={conv.contact.name ?? conv.contact.phone} phone={conv.contact.phone} src={conv.contact.avatarUrl} />
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-sm text-ink flex items-center gap-1.5 min-w-0">
             <span className="truncate">{conv.contact.name ?? `+${conv.contact.phone}`}</span>

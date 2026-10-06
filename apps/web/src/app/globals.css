@@ -143,6 +143,15 @@ body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antiali
 .animate-fade-in { animation: fade-in .18s ease-out; }
 @media (prefers-reduced-motion: reduce) { .animate-fade-in { animation: none; } }
 
+/* foto do contato ampliada (AvatarViewer): fundo esmaece, card cresce; saída 140ms */
+@keyframes avatar-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes avatar-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+@keyframes avatar-out { to { opacity: 0; transform: scale(.96); } }
+.avatar-backdrop-in { animation: avatar-backdrop-in .16s ease-out; }
+.avatar-in { animation: avatar-in .18s ease-out; }
+.avatar-out { animation: avatar-out .14s ease-in forwards; }
+@media (prefers-reduced-motion: reduce) { .avatar-backdrop-in, .avatar-in, .avatar-out { animation: none; } }
+
 .scrollbar-thin::-webkit-scrollbar { width: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; }
 
