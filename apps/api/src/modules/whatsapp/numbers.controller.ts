@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
@@ -61,7 +61,7 @@ export class NumbersController {
   @Get()
   list(@CurrentUser() user: AuthUser) {
     return this.prisma.whatsAppNumber.findMany({
-      where: { tenantId: user.tenantId },
+      where: { tenantId: user.tenantId, deletedAt: null },
       select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -74,18 +74,21 @@ export class NumbersController {
   async create(@CurrentUser() user: AuthUser, @Body() dto: CreateNumberDto) {
     const externalId = String(dto.config.phoneNumberId ?? dto.config.instanceName ?? `atendo-${user.tenantId.slice(0, 8)}-${dto.phone}`);
     const config = dto.provider === 'evolution' ? { instanceName: externalId, ...dto.config } : dto.config;
-    const n = await this.prisma.whatsAppNumber.create({
-      data: {
-        tenantId: user.tenantId,
-        phone: dto.phone.replace(/^\+/, ''),
-        label: dto.label,
-        ...(dto.color && { color: dto.color }),
-        provider: dto.provider,
-        sendDelay: defaultSendDelay(dto.provider),
-        externalId,
-        providerConfig: this.crypto.encryptJson(config),
-      },
-    });
+    const phone = dto.phone.replace(/^\+/, '');
+    const data = {
+      label: dto.label,
+      ...(dto.color && { color: dto.color }),
+      provider: dto.provider,
+      sendDelay: defaultSendDelay(dto.provider),
+      externalId,
+      providerConfig: this.crypto.encryptJson(config),
+    };
+    // mesmo telefone já cadastrado nesta conta: excluído volta com o histórico; ativo é duplicata
+    const existing = await this.prisma.whatsAppNumber.findUnique({ where: { tenantId_phone: { tenantId: user.tenantId, phone } }, select: { id: true, deletedAt: true } });
+    if (existing && !existing.deletedAt) throw new ConflictException('Este número já está cadastrado.');
+    const n = existing
+      ? await this.prisma.whatsAppNumber.update({ where: { id: existing.id }, data: { ...data, deletedAt: null, isActive: true, status: 'disconnected' } })
+      : await this.prisma.whatsAppNumber.create({ data: { tenantId: user.tenantId, phone, ...data } });
     return this.numbers.switchProvider(n.id, dto.provider, config as any);
   }
 
@@ -93,7 +96,7 @@ export class NumbersController {
   @Put(':id/provider')
   @RequirePermission('numbers.manage')
   async switchProvider(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: SwitchProviderDto) {
-    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
+    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
     return this.numbers.switchProvider(id, dto.provider, dto.config as any);
   }
 
@@ -110,7 +113,7 @@ export class NumbersController {
     const ehDono = user.role === 'super_admin' || !!user.impersonatorId;
     const custo = ehDono && infraCostMonth !== undefined ? { infraCostMonth } : {};
     return this.prisma.whatsAppNumber.update({
-      where: { id, tenantId: user.tenantId },
+      where: { id, tenantId: user.tenantId, deletedAt: null },
       data: { ...resto, ...custo, ...limites, ...(endWarmup && { warmupStartedAt: null }) },
       select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
     });
@@ -120,7 +123,7 @@ export class NumbersController {
   @Get(':id/sending')
   async sending(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const n = await this.prisma.whatsAppNumber.findFirstOrThrow({
-      where: { id, tenantId: user.tenantId },
+      where: { id, tenantId: user.tenantId, deletedAt: null },
       select: { id: true, provider: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true },
     });
     const status = await this.pacer.dailyStatus(n);
@@ -134,7 +137,7 @@ export class NumbersController {
    */
   @Get(':id/templates')
   async templates(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('refresh') refresh?: string) {
-    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId }, select: { id: true } });
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null }, select: { id: true } });
     if (!canUseNumber(user, n.id)) throw new ForbiddenException('Você não opera este número.');
     return this.numbers.templates(n.id, refresh === '1' || refresh === 'true');
   }
@@ -146,7 +149,7 @@ export class NumbersController {
    */
   @Get(':id/phonebook')
   async phonebook(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('q') q?: string, @Query('cursor') cursor?: string) {
-    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId }, select: { id: true } });
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null }, select: { id: true } });
     if (!canUseNumber(user, n.id)) throw new ForbiddenException('Você não opera este número.');
     // sem acento, por palavras em qualquer ordem, telefone com ou sem máscara (common/text-search.ts)
     const where: Prisma.PhonebookEntryWhereInput = { numberId: n.id, ...textSearch(q) };
@@ -179,19 +182,28 @@ export class NumbersController {
   @Post(':id/contacts/sync')
   @RequirePermission('numbers.manage')
   async syncContacts(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId }, select: { id: true, provider: true, status: true } });
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null }, select: { id: true, provider: true, status: true } });
     if (n.provider !== 'evolution') throw new BadRequestException('A API oficial não dá acesso à agenda do celular.');
     if (n.status !== 'connected') throw new BadRequestException('Conecte o número para sincronizar a agenda.');
     await this.contactsSync.enqueue(n.id);
     return { queued: true };
   }
 
-  /** Remove o número do provider e do banco (conversas vão junto — cascade). */
+  /** Tira o número do provider e arquiva (conversas ficam; recadastrar o mesmo telefone as traz de volta). */
   @Delete(':id')
   @RequirePermission('numbers.manage')
   async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
+    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
     await this.numbers.remove(id);
+    return { ok: true };
+  }
+
+  /** Desconecta a sessão sem excluir o número (Evolution: logout; reconectar gera QR novo). */
+  @Post(':id/disconnect')
+  @RequirePermission('numbers.manage')
+  async disconnect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
+    await this.numbers.disconnect(id);
     return { ok: true };
   }
 
@@ -199,7 +211,7 @@ export class NumbersController {
   @Post(':id/connect')
   @RequirePermission('numbers.manage')
   async connect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId } });
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
     const ctx = await this.numbers.context(n.id);
     return this.numbers.switchProvider(n.id, n.provider, ctx.config as any);
   }

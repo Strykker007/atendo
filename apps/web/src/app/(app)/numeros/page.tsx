@@ -1,9 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone, BookUser } from 'lucide-react';
+import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone, BookUser, Unplug } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
-import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, useSyncPhonebook, type NumberItem } from '@/lib/hooks';
+import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useDisconnectNumber, useUsage, useSyncPhonebook, type NumberItem } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
@@ -28,10 +28,12 @@ export default function NumerosPage() {
   const syncAgenda = useSyncPhonebook();
   const update = useUpdateNumber();
   const remove = useDeleteNumber();
+  const disconnect = useDisconnectNumber();
   const [creating, setCreating] = useState(false);
   const [switching, setSwitching] = useState<NumberItem | null>(null);
   const [qr, setQr] = useState<{ id: string; initial?: string } | null>(null);
   const [deleting, setDeleting] = useState<NumberItem | null>(null);
+  const [disconnecting, setDisconnecting] = useState<NumberItem | null>(null);
 
   // null = ilimitado; undefined = ainda carregando/sem plano
   const max = usage.data?.limits?.maxNumbers;
@@ -163,6 +165,9 @@ export default function NumerosPage() {
                     {n.provider === 'evolution' && n.status === 'connected' && (
                       <Button size="sm" variant="ghost" icon={<BookUser size={14} />} title="Atualiza o nome dos contatos com a agenda do celular" onClick={() => syncAgenda.mutateAsync(n.id).then(() => toast.ok('Sincronizando a agenda do celular. Os nomes atualizam em alguns instantes.')).catch(toast.err)} loading={syncAgenda.isPending && syncAgenda.variables === n.id}>Sincronizar agenda</Button>
                     )}
+                    {n.provider === 'evolution' && n.status === 'connected' && (
+                      <Button size="sm" variant="ghost" icon={<Unplug size={14} />} title="Encerra a sessão do WhatsApp; o número e as conversas ficam" onClick={() => setDisconnecting(n)} disabled={busyId === n.id}>Desconectar</Button>
+                    )}
                     <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)} disabled={busyId === n.id}>Trocar provider</Button>
                     <Button size="sm" variant="ghost" icon={<Power size={14} />} onClick={() => toggleActive(n)} loading={busyId === n.id && update.isPending}>{n.isActive ? 'Desativar' : 'Ativar'}</Button>
                     <Button size="sm" variant="subtle" icon={<Trash2 size={14} />} onClick={() => setDeleting(n)} disabled={busyId === n.id}>Excluir</Button>
@@ -183,8 +188,16 @@ export default function NumerosPage() {
         title="Excluir número"
         danger
         confirmLabel="Excluir"
-        text={`"${deleting?.label}" será desconectado e todas as conversas dele serão removidas. Isso não pode ser desfeito.`}
+        text={`"${deleting?.label}" será desconectado e sai da lista, junto com as conversas dele. O histórico fica guardado: cadastrar este mesmo telefone de novo nesta conta traz as conversas de volta.`}
         onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Número excluído'); } catch (err) { toast.err(err); throw err; } }}
+      />
+      <ConfirmDialog
+        open={!!disconnecting}
+        onClose={() => setDisconnecting(null)}
+        title="Desconectar número"
+        confirmLabel="Desconectar"
+        text={`A sessão de "${disconnecting?.label}" no WhatsApp será encerrada. O número e as conversas continuam aqui; para voltar, use "Conectar (QR)".`}
+        onConfirm={async () => { if (!disconnecting) return; try { await disconnect.mutateAsync(disconnecting.id); toast.ok('Número desconectado'); } catch (err) { toast.err(err); throw err; } }}
       />
     </div>
   );

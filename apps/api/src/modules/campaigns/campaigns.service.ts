@@ -52,7 +52,7 @@ export class CampaignsService {
     userId: string,
     dto: { name: string; numberId: string; text: string; mediaKey?: string; mediaType?: string; mediaName?: string; template?: unknown; startAt?: string; businessHoursOnly?: boolean; audience: Audience },
   ) {
-    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: dto.numberId, tenantId } });
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: dto.numberId, tenantId, deletedAt: null } });
     if (!number) throw new NotFoundException('Número não encontrado');
 
     const contacts = await this.prisma.contact.findMany({ where: this.audienceWhere(tenantId, dto.audience), select: { id: true } });

@@ -97,7 +97,7 @@ export class SchedulesService {
   /** Número passa a usar um quadro próprio (null = o padrão do cliente). */
   async setNumberSchedule(tenantId: string, numberId: string, scheduleId: string | null) {
     if (scheduleId) await this.own(tenantId, scheduleId);
-    const n = await this.prisma.whatsAppNumber.updateMany({ where: { id: numberId, tenantId }, data: { scheduleId } });
+    const n = await this.prisma.whatsAppNumber.updateMany({ where: { id: numberId, tenantId, deletedAt: null }, data: { scheduleId } });
     if (!n.count) throw new NotFoundException('Número não encontrado');
     return { ok: true };
   }

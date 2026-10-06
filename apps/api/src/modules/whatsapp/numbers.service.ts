@@ -126,11 +126,27 @@ export class NumbersService {
     return { ...updated, providerConfig: undefined, status: result.status, qrCode: result.qrCode };
   }
 
+  /**
+   * Excluir = sai do provider e some do painel, mas o registro fica arquivado: apagar levava
+   * junto (cascade) todas as conversas, e quem só queria refazer a conexão perdia o histórico.
+   * Recadastrar o mesmo telefone na mesma conta revive o número (ver `revive`).
+   */
   async remove(numberId: string) {
     const ctx = await this.context(numberId);
     const provider = this.registry.get(ctx.provider);
     await (provider.destroy ? provider.destroy(ctx) : provider.disconnect(ctx)).catch(() => undefined);
-    await this.prisma.whatsAppNumber.delete({ where: { id: numberId } });
+    await this.prisma.whatsAppNumber.update({
+      where: { id: numberId },
+      // externalId é único global: liberar deixa o mesmo instanceName/phone_number_id ser usado de novo
+      data: { deletedAt: new Date(), isActive: false, status: 'disconnected', externalId: `removed:${numberId}` },
+    });
+  }
+
+  /** Desconecta a sessão (logout na Evolution) sem excluir: o número e as conversas ficam; "Reconectar" gera QR novo. */
+  async disconnect(numberId: string) {
+    const ctx = await this.context(numberId);
+    await this.registry.get(ctx.provider).disconnect(ctx);
+    await this.prisma.whatsAppNumber.update({ where: { id: numberId }, data: { status: 'disconnected' } });
   }
 
   async findByExternal(provider: ProviderKind, externalId: string) {

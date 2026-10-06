@@ -49,6 +49,11 @@ export const useDeleteNumber = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/numbers/${id}`, { method: 'DELETE' }), onSuccess: invalidateNumbers(qc) });
 };
+/** Desconecta a sessão (logout na Evolution) sem excluir o número nem as conversas. */
+export const useDisconnectNumber = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api(`/numbers/${id}/disconnect`, { method: 'POST' }), onSuccess: invalidateNumbers(qc) });
+};
 /** QR code mais recente por número, alimentado pelo socket (evento `number`). */
 export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-qr', id], enabled: false, queryFn: () => null as string | null });
 

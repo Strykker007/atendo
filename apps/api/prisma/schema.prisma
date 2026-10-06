@@ -321,6 +321,10 @@ model WhatsAppNumber {
   /// Limites da fila de envio (`Partial<SendLimits>` do shared); o que faltar = padrão do provider
   sendLimits     Json?
   isActive       Boolean      @default(true)
+  /// Excluído pelo cliente. O registro fica (e com ele conversas, mensagens e agenda): recadastrar
+  /// o MESMO telefone na MESMA conta revive este número com o histórico. `externalId` vira
+  /// `removed:<id>` para liberar o instanceName/phone_number_id.
+  deletedAt      DateTime?
   /// quadro de horários próprio; nulo = o padrão do cliente
   scheduleId     String?
   createdAt      DateTime     @default(now())

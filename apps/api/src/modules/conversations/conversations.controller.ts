@@ -151,7 +151,7 @@ export class ConversationsController {
     let template;
     if (dto.template) {
       // o número tem de ser do tenant ANTES de perguntar à Meta pelos templates dele
-      await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: dto.numberId, tenantId: u.tenantId }, select: { id: true } });
+      await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: dto.numberId, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
       template = { definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language), header: dto.template.header, body: dto.template.body };
     }
     return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey });

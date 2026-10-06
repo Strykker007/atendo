@@ -193,7 +193,7 @@ class TenantsController {
 
     if (numberIds) {
       // só números deste cliente: os ids vêm do corpo da requisição
-      const valid = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: numberIds }, tenantId: u.tenantId }, select: { id: true } });
+      const valid = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: numberIds }, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
       await this.prisma.$transaction([
         this.prisma.userNumber.deleteMany({ where: { userId: id } }),
         this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: id, numberId: n.id })), skipDuplicates: true }),

@@ -44,7 +44,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | PUT | `/numbers/:id/provider` | tenant_admin | **Troca de provider** |
 | POST | `/numbers/:id/connect` | tenant_admin | Reconecta / QR novo |
 | PATCH | `/numbers/:id` | tenant_admin | Label / cor (`color`, `#rrggbb`) / ativo / `sendDelay` / `sendLimits` (`sendDailyLimit` e `endWarmup` ainda são aceitos, mas a tela não usa mais — teto diário desligado) |
-| DELETE | `/numbers/:id` | tenant_admin | Remove (cascade em conversas) |
+| POST | `/numbers/:id/disconnect` | `numbers.manage` | Encerra a sessão (logout na Evolution) sem excluir; número e conversas ficam, status `disconnected` |
+| DELETE | `/numbers/:id` | tenant_admin | Exclui = tira do provider e **arquiva** (`deletedAt`): conversas ficam guardadas, fora da lista. `POST /numbers` com o mesmo telefone na mesma conta revive o número com o histórico; telefone ativo duplicado → 409 |
 | **Conversas** | | | |
 | GET | `/conversations?status=&numberId=&departmentId=&tagIds=a,b&search=&origin=&assigneeId=&sort=&cursor=` | todos | Lista por cursor. `departmentId` = id ou `none` (sem departamento), sempre interseccionado com o escopo de departamentos do usuário ([Departamentos](departamentos.md)). Em `in_progress`, atendente vê só as suas; admin vê todas ou filtra por `assigneeId`. `sort=waiting` ordena por quem espera resposta há mais tempo (`awaitingSince` asc, já respondidas por último). `search` = [busca textual](#busca-textual-de-contatos) no nome/e-mail/telefone do contato |
 | GET | `/conversations/counts?numberId=&departmentId=` | todos | `{waiting, in_progress, closed, in_progress_mine, in_progress_all}` (`in_progress` já respeita a visão do usuário) |

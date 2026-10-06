@@ -173,6 +173,8 @@ export class ConversationsService {
       q.assigneeId && isAdmin ? { assigneeId: q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
       tenantId,
+      // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
+      number: { deletedAt: null },
       ...(q.status && { status: q.status }),
       ...(q.origin && { origin: q.origin }),
       ...ownership,
@@ -204,7 +206,7 @@ export class ConversationsService {
   async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string) {
     const scoped = narrowTo(viewer, numberId);
     const dept = departmentWhere(viewer, departmentId);
-    const base: Prisma.ConversationWhereInput = { tenantId, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
+    const base: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
     const [waiting, closed, mine, all] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
