@@ -24,3 +24,11 @@ export function nomeDaAgendaTroca(contact: { name: string | null; nameSource: Co
   if (!novo || novo === contact.name || jaVeioEmMensagem) return false;
   return contact.nameSource !== 'manual' || !contact.name;
 }
+
+/**
+ * Entre os registros de agenda de um telefone (um por número de WhatsApp do cliente), qual vale:
+ * o da agenda do número onde a conversa acontece; senão o atualizado mais recentemente.
+ */
+export function escolherDaAgenda<T extends { numberId: string; name: string; updatedAt: Date }>(entradas: T[], numberId: string): T | undefined {
+  return entradas.find((e) => e.numberId === numberId) ?? [...entradas].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+}

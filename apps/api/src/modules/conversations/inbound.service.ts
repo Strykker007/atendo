@@ -12,7 +12,7 @@ import { UsageService } from '../billing/usage.service';
 import { ConversationsGateway } from './conversations.gateway';
 import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './conversations.service';
 import { decidirEntrada, voltandoDepoisDeEncerrado } from './reopen';
-import { nomeDaAgendaTroca, pushNameTrocaNome } from './contact-name';
+import { escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome } from './contact-name';
 
 /**
  * Tudo que **entra** pelo provider: mensagem recebida, mensagem digitada no celular, confirmação
@@ -60,11 +60,8 @@ export class InboundService {
     // digitada no celular do cliente, não no painel: entra como enviada
     if (msg.fromMe) return this.ingestFromDevice(number, msg);
 
-    let contact = await this.prisma.contact.upsert({
-      where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } },
-      create: { tenantId: number.tenantId, phone: msg.from, name: msg.contactName },
-      update: {},
-    });
+    let contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
+      ?? await this.createContact(number, msg.from, msg.contactName);
     // o pushName só troca nome que também veio do WhatsApp (ou contato ainda sem nome): nome da
     // ficha ou da agenda não pode ser desfeito pela próxima mensagem do cliente
     if (pushNameTrocaNome(contact, msg.contactName)) {
@@ -166,13 +163,10 @@ export class InboundService {
    * robô respondendo ao dono do número.
    */
   private async ingestFromDevice(number: WhatsAppNumber, msg: InboundMessage) {
-    const contact = await this.prisma.contact.upsert({
-      where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } },
-      // sem nome: o pushName desta mensagem é de quem a enviou (o dono do número), não do
-      // contato. O nome certo chega na primeira mensagem que o contato mandar.
-      create: { tenantId: number.tenantId, phone: msg.from },
-      update: {},
-    });
+    // sem pushName: o desta mensagem é de quem a enviou (o dono do número), não do contato.
+    // Nome só da agenda; senão chega na primeira mensagem que o contato mandar.
+    const contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
+      ?? await this.createContact(number, msg.from);
 
     // mesma regra da entrada: uma conversa por pessoa neste número (ver reopen.ts)
     let conversation = await this.prisma.conversation.findFirst({
@@ -311,21 +305,48 @@ export class InboundService {
   }
 
   /**
-   * Nome da sincronização de contatos (agenda do celular). Só atualiza contato que já existe:
-   * a agenda tem milhares de pessoas e não pode criar contato no painel.
+   * Contato novo: nasce com o nome da agenda do celular, se houver (`phonebook_entries`); senão
+   * com o pushName. `upsert` porque duas mensagens da mesma pessoa podem chegar juntas.
+   */
+  private async createContact(number: WhatsAppNumber, phone: string, pushName?: string) {
+    const agenda = escolherDaAgenda(
+      await this.prisma.phonebookEntry.findMany({ where: { tenantId: number.tenantId, phone }, take: 10 }),
+      number.id,
+    );
+    const inicial = agenda ? { name: agenda.name, nameSource: 'agenda' as const } : { name: pushName?.trim() || null, nameSource: 'whatsapp' as const };
+    return this.prisma.contact.upsert({
+      where: { tenantId_phone: { tenantId: number.tenantId, phone } },
+      create: { tenantId: number.tenantId, phone, ...inicial },
+      update: {},
+    });
+  }
+
+  /**
+   * Nome da sincronização de contatos (agenda do celular). Guarda na agenda do número
+   * (`phonebook_entries`) e, se a pessoa já é contato, aplica a ela. Não cria contato: a agenda
+   * tem milhares de pessoas e não pode aparecer no painel.
+   *
+   * O mesmo evento também chega com o pushName de cada mensagem: se o contato já mandou
+   * mensagem com exatamente esse nome, não é agenda — nem guarda, nem aplica.
    */
   async applyContactName(number: WhatsAppNumber, c: { phone: string; name: string }) {
+    const name = c.name.trim();
     const contact = await this.prisma.contact.findUnique({
       where: { tenantId_phone: { tenantId: number.tenantId, phone: c.phone } },
       select: { id: true, name: true, nameSource: true },
     });
-    if (!contact) return;
-    const jaVeioEmMensagem = !!(await this.prisma.message.findFirst({
+    const jaVeioEmMensagem = !!contact && !!(await this.prisma.message.findFirst({
       where: { direction: 'in', conversation: { contactId: contact.id }, raw: { path: ['pushName'], equals: c.name } },
       select: { id: true },
     }));
-    if (!nomeDaAgendaTroca(contact, c.name, jaVeioEmMensagem)) return;
-    await this.prisma.contact.update({ where: { id: contact.id }, data: { name: c.name.trim(), nameSource: 'agenda' } });
+    if (jaVeioEmMensagem) return;
+    await this.prisma.phonebookEntry.upsert({
+      where: { numberId_phone: { numberId: number.id, phone: c.phone } },
+      create: { tenantId: number.tenantId, numberId: number.id, phone: c.phone, name },
+      update: { name },
+    });
+    if (!contact || !nomeDaAgendaTroca(contact, name, false)) return;
+    await this.prisma.contact.update({ where: { id: contact.id }, data: { name, nameSource: 'agenda' } });
     await this.emitContactConversations(number.tenantId, contact.id);
   }
 

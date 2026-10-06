@@ -328,6 +328,7 @@ model WhatsAppNumber {
   usage         MessageUsage[]
   users         UserNumber[]
   campaigns     Campaign[]
+  phonebook     PhonebookEntry[]
 
   @@unique([provider, externalId])
   @@unique([tenantId, phone])
@@ -384,6 +385,25 @@ enum ContactNameSource {
   agenda
   /// digitado pela equipe na ficha ou pelo próprio contato num fluxo
   manual
+}
+
+/// Agenda do celular de um número (nome salvo pelo dono do aparelho), sincronizada pela
+/// Evolution. NÃO é contato: a agenda tem milhares de pessoas e não aparece no painel. Serve
+/// para o contato já nascer com o nome da agenda quando a pessoa conversar pela primeira vez.
+model PhonebookEntry {
+  id        String   @id @default(uuid())
+  tenantId  String
+  numberId  String
+  /// telefone do contato, só dígitos (mesmo formato de contacts.phone)
+  phone     String
+  name      String
+  updatedAt DateTime @updatedAt
+
+  number WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
+
+  @@unique([numberId, phone])
+  @@index([tenantId, phone])
+  @@map("phonebook_entries")
 }
 
 enum ContactAttributeType {

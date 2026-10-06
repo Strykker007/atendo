@@ -250,7 +250,7 @@ Prioridade **manual > agenda > whatsapp**:
 | Origem | Quem grava | Pode ser trocado por |
 |---|---|---|
 | `manual` | ficha (`PATCH /conversations/contacts/:id`, só quando o nome muda), bloco Salvar do fluxo com destino *nome*, `sendToPhone` com nome | só outra edição manual. Apagar o nome na ficha volta para `whatsapp` |
-| `agenda` | eventos `contacts.upsert`/`contacts.update` da Evolution (`InboundService.applyContactName`) | outra sincronização da agenda e edição manual |
+| `agenda` | eventos `contacts.upsert`/`contacts.update` da Evolution (`InboundService.applyContactName`) ou, na criação do contato, `phonebook_entries` | outra sincronização da agenda e edição manual |
 | `whatsapp` | `pushName` da mensagem recebida (nunca de mensagem `fromMe`) | qualquer um, inclusive o próximo pushName |
 
 A regra fica em `conversations/contact-name.ts` (`pushNameTrocaNome`, `nomeDaAgendaTroca`).
@@ -259,8 +259,11 @@ A regra fica em `conversations/contact-name.ts` (`pushNameTrocaNome`, `nomeDaAge
 
 - o parser descarta `@lid`, grupos, vazio e nome que é só o número (`nomeDeContatoValido`);
 - o webhook enfileira esses eventos com **30 s de atraso**, para a mensagem que os originou já estar gravada (a fila roda com concorrência 10);
-- se o contato já mandou mensagem com exatamente esse pushName, é pushName → ignorado (o caminho das mensagens cuida); senão vira nome `agenda`;
-- só atualiza contato que **já existe** — a agenda tem milhares de pessoas e não cria contato no painel.
+- se o contato já mandou mensagem com exatamente esse pushName, é pushName → ignorado (o caminho das mensagens cuida);
+- senão é agenda: grava em **`phonebook_entries`** (agenda do número: `numberId` + telefone + nome) e, se a pessoa já é contato, aplica a ela como `agenda`;
+- **não cria contato** — a agenda tem milhares de pessoas e não aparece no painel.
+
+**Contato novo nasce com o nome da agenda.** Ao criar o contato (primeira mensagem dele, ou a primeira enviada pelo celular do cliente), `InboundService.createContact` consulta `phonebook_entries` do tenant — de preferência a agenda do número onde a conversa acontece (`escolherDaAgenda`) — e cria com origem `agenda`; sem registro, usa o pushName (`whatsapp`). Assim o reparear por QR, que traz a agenda inteira, só é preciso **uma vez**: o que for salvo no celular depois chega pelo mesmo evento.
 
 **Contato que nasce sem nome** (conversa começada pelo celular do cliente): o processor pergunta à Evolution (`POST /chat/findContacts`, `provider.contactName`). O que ela guardou mistura agenda e pushName, então entra como `whatsapp`.
  Antes, **toda mensagem recebida trocava o nome pelo pushName**, desfazendo a correção feita na ficha. A migração `20261017000000_contact_name_source` marcou como `manual` quem tinha nome diferente do pushName da última mensagem recebida (nome que só pode ter vindo da ficha, de fluxo ou de cadastro).

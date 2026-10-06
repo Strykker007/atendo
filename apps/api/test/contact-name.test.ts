@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nomeDaAgendaTroca, pushNameTrocaNome } from '../src/modules/conversations/contact-name';
+import { escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome } from '../src/modules/conversations/contact-name';
 import { nomeDeContatoValido } from '../src/modules/whatsapp/providers/evolution.provider';
 
 describe('pushNameTrocaNome', () => {
@@ -56,5 +56,21 @@ describe('nomeDeContatoValido', () => {
 
   it('aceita nome com número no meio', () => {
     expect(nomeDeContatoValido('Loja 2 Centro', '553499917253')).toBe(true);
+  });
+});
+
+describe('escolherDaAgenda', () => {
+  const e = (numberId: string, name: string, dia: number) => ({ numberId, name, updatedAt: new Date(2026, 9, dia) });
+
+  it('prefere a agenda do número onde a conversa acontece', () => {
+    expect(escolherDaAgenda([e('outro', 'Ed', 9), e('este', 'Ednilton Criatura', 1)], 'este')?.name).toBe('Ednilton Criatura');
+  });
+
+  it('sem registro do número, usa o mais recente de outro número da empresa', () => {
+    expect(escolherDaAgenda([e('a', 'Antigo', 1), e('b', 'Novo', 5)], 'este')?.name).toBe('Novo');
+  });
+
+  it('sem agenda, nada', () => {
+    expect(escolherDaAgenda([], 'este')).toBeUndefined();
   });
 });

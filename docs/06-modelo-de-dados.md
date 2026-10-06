@@ -131,3 +131,5 @@ resposta já foi enviada (uma vez por conversa a cada período). Substituiu `bus
 **contact_attributes** — campos livres da ficha de **um** contato (`label`, `type`
 `ContactAttributeType`: text, number, date, `value` em texto, `position`). Cada cliente tem os
 seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos-personalizados.md).
+
+**phonebook_entries** — agenda do celular de cada número (`numberId`, `phone`, `name`, único por número + telefone), vinda da sincronização de contatos da Evolution. **Não é contato** e não aparece no painel; serve para o contato nascer com o nome da agenda. Cai junto com o número (cascade). Ver [providers › De onde vem o nome do contato](04-providers-whatsapp.md#de-onde-vem-o-nome-do-contato-contactsnamesource).
