@@ -905,6 +905,11 @@ model SchedulingSettings {
   numberId String?
   /// quantos dias à frente o robô oferece horários
   daysAhead Int @default(7)
+  /// template aprovado (Meta) para lembrete fora da janela de 24h:
+  /// `{ name, language, header?: {"1": "…"}, body?: {"1": "{{contact.first_name}}", "2": "{{data}}"} }`.
+  /// Identificado por nome + idioma (é como a Cloud API envia). Null = sem template: lembrete
+  /// em número oficial para quem não escreveu nas últimas 24h é recusado (fica no log)
+  reminderTemplate Json?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 

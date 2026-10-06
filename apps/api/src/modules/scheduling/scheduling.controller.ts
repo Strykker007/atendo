@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsBoolean, IsDateString, IsEnum, IsHexColor, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min } from 'class-validator';
-import { AppointmentStatus } from '@prisma/client';
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsHexColor, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { AppointmentStatus, Prisma } from '@prisma/client';
+import { TemplateChoiceDto } from '../whatsapp/template.dto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
@@ -45,6 +47,8 @@ class SettingsDto {
   @IsOptional() @IsInt() @Min(0) proReminderMinutes?: number;
   @IsOptional() @IsUUID() numberId?: string;
   @IsOptional() @IsInt() @Min(1) daysAhead?: number;
+  /** template (Meta) do lembrete fora da janela de 24h; null = remover */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @ValidateNested() @Type(() => TemplateChoiceDto) reminderTemplate?: TemplateChoiceDto | null;
 }
 class CreateAppointmentDto {
   @IsUUID() professionalId: string;
@@ -81,7 +85,9 @@ export class SchedulingController {
   @RequirePermission('agenda.manage')
   async updateSettings(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     await this.scheduling.settings(u.tenantId);
-    return this.prisma.schedulingSettings.update({ where: { tenantId: u.tenantId }, data: dto });
+    const { reminderTemplate, ...rest } = dto;
+    const tpl = reminderTemplate === undefined ? {} : { reminderTemplate: reminderTemplate === null ? Prisma.DbNull : ({ ...reminderTemplate } as Prisma.InputJsonValue) };
+    return this.prisma.schedulingSettings.update({ where: { tenantId: u.tenantId }, data: { ...rest, ...tpl } });
   }
 
   // ----- profissionais -----

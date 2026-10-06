@@ -258,6 +258,19 @@ Emoji, menção e resposta rápida entram **no ponto do cursor**, não no fim: e
 
 **Menção** insere `@Nome` e serve para a nota interna ("@Ana, esse é seu cliente"). Ela **não notifica** ninguém ainda — não existe notificação interna no sistema, e fingir que avisa seria pior que não ter.
 
+## Nova conversa (disparo ativo)
+
+Botão **💬+** ao lado da busca da lista abre `NewConversationModal`: contato (busca nas conversas por nome/telefone, ou digitar um telefone novo + nome opcional), **número de saída** (só conectados; padrão = o do filtro da lista) e a mensagem:
+
+- **API oficial (Meta):** *Template aprovado* (padrão) — seletor com botão de sincronizar (`?refresh=1`), um campo por variável (o `{{1}}` do corpo já vem com `{{contact.first_name}}`), pré-visualização e aviso de cobrança. *Texto livre* fica disponível, mas só é aceito se o contato escreveu nas últimas 24h.
+- **Evolution:** texto livre (aceita variáveis).
+
+A busca (`GET /conversations/start/contacts`) traz contatos da base e, numa seção **Agenda do celular**, nomes sincronizados do aparelho que ainda não são contato (escolher um preenche telefone + nome e, se possível, o número de onde veio).
+
+**Janela de 24h fechada no chat.** Conversa em número da API oficial cujo contato não escreve há 24h troca o composer por uma barra amarela *"Janela de 24h fechada"* com **Enviar template** (`TemplateSendModal`) e o atalho da nota interna. O relógio é o mesmo da lista (`useMinuto`), então a barra aparece sozinha quando a janela vence com a conversa aberta. O seletor (`TemplateFields` + `useTemplateChoice`) é o mesmo do *Nova conversa* e do template de lembrete da Agenda.
+
+Enviou → a lista vai para *Atendendo* e a conversa abre. Uma `idempotencyKey` por abertura do modal evita envio duplo no clique duplo.
+
 ## Uma conversa, vários atendimentos
 
 A lista mostra **uma linha por pessoa**, não uma por atendimento. Encerrar e receber mensagem de novo **reabre a mesma conversa** (volta para *Aguardando*) em vez de criar outra — o contato deixa de aparecer duplicado, em "encerrado" e em "aguardando" ao mesmo tempo, com o histórico partido entre as duas.

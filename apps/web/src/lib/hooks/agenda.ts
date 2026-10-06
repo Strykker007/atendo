@@ -12,7 +12,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 export interface WorkingHour { id?: string; weekday: number; start: string; end: string }
 export interface Professional { id: string; name: string; phone: string | null; userId: string | null; color: string; isActive: boolean; hours: WorkingHour[] }
 export interface ServiceItem { id: string; name: string; durationMin: number; price: string; isActive: boolean; position: number }
-export interface SchedulingSettings { tenantId: string; slotMinutes: number; clientReminderMinutes: number[]; proReminderMinutes: number; numberId: string | null; timezone: string; daysAhead: number }
+export interface SchedulingSettings { tenantId: string; slotMinutes: number; clientReminderMinutes: number[]; proReminderMinutes: number; numberId: string | null; timezone: string; daysAhead: number; /** template (Meta) do lembrete fora da janela de 24h */ reminderTemplate?: { name: string; language: string; header?: Record<string, string>; body?: Record<string, string> } | null }
 export type AppointmentStatus = 'scheduled' | 'confirmed' | 'done' | 'no_show' | 'canceled';
 export interface Appointment { id: string; professionalId: string; serviceId: string; contactId: string; conversationId: string | null; startAt: string; endAt: string; status: AppointmentStatus; source: string; notes: string | null; rescheduleRequested: boolean; contact: { id: string; name: string | null; phone: string }; service: ServiceItem; professional: { id: string; name: string; color: string } }
 export interface Slot { startAt: string; endAt: string; label: string }

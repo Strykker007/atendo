@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Pencil, Trash2, Scissors, UserRound, Bell } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Scissors, UserRound, Bell, FileCheck2 } from 'lucide-react';
+import { TemplateFields, useTemplateChoice, type TemplateChoice } from '@/components/chat/TemplateFields';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -26,6 +27,10 @@ export default function ConfigurarAgendaPage() {
   const [proModal, setProModal] = useState<Partial<Professional> | null>(null);
   const [svcModal, setSvcModal] = useState<Partial<ServiceItem> | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'pro' | 'svc'; id: string; name: string } | null>(null);
+  // número que manda os lembretes (o escolhido ou o primeiro conectado, como no servidor): se for
+  // a API oficial, quem não escreveu nas últimas 24h só recebe por template
+  const envia = numbers.data?.find((n) => n.id === settings.data?.numberId) ?? numbers.data?.find((n) => n.isActive && n.status === 'connected');
+  const lembreteMeta = envia?.provider === 'meta' ? envia : null;
 
   return (
     <PageShell width="max-w-5xl">
@@ -74,6 +79,7 @@ export default function ConfigurarAgendaPage() {
             <Field label="Intervalo dos horários" hint="minutos"><input type="number" min={5} step={5} className={inputCls} defaultValue={settings.data.slotMinutes} onBlur={(e) => saveSettings.mutateAsync({ slotMinutes: Number(e.target.value) }).then(() => toast.ok('Salvo')).catch(toast.err)} /></Field>
             <Field label="Número que envia" hint="lembretes e avisos"><select className={inputCls} value={settings.data.numberId ?? ''} onChange={(e) => saveSettings.mutateAsync({ numberId: e.target.value || undefined }).then(() => toast.ok('Salvo')).catch(toast.err)}><option value="">Primeiro conectado</option>{numbers.data?.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}</select></Field>
           </div>
+          {lembreteMeta && <ReminderTemplate key={lembreteMeta.id} numberId={lembreteMeta.id} saved={settings.data.reminderTemplate ?? null} />}
         </section>
       )}
 
@@ -81,6 +87,28 @@ export default function ConfigurarAgendaPage() {
       <ServiceModal value={svcModal} onClose={() => setSvcModal(null)} onSave={(s) => saveSvc.mutateAsync({ id: s.id, name: s.name, durationMin: s.durationMin, price: s.price, isActive: s.isActive }).then(() => { toast.ok('Serviço salvo'); setSvcModal(null); }).catch(toast.err)} pending={saveSvc.isPending} />
       <ConfirmDialog open={!!confirm} onClose={() => setConfirm(null)} title={confirm?.kind === 'pro' ? 'Desativar profissional' : 'Desativar serviço'} danger confirmLabel="Desativar" text={`"${confirm?.name}" deixa de aparecer para novos agendamentos. O histórico é mantido.`} onConfirm={async () => { if (!confirm) return; try { await (confirm.kind === 'pro' ? delPro : delSvc).mutateAsync(confirm.id); toast.ok('Desativado'); } catch (err) { toast.err(err); throw err; } }} />
     </PageShell>
+  );
+}
+
+/**
+ * Template do lembrete na API oficial. A Meta só deixa falar com quem não escreveu nas últimas
+ * 24h por template aprovado; sem ele, o lembrete dessas pessoas não sai.
+ */
+function ReminderTemplate({ numberId, saved }: { numberId: string; saved: TemplateChoice | null }) {
+  const choice = useTemplateChoice(numberId, true, saved);
+  const save = useUpdateSchedulingSettings();
+  return (
+    <div className="border-t border-line pt-3 space-y-3">
+      <div className="flex items-center gap-2"><FileCheck2 size={15} className="text-muted" /><span className="text-sm font-semibold text-ink">Template do lembrete (API oficial)</span></div>
+      <p className="text-xs text-muted">Usado quando o cliente não escreveu nas últimas 24h — fora disso a Meta recusa mensagem livre. Para o cliente confirmar pelo próprio lembrete, crie os botões de resposta rápida <b>Confirmar</b> e <b>Remarcar</b> no template.{!saved && <b className="text-warn-ink"> Sem template, esses lembretes não são enviados.</b>}</p>
+      <div className="max-w-xl space-y-3">
+        <TemplateFields choice={choice} hint={<>Variáveis do agendamento: {'{{servico}}'}, {'{{profissional}}'}, {'{{data}}'}, {'{{hora}}'}, {'{{agendamento}}'} — e as do contato, como {'{{contact.first_name}}'}.</>} />
+        <div className="flex gap-2">
+          <Button size="sm" disabled={!choice.valid} loading={save.isPending} onClick={() => save.mutateAsync({ reminderTemplate: choice.value }).then(() => toast.ok('Template do lembrete salvo')).catch(toast.err)}>Salvar template</Button>
+          {saved && <Button size="sm" variant="ghost" onClick={() => save.mutateAsync({ reminderTemplate: null }).then(() => { choice.reset(); toast.ok('Template removido'); }).catch(toast.err)}>Remover</Button>}
+        </div>
+      </div>
+    </div>
   );
 }
 

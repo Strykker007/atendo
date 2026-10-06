@@ -5,7 +5,7 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, FileCheck2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
@@ -32,6 +32,8 @@ import { ContactSheet, ContactSummary } from './ContactSheet';
 import { MediaPreview, type Escolhido } from './MediaPreview';
 import { MediaViewerModal, type ViewerMedia } from './MediaViewer';
 import { ForwardModal } from './ForwardModal';
+import { TemplateSendModal } from './TemplateSendModal';
+import { useMinuto } from './ConversationList';
 import { structuredBody, ForwardedLabel } from './messages/MessageContent';
 import { messagePreview } from '@atendo/shared';
 
@@ -110,6 +112,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const mensagens = useMemo(() => mensagensEmOrdem(messages.data), [messages.data]);
   // o canal mostrado na tela vai junto: se a conversa mudou de número, a API recusa (409) em vez de enviar
   const send = useSendMessage(conversationId, conv?.number.id);
+  // janela de 24h da Meta: o relógio da lista re-renderiza para a barra aparecer quando ela fecha
+  const agora = useMinuto();
+  const [enviandoTemplate, setEnviandoTemplate] = useState(false);
   // gravando: a linha inteira vira a gravação, como no WhatsApp
   const [gravando, setGravando] = useState(false);
   const setStatus = useSetStatus();
@@ -416,6 +421,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
   const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.limits.includedMessagesMonth != null && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
   const numberOffline = channelOffline(conv.number);
+  /** API oficial e o contato não escreve há 24h: texto livre seria recusado, só template */
+  const janelaFechada = conv.number.provider === 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
   /** quem aparece como autor da citação recebida e na faixa "Respondendo a …" */
   const nomeContato = conv.contact.name ?? `+${conv.contact.phone}`;
@@ -659,6 +666,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       />
 
       {encaminhando && <ForwardModal message={encaminhando} onClose={() => setEncaminhando(null)} />}
+      {enviandoTemplate && <TemplateSendModal conversationId={conv.id} numberId={conv.number.id} onClose={() => setEnviandoTemplate(false)} />}
       {vendoMidia && indiceMidia >= 0 && (
         <MediaViewerModal
           midias={midias}
@@ -726,6 +734,13 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         </div>
       ) : conv.status === 'closed' ? (
         <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted flex items-center justify-center gap-3">Conversa encerrada. Reabra para responder.{botaoNota}</div>
+      ) : janelaFechada ? (
+        <div className="bg-warn-soft border-t border-warn/30 px-4 py-3 text-sm text-warn-ink flex items-center gap-2">
+          <Clock size={16} className="shrink-0" />
+          <span className="flex-1">Janela de 24h fechada: o contato não escreve há mais de um dia. Na API oficial só sai <b>template aprovado</b>.</span>
+          <Button type="button" size="sm" onClick={() => setEnviandoTemplate(true)} icon={<FileCheck2 size={14} />}>Enviar template</Button>
+          {botaoNota}
+        </div>
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           {podeNota && <AbasDoEnvio nota={false} onNota={setModoNota} />}

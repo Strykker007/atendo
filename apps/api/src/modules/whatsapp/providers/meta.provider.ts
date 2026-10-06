@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { MessageStatus, MessageType, NumberStatus, BillingCategory } from '@atendo/shared';
-import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
+import { MessageStatus, MessageType, NumberStatus, BillingCategory, templateParams } from '@atendo/shared';
+import type { InboundMessage, MessageTemplate, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
 import type { MediaPayload, NumberContext, OutboundReaction, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError, ProviderSendError } from './provider-error';
@@ -146,6 +146,25 @@ export class MetaProvider implements WhatsAppProvider {
       method: 'POST',
       body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: r.to, type: 'reaction', reaction: { message_id: r.targetExternalId, emoji: r.emoji } }),
     });
+  }
+
+  /** Templates APROVADOS da WABA. Pagina pelo cursor da Graph (teto de 10 páginas = 1.000 templates). */
+  async listTemplates(ctx: NumberContext): Promise<MessageTemplate[]> {
+    const cfg = this.cfg(ctx);
+    if (!cfg.wabaId) throw new BadRequestException('Número sem WABA ID configurado: não dá para listar os templates.');
+    const out: MessageTemplate[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const qs = new URLSearchParams({ fields: 'id,name,language,category,status,components', status: 'APPROVED', limit: '100', ...(after && { after }) });
+      const res = await this.graph<{ data: any[]; paging?: { cursors?: { after?: string }; next?: string } }>(cfg, `${cfg.wabaId}/message_templates?${qs}`);
+      for (const raw of res.data ?? []) {
+        const t = parseMetaTemplate(raw);
+        if (t) out.push(t);
+      }
+      after = res.paging?.next ? res.paging.cursors?.after : undefined;
+      if (!after) break;
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name) || a.language.localeCompare(b.language));
   }
 
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer) {
@@ -316,4 +335,42 @@ function metaMediaExtras(type: string, caption?: string, filename?: string) {
   if ((type === MessageType.IMAGE || type === MessageType.VIDEO || type === MessageType.DOCUMENT) && caption) out.caption = caption;
   if (type === MessageType.DOCUMENT && filename) out.filename = filename;
   return out;
+}
+
+/**
+ * Template da Graph API → formato canônico. `null` = não é aprovado (a listagem já filtra, mas
+ * status muda). O que o painel ainda não sabe preencher (cabeçalho de mídia, URL dinâmica em
+ * botão, código de autenticação) volta com `unsupported` em vez de sumir: o atendente vê que o
+ * template existe e por que não dá para usar daqui.
+ */
+export function parseMetaTemplate(raw: any): MessageTemplate | null {
+  if (!raw?.name || String(raw.status ?? 'APPROVED').toUpperCase() !== 'APPROVED') return null;
+  const comps: any[] = Array.isArray(raw.components) ? raw.components : [];
+  const find = (type: string) => comps.find((c) => String(c?.type).toUpperCase() === type);
+  const header = find('HEADER');
+  const body = find('BODY');
+  const footer = find('FOOTER');
+  const buttons: any[] = find('BUTTONS')?.buttons ?? [];
+  const headerFormat = header?.format ? (String(header.format).toUpperCase() as MessageTemplate['headerFormat']) : undefined;
+  const category = String(raw.category ?? '').toLowerCase();
+
+  let unsupported: string | undefined;
+  if (category === 'authentication') unsupported = 'Template de autenticação (código) não é enviado pelo painel.';
+  else if (headerFormat && headerFormat !== 'TEXT') unsupported = 'Cabeçalho com mídia ainda não é suportado no painel.';
+  else if (buttons.some((b) => String(b?.type).toUpperCase() === 'URL' && templateParams(b?.url).length)) unsupported = 'Botão com link dinâmico ainda não é suportado no painel.';
+
+  return {
+    id: String(raw.id ?? `${raw.name}:${raw.language}`),
+    name: raw.name,
+    language: raw.language ?? 'pt_BR',
+    category: category === 'marketing' || category === 'authentication' ? category : 'utility',
+    header: headerFormat === 'TEXT' ? header?.text : undefined,
+    headerFormat,
+    body: body?.text ?? '',
+    footer: footer?.text,
+    buttons: buttons.map((b) => String(b?.text ?? '')).filter(Boolean),
+    headerParams: headerFormat === 'TEXT' ? templateParams(header?.text) : [],
+    bodyParams: templateParams(body?.text),
+    ...(unsupported && { unsupported }),
+  };
 }

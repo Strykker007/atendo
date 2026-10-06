@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff } from 'lucide-react';
+import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
@@ -14,6 +14,7 @@ import { ChannelBadge, channelColor } from './ChannelBadge';
 import type { ConversationOrigin } from '@/lib/hooks';
 import { SkeletonConversations } from '@/components/ui/Skeleton';
 import { BulkCloseModal } from './BulkCloseModal';
+import { NewConversationModal } from './NewConversationModal';
 import { Button } from '@/components/ui/Button';
 import { usePersistedState } from '@/lib/persisted';
 import { useCan } from '@/lib/hooks';
@@ -71,6 +72,7 @@ export function ConversationList() {
   const [selecionando, setSelecionando] = useState(false);
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
+  const [iniciando, setIniciando] = useState(false);
   const conversations = useConversations({ status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
   const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0);
@@ -158,6 +160,9 @@ export function ConversationList() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-8 pr-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
           </div>
+          <button onClick={() => setIniciando(true)} title="Nova conversa" className="shrink-0 w-8 h-8 rounded-lg grid place-items-center text-faint hover:text-ink hover:bg-field">
+            <MessageSquarePlus size={15} />
+          </button>
           <button
             onClick={() => setFiltrosAbertos((v) => !v)}
             title={filtrosAtivos ? `${filtrosAtivos} filtro(s) ligado(s)` : 'Filtros'}
@@ -267,6 +272,7 @@ export function ConversationList() {
       {encerrando && (
         <BulkCloseModal ids={marcadosVisiveis} onDone={sair} onClose={() => setEncerrando(false)} />
       )}
+      {iniciando && <NewConversationModal onClose={() => setIniciando(false)} />}
     </>
   );
 }

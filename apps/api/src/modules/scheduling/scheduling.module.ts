@@ -8,6 +8,7 @@ import { TenantsModule } from '../tenants/tenants.module';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 export const QUEUE_SCHEDULING = 'scheduling';
 
@@ -30,7 +31,7 @@ class RemindersProcessor extends TrackedWorkerHost {
 }
 
 @Module({
-  imports: [BullModule.registerQueue({ name: QUEUE_SCHEDULING, defaultJobOptions: { removeOnComplete: 50, removeOnFail: 50 } }), AuthModule, BillingModule, TenantsModule, forwardRef(() => ConversationsModule)],
+  imports: [BullModule.registerQueue({ name: QUEUE_SCHEDULING, defaultJobOptions: { removeOnComplete: 50, removeOnFail: 50 } }), AuthModule, BillingModule, TenantsModule, forwardRef(() => ConversationsModule), forwardRef(() => WhatsAppModule)],
   controllers: [SchedulingController],
   providers: [SchedulingService, RemindersScheduler, RemindersProcessor],
   exports: [SchedulingService],

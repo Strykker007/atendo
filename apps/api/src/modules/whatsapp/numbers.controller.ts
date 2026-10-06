@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
@@ -12,6 +12,8 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { SendPacer } from './send-pacer';
+import { canUseNumber } from '../auth/number-scope';
+import { ContactsSyncScheduler } from './contacts-sync';
 
 class CreateNumberDto {
   @Matches(/^\+?[1-9]\d{7,14}$/) phone: string;
@@ -52,6 +54,7 @@ export class NumbersController {
     private readonly crypto: CryptoService,
     private readonly numbers: NumbersService,
     private readonly pacer: SendPacer,
+    private readonly contactsSync: ContactsSyncScheduler,
   ) {}
 
   @Get()
@@ -121,6 +124,32 @@ export class NumbersController {
     });
     const status = await this.pacer.dailyStatus(n);
     return { ...status, sendDelay: n.sendDelay, warmupStartedAt: n.warmupStartedAt };
+  }
+
+  /**
+   * Templates aprovados (HSM) do número. Só Meta tem; Evolution devolve lista vazia.
+   * `?refresh=1` busca de novo na Meta (template recém-aprovado). Quem atende precisa ver —
+   * é o que permite iniciar conversa —, então vale para quem opera o número, sem permissão extra.
+   */
+  @Get(':id/templates')
+  async templates(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('refresh') refresh?: string) {
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId }, select: { id: true } });
+    if (!canUseNumber(user, n.id)) throw new ForbiddenException('Você não opera este número.');
+    return this.numbers.templates(n.id, refresh === '1' || refresh === 'true');
+  }
+
+  /**
+   * Reler agora a agenda de contatos do aparelho (Evolution). Roda no worker — a agenda pode ter
+   * milhares de nomes; a resposta só confirma que entrou na fila. Também roda sozinho a cada 6 h.
+   */
+  @Post(':id/contacts/sync')
+  @RequirePermission('numbers.manage')
+  async syncContacts(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId }, select: { id: true, provider: true, status: true } });
+    if (n.provider !== 'evolution') throw new BadRequestException('A API oficial não dá acesso à agenda do celular.');
+    if (n.status !== 'connected') throw new BadRequestException('Conecte o número para sincronizar a agenda.');
+    await this.contactsSync.enqueue(n.id);
+    return { queued: true };
   }
 
   /** Remove o número do provider e do banco (conversas vão junto — cascade). */

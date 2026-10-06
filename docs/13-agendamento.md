@@ -36,19 +36,23 @@ deliberadamente estrita (`reminder-reply.ts`), porque roda em **toda** mensagem 
 "bom dia" ou um "quero remarcar meu horário" **não** contam como resposta — quem cuida
 desses casos é o atendente ou um fluxo.
 
+**Por qual conversa e número sai.** O lembrete vai pela conversa aberta do contato, se houver; senão pela última conversa dele no **número que envia** (preferências; vazio = primeiro conectado), ou por uma nova. Conversa encerrada recebe o lembrete **sem reabrir** (`sendToContact` com `allowClosed`) — antes ela era recusada e o lembrete de quem não estava em atendimento nunca saía. Quando o cliente responde, a conversa reabre normalmente e a resposta passa pelo `onInbound`.
+
+**API oficial (Meta) e a janela de 24h.** Se o número da conversa é Meta e o cliente não escreveu nas últimas 24h, a Meta recusa mensagem livre: sai o **template do lembrete** configurado em *Agenda → Profissionais e serviços → Lembretes* (`SchedulingSettings.reminderTemplate` = `{ name, language, header?, body? }`). Os valores das variáveis aceitam `{{servico}}`, `{{profissional}}`, `{{data}}` (21/09), `{{hora}}` (09:00), `{{agendamento}}` (seg. 21/09 09:00) e as do contato (`{{contact.first_name}}`…). O mesmo template serve para todos os lembretes ao cliente; dentro da janela continua saindo o texto normal (grátis). Para o cliente confirmar pelo template, crie botões de resposta rápida **Confirmar** e **Remarcar** — o toque chega com o texto do botão e cai no `reminderChoice`. Sem template configurado, o lembrete dessas pessoas é recusado e o motivo vai para o log. O template é conferido na conta (WABA) do número da conversa: se o contato está numa conversa de outra conta Meta, é preciso que o template exista lá também.
+
 O aviso ao profissional vai pelo número da barbearia para o WhatsApp dele (`sendToPhone`): cria um contato/conversa para ele que fica **encerrada** (não polui a fila). Sem WhatsApp cadastrado, não há aviso (a tela mostra isso em laranja).
 
 ## Telas
 
 - **Agenda** — dia por profissional, navegação por dia/semana com contagem, filtro por profissional. Cada horário: status, serviço, obs., "🤖 pelo WhatsApp", "pediu remarcação"; ações **Atendido / Faltou** (após o horário), **Remarcar**, **Cancelar**, **Conversa**.
-- **Agenda → Profissionais e serviços** — CRUD (desativar preserva histórico), horários por dia com múltiplos intervalos, preferências de lembretes.
+- **Agenda → Profissionais e serviços** — CRUD (desativar preserva histórico), horários por dia com múltiplos intervalos, preferências de lembretes e, quando o número que envia é da API oficial, o **template do lembrete** (seletor com as variáveis do agendamento).
 - **Chat** — botão *Agendar* e ficha "💈 3 visitas · última 02/09 · Próximo: seg. 21/09 09:00 · Corte com Carlos ✅".
 
 ## API (`/scheduling/*`, exige feature)
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET/PATCH | `settings` | Preferências |
+| GET/PATCH | `settings` | Preferências. `reminderTemplate: { name, language, header?, body? } \| null` (null remove) — ver acima |
 | GET/POST/PATCH/DELETE | `professionals[/:id]` | `hours: [{weekday, start, end}]` substitui todos; DELETE = desativa |
 | GET/POST/PATCH/DELETE | `services[/:id]` | |
 | GET | `availability?professionalId&serviceId&from&days` | `[{startAt, endAt, label}]` |

@@ -4,7 +4,7 @@ import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { DELETED_MESSAGE_LABEL, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, messagePreview } from '@atendo/shared';
-import type { DeletedMessageOriginal, MessageContent, MessageReaction, OutboundMessage, QuotedRef } from '@atendo/shared';
+import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -13,8 +13,10 @@ import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import { enqueueOutbound, promoteNext, requeueSeq } from '../whatsapp/send-queue';
 import type { Permission } from '@atendo/shared';
-import { narrowTo, numberFilter } from '../auth/number-scope';
-import { departmentWhere } from '../auth/department-scope';
+import { canUseNumber, narrowTo, numberFilter } from '../auth/number-scope';
+import { buildTemplateSend } from '../whatsapp/templates';
+import { phoneVariants } from './phone-variants';
+import { canSeeDepartment, departmentWhere } from '../auth/department-scope';
 import { BOT_PAUSE_CLEAR } from './bot-pause';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { interpolate } from '../flows/answer';
@@ -31,6 +33,8 @@ const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permis
 
 
 const META_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** O contato escreveu nas últimas 24h? Fora disso a Meta só aceita template. */
+const inMetaWindow = (lastInboundAt: Date | null | undefined) => !!lastInboundAt && Date.now() - lastInboundAt.getTime() < META_WINDOW_MS;
 
 /** O que `present()` precisa para montar `quoted`. Use em todo create/update/find que vai para o navegador. */
 export const MESSAGE_INCLUDE = {
@@ -324,7 +328,15 @@ export class ConversationsService {
    * Envio pelo sistema (fluxos de automação): sem autor humano, não assume a conversa,
    * respeita quota e janela de 24h, passa pela mesma fila.
    */
-  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string; voice?: boolean }, interactive?: import('@atendo/shared').InteractiveMenu, opts?: { idempotencyKey?: string; /** piso desde a entrega da anterior (atraso do Conteúdo) */ minGapMs?: number }) {
+  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string; voice?: boolean }, interactive?: import('@atendo/shared').InteractiveMenu, opts?: {
+    idempotencyKey?: string;
+    /** piso desde a entrega da anterior (atraso do Conteúdo) */
+    minGapMs?: number;
+    /** template aprovado (Meta): dispensa a janela de 24h, conta na quota de templates */
+    template?: NonNullable<OutboundMessage['template']>;
+    /** envia em conversa encerrada sem reabrir (lembrete): ela continua encerrada até o contato responder */
+    allowClosed?: boolean;
+  }) {
     const key = opts?.idempotencyKey;
     if (key) {
       // mesmo envio repetido (job reprocessado, lote de campanha refeito): devolve o que já existe
@@ -332,22 +344,21 @@ export class ConversationsService {
       if (dup) return dup;
     }
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true } });
-    if (!conv || conv.status === 'closed') throw new BadRequestException('Conversa indisponível');
+    if (!conv || (conv.status === 'closed' && !opts?.allowClosed)) throw new BadRequestException('Conversa indisponível');
     if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
-    if (conv.number.provider === 'meta') {
-      const inWindow = conv.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
-      if (!inWindow) throw new BadRequestException('Fora da janela de 24h da Meta');
-    }
-    const quota = await this.usage.canSend(conv.tenantId, 'messages');
+    const template = opts?.template;
+    if (template && conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
+    if (conv.number.provider === 'meta' && !template && !inMetaWindow(conv.lastInboundAt)) throw new BadRequestException('Fora da janela de 24h da Meta');
+    const quota = await this.usage.canSend(conv.tenantId, template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
     // no histórico do painel a mensagem interativa aparece como texto + opções numeradas
     const shown = interactive?.options.length ? `${text ?? ''}\n\n${interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : text;
     const created = await this.createOnce(conversationId, key, () => this.prisma.message.create({
-      data: { conversationId, numberId: conv.numberId, direction: 'out', type: media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, idempotencyKey: key, raw: interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : media?.voice === false ? { voice: false } : undefined },
+      data: { conversationId, numberId: conv.numberId, direction: 'out', type: template ? 'template' : media ? media.type : 'text', status: 'pending', text: shown, mediaUrl: media?.key, mediaName: media?.name, idempotencyKey: key, raw: template ? ({ template } as Prisma.InputJsonValue) : interactive ? ({ interactive, body: text } as unknown as Prisma.InputJsonValue) : media?.voice === false ? { voice: false } : undefined },
     }));
     if (!created.fresh) return created.message;
     const message = created.message;
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: messagePreview({ type: media ? media.type : 'text', text: shown, mediaName: media?.name }).slice(0, 120), awaitingSince: null } });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: messagePreview({ type: template ? 'template' : media ? media.type : 'text', text: shown, mediaName: media?.name }).slice(0, 120), awaitingSince: null } });
     await enqueueOutbound(this.outbound, message, { minGapMs: opts?.minGapMs });
     this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
@@ -361,15 +372,31 @@ export class ConversationsService {
     return n;
   }
 
-  /** Manda uma mensagem do sistema para um contato: reaproveita a conversa aberta ou cria uma. */
-  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string }) {
+  /**
+   * Manda uma mensagem do sistema para um contato: reaproveita a conversa aberta ou cria uma.
+   *
+   * `allowClosed` (lembretes): sem conversa aberta, usa a última do contato no número do sistema
+   * — ou cria — e envia nela **sem reabrir**. Sem isto a conversa nascia encerrada e o
+   * `sendAsSystem` recusava: lembrete para quem não estava em atendimento nunca saía.
+   *
+   * `outsideWindow`: número Meta e contato fora da janela de 24h → pede o template a quem chamou
+   * (recebe o número, porque o template é aprovado por conta). Sem ele, o envio é recusado.
+   */
+  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; outsideWindow?: (numberId: string) => Promise<Omit<OutboundMessage, 'to'> | null> }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
-    let conv = await this.prisma.conversation.findFirst({ where: { contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' } });
+    let conv = await this.prisma.conversation.findFirst({ where: { tenantId, contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } });
     if (!conv) {
       const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
-      conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
+      conv = (opts?.allowClosed && (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId: number.id }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } })))
+        || (await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() }, include: { number: { select: { provider: true } } } }));
     }
-    return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, { idempotencyKey: opts?.idempotencyKey });
+    const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed };
+    if (conv.number.provider === 'meta' && !inMetaWindow(conv.lastInboundAt) && opts?.outsideWindow) {
+      const tpl = await opts.outsideWindow(conv.numberId);
+      if (!tpl?.template) throw new BadRequestException('Fora da janela de 24h da Meta e sem template configurado');
+      return this.sendAsSystem(conv.id, tpl.text, undefined, undefined, { ...send, template: tpl.template });
+    }
+    return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, send);
   }
 
   /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */
@@ -510,6 +537,133 @@ export class ConversationsService {
     this.gateway.emitMessage(tenantId, this.present(message));
     this.gateway.emitConversation(tenantId, updatedConv);
     return this.present(message);
+  }
+
+  /**
+   * Quem dá para chamar no "Nova conversa": contatos da base (por nome ou telefone) e, em
+   * seguida, nomes da agenda do aparelho (`phonebook_entries`, sincronizada da Evolution) que
+   * ainda não são contato. Usuário restrito a números/departamentos só vê contato que já falou
+   * por eles, e só a agenda dos números que opera — a busca não pode furar o escopo da lista.
+   */
+  async startCandidates(tenantId: string, viewer: Viewer, q: string) {
+    const termo = q.trim();
+    if (termo.length < 2) return { contacts: [], phonebook: [] };
+    const digitos = termo.replace(/\D/g, '');
+    const porTexto = (campo: 'name') => ({ [campo]: { contains: termo, mode: 'insensitive' as const } });
+    const match = [porTexto('name'), ...(digitos.length >= 3 ? [{ phone: { contains: digitos } }] : [])];
+    const numeros = numberFilter(viewer);
+    const dept = departmentWhere(viewer);
+    const contacts = await this.prisma.contact.findMany({
+      where: { tenantId, OR: match, ...((numeros || dept) && { conversations: { some: { ...(numeros && { numberId: numeros }), ...dept } } }) },
+      select: { id: true, name: true, phone: true, avatarUrl: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 8,
+    });
+    const agenda = await this.prisma.phonebookEntry.findMany({
+      where: { tenantId, OR: match, ...(numeros && { numberId: numeros }) },
+      select: { phone: true, name: true, numberId: true },
+      orderBy: { name: 'asc' },
+      take: 20,
+    });
+    // quem já é contato aparece como contato (com histórico), não como linha da agenda
+    const jaContato = new Set((await this.prisma.contact.findMany({ where: { tenantId, phone: { in: agenda.map((a) => a.phone) } }, select: { phone: true } })).map((c) => c.phone));
+    const vistos = new Set<string>();
+    const phonebook = agenda.filter((a) => !jaContato.has(a.phone) && !vistos.has(a.phone) && vistos.add(a.phone)).slice(0, 8);
+    return { contacts: contacts.map((c) => this.presentContact({ contact: c }).contact), phonebook };
+  }
+
+  /**
+   * Template + valores digitados/configurados → mensagem pronta para `send`/`sendAsSystem`.
+   * Os valores aceitam `{{contact.first_name}}`, globais e `vars` (ex.: `{{servico}}` do
+   * lembrete); variável que resolve vazia conta como não preenchida (400 com o nome dela).
+   */
+  async templateMessage(tenantId: string, contactId: string, definition: MessageTemplate, values: { header?: TemplateValues; body?: TemplateValues }, extra?: { agentName?: string | null; vars?: Record<string, string> }): Promise<Omit<OutboundMessage, 'to'>> {
+    const ctx = await this.interpolation.forContact(tenantId, contactId, extra?.vars ?? {}, { agentName: extra?.agentName });
+    const fill = (v?: TemplateValues) => Object.fromEntries(Object.entries(v ?? {}).map(([k, x]) => [k, interpolate(String(x ?? ''), ctx, undefined, { keepUnknown: false })]));
+    try {
+      const built = buildTemplateSend(definition, { header: fill(values.header), body: fill(values.body) });
+      return { type: 'text', text: built.text, template: built.template };
+    } catch (err) {
+      throw new BadRequestException(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /**
+   * Iniciar conversa pelo painel (disparo ativo): o atendente fala primeiro.
+   *
+   * Uma conversa por pessoa e número (ver `reopen.ts`): se já existe, é ela que recebe a
+   * mensagem — encerrada volta como atendimento novo de quem iniciou. O envio em si é o `send`
+   * normal (posse, quota, janela da Meta, ledger, fila com o ritmo do número); as checagens que
+   * podem falhar rodam ANTES de criar/reabrir, para um envio recusado não deixar conversa
+   * reaberta à toa.
+   *
+   * Meta: fora da janela de 24h (e contato novo) só sai template. `template.definition` vem do
+   * controller já conferido na Meta; os valores podem ter `{{contact.first_name}}` etc.
+   */
+  async start(
+    tenantId: string,
+    author: Viewer,
+    input: {
+      numberId: string;
+      contactId?: string;
+      phone?: string;
+      name?: string;
+      text?: string;
+      template?: { definition: MessageTemplate; header?: TemplateValues; body?: TemplateValues };
+      idempotencyKey?: string;
+    },
+  ) {
+    if (!canUseNumber(author, input.numberId)) throw new ForbiddenException('Você não opera este número.');
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: input.numberId, tenantId, isActive: true } });
+    if (!number) throw new NotFoundException('Número não encontrado');
+    if (number.status !== 'connected') throw new UnprocessableEntityException(`O número "${number.label}" está desconectado. Conecte-o em Números para enviar.`);
+    if (input.template && number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
+    if (!input.template && !input.text?.trim()) throw new BadRequestException('Escreva a mensagem ou escolha um template.');
+
+    // contato: o escolhido na lista, ou pelo telefone digitado (reaproveita quem já existe)
+    let contact = input.contactId ? await this.prisma.contact.findFirst({ where: { id: input.contactId, tenantId } }) : null;
+    if (input.contactId && !contact) throw new NotFoundException('Contato não encontrado');
+    if (!contact) {
+      const phone = (input.phone ?? '').replace(/\D/g, '');
+      if (phone.length < 10 || phone.length > 15) throw new BadRequestException('Telefone inválido. Use DDI + DDD + número (ex.: 5562999998888).');
+      contact = (await this.prisma.contact.findFirst({ where: { tenantId, phone: { in: phoneVariants(phone) } } }))
+        ?? (await this.prisma.contact.upsert({
+          where: { tenantId_phone: { tenantId, phone } },
+          create: { tenantId, phone, name: input.name?.trim() || null, ...(input.name?.trim() && { nameSource: 'manual' as const }) },
+          update: {},
+        }));
+    }
+
+    let conv = await this.prisma.conversation.findFirst({ where: { tenantId, contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } });
+    // conversa existente num departamento que esta pessoa não vê: não pode virar porta dos fundos
+    if (conv && !canSeeDepartment(author, conv.departmentId)) {
+      throw new ConflictException({ code: 'other_department', message: 'Este contato já é atendido por um departamento que você não acessa neste número.' });
+    }
+    if (conv && conv.status !== 'closed' && conv.assigneeId && conv.assigneeId !== author.id) {
+      const owner = await this.prisma.user.findUnique({ where: { id: conv.assigneeId }, select: { name: true } });
+      throw new ConflictException({ code: 'already_assigned', conversationId: conv.id, message: `${owner?.name ?? 'Outro atendente'} já está atendendo este contato neste número.` });
+    }
+    if (number.provider === 'meta' && !input.template) {
+      const inWindow = conv?.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
+      if (!inWindow) throw new BadRequestException('Na API oficial só dá para falar primeiro com template aprovado (o contato não escreveu nas últimas 24h).');
+    }
+    const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages');
+    if (!quota.ok) throw new ForbiddenException(quota.reason);
+
+    // template: variáveis do painel ({{contact.first_name}}…) resolvidas antes de ir para a Meta
+    const agentName = input.template ? (await this.prisma.user.findUnique({ where: { id: author.id }, select: { name: true } }))?.name : undefined;
+    const message: Omit<OutboundMessage, 'to'> = input.template
+      ? await this.templateMessage(tenantId, contact.id, input.template.definition, input.template, { agentName })
+      : { type: 'text', text: input.text };
+
+    if (!conv) {
+      // nasce na fila sem dono: o `send` faz "responder = assumir" e põe em atendimento
+      conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date() } });
+    } else if (conv.status === 'closed') {
+      conv = await this.setStatus(tenantId, conv.id, 'in_progress', author.id);
+    }
+    const sent = await this.send(tenantId, author, conv.id, { ...message, idempotencyKey: input.idempotencyKey });
+    return { conversationId: conv.id, message: sent };
   }
 
   /**

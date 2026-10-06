@@ -1,4 +1,4 @@
-import type { InboundEdit, InboundMessage, InboundPresence, InboundReaction, OutboundMessage, SendResult, StatusUpdate, NumberStatus } from '@atendo/shared';
+import type { InboundEdit, InboundMessage, InboundPresence, InboundReaction, MessageTemplate, OutboundMessage, SendResult, StatusUpdate, NumberStatus } from '@atendo/shared';
 
 /** Como o número está configurado no provider (descriptografado do banco). */
 export interface NumberContext {
@@ -116,6 +116,16 @@ export interface WhatsAppProvider {
    * para dar nome a contato que nasceu sem nenhum. Opcional: a Meta não tem agenda.
    */
   contactName?(ctx: NumberContext, phone: string): Promise<string | undefined>;
+  /**
+   * Templates aprovados da conta (HSM). Opcional: só a Meta tem — na Evolution qualquer texto
+   * pode iniciar conversa.
+   */
+  listTemplates?(ctx: NumberContext): Promise<MessageTemplate[]>;
+  /**
+   * Agenda de contatos do aparelho (telefone só dígitos + nome). Opcional: só a Evolution tem —
+   * a Meta não expõe a agenda do celular. Usado pela sincronização periódica de contatos.
+   */
+  listContacts?(ctx: NumberContext): Promise<{ phone: string; name: string }[]>;
 
   /** Valida assinatura/autenticidade do webhook. Lança se inválido. */
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer): void;

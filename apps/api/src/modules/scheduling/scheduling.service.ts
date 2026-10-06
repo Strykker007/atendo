@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
 import type { AppointmentStatus, AppointmentSource, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -7,6 +7,20 @@ import { TZ_DEFAULT, toLocal } from '../../common/time';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { computeSlots, type Slot } from './slots';
 import { REMINDER_OPTIONS, reminderChoice } from './reminder-reply';
+import { NumbersService } from '../whatsapp/numbers.service';
+import type { TemplateValues } from '@atendo/shared';
+
+/** Template do lembrete guardado nas preferências (`SchedulingSettings.reminderTemplate`). */
+type ReminderTemplate = { name: string; language: string; header?: TemplateValues; body?: TemplateValues };
+
+/**
+ * Variáveis do agendamento para o template do lembrete: `{{servico}}`, `{{profissional}}`,
+ * `{{data}}` (21/09), `{{hora}}` (09:00) e `{{agendamento}}` (seg. 21/09 09:00).
+ */
+export function reminderVars(a: { service: { name: string }; professional: { name: string } }, when: { ymd: string; hm: string; label: string }): Record<string, string> {
+  const [, m, d] = when.ymd.split('-');
+  return { servico: a.service.name, profissional: a.professional.name, data: `${d}/${m}`, hora: when.hm, agendamento: when.label };
+}
 
 export type { Slot };
 
@@ -20,6 +34,7 @@ export class SchedulingService {
     private readonly conversations: ConversationsService,
     private readonly gateway: ConversationsGateway,
     private readonly tenantSettings: TenantSettingsService,
+    @Inject(forwardRef(() => NumbersService)) private readonly numbers: NumbersService,
   ) {}
 
   // ---------- preferências ----------
@@ -144,7 +159,7 @@ export class SchedulingService {
         const sent = (a.clientRemindersSent as number[]) ?? [];
         for (const m of clientMins) {
           if (minsLeft <= m && !sent.includes(m)) {
-            await this.sendClientReminder(a, tz, m).catch((e) => this.log.warn(`lembrete cliente ${a.id}: ${e.message}`));
+            await this.sendClientReminder(a, tz, m, s.reminderTemplate as ReminderTemplate | null, s.numberId).catch((e) => this.log.warn(`lembrete cliente ${a.id}: ${e.message}`));
             sent.push(m);
             await this.prisma.appointment.update({ where: { id: a.id }, data: { clientRemindersSent: sent } });
           }
@@ -158,20 +173,26 @@ export class SchedulingService {
     }
   }
 
-  private async sendClientReminder(a: Prisma.AppointmentGetPayload<{ include: { contact: true; service: true; professional: true } }>, tz: string, minutesBefore: number) {
+  private async sendClientReminder(a: Prisma.AppointmentGetPayload<{ include: { contact: true; service: true; professional: true } }>, tz: string, minutesBefore: number, template: ReminderTemplate | null, preferredNumberId: string | null) {
     const when = toLocal(a.startAt, tz);
     const soon = minutesBefore <= 120;
+    // Número oficial e cliente sem escrever há 24h: só template. Sem template configurado o
+    // `sendToContact` recusa e o motivo vai para o log (o lembrete conta como tentado).
+    const outsideWindow = template
+      ? async (numberId: string) => this.conversations.templateMessage(a.tenantId, a.contactId, await this.numbers.template(numberId, template.name, template.language), template, { vars: reminderVars(a, when) })
+      : undefined;
+    // chave por agendamento + antecedência: tick repetido do job não manda o lembrete duas vezes
+    const common = { idempotencyKey: `reminder-${a.id}-${minutesBefore}`, allowClosed: true, outsideWindow, preferredNumberId };
     if (soon) {
       // lembrete de última hora: só avisa, não pede resposta
-      await this.conversations.sendToContact(a.tenantId, a.contactId, `Olá ${a.contact.name ?? ''}! Lembrete: seu horário de *${a.service.name}* com ${a.professional.name} é hoje às ${when.hm}. Até já! 💈`, { idempotencyKey: `reminder-${a.id}-${minutesBefore}` });
+      await this.conversations.sendToContact(a.tenantId, a.contactId, `Olá ${a.contact.name ?? ''}! Lembrete: seu horário de *${a.service.name}* com ${a.professional.name} é hoje às ${when.hm}. Até já! 💈`, common);
       return;
     }
     await this.conversations.sendToContact(
       a.tenantId,
       a.contactId,
       `Olá ${a.contact.name ?? ''}! Você tem *${a.service.name}* com ${a.professional.name} marcado para ${when.label}.\n\nPosso confirmar?`,
-      // chave por agendamento + antecedência: tick repetido do job não manda o lembrete duas vezes
-      { interactive: { options: REMINDER_OPTIONS }, idempotencyKey: `reminder-${a.id}-${minutesBefore}` },
+      { ...common, interactive: { options: REMINDER_OPTIONS } },
     );
   }
 

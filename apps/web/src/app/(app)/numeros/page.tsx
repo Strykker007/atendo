@@ -1,9 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone } from 'lucide-react';
+import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone, BookUser } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
-import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, type NumberItem } from '@/lib/hooks';
+import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useUsage, useSyncPhonebook, type NumberItem } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
@@ -25,6 +25,7 @@ export default function NumerosPage() {
   const numbers = useNumbers();
   const usage = useUsage();
   const connect = useConnectNumber();
+  const syncAgenda = useSyncPhonebook();
   const update = useUpdateNumber();
   const remove = useDeleteNumber();
   const [creating, setCreating] = useState(false);
@@ -158,6 +159,10 @@ export default function NumerosPage() {
                     <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => reconnect(n)} loading={busyId === n.id && connect.isPending} loadingText="Validando…">Revalidar</Button>
                   )}
                   {podeGerenciar && <>
+                    {/* agenda do celular: roda sozinha a cada 6 h; o botão é para não esperar */}
+                    {n.provider === 'evolution' && n.status === 'connected' && (
+                      <Button size="sm" variant="ghost" icon={<BookUser size={14} />} title="Atualiza o nome dos contatos com a agenda do celular" onClick={() => syncAgenda.mutateAsync(n.id).then(() => toast.ok('Sincronizando a agenda do celular. Os nomes atualizam em alguns instantes.')).catch(toast.err)} loading={syncAgenda.isPending && syncAgenda.variables === n.id}>Sincronizar agenda</Button>
+                    )}
                     <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)} disabled={busyId === n.id}>Trocar provider</Button>
                     <Button size="sm" variant="ghost" icon={<Power size={14} />} onClick={() => toggleActive(n)} loading={busyId === n.id && update.isPending}>{n.isActive ? 'Desativar' : 'Ativar'}</Button>
                     <Button size="sm" variant="subtle" icon={<Trash2 size={14} />} onClick={() => setDeleting(n)} disabled={busyId === n.id}>Excluir</Button>

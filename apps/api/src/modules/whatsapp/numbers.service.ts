@@ -7,6 +7,7 @@ import type { NumberContext, OutboundReaction, OutboundRevoke } from './provider
 import type { MetaNumberConfig } from './providers/meta.provider';
 import type { EvolutionNumberConfig } from './providers/evolution.provider';
 import { defaultSendDelay } from './sending-policy';
+import type { MessageTemplate } from '@atendo/shared';
 
 @Injectable()
 export class NumbersService {
@@ -51,6 +52,30 @@ export class NumbersService {
     if (!provider.revoke) return false;
     await provider.revoke(ctx, target);
     return true;
+  }
+
+  /** templates por número, por 5 min: abrir o modal e enviar não podem bater na Meta toda vez */
+  private readonly templateCache = new Map<string, { at: number; list: MessageTemplate[] }>();
+
+  /**
+   * Templates aprovados do número (Meta). Evolution não tem template: lista vazia.
+   * `refresh` ignora o cache — é o "sincronizar" da tela, para template recém-aprovado.
+   */
+  async templates(numberId: string, refresh = false): Promise<MessageTemplate[]> {
+    const hit = this.templateCache.get(numberId);
+    if (!refresh && hit && Date.now() - hit.at < 5 * 60_000) return hit.list;
+    const ctx = await this.context(numberId);
+    const list = (await this.registry.get(ctx.provider).listTemplates?.(ctx)) ?? [];
+    this.templateCache.set(numberId, { at: Date.now(), list });
+    return list;
+  }
+
+  /** Um template pelo nome + idioma. Recarrega uma vez antes de dizer que não existe (pode ter sido aprovado agora). */
+  async template(numberId: string, name: string, language: string): Promise<MessageTemplate> {
+    const match = (l: MessageTemplate[]) => l.find((t) => t.name === name && t.language === language);
+    const t = match(await this.templates(numberId)) ?? match(await this.templates(numberId, true));
+    if (!t) throw new BadRequestException(`Template "${name}" (${language}) não está aprovado neste número.`);
+    return t;
   }
 
   async context(numberId: string): Promise<NumberContext & { provider: ProviderKind }> {

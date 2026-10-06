@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS } from './conversations.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -8,6 +8,7 @@ import { FlowEngineService } from '../flows/flow-engine.service';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { NumbersService } from '../whatsapp/numbers.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { TemplateChoiceDto } from '../whatsapp/template.dto';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { ConversationScopeGuard } from './conversation-scope.guard';
 import { BOT_PAUSE_MINUTES } from './bot-pause';
@@ -42,11 +43,25 @@ class SendDto {
   /** chave devolvida por POST /uploads */
   @IsOptional() @IsString() mediaKey?: string;
   @IsOptional() @IsString() quotedExternalId?: string;
-  @IsOptional() template?: any;
+  /** template aprovado (Meta) — o jeito de falar com quem está fora da janela de 24h */
+  @IsOptional() @ValidateNested() @Type(() => TemplateChoiceDto) template?: TemplateChoiceDto;
   /** número que a tela mostrava ao enviar — se a conversa estiver em outro, 409 sem enviar.
    *  Só confere: quem escolhe o número é a conversa, nunca o payload. */
   @IsOptional() @IsUUID() expectedNumberId?: string;
   /** gerada pela tela por envio: repetir a requisição com a mesma chave devolve a mesma mensagem */
+  @IsOptional() @IsString() @MaxLength(100) idempotencyKey?: string;
+}
+class StartDto {
+  @IsUUID() numberId: string;
+  /** contato existente OU telefone (DDI + DDD + número) */
+  @ValidateIf((o) => !o.phone) @IsUUID() contactId?: string;
+  @ValidateIf((o) => !o.contactId) @IsString() @MaxLength(20) phone?: string;
+  /** nome do contato novo (só quando vem `phone` e ele ainda não existe) */
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  /** texto livre (Evolution, ou Meta dentro da janela de 24h) */
+  @IsOptional() @IsString() @MaxLength(4096) text?: string;
+  /** template aprovado — obrigatório na Meta fora da janela */
+  @IsOptional() @ValidateNested() @Type(() => TemplateChoiceDto) template?: TemplateChoiceDto;
   @IsOptional() @IsString() @MaxLength(100) idempotencyKey?: string;
 }
 class ReactDto {
@@ -118,6 +133,27 @@ export class ConversationsController {
     return this.conversations.closeMany(u.tenantId, u, dto.ids, dto.outcome ? { outcome: dto.outcome, reason: dto.reason } : undefined);
   }
 
+  /** Busca do "Nova conversa": contatos da base + agenda do aparelho (Evolution). */
+  @Get('start/contacts')
+  startCandidates(@CurrentUser() u: AuthUser, @Query('q') q = '') {
+    return this.conversations.startCandidates(u.tenantId, u, String(q).slice(0, 100));
+  }
+
+  /**
+   * Iniciar conversa (disparo ativo): o atendente fala primeiro com um contato existente ou um
+   * telefone novo. Fora da rota `:id`, então o escopo de número é checado no service.
+   */
+  @Post('start')
+  async start(@CurrentUser() u: AuthUser, @Body() dto: StartDto) {
+    let template;
+    if (dto.template) {
+      // o número tem de ser do tenant ANTES de perguntar à Meta pelos templates dele
+      await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: dto.numberId, tenantId: u.tenantId }, select: { id: true } });
+      template = { definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language), header: dto.template.header, body: dto.template.body };
+    }
+    return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey });
+  }
+
   /** Nota interna (cadeado) — só equipe vê. */
   @Post(':id/notes')
   note(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: NoteDto) {
@@ -169,10 +205,18 @@ export class ConversationsController {
   }
 
   @Post(':id/messages')
-  send(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: SendDto) {
+  async send(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: SendDto) {
     // mediaKey só pode apontar para o storage do próprio tenant
     if (dto.mediaKey && !dto.mediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('mediaKey inválida');
-    return this.conversations.send(u.tenantId, u, id, dto);
+    if (dto.template) {
+      // janela expirada no composer: o template é conferido na Meta no número DA CONVERSA
+      const conv = await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { numberId: true, contactId: true, number: { select: { provider: true } } } });
+      if (conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
+      const definition = await this.numbers.template(conv.numberId, dto.template.name, dto.template.language);
+      const msg = await this.conversations.templateMessage(u.tenantId, conv.contactId, definition, dto.template, { agentName: u.name });
+      return this.conversations.send(u.tenantId, u, id, { ...msg, expectedNumberId: dto.expectedNumberId, idempotencyKey: dto.idempotencyKey });
+    }
+    return this.conversations.send(u.tenantId, u, id, { ...dto, template: undefined });
   }
 
   @Post(':id/messages/:messageId/resend')

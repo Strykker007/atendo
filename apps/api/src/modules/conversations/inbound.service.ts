@@ -351,6 +351,23 @@ export class InboundService {
   }
 
   /**
+   * Sincronização completa da agenda do aparelho (job periódico, `contacts-sync.ts`). Passa
+   * cada nome pela MESMA regra do webhook (`applyContactName`): guarda na agenda do número e
+   * atualiza o nome de quem já é contato, sem criar contato novo. Só processa o que mudou desde a
+   * última vez — a agenda tem milhares de linhas e quase nada muda entre uma rodada e outra.
+   */
+  async syncPhonebook(number: WhatsAppNumber, list: { phone: string; name: string }[]) {
+    const atual = new Map((await this.prisma.phonebookEntry.findMany({ where: { numberId: number.id }, select: { phone: true, name: true } })).map((e) => [e.phone, e.name]));
+    let changed = 0;
+    for (const c of list) {
+      if (atual.get(c.phone) === c.name.trim()) continue;
+      await this.applyContactName(number, c);
+      changed++;
+    }
+    return { total: list.length, changed };
+  }
+
+  /**
    * Contato que nasceu sem nome (conversa começada pelo celular do cliente): pergunta ao
    * provider. O que vier não dá para saber se é agenda ou pushName — entra como `whatsapp`.
    */

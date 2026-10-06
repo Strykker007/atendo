@@ -61,6 +61,8 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 
 **Janela de 24h:** `Conversation.lastInboundAt` guarda a última mensagem do contato. `ConversationsService.send` recusa mensagem livre fora da janela — o atendente precisa mandar um template. O template vai em `OutboundMessage.template` com `category` (`utility | marketing | authentication`) que define o custo.
 
+**Templates (HSM):** `MetaProvider.listTemplates` lê `GET /{wabaId}/message_templates?status=APPROVED` (paginado, até 1.000) e normaliza com `parseMetaTemplate` → `MessageTemplate`. Variáveis posicionais (`{{1}}`) e nomeadas (`{{first_name}}`, enviadas com `parameter_name`) são suportadas; cabeçalho de mídia, botão de URL dinâmica e templates de autenticação voltam marcados `unsupported`. O envio monta os `components` em `whatsapp/templates.ts` (`buildTemplateSend`), que também limpa os valores (sem quebra de linha/tab, ≤ 1024 — a Meta recusaria na entrega com 132018) e gera o texto que fica no histórico do painel. Quem usa: **Nova conversa** (`POST /conversations/start`), o **composer** quando a janela fecha (`POST /conversations/:id/messages` com `template`) e o **lembrete da Agenda** fora da janela ([Agendamento](13-agendamento.md)). A lista é cacheada 5 min por número (`NumbersService.templates`).
+
 **Categorias de cobrança (`BillingCategory`):** `service` = resposta livre na janela (grátis); `utility`, `marketing`, `authentication` = templates (pagos); `unofficial` = Evolution (grátis).
 
 ## Evolution API
@@ -262,6 +264,8 @@ A regra fica em `conversations/contact-name.ts` (`pushNameTrocaNome`, `nomeDaAge
 - se o contato já mandou mensagem com exatamente esse pushName, é pushName → ignorado (o caminho das mensagens cuida);
 - senão é agenda: grava em **`phonebook_entries`** (agenda do número: `numberId` + telefone + nome) e, se a pessoa já é contato, aplica a ela como `agenda`;
 - **não cria contato** — a agenda tem milhares de pessoas e não aparece no painel.
+
+**Sincronização periódica da agenda** (`whatsapp/contacts-sync.ts`). O webhook perde o que chega com a instância fora do ar ou durante deploy; por isso, a cada **6 h** o worker relê a agenda inteira de cada número Evolution conectado (`provider.listContacts` → `POST /chat/findContacts` sem filtro, mesmo filtro do webhook) e passa só o que mudou desde a última vez (`InboundService.syncPhonebook`, comparando com `phonebook_entries`) pela **mesma** regra do `applyContactName`. Também não cria contato. Em *Números*, **Sincronizar agenda** (`POST /numbers/:id/contacts/sync`, `numbers.manage`) põe um número na fila na hora (`jobId` fixo: clicar de novo não empilha). A Meta não expõe agenda — `listContacts` não existe lá. A agenda sincronizada aparece na busca do **Nova conversa** (seção "Agenda do celular"), para iniciar conversa com quem ainda não é contato.
 
 **Contato novo nasce com o nome da agenda.** Ao criar o contato (primeira mensagem dele, ou a primeira enviada pelo celular do cliente), `InboundService.createContact` consulta `phonebook_entries` do tenant — de preferência a agenda do número onde a conversa acontece (`escolherDaAgenda`) — e cria com origem `agenda`; sem registro, usa o pushName (`whatsapp`). Assim o reparear por QR, que traz a agenda inteira, só é preciso **uma vez**: o que for salvo no celular depois chega pelo mesmo evento.
 

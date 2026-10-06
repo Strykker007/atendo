@@ -7,7 +7,8 @@ import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingEvent, SendLimits } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
-import { Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, upsertMessageInCache } from './core';
+import { Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache } from './core';
+import type { MessageTemplate, TemplateValues } from '@atendo/shared';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -97,3 +98,45 @@ export function useRealtime() {
     };
   }, [qc, temToken]);
 }
+
+/** Templates aprovados (HSM) do número — só Meta; Evolution vem vazio. `sync()` ignora o cache do servidor. */
+export const useTemplates = (numberId: string | null, enabled = true) => {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['templates', numberId], enabled: !!numberId && enabled, staleTime: 60_000, queryFn: () => api<MessageTemplate[]>(`/numbers/${numberId}/templates`) });
+  const sync = useMutation({
+    mutationFn: () => api<MessageTemplate[]>(`/numbers/${numberId}/templates?refresh=1`),
+    onSuccess: (list) => qc.setQueryData(['templates', numberId], list),
+  });
+  return { ...q, sync };
+};
+
+/** Iniciar conversa (disparo ativo). Devolve a conversa para a tela abrir. */
+export interface StartConversationInput {
+  numberId: string;
+  contactId?: string;
+  phone?: string;
+  name?: string;
+  text?: string;
+  template?: { name: string; language: string; header?: TemplateValues; body?: TemplateValues };
+  idempotencyKey?: string;
+}
+export const useStartConversation = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: StartConversationInput) => api<{ conversationId: string; message: Message }>('/conversations/start', { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: (r) => { upsertMessageInCache(qc, r.message); invConv(qc, r.conversationId); qc.invalidateQueries({ queryKey: ['usage'] }); },
+  });
+};
+
+/** Template pelo composer (janela de 24h fechada na Meta). Sai pelo número da conversa, como qualquer envio. */
+export const useSendTemplate = (conversationId: string | null, expectedNumberId?: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { template: { name: string; language: string; header?: TemplateValues; body?: TemplateValues }; idempotencyKey: string }) =>
+      api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ type: 'text', ...b, expectedNumberId }) }),
+    onSuccess: (m) => { upsertMessageInCache(qc, m); if (conversationId) invConv(qc, conversationId); qc.invalidateQueries({ queryKey: ['usage'] }); },
+  });
+};
+
+/** Reler agora a agenda de contatos do celular (Evolution). Roda no worker. */
+export const useSyncPhonebook = () => useMutation({ mutationFn: (numberId: string) => api<{ queued: boolean }>(`/numbers/${numberId}/contacts/sync`, { method: 'POST' }) });

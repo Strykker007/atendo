@@ -214,6 +214,24 @@ export class EvolutionProvider implements WhatsAppProvider {
     }, this.shard(ctx));
   }
 
+  /**
+   * Agenda inteira da instância (`POST /chat/findContacts` sem filtro): telefone + nome.
+   * Mesmo filtro do webhook `contacts.upsert` — só `@s.whatsapp.net` (sem grupo, status, @lid)
+   * e só nome que não seja o próprio número.
+   */
+  async listContacts(ctx: NumberContext) {
+    const rows = await this.api<any[]>(`/chat/findContacts/${this.instance(ctx)}`, { method: 'POST', body: JSON.stringify({ where: {} }) }, this.shard(ctx));
+    const out: { phone: string; name: string }[] = [];
+    for (const r of Array.isArray(rows) ? rows : []) {
+      const jid = String(r?.remoteJid ?? '');
+      if (!jid.endsWith('@s.whatsapp.net')) continue;
+      const phone = jid.replace(/@.*$/, '');
+      const name = typeof r?.pushName === 'string' ? r.pushName.trim() : '';
+      if (nomeDeContatoValido(name, phone)) out.push({ phone, name });
+    }
+    return out;
+  }
+
   /** Nome guardado pela Evolution para o contato (`POST /chat/findContacts`). */
   async contactName(ctx: NumberContext, phone: string) {
     const rows = await this.api<any[]>(`/chat/findContacts/${this.instance(ctx)}`, {
