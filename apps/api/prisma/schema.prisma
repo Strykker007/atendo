@@ -411,6 +411,9 @@ model PhonebookEntry {
   /// telefone do contato, só dígitos (mesmo formato de contacts.phone)
   phone     String
   name      String
+  /// nome antes da última troca. Se a troca era o nome de perfil do WhatsApp (e não a agenda),
+  /// a próxima mensagem com esse pushName volta para ele — ver `agendaParaRestaurar`
+  previousName String?
   updatedAt DateTime @updatedAt
 
   number WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)

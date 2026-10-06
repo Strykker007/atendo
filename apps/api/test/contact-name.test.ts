@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome } from '../src/modules/conversations/contact-name';
+import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from '../src/modules/conversations/contact-name';
 import { nomeDeContatoValido } from '../src/modules/whatsapp/providers/evolution.provider';
 
 describe('pushNameTrocaNome', () => {
@@ -74,3 +74,39 @@ describe('escolherDaAgenda', () => {
     expect(escolherDaAgenda([], 'este')).toBeUndefined();
   });
 });
+
+describe('trocaNaAgenda', () => {
+  it('primeiro nome da agenda entra sem anterior', () => {
+    expect(trocaNaAgenda(null, ' Lídia Luisa ')).toEqual({ name: 'Lídia Luisa', previousName: null });
+  });
+
+  it('mesmo nome ou vazio não grava nada', () => {
+    expect(trocaNaAgenda({ name: 'Lídia Luisa', previousName: null }, 'Lídia Luisa')).toBeNull();
+    expect(trocaNaAgenda({ name: 'Lídia Luisa', previousName: null }, '  ')).toBeNull();
+  });
+
+  it('toda troca guarda o nome anterior', () => {
+    expect(trocaNaAgenda({ name: 'Lídia Luisa', previousName: null }, 'Lidia L.')).toEqual({ name: 'Lidia L.', previousName: 'Lídia Luisa' });
+  });
+});
+
+describe('agendaParaRestaurar', () => {
+  // o caso real: agenda "Lídia Luisa", nome de perfil "Lídia". A Evolution guarda um nome só e
+  // troca pelo de perfil — se a troca chegar como agenda, a mensagem seguinte desfaz.
+  it('caso Lídia: a troca era o nome de perfil, a mensagem com esse pushName restaura a agenda', () => {
+    const depoisDoEvento = trocaNaAgenda({ name: 'Lídia Luisa', previousName: null }, 'Lídia')!;
+    expect(depoisDoEvento).toEqual({ name: 'Lídia', previousName: 'Lídia Luisa' });
+    expect(agendaParaRestaurar(depoisDoEvento, 'Lídia')).toBe('Lídia Luisa');
+  });
+
+  it('troca de verdade na agenda do celular fica: o pushName é outro', () => {
+    expect(agendaParaRestaurar({ name: 'Lidia L.', previousName: 'Lídia Luisa' }, 'Lídia')).toBeNull();
+  });
+
+  it('sem nome anterior ou sem pushName não restaura', () => {
+    expect(agendaParaRestaurar({ name: 'Lídia', previousName: null }, 'Lídia')).toBeNull();
+    expect(agendaParaRestaurar({ name: 'Lídia', previousName: 'Lídia Luisa' }, undefined)).toBeNull();
+    expect(agendaParaRestaurar({ name: 'Lídia', previousName: 'Lídia Luisa' }, '  ')).toBeNull();
+  });
+});
+

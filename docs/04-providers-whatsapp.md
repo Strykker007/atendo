@@ -255,7 +255,7 @@ Prioridade **manual > agenda > whatsapp**:
 | `agenda` | eventos `contacts.upsert`/`contacts.update` da Evolution (`InboundService.applyContactName`) ou, na criação do contato, `phonebook_entries` | outra sincronização da agenda e edição manual |
 | `whatsapp` | `pushName` da mensagem recebida (nunca de mensagem `fromMe`) | qualquer um, inclusive o próximo pushName |
 
-A regra fica em `conversations/contact-name.ts` (`pushNameTrocaNome`, `nomeDaAgendaTroca`).
+A regra fica em `conversations/contact-name.ts` (`pushNameTrocaNome`, `nomeDaAgendaTroca`, `trocaNaAgenda`, `agendaParaRestaurar`), testada em `test/contact-name.test.ts`.
 
 **Agenda do celular.** Lido no código da Evolution 2.3.7: `contacts.upsert`/`contacts.update` trazem em `pushName` o `contact.name` do Baileys (nome salvo na agenda) — mas a Evolution **também** dispara esses eventos a cada mensagem, com o pushName dela (vazio quando `fromMe`), e manda o próprio número quando não há nome. Por isso:
 
@@ -264,6 +264,12 @@ A regra fica em `conversations/contact-name.ts` (`pushNameTrocaNome`, `nomeDaAge
 - se o contato já mandou mensagem com exatamente esse pushName, é pushName → ignorado (o caminho das mensagens cuida);
 - senão é agenda: grava em **`phonebook_entries`** (agenda do número: `numberId` + telefone + nome) e, se a pessoa já é contato, aplica a ela como `agenda`;
 - **não cria contato** — a agenda tem milhares de pessoas e não aparece no painel.
+
+**A Evolution guarda UM nome por contato** e o sobrescreve com o nome de perfil do WhatsApp quando a pessoa manda mensagem — o nome da agenda some de lá. `phonebook_entries` é a nossa cópia e não pode seguir essa troca:
+
+- a troca pelo pushName de mensagem é barrada pela regra acima (o nome já veio em mensagem);
+- a pessoa pode trocar o nome de perfil **sem mandar mensagem**, e a Evolution avisar como se fosse agenda. Por isso toda troca em `phonebook_entries` guarda o nome anterior (`previousName`, `trocaNaAgenda`) e sai no log (`agenda <numberId> …1234: "A" → "B"`). Quando chega mensagem com pushName **igual** ao nome atual e há anterior, a troca era o perfil: volta para o anterior, no contato também se o nome dele veio dessa agenda (`agendaParaRestaurar`, log `warn`). Até essa mensagem chegar, o contato fica com o nome de perfil;
+- caso real que motivou isto (06/10/2026): celular pareado em 03/10, contato mandou mensagem em 04/10, `phonebook_entries` só passou a existir em 06/10 — o nome da agenda já tinha sido sobrescrito na Evolution e não havia cópia. Contato que perdeu o nome assim só volta repareando o QR (reenvia a agenda) ou com nome manual na ficha.
 
 **Sincronização periódica da agenda** (`whatsapp/contacts-sync.ts`). O webhook perde o que chega com a instância fora do ar ou durante deploy; por isso, a cada **6 h** o worker relê a agenda inteira de cada número Evolution conectado (`provider.listContacts` → `POST /chat/findContacts` sem filtro, mesmo filtro do webhook) e passa só o que mudou desde a última vez (`InboundService.syncPhonebook`, comparando com `phonebook_entries`) pela **mesma** regra do `applyContactName`. Também não cria contato. Em *Números*, **Sincronizar agenda** (`POST /numbers/:id/contacts/sync`, `numbers.manage`) põe um número na fila na hora (`jobId` fixo: clicar de novo não empilha). A Meta não expõe agenda — `listContacts` não existe lá. A agenda sincronizada aparece na busca do **Nova conversa** (seção "Agenda do celular"), para iniciar conversa com quem ainda não é contato.
 

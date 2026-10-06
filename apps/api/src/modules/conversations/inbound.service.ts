@@ -4,7 +4,7 @@ import type { Queue } from 'bullmq';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
 import { resumeNumber } from '../whatsapp/send-queue';
 import { Prisma } from '@prisma/client';
-import type { Conversation, Message, WhatsAppNumber } from '@prisma/client';
+import type { Contact, Conversation, Message, WhatsAppNumber } from '@prisma/client';
 import { messagePreview } from '@atendo/shared';
 import type { InboundEdit, InboundMessage, InboundPresence, InboundReaction, StatusUpdate, NumberStatus } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -12,7 +12,7 @@ import { UsageService } from '../billing/usage.service';
 import { ConversationsGateway } from './conversations.gateway';
 import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './conversations.service';
 import { decidirEntrada, voltandoDepoisDeEncerrado } from './reopen';
-import { escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome } from './contact-name';
+import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 
 /**
  * Tudo que **entra** pelo provider: mensagem recebida, mensagem digitada no celular, confirmação
@@ -62,6 +62,7 @@ export class InboundService {
 
     let contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
       ?? await this.createContact(number, msg.from, msg.contactName);
+    if (msg.contactName) contact = await this.restaurarAgenda(number.tenantId, contact, msg.contactName);
     // o pushName só troca nome que também veio do WhatsApp (ou contato ainda sem nome): nome da
     // ficha ou da agenda não pode ser desfeito pela próxima mensagem do cliente
     if (pushNameTrocaNome(contact, msg.contactName)) {
@@ -340,14 +341,44 @@ export class InboundService {
       select: { id: true },
     }));
     if (jaVeioEmMensagem) return;
-    await this.prisma.phonebookEntry.upsert({
-      where: { numberId_phone: { numberId: number.id, phone: c.phone } },
-      create: { tenantId: number.tenantId, numberId: number.id, phone: c.phone, name },
-      update: { name },
-    });
+    const chave = { numberId_phone: { numberId: number.id, phone: c.phone } };
+    const atual = await this.prisma.phonebookEntry.findUnique({ where: chave, select: { name: true, previousName: true } });
+    const registro = trocaNaAgenda(atual, name);
+    if (registro) {
+      await this.prisma.phonebookEntry.upsert({
+        where: chave,
+        create: { tenantId: number.tenantId, numberId: number.id, phone: c.phone, name: registro.name },
+        update: registro,
+      });
+      // nome da agenda trocado fica no log: é o rastro para auditar se a troca era mesmo agenda
+      if (atual) this.log.log(`agenda ${number.id} …${c.phone.slice(-4)}: "${atual.name}" → "${registro.name}"`);
+    }
     if (!contact || !nomeDaAgendaTroca(contact, name, false)) return;
     await this.prisma.contact.update({ where: { id: contact.id }, data: { name, nameSource: 'agenda' } });
     await this.emitContactConversations(number.tenantId, contact.id);
+  }
+
+  /**
+   * Mensagem chegou com um pushName igual ao nome atual da agenda que acabou de ser trocado: a
+   * troca era o nome de perfil do WhatsApp (a pessoa mudou o nome dela sem mandar mensagem e a
+   * Evolution avisou como se fosse agenda). Volta a agenda para o nome anterior e, se o contato
+   * tinha recebido esse nome pela agenda, ele também. Ver `agendaParaRestaurar`.
+   */
+  private async restaurarAgenda(tenantId: string, contact: Contact, pushName: string): Promise<Contact> {
+    const entradas = await this.prisma.phonebookEntry.findMany({
+      where: { tenantId, phone: contact.phone, previousName: { not: null } },
+      select: { id: true, numberId: true, name: true, previousName: true },
+    });
+    let paraContato: string | null = null;
+    for (const e of entradas) {
+      const nome = agendaParaRestaurar(e, pushName);
+      if (!nome) continue;
+      await this.prisma.phonebookEntry.update({ where: { id: e.id }, data: { name: nome, previousName: null } });
+      this.log.warn(`agenda ${e.numberId} …${contact.phone.slice(-4)}: "${e.name}" era o nome de perfil do WhatsApp, não a agenda — volta para "${nome}"`);
+      if (contact.nameSource === 'agenda' && contact.name === e.name) paraContato = nome;
+    }
+    if (!paraContato) return contact;
+    return this.prisma.contact.update({ where: { id: contact.id }, data: { name: paraContato } });
   }
 
   /**
