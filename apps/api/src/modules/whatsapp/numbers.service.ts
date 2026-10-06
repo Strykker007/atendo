@@ -6,6 +6,7 @@ import { ProviderRegistry } from './providers/provider.registry';
 import type { NumberContext, OutboundReaction, OutboundRevoke } from './providers/provider.interface';
 import type { MetaNumberConfig } from './providers/meta.provider';
 import type { EvolutionNumberConfig } from './providers/evolution.provider';
+import { defaultSendDelay } from './sending-policy';
 
 @Injectable()
 export class NumbersService {
@@ -81,7 +82,8 @@ export class NumbersService {
 
     const updated = await this.prisma.whatsAppNumber.update({
       where: { id: numberId },
-      data: { provider, externalId, providerConfig: this.crypto.encryptJson(config), status: 'disconnected' },
+      // trocou de provider: o intervalo volta ao padrão do novo (o imediato da Meta não serve na Evolution)
+      data: { provider, externalId, providerConfig: this.crypto.encryptJson(config), status: 'disconnected', ...(current.provider !== provider && { sendDelay: defaultSendDelay(provider) }) },
     });
 
     const ctx = await this.context(updated.id);

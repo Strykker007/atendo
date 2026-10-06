@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post,
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
+import { defaultSendDelay } from './sending-policy';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { NumbersService } from './numbers.service';
@@ -76,6 +77,7 @@ export class NumbersController {
         label: dto.label,
         ...(dto.color && { color: dto.color }),
         provider: dto.provider,
+        sendDelay: defaultSendDelay(dto.provider),
         externalId,
         providerConfig: this.crypto.encryptJson(config),
       },

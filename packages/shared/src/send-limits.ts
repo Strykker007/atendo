@@ -22,7 +22,7 @@ export interface SendLimits {
 }
 
 export const SEND_LIMIT_DEFAULTS: Record<SendProvider, SendLimits> = {
-  evolution: { ratePerMinute: 20, convMinIntervalSec: 2, convBurstMax: 6, convBurstWindowSec: 30, maxQueueAgeMin: 30 },
+  evolution: { ratePerMinute: 40, convMinIntervalSec: 1, convBurstMax: 6, convBurstWindowSec: 30, maxQueueAgeMin: 30 },
   meta: { ratePerMinute: 80, convMinIntervalSec: 1, convBurstMax: 10, convBurstWindowSec: 30, maxQueueAgeMin: 30 },
 };
 

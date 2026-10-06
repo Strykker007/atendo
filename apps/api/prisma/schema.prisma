@@ -308,7 +308,7 @@ model WhatsAppNumber {
   infraCostMonth Decimal      @default(0) @db.Decimal(10, 2)
   // ---- proteção contra bloqueio/banimento (só faz sentido no não-oficial) ----
   /// intervalo entre envios deste número; `instant` só para a API oficial
-  sendDelay      SendDelayProfile @default(short)
+  sendDelay      SendDelayProfile @default(fast)
   /// teto de envios PROATIVOS por dia (resposta dentro de 24h não conta). 0 = sem teto (padrão)
   sendDailyLimit Int          @default(0)
   /// quando o número conectou pela primeira vez — número novo sobe o volume aos poucos

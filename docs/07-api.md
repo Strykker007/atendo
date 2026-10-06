@@ -40,7 +40,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/numbers` | tenant_admin | Cria e conecta (respeita `maxNumbers`) |
 | PUT | `/numbers/:id/provider` | tenant_admin | **Troca de provider** |
 | POST | `/numbers/:id/connect` | tenant_admin | Reconecta / QR novo |
-| PATCH | `/numbers/:id` | tenant_admin | Label / cor (`color`, `#rrggbb`) / ativo / `sendDelay` / `sendDailyLimit` (proativos por dia, 0 = sem teto) / `sendLimits` / `endWarmup: true` (encerra o aquecimento) |
+| PATCH | `/numbers/:id` | tenant_admin | Label / cor (`color`, `#rrggbb`) / ativo / `sendDelay` / `sendLimits` (`sendDailyLimit` e `endWarmup` ainda são aceitos, mas a tela não usa mais — teto diário desligado) |
 | DELETE | `/numbers/:id` | tenant_admin | Remove (cascade em conversas) |
 | **Conversas** | | | |
 | GET | `/conversations?status=&numberId=&departmentId=&tagIds=a,b&search=&origin=&assigneeId=&sort=&cursor=` | todos | Lista por cursor. `departmentId` = id ou `none` (sem departamento), sempre interseccionado com o escopo de departamentos do usuário ([Departamentos](departamentos.md)). Em `in_progress`, atendente vê só as suas; admin vê todas ou filtra por `assigneeId`. `sort=waiting` ordena por quem espera resposta há mais tempo (`awaitingSince` asc, já respondidas por último) |

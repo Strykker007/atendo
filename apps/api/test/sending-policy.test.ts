@@ -22,7 +22,7 @@ describe('delayMs — intervalo entre envios', () => {
   });
 
   it('perfil desconhecido cai no curto em vez de enviar em rajada', () => {
-    expect(delayMs('inexistente' as SendDelayProfile, () => 0)).toBe(7000);
+    expect(delayMs('inexistente' as SendDelayProfile, () => 0)).toBe(3000);
   });
 });
 

@@ -37,8 +37,8 @@ qualquer origem ──▶ ConversationsService.send / sendAsSystem
         queuedAt + prazo vencido            → falha "Expirou na fila"
         há pendente anterior na conversa    → espera a vez (job atrasado 5 s; promovido antes)
         número não conectado                → pausa (job atrasado 60 s, sem chamar o provider)
-   3. teto do dia (aquecimento) — só envio proativo (contato sem mensagem nas últimas 24h);
-      resposta de atendimento pula esta etapa e não conta no contador → falha sem retry
+   3. teto do dia — desligado (todo número com sendDailyLimit 0, sem aquecimento);
+      se voltar a existir, vale só para envio proativo → falha sem retry
    4. SendPacer.reserve (Lua atômico): perfil do número + máx/min do número
         + intervalo mínimo da conversa + rajada da conversa  → atrasa até a vaga
    5. provider.send
@@ -117,8 +117,8 @@ Centralizados em `packages/shared/src/send-limits.ts`.
 
 | Limite | Evolution | Meta | Faixa aceita | Onde muda |
 |---|---|---|---|---|
-| Máximo por minuto (número) | 20 | 80 | 1–600 | Números → Proteção → Limites da fila |
-| Intervalo mínimo na conversa | 2 s | 1 s | 0–60 s | idem |
+| Máximo por minuto (número) | 40 | 80 | 1–600 | Números → Proteção → Limites da fila |
+| Intervalo mínimo na conversa | 1 s | 1 s | 0–60 s | idem |
 | Rajada por conversa | 6 msgs / 30 s | 10 msgs / 30 s | 1–100 / 5–600 s | idem |
 | Expirar na fila após | 30 min | 30 min | 1–1440 min | idem |
 | Retry | 5 tentativas, base 3 s, ×2, jitter ±50%, teto 120 s | | — | `SEND_RETRY` (código) |

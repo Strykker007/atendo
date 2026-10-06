@@ -11,19 +11,28 @@ export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'medium' | 'long';
 /** Faixas em segundos. O intervalo real é sorteado dentro da faixa a cada envio. */
 export const DELAY_RANGES: Record<SendDelayProfile, [number, number]> = {
   instant: [0, 0], // só para a API oficial, que não bane por ritmo
-  fast: [1, 7],
-  short: [7, 25],
+  fast: [1, 2],
+  short: [3, 4],
   medium: [25, 60],
   long: [60, 250],
 };
 
 export const DELAY_LABEL: Record<SendDelayProfile, string> = {
   instant: 'Imediato (só API oficial)',
-  fast: 'Rápido (1–7s)',
-  short: 'Curto (7–25s)',
+  fast: 'Rápido (1–2s)',
+  short: 'Curto (3–4s)',
   medium: 'Médio (25–60s)',
   long: 'Longo (60–250s)',
 };
+
+/**
+ * Intervalo padrão de um número: a oficial não bane por ritmo (imediato); a não oficial sai no
+ * Rápido. Antes o padrão era 7–25s para todos — com vários atendentes no mesmo número
+ * a fila virava minutos de espera.
+ */
+export function defaultSendDelay(provider: string): SendDelayProfile {
+  return provider === 'meta' ? 'instant' : 'fast';
+}
 
 /**
  * Intervalo até o próximo envio, em ms. **Sempre aleatório dentro da faixa**: intervalo

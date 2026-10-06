@@ -184,9 +184,9 @@ número na tela **Números**:
 
 | Defesa | Como funciona |
 |---|---|
-| **Intervalo entre envios** | Faixas `instant` (só oficial), `fast` 1–7s, `short` 7–25s (padrão), `medium` 25–60s, `long` 60–250s. O valor é **sorteado dentro da faixa a cada envio** — intervalo fixo é assinatura de robô |
-| **Teto diário** | Máximo de envios **proativos** por dia por número (0 = sem teto, **padrão** desde a migration `send_daily_limit_sem_teto`; quem estava no antigo padrão 1000 virou 0). Proativo = conversa sem mensagem do contato nas últimas 24h (campanha, primeiro contato, retomada); **resposta dentro de 24h nunca é barrada nem contada** (`countsTowardDailyLimit`). Ao atingir, a mensagem falha com motivo claro e **sem retry** |
-| **Aquecimento** | Só Evolution (número Meta não aquece) e só envio proativo. Número novo começa em 20 proativos/dia e dobra a cada dia por 7 dias, até o teto configurado. Começa sozinho na primeira conexão; o cartão do número tem "Encerrar aquecimento" (`PATCH /numbers/:id { endWarmup: true }`) para chip antigo que só é novo no Atendo. A tela não mostra alerta de banimento — só um aviso neutro com esse link |
+| **Intervalo entre envios** | Faixas `instant` (só oficial — **padrão da Meta**), `fast` 1–2s (**padrão da Evolution**), `short` 3–4s, `medium` 25–60s, `long` 60–250s. Vale entre quaisquer dois envios do número (todas as conversas), por isso o padrão antigo (`short` para todos) fazia a fila virar minutos com vários atendentes; a migration `send_delay_mais_rapido` passou `short` → `fast` (Meta → `instant`). Criar o número ou trocar de provider aplica o padrão do provider (`defaultSendDelay`). O valor é **sorteado dentro da faixa a cada envio** — intervalo fixo é assinatura de robô |
+| **Teto diário** | **Desligado.** Saiu da tela; a migration `sem_teto_diario` zerou `sendDailyLimit` (0 = sem teto) em todos os números. O código ainda respeitaria um valor > 0 só em envio proativo (`countsTowardDailyLimit`), mas nada o configura |
+| **Aquecimento** | **Desligado.** Número novo não inicia mais aquecimento (`numberConnectionChanged`) e a migration `sem_teto_diario` limpou `warmupStartedAt` |
 
 Implementação: `sending-policy.ts` (puro e testado) decide faixa, teto e rampa;
 `SendPacer` reserva a vaga do próximo envio no Redis com **script Lua atômico** — com
