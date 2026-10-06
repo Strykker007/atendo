@@ -36,7 +36,7 @@ provider_pricing (global, sem tenant)
 - `providerConfig` — credenciais criptografadas (string, não json, de propósito).
 - `status` — `connected | pending_qr | disconnected | error`.
 - `infraCostMonth` — rateio para margem (Evolution).
-- `deletedAt` — número **excluído** (arquivado). O registro fica com conversas, mensagens e agenda; some da lista de números e da caixa de entrada. `externalId` vira `removed:<id>` para liberar o instanceName/phone_number_id. Cadastrar o **mesmo telefone na mesma conta** (único `tenantId + phone`) revive o registro e o histórico volta; em outra conta nasce um número novo, sem histórico.
+- `deletedAt` — número **excluído** (arquivado). O registro fica com conversas, mensagens e agenda; some da lista de números e da caixa de entrada. `externalId` vira `removed:<id>` para liberar o instanceName/phone_number_id. Cadastrar o **mesmo telefone na mesma conta** (único `tenantId + phone`) revive o registro e o histórico volta — com ou sem o nono dígito (`phoneVariants`), porque depois de conectar o telefone gravado é o que o WhatsApp informa, muitas vezes sem o 9; havendo mais de um arquivado, volta o com mais conversas; em outra conta nasce um número novo, sem histórico.
 - `sendLimits` — JSON `Partial<SendLimits>`: limites da fila de envio que esta conexão sobrescreveu (por minuto, intervalo/rajada por conversa, expiração); nulo = padrão do provider. Ver [Envio](envio.md).
 - `color` — cor do canal (`#rrggbb`, padrão `#64748b`). Só visual: identifica o número no selo da lista de conversas e no cabeçalho do chat. A conversa já pertence a um número (`conversations.numberId`) e a resposta sai sempre por ele.
 

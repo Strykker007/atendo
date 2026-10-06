@@ -15,6 +15,7 @@ import { SendPacer } from './send-pacer';
 import { canUseNumber } from '../auth/number-scope';
 import { ContactsSyncScheduler } from './contacts-sync';
 import { textSearch } from '../../common/text-search';
+import { phoneVariants } from '../conversations/phone-variants';
 
 class CreateNumberDto {
   @Matches(/^\+?[1-9]\d{7,14}$/) phone: string;
@@ -83,9 +84,16 @@ export class NumbersController {
       externalId,
       providerConfig: this.crypto.encryptJson(config),
     };
-    // mesmo telefone já cadastrado nesta conta: excluído volta com o histórico; ativo é duplicata
-    const existing = await this.prisma.whatsAppNumber.findUnique({ where: { tenantId_phone: { tenantId: user.tenantId, phone } }, select: { id: true, deletedAt: true } });
-    if (existing && !existing.deletedAt) throw new ConflictException('Este número já está cadastrado.');
+    // mesmo telefone já cadastrado nesta conta: excluído volta com o histórico; ativo é duplicata.
+    // Compara com e sem o nono dígito: depois de conectar, o telefone gravado é o que o WhatsApp
+    // informa (muitas vezes SEM o 9), e quem recadastra digita COM — igualdade exata não casava
+    const mesmos = await this.prisma.whatsAppNumber.findMany({
+      where: { tenantId: user.tenantId, phone: { in: phoneVariants(phone) } },
+      select: { id: true, deletedAt: true, createdAt: true, _count: { select: { conversations: true } } },
+    });
+    if (mesmos.some((m) => !m.deletedAt)) throw new ConflictException('Este número já está cadastrado.');
+    // mais de um arquivado (excluiu e recadastrou antes desta checagem existir): volta o que tem o histórico
+    const existing = mesmos.sort((a, b) => b._count.conversations - a._count.conversations || +a.createdAt - +b.createdAt)[0];
     const n = existing
       ? await this.prisma.whatsAppNumber.update({ where: { id: existing.id }, data: { ...data, deletedAt: null, isActive: true, status: 'disconnected' } })
       : await this.prisma.whatsAppNumber.create({ data: { tenantId: user.tenantId, phone, ...data } });
