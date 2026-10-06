@@ -80,7 +80,7 @@ export default function AdminPage() {
               <ul className="divide-y divide-line">
                 {d.byPlan.map((p) => (
                   <li key={p.plan} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-ink">{p.plan} <span className="text-muted">· {p.count}</span></span>
+                    <span className="text-ink">{p.plan} <span className="text-muted">· {p.count}{p.trialing > 0 && ` (${p.trialing} em teste, fora do MRR)`}</span></span>
                     <span className="text-right">
                       <b className="tnum block">{brl(p.mrr)}</b>
                       {/* margem só aparece com custo cadastrado: "margem = receita" seria mentira

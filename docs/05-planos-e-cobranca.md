@@ -215,6 +215,10 @@ Fatura espelhada em `invoices` com `hostedUrl` (link do Stripe para pagar/baixar
 
 Tela *Financeiro (dono)* (`GET /billing/finance`), quatro abas:
 - **Visão geral** — MRR/ARR, clientes ativos/teste/cancelados, valor em atraso, margem estimada do mês; gráfico Faturado × Recebido × Custo por mês; MRR por plano; novos clientes por mês.
+  - **MRR** soma as assinaturas pagantes: `active`/`past_due`, e também `trialing` que já tenha fatura **paga** com valor > 0 na janela (o webhook que a tiraria do teste pode ter se perdido). `trialing` sem pagamento fica fora e aparece como "N em teste, fora do MRR" no MRR por plano.
+  - Valor de cada assinatura: `subscriptions.priceMonth` (contratado); se for nulo **ou zero**, usa `plans.priceMonth` — zero em plano pago é resto de plano gratuito, não preço.
+  - **Margem estimada do mês** = MRR + excedente − (custo Meta do ledger + infra dos números + custo cadastrado nos planos).
+  - Webhook `invoice.paid`: re-sincroniza a assinatura no Stripe e promove `trialing`/`past_due`/`suspended` → `active` quando a fatura tem valor > 0.
 - **Assinaturas** — cada cliente com plano, mensalidade, status, renovação, cancelamento agendado, carência.
 - **Faturas** — todas as faturas (espelho do Stripe) com link.
 - **Margem por cliente** — a tabela abaixo.

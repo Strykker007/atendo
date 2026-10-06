@@ -53,18 +53,25 @@ export class FinanceService {
 
     // agora
     const active = subs.filter((s) => ['active', 'trialing', 'past_due'].includes(s.status));
+    // pagante = ativa/pendente, ou ainda `trialing` no banco mas com fatura paga de verdade —
+    // o webhook que tiraria do teste pode ter se perdido, e o dinheiro já entrou
+    const paidTenants = new Set(invoices.filter((i) => i.status === 'paid' && Number(i.totalAmount) > 0).map((i) => i.tenantId));
+    const paying = (s: (typeof subs)[number]) => s.status !== 'trialing' || paidTenants.has(s.tenantId);
     // o preço contratado manda sobre o de tabela: cliente congelado num preço antigo rende o
-    // que ele paga, não o que o plano custa hoje — somar o do catálogo inflaria o MRR
-    const mrr = active.filter((s) => s.status !== 'trialing').reduce((a, s) => a + Number(s.priceMonth ?? s.plan.priceMonth), 0);
+    // que ele paga, não o que o plano custa hoje — somar o do catálogo inflaria o MRR.
+    // Contratado zerado em plano pago é resto de plano gratuito/cadastro, não preço: usa o do plano
+    const price = (s: (typeof subs)[number]) => Number(s.priceMonth ?? 0) > 0 ? Number(s.priceMonth) : Number(s.plan.priceMonth);
+    const mrr = active.filter(paying).reduce((a, s) => a + price(s), 0);
     const byPlan = Object.values(
-      active.reduce<Record<string, { plan: string; count: number; mrr: number; cost: number; margin: number }>>((acc, s) => {
+      active.reduce<Record<string, { plan: string; count: number; trialing: number; mrr: number; cost: number; margin: number }>>((acc, s) => {
         const k = s.plan.name;
-        acc[k] ??= { plan: k, count: 0, mrr: 0, cost: 0, margin: 0 };
+        acc[k] ??= { plan: k, count: 0, trialing: 0, mrr: 0, cost: 0, margin: 0 };
         acc[k].count++;
         // o custo conta inclusive em teste: cliente em trial consome suporte e infra do mesmo
         // jeito, e esconder isso faria o período de teste parecer de graça
         acc[k].cost += Number(s.plan.costMonth);
-        if (s.status !== 'trialing') acc[k].mrr += Number(s.priceMonth ?? s.plan.priceMonth);
+        if (paying(s)) acc[k].mrr += price(s);
+        else acc[k].trialing++;
         acc[k].margin = acc[k].mrr - acc[k].cost;
         return acc;
       }, {}),
@@ -91,7 +98,7 @@ export class FinanceService {
       byPlan,
       series,
       invoices: invoices.slice(0, 100).map((i) => ({ id: i.id, tenant: i.tenant.name, period: i.period, total: Number(i.totalAmount), overage: Number(i.overageAmount), status: i.status, dueAt: i.dueAt, paidAt: i.paidAt, hostedUrl: i.hostedUrl })),
-      subscriptions: subs.map((s) => ({ tenant: s.tenant.name, plan: s.plan.name, price: Number(s.priceMonth ?? s.plan.priceMonth), status: s.status, periodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd, graceUntil: s.graceUntil })),
+      subscriptions: subs.map((s) => ({ tenant: s.tenant.name, plan: s.plan.name, price: price(s), status: s.status, periodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd, graceUntil: s.graceUntil })),
     };
   }
 }

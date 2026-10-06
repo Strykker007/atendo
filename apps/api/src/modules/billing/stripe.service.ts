@@ -210,8 +210,16 @@ export class StripeService {
       update: { status, totalAmount: inv.total / 100, overageAmount, baseAmount: inv.subtotal / 100 - overageAmount, hostedUrl: inv.hosted_invoice_url ?? null, paidAt: inv.status === 'paid' ? new Date() : null },
     });
     if (inv.status === 'paid') {
-      // pagou: se estava em carência/suspenso, volta a ativo
-      await this.prisma.subscription.updateMany({ where: { tenantId: tenant.id, status: { in: ['past_due', 'suspended'] } }, data: { status: 'active', graceUntil: null } });
+      // fatura paga re-espelha a assinatura do Stripe: se o `customer.subscription.*` se perdeu
+      // (ou não está assinado no endpoint), o cliente pagava e seguia `trialing`, fora do MRR
+      const subId = inv.parent?.subscription_details?.subscription;
+      if (subId) {
+        await this.syncSubscription(typeof subId === 'string' ? await this.client.subscriptions.retrieve(subId) : subId)
+          .catch((e) => this.log.warn(`fatura ${inv.id}: falha ao re-sincronizar assinatura: ${e}`));
+      }
+      // pagou: se estava em carência/suspenso — ou em teste com cobrança de verdade — vira ativo
+      const from: SubscriptionStatus[] = inv.total > 0 ? ['past_due', 'suspended', 'trialing'] : ['past_due', 'suspended'];
+      await this.prisma.subscription.updateMany({ where: { tenantId: tenant.id, status: { in: from } }, data: { status: 'active', graceUntil: null } });
     }
     if (inv.status === 'open' && inv.attempt_count && inv.attempt_count > 0) {
       // tentativa de cobrança falhou: avisa com o link da fatura e a data-limite
