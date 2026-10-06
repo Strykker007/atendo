@@ -13,7 +13,9 @@ const today = (d = new Date()) => d.toISOString().slice(0, 10);
 
 /**
  * Reserva o horário de um envio respeitando, ao mesmo tempo:
- * - o perfil do número (`wa:next`, intervalo aleatório entre envios do número);
+ * - o perfil do número (`wa:next`, intervalo aleatório entre envios do número). Número ocioso
+ *   (sem envio recente) também espera um sorteio antes da 1ª mensagem (`idleDelay`) — inclusive
+ *   a digitada pelo atendente: mensagem que sai no mesmo instante do gatilho é padrão de robô;
  * - o limite por minuto do número (`wa:rate`, janela deslizante de reservas);
  * - o intervalo mínimo da conversa (`wa:cnext`);
  * - a rajada da conversa (`wa:cburst`, N mensagens por janela);
@@ -35,9 +37,11 @@ local burstMax = tonumber(ARGV[5])
 local burstWin = tonumber(ARGV[6])
 local member = ARGV[7]
 local minGap = tonumber(ARGV[8])
+local idleDelay = tonumber(ARGV[9])
 local t = now
 local nxt = tonumber(redis.call('GET', KEYS[1]) or '0')
-if nxt > t then t = nxt end
+-- em sequência o intervalo já conta da entrega anterior; ocioso, espera um sorteio (não somam)
+if nxt > now then t = nxt else t = now + idleDelay end
 local cnxt = tonumber(redis.call('GET', KEYS[3]) or '0')
 if cnxt > t then t = cnxt end
 if minGap > 0 then
@@ -123,6 +127,8 @@ export class SendPacer {
       String(i.limits.convBurstWindowSec * 1000),
       i.messageId,
       String(Math.max(0, Math.round(i.minGapMs ?? 0))),
+      // sorteio próprio para a 1ª mensagem (o de ARGV[2] é o intervalo até a próxima)
+      String(delayMs(i.profile)),
     )) as [number, number] | null;
     return { waitMs: Math.max(0, Number(res?.[0] ?? 0)), burst: Number(res?.[1] ?? 0) === 1 };
   }

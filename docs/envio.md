@@ -73,6 +73,13 @@ Uma reserva atômica no Redis cumpre ao mesmo tempo:
 | `wa:cburst:<conversa>` | rajada: N mensagens por janela na conversa |
 | `wa:cdone:<conversa>` | instante da última **entrega** na conversa — base do piso do Conteúdo (`minGapMs`) |
 
+**A 1ª mensagem também espera.** Número ocioso (sem envio recente, `wa:next` no passado): o
+envio sai depois de um sorteio do perfil (ex.: `moderate` 3–5 s), venha de fluxo, campanha,
+resposta rápida, automação ou do atendente digitando — mensagem que sai no mesmo instante do
+gatilho é padrão de robô. Em sequência, a espera é só o intervalo desde a entrega anterior (as
+duas não somam). `instant` (Meta) continua sem espera; no `fast` (padrão da Evolution) a 1ª
+mensagem leva 1–2 s.
+
 **O intervalo conta da entrega, não da reserva.** Depois que o provider aceita a mensagem,
 `SendPacer.delivered` empurra `wa:next` para *agora + novo sorteio do perfil* (ex.: `moderate`
 3000–5000 ms) e `wa:cnext` para *agora + intervalo da conversa* (só para a frente). Antes, a
