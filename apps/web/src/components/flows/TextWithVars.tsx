@@ -3,10 +3,18 @@ import { useEffect, useRef, useState } from 'react';
 import { Braces, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { inputCls } from '@/components/ui/Modal';
-import { CONTACT_FIXED_KEYS, SYSTEM_VARIABLES, VARIABLE_OP_LABEL, attributeVarKey } from '@atendo/shared';
+import { CONTACT_FIXED_KEYS, SYSTEM_VARIABLES, VARIABLE_OP_LABEL, VARIABLE_SHORTCUTS, attributeVarKey } from '@atendo/shared';
 import { useContactAttributeLabels } from '@/lib/hooks';
 
-export interface FlowVar { key: string; label: string; source: 'system' | 'attribute' | 'question' | 'menu' | 'action' }
+export interface FlowVar { key: string; label: string; source: 'shortcut' | 'system' | 'attribute' | 'question' | 'menu' | 'action' }
+
+/** Topo do menu: as mais usadas, com nome amigável (`VARIABLE_SHORTCUTS`). */
+export const SHORTCUT_VARS: FlowVar[] = VARIABLE_SHORTCUTS.map((v) => ({ key: v.key, label: v.label, source: 'shortcut' }));
+// já está nos atalhos (por chave ou apelido): não repete em "Do sistema"
+const IN_SHORTCUTS = new Set(VARIABLE_SHORTCUTS.map((v) => v.key));
+const MENU_SYSTEM_VARS = SYSTEM_VARIABLES
+  .filter((v) => !IN_SHORTCUTS.has(v.key) && !v.aliases?.some((a) => IN_SHORTCUTS.has(a)))
+  .map((v): FlowVar => ({ key: v.key, label: v.label, source: 'system' }));
 
 /**
  * Variáveis sempre disponíveis (catálogo em `@atendo/shared`, docs/variaveis.md). Os apelidos
@@ -75,11 +83,11 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
   }
 
   const attributeVars = useAttributeVars();
-  const all = [...SYSTEM_VARS, ...attributeVars, ...vars];
   const groups: [string, FlowVar[]][] = [
-    ['Do sistema', all.filter((v) => v.source === 'system')],
+    ['Mais usadas', SHORTCUT_VARS],
+    ['Do sistema', [...MENU_SYSTEM_VARS, ...vars.filter((v) => v.source === 'system')]],
     ...(attributeVars.length ? [['Campos da ficha', attributeVars] as [string, FlowVar[]]] : []),
-    ...(flowVarsGroup ? [['Criadas neste fluxo', all.filter((v) => v.source !== 'system' && v.source !== 'attribute')] as [string, FlowVar[]]] : []),
+    ...(flowVarsGroup ? [['Criadas neste fluxo', vars.filter((v) => v.source !== 'system' && v.source !== 'attribute')] as [string, FlowVar[]]] : []),
   ];
 
   return (
@@ -114,8 +122,20 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
               ))}
             </div>
           ))}
+          <VarSyntaxHint />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Rodapé do menu: os filtros e o valor padrão (docs/variaveis.md). */
+export function VarSyntaxHint() {
+  return (
+    <div className="mt-1 border-t border-line px-3 pt-2 pb-1.5 text-[11px] text-muted leading-relaxed">
+      Filtros: <code className="font-mono text-ink">{'{{contact.name | upper}}'}</code> · <code className="font-mono">first</code> <code className="font-mono">last</code> <code className="font-mono">title</code> <code className="font-mono">upper</code> <code className="font-mono">lower</code> <code className="font-mono">formatted</code>
+      <br />
+      Se vazio: <code className="font-mono text-ink">{"{{contact.first_name || 'Cliente'}}"}</code>
     </div>
   );
 }

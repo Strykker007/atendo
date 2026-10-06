@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock, Braces } from 'lucide-react';
+import { SHORTCUT_VARS, VarSyntaxHint } from '@/components/flows/TextWithVars';
 import { ScheduleMessageModal } from './ScheduledMessages';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
@@ -45,7 +46,7 @@ export interface ComposerBarProps {
 }
 
 export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita, texto, onAgendado }: ComposerBarProps) {
-  const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'mencao' | null>(null);
+  const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'mencao' | 'variavel' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
   const [agendando, setAgendando] = useState(false);
   // vendido à parte: só aparece para quem tem no perfil
@@ -89,6 +90,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       )}
       {podeAgendar && <Atalho icone={<AlarmClock size={16} />} titulo="Agendar mensagem" ativo={agendando} onClick={() => { setAberto(null); setAgendando(true); }} />}
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
+      <Atalho icone={<Braces size={16} />} titulo="Inserir variável (trocada pelo valor no envio)" ativo={aberto === 'variavel'} onClick={() => setAberto(aberto === 'variavel' ? null : 'variavel')} />
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
       <Atalho
         icone={<span className="text-[15px] font-bold underline underline-offset-2 decoration-2 leading-none">A</span>}
@@ -122,6 +124,18 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
         </Menu>
       )}
       {aberto === 'mencao' && <MenuMencao onInserir={inserir} />}
+      {aberto === 'variavel' && (
+        // a API troca no envio (`{{...}}` desconhecida fica como foi escrita) — docs/variaveis.md
+        <Menu>
+          {SHORTCUT_VARS.map((v) => (
+            <button key={v.key} type="button" onMouseDown={(ev) => ev.preventDefault()} onClick={() => inserir(`{{${v.key}}}`)} className="w-full text-left px-3 py-1.5 hover:bg-field">
+              <div className="text-[13px] text-ink">{v.label}</div>
+              <div className="font-mono text-[11px] text-muted">{`{{${v.key}}}`}</div>
+            </button>
+          ))}
+          <VarSyntaxHint />
+        </Menu>
+      )}
       <ScheduleMessageModal open={agendando} onClose={() => setAgendando(false)} conversationId={conversationId} textoInicial={texto} onAgendado={onAgendado} />
     </div>
   );

@@ -141,7 +141,7 @@ Tipo interno continua `variable` (fluxos salvos intactos); só o nome exibido mu
 
 **Operação impossível na execução** (somar texto, valor atual não numérico): o fluxo **não para** — o atendimento continua —, mas nunca fica em silêncio. `applyAssignments` devolve `problems` e o motor chama `warnTeam`: grava uma **nota interna** na conversa (autor "robô do fluxo", só a equipe vê, não vai ao WhatsApp nem conta no uso — `ConversationsService.systemNote`) e marca a execução com `error = "aviso — …"`, que aparece na lista de execuções do editor mesmo com status *concluído*.
 
-**Interpolação** (padrão do projeto, `answer.ts → interpolate`): `{{nome_da_variavel}}` e `{{contact.<campo>}}` (name, phone, email, address, note1, note2); espaços dentro das chaves são aceitos; chave inexistente vira texto vazio. Vale em todo texto enviado, nos valores do Manipulador e nos valores das regras da Condição.
+**Interpolação** (padrão do projeto, `answer.ts → interpolate`): `{{nome_da_variavel}}` e `{{contact.<campo>}}` (name, first_name, last_name, phone, email, address, note1, note2); espaços dentro das chaves são aceitos; chave inexistente vira texto vazio. Filtros e valor padrão (`{{contact.name | first | upper}}`, `{{contact.first_name || 'Cliente'}}`): ver [Variáveis](variaveis.md). Vale em todo texto enviado, nos valores do Manipulador e nos valores das regras da Condição.
 
 ## Variáveis: escopo e persistência
 

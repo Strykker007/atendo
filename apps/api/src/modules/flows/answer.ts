@@ -1,4 +1,4 @@
-import { firstName } from '@atendo/shared';
+import { applyVariableFilters, firstName, lastName, parseVariableExpr } from '@atendo/shared';
 
 /**
  * Interpretação da resposta do contato. Isolado (sem Nest/Prisma) porque é o ponto
@@ -48,15 +48,20 @@ export interface InterpolateCtx {
 const CONTACT_KEYS = ['name', 'phone', 'email', 'address', 'note1', 'note2'] as const;
 
 /**
- * `{{nome_da_variavel}}` (variável do fluxo), `{{contact.<campo>}}` — name, first_name, phone,
- * email, address, note1, note2 ou a chave de um campo livre da ficha — e as globais
- * (`{{empresa}}`, `{{saudacao}}`…). Chave desconhecida vira texto vazio; com `keepUnknown`
- * (mensagem digitada no chat) fica como estava. `escape` trata cada valor antes de entrar no
- * texto (ex.: corpo JSON do webhook, onde uma aspa no nome quebraria o JSON).
+ * `{{nome_da_variavel}}` (variável do fluxo), `{{contact.<campo>}}` — name, first_name,
+ * last_name, phone, email, address, note1, note2 ou a chave de um campo livre da ficha — e as
+ * globais (`{{empresa}}`, `{{saudacao}}`…). Aceita filtros e valor padrão
+ * (`{{contact.name | first | upper}}`, `{{contact.first_name || 'Cliente'}}`, docs/variaveis.md).
+ * Chave desconhecida (sem valor padrão) vira texto vazio; com `keepUnknown` (mensagem digitada
+ * no chat) fica como estava. Sintaxe inválida dentro de `{{ }}` sempre fica como estava.
+ * `escape` trata cada valor antes de entrar no texto (ex.: corpo JSON do webhook, onde uma
+ * aspa no nome quebraria o JSON).
  */
 export function interpolate(text: string, ctx: InterpolateCtx, escape: (v: string) => string = (v) => v, opts?: { keepUnknown?: boolean }) {
-  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (raw, key: string) => {
-    const value = resolveVar(key, ctx);
+  return text.replace(/\{\{([^{}]*)\}\}/g, (raw, inner: string) => {
+    const expr = parseVariableExpr(inner);
+    if (!expr) return raw;
+    const value = applyVariableFilters(resolveVar(expr.key, ctx), expr.filters);
     if (value === undefined) return opts?.keepUnknown ? raw : '';
     return escape(value);
   });
@@ -66,6 +71,7 @@ function resolveVar(key: string, ctx: InterpolateCtx): string | undefined {
   if (key.startsWith('contact.')) {
     const field = key.slice(8);
     if (field === 'first_name') return firstName(ctx.contact.name);
+    if (field === 'last_name') return lastName(ctx.contact.name);
     if ((CONTACT_KEYS as readonly string[]).includes(field)) return ctx.contact[field as (typeof CONTACT_KEYS)[number]] ?? '';
     // campo livre que este contato não tem: vazio (outro cliente pode ter)
     if (ctx.contact.attributes) return ctx.contact.attributes[field] ?? '';
