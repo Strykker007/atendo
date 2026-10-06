@@ -9,6 +9,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 HOST=${1:?informe o destino, ex.: bash scripts/deploy.sh ubuntu@1.2.3.4}
+
+# Produção = branch main, commitada. O rsync manda a PASTA, não um commit: sem esta trava,
+# deploy feito da develop (ou com arquivo pela metade) sobe código que não está em lugar
+# nenhum do git. Emergência consciente: DEPLOY_ANY_BRANCH=1 bash scripts/deploy.sh …
+if [ "${DEPLOY_ANY_BRANCH:-}" != "1" ]; then
+  BRANCH=$(git rev-parse --abbrev-ref HEAD)
+  [ "$BRANCH" = "main" ] || { echo "✖ Deploy só da main (você está em '$BRANCH'). Faça o merge da develop na main antes." >&2; exit 1; }
+  [ -z "$(git status --porcelain)" ] || { echo "✖ Há alterações não commitadas — elas iriam para produção sem estar no git." >&2; exit 1; }
+fi
 KEY=${2:-$HOME/.ssh/atendo-prod.key}
 SSH="ssh -i $KEY -o BatchMode=yes"
 

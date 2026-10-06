@@ -153,6 +153,17 @@ sobe com o banco de desenvolvimento dentro (autenticação falha, porque a senha
 Pior, vai junto a sessão da Evolution — e duas instâncias com a mesma sessão derrubam o
 número de WhatsApp.
 
+**Branches: `main` = produção, `develop` = desenvolvimento.** O trabalho do dia a dia vai na
+`develop` (feature maior: `feat/...` saindo dela e voltando para ela). Para publicar, merge da
+`develop` na `main` e deploy **da `main`**. O `deploy.sh` recusa outra branch ou alteração não
+commitada, porque o `rsync` manda a pasta, não um commit — sem a trava, sobe para produção
+código que não está no git. Emergência consciente: `DEPLOY_ANY_BRANCH=1`. O CI roda nas duas.
+
+```bash
+git checkout main && git merge --ff-only develop && bash scripts/deploy.sh ubuntu@IP_DO_SERVIDOR
+git checkout develop
+```
+
 O seed roda uma vez, com o arquivo já compilado na imagem:
 
 ```bash
