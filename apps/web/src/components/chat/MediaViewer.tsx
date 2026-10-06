@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Loader2, X } from 'lucide-react';
+import { ZoomableImage } from './ZoomableImage';
 
 export interface ViewerMedia { url: string; nome?: string | null; tipo: 'image' | 'video' }
 
@@ -10,7 +11,7 @@ export interface ViewerMedia { url: string; nome?: string | null; tipo: 'image' 
  * Abrir em aba nova tirava o atendente da conversa: ele perdia o contexto, voltava e tinha
  * que achar o lugar de novo. Aqui a mídia abre por cima e fecha com Esc, no X ou num clique fora,
  * sem sair de onde estava. Vídeo vem com os controles nativos completos (play/pausa, barra,
- * volume, tela cheia do navegador).
+ * volume, tela cheia do navegador). Imagem tem zoom, arrastar e girar (`ZoomableImage`).
  *
  * As setas percorrem as **outras imagens e vídeos da mesma conversa**, que é como se olha um
  * comprovante seguido da foto do produto sem ficar fechando e reabrindo.
@@ -54,8 +55,8 @@ export function MediaViewerModal({ midias, indice, onIndice, onClose }: {
           // `key`: trocar de mídia recria o player (o anterior para de tocar)
           <video key={atual.url} src={atual.url} controls autoPlay playsInline onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full min-w-0 rounded-lg bg-black" />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={atual.url} alt="" onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full min-w-0 object-contain rounded-lg" />
+          // `key`: trocar de imagem zera zoom, posição e giro
+          <ZoomableImage key={atual.url} src={atual.url} />
         )}
         <Seta lado="dir" visivel={indice < midias.length - 1} onClick={() => onIndice(indice + 1)} />
       </div>

@@ -64,7 +64,11 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
     : termo.length >= 2 && (termo !== termoAtrasado || candidatos.isFetching));
 
   const digitos = busca.replace(/\D/g, '');
-  const pareceTelefone = digitos.length >= 10 && /^[\d\s()+-]+$/.test(busca.trim());
+  const soNumeros = /^[\d\s()+-]+$/.test(busca.trim());
+  // número avulso, fora da agenda: com DDD (10–11 dígitos, assume 55) ou já com DDI (até 15, E.164)
+  const pareceTelefone = soNumeros && digitos.length >= 10 && digitos.length <= 15;
+  const telefoneDigitado = digitos.length <= 11 ? `55${digitos}` : digitos;
+  const telefoneIncompleto = soNumeros && digitos.length > 0 && !pareceTelefone;
   const usandoTemplate = isMeta && modo === 'template';
   const destinoOk = !!contato || (!!novoTelefone && novoTelefone.length >= 12);
   const mensagemOk = usandoTemplate ? choice.valid : !!texto.trim();
@@ -99,7 +103,15 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="relative">
-              <input autoFocus value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={agendaAberta ? 'Filtrar a agenda por nome ou telefone' : 'Buscar por nome ou digitar o telefone'} className={cn(inputCls, 'pr-8')} />
+              <input
+                autoFocus
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                // Enter num telefone válido já escolhe o número avulso — não precisa achar o item na lista
+                onKeyDown={(e) => { if (e.key === 'Enter' && !agendaAberta && pareceTelefone) { e.preventDefault(); setNovoTelefone(telefoneDigitado); } }}
+                placeholder={agendaAberta ? 'Filtrar a agenda por nome ou telefone' : 'Buscar por nome ou digitar o telefone (ex.: 5562999999999)'}
+                className={cn(inputCls, 'pr-8')}
+              />
               {buscando && <Loader2 size={14} aria-label="Buscando" className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-faint pointer-events-none" />}
               {!agendaAberta && (resultados.contacts.length > 0 || resultados.phonebook.length > 0 || pareceTelefone) && (
                 <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-64 overflow-y-auto">
@@ -115,13 +127,16 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
                     </button>
                   ))}
                   {pareceTelefone && (
-                    <button type="button" onClick={() => setNovoTelefone(digitos.length <= 11 ? `55${digitos}` : digitos)} className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-sm hover:bg-field text-accent-ink">
-                      <UserPlus size={14} /> Iniciar com {formatPhone(digitos.length <= 11 ? `55${digitos}` : digitos)}
+                    <button type="button" onClick={() => setNovoTelefone(telefoneDigitado)} className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-sm hover:bg-field text-accent-ink">
+                      <UserPlus size={14} /> Iniciar com {formatPhone(telefoneDigitado)} <span className="ml-auto text-[10.5px] text-faint">Enter</span>
                     </button>
                   )}
                 </div>
               )}
             </div>
+          )}
+          {!contato && !novoTelefone && !agendaAberta && telefoneIncompleto && (
+            <p className="mt-1 text-[11.5px] text-warn-ink">{digitos.length > 15 ? 'Número longo demais.' : 'Digite DDD + número, ou DDI + DDD + número (ex.: 5562999999999).'}</p>
           )}
           {!contato && !novoTelefone && number && !isMeta && (
             <button type="button" onClick={() => setAgendaAberta((v) => !v)} className={cn('mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium', agendaAberta ? 'text-ink' : 'text-accent-ink hover:underline')}>

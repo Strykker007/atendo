@@ -220,6 +220,12 @@ palavra-chave configurada sempre ganha do padrão.
 | **Boas-vindas** | primeira mensagem de um contato que nunca conversou |
 | **Conversa finalizada** | contato volta a escrever depois de o atendimento ter sido encerrado |
 | **Resposta padrão** | qualquer mensagem que não casou com palavra-chave, **e só após o período de inatividade** (padrão 24h) |
+| **Ao encerrar o atendimento** (`onCloseFlowId`) | toda vez que um atendente encerra |
+| **Ao encerrar — Comprou / Não comprou / Sem resultado** (`wonFlowId`, `lostFlowId`, `noneFlowId`) | encerramento com aquele resultado; ganha do "ao encerrar" geral |
+
+No modal de encerramento, escolher o resultado já pré-seleciona o fluxo dele (ou o geral); o
+atendente encerra com um clique ou troca/põe *Nenhum* só para aquele atendimento. Na API,
+`flowId` ausente = servidor aplica o padrão; `flowId: null` = nenhum fluxo.
 
 O período de inatividade da resposta padrão existe para o robô **não falar por cima do
 atendente**: sem ele, cada mensagem de uma conversa em andamento dispararia o fluxo. `0`

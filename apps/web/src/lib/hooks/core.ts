@@ -353,7 +353,7 @@ export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'docume
 export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; reason?: string; flowId?: string }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; reason?: string; products?: string; notes?: string; flowId?: string | null }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: (_, v) => invConv(qc, v.id),
   });
 };

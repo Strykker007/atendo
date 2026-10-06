@@ -80,6 +80,13 @@ entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` qua
 
 ### Relatórios
 
+**sales** — uma linha por atendimento encerrado como **Comprou**: `conversationId`, `contactId`,
+`userId` (quem encerrou; nulo = super_admin), `amount` (obrigatório), `products`, `notes`,
+`closedAt`. Nunca alterada nem apagada — reabrir a conversa limpa `conversations.outcome*`, mas a
+venda que já entrou no mês continua. É a base de conversão, ticket médio e faturamento por
+atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`). Encerramento em
+massa como *Comprou* não grava venda (não tem valor). Migração `20261028000000_close_flows_and_sales`.
+
 **saved_reports** — `definition` jsonb com o `ReportDefinition` (métrica, agrupamento, filtros, tipo de gráfico).
 
 ## Enums
@@ -113,7 +120,8 @@ Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
 
 **tenant_settings** — fuso horário do cliente (usado pela agenda, pelos fluxos e pelos
 relatórios), chave `attendanceActive` (feriado/férias: vale a faixa Fechado sem mexer nos
-horários) + `attendanceChangedAt`, fluxos padrão e **boas-vindas** (`welcomeEnabled`,
+horários) + `attendanceChangedAt`, fluxos padrão (inclusive `wonFlowId`/`lostFlowId`/`noneFlowId`,
+o fluxo de encerramento por resultado) e **boas-vindas** (`welcomeEnabled`,
 `welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)).
 
 **business_schedules** — quadros de horários ([Horários](horarios.md)): `name`, `timezone`,

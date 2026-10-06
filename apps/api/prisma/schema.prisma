@@ -44,6 +44,7 @@ model Tenant {
   accessProfiles AccessProfile[]
   campaigns     Campaign[]
   conversationEvents ConversationEvent[]
+  sales         Sale[]
   departments   Department[]
 
   scheduledMessages ScheduledMessage[]
@@ -87,6 +88,7 @@ model User {
   numbers       UserNumber[]
   events        ConversationEvent[] @relation("eventActor")
   eventsAbout   ConversationEvent[] @relation("eventTarget")
+  sales         Sale[]
   botPauses     Conversation[] @relation("botPausedBy")
   departments   UserDepartment[]
 
@@ -235,6 +237,10 @@ model TenantSettings {
   /// disparado automaticamente QUANDO o atendente encerra (pesquisa de satisfação, pós-venda).
   /// Diferente de `closedFlowId`, que reage ao contato voltar a escrever depois do encerramento.
   onCloseFlowId String?
+  /// fluxo padrão por desfecho do encerramento — vem pré-selecionado no modal; sem ele vale `onCloseFlowId`
+  wonFlowId  String?
+  lostFlowId String?
+  noneFlowId String?
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)
@@ -373,6 +379,7 @@ model Contact {
   conversations Conversation[]
   tags          ContactTag[]
   appointments  Appointment[]
+  sales         Sale[]
 
   /// pediu para não receber disparo. Vale para campanhas; atendimento 1-a-1 continua normal,
   /// porque o contato pode voltar a escrever e precisa ser respondido.
@@ -562,6 +569,7 @@ model Conversation {
   tags     ConversationTag[]
   flowRuns FlowRun[]
   events   ConversationEvent[]
+  sales    Sale[]
   /// execução de fluxo ativa (para marcar "em automação" na lista)
   activeFlowRunId String?
   // ---- robô pausado SÓ nesta conversa (docs/fluxos.md → Pausar o robô) ----
@@ -681,6 +689,35 @@ model ConversationEvent {
   @@index([tenantId, type, createdAt])
   @@index([tenantId, actorId, createdAt])
   @@map("conversation_events")
+}
+
+/// Venda registrada ao encerrar um atendimento como "Comprou" (docs/06-modelo-de-dados.md).
+///
+/// Uma linha por encerramento ganho, nunca alterada nem apagada — mesmo raciocínio do
+/// `ConversationEvent`: reabrir a conversa limpa o desfecho dela, mas a venda do mês que já
+/// fechou continua contando. É a base de conversão, ticket médio e faturamento por atendente.
+model Sale {
+  id             String   @id @default(uuid())
+  tenantId       String
+  conversationId String
+  contactId      String
+  /// atendente que encerrou. Nulo = super_admin/sistema
+  userId         String?
+  amount         Decimal  @db.Decimal(12, 2)
+  /// o que foi comprado (texto livre)
+  products       String?
+  notes          String?
+  closedAt       DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, closedAt])
+  @@index([tenantId, userId, closedAt])
+  @@index([conversationId])
+  @@map("sales")
 }
 
 model Message {

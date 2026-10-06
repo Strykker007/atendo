@@ -264,6 +264,7 @@ reconciliação diária reconstrói o contador a partir dele.
 
 ## Resultado do atendimento
 
-Ao encerrar, o atendente registra **comprou** (com valor) ou **não comprou** (com motivo).
+Ao encerrar, o atendente registra **comprou** (valor obrigatório, produtos e observações —
+gravados em `sales`) ou **não comprou** (com motivo).
 Isso alimenta os indicadores de venda em Relatórios — faturamento, taxa de conversão e onde
 o negócio se perde — e as métricas `revenue`, `won`, `lost` e `win_rate` no construtor.

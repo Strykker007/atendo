@@ -1,5 +1,5 @@
 'use client';
-import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles, Send } from 'lucide-react';
+import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles, Send, XCircle, MinusCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
@@ -22,7 +22,7 @@ export function DefaultFlowsSection() {
   const salvar = (patch: Parameters<typeof update.mutateAsync>[0], msg = 'Configuração salva') =>
     update.mutateAsync(patch).then(() => toast.ok(msg)).catch(toast.err);
 
-  const Select = ({ label, hint, icon, value, field }: { label: string; hint: string; icon: React.ReactNode; value: string | null; field: 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'defaultFlowId' }) => (
+  const Select = ({ label, hint, icon, value, field }: { label: string; hint: string; icon: React.ReactNode; value: string | null; field: 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'noneFlowId' | 'defaultFlowId' }) => (
     <div className="space-y-1 py-2.5 border-b border-line last:border-0">
       <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink">{icon} {label}</div>
       <p className="text-[11.5px] text-muted">{hint}</p>
@@ -67,6 +67,30 @@ export function DefaultFlowsSection() {
         hint="Dispara sozinho toda vez que alguém encerra — pesquisa de satisfação, pós-venda. No encerramento ainda dá para escolher outro fluxo só para aquele atendimento."
         value={s.onCloseFlowId}
       />
+      <div className="pl-4 border-l-2 border-line">
+        <p className="pt-2 text-[11.5px] text-muted">Por resultado do encerramento: vem pré-selecionado no modal ao escolher o resultado e ganha do fluxo acima. Em branco = usa o de cima.</p>
+        <Select
+          field="wonFlowId"
+          icon={<CheckCircle2 size={14} className="text-ok" />}
+          label="Comprou"
+          hint="Pós-venda, pedido de avaliação, instruções de entrega."
+          value={s.wonFlowId}
+        />
+        <Select
+          field="lostFlowId"
+          icon={<XCircle size={14} className="text-danger" />}
+          label="Não comprou"
+          hint="Recuperação: cupom, pesquisa do motivo, nova oferta."
+          value={s.lostFlowId}
+        />
+        <Select
+          field="noneFlowId"
+          icon={<MinusCircle size={14} className="text-muted" />}
+          label="Sem resultado"
+          hint="Atendimento sem venda em jogo (dúvida, suporte) ou contato que parou de responder."
+          value={s.noneFlowId}
+        />
+      </div>
       <Select
         field="defaultFlowId"
         icon={<MessageCircleQuestion size={14} className="text-c4" />}

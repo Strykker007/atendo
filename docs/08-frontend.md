@@ -265,6 +265,8 @@ Botão **💬+** ao lado da busca da lista abre `NewConversationModal`: contato 
 - **API oficial (Meta):** *Template aprovado* (padrão) — seletor com botão de sincronizar (`?refresh=1`), um campo por variável (o `{{1}}` do corpo já vem com `{{contact.first_name}}`), pré-visualização e aviso de cobrança. *Texto livre* fica disponível, mas só é aceito se o contato escreveu nas últimas 24h.
 - **Evolution:** texto livre (aceita variáveis).
 
+**Número avulso** (fora da agenda e da base): digite o telefone com DDD (`62999999999`, assume 55) ou já com DDI (`5562999999999`, até 15 dígitos) e escolha *Iniciar com …* ou aperte **Enter**. Número curto/longo demais mostra o aviso embaixo do campo. O contato é criado no envio e a tela abre a conversa.
+
 A busca (`GET /conversations/start/contacts`) traz contatos da base e, numa seção **Agenda do celular**, nomes sincronizados do aparelho que ainda não são contato (escolher um preenche telefone + nome e, se possível, o número de onde veio). Para quem não lembra o nome, **Ver agenda do celular** (só em número Evolution) abre a agenda inteira do número selecionado (`GET /numbers/:id/phonebook`), em ordem alfabética, de 50 em 50 carregando sozinha ao rolar (scroll infinito) e virtualizada — só as linhas visíveis vão para o DOM, então agenda de milhares de nomes não trava; o campo de busca passa a filtrar essa lista. A busca é no servidor ([busca textual](07-api.md#busca-textual-de-contatos): sem acento, palavras em qualquer ordem, telefone com máscara), com debounce de 300 ms (`useDebounced`) e spinner dentro do campo enquanto procura. Quem já é contato vem marcado *já é contato* e abre o contato existente.
 
 **Janela de 24h fechada no chat.** Conversa em número da API oficial cujo contato não escreve há 24h troca o composer por uma barra amarela *"Janela de 24h fechada"* com **Enviar template** (`TemplateSendModal`) e o atalho da nota interna. O relógio é o mesmo da lista (`useMinuto`), então a barra aparece sozinha quando a janela vence com a conversa aberta. O seletor (`TemplateFields` + `useTemplateChoice`) é o mesmo do *Nova conversa* e do template de lembrete da Agenda.
@@ -385,7 +387,9 @@ barra, volume, tela cheia do navegador).
 Fecha com `Esc`, no X ou clique no fundo — **clicar na mídia não fecha**, senão olhar de perto
 (ou dar play) fecharia sem querer. As setas (e `←` / `→`) percorrem as outras imagens e vídeos
 da mesma conversa (mensagens apagadas ficam de fora); com o foco no vídeo, `←` / `→` são do
-player. **Baixar** busca o arquivo e salva com o nome original (o atributo `download` não vale
+player. **Imagem tem zoom** (`ZoomableImage`): roda do mouse/pinça e duplo clique ampliam na direção
+do cursor, botões − / + / tamanho original / girar 90° na barra de baixo, teclas `+` `-` `0`;
+ampliada, arrasta com o mouse. Trocar de imagem zera zoom e giro. **Baixar** busca o arquivo e salva com o nome original (o atributo `download` não vale
 para a URL do storage, que é de outro domínio); se o storage recusar a busca, abre em aba nova.
 
 

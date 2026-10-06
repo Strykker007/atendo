@@ -9,6 +9,9 @@ export interface SettingsUpdate {
   welcomeFlowId?: string | null;
   closedFlowId?: string | null;
   onCloseFlowId?: string | null;
+  wonFlowId?: string | null;
+  lostFlowId?: string | null;
+  noneFlowId?: string | null;
   defaultFlowId?: string | null;
   defaultFlowInactivityHours?: number;
   welcomeMessages?: WelcomeMessage[];

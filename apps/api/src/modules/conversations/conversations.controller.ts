@@ -82,10 +82,19 @@ class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;
   /** desfecho do atendimento, só no encerramento */
   @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
-  @IsOptional() @IsNumber() @Min(0) @Max(9_999_999) value?: number;
+  /** valor da venda — obrigatório quando encerra como `won` */
+  @ValidateIf((o: StatusDto) => o.status === 'closed' && o.outcome === 'won')
+  @IsNumber({}, { message: 'Informe o valor da compra' }) @Min(0.01, { message: 'Informe o valor da compra' }) @Max(9_999_999)
+  value?: number;
+  /** venda: o que foi comprado e observações do fechamento */
+  @IsOptional() @IsString() @MaxLength(500) products?: string;
+  @IsOptional() @IsString() @MaxLength(1000) notes?: string;
   @IsOptional() @IsString() @MaxLength(200) reason?: string;
-  /** fluxo disparado ao encerrar (pesquisa de satisfação, pós-venda…) */
-  @IsOptional() @IsUUID() flowId?: string;
+  /**
+   * Fluxo disparado ao encerrar (pesquisa de satisfação, pós-venda…). Ausente = padrão do
+   * desfecho (ou o geral); `null` = o atendente escolheu "Nenhum" e nada dispara.
+   */
+  @IsOptional() @IsUUID() flowId?: string | null;
 }
 class BulkCloseDto {
   /**
@@ -305,14 +314,21 @@ export class ConversationsController {
 
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
-    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason } : undefined);
+    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason, products: dto.products, notes: dto.notes } : undefined);
     // Fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar).
     // Sem escolha no modal, vale o fluxo padrão configurado — é o caso comum: pesquisa de
     // satisfação que precisa sair em TODO encerramento, e depender de alguém lembrar de
     // escolher na hora é o mesmo que não existir.
+    // O padrão do desfecho (Comprou/Não comprou/Sem resultado) ganha do geral. `null` explícito
+    // é "Nenhum" escolhido no modal — não cai no padrão.
     if (dto.status === 'closed') {
-      const padrao = dto.flowId ?? (await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { onCloseFlowId: true } }))?.onCloseFlowId;
-      if (padrao) await this.flows.startOnClose(u.tenantId, id, padrao).catch(() => undefined);
+      let fluxo = dto.flowId;
+      if (fluxo === undefined) {
+        const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { onCloseFlowId: true, wonFlowId: true, lostFlowId: true, noneFlowId: true } });
+        const porDesfecho = { won: s?.wonFlowId, lost: s?.lostFlowId, none: s?.noneFlowId }[dto.outcome ?? 'none'];
+        fluxo = porDesfecho ?? s?.onCloseFlowId ?? null;
+      }
+      if (fluxo) await this.flows.startOnClose(u.tenantId, id, fluxo).catch(() => undefined);
     }
     return conv;
   }

@@ -1055,7 +1055,7 @@ export class ConversationsService {
     id: string,
     status: ConversationStatus,
     userId: string,
-    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string },
+    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string; products?: string; notes?: string },
   ) {
     // o desfecho só faz sentido ao encerrar; reabrir limpa, porque o atendimento continua
     const desfecho =
@@ -1098,6 +1098,22 @@ export class ConversationsService {
       outcomeValue: conv.outcomeValue,
       reason: status === 'closed' ? outcome?.reason?.trim() || null : null,
     });
+    // venda: linha própria e imutável — é a base de conversão, ticket médio e desempenho por atendente
+    if (status === 'closed' && outcome?.outcome === 'won' && conv.outcomeValue) {
+      const vendedor = (await this.prisma.user.findFirst({ where: { id: userId, tenantId }, select: { id: true } }))?.id ?? null;
+      await this.prisma.sale.create({
+        data: {
+          tenantId,
+          conversationId: id,
+          contactId: conv.contactId,
+          userId: vendedor,
+          amount: conv.outcomeValue,
+          products: outcome.products?.trim() || null,
+          notes: outcome.notes?.trim() || null,
+          closedAt: conv.closedAt ?? new Date(),
+        },
+      });
+    }
     if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId, conversationId: id, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     if (status === 'closed') await this.encerrarFluxosPausados([id]);
     this.gateway.emitConversation(tenantId, conv);

@@ -27,6 +27,10 @@ class SettingsDto {
   @IsOptional() @IsUUID() closedFlowId?: string | null;
   /** disparado quando o atendente encerra */
   @IsOptional() @IsUUID() onCloseFlowId?: string | null;
+  /** padrão por desfecho do encerramento; pré-seleciona no modal e ganha de `onCloseFlowId` */
+  @IsOptional() @IsUUID() wonFlowId?: string | null;
+  @IsOptional() @IsUUID() lostFlowId?: string | null;
+  @IsOptional() @IsUUID() noneFlowId?: string | null;
   @IsOptional() @IsUUID() defaultFlowId?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(720) defaultFlowInactivityHours?: number;
   /** boas-vindas: cada uma é uma lista de mensagens no formato do Conteúdo */
