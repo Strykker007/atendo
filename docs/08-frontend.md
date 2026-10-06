@@ -292,6 +292,7 @@ Ator vazio aparece como **Automação**, nunca em branco: em auditoria, campo va
 - Uma escala só; grade discreta (`--grid`); tooltip por marca; tabela alternativa (ícone de tabela) e CSV.
 - Cores categóricas `--c1…--c6` em **ordem fixa**, validadas para daltonismo e contraste nos dois temas (script `validate_palette` do skill dataviz). Nunca gerar cor extra: além de 6, agrupar.
 - `XAxis`/`YAxis` precisam ser filhos **diretos** do chart — Fragment quebra a detecção do Recharts.
+- Métrica `revenue` formata em R$ (tooltip `fmtBRL`, eixo compacto "12 mil"); `win_rate` em %. A seção **Vendas** da visão pronta (KPIs faturado/ticket médio/conversão, faturamento por dia, vendas por atendente com tabela) usa `overview.sales`, que vem da tabela `sales`.
 
 ## Padrões
 

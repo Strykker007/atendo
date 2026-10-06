@@ -128,7 +128,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/billing/sync-plans` | super_admin | Cria Products/Prices no Stripe |
 | GET | `/billing/usage` | todos | Uso do mês (mensagens, templates, números, atendentes, fluxos ativos, respostas rápidas), limites, status, mensalidade, excedente, fim do período, `freePlan: {durationDays} \| null`, `billingCycle` |
 | **Relatórios** | | | |
-| GET | `/reports/overview?from=&to=` | todos | Visão pronta: KPIs (conversas, fila agora, 1ª resposta média, % encerradas, msgs in/out) + séries por dia/atendente/origem/campanha/tag/status |
+| GET | `/reports/overview?from=&to=` | todos | Visão pronta: KPIs (conversas, fila agora, 1ª resposta média, % encerradas, msgs in/out, comprou/não comprou/taxa de conversão) + séries por dia/atendente/origem/campanha/tag/status + `sales` (tabela `sales`, pelo `closedAt`): `{total, count, avgTicket, byDay[{label,value}], byAgent[{label,value,count,avgTicket}]}` |
 | POST | `/reports/run` | todos | Executa um `ReportDefinition` |
 | GET / POST / DELETE | `/reports/saved[/:id]` | todos | Relatórios salvos |
 | **Webhooks** (sem auth de usuário) | | | |

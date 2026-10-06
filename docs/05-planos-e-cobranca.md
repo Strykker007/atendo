@@ -266,5 +266,7 @@ reconciliação diária reconstrói o contador a partir dele.
 
 Ao encerrar, o atendente registra **comprou** (valor obrigatório, produtos e observações —
 gravados em `sales`) ou **não comprou** (com motivo).
+Em **Relatórios → Vendas**: faturado no período, ticket médio, taxa de conversão, faturamento
+por dia e tabela por atendente (vendas, faturado, ticket médio) — lidos de `sales`.
 Isso alimenta os indicadores de venda em Relatórios — faturamento, taxa de conversão e onde
 o negócio se perde — e as métricas `revenue`, `won`, `lost` e `win_rate` no construtor.

@@ -62,5 +62,7 @@ export interface ReportOverview {
   period: { from: string; to: string };
   kpis: { conversations: number; closed: number; closeRate: number; waitingNow: number; inProgressNow: number; messagesIn: number; messagesOut: number; avgFirstResponseMin: number | null; won: number; lost: number; revenue: number; winRate: number | null };
   series: Record<'byDay' | 'byAgent' | 'byOrigin' | 'byCampaign' | 'byTag' | 'byStatus', { label: string; value: number }[]>;
+  /** vendas do período (tabela `sales`): total em R$, quantidade, ticket médio e por dia/atendente */
+  sales: { total: number; count: number; avgTicket: number | null; byDay: { label: string; value: number }[]; byAgent: { label: string; value: number; count: number; avgTicket: number }[] };
 }
 export const useReportOverview = (from: string, to: string) => useQuery({ queryKey: ['report-overview', from, to], queryFn: () => api<ReportOverview>(`/reports/overview?from=${from}&to=${to}`) });

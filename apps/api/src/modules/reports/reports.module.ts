@@ -68,6 +68,7 @@ class ReportsController {
       this.prisma.conversationEvent.count({ where: { tenantId: t, type: 'closed', outcome: 'lost', createdAt: { gte: from, lt: to } } }),
     ]);
     const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
+    const sales = await this.sales(t, from, to);
     return {
       period: { from, to },
       kpis: {
@@ -84,6 +85,7 @@ class ReportsController {
         revenue: Number(won._sum.outcomeValue ?? 0),
         winRate: won._count._all + lost > 0 ? won._count._all / (won._count._all + lost) : null,
       },
+      sales,
       series: { byDay, byAgent, byOrigin, byCampaign: byCampaign.filter((c) => c.label !== '(orgânico)'), byTag: byTag.filter((c) => c.label !== '(sem tag)').sort((a, b) => b.value - a.value).slice(0, 8), byStatus },
     };
   }
@@ -102,6 +104,38 @@ class ReportsController {
   @Delete('saved/:id')
   remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.prisma.savedReport.delete({ where: { id, tenantId: u.tenantId } });
+  }
+
+  /**
+   * Vendas do período, lidas da tabela `sales` (uma linha por encerramento "Comprou", nunca
+   * alterada). Entra no dia do fechamento. Atendente que saiu da equipe continua com o nome
+   * enquanto o usuário existir; apagado vira "(sem atendente)".
+   */
+  private async sales(tenantId: string, from: Date, to: Date) {
+    const where = Prisma.sql`s."tenantId" = ${tenantId} and s."closedAt" >= ${from} and s."closedAt" < ${to}`;
+    const [totais, byDay, byAgent] = await Promise.all([
+      this.prisma.$queryRaw<{ total: number | null; count: number }[]>(Prisma.sql`
+        select sum(s.amount)::float as total, count(*)::int as count from sales s where ${where}
+      `),
+      this.prisma.$queryRaw<{ label: string; value: number }[]>(Prisma.sql`
+        select to_char(s."closedAt", 'YYYY-MM-DD') as label, sum(s.amount)::float as value
+        from sales s where ${where} group by 1 order by 1
+      `),
+      this.prisma.$queryRaw<{ label: string; value: number; count: number }[]>(Prisma.sql`
+        select coalesce(u.name, '(sem atendente)') as label, sum(s.amount)::float as value, count(*)::int as count
+        from sales s left join users u on u.id = s."userId"
+        where ${where} group by 1 order by 2 desc
+      `),
+    ]);
+    const total = Number(totais[0]?.total ?? 0);
+    const count = Number(totais[0]?.count ?? 0);
+    return {
+      total,
+      count,
+      avgTicket: count ? total / count : null,
+      byDay: byDay.map((r) => ({ label: r.label, value: Number(r.value) })),
+      byAgent: byAgent.map((r) => ({ label: r.label, value: Number(r.value), count: Number(r.count), avgTicket: Number(r.value) / Number(r.count) })),
+    };
   }
 
   /** Conversas agrupadas. Parametrizado via Prisma.sql — sem concatenação de string do usuário. */

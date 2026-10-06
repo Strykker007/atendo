@@ -10,7 +10,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 import { ConversationOrigin } from './core';
 
 // ---- Relatórios ----
-export type ReportMetric = 'conversations' | 'messages_in' | 'messages_out' | 'avg_first_response_min';
+export type ReportMetric = 'conversations' | 'messages_in' | 'messages_out' | 'avg_first_response_min' | 'revenue' | 'won' | 'lost' | 'win_rate';
 export type ReportGroup = 'day' | 'week' | 'month' | 'tag' | 'status' | 'number' | 'agent' | 'origin' | 'campaign';
 export interface ReportDefinition {
   metric: ReportMetric;

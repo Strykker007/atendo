@@ -8,9 +8,9 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
-import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel } from '@/components/reports/ReportChart';
+import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
 import { useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
-import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
+import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -60,6 +60,9 @@ export default function RelatoriosPage() {
 
   const total = useMemo(() => result?.series.reduce((a, s) => a + s.value, 0) ?? 0, [result]);
   const isAvg = result?.definition.metric === 'avg_first_response_min';
+  const isRate = result?.definition.metric === 'win_rate';
+  const isBRL = result?.definition.metric === 'revenue';
+  const fmtCelula = (v: number) => (isAvg ? v.toFixed(1) : isRate ? `${Math.round(v * 100)}%` : isBRL ? fmtBRL(v) : v.toLocaleString('pt-BR'));
 
   function exportCsv() {
     if (!result) return;
@@ -104,6 +107,8 @@ export default function RelatoriosPage() {
               <ReportChart def={{ metric: 'conversations', groupBy: overview.data.series.byCampaign.length ? 'campaign' : 'tag', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byCampaign.length ? overview.data.series.byCampaign : overview.data.series.byTag} height={220} />
             </Card>
           </div>
+
+          <Vendas overview={overview.data} range={range} />
         </>
       )}
 
@@ -177,7 +182,7 @@ export default function RelatoriosPage() {
                 </div>
                 {result && (
                   <div className="text-xs text-muted tnum">
-                    {new Date(result.definition.from).toLocaleDateString('pt-BR')} → {new Date(result.definition.to).toLocaleDateString('pt-BR')} · {isAvg ? `média ${(total / Math.max(1, result.series.length)).toFixed(1)} min` : `total ${total.toLocaleString('pt-BR')}`}
+                    {new Date(result.definition.from).toLocaleDateString('pt-BR')} → {new Date(result.definition.to).toLocaleDateString('pt-BR')} · {isAvg ? `média ${(total / Math.max(1, result.series.length)).toFixed(1)} min` : isRate ? 'taxa por grupo' : `total ${isBRL ? fmtBRL(total) : total.toLocaleString('pt-BR')}`}
                   </div>
                 )}
               </div>
@@ -199,7 +204,7 @@ export default function RelatoriosPage() {
                   <table className="w-full text-sm">
                     <thead className="text-left text-xs uppercase tracking-wide text-muted"><tr><th className="py-2 pr-4">{GROUP_LABEL[result.definition.groupBy]}</th><th className="py-2 text-right">{METRIC_LABEL[result.definition.metric]}</th></tr></thead>
                     <tbody className="divide-y divide-line">
-                      {result.series.map((s) => <tr key={s.label}><td className="py-2 pr-4 text-ink">{fmtLabel(result.definition.groupBy, s.label)}</td><td className="py-2 text-right tnum font-mono text-ink">{isAvg ? s.value.toFixed(1) : s.value.toLocaleString('pt-BR')}</td></tr>)}
+                      {result.series.map((s) => <tr key={s.label}><td className="py-2 pr-4 text-ink">{fmtLabel(result.definition.groupBy, s.label)}</td><td className="py-2 text-right tnum font-mono text-ink">{fmtCelula(s.value)}</td></tr>)}
                     </tbody>
                   </table>
                 </div>
@@ -226,6 +231,48 @@ export default function RelatoriosPage() {
       <SaveModal open={saving} onClose={() => setSaving(false)} pending={save.isPending} onSubmit={(name) => save.mutateAsync({ name, definition: result?.definition ?? def }).then(() => { toast.ok('Relatório salvo'); setSaving(false); }).catch(toast.err)} />
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} title="Excluir relatório salvo" danger confirmLabel="Excluir" text={`"${deleting?.name}" será removido da lista.`} onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Excluído'); } catch (err) { toast.err(err); throw err; } }} />
     </PageShell>
+  );
+}
+
+/**
+ * Vendas do período, da tabela `sales` (encerramentos "Comprou" com valor). Taxa de conversão
+ * vem do histórico de encerramentos: comprou ÷ (comprou + não comprou) — "sem resultado" fica de fora.
+ */
+function Vendas({ overview, range }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string] }) {
+  const v = overview.sales;
+  const { won, lost, winRate } = overview.kpis;
+  return (
+    <section className="space-y-3">
+      <h2 className="font-display font-semibold text-ink">Vendas</h2>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Kpi icon={<DollarSign size={15} />} label="Faturado no período" value={fmtBRL(v.total)} sub={`${v.count} venda${v.count === 1 ? '' : 's'}`} />
+        <Kpi icon={<Receipt size={15} />} label="Ticket médio" value={v.avgTicket != null ? fmtBRL(v.avgTicket) : '—'} sub="faturado ÷ vendas" />
+        <Kpi icon={<Target size={15} />} label="Taxa de conversão" value={winRate != null ? `${Math.round(winRate * 100)}%` : '—'} sub={`${won} comprou · ${lost} não comprou`} />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Faturamento por dia" hint="Pelo dia do fechamento da venda">
+          <ReportChart def={{ metric: 'revenue', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={v.byDay} height={220} />
+        </Card>
+        <Card title="Vendas por atendente" hint="Faturado por quem encerrou como Comprou">
+          <ReportChart def={{ metric: 'revenue', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={v.byAgent} height={220} />
+          {v.byAgent.length > 0 && (
+            <table className="w-full mt-3 text-[12.5px]">
+              <thead><tr className="text-left text-muted border-b border-line"><th className="py-1.5 font-medium">Atendente</th><th className="py-1.5 font-medium text-right">Vendas</th><th className="py-1.5 font-medium text-right">Faturado</th><th className="py-1.5 font-medium text-right">Ticket médio</th></tr></thead>
+              <tbody>
+                {v.byAgent.map((a) => (
+                  <tr key={a.label} className="border-b border-line last:border-0">
+                    <td className="py-1.5 text-ink truncate max-w-[160px]">{a.label}</td>
+                    <td className="py-1.5 text-right tnum">{a.count}</td>
+                    <td className="py-1.5 text-right tnum">{fmtBRL(a.value)}</td>
+                    <td className="py-1.5 text-right tnum text-muted">{fmtBRL(a.avgTicket)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </div>
+    </section>
   );
 }
 

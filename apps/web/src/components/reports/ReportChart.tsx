@@ -10,6 +10,10 @@ export const METRIC_LABEL: Record<ReportDefinition['metric'], string> = {
   messages_in: 'Mensagens recebidas',
   messages_out: 'Mensagens enviadas',
   avg_first_response_min: 'Tempo médio da 1ª resposta (min)',
+  revenue: 'Faturamento (R$)',
+  won: 'Vendas',
+  lost: 'Não comprou',
+  win_rate: 'Taxa de conversão',
 };
 export const GROUP_LABEL: Record<ReportDefinition['groupBy'], string> = {
   day: 'Dia', week: 'Semana', month: 'Mês', tag: 'Tag', status: 'Status', number: 'Número', agent: 'Atendente', origin: 'Origem', campaign: 'Campanha (anúncio)',
@@ -43,7 +47,15 @@ export const fmtLabel = (groupBy: ReportDefinition['groupBy'], l: string): strin
   if (groupBy === 'month') { const [y, m] = l.split('-'); return `${m}/${y}`; }
   return l;
 };
-const fmtValue = (metric: ReportDefinition['metric'], v: number) => (metric === 'avg_first_response_min' ? `${v.toFixed(1)} min` : v.toLocaleString('pt-BR'));
+export const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const fmtValue = (metric: ReportDefinition['metric'], v: number) =>
+  metric === 'avg_first_response_min' ? `${v.toFixed(1)} min`
+    : metric === 'revenue' ? fmtBRL(v)
+      : metric === 'win_rate' ? `${Math.round(v * 100)}%`
+        : v.toLocaleString('pt-BR');
+/** eixo: valores em R$ ficam compactos ("12 mil"), senão não cabem nos 44px */
+const fmtTick = (metric: ReportDefinition['metric']) => (v: number) =>
+  metric === 'revenue' ? v.toLocaleString('pt-BR', { notation: 'compact' }) : metric === 'win_rate' ? `${Math.round(v * 100)}%` : v.toLocaleString('pt-BR');
 
 function TooltipBox({ active, payload, label, metric }: { active?: boolean; payload?: { value: number; name: string }[]; label?: string; metric: ReportDefinition['metric'] }) {
   if (!active || !payload?.length) return null;
@@ -87,7 +99,7 @@ export function ReportChart({ def, series, height = 320 }: { def: ReportDefiniti
         <LineChart data={data} margin={margin}>
           <CartesianGrid vertical={false} stroke="var(--grid)" />
           <XAxis dataKey="name" tick={axisTick} axisLine={{ stroke: 'var(--line)' }} tickLine={false} minTickGap={24} />
-          <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} allowDecimals={def.metric === 'avg_first_response_min'} />
+          <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} allowDecimals={def.metric === 'avg_first_response_min' || def.metric === 'win_rate'} tickFormatter={fmtTick(def.metric)} />
           <Tooltip content={<TooltipBox metric={def.metric} />} cursor={{ stroke: 'var(--line-strong)' }} />
           <Line type="monotone" dataKey="value" stroke="var(--c1)" strokeWidth={2} dot={{ r: 3, fill: 'var(--c1)', stroke: 'var(--panel)', strokeWidth: 2 }} activeDot={{ r: 5 }} />
         </LineChart>
@@ -102,10 +114,10 @@ export function ReportChart({ def, series, height = 320 }: { def: ReportDefiniti
       <BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'} margin={margin} barCategoryGap="28%">
         <CartesianGrid vertical={horizontal} horizontal={!horizontal} stroke="var(--grid)" />
         {/* Recharts só reconhece XAxis/YAxis como filhos diretos — nada de Fragment aqui */}
-        {horizontal && <XAxis type="number" tick={axisTick} axisLine={false} tickLine={false} allowDecimals={def.metric === 'avg_first_response_min'} />}
+        {horizontal && <XAxis type="number" tick={axisTick} axisLine={false} tickLine={false} allowDecimals={def.metric === 'avg_first_response_min' || def.metric === 'win_rate'} tickFormatter={fmtTick(def.metric)} />}
         {horizontal && <YAxis type="category" dataKey="name" tick={axisTick} tickFormatter={short} axisLine={false} tickLine={false} width={170} />}
         {!horizontal && <XAxis dataKey="name" tick={axisTick} axisLine={{ stroke: 'var(--line)' }} tickLine={false} interval={0} angle={data.length > 8 ? -30 : 0} textAnchor={data.length > 8 ? 'end' : 'middle'} height={data.length > 8 ? 56 : 30} />}
-        {!horizontal && <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} allowDecimals={def.metric === 'avg_first_response_min'} />}
+        {!horizontal && <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} allowDecimals={def.metric === 'avg_first_response_min' || def.metric === 'win_rate'} tickFormatter={fmtTick(def.metric)} />}
         <Tooltip content={<TooltipBox metric={def.metric} />} cursor={{ fill: 'var(--field)' }} />
         <Bar dataKey="value" fill="var(--c1)" radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]} maxBarSize={40}>
           {!isTime && data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
