@@ -75,14 +75,15 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const limpar = useClearHistory();
   const podeApagar = (m: Message) =>
     !m.deletedAt && (podeApagarQualquer || (m.direction === 'out' && !!m.authorId && m.authorId === me.data?.id && Date.now() - new Date(m.createdAt).getTime() < OWN_MESSAGE_DELETE_WINDOW_MS));
-  // Editar (docs/editar-mensagens.md): só a própria mensagem de texto, com a permissão, e na
-  // Evolution dentro dos 15 min do WhatsApp (na fila, a qualquer momento). A API corta de novo.
+  // Editar (docs/editar-mensagens.md): qualquer mensagem de texto enviada pelo número (própria, de
+  // colega, do celular, do robô), com a permissão. Na fila a qualquer momento; enviada, só na
+  // Evolution e dentro dos 15 min do WhatsApp. A API corta de novo.
   const podeEditarPerfil = useCan('conversations.edit_message');
   const [editando, setEditando] = useState<Message | null>(null);
   const podeEditar = (m: Message) =>
-    podeEditarPerfil && !m.deletedAt && !m.internal && m.direction === 'out' && !!m.authorId && m.authorId === me.data?.id
-    && m.type === 'text' && !m.content && m.status !== 'failed' && conv?.number.provider !== 'meta'
-    && (m.status === 'pending' || Date.now() - new Date(m.createdAt).getTime() < MESSAGE_EDIT_WINDOW_MS);
+    podeEditarPerfil && !m.deletedAt && !m.internal && m.direction === 'out' && m.type === 'text' && !m.content && m.status !== 'failed'
+    // na fila ainda dá em qualquer provider (o texto novo é o que sai); enviada, só Evolution e no prazo
+    && (m.status === 'pending' || (conv?.number.provider !== 'meta' && Date.now() - new Date(m.createdAt).getTime() < MESSAGE_EDIT_WINDOW_MS));
   const mine = !!conv && conv.assignee?.id === me.data?.id;
   const ownedByOther = !!conv && !!conv.assignee && !mine;
   // Modo nota interna: o composer vira âmbar e o que sai é NOTA (só a equipe vê, nunca vai ao

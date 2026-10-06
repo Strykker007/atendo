@@ -20,9 +20,10 @@ export const PERMISSIONS = {
   // quem enviou sempre pode apagar a SUA mensagem recente; esta permissão é para apagar a dos
   // outros, a do robô, a recebida e a antiga (docs/apagar-mensagens.md)
   'conversations.delete_message': 'Apagar qualquer mensagem (de outras pessoas, do robô, recebidas ou antigas)',
-  // só a PRÓPRIA mensagem de texto, dentro do prazo do WhatsApp (docs/editar-mensagens.md). Vem
-  // ligada em todos os perfis padrão: é permissão para poder TIRAR de quem não deve editar
-  'conversations.edit_message': 'Editar as próprias mensagens de texto (até 15 min depois do envio)',
+  // qualquer mensagem de texto enviada pelo número (própria, de colega, do celular, da automação),
+  // dentro do prazo do WhatsApp (docs/editar-mensagens.md). Vem ligada em todos os perfis padrão:
+  // é permissão para poder TIRAR de quem não deve editar
+  'conversations.edit_message': 'Editar mensagens de texto enviadas (qualquer origem, até 15 min depois do envio)',
   'conversations.delete_chat': 'Limpar o histórico de uma conversa',
   'conversations.view_deleted': 'Ver o conteúdo original de mensagens apagadas',
   // vendida à parte: o cliente só tem se o perfil dele tiver (docs/agendamento-de-mensagens.md)

@@ -260,7 +260,7 @@ export class ConversationsController {
   }
 
   /**
-   * Editar a própria mensagem de texto (docs/editar-mensagens.md). Enviada: edita no WhatsApp do
+   * Editar mensagem de texto enviada pelo número, de qualquer origem (docs/editar-mensagens.md). Enviada: edita no WhatsApp do
    * contato primeiro (Evolution, até 15 min) e só grava se o provider aceitar — texto novo no
    * painel que não chegou ao contato engana quem atende. Na fila: só troca o texto.
    */

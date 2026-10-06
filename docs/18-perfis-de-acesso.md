@@ -142,7 +142,7 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `conversations.view_all` | aba "Atendendo" vs "Minhas", seletor de atendente na lista |
 | `conversations.transfer_any` | menu Transferir/Devolver no cabeçalho do chat |
 | `conversations.internal_note` | modo nota interna |
-| `conversations.edit_message` | lápis no hover das próprias mensagens de texto (fila ou até 15 min, só Evolution) — [Editar mensagens](editar-mensagens.md). Ligada nos três perfis padrão (migration `edit_message`) |
+| `conversations.edit_message` | lápis no hover de qualquer mensagem de texto enviada — própria, de colega, do celular ou do robô (na fila sempre; enviada até 15 min, só Evolution) — [Editar mensagens](editar-mensagens.md). Ligada nos três perfis padrão (migration `edit_message`) |
 | `conversations.delete_message` | lixeira no hover de qualquer mensagem (sem ela, só nas próprias com menos de 2 dias) |
 | `conversations.delete_chat` | botão "Limpar histórico" no cabeçalho do chat |
 | `conversations.view_deleted` | olho no aviso "Mensagem apagada por…" para ver o original |
