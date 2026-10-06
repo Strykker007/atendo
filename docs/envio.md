@@ -71,6 +71,22 @@ Uma reserva atômica no Redis cumpre ao mesmo tempo:
 | `wa:rate:<número>` | máximo por minuto do número (janela deslizante de 60 s) |
 | `wa:cnext:<conversa>` | intervalo mínimo entre mensagens seguidas da conversa |
 | `wa:cburst:<conversa>` | rajada: N mensagens por janela na conversa |
+| `wa:cdone:<conversa>` | instante da última **entrega** na conversa — base do piso do Conteúdo (`minGapMs`) |
+
+**O intervalo conta da entrega, não da reserva.** Depois que o provider aceita a mensagem,
+`SendPacer.delivered` empurra `wa:next` para *agora + novo sorteio do perfil* (ex.: `moderate`
+3000–5000 ms) e `wa:cnext` para *agora + intervalo da conversa* (só para a frente). Antes, a
+vaga era medida do horário reservado: num fluxo, as mensagens entram juntas e a 2ª só é
+processada quando a 1ª termina (ordem por conversa) — se a 1ª era uma mídia que levou 6 s para
+subir, a vaga da 2ª já tinha passado e ela saía colada. Vale para fluxo, campanha, boas-vindas,
+lembrete e chat (todos passam pelo mesmo worker).
+
+**Atraso do Conteúdo é piso.** O "esperar X s antes desta mensagem" do bloco Conteúdo (e das
+boas-vindas/faixa) continua agendando o envio X s depois, e agora também vai no job
+(`OutboundJob.minGapMs`): a mensagem só sai X s depois da **entrega** da anterior da conversa.
+Com o ritmo do número, vale o **maior** dos dois (não somam): Conteúdo 2 s + `moderate` → 3–5 s;
+Conteúdo 10 s + `moderate` → 10 s. O bloco **Esperar** (minutos/horas) segue como antes — é
+muito maior que qualquer perfil.
 
 O excedente **nunca é descartado**: o job espera a vaga. Quando é a rajada da conversa que
 segura, o worker registra `warn` "Rajada na conversa …".

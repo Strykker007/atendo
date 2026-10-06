@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -30,7 +30,7 @@ import { usePersistedState } from '@/lib/persisted';
 import { AudioMessage } from './AudioMessage';
 import { ContactSheet, ContactSummary } from './ContactSheet';
 import { MediaPreview, type Escolhido } from './MediaPreview';
-import { ImageViewer } from './ImageViewer';
+import { MediaViewerModal, type ViewerMedia } from './MediaViewer';
 import { ForwardModal } from './ForwardModal';
 import { structuredBody, ForwardedLabel } from './messages/MessageContent';
 import { messagePreview } from '@atendo/shared';
@@ -122,10 +122,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const [uploading, setUploading] = useState(false);
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
   const [previa, setPrevia] = useState<File | null>(null);
-  // imagens desta conversa, na ordem em que aparecem: as setas do visualizador andam por elas
-  const imagens = mensagens.filter((m) => (m.type === 'image' || m.type === 'sticker') && m.mediaUrl).map((m) => ({ url: m.mediaUrl!, nome: m.mediaName }));
-  const [vendoImagem, setVendoImagem] = useState<string | null>(null);
-  const indiceImagem = imagens.findIndex((i) => i.url === vendoImagem);
+  // imagens e vídeos desta conversa, na ordem em que aparecem: as setas do visualizador andam por eles
+  const midias: ViewerMedia[] = mensagens
+    .filter((m) => ['image', 'sticker', 'video'].includes(m.type) && m.mediaUrl && !m.deletedAt)
+    .map((m) => ({ url: m.mediaUrl!, nome: m.mediaName, tipo: m.type === 'video' ? 'video' : 'image' }));
+  const [vendoMidia, setVendoMidia] = useState<string | null>(null);
+  const indiceMidia = midias.findIndex((i) => i.url === vendoMidia);
   const fileRef = useRef<HTMLInputElement>(null);
   const [accept, setAccept] = useState(ACCEPT_ALL);
   /**
@@ -622,7 +624,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerImagem={setVendoImagem} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
       </div>
@@ -657,12 +659,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       />
 
       {encaminhando && <ForwardModal message={encaminhando} onClose={() => setEncaminhando(null)} />}
-      {vendoImagem && indiceImagem >= 0 && (
-        <ImageViewer
-          imagens={imagens}
-          indice={indiceImagem}
-          onIndice={(i) => setVendoImagem(imagens[i]?.url ?? null)}
-          onClose={() => setVendoImagem(null)}
+      {vendoMidia && indiceMidia >= 0 && (
+        <MediaViewerModal
+          midias={midias}
+          indice={indiceMidia}
+          onIndice={(i) => setVendoMidia(midias[i]?.url ?? null)}
+          onClose={() => setVendoMidia(null)}
         />
       )}
 
@@ -841,7 +843,7 @@ export function resumoDaMensagem(m: Message): string {
   return messagePreview(m);
 }
 
-function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, onApagar, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerImagem?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
+function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
   const estruturado = structuredBody(m);
@@ -873,7 +875,7 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, onApagar
         <Citacao m={m} citada={citada} contato={contato} />
         {estruturado ?? (
           <>
-            <MediaBody m={m} onVerImagem={onVerImagem} />
+            <MediaBody m={m} onVerMidia={onVerMidia} />
             {m.text && <p className="whitespace-pre-wrap break-words">{out ? <TextoAssinado texto={m.text} /> : m.text}</p>}
           </>
         )}
@@ -1096,16 +1098,33 @@ function irParaMensagem(id: string) {
 }
 
 /** Corpo de mídia da bolha. Sem mediaUrl ainda (download em andamento) mostra placeholder. */
-function MediaBody({ m, onVerImagem }: { m: Message; onVerImagem?: (url: string) => void }) {
+function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) => void }) {
   // só mídia: localização, contato, botões e afins são desenhados por `structuredBody`
   if (!['image', 'audio', 'video', 'document', 'sticker'].includes(m.type)) return null;
   if (!m.mediaUrl) return <span className="italic text-muted text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
   // abre por cima, não em aba nova: abrir fora tirava o atendente da conversa
   if (m.type === 'image' || m.type === 'sticker') {
-    return <img src={m.mediaUrl} alt="" onClick={() => onVerImagem?.(m.mediaUrl!)} className="rounded-md max-h-72 max-w-full object-contain mb-1 cursor-zoom-in" />;
+    return <img src={m.mediaUrl} alt="" onClick={() => onVerMidia?.(m.mediaUrl!)} className="rounded-md max-h-72 max-w-full object-contain mb-1 cursor-zoom-in" />;
   }
   if (m.type === 'audio') return <AudioMessage src={m.mediaUrl} mine={m.direction === 'out'} />;
-  if (m.type === 'video') return <video controls preload="metadata" src={m.mediaUrl} className="rounded-md max-h-72 max-w-full mb-1" />;
+  if (m.type === 'video') {
+    // o play continua na bolha (clique no vídeo é do player); o botão abre em tela cheia
+    return (
+      <div className="relative group/video mb-1 w-fit max-w-full">
+        <video controls preload="metadata" src={m.mediaUrl} className="rounded-md max-h-72 max-w-full block" />
+        {onVerMidia && (
+          <button
+            type="button"
+            onClick={(e) => { e.currentTarget.parentElement?.querySelector('video')?.pause(); onVerMidia(m.mediaUrl!); }}
+            className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/55 text-white opacity-80 group-hover/video:opacity-100 hover:bg-black/75"
+            title="Abrir em tela cheia"
+          >
+            <Maximize2 size={14} />
+          </button>
+        )}
+      </div>
+    );
+  }
   return (
     <a href={m.mediaUrl} target="_blank" rel="noreferrer" download={m.mediaName ?? undefined} className="flex items-center gap-2 rounded-md bg-black/5 px-2.5 py-2 mb-1 hover:bg-black/10">
       <FileText size={20} className="text-muted shrink-0" />

@@ -38,8 +38,12 @@ export interface BotUnpauseJob { conversationId: string; tenantId: string; pause
  */
 export interface ReplyTimeoutJob { runId: string; nodeId: string; until: string }
 /** Intervalo entre mensagens automáticas (boas-vindas, faixa de horário): o resto da sequência, já interpolado. */
-export interface AutoContentJob { conversationId: string; items: ContentItem[] }
+/** `waited`: o atraso do 1º item já foi esperado (vira só piso desde a entrega anterior). */
+export interface AutoContentJob { conversationId: string; items: ContentItem[]; waited?: boolean }
 export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob | AutoContentJob;
+
+/** Atraso antes de um item do Conteúdo, em segundos (0 a CONTENT_MAX_DELAY_SEC). */
+const contentDelaySec = (it: ContentItem) => Math.min(CONTENT_MAX_DELAY_SEC, Math.max(0, Number(it.delay) || 0));
 
 const CLOSED_REASON = 'conversa encerrada';
 type JobConv = { botPausedAt: Date | null; botPausedUntil: Date | null; status: string };
@@ -315,15 +319,14 @@ export class FlowEngineService {
    * interpolados, enviados em ordem; intervalo entre mensagens vira job `auto-content`.
    * Não cria FlowRun — não aparece em execuções de fluxo.
    */
-  async deliverAuto(conversationId: string, items: ContentItem[]) {
+  async deliverAuto(conversationId: string, items: ContentItem[], waited = false) {
     for (let i = 0; i < items.length; i++) {
-      const delay = i > 0 ? Math.min(CONTENT_MAX_DELAY_SEC, Math.max(0, Number(items[i].delay) || 0)) : 0;
-      if (delay > 0) {
-        const rest = items.slice(i).map((it, k) => (k === 0 ? { ...it, delay: 0 } : it));
-        await this.queue.add('auto-content', { conversationId, items: rest }, { delay: delay * 1000, removeOnComplete: true });
+      const gap = i > 0 || waited ? contentDelaySec(items[i]) : 0;
+      if (gap > 0 && !(waited && i === 0)) {
+        await this.queue.add('auto-content', { conversationId, items: items.slice(i), waited: true }, { delay: gap * 1000, removeOnComplete: true });
         return;
       }
-      await this.sendItem(conversationId, items[i], null).catch((err) => {
+      await this.sendItem(conversationId, items[i], null, gap * 1000).catch((err) => {
         this.log.warn(`Mensagem automática não enviada: ${err instanceof Error ? err.message : err}`);
       });
     }
@@ -331,7 +334,7 @@ export class FlowEngineService {
 
   /** Job do intervalo entre mensagens automáticas. */
   autoContent(job: AutoContentJob) {
-    return this.deliverAuto(job.conversationId, job.items);
+    return this.deliverAuto(job.conversationId, job.items, job.waited);
   }
 
   /** Inicia o fluxo da faixa (chamado por `AutoReply`). */
@@ -433,14 +436,16 @@ export class FlowEngineService {
             let paused = false;
             for (let i = resumeAt ?? 0; i < items.length; i++) {
               // intervalo antes da mensagem i (a primeira sai na hora; a retomada já esperou)
-              const delay = i > 0 && i !== resumeAt ? Math.min(CONTENT_MAX_DELAY_SEC, Math.max(0, Number(items[i].delay) || 0)) : 0;
+              const gap = i > 0 ? contentDelaySec(items[i]) : 0;
+              const delay = i !== resumeAt ? gap : 0;
               if (delay > 0) {
                 await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: new Date(Date.now() + delay * 1000), vars: { ...vars, [CONTENT_VAR]: `${node.id}:${i}` } } });
                 await this.queue.add('resume', { runId }, { delay: delay * 1000, jobId: `resume-${runId}-${node.id}-${i}-${Date.now()}` });
                 paused = true;
                 break;
               }
-              await this.sendItem(run.conversationId, items[i], ctx);
+              // o atraso também vale como piso desde a ENTREGA da anterior (mídia lenta não o encurta)
+              await this.sendItem(run.conversationId, items[i], ctx, gap * 1000);
             }
             if (paused) return;
             if (resumeAt !== undefined) {
@@ -655,7 +660,8 @@ export class FlowEngineService {
         conversationId: run.conversationId,
         businessName: tenant.name,
         instructions: interpolate(node.data.instructions, ctx),
-        knowledge: node.data.knowledge,
+        // preço/PIX/horário da empresa podem vir de variáveis ({{pix_chave}}) — docs/variaveis.md
+        knowledge: node.data.knowledge ? interpolate(node.data.knowledge, ctx) : node.data.knowledge,
         history: [...history].reverse(),
       });
       await this.send(run.conversationId, text);
@@ -1033,19 +1039,19 @@ export class FlowEngineService {
     return true;
   }
 
-  private async send(conversationId: string, text?: string) {
+  private async send(conversationId: string, text?: string, minGapMs?: number) {
     if (!text) return;
-    await this.conversations.sendAsSystem(conversationId, text);
+    await this.conversations.sendAsSystem(conversationId, text, undefined, undefined, { minGapMs });
   }
 
   /** Uma mensagem do Conteúdo. Anexo removido na importação (`_reconfig`) é pulado; áudio não leva legenda. */
-  private async sendItem(conversationId: string, it: ContentItem, ctx: InterpolateCtx | null) {
+  private async sendItem(conversationId: string, it: ContentItem, ctx: InterpolateCtx | null, minGapMs?: number) {
     // ctx nulo = texto já interpolado (mensagens automáticas)
     const text = it.text ? (ctx ? interpolate(it.text, ctx) : it.text) : undefined;
-    if (it.kind === 'text') return this.send(conversationId, text);
+    if (it.kind === 'text') return this.send(conversationId, text, minGapMs);
     if (!it.mediaKey) return;
     const audio = it.kind === 'audio';
-    await this.conversations.sendAsSystem(conversationId, audio ? undefined : text || undefined, { key: it.mediaKey, type: it.kind, name: it.mediaName, ...(audio && { voice: it.voice !== false }) });
+    await this.conversations.sendAsSystem(conversationId, audio ? undefined : text || undefined, { key: it.mediaKey, type: it.kind, name: it.mediaName, ...(audio && { voice: it.voice !== false }) }, undefined, { minGapMs });
   }
 
   /** Pergunta com opções: botões/lista na Meta, lista numerada na Evolution. */

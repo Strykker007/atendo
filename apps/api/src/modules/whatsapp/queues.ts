@@ -14,4 +14,9 @@ export interface OutboundJob {
    * job se empurraria para frente para sempre, sem nunca enviar.
    */
   pacedUntil?: number;
+  /**
+   * Piso (ms) entre a ENTREGA da mensagem anterior da conversa e esta: o atraso do bloco
+   * Conteúdo ("esperar X s antes desta"). Soma-se ao ritmo do número como o maior dos dois.
+   */
+  minGapMs?: number;
 }

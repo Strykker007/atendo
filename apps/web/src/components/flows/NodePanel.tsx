@@ -297,7 +297,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
             {node.data.mode === 'answer' ? (
               <>
                 <Field label="Base de conhecimento" hint="Única fonte de fatos: preços, endereço, horários, regras. Se não estiver aqui, a IA diz que vai verificar.">
-                  <textarea className={inputCls} rows={7} value={node.data.knowledge ?? ''} onChange={(e) => set({ knowledge: e.target.value })} placeholder={'Corte: R$ 45 (30 min)\nBarba: R$ 30\nEndereço: Rua X, 100\nFuncionamento: terça a sábado, 9h às 19h'} />
+                  <TextWithVars className="min-h-40" value={node.data.knowledge ?? ''} onChange={(v) => set({ knowledge: v })} vars={vars} placeholder={'Corte: R$ 45 (30 min)\nPIX: {{pix_chave}}\nEndereço: Rua X, 100\nFuncionamento: {{horario_atendimento}}'} />
                 </Field>
                 <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3 space-y-2">
                   <label className="flex items-center gap-2 text-ink text-[13px]">

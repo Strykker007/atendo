@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Building, Plus } from 'lucide-react';
 import { GLOBAL_VARIABLE_KEY_MAX, GLOBAL_VARIABLE_VALUE_MAX, globalVarKey, globalVarKeyError } from '@atendo/shared';
 import { cn } from '@/lib/utils';
@@ -81,6 +81,9 @@ export function GlobalVarsMenuSection({ onPick, keyFirst }: { onPick: (key: stri
   const canFlows = useCan('flows.manage');
   const canCreate = canManage || canFlows;
   const [creating, setCreating] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+  // o menu tem altura limitada e o grupo fica no meio da lista: sem isto o formulário abre fora da vista
+  useEffect(() => { if (creating) formRef.current?.scrollIntoView({ block: 'nearest' }); }, [creating]);
   if (!vars.length && !canCreate) return null;
   return (
     <div>
@@ -106,7 +109,7 @@ export function GlobalVarsMenuSection({ onPick, keyFirst }: { onPick: (key: stri
         </button>
       )}
       {creating && (
-        <div className="mx-2 my-1 rounded-lg border border-line bg-field/40 p-2.5">
+        <div ref={formRef} className="mx-2 my-1 rounded-lg border border-line bg-field/40 p-2.5">
           <div className="flex items-center gap-1.5 text-[12px] font-semibold text-ink mb-2"><Building size={13} /> Nova variável da empresa</div>
           <GlobalVariableForm compact onCancel={() => setCreating(false)} onSaved={(v) => { setCreating(false); onPick(v.key); }} />
         </div>

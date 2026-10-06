@@ -35,10 +35,11 @@ export const OUTBOUND_JOB_OPTS = {
  * Entrega a mensagem (já `pending` no banco) à fila. O `jobId` vem da mensagem: chamar duas
  * vezes para o mesmo enfileiramento não cria dois jobs.
  */
-export async function enqueueOutbound(queue: Queue<OutboundJob>, m: { id: string; queueSeq: bigint | number; internal?: boolean }) {
+export async function enqueueOutbound(queue: Queue<OutboundJob>, m: { id: string; queueSeq: bigint | number; internal?: boolean }, opts?: { minGapMs?: number }) {
   // nota interna nunca entra na fila externa — o worker e o `planSend` também recusam, isto é a 1ª barreira
   if (m.internal) throw new Error(`Nota interna ${m.id} não pode ir para a fila de envio`);
-  await queue.add('send', { messageId: m.id }, { ...OUTBOUND_JOB_OPTS, jobId: outboundJobId(m) });
+  const minGapMs = Math.max(0, Math.round(opts?.minGapMs ?? 0));
+  await queue.add('send', { messageId: m.id, ...(minGapMs > 0 && { minGapMs }) }, { ...OUTBOUND_JOB_OPTS, jobId: outboundJobId(m) });
 }
 
 /** Volta uma mensagem com falha para o fim da fila: `queueSeq` novo, prazo de expiração recomeça. */

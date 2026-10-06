@@ -104,7 +104,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
         // número desconectado: não insiste no provider. A vaga reservada é descartada — ao
         // reconectar, cada envio reserva de novo e sai no ritmo, não tudo de uma vez.
         this.log.debug(`Envio ${message.id} pausado: número ${num.id} ${num.status}`);
-        return this.later(job, token, Date.now() + plan.delayMs, { messageId: job.data.messageId });
+        return this.later(job, token, Date.now() + plan.delayMs, { messageId: job.data.messageId, minGapMs: job.data.minGapMs });
     }
 
     // ---- proteção do número (bloqueio/banimento) ----
@@ -120,7 +120,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     }
     // reserva a vaga uma única vez; nas reentradas o job já tem a dele
     if (!job.data.pacedUntil) {
-      const { waitMs, burst } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits });
+      const { waitMs, burst } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits, minGapMs: job.data.minGapMs });
       if (burst) this.log.warn(`Rajada na conversa ${message.conversationId}: envio ${message.id} adiado ${Math.round(waitMs / 1000)}s (limite ${limits.convBurstMax}/${limits.convBurstWindowSec}s)`);
       if (waitMs > 0) {
         const until = Date.now() + waitMs;
@@ -169,7 +169,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       }
       this.log.warn(`Envio ${message.id}: erro transitório, nova tentativa (${job.attemptsMade + 1}/${job.opts.attempts}): ${error}`);
       // a nova tentativa reserva o ritmo de novo
-      await job.updateData({ messageId: job.data.messageId });
+      await job.updateData({ messageId: job.data.messageId, minGapMs: job.data.minGapMs });
       throw err;
     }
 
@@ -180,6 +180,8 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       data: { status: result.status, externalId: result.externalId, error: null },
     });
     if (proativo) await this.pacer.countSend(num.id).catch(() => undefined);
+    // o intervalo até o próximo envio conta da entrega, não da reserva (mídia lenta não "gasta" o intervalo)
+    await this.pacer.delivered({ numberId: num.id, conversationId: message.conversationId, profile: num.sendDelay, limits }).catch((err) => this.log.warn(`ritmo pós-envio não gravado: ${err instanceof Error ? err.message : err}`));
     this.gateway.emitMessage(ctx.tenantId, this.conversations.present(updated));
     try {
       await this.usage.record({

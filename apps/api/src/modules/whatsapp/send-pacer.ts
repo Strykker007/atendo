@@ -7,6 +7,7 @@ const nextKey = (numberId: string) => `wa:next:${numberId}`;
 const rateKey = (numberId: string) => `wa:rate:${numberId}`;
 const convNextKey = (conversationId: string) => `wa:cnext:${conversationId}`;
 const convBurstKey = (conversationId: string) => `wa:cburst:${conversationId}`;
+const convDoneKey = (conversationId: string) => `wa:cdone:${conversationId}`;
 const dayKey = (numberId: string, day: string) => `wa:sent:${numberId}:${day}`;
 const today = (d = new Date()) => d.toISOString().slice(0, 10);
 
@@ -15,7 +16,8 @@ const today = (d = new Date()) => d.toISOString().slice(0, 10);
  * - o perfil do número (`wa:next`, intervalo aleatório entre envios do número);
  * - o limite por minuto do número (`wa:rate`, janela deslizante de reservas);
  * - o intervalo mínimo da conversa (`wa:cnext`);
- * - a rajada da conversa (`wa:cburst`, N mensagens por janela).
+ * - a rajada da conversa (`wa:cburst`, N mensagens por janela);
+ * - o piso do Conteúdo (`minGap` desde a última entrega na conversa, `wa:cdone`).
  *
  * Script Lua = atômico: com vários workers, dois jobs leriam o mesmo "próximo horário livre" e
  * sairiam juntos — exatamente a rajada que se quer evitar. Toda reserva fica ≤ o "próximo"
@@ -32,11 +34,16 @@ local convInterval = tonumber(ARGV[4])
 local burstMax = tonumber(ARGV[5])
 local burstWin = tonumber(ARGV[6])
 local member = ARGV[7]
+local minGap = tonumber(ARGV[8])
 local t = now
 local nxt = tonumber(redis.call('GET', KEYS[1]) or '0')
 if nxt > t then t = nxt end
 local cnxt = tonumber(redis.call('GET', KEYS[3]) or '0')
 if cnxt > t then t = cnxt end
+if minGap > 0 then
+  local done = tonumber(redis.call('GET', KEYS[5]) or '0')
+  if done > 0 and done + minGap > t then t = done + minGap end
+end
 local function fit(key, limit, win)
   if limit <= 0 then return false end
   redis.call('ZREMRANGEBYSCORE', key, '-inf', now - win)
@@ -65,6 +72,24 @@ redis.call('PEXPIRE', KEYS[4], ttl)
 return { t - now, burst }
 `;
 
+/**
+ * Depois da entrega: o próximo envio do número só sai `numDelay` depois DESTE instante (não do
+ * horário reservado). Sem isto, uma mídia que levou 6 s para subir "gastava" o intervalo de
+ * 3–5 s e a mensagem seguinte do fluxo saía colada. Só empurra para a frente (max).
+ */
+const DELIVERED = `
+local now = tonumber(ARGV[1])
+local ttl = 3600000
+local function bump(key, v)
+  local cur = tonumber(redis.call('GET', key) or '0')
+  if v > cur then redis.call('SET', key, v, 'PX', ttl) end
+end
+bump(KEYS[1], now + tonumber(ARGV[2]))
+bump(KEYS[2], now + tonumber(ARGV[3]))
+redis.call('SET', KEYS[3], now, 'PX', ttl)
+return 1
+`;
+
 export interface ReserveInput {
   numberId: string;
   conversationId: string;
@@ -72,6 +97,8 @@ export interface ReserveInput {
   messageId: string;
   profile: SendDelayProfile;
   limits: SendLimits;
+  /** piso desde a última entrega na conversa (`OutboundJob.minGapMs`) */
+  minGapMs?: number;
 }
 
 @Injectable()
@@ -82,11 +109,12 @@ export class SendPacer {
   async reserve(i: ReserveInput): Promise<{ waitMs: number; burst: boolean }> {
     const res = (await this.redis.eval(
       RESERVE,
-      4,
+      5,
       nextKey(i.numberId),
       rateKey(i.numberId),
       convNextKey(i.conversationId),
       convBurstKey(i.conversationId),
+      convDoneKey(i.conversationId),
       String(Date.now()),
       String(delayMs(i.profile)),
       String(i.limits.ratePerMinute),
@@ -94,8 +122,23 @@ export class SendPacer {
       String(i.limits.convBurstMax),
       String(i.limits.convBurstWindowSec * 1000),
       i.messageId,
+      String(Math.max(0, Math.round(i.minGapMs ?? 0))),
     )) as [number, number] | null;
     return { waitMs: Math.max(0, Number(res?.[0] ?? 0)), burst: Number(res?.[1] ?? 0) === 1 };
+  }
+
+  /** Mensagem entregue ao provider: o intervalo do número (sorteado de novo) e o da conversa contam daqui. */
+  async delivered(i: { numberId: string; conversationId: string; profile: SendDelayProfile; limits: SendLimits }) {
+    await this.redis.eval(
+      DELIVERED,
+      3,
+      nextKey(i.numberId),
+      convNextKey(i.conversationId),
+      convDoneKey(i.conversationId),
+      String(Date.now()),
+      String(delayMs(i.profile)),
+      String(Math.round(i.limits.convMinIntervalSec * 1000)),
+    );
   }
 
   /** Devolve a vaga quando o envio não vai acontecer (bloqueio de quota, mensagem sumiu). */

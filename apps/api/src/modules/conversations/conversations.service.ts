@@ -324,7 +324,7 @@ export class ConversationsService {
    * Envio pelo sistema (fluxos de automação): sem autor humano, não assume a conversa,
    * respeita quota e janela de 24h, passa pela mesma fila.
    */
-  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string; voice?: boolean }, interactive?: import('@atendo/shared').InteractiveMenu, opts?: { idempotencyKey?: string }) {
+  async sendAsSystem(conversationId: string, text?: string, media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string; voice?: boolean }, interactive?: import('@atendo/shared').InteractiveMenu, opts?: { idempotencyKey?: string; /** piso desde a entrega da anterior (atraso do Conteúdo) */ minGapMs?: number }) {
     const key = opts?.idempotencyKey;
     if (key) {
       // mesmo envio repetido (job reprocessado, lote de campanha refeito): devolve o que já existe
@@ -348,7 +348,7 @@ export class ConversationsService {
     if (!created.fresh) return created.message;
     const message = created.message;
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: messagePreview({ type: media ? media.type : 'text', text: shown, mediaName: media?.name }).slice(0, 120), awaitingSince: null } });
-    await enqueueOutbound(this.outbound, message);
+    await enqueueOutbound(this.outbound, message, { minGapMs: opts?.minGapMs });
     this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
   }

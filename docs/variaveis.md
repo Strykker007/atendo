@@ -1,7 +1,7 @@
 # Variáveis `{{...}}` — fluxos, respostas rápidas, campanhas e chat
 
 Um formato só, resolvido **na hora do envio** pela API. Vale em: textos dos fluxos (Conteúdo,
-Menu, Perguntar, IA, webhook, Manipulador, condições), boas-vindas e resposta por faixa de
+Menu, Perguntar, IA — instruções e base de conhecimento —, webhook, Manipulador, condições), boas-vindas e resposta por faixa de
 horário, campanhas, respostas rápidas, mensagens digitadas no chat e mensagens agendadas.
 
 ## Variáveis disponíveis
@@ -28,7 +28,9 @@ editar, excluir) ou direto no menu "Inserir variável" de qualquer tela (fluxos,
 automáticas, respostas rápidas, agendamento, botão `{ }` do chat): grupo **Variáveis da
 empresa** → **+ Criar nova variável global** abre um mini-formulário ali mesmo (Nome, Chave —
 preenchida sozinha a partir do nome, em snake_case —, Valor). Salvou, `{{chave}}` entra no
-texto onde estava o cursor e a lista atualiza no sistema todo.
+texto onde estava o cursor e a lista atualiza no sistema todo. No editor de fluxos o menu está em todo campo
+de texto dos blocos (não nos rótulos de opção do Menu/ramos nem nos nomes de variável, que
+não passam pela troca).
 
 - Tabela `global_variables`: `key` única por empresa, `label`, `value`. Até 200 por empresa.
 - Chave: minúsculas sem acento, números e `_`, começando por letra, até 40 (`globalVarKey` /
