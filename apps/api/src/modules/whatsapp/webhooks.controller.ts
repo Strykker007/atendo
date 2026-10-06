@@ -42,7 +42,12 @@ export class WebhooksController {
   @HttpCode(200)
   async evolution(@Req() req: Request & { rawBody?: Buffer }, @Headers() headers: Record<string, string>) {
     this.registry.get('evolution').verifyWebhook(headers, req.rawBody ?? Buffer.alloc(0));
-    await this.inbound.add('evolution', { provider: 'evolution', body: req.body }, { removeOnComplete: 1000, removeOnFail: 5000 });
+    // eventos de contato chegam junto da mensagem que os originou (com o pushName dela); o
+    // atraso garante que a mensagem já esteja gravada quando o nome for avaliado — a fila roda
+    // em paralelo e, sem isso, o pushName passava por nome da agenda
+    const ev = (req.body as { event?: string })?.event;
+    const delay = ev === 'contacts.upsert' || ev === 'contacts.update' ? 30_000 : undefined;
+    await this.inbound.add('evolution', { provider: 'evolution', body: req.body }, { removeOnComplete: 1000, removeOnFail: 5000, delay });
     return { ok: true };
   }
 }

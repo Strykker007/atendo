@@ -123,6 +123,8 @@ resposta já foi enviada (uma vez por conversa a cada período). Substituiu `bus
 `outsideHoursText` (migração `20261005000000_business_schedules`).
 
 
+**contacts.nameSource** (`whatsapp` | `agenda` | `manual`) diz de onde veio o nome e quem pode trocá-lo — ver [providers › De onde vem o nome do contato](04-providers-whatsapp.md#de-onde-vem-o-nome-do-contato-contactsnamesource).
+
 **contacts** ganhou a ficha preenchida pelo atendente: `email`, `address`, `note1` e
 `note2`. Campo enviado vazio vira `null` — o atendente apaga o que não vale mais.
 

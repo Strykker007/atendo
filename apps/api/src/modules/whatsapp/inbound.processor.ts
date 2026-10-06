@@ -84,6 +84,17 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       // foto de perfil do contato: na primeira mensagem e depois só de tempos em tempos.
       // Nunca derruba a ingestão — é enfeite, a mensagem é o que importa.
       if (result) await this.refreshAvatar(number, result.conversation.contactId).catch((err) => this.log.debug(`foto: ${err instanceof Error ? err.message : err}`));
+      // conversa começada pelo celular do cliente: o contato nasce sem nome (o pushName era o
+      // do dono do número); pergunta ao provider. Também é enfeite — não derruba nada.
+      // (fillMissingName só consulta o provider se o contato continuar sem nome)
+      if (result?.fromMe) {
+        const provider = this.registry.get(job.data.provider);
+        if (provider.contactName) {
+          const ctx = await this.numbers.context(number.id);
+          await this.inbound.fillMissingName(number, result.conversation.contactId, (phone) => provider.contactName!(ctx, phone))
+            .catch((err) => this.log.debug(`nome do contato: ${err instanceof Error ? err.message : err}`));
+        }
+      }
 
       // mídia: baixa do provider e guarda no storage privado (falha aqui não perde a mensagem)
       if (saved && msg.media) {
@@ -113,6 +124,11 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     for (const e of parsed.edits ?? []) {
       const number = await this.numbers.findByExternal(job.data.provider, e.externalNumberId);
       if (number) await this.inbound.applyEdit(number, e);
+    }
+
+    for (const c of parsed.contactNames ?? []) {
+      const number = await this.numbers.findByExternal(job.data.provider, c.externalNumberId);
+      if (number) await this.inbound.applyContactName(number, c);
     }
 
     for (const p of parsed.presences ?? []) {

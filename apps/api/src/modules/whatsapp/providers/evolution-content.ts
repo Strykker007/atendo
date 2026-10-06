@@ -59,6 +59,16 @@ export function lerEdicao(msg: any): { targetExternalId: string; text: string } 
   return typeof text === 'string' && text.trim() ? { targetExternalId: p.key.id, text } : null;
 }
 
+/**
+ * Evento criptografado de outra mensagem (`secretEncryptedMessage`): edição no formato novo
+ * do WhatsApp (tipo 2 = MESSAGE_EDIT), edição de evento etc. A Evolution não decifra — só o
+ * dono da `messageSecret` da original consegue — e muitas vezes a original nem está conosco.
+ * Não é mensagem: virava bolha "conteúdo não suportado" no meio da conversa.
+ */
+export function eventoCifrado(msg: any): boolean {
+  return !!desembrulhar(msg)?.secretEncryptedMessage;
+}
+
 export function lerConteudo(raw: any): ConteudoLido {
   const msg = desembrulhar(raw);
   const ctx = contextInfoDe(msg);

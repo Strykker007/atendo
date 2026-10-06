@@ -161,9 +161,19 @@ export const useMessages = (conversationId: string | null) =>
     getNextPageParam: (ultima) => (ultima.length < PAGINA_MENSAGENS ? undefined : ultima[ultima.length - 1]?.id),
   });
 
-/** As páginas viram uma lista só, em ordem cronológica (a tela lê de cima para baixo). */
+/**
+ * As páginas viram uma lista só, em ordem cronológica (a tela lê de cima para baixo).
+ *
+ * Ordena pelo horário da mensagem, não pela ordem de chegada: o socket põe cada mensagem nova
+ * no topo da página 0, e quando o número reconecta a Evolution despeja o atraso fora de ordem
+ * (a das 00:51 chegava antes da das 00:41). O sort é estável — empate no mesmo segundo fica na
+ * ordem de chegada, igual à API.
+ */
 export function mensagensEmOrdem(data?: InfiniteData<Message[]>): Message[] {
-  return (data?.pages.flat() ?? []).slice().reverse();
+  return (data?.pages.flat() ?? [])
+    .slice()
+    .reverse()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
 /**

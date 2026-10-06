@@ -34,6 +34,13 @@ export interface OutboundRevoke {
   externalId: string;
 }
 
+export interface InboundContactName {
+  externalNumberId: string;
+  /** telefone do contato, só dígitos */
+  phone: string;
+  name: string;
+}
+
 export interface ParsedWebhook {
   messages: InboundMessage[];
   statuses: StatusUpdate[];
@@ -43,6 +50,11 @@ export interface ParsedWebhook {
   edits?: InboundEdit[];
   /** "digitando…"/"gravando áudio…" do contato — efêmero, só repassado ao painel. Meta não manda. */
   presences?: InboundPresence[];
+  /**
+   * Nome de contato vindo da sincronização de contatos (Evolution). Pode ser o da AGENDA do
+   * celular ou só o pushName repetido — quem decide é `InboundService.applyContactName`.
+   */
+  contactNames?: InboundContactName[];
   /** mudanças de conexão (QR lido, desconectou) */
   connection?: {
     externalNumberId: string;
@@ -99,6 +111,11 @@ export interface WhatsAppProvider {
    * isto o "digitando…" nunca chega. Opcional: a Meta não tem esse recurso.
    */
   subscribePresence?(ctx: NumberContext, phone: string): Promise<void>;
+  /**
+   * Nome que o provider guardou para o contato (agenda ou pushName, sem distinção). Usado só
+   * para dar nome a contato que nasceu sem nenhum. Opcional: a Meta não tem agenda.
+   */
+  contactName?(ctx: NumberContext, phone: string): Promise<string | undefined>;
 
   /** Valida assinatura/autenticidade do webhook. Lança se inválido. */
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer): void;

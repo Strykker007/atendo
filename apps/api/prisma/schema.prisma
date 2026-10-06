@@ -344,6 +344,8 @@ model Contact {
   tenantId  String
   phone     String // E.164
   name      String?
+  /// de onde veio o `name` — decide quem pode trocá-lo (ver docs/04-providers-whatsapp.md)
+  nameSource ContactNameSource @default(whatsapp)
   /// chave da foto de perfil no NOSSO storage (a URL da CDN do WhatsApp expira)
   avatarUrl String?
   /// última tentativa de buscar a foto — evita uma chamada ao provider por mensagem
@@ -371,6 +373,17 @@ model Contact {
 
   @@unique([tenantId, phone])
   @@map("contacts")
+}
+
+/// Prioridade do nome do contato: manual > agenda > whatsapp. O pushName que chega em cada
+/// mensagem só sobrescreve nome que também veio do WhatsApp.
+enum ContactNameSource {
+  /// pushName: o nome que o contato escolheu no WhatsApp
+  whatsapp
+  /// nome salvo na agenda do celular do número (sincronizado pela Evolution)
+  agenda
+  /// digitado pela equipe na ficha ou pelo próprio contato num fluxo
+  manual
 }
 
 enum ContactAttributeType {

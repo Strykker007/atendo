@@ -911,7 +911,8 @@ export class FlowEngineService {
   /** Bloco "Salvar" com destino na ficha: o que o contato respondeu vira dado dele. */
   private async saveContactField(conversationId: string, field: 'name' | 'email' | 'address' | 'note1' | 'note2', value: string) {
     const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId }, select: { contactId: true } });
-    await this.prisma.contact.update({ where: { id: conv.contactId }, data: { [field]: value.slice(0, 500) } });
+    // nome que o próprio contato digitou vale mais que o pushName: protege como manual
+    await this.prisma.contact.update({ where: { id: conv.contactId }, data: { [field]: value.slice(0, 500), ...(field === 'name' && { nameSource: 'manual' as const }) } });
   }
 
   /**

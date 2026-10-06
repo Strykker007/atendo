@@ -102,6 +102,8 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 | Evento | O que fazemos |
 |---|---|
 | `messages.upsert` | Mensagens de contatos e do celular do cliente (`fromMe`), reações e edições; ignora grupos `@g.us`. Tipos: ver [Tipos de mensagem recebida](#tipos-de-mensagem-recebida) |
+| `messages.edited` | Edição de mensagem (ver tabela de tipos) |
+| `contacts.upsert` / `contacts.update` | Nome da agenda do celular → `contacts.name` com origem `agenda` (ver [De onde vem o nome do contato](#de-onde-vem-o-nome-do-contato-contactsnamesource)). Enfileirados com 30 s de atraso |
 | `messages.update` | Status (texto ou número do Baileys): `SERVER_ACK`/2→sent, `DELIVERY_ACK`/3→delivered, `READ`/4 e `PLAYED`/5 (áudio ouvido)→read, `ERROR`/0→failed. `InboundService.applyStatus` não deixa regredir (e ignora falha tardia de algo já entregue) e reemite a mensagem pelo evento `message` do socket |
 | `connection.update` | `open`→connected; `connecting` é **transitório** (o WhatsApp reinicia o socket logo após parear) e não derruba um número já conectado; `close` com `statusReason 401`→ deslogado pelo celular (dispositivo removido). Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone é corrigido |
 | `qrcode.updated` | QR novo → painel atualiza pelo socket |
@@ -124,6 +126,8 @@ Nada deve virar bolha vazia. Cada adapter traduz o payload para `type` + `text` 
 | Reação | `reactionMessage` | `reaction` | marca a reagida (não é mensagem) |
 | Edição | `protocolMessage` com `editedMessage` → `ParsedWebhook.edits` → `InboundService.applyEdit` troca o `text` da original | — | não cria mensagem |
 | Apagar / config. de temporárias | outros `protocolMessage` | — | descartado |
+| Edição no formato novo (cifrada) | `secretEncryptedMessage` (`secretEncType` 2 = MESSAGE_EDIT, edição de evento…). A Evolution não decifra e a original muitas vezes nem chegou até nós | — | descartado (`eventoCifrado`) — antes virava bolha "conteúdo não suportado" |
+| Edição pelo evento próprio | `messages.edited` (`WEBHOOK_EVENTS_MESSAGES_EDITED`, ligado nos dois compose): `protocolMessage` puro ou embrulhado em `{key, message}` → mesmo `lerEdicao` → `applyEdit` | — | não cria mensagem; formato desconhecido gera `warn` no log com o payload (800 caracteres) para ajustar o parser |
 | Qualquer outro | fallback `textoQualquer` (`providers/payload-text.ts`): primeiro `conversation`/`text`/`caption`/`hydratedContentText`/`contentText`/`body`/… achado no payload | idem (`unsupported`, `system`, tipos novos) | `text`; só sem texto nenhum fica `unknown` |
 
 Envelopes (`ephemeralMessage`, `viewOnceMessage*`, `documentWithCaptionMessage`, `editedMessage`) são desembrulhados antes (`desembrulhar` em `providers/evolution-content.ts`), e o `contextInfo` (citação, anúncio, encaminhada) é procurado em qualquer nó da mensagem.
@@ -233,5 +237,32 @@ Três cuidados nesse caminho:
    — e `lastInboundAt` reabriria a janela de 24h da Meta sem o contato ter escrito.
 3. **Cria a conversa se não houver.** Conversa iniciada pelo celular precisa existir no
    painel, senão a resposta do contato abriria outra e o histórico nasceria partido.
+4. **Não dá nome ao contato.** Nessas mensagens o `pushName` é de quem enviou — o dono do
+   número —, não do contato: conversa iniciada pelo celular criava o contato chamado "Tiago".
+   O parser não manda `contactName` quando `fromMe`, e `ingestFromDevice` cria o contato sem
+   nome; o nome certo chega na primeira mensagem do contato. A migração
+   `20261016000000_nome_contato_pushname_proprio` limpou os que já tinham nascido assim.
+
+### De onde vem o nome do contato (`contacts.nameSource`)
+
+Prioridade **manual > agenda > whatsapp**:
+
+| Origem | Quem grava | Pode ser trocado por |
+|---|---|---|
+| `manual` | ficha (`PATCH /conversations/contacts/:id`, só quando o nome muda), bloco Salvar do fluxo com destino *nome*, `sendToPhone` com nome | só outra edição manual. Apagar o nome na ficha volta para `whatsapp` |
+| `agenda` | eventos `contacts.upsert`/`contacts.update` da Evolution (`InboundService.applyContactName`) | outra sincronização da agenda e edição manual |
+| `whatsapp` | `pushName` da mensagem recebida (nunca de mensagem `fromMe`) | qualquer um, inclusive o próximo pushName |
+
+A regra fica em `conversations/contact-name.ts` (`pushNameTrocaNome`, `nomeDaAgendaTroca`).
+
+**Agenda do celular.** Lido no código da Evolution 2.3.7: `contacts.upsert`/`contacts.update` trazem em `pushName` o `contact.name` do Baileys (nome salvo na agenda) — mas a Evolution **também** dispara esses eventos a cada mensagem, com o pushName dela (vazio quando `fromMe`), e manda o próprio número quando não há nome. Por isso:
+
+- o parser descarta `@lid`, grupos, vazio e nome que é só o número (`nomeDeContatoValido`);
+- o webhook enfileira esses eventos com **30 s de atraso**, para a mensagem que os originou já estar gravada (a fila roda com concorrência 10);
+- se o contato já mandou mensagem com exatamente esse pushName, é pushName → ignorado (o caminho das mensagens cuida); senão vira nome `agenda`;
+- só atualiza contato que **já existe** — a agenda tem milhares de pessoas e não cria contato no painel.
+
+**Contato que nasce sem nome** (conversa começada pelo celular do cliente): o processor pergunta à Evolution (`POST /chat/findContacts`, `provider.contactName`). O que ela guardou mistura agenda e pushName, então entra como `whatsapp`.
+ Antes, **toda mensagem recebida trocava o nome pelo pushName**, desfazendo a correção feita na ficha. A migração `20261017000000_contact_name_source` marcou como `manual` quem tinha nome diferente do pushName da última mensagem recebida (nome que só pode ter vindo da ficha, de fluxo ou de cadastro).
 
 Vale só para a Evolution: na API oficial o número não é operado por um aparelho.

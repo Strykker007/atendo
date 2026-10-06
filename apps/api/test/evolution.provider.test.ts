@@ -49,6 +49,13 @@ describe('EvolutionProvider.parseWebhook — mensagens', () => {
     expect(m.fromMe).toBe(true);
   });
 
+  it('mensagem nossa não dá nome ao contato — o pushName é de quem enviou (o dono do número)', () => {
+    const [nossa] = provider.parseWebhook(upsert({ conversation: 'oi' }, { fromMe: true })).messages;
+    expect(nossa.contactName).toBeUndefined();
+    const [dele] = provider.parseWebhook(upsert({ conversation: 'oi' })).messages;
+    expect(dele.contactName).toBe('Bruno');
+  });
+
   it('ignora grupos', () => {
     expect(provider.parseWebhook(upsert({ conversation: 'oi' }, { remoteJid: '12036304@g.us' })).messages).toHaveLength(0);
   });
@@ -141,6 +148,26 @@ describe('EvolutionProvider.parseWebhook — mensagens', () => {
     expect(out.edits).toBeUndefined();
   });
 
+  it('edição cifrada (secretEncryptedMessage) não vira bolha "não suportado"', () => {
+    const out = provider.parseWebhook(upsert({
+      messageContextInfo: {},
+      secretEncryptedMessage: { targetMessageKey: { id: 'EVO0', fromMe: true }, encPayload: {}, encIv: {}, secretEncType: 2 },
+    }));
+    expect(out.messages).toHaveLength(0);
+    expect(out.edits ?? []).toHaveLength(0);
+  });
+
+  it('evento messages.edited (protocolMessage puro) troca o texto da original', () => {
+    const out = provider.parseWebhook({ event: 'messages.edited', instance: INSTANCE, data: { key: { id: 'EVO0', remoteJid: '5511999999999@s.whatsapp.net' }, type: 14, editedMessage: { conversation: 'novo texto' } } });
+    expect(out.edits).toEqual([{ provider: 'evolution', externalNumberId: INSTANCE, targetExternalId: 'EVO0', text: 'novo texto' }]);
+    expect(out.messages).toHaveLength(0);
+  });
+
+  it('evento messages.edited embrulhado como mensagem também é lido', () => {
+    const out = provider.parseWebhook({ event: 'messages.edited', instance: INSTANCE, data: { key: { id: 'EVO9' }, message: { protocolMessage: { type: 14, key: { id: 'EVO0' }, editedMessage: { extendedTextMessage: { text: 'corrigido' } } } } } });
+    expect(out.edits?.[0]).toMatchObject({ targetExternalId: 'EVO0', text: 'corrigido' });
+  });
+
   it('marca origem de anúncio pelo externalAdReply', () => {
     const m = provider.parseWebhook(
       upsert({ extendedTextMessage: { text: 'oi', contextInfo: { externalAdReply: { title: 'Corte + barba', body: 'promo', sourceUrl: 'https://facebook.com/ads/x', ctwaClid: 'clid-1' } } } }),
@@ -158,6 +185,24 @@ describe('EvolutionProvider.parseWebhook — mensagens', () => {
   it('aceita lote de mensagens (data como array)', () => {
     const body = { event: 'messages.upsert', instance: INSTANCE, data: [upsert({ conversation: 'a' }).data, upsert({ conversation: 'b' }).data] };
     expect(provider.parseWebhook(body).messages.map((m) => m.text)).toEqual(['a', 'b']);
+  });
+});
+
+describe('EvolutionProvider.parseWebhook — contatos', () => {
+  it('lê nomes de contacts.upsert e ignora @lid, grupo e nome que é só o número', () => {
+    const out = provider.parseWebhook({ event: 'contacts.upsert', instance: INSTANCE, data: [
+      { remoteJid: '553499917253@s.whatsapp.net', pushName: 'Ednilton Criatura' },
+      { remoteJid: '556200000000@s.whatsapp.net', pushName: '556200000000' },
+      { remoteJid: '246002959269910@lid', pushName: 'Danilo' },
+      { remoteJid: '123@g.us', pushName: 'Grupo' },
+    ] });
+    expect(out.contactNames).toEqual([{ externalNumberId: INSTANCE, phone: '553499917253', name: 'Ednilton Criatura' }]);
+    expect(out.messages).toHaveLength(0);
+  });
+
+  it('contacts.update com objeto único também é lido', () => {
+    const out = provider.parseWebhook({ event: 'contacts.update', instance: INSTANCE, data: { remoteJid: '556292129776@s.whatsapp.net', pushName: 'Thiago Campos' } });
+    expect(out.contactNames?.[0]).toMatchObject({ phone: '556292129776', name: 'Thiago Campos' });
   });
 });
 

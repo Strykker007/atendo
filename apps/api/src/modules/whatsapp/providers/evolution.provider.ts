@@ -1,10 +1,10 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BillingCategory, MessageStatus, MessageType, NumberStatus } from '@atendo/shared';
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
 import { lerCitacao } from './quoted';
-import { contextInfoDe, desembrulhar, lerConteudo, lerEdicao } from './evolution-content';
+import { contextInfoDe, desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
 import type { MediaPayload, NumberContext, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError, ProviderSendError } from './provider-error';
 
@@ -28,6 +28,7 @@ export interface EvolutionNumberConfig {
 @Injectable()
 export class EvolutionProvider implements WhatsAppProvider {
   readonly kind = 'evolution' as const;
+  private readonly logger = new Logger('EvolutionProvider');
 
   private async api<T>(path: string, init?: RequestInit, shard?: { baseUrl?: string; apiKey?: string }): Promise<T> {
     const res = await fetch(`${shard?.baseUrl ?? env.EVOLUTION_BASE_URL}${path}`, {
@@ -213,6 +214,16 @@ export class EvolutionProvider implements WhatsAppProvider {
     }, this.shard(ctx));
   }
 
+  /** Nome guardado pela Evolution para o contato (`POST /chat/findContacts`). */
+  async contactName(ctx: NumberContext, phone: string) {
+    const rows = await this.api<any[]>(`/chat/findContacts/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ where: { remoteJid: `${phone.replace(/\D/g, '')}@s.whatsapp.net` } }),
+    }, this.shard(ctx));
+    const name = (Array.isArray(rows) ? rows : []).map((r) => (typeof r?.pushName === 'string' ? r.pushName.trim() : '')).find((n) => nomeDeContatoValido(n, phone));
+    return name || undefined;
+  }
+
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer) {
     const eq = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
     // 1) chamada manual/teste com a chave global no header
@@ -262,10 +273,42 @@ export class EvolutionProvider implements WhatsAppProvider {
             if (edicao) (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...edicao });
             continue;
           }
+          if (eventoCifrado(m.message)) continue;
           // `fromMe` cobre DOIS casos: o que o painel acabou de enviar (descartado adiante
           // pelo externalId, que já está no banco) e o que a pessoa digitou no celular, que
           // precisa aparecer no histórico. Filtrar aqui jogava os dois fora.
           out.messages.push({ ...this.toInbound(m, externalNumberId), fromMe: !!m.key.fromMe });
+        }
+        break;
+      }
+      // Edição pelo evento próprio (WEBHOOK_EVENTS_MESSAGES_EDITED). O formato varia entre
+      // versões: o protocolMessage puro, ou embrulhado como mensagem ({ key, message }).
+      case 'messages.edited': {
+        const items = Array.isArray(data) ? data : [data];
+        for (const d of items) {
+          const jid = String(d?.key?.remoteJid ?? d?.remoteJid ?? '');
+          if (jid.endsWith('@g.us')) continue;
+          const edicao = lerEdicao(d?.message) ?? lerEdicao({ protocolMessage: d }) ?? lerEdicao({ protocolMessage: d?.protocolMessage });
+          if (edicao) (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...edicao });
+          // formato que ainda não conhecemos: registra para ajustar o parser, sem virar bolha
+          else this.logger.warn(`messages.edited sem texto reconhecível: ${JSON.stringify(d).slice(0, 800)}`);
+        }
+        break;
+      }
+      // Sincronização de contatos. Vem da agenda do celular (`contact.name`) MAS a Evolution
+      // também dispara estes eventos a cada mensagem, com o pushName — e manda o próprio número
+      // quando não há nome. Aqui só filtra o lixo; a separação agenda × pushName é no service.
+      case 'contacts.upsert':
+      case 'contacts.update': {
+        const items = Array.isArray(data) ? data : [data];
+        for (const c of items) {
+          const jid = String(c?.remoteJid ?? '');
+          // @lid não diz o telefone; grupos e status não são contato
+          if (!jid.endsWith('@s.whatsapp.net')) continue;
+          const name = typeof c?.pushName === 'string' ? c.pushName.trim() : '';
+          const phone = jid.replace(/@.*$/, '');
+          if (!nomeDeContatoValido(name, phone)) continue;
+          (out.contactNames ??= []).push({ externalNumberId, phone, name });
         }
         break;
       }
@@ -314,7 +357,9 @@ export class EvolutionProvider implements WhatsAppProvider {
       externalId: m.key.id,
       externalNumberId,
       from,
-      contactName: m.pushName,
+      // em mensagem nossa (`fromMe`) o pushName é o NOSSO nome, não o do contato: o contato
+      // nascia chamado "Tiago" quando a conversa começava pelo celular do cliente
+      contactName: m.key.fromMe ? undefined : m.pushName,
       type: lido.type,
       text: lido.text,
       media: lido.media ? { ...lido.media, providerMediaId: m.key.id } : undefined,
@@ -374,4 +419,12 @@ export class EvolutionProvider implements WhatsAppProvider {
     if (state === 'connecting') return NumberStatus.PENDING_QR;
     return NumberStatus.DISCONNECTED;
   }
+}
+
+/** A Evolution manda o próprio número (ou nada) quando o contato não tem nome. */
+export function nomeDeContatoValido(name: string, phone: string): boolean {
+  const n = name.trim();
+  if (!n || n.length > 80) return false;
+  const digitos = n.replace(/\D/g, '');
+  return !(digitos.length >= 8 && digitos === n.replace(/[\s+()-]/g, '')) && digitos !== phone;
 }

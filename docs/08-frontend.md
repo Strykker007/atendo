@@ -186,6 +186,8 @@ Três comportamentos de rolagem, e tratá-los como um só é o que faz o chat pu
 
 Há ainda um `ResizeObserver`, para o caso de a bolha crescer depois (imagem que carrega, player de áudio que monta). Ele não substitui o efeito acima: **não dispara quando o elemento só é criado**, apenas quando muda de tamanho — foi o que fez a conversa abrir parada no topo na primeira tentativa.
 
+**Ordem da timeline**: pelo horário da mensagem no WhatsApp (`createdAt`), não pela ordem de chegada. O socket insere cada mensagem nova no topo da página 0 e, quando o número reconecta, a Evolution entrega o atraso fora de ordem — por isso `mensagensEmOrdem` reordena (sort estável: empate no mesmo segundo fica na ordem de chegada). A API pagina por `createdAt desc, queueSeq desc` pelo mesmo motivo.
+
 ## Filtros da lista
 
 Os três botões de status seguem a ordem de mercado: **Atendendo | Aguardando | Encerrado** (o que já é meu, depois a fila, depois o histórico). A tela **abre sempre em Aguardando** — a aba escolhida não é lembrada entre visitas (`status` fora do `partialize` do `useUI`). Busca e os três botões de status ficam sempre à vista; **tag, origem, ordem e atendente entram atrás do ícone de filtro**, porque são ajuste ocasional e ocupavam quatro faixas fixas no alto — espaço que a fila precisa mais (a lista começava 70px mais abaixo).

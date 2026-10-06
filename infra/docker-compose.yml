@@ -47,6 +47,11 @@ services:
       WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
       WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
       WEBHOOK_EVENTS_MESSAGES_UPDATE: "true"
+      # edição de mensagem (formato novo do WhatsApp chega cifrado no upsert; ver docs/04-providers-whatsapp.md)
+      WEBHOOK_EVENTS_MESSAGES_EDITED: "true"
+      # nomes da agenda do celular (ver docs/04-providers-whatsapp.md › De onde vem o nome do contato)
+      WEBHOOK_EVENTS_CONTACTS_UPSERT: "true"
+      WEBHOOK_EVENTS_CONTACTS_UPDATE: "true"
       WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
       WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
       WEBHOOK_EVENTS_PRESENCE_UPDATE: "true"

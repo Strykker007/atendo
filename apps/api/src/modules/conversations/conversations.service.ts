@@ -307,7 +307,9 @@ export class ConversationsService {
   async messages(tenantId: string, conversationId: string, cursor?: string, take = 50) {
     const rows = await this.prisma.message.findMany({
       where: { conversationId, conversation: { tenantId } },
-      orderBy: { createdAt: 'desc' },
+      // o horário vem do WhatsApp em segundos: no mesmo segundo, desempata pela ordem de chegada
+      // (sem isso o banco devolvia empatadas em qualquer ordem e a paginação podia pular/repetir)
+      orderBy: [{ createdAt: 'desc' }, { queueSeq: 'desc' }],
       take,
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
       include: MESSAGE_INCLUDE,
@@ -370,7 +372,7 @@ export class ConversationsService {
   /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */
   async sendToPhone(tenantId: string, phone: string, text: string, opts?: { closeAfter?: boolean; contactName?: string; preferredNumberId?: string | null; idempotencyKey?: string }) {
     const clean = phone.replace(/\D/g, '');
-    const contact = await this.prisma.contact.upsert({ where: { tenantId_phone: { tenantId, phone: clean } }, create: { tenantId, phone: clean, name: opts?.contactName }, update: {} });
+    const contact = await this.prisma.contact.upsert({ where: { tenantId_phone: { tenantId, phone: clean } }, create: { tenantId, phone: clean, name: opts?.contactName, ...(opts?.contactName && { nameSource: 'manual' as const }) }, update: {} });
     const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
     let conv = await this.prisma.conversation.findFirst({ where: { contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } });
     if (!conv) conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
@@ -799,6 +801,13 @@ export class ConversationsService {
       Object.entries(data).map(([k, v]) => [k, typeof v === 'string' && !v.trim() ? null : v?.trim()]),
     );
     // contato inexistente (ou de outro cliente) é 404, não erro interno
+    // nome digitado na ficha manda; apagado, volta a aceitar o do WhatsApp. Só conta se mudou:
+    // a ficha manda o nome junto mesmo quando a pessoa só mexeu no e-mail
+    if ('name' in limpo) {
+      const atual = await this.prisma.contact.findFirst({ where: { id: contactId, tenantId }, select: { name: true } });
+      if (atual && atual.name === limpo.name) delete limpo.name;
+      else (limpo as Record<string, unknown>).nameSource = limpo.name ? 'manual' : 'whatsapp';
+    }
     const contact = await this.prisma.contact.update({ where: { id: contactId, tenantId }, data: limpo }).catch((err) => {
       if (String((err as { code?: string })?.code) === 'P2025') throw new NotFoundException('Contato não encontrado');
       throw err;
