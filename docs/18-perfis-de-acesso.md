@@ -24,7 +24,7 @@ senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 | Grupo | Permissões |
 |---|---|
-| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.view_deleted`, `contacts.edit` |
+| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `agenda.manage` |
 | Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
 | Conta | `numbers.manage`, `billing.manage` |
@@ -141,6 +141,7 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `conversations.delete_message` | lixeira no hover de qualquer mensagem (sem ela, só nas próprias com menos de 2 dias) |
 | `conversations.delete_chat` | botão "Limpar histórico" no cabeçalho do chat |
 | `conversations.view_deleted` | olho no aviso "Mensagem apagada por…" para ver o original |
+| `conversations.schedule_message` | relógio na barra do campo (agendar) e o X de cancelar na faixa de agendadas. Vendido à parte: no padrão só o Administrador tem ([Agendamento de mensagens](agendamento-de-mensagens.md)) |
 | `contacts.edit` | ficha do contato fica só de leitura, com o motivo escrito |
 | `tags.manage`, `flows.manage`, `agenda.manage`, `team.manage`, `reports.view`, `billing.manage` | item somem do menu lateral; `reports.view` também barra a rota direta |
 | `quick_replies.manage` | botões de editar em /respostas |

@@ -85,6 +85,7 @@ export function useRealtime() {
       qc.invalidateQueries({ queryKey: ['kanban'] });
     });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
+    socket.on('scheduled_messages', (e: { conversationId: string }) => qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }));
     socket.on('appointment', () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['contact-card'] }); });
     socket.on('number', (n: { id: string; status: string; qrCode?: string }) => {
       if (n.qrCode) qc.setQueryData(['number-qr', n.id], n.qrCode);

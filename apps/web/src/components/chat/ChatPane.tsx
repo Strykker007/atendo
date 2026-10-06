@@ -20,6 +20,7 @@ import { channelOffline } from './ChannelBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { ComposerBar } from './ComposerBar';
+import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, QuickReplyCountdown, type QuickReplyEventDetail, type QuickReplyPending } from './QuickReplyCountdown';
 import { OWN_MESSAGE_DELETE_WINDOW_MS, QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
@@ -676,6 +677,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       )}
       <AppointmentModal open={scheduling} onClose={() => setScheduling(false)} contact={conv.contact} conversationId={conv.id} />
 
+      {/* agendadas desta conversa: aparece mesmo com o campo bloqueado (encerrada, de outra pessoa) */}
+      <ScheduledMessagesBar conversationId={conv.id} />
+
       {/* Composer */}
       {noteMode ? (
         <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5">
@@ -777,6 +781,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               assinando={assinando}
               onAssinando={setAssinando}
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
+              texto={text}
+              onAgendado={() => setText('')}
             />
           )}
         </form>

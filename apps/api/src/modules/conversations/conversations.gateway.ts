@@ -70,6 +70,10 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
    * Histórico da conversa limpo. Um evento só em vez de um `message` por mensagem apagada: o
    * painel recarrega a conversa (que já vem redigida pelo `present()`).
    */
+  /** Agendadas da conversa mudaram (criou, cancelou, saiu, falhou): o painel recarrega. */
+  emitScheduledMessages(tenantId: string, conversationId: string) {
+    this.room(tenantId).emit('scheduled_messages', { conversationId });
+  }
   emitMessagesCleared(tenantId: string, conversationId: string) {
     this.room(tenantId).emit('messages_cleared', { conversationId });
   }

@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock } from 'lucide-react';
+import { ScheduleMessageModal } from './ScheduledMessages';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './QuickReplyCountdown';
 import {
-  useAgents, useActiveRun, useFlows, useHasFeature, useMe, useQuickReplies, useConversation, usePauseBot, useResumeBot, useCancelFlow, botPaused,
+  useAgents, useActiveRun, useFlows, useHasFeature, useMe, useQuickReplies, useConversation, usePauseBot, useResumeBot, useCancelFlow, botPaused, useCan,
   type QuickReplyItem,
 } from '@/lib/hooks';
 
@@ -37,11 +38,18 @@ export interface ComposerBarProps {
   onAssinando: (v: boolean) => void;
   /** conteúdo extra à direita (copiloto de IA) */
   direita?: React.ReactNode;
+  /** texto do campo: vira a mensagem do agendamento */
+  texto: string;
+  /** agendou com o texto do campo: limpa o campo */
+  onAgendado: () => void;
 }
 
-export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita }: ComposerBarProps) {
+export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita, texto, onAgendado }: ComposerBarProps) {
   const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'mencao' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
+  const [agendando, setAgendando] = useState(false);
+  // vendido à parte: só aparece para quem tem no perfil
+  const podeAgendar = useCan('conversations.schedule_message');
   const activeRun = useActiveRun(conversationId);
   const conv = useConversation(conversationId).data;
   const pausado = !!conv && botPaused(conv);
@@ -79,6 +87,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
           onClick={() => setAberto(aberto === 'pausa' ? null : 'pausa')}
         />
       )}
+      {podeAgendar && <Atalho icone={<AlarmClock size={16} />} titulo="Agendar mensagem" ativo={agendando} onClick={() => { setAberto(null); setAgendando(true); }} />}
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
       <Atalho
@@ -113,6 +122,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
         </Menu>
       )}
       {aberto === 'mencao' && <MenuMencao onInserir={inserir} />}
+      <ScheduleMessageModal open={agendando} onClose={() => setAgendando(false)} conversationId={conversationId} textoInicial={texto} onAgendado={onAgendado} />
     </div>
   );
 }

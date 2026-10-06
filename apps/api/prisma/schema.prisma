@@ -46,6 +46,7 @@ model Tenant {
   conversationEvents ConversationEvent[]
   departments   Department[]
 
+  scheduledMessages ScheduledMessage[]
   @@map("tenants")
 }
 
@@ -88,6 +89,7 @@ model User {
   botPauses     Conversation[] @relation("botPausedBy")
   departments   UserDepartment[]
 
+  scheduledMessages ScheduledMessage[]
   @@index([tenantId])
   @@index([profileId])
   @@map("users")
@@ -372,6 +374,7 @@ model Contact {
   campaignTargets CampaignTarget[]
   attributes      ContactAttribute[]
 
+  scheduledMessages ScheduledMessage[]
   @@unique([tenantId, phone])
   @@map("contacts")
 }
@@ -535,6 +538,7 @@ model Conversation {
 
   /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
+  scheduledMessages ScheduledMessage[]
   @@unique([numberId, contactId])
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
   /// fila por tempo de espera
@@ -1328,4 +1332,49 @@ model CampaignTarget {
   @@unique([campaignId, contactId])
   @@index([campaignId, status])
   @@map("campaign_targets")
+}
+
+enum ScheduledMessageStatus {
+  pending
+  sent
+  cancelled
+  /// não deu para enviar na hora (janela da Meta, número desconectado, outra pessoa atendendo…) — ver `error`
+  failed
+}
+
+/// Mensagem que o atendente deixou para sair depois (docs/agendamento-de-mensagens.md).
+/// O job de 1 minuto pega as `pending` vencidas e envia pelo caminho normal do chat (`ConversationsService.send`).
+model ScheduledMessage {
+  id             String                 @id @default(uuid())
+  tenantId       String
+  conversationId String
+  contactId      String
+  /// quem agendou — é o autor da mensagem quando ela sair
+  userId         String
+  /// texto (ou legenda do anexo); aceita {{variáveis}}, resolvidas na hora do envio
+  content        String
+  /// chave do anexo no storage (nunca URL)
+  mediaKey       String?
+  mediaType      String?
+  mediaName      String?
+  mediaMime      String?
+  scheduledFor   DateTime
+  status         ScheduledMessageStatus @default(pending)
+  error          String?
+  messageId      String?
+  sentAt         DateTime?
+  cancelledAt    DateTime?
+  cancelledById  String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([conversationId, status])
+  @@index([tenantId, status])
+  @@map("scheduled_messages")
 }

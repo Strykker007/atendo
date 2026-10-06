@@ -22,6 +22,7 @@ import { env } from './config/env';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
+import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { DepartmentsModule } from './modules/departments/departments.module';
     MediaModule,
     FlowsModule,
     SchedulingModule,
+    ScheduledMessagesModule,
     AiModule,
   ],
   controllers: [HealthController],

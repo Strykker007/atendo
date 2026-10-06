@@ -22,6 +22,8 @@ export const PERMISSIONS = {
   'conversations.delete_message': 'Apagar qualquer mensagem (de outras pessoas, do robô, recebidas ou antigas)',
   'conversations.delete_chat': 'Limpar o histórico de uma conversa',
   'conversations.view_deleted': 'Ver o conteúdo original de mensagens apagadas',
+  // vendida à parte: o cliente só tem se o perfil dele tiver (docs/agendamento-de-mensagens.md)
+  'conversations.schedule_message': 'Agendar mensagens para o cliente',
   'contacts.edit': 'Editar a ficha do contato',
   'tags.manage': 'Criar e editar etiquetas',
   'quick_replies.manage': 'Criar e editar respostas rápidas',
@@ -42,7 +44,7 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 /** Agrupamento só para a tela de edição do perfil não virar uma lista de 14 itens soltos. */
 export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
-  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.view_deleted', 'contacts.edit'] },
+  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit'] },
   { label: 'Conteúdo', items: ['tags.manage', 'quick_replies.manage', 'flows.manage', 'agenda.manage', 'campaigns.manage'] },
   { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage'] },
   { label: 'Conta', items: ['numbers.manage', 'billing.manage'] },
