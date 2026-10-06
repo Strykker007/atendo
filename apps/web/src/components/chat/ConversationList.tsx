@@ -24,7 +24,8 @@ export const STATUS_META: Record<ConversationStatus, { label: string; short: str
   in_progress: { label: 'Em atendimento', short: 'Atendendo', color: 'text-prog', soft: 'bg-prog-soft', bar: 'bg-prog' },
   closed: { label: 'Encerrado', short: 'Encerrado', color: 'text-done', soft: 'bg-done-soft', bar: 'bg-done' },
 };
-const ORDER: ConversationStatus[] = ['waiting', 'in_progress', 'closed'];
+// padrão de mercado: o que está comigo primeiro, depois a fila, depois o histórico
+const ORDER: ConversationStatus[] = ['in_progress', 'waiting', 'closed'];
 
 /**
  * Relógio da lista: um intervalo só, no pai, em vez de um por linha.
@@ -138,8 +139,8 @@ export function ConversationList() {
             const m = STATUS_META[s];
             const n = counts.data?.[s];
             const on = status === s;
-            // atendente comum só vê as próprias em atendimento: o rótulo diz isso
-            const label = s === 'in_progress' && !isAdmin ? 'Minhas' : m.short;
+            // mesmo rótulo para todos os perfis (atendente comum continua vendo só as dele)
+            const label = m.short;
             return (
               <button key={s} onClick={() => setStatus(s)} className={cn('rounded-md py-1 transition-colors flex items-center justify-center gap-1', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink')}>
                 {label}

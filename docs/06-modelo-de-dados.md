@@ -125,3 +125,7 @@ resposta já foi enviada (uma vez por conversa a cada período). Substituiu `bus
 
 **contacts** ganhou a ficha preenchida pelo atendente: `email`, `address`, `note1` e
 `note2`. Campo enviado vazio vira `null` — o atendente apaga o que não vale mais.
+
+**contact_attributes** — campos livres da ficha de **um** contato (`label`, `type`
+`ContactAttributeType`: text, number, date, `value` em texto, `position`). Cada cliente tem os
+seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos-personalizados.md).

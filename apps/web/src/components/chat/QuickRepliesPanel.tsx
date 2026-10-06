@@ -116,7 +116,7 @@ function FlowsTab() {
     );
   }
   return (
-    <div className="flex-1 overflow-y-auto scrollbar-thin">
+    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
       {dialog}
       {!conversationId && <p className="p-5 text-xs text-muted text-center">Abra uma conversa para disparar um fluxo nela.</p>}
       {active.data && <div className="m-2.5 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">🤖 <b>{active.data.flow.name}</b> está rodando nesta conversa{active.data.status === 'waiting' ? ' (esperando o contato)' : ''}. Disparar outro substitui este.</div>}
@@ -179,7 +179,7 @@ function RepliesTab() {
         <Link href="/respostas" className="text-faint hover:text-ink shrink-0" title="Gerenciar respostas"><Settings2 size={16} /></Link>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full rounded-lg bg-field px-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
       </div>
-      <div className="flex-1 overflow-y-auto scrollbar-thin py-1">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin py-1">
         {folders.data?.map((f) => {
           const replies = f.replies.filter((r) => !q || match(r.title) || match(r.body));
           if (q && replies.length === 0) return null;

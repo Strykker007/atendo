@@ -20,6 +20,7 @@ import { channelOffline } from './ChannelBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { ComposerBar } from './ComposerBar';
+import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, QuickReplyCountdown, type QuickReplyEventDetail, type QuickReplyPending } from './QuickReplyCountdown';
 import { OWN_MESSAGE_DELETE_WINDOW_MS, QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
 import { HistorySheet } from './HistorySheet';
@@ -137,6 +138,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
    */
   const [assinando, setAssinando] = usePersistedState('assinar-mensagens', false);
   const campoRef = useRef<HTMLTextAreaElement>(null);
+  useAutoResize(campoRef);
+  useAutoResize(notaRef);
   /** mensagem que está sendo respondida (citação), como no WhatsApp */
   const [respondendo, setRespondendo] = useState<Message | null>(null);
   const [encaminhando, setEncaminhando] = useState<Message | null>(null);
@@ -436,7 +439,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       }
       return;
     }
-    const t = assinando && text.trim() ? `*${me.data?.name ?? ''}*\n${text.trim()}` : text.trim();
+    const t = assinando && text.trim() ? `*${me.data?.name ?? ''}:*\n${text.trim()}` : text.trim();
     if ((!t && !attachment) || send.isPending) return;
     const att = attachment;
     setText('');
@@ -678,12 +681,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       {/* Composer */}
       {noteMode ? (
         <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5">
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-warn-ink">
-            <StickyNote size={13} className="shrink-0" />
-            <span className="truncate">Nota interna — visível apenas para a equipe</span>
-            <span className="ml-auto font-normal text-warn-ink/70 hidden sm:inline whitespace-nowrap">Alt+N alterna · Esc sai</span>
-            <button type="button" onClick={() => setModoNota(false)} className="text-warn-ink/70 hover:text-warn-ink" title="Sair do modo nota"><X size={15} /></button>
-          </div>
+          <AbasDoEnvio nota onNota={setModoNota} />
           <div className="flex items-end gap-2">
             <textarea
               ref={notaRef}
@@ -695,7 +693,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               }}
               rows={1}
               placeholder={ownedByOther ? `Nota para ${conv.assignee?.name} — o cliente não vê` : 'Nota para a equipe — o cliente não vê'}
-              className="flex-1 resize-none max-h-40 rounded-xl bg-panel border border-warn/40 text-ink placeholder:text-warn-ink/60 px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-warn/50"
+              className="flex-1 resize-none min-h-[38px] max-h-40 overflow-y-hidden scrollbar-thin rounded-xl bg-panel border border-warn/40 text-ink placeholder:text-warn-ink/60 px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-warn/50"
             />
             <Button type="submit" className="h-9 rounded-full px-3.5 bg-warn hover:bg-warn/90 text-white border-0" disabled={!textoNota.trim()} loading={sendNote.isPending} icon={<StickyNote size={15} />}>Adicionar nota</Button>
           </div>
@@ -726,6 +724,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted flex items-center justify-center gap-3">Conversa encerrada. Reabra para responder.{botaoNota}</div>
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
+          {podeNota && <AbasDoEnvio nota={false} onNota={setModoNota} />}
           {rapida && <QuickReplyCountdown pending={rapida} onCancel={() => setRapida(null)} onEdit={editarRapida} />}
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
@@ -758,7 +757,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
                 onPaste={colar}
                 rows={1}
                 placeholder={attachment ? 'Legenda (opcional)' : 'Mensagem… (Enter envia)'}
-                className="flex-1 resize-none max-h-40 rounded-xl bg-field text-ink placeholder:text-faint px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent/40"
+                className="flex-1 resize-none min-h-[38px] max-h-40 overflow-y-hidden scrollbar-thin rounded-xl bg-field text-ink placeholder:text-faint px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent/40"
               />
             </>
           )}
@@ -780,7 +779,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               assinando={assinando}
               onAssinando={setAssinando}
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
-              onNotaInterna={podeNota ? () => setModoNota(true) : undefined}
             />
           )}
           {flowsFeature.has && <BotPauseBar conv={conv} />}
@@ -788,6 +786,39 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       )}
     </>
   );
+}
+
+/**
+ * Abas logo acima do campo: "Mensagem para o cliente" | "Nota interna". Antes a nota era um
+ * ícone perdido na barra de atalhos e pouca gente achava — a aba deixa o modo sempre à vista.
+ */
+function AbasDoEnvio({ nota, onNota }: { nota: boolean; onNota: (v: boolean) => void }) {
+  const aba = (ativa: boolean, cor: string) => cn(
+    'inline-flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-1 text-[12px] font-semibold transition-colors',
+    ativa ? cor : 'border-transparent text-muted hover:text-ink',
+  );
+  return (
+    <div role="tablist" className="flex items-end gap-1 border-b border-line/70">
+      <button type="button" role="tab" aria-selected={!nota} onClick={() => onNota(false)} className={aba(!nota, 'border-accent text-accent-ink')}>
+        <Send size={12} /> Mensagem para o cliente
+      </button>
+      <button type="button" role="tab" aria-selected={nota} onClick={() => onNota(true)} title="Só a equipe vê — nunca vai para o WhatsApp (Alt+N)" className={aba(nota, 'border-warn bg-warn/15 text-warn-ink')}>
+        <StickyNote size={12} /> Nota interna <Lock size={11} className={nota ? '' : 'text-faint'} />
+      </button>
+      {nota && <span className="ml-auto pb-1 text-[11px] text-warn-ink/80 hidden sm:inline whitespace-nowrap">🔒 Visível só para a equipe · Alt+N alterna · Esc sai</span>}
+    </div>
+  );
+}
+
+/**
+ * Assinatura do atendente (`*Nome:*` na 1ª linha, formato do WhatsApp): no painel mostra só
+ * "Nome:" em negrito, sem os asteriscos.
+ */
+const ASSINATURA = /^\*([^*\n]{1,80}?):?\*\n/;
+function TextoAssinado({ texto }: { texto: string }) {
+  const m = ASSINATURA.exec(texto);
+  if (!m) return <>{texto}</>;
+  return <><span className="font-bold">{m[1].trim()}:</span>{'\n'}{texto.slice(m[0].length)}</>;
 }
 
 /** Uma linha do que foi citado: texto curto, ou o rótulo da mídia. */
@@ -840,7 +871,7 @@ function Bubble({ m, canResend, onVerImagem, onResponder, onEncaminhar, onApagar
         {estruturado ?? (
           <>
             <MediaBody m={m} onVerImagem={onVerImagem} />
-            {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
+            {m.text && <p className="whitespace-pre-wrap break-words">{out ? <TextoAssinado texto={m.text} /> : m.text}</p>}
           </>
         )}
         <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>

@@ -51,6 +51,7 @@ export const useUI = create<UIState>()(
       setAssignee: (assigneeId) => set({ assigneeId }),
       setConversation: (conversationId) => set({ conversationId }),
     }),
-    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, status: s.status }) },
+    // `status` não é lembrado: a tela de conversas abre sempre em 'Aguardando' (a fila nova)
+    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId }) },
   ),
 );

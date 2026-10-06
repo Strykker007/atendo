@@ -21,7 +21,7 @@ export default function ConversasPage() {
         <ChatPane />
       </section>
       {rightPanelOpen ? (
-        <aside className="hidden xl:flex w-72 shrink-0 border-l border-line bg-panel flex-col">
+        <aside className="hidden xl:flex w-72 shrink-0 min-h-0 overflow-hidden border-l border-line bg-panel flex-col">
           <QuickRepliesPanel />
         </aside>
       ) : (

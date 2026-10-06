@@ -20,3 +20,4 @@ export * from './hooks/ia';
 export * from './hooks/configuracoes';
 export * from './hooks/kanban';
 export * from './hooks/departamentos';
+export * from './hooks/campos';

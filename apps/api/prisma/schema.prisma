@@ -24,6 +24,7 @@ model Tenant {
   users         User[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
+  contactAttributes ContactAttribute[]
   conversations Conversation[]
   tags          Tag[]
   folders       QuickReplyFolder[]
@@ -366,9 +367,38 @@ model Contact {
   optOutAt  DateTime?
 
   campaignTargets CampaignTarget[]
+  attributes      ContactAttribute[]
 
   @@unique([tenantId, phone])
   @@map("contacts")
+}
+
+enum ContactAttributeType {
+  text
+  number
+  date
+}
+
+/// Campo livre da ficha de UM contato (ex.: CPF, placa do carro). Cada cliente tem os seus:
+/// nem todo cliente tem os mesmos dados, então não há cadastro de campos da empresa.
+model ContactAttribute {
+  id        String               @id @default(uuid())
+  tenantId  String
+  contactId String
+  label     String
+  type      ContactAttributeType @default(text)
+  /// texto; data = AAAA-MM-DD, número com ponto
+  value     String
+  position  Int                  @default(0)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([tenantId, label])
+  @@map("contact_attributes")
 }
 
 /// Tag "colada" na pessoa: vale para todas as conversas dela (ex.: comprador recorrente).

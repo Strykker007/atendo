@@ -9,6 +9,7 @@ import { TenantsModule } from './modules/tenants/tenants.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { TagsModule } from './modules/tags/tags.module';
+import { ContactAttributesModule } from './modules/contact-attributes/contact-attributes.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -33,6 +34,7 @@ import { DepartmentsModule } from './modules/departments/departments.module';
     WhatsAppModule,
     ConversationsModule,
     TagsModule,
+    ContactAttributesModule,
     DepartmentsModule,
     KanbanModule,
     QuickRepliesModule,

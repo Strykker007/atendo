@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, StickyNote } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Image as ImageIcon, Video, FileText, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
@@ -37,11 +37,9 @@ export interface ComposerBarProps {
   onAssinando: (v: boolean) => void;
   /** conteúdo extra à direita (copiloto de IA) */
   direita?: React.ReactNode;
-  /** liga o modo nota interna (só aparece com a permissão `conversations.internal_note`) */
-  onNotaInterna?: () => void;
 }
 
-export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita, onNotaInterna }: ComposerBarProps) {
+export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita }: ComposerBarProps) {
   const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'emoji' | 'mencao' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
   const activeRun = useActiveRun(conversationId);
@@ -80,7 +78,6 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       )}
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
-      {onNotaInterna && <Atalho icone={<StickyNote size={16} />} titulo="Nota interna — só a equipe vê (Alt+N)" onClick={onNotaInterna} />}
       <Atalho
         icone={<span className="text-[15px] font-bold underline underline-offset-2 decoration-2 leading-none">A</span>}
         titulo={assinando ? 'Assinatura ligada: seu nome vai junto' : 'Assinar as mensagens com o seu nome'}
@@ -135,10 +132,13 @@ function Atalho({ icone, titulo, onClick, ativo, destaque }: { icone: React.Reac
   );
 }
 
-/** Menu ancorado acima da barra — sobe, porque abaixo dela é a borda da janela. */
+/**
+ * Menu ancorado acima da barra — sobe, porque abaixo dela é a borda da janela. Altura limitada
+ * com rolagem por dentro: lista longa de fluxos/respostas não pode sair pelo topo da tela.
+ */
 function Menu({ children, largura = 'w-72' }: { children: React.ReactNode; largura?: string }) {
   return (
-    <div className={cn('absolute bottom-full left-0 mb-1 z-30 rounded-xl border border-line bg-panel shadow-lg overflow-hidden', largura)}>
+    <div className={cn('absolute bottom-full left-0 mb-1 z-30 rounded-xl border border-line bg-panel shadow-lg max-h-[min(60vh,26rem)] overflow-y-auto overscroll-contain scrollbar-thin', largura)}>
       {children}
     </div>
   );
@@ -164,7 +164,7 @@ function MenuRespostas({ conversationId, onFechar }: { conversationId: string; o
   const conv = useConversation(conversationId).data;
   const [q, setQ] = useState('');
   const todas = (folders.data ?? []).flatMap((f) => f.replies.map((r) => ({ ...r, pasta: f.name })));
-  const filtradas = todas.filter((r) => !q || `${r.title} ${r.body}`.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+  const filtradas = todas.filter((r) => !q || `${r.title} ${r.body}`.toLowerCase().includes(q.toLowerCase()));
 
   const resolver = (r: QuickReplyItem) => {
     const nome = conv?.contact.name ?? conv?.contact.phone ?? '';
@@ -179,11 +179,11 @@ function MenuRespostas({ conversationId, onFechar }: { conversationId: string; o
 
   return (
     <Menu largura="w-80">
-      <div className="p-1.5 border-b border-line flex items-center gap-1.5">
+      <div className="sticky top-0 z-10 bg-panel p-1.5 border-b border-line flex items-center gap-1.5">
         <Search size={13} className="text-faint shrink-0" />
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full bg-transparent text-[12.5px] focus:outline-none" />
       </div>
-      <div className="max-h-64 overflow-y-auto scrollbar-thin">
+      <div>
         {filtradas.length === 0 && <p className="px-3 py-3 text-[12px] text-faint">Nenhuma resposta encontrada.</p>}
         {filtradas.map((r) => (
           <button key={r.id} type="button" onClick={() => { escolher(r); onFechar(); }} className="w-full text-left px-3 py-1.5 hover:bg-accent-soft">
