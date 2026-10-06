@@ -1,4 +1,5 @@
 'use client';
+import { MarcaHorizontal } from '@/components/ui/Marca';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, setAccessToken } from '@/lib/api';
@@ -6,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('demo@atendo.local');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -30,7 +31,7 @@ export default function LoginPage() {
     <main className="min-h-screen grid place-items-center px-4 bg-canvas">
       <form onSubmit={submit} className="w-full max-w-sm bg-panel rounded-2xl shadow-sm border border-line p-8 space-y-5">
         <div>
-          <div className="flex items-center gap-2.5"><span className="w-9 h-9 rounded-xl bg-accent grid place-items-center text-white font-display font-bold">A</span><span className="font-display text-2xl font-semibold text-ink tracking-tight">Atendo</span></div>
+          <MarcaHorizontal className="h-10 w-auto max-w-full object-contain object-left" />
           <p className="text-sm text-muted">Entre para acessar o atendimento</p>
         </div>
         <label className="block text-sm">

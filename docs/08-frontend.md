@@ -144,7 +144,7 @@ O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseMo
 
 A logo fica em `apps/web/public/marca/`, em três recortes: `vogo.png` (original, fundo claro), `vogo-escuro.png` (texto em branco, para o menu lateral, que é escuro nos dois temas) e `vogo-icone.png` (só o robô, para o menu recolhido). A versão escura é gerada do original clareando os pixels **sem cor** — o vermelho da marca fica intacto e o "CHAT", que é preto, sumiria no fundo do menu.
 
-O título da aba é "VOGO.CHAT". Login, telas de convite/recuperação, aviso de versão e telas do dono (Financeiro, Clientes) ainda dizem "Atendo".
+Login e telas de convite/recuperação usam a logo horizontal (`MarcaHorizontal`, `components/ui/Marca.tsx`): `vogo-horizontal.png` no tema claro e `vogo-horizontal-escuro.png` no escuro (gerada da clara clareando os pixels sem cor; bordas transparentes cortadas). O título da aba é "VOGO.CHAT". O aviso de versão e as telas do dono (Financeiro, Clientes) ainda dizem "Atendo".
 
 ## Cabeçalho do chat
 
@@ -232,7 +232,7 @@ Com `quoted.messageId` a caixa é clicável: rola até a bolha citada (`id="msg-
 
 Os atalhos ficam **abaixo** do campo de texto, como no WhatsApp: a mão está no teclado, e atalho acima do texto obriga o olho a subir e voltar. Cada botão abre o seu menu ancorado ali mesmo (`ComposerBar`), que fecha com Esc ou clique fora.
 
-Da esquerda para a direita: **clipe** (foto, vídeo, documento — antes esses três eram botões soltos acima *e* o clipe repetia os mesmos), **raio** = respostas rápidas (ícone do raio em todo o sistema), **fluxo** para disparar, **pausa** ⏸ (menu pausar / continuar de onde parou / cancelar fluxo, âmbar quando pausado — ver [fluxos › Pausar](fluxos.md#pausar-o-robô-na-conversa)), **emoji**, **@** para mencionar a equipe e **A sublinhado** para assinatura. O copiloto de IA fica na ponta direita.
+Da esquerda para a direita: **clipe** (foto, vídeo, documento — antes esses três eram botões soltos acima *e* o clipe repetia os mesmos), **raio** = respostas rápidas (ícone do raio em todo o sistema), **fluxo** para disparar, **pausa** ⏸ (menu pausar / continuar de onde parou / cancelar fluxo, âmbar quando pausado — ver [fluxos › Pausar](fluxos.md#pausar-o-robô-na-conversa)), **relógio** ⏰ para agendar a mensagem (modal com data/hora; a faixa retrátil acima do campo lista as agendadas e permite cancelar — ver [Agendamento de mensagens](agendamento-de-mensagens.md)), **emoji**, **@** para mencionar a equipe e **A sublinhado** para assinatura. O copiloto de IA fica na ponta direita.
 
 Os menus da barra (respostas rápidas, fluxos, menção…) têm altura máxima (`min(60vh, 26rem)`) e rolam por dentro — lista longa não sai pelo topo da tela. No menu de respostas a busca fica fixa no topo e **todas** as respostas aparecem (antes cortava em 8). O painel lateral de respostas/fluxos também rola dentro da própria coluna.
 
