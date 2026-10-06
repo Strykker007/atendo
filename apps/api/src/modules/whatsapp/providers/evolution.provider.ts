@@ -197,18 +197,45 @@ export class EvolutionProvider implements WhatsAppProvider {
 
   /** Apagar para todos: a Evolution acha a mensagem pela key (chat + id + fromMe). */
   async revoke(ctx: NumberContext, t: OutboundRevoke) {
+    const remoteJid = await this.storedRemoteJid(ctx, t.externalId, t.to);
     await this.api(`/chat/deleteMessageForEveryone/${this.instance(ctx)}`, {
       method: 'DELETE',
-      body: JSON.stringify({ id: t.externalId, remoteJid: `${t.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: true }),
+      body: JSON.stringify({ id: t.externalId, remoteJid, fromMe: true }),
     }, this.shard(ctx));
+  }
+
+  /**
+   * Endereço da conversa como a Evolution GRAVOU a mensagem — é com ele que ela confere a edição
+   * ("RemoteJid does not match") e manda o protocolo ao WhatsApp.
+   *
+   * Não dá para montar a partir do telefone: o WhatsApp está migrando contatos para o LID
+   * (`242511201210535@lid`), e a mensagem digitada no celular costuma ficar gravada assim, enquanto
+   * a enviada pela API fica como `<telefone>@s.whatsapp.net`. Além disso, para celular BR a
+   * Evolution tira ou põe o nono dígito ao montar o JID. Sem registro, cai no telefone.
+   */
+  private async storedRemoteJid(ctx: NumberContext, externalId: string, phone: string): Promise<string> {
+    const fallback = `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
+    try {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        body: JSON.stringify({ where: { key: { id: externalId } }, limit: 1 }),
+      }, this.shard(ctx));
+      // v2 devolve `{ messages: { records } }`; versões antigas, a lista direto
+      const rows: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      const jid = rows.find((r) => r?.key?.id === externalId)?.key?.remoteJid;
+      return typeof jid === 'string' && jid.includes('@') ? jid : fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   /** Editar mensagem nossa (`POST /chat/updateMessage`). O WhatsApp só aceita até ~15 min depois do envio. */
   async editMessage(ctx: NumberContext, t: OutboundEdit) {
-    const number = t.to.replace(/\D/g, '');
+    // `number` com `@` passa direto pelo createJid da Evolution: precisa ser IGUAL ao gravado
+    const remoteJid = await this.storedRemoteJid(ctx, t.externalId, t.to);
     await this.api(`/chat/updateMessage/${this.instance(ctx)}`, {
       method: 'POST',
-      body: JSON.stringify({ number, text: t.text, key: { id: t.externalId, remoteJid: `${number}@s.whatsapp.net`, fromMe: true } }),
+      body: JSON.stringify({ number: remoteJid, text: t.text, key: { id: t.externalId, remoteJid, fromMe: true } }),
     }, this.shard(ctx));
   }
 

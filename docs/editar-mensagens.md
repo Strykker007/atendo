@@ -35,6 +35,17 @@ Não se edita: mensagem **recebida** (é do contato) e **nota interna** (apaga e
 Editar **só no painel** uma mensagem já entregue nunca acontece: o atendente veria um texto que
 o contato não leu.
 
+## Endereço da conversa (LID)
+
+A Evolution confere a edição comparando o `remoteJid` que ela **gravou** para a mensagem com o
+que pedimos — diferente, recusa com *"RemoteJid does not match"*. E o gravado nem sempre é o
+telefone: o WhatsApp está migrando contatos para o **LID** (`242511201210535@lid`), e a mensagem
+digitada no celular costuma ficar assim, enquanto a enviada pela API fica como
+`<telefone>@s.whatsapp.net`; para celular BR ela ainda tira/põe o nono dígito ao montar o JID.
+Por isso, antes de editar (e de apagar para todos), o provider consulta a própria Evolution
+(`POST /chat/findMessages` pelo id) e usa o endereço gravado (`storedRemoteJid`); sem registro,
+cai no telefone.
+
 ## Assinatura
 
 Com a assinatura ligada, a mensagem começa com `*Nome:*`. O modal de edição mostra só o corpo e
