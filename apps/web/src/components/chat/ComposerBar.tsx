@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Smile, AtSign, Image as ImageIcon, Video, FileText, Search } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './QuickReplyCountdown';
 import {
-  useAgents, useActiveRun, useFlows, useStopFlow, useHasFeature, useMe, useQuickReplies, useConversation,
+  useAgents, useActiveRun, useFlows, useHasFeature, useMe, useQuickReplies, useConversation, usePauseBot, useResumeBot, useCancelFlow, botPaused,
   type QuickReplyItem,
 } from '@/lib/hooks';
 
@@ -40,10 +40,11 @@ export interface ComposerBarProps {
 }
 
 export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita }: ComposerBarProps) {
-  const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'emoji' | 'mencao' | null>(null);
+  const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'mencao' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
   const activeRun = useActiveRun(conversationId);
-  const stopFlow = useStopFlow();
+  const conv = useConversation(conversationId).data;
+  const pausado = !!conv && botPaused(conv);
   const flows = useHasFeature('flows');
   // fora do menu: o menu fecha no clique, a confirmação de "robô pausado" precisa ficar
   const startFlow = useStartFlowConfirm();
@@ -67,13 +68,15 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       {flows.has && (
         <Atalho icone={<Workflow size={16} />} titulo="Disparar fluxo" ativo={aberto === 'fluxos'} onClick={() => setAberto(aberto === 'fluxos' ? null : 'fluxos')} />
       )}
-      {/* pausar só aparece com fluxo rodando: botão que não faz nada ensina a ignorar a barra */}
-      {activeRun.data && (
+      {/* pausa: menu com pausar / continuar / cancelar. Âmbar quando pausado, para ninguém
+          esquecer que o robô está calado nesta conversa */}
+      {flows.has && (
         <Atalho
           icone={<Pause size={16} />}
-          titulo={`Parar "${activeRun.data.flow.name}" e assumir`}
-          destaque
-          onClick={() => stopFlow.mutateAsync(conversationId).then(() => toast.ok('Fluxo parado — a conversa é sua')).catch(toast.err)}
+          titulo={pausado ? 'Fluxo pausado — continuar ou cancelar' : activeRun.data ? `Pausar ou cancelar "${activeRun.data.flow.name}"` : 'Pausar os fluxos nesta conversa'}
+          ativo={aberto === 'pausa'}
+          destaque={pausado}
+          onClick={() => setAberto(aberto === 'pausa' ? null : 'pausa')}
         />
       )}
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
@@ -98,6 +101,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       {aberto === 'respostas' && <MenuRespostas conversationId={conversationId} onFechar={() => setAberto(null)} />}
       {aberto === 'fluxos' && <MenuFluxos conversationId={conversationId} onStart={startFlow.run} onFechar={() => setAberto(null)} />}
       {startFlow.dialog}
+      {aberto === 'pausa' && conv && <MenuPausa conversationId={conversationId} pausado={pausado} pausadoPor={conv.botPausedBy?.name} run={activeRun.data ?? null} onFechar={() => setAberto(null)} />}
       {aberto === 'emoji' && (
         <Menu largura="w-64">
           <div className="grid grid-cols-8 gap-0.5 p-1">
@@ -211,6 +215,53 @@ function MenuFluxos({ conversationId, onStart, onFechar }: { conversationId: str
           {f.name}
         </ItemMenu>
       ))}
+    </Menu>
+  );
+}
+
+/**
+ * Pausa do fluxo nesta conversa (docs/fluxos.md → Pausar o fluxo).
+ *
+ * Pausar congela o fluxo onde está e cala a automação só aqui; continuar segue do mesmo ponto
+ * (a pergunta que esperava resposta volta a esperar, o Aguardar retoma o tempo). Cancelar
+ * encerra o fluxo de vez e libera a automação.
+ */
+function MenuPausa({ conversationId, pausado, pausadoPor, run, onFechar }: {
+  conversationId: string;
+  pausado: boolean;
+  pausadoPor?: string;
+  run: { status: string; flow: { name: string } } | null;
+  onFechar: () => void;
+}) {
+  const pausar = usePauseBot();
+  const continuar = useResumeBot();
+  const cancelar = useCancelFlow();
+  const acao = (p: Promise<unknown>, ok: string) => { onFechar(); p.then(() => toast.ok(ok)).catch(toast.err); };
+  const congelado = run?.status === 'paused';
+
+  return (
+    <Menu>
+      <div className="px-3 pt-2 pb-1.5 border-b border-line text-[11.5px] text-muted">
+        {pausado
+          ? <>Fluxo pausado{pausadoPor && <> por <b className="text-ink">{pausadoPor}</b></>}{congelado && <>: <b className="text-ink">{run!.flow.name}</b> parado onde estava</>}.</>
+          : run
+            ? <><b className="text-ink">{run.flow.name}</b> {run.status === 'waiting' ? 'esperando o contato' : 'rodando'} nesta conversa.</>
+            : 'Nenhum fluxo rodando. Pausar impede que fluxos e respostas automáticas respondam aqui.'}
+      </div>
+      {pausado ? (
+        <ItemMenu icone={<Play size={14} />} onClick={() => acao(continuar.mutateAsync(conversationId), congelado ? 'Fluxo continuando de onde parou' : 'Fluxos liberados nesta conversa')}>
+          {congelado ? 'Continuar de onde parou' : 'Retomar fluxos nesta conversa'}
+        </ItemMenu>
+      ) : (
+        <ItemMenu icone={<Pause size={14} />} onClick={() => acao(pausar.mutateAsync({ conversationId, minutes: null }), run ? 'Fluxo pausado' : 'Fluxos pausados nesta conversa')}>
+          {run ? 'Pausar fluxo' : 'Pausar fluxos nesta conversa'}
+        </ItemMenu>
+      )}
+      {run && (
+        <ItemMenu icone={<CircleStop size={14} />} onClick={() => acao(cancelar.mutateAsync(conversationId), 'Fluxo cancelado — a conversa é sua')}>
+          Cancelar fluxo
+        </ItemMenu>
+      )}
     </Menu>
   );
 }

@@ -401,6 +401,7 @@ export class ConversationsService {
     // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria
     await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação' });
     if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId: conv.tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
+    if (status === 'closed') await this.encerrarFluxosPausados([conversationId]);
     this.gateway.emitConversation(conv.tenantId, conv);
     return conv;
   }
@@ -870,6 +871,7 @@ export class ConversationsService {
       reason: status === 'closed' ? outcome?.reason?.trim() || null : null,
     });
     if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId, conversationId: id, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
+    if (status === 'closed') await this.encerrarFluxosPausados([id]);
     this.gateway.emitConversation(tenantId, conv);
     return conv;
   }
@@ -951,6 +953,7 @@ export class ConversationsService {
       });
     }
 
+    await this.encerrarFluxosPausados(idsAlvo);
     // cada conversa precisa ir pelo socket: quem está com o painel aberto vê a fila esvaziar
     const fechadas = await this.prisma.conversation.findMany({ where: { id: { in: idsAlvo } } });
     for (const c of fechadas) this.gateway.emitConversation(tenantId, c);
@@ -959,6 +962,19 @@ export class ConversationsService {
   }
 
   // ---------- robô pausado na conversa ----------
+
+  /**
+   * Encerrar o atendimento libera a pausa — e o fluxo congelado nela não pode ficar pendurado
+   * esperando um "continuar" que não vai vir. (Run rodando/esperando é encerrado pelo próprio
+   * motor no próximo passo, que vê a conversa fechada.)
+   */
+  private async encerrarFluxosPausados(conversationIds: string[]) {
+    const r = await this.prisma.flowRun.updateMany({
+      where: { conversationId: { in: conversationIds }, status: 'paused' },
+      data: { status: 'stopped', endedAt: new Date(), error: 'conversa encerrada', pausedFrom: null },
+    });
+    if (r.count) await this.prisma.conversation.updateMany({ where: { id: { in: conversationIds } }, data: { activeFlowRunId: null } });
+  }
 
   /**
    * Grava a pausa (quem parou o fluxo em andamento e agenda o fim é o `FlowEngineService.pauseBot`).

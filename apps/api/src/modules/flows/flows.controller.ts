@@ -318,9 +318,17 @@ export class FlowStopController {
     return { stopped: !!run };
   }
 
+  /** Cancelar (menu de pausa): encerra o fluxo, pausado ou não, e libera a automação da conversa. */
+  @Post(':id/flow/cancel')
+  async cancel(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
+    return this.engine.cancelFlow(u.tenantId, id, u);
+  }
+
+  /** Fluxo da conversa: rodando, esperando ou pausado (`paused`, com `pausedFrom`). */
   @Get(':id/flow')
   async active(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const run = await this.prisma.flowRun.findFirst({ where: { conversationId: id, tenantId: u.tenantId, status: { in: ['running', 'waiting'] } }, include: { flow: { select: { id: true, name: true } } } });
-    return run ? { id: run.id, status: run.status, currentNodeId: run.currentNodeId, flow: run.flow, startedAt: run.startedAt, waitUntil: run.waitUntil } : null;
+    const run = await this.prisma.flowRun.findFirst({ where: { conversationId: id, tenantId: u.tenantId, status: { in: ['running', 'waiting', 'paused'] } }, include: { flow: { select: { id: true, name: true } } } });
+    return run ? { id: run.id, status: run.status, pausedFrom: run.pausedFrom, currentNodeId: run.currentNodeId, flow: run.flow, startedAt: run.startedAt, waitUntil: run.waitUntil } : null;
   }
 }

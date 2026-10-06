@@ -12,7 +12,8 @@ import { invConv, useUsage } from './core';
 export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
 /** `mediaUrls`: link assinado de cada anexo do Conteúdo (só na leitura de um fluxo). */
 export interface Flow { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string; mediaUrls?: Record<string, string>; /** optimistic locking: mandar no PATCH do editor */ version: number }
-export interface ActiveRun { id: string; status: 'running' | 'waiting'; currentNodeId: string | null; flow: { id: string; name: string }; startedAt: string; waitUntil: string | null }
+/** `paused` = congelado pelo atendente; `pausedFrom` é para onde volta ao continuar. */
+export interface ActiveRun { id: string; status: 'running' | 'waiting' | 'paused'; pausedFrom?: 'running' | 'waiting' | null; currentNodeId: string | null; flow: { id: string; name: string }; startedAt: string; waitUntil: string | null }
 export interface FlowRuns { byStatus: Record<string, number>; recent: { id: string; status: string; startedAt: string; endedAt: string | null; error: string | null; contact: { name: string | null; phone: string }; conversationId: string }[] }
 
 export const useFlows = () => useQuery({ queryKey: ['flows'], queryFn: () => api<FlowSummary[]>('/flows'), retry: false });
@@ -42,7 +43,9 @@ export const botPaused = (c: { botPausedAt?: string | null; botPausedUntil?: str
   !!c.botPausedAt && (!c.botPausedUntil || new Date(c.botPausedUntil).getTime() > now);
 /** `minutes` nulo = até retomar manualmente. */
 export const usePauseBot = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ conversationId, minutes }: { conversationId: string; minutes: number | null }) => api(`/conversations/${conversationId}/bot/pause`, { method: 'POST', body: JSON.stringify({ minutes }) }), onSuccess: (_, v) => { qc.refetchQueries({ queryKey: ['active-run', v.conversationId] }); invConv(qc, v.conversationId); qc.invalidateQueries({ queryKey: ['conversation-events', v.conversationId] }); } }); };
-export const useResumeBot = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api(`/conversations/${conversationId}/bot/resume`, { method: 'POST' }), onSuccess: (_, id) => { invConv(qc, id); qc.invalidateQueries({ queryKey: ['conversation-events', id] }); } }); };
+export const useResumeBot = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api(`/conversations/${conversationId}/bot/resume`, { method: 'POST' }), onSuccess: (_, id) => { qc.refetchQueries({ queryKey: ['active-run', id] }); invConv(qc, id); qc.invalidateQueries({ queryKey: ['conversation-events', id] }); } }); };
+/** Cancelar: encerra o fluxo (pausado ou não) e libera a automação da conversa. */
+export const useCancelFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ stopped: boolean }>(`/conversations/${conversationId}/flow/cancel`, { method: 'POST' }), onSuccess: (_, id) => { qc.refetchQueries({ queryKey: ['active-run', id] }); invConv(qc, id); qc.invalidateQueries({ queryKey: ['conversation-events', id] }); } }); };
 export const useActiveRun = (conversationId: string | null) => useQuery({ queryKey: ['active-run', conversationId], enabled: !!conversationId, queryFn: () => api<ActiveRun | null>(`/conversations/${conversationId}/flow`), refetchInterval: 15_000 });
 /** O plano inclui a funcionalidade? (usa /billing/usage já em cache) */
 export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as PlanFeature), loading: u.isLoading }; };

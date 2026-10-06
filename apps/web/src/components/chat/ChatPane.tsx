@@ -24,7 +24,6 @@ import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, QuickReplyCountdown, type QuickReplyEventDetail, type QuickReplyPending } from './QuickReplyCountdown';
 import { OWN_MESSAGE_DELETE_WINDOW_MS, QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
 import { HistorySheet } from './HistorySheet';
-import { BotPauseBar } from './BotPauseBar';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
 import { AudioMessage } from './AudioMessage';
@@ -99,7 +98,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const activeRun = useActiveRun(conversationId);
   const stopFlow = useStopFlow();
   const sched = useHasFeature('scheduling');
-  const flowsFeature = useHasFeature('flows');
   const ai = useAiStatus();
   const [scheduling, setScheduling] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -781,7 +779,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
             />
           )}
-          {flowsFeature.has && <BotPauseBar conv={conv} />}
         </form>
       )}
     </>

@@ -23,9 +23,11 @@ import { planInbound } from './hours-gate';
 import { callWebhook } from './webhook';
 import { DISTRIBUTION_REASON, leastBusy, nextInRotation, pickWeighted } from './distribution';
 import { pickDefaultFlow, type InboundSituation } from './default-flows';
+import { planejarRetomada } from './flow-pause';
 
 export const QUEUE_FLOWS = 'flows';
-export interface FlowResumeJob { runId: string }
+/** `until` (ISO, opcional): só vale se o run ainda espera com esse `waitUntil` — o job reagendado ao continuar uma pausa não pode adiantar outra espera. */
+export interface FlowResumeJob { runId: string; until?: string }
 /** Fim automático da pausa do robô. `pausedAt` (ISO) identifica a pausa: pausar de novo invalida o job antigo. */
 export interface BotUnpauseJob { conversationId: string; tenantId: string; pausedAt: string }
 /**
@@ -38,14 +40,14 @@ export interface ReplyTimeoutJob { runId: string; nodeId: string; until: string 
 export interface AutoContentJob { conversationId: string; items: ContentItem[] }
 export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob | AutoContentJob;
 
-const BOT_PAUSED_REASON = 'fluxo pausado na conversa';
 const CLOSED_REASON = 'conversa encerrada';
 type JobConv = { botPausedAt: Date | null; botPausedUntil: Date | null; status: string };
 /**
  * Checagem de todo job do motor (Atraso, intervalo do Conteúdo, tempo limite) antes de agir:
- * robô pausado ou conversa encerrada encerram o run em vez de executar.
+ * conversa encerrada encerra o run. Pausada não: o run fica congelado (`paused`) e, ao
+ * continuar, `thawRun` reagenda o que venceu durante a pausa.
  */
-const jobBlocked = (conv: JobConv) => (botPaused(conv) ? BOT_PAUSED_REASON : conv.status === 'closed' ? CLOSED_REASON : null);
+const jobBlocked = (conv: JobConv) => (conv.status === 'closed' ? CLOSED_REASON : null);
 const JOB_CONV = { select: { botPausedAt: true, botPausedUntil: true, status: true } } as const;
 const MAX_STEPS = 50; // proteção contra loop infinito num mesmo avanço
 
@@ -137,20 +139,22 @@ export class FlowEngineService {
 
   /** Para o fluxo ativo da conversa (botão "Parar" ou handoff). */
   async stop(conversationId: string, reason = 'parado pelo atendente') {
-    const active = await this.prisma.flowRun.findFirst({ where: { conversationId, status: { in: ['running', 'waiting'] } } });
+    // pausado também conta: cancelar um fluxo congelado é encerrá-lo de vez
+    const active = await this.prisma.flowRun.findFirst({ where: { conversationId, status: { in: ['running', 'waiting', 'paused'] } } });
     if (!active) return null;
-    await this.prisma.flowRun.update({ where: { id: active.id }, data: { status: 'stopped', endedAt: new Date(), error: reason } });
+    await this.prisma.flowRun.update({ where: { id: active.id }, data: { status: 'stopped', endedAt: new Date(), error: reason, pausedFrom: null } });
     await this.markConversation(conversationId, null);
     return active;
   }
 
   /**
-   * Pausa o robô SÓ nesta conversa: interrompe o run em andamento (sem retomar depois) e
-   * agenda o fim automático. `minutes` nulo = até retomar manualmente.
+   * Pausa o robô SÓ nesta conversa: o run em andamento **congela** onde está (`paused`) — ao
+   * continuar, segue do mesmo ponto — e nenhuma automação responde aqui. Agenda o fim
+   * automático; `minutes` nulo = até continuar manualmente.
    */
   async pauseBot(tenantId: string, conversationId: string, by: { id: string }, minutes: number | null) {
     const conv = await this.conversations.setBotPause(tenantId, conversationId, by, minutes);
-    await this.stop(conversationId, BOT_PAUSED_REASON);
+    await this.freezeRun(conversationId);
     if (conv.botPausedUntil && conv.botPausedAt) {
       await this.queue.add('unpause', { conversationId, tenantId, pausedAt: conv.botPausedAt.toISOString() }, {
         delay: Math.max(0, conv.botPausedUntil.getTime() - Date.now()),
@@ -161,14 +165,55 @@ export class FlowEngineService {
     return conv;
   }
 
-  /** Retomar pelo botão. A execução interrompida não volta: a próxima mensagem segue as regras de entrada. */
-  resumeBot(tenantId: string, conversationId: string, by: { id: string }) {
-    return this.conversations.clearBotPause(tenantId, conversationId, by);
+  /** Continuar pelo botão: libera a automação e o fluxo pausado segue de onde parou. */
+  async resumeBot(tenantId: string, conversationId: string, by: { id: string }) {
+    const conv = await this.conversations.clearBotPause(tenantId, conversationId, by);
+    if (conv && !botPaused(conv)) await this.thawRun(conversationId);
+    return conv;
   }
 
-  /** Job do fim automático da pausa. */
+  /** Cancelar pelo menu: encerra o fluxo (pausado ou não) e libera a automação da conversa. */
+  async cancelFlow(tenantId: string, conversationId: string, by: { id: string }) {
+    const run = await this.stop(conversationId, 'cancelado pelo atendente');
+    await this.conversations.clearBotPause(tenantId, conversationId, by);
+    return { stopped: !!run };
+  }
+
+  /** Job do fim automático da pausa. Pausa nova depois desta (outro `pausedAt`) continua valendo. */
   async autoResumeBot(job: BotUnpauseJob) {
-    await this.conversations.clearBotPause(job.tenantId, job.conversationId, null, new Date(job.pausedAt));
+    const conv = await this.conversations.clearBotPause(job.tenantId, job.conversationId, null, new Date(job.pausedAt));
+    if (conv && !botPaused(conv)) await this.thawRun(job.conversationId);
+  }
+
+  /** Congela o run ativo: guarda o status em `pausedFrom` para voltar exatamente a ele. */
+  private async freezeRun(conversationId: string) {
+    const active = await this.prisma.flowRun.findFirst({ where: { conversationId, status: { in: ['running', 'waiting'] } } });
+    if (!active) return;
+    await this.prisma.flowRun.updateMany({ where: { id: active.id, status: active.status }, data: { status: 'paused', pausedFrom: active.status } });
+  }
+
+  /**
+   * Descongela o run pausado. Estava rodando: segue avançando. Estava esperando: volta a
+   * esperar — e, se a espera tinha prazo (Aguardar, intervalo do Conteúdo, tempo limite de
+   * resposta), reagenda o job, porque o original pode ter vencido durante a pausa e sido ignorado.
+   */
+  private async thawRun(conversationId: string) {
+    const run = await this.prisma.flowRun.findFirst({ where: { conversationId, status: 'paused' } });
+    if (!run) return;
+    let porTempo = false;
+    if (run.waitUntil && run.currentNodeId) {
+      const { def } = await this.load(run.id);
+      porTempo = def.nodes.find((n) => n.id === run.currentNodeId)?.type === 'wait' || contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined;
+    }
+    const plano = planejarRetomada(run, porTempo);
+    const ok = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'paused' }, data: { status: plano.status, pausedFrom: null } });
+    if (!ok.count) return;
+    if (plano.status === 'running') return this.advance(run.id);
+    if (!plano.job || !run.waitUntil || !run.currentNodeId) return;
+    const until = run.waitUntil.toISOString();
+    const jobId = `${plano.job === 'resume' ? 'resume' : 'timeout'}-${run.id}-${run.currentNodeId}-thaw-${Date.now()}`;
+    if (plano.job === 'resume') await this.queue.add('resume', { runId: run.id, until }, { delay: plano.delayMs, jobId, removeOnComplete: true });
+    else await this.queue.add('reply-timeout', { runId: run.id, nodeId: run.currentNodeId, until }, { delay: plano.delayMs, jobId, removeOnComplete: true });
   }
 
   /**
@@ -180,7 +225,10 @@ export class FlowEngineService {
   async onInbound(number: WhatsAppNumber, conversation: Conversation, message: Message, isNewConversation: boolean, situation?: InboundSituation) {
     const paused = botPaused(conversation);
     // pausa vencida e o job do fim ainda não rodou (fila atrasada): encerra aqui e segue normal
-    if (!paused && conversation.botPausedAt) await this.conversations.clearBotPause(conversation.tenantId, conversation.id, null, conversation.botPausedAt);
+    if (!paused && conversation.botPausedAt) {
+      await this.conversations.clearBotPause(conversation.tenantId, conversation.id, null, conversation.botPausedAt);
+      await this.thawRun(conversation.id);
+    }
     const [now, active] = await Promise.all([
       this.schedules.now(number.tenantId, number.id),
       this.prisma.flowRun.findFirst({ where: { conversationId: conversation.id, status: { in: ['running', 'waiting'] } } }),
@@ -298,10 +346,12 @@ export class FlowEngineService {
   }
 
   /** Job de "Aguardar" (ou do intervalo entre mensagens do Conteúdo) venceu. */
-  async resume(runId: string) {
+  async resume(runId: string, until?: string) {
     const run = await this.prisma.flowRun.findUnique({ where: { id: runId }, include: { conversation: JOB_CONV } });
     if (!run || run.status !== 'waiting') return;
-    // a pausa já parou o run; isto cobre o job que venceu no meio do caminho
+    if (until && run.waitUntil?.toISOString() !== until) return; // espera diferente: job velho
+    // pausado (inclusive pausa em andamento): deixa quieto; continuar reagenda
+    if (botPaused(run.conversation)) return;
     const blocked = jobBlocked(run.conversation);
     if (blocked) return this.finish(runId, 'stopped', blocked);
     await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'running', waitUntil: null } });
@@ -318,6 +368,7 @@ export class FlowEngineService {
   async replyTimeout(job: ReplyTimeoutJob) {
     const run = await this.prisma.flowRun.findUnique({ where: { id: job.runId }, include: { conversation: JOB_CONV } });
     if (!run || run.status !== 'waiting' || run.currentNodeId !== job.nodeId || run.waitUntil?.toISOString() !== job.until) return;
+    if (botPaused(run.conversation)) return; // continuar reagenda
     const blocked = jobBlocked(run.conversation);
     if (blocked) return this.finish(run.id, 'stopped', blocked);
     const claimed = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'waiting', currentNodeId: job.nodeId, waitUntil: new Date(job.until) }, data: { status: 'running', waitUntil: null, retries: 0 } });
@@ -354,7 +405,11 @@ export class FlowEngineService {
     for (let step = 0; step < MAX_STEPS; step++) {
       const { run, def, node } = await this.load(runId);
       if (run.status !== 'running') return;
-      if (botPaused(run.conversation)) return this.finish(runId, 'stopped', BOT_PAUSED_REASON);
+      // pausaram no meio do avanço: congela aqui, para continuar deste nó
+      if (botPaused(run.conversation)) {
+        await this.prisma.flowRun.updateMany({ where: { id: runId, status: 'running' }, data: { status: 'paused', pausedFrom: 'running' } });
+        return;
+      }
       if (!node) return this.finish(runId, 'failed', `nó ${run.currentNodeId} não existe`);
       const vars = run.vars as Record<string, string>;
       const ctx = { contact: run.conversation.contact, vars };

@@ -144,7 +144,7 @@ O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseMo
 
 A logo fica em `apps/web/public/marca/`, em três recortes: `vogo.png` (original, fundo claro), `vogo-escuro.png` (texto em branco, para o menu lateral, que é escuro nos dois temas) e `vogo-icone.png` (só o robô, para o menu recolhido). A versão escura é gerada do original clareando os pixels **sem cor** — o vermelho da marca fica intacto e o "CHAT", que é preto, sumiria no fundo do menu.
 
-Login, telas de convite/recuperação, título da aba e aviso de versão ainda dizem "Atendo".
+O título da aba é "VOGO.CHAT". Login, telas de convite/recuperação, aviso de versão e telas do dono (Financeiro, Clientes) ainda dizem "Atendo".
 
 ## Cabeçalho do chat
 
@@ -168,7 +168,7 @@ O estado fica guardado (`atendo-ui`), junto com o do menu da esquerda.
 
 ## Painel direito: dados da conversa
 
-Abaixo das abas Mensagens/Fluxos, um bloco com nome, primeiro nome, telefone, e-mail, endereço e atendente. Clicar insere o valor no campo de mensagem **já resolvido** (vai "Tiago", não `{{contact.name}}`); o ícone ao lado copia. Campo sem valor não aparece.
+Abaixo das abas Mensagens/Fluxos, um bloco com nome, primeiro nome, telefone, e-mail, endereço, **os campos livres da ficha do contato** (data como dd/mm/aaaa) e atendente. Clicar insere o valor no campo de mensagem **já resolvido** (vai "Tiago", não `{{contact.name}}`); o ícone ao lado copia. Campo sem valor não aparece.
 
 Serve para o que acontece o tempo todo no atendimento: precisar do e-mail ou do telefone no meio da frase e ter que abrir a ficha, ler, lembrar e voltar — ou digitar de cabeça e errar. O bloco fecha, porque divide espaço com a lista de respostas.
 
@@ -232,7 +232,7 @@ Com `quoted.messageId` a caixa é clicável: rola até a bolha citada (`id="msg-
 
 Os atalhos ficam **abaixo** do campo de texto, como no WhatsApp: a mão está no teclado, e atalho acima do texto obriga o olho a subir e voltar. Cada botão abre o seu menu ancorado ali mesmo (`ComposerBar`), que fecha com Esc ou clique fora.
 
-Da esquerda para a direita: **clipe** (foto, vídeo, documento — antes esses três eram botões soltos acima *e* o clipe repetia os mesmos), **raio** = respostas rápidas (ícone do raio em todo o sistema), **fluxo** para disparar, **pausar** (só aparece com fluxo rodando — botão que não faz nada ensina a ignorar a barra), **emoji**, **@** para mencionar a equipe e **A sublinhado** para assinatura. O copiloto de IA fica na ponta direita.
+Da esquerda para a direita: **clipe** (foto, vídeo, documento — antes esses três eram botões soltos acima *e* o clipe repetia os mesmos), **raio** = respostas rápidas (ícone do raio em todo o sistema), **fluxo** para disparar, **pausa** ⏸ (menu pausar / continuar de onde parou / cancelar fluxo, âmbar quando pausado — ver [fluxos › Pausar](fluxos.md#pausar-o-robô-na-conversa)), **emoji**, **@** para mencionar a equipe e **A sublinhado** para assinatura. O copiloto de IA fica na ponta direita.
 
 Os menus da barra (respostas rápidas, fluxos, menção…) têm altura máxima (`min(60vh, 26rem)`) e rolam por dentro — lista longa não sai pelo topo da tela. No menu de respostas a busca fica fixa no topo e **todas** as respostas aparecem (antes cortava em 8). O painel lateral de respostas/fluxos também rola dentro da própria coluna.
 

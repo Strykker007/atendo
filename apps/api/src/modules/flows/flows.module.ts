@@ -18,7 +18,7 @@ class FlowsProcessor extends TrackedWorkerHost<FlowJob> {
     super(QUEUE_FLOWS);
   }
   protected async handle(job: Job<FlowJob>) {
-    if (job.name === 'resume') await this.engine.resume((job.data as FlowResumeJob).runId);
+    if (job.name === 'resume') await this.engine.resume((job.data as FlowResumeJob).runId, (job.data as FlowResumeJob).until);
     if (job.name === 'unpause') await this.engine.autoResumeBot(job.data as BotUnpauseJob);
     if (job.name === 'reply-timeout') await this.engine.replyTimeout(job.data as ReplyTimeoutJob);
     if (job.name === 'auto-content') await this.engine.autoContent(job.data as AutoContentJob);

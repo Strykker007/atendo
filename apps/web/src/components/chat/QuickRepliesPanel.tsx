@@ -6,7 +6,7 @@ import { toast } from '@/components/ui/Toast';
 import { type QuickReplyItem, useFlows, useHasFeature, useActiveRun } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
-import { useQuickReplies, useConversation, useMe } from '@/lib/hooks';
+import { useQuickReplies, useConversation, useMe, useContactAttributes } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 import { Settings2 } from 'lucide-react';
 import { usePersistedState } from '@/lib/persisted';
@@ -53,6 +53,8 @@ function DadosDaConversa() {
   const { conversationId } = useUI();
   const conv = useConversation(conversationId).data;
   const me = useMe();
+  // campos livres da ficha ("Outras informações deste cliente"): também entram com um clique
+  const extras = useContactAttributes(conv?.contact.id ?? null).data ?? [];
   if (!conv) return null;
 
   const c = conv.contact;
@@ -63,6 +65,7 @@ function DadosDaConversa() {
     { rotulo: 'Telefone', valor: c.phone ? `+${c.phone}` : null },
     { rotulo: 'E-mail', valor: c.email },
     { rotulo: 'Endereço', valor: c.address },
+    ...extras.map((a) => ({ rotulo: a.label, valor: a.type === 'date' ? dataBR(a.value) : a.value })),
     { rotulo: 'Atendente', valor: me.data?.name },
   ];
   const uteis = linhas.filter((l) => !!l.valor);
@@ -79,9 +82,9 @@ function DadosDaConversa() {
       </button>
       {aberto && (
         <ul className="pb-1.5">
-          {uteis.map((l) => (
-            <li key={l.rotulo} className="group flex items-center gap-2 pl-6 pr-2 py-0.5 hover:bg-field">
-              <span className="text-[10.5px] text-faint w-20 shrink-0">{l.rotulo}</span>
+          {uteis.map((l, i) => (
+            <li key={`${l.rotulo}-${i}`} className="group flex items-center gap-2 pl-6 pr-2 py-0.5 hover:bg-field">
+              <span className="text-[10.5px] text-faint w-20 shrink-0 truncate" title={l.rotulo}>{l.rotulo}</span>
               <button onClick={() => inserir(l.valor!)} title="Inserir no campo de mensagem" className="text-[12px] text-ink truncate flex-1 text-left hover:text-accent-ink">
                 {l.valor}
               </button>
@@ -95,6 +98,9 @@ function DadosDaConversa() {
     </div>
   );
 }
+
+/** "2026-10-06" → "06/10/2026": no campo de mensagem vai a data como o cliente lê. */
+const dataBR = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split('-').reverse().join('/') : v);
 
 /** Aba Fluxos: dispara um fluxo na conversa aberta. Plugável no plano. */
 function FlowsTab() {
@@ -119,7 +125,9 @@ function FlowsTab() {
     <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
       {dialog}
       {!conversationId && <p className="p-5 text-xs text-muted text-center">Abra uma conversa para disparar um fluxo nela.</p>}
-      {active.data && <div className="m-2.5 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">🤖 <b>{active.data.flow.name}</b> está rodando nesta conversa{active.data.status === 'waiting' ? ' (esperando o contato)' : ''}. Disparar outro substitui este.</div>}
+      {active.data && (active.data.status === 'paused'
+        ? <div className="m-2.5 rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn-ink">⏸ <b>{active.data.flow.name}</b> está pausado nesta conversa. Continue ou cancele pelo botão de pausa na barra do campo de mensagem.</div>
+        : <div className="m-2.5 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">🤖 <b>{active.data.flow.name}</b> está rodando nesta conversa{active.data.status === 'waiting' ? ' (esperando o contato)' : ''}. Disparar outro substitui este.</div>)}
       {list.length === 0 && flows.data && <p className="p-5 text-xs text-muted text-center">Nenhum fluxo marcado como atalho. Marque em <Link href="/fluxos" className="text-accent-ink underline">Fluxos</Link>.</p>}
       <ul className="divide-y divide-line">
         {list.map((f) => {

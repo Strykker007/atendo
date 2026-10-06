@@ -832,6 +832,8 @@ enum FlowRunStatus {
   done
   stopped
   failed
+  /// congelado pelo atendente (pausar fluxo); `pausedFrom` diz para onde volta ao continuar
+  paused
 }
 
 /// Uma execução de fluxo numa conversa. No máximo uma ativa (running/waiting) por conversa.
@@ -847,6 +849,8 @@ model FlowRun {
   /// tentativas inválidas no nó atual (menu/pergunta)
   retries        Int           @default(0)
   waitUntil      DateTime?
+  /// status antes da pausa (running/waiting): "continuar" volta exatamente para ele
+  pausedFrom     FlowRunStatus?
   startedById    String?
   error          String?
   startedAt      DateTime      @default(now())

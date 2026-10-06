@@ -6,8 +6,8 @@ import { api } from '../api';
 export type ContactAttributeType = 'text' | 'number' | 'date';
 export interface ContactAttribute { id?: string; label: string; type: ContactAttributeType; value: string }
 
-export const useContactAttributes = (contactId: string) =>
-  useQuery({ queryKey: ['contact-attributes', contactId], queryFn: () => api<ContactAttribute[]>(`/contact-attributes/${contactId}`) });
+export const useContactAttributes = (contactId: string | null) =>
+  useQuery({ queryKey: ['contact-attributes', contactId], enabled: !!contactId, queryFn: () => api<ContactAttribute[]>(`/contact-attributes/${contactId}`) });
 
 /** Nomes já usados em outros contatos: sugestão ao digitar. */
 export const useContactAttributeLabels = () =>
