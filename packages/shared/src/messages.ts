@@ -185,6 +185,11 @@ export interface OutboundMessage {
   /** `voice`: áudio como mensagem de voz (PTT, padrão) ou `false` = arquivo de áudio */
   media?: { url: string; mimeType?: string; fileName?: string; caption?: string; voice?: boolean };
   quotedExternalId?: string;
+  /**
+   * Mostrar "digitando…" (ou "gravando…" no áudio) por este tempo antes de entregar. O adapter
+   * que não suporta ignora. Usado no envio automático (docs/envio.md#humanização).
+   */
+  typingMs?: number;
   /** Somente Meta: template aprovado. Obrigatório fora da janela de 24h. */
   template?: { name: string; language: string; components?: unknown[]; category: BillingCategory };
   /**

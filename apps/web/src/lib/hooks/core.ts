@@ -11,7 +11,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; endsAt: string } | null }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -26,7 +26,7 @@ export interface Conversation {
   lastInboundAt: string | null; numberId: string;
   /** desde quando o contato espera resposta; null = já respondemos */
   awaitingSince: string | null;
-  contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[] };
+  contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[]; /** pediu para não receber automáticas ("sair") */ optOutAt?: string | null; /** a checagem disse que o telefone não tem WhatsApp */ waInvalidAt?: string | null };
   /** `isPrimary` = etapa do atendimento no Kanban (no máximo uma) */
   tags: { tag: Tag; isPrimary?: boolean }[];
   assignee: { id: string; name: string } | null;
@@ -77,6 +77,10 @@ export const useQuickReplies = () => useQuery({ queryKey: ['quick-replies'], que
 export interface Usage {
   period: string;
   billingEnabled: boolean;
+  /** gateway dos checkouts novos: asaas = modal PIX/cartão; stripe = redireciona ao Checkout */
+  gateway: 'asaas' | 'stripe' | null;
+  /** onde a assinatura atual nasceu (portal do Stripe x cobrança do Asaas) */
+  subscriptionGateway: 'asaas' | 'stripe' | null;
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
   planId: string | null;
@@ -476,7 +480,7 @@ export const useConversationEvents = (id: string | null, enabled = true) =>
 export const useUpdateContact = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ contactId, ...b }: { contactId: string; name?: string; email?: string; address?: string; note1?: string; note2?: string }) => api(`/conversations/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify(b) }),
+    mutationFn: ({ contactId, ...b }: { contactId: string; name?: string; email?: string; address?: string; note1?: string; note2?: string; resubscribe?: true }) => api(`/conversations/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify(b) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['conversation'] }); qc.invalidateQueries({ queryKey: ['conversations'] }); },
   });
 };

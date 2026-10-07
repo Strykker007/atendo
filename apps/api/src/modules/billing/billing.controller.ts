@@ -8,6 +8,7 @@ import { Roles, RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { StripeService } from './stripe.service';
+import { AsaasService } from './asaas.service';
 import { FinanceService } from './finance.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -80,6 +81,7 @@ export class BillingController {
     private readonly usage: UsageService,
     private readonly prisma: PrismaService,
     private readonly stripe: StripeService,
+    private readonly asaas: AsaasService,
     private readonly finance: FinanceService,
   ) {}
 
@@ -126,7 +128,8 @@ export class BillingController {
         // quantos pagam valor diferente do atual: é o número que mostra quanto está parado no
         // passado, e some sozinho quando o reajuste roda
         onOldPrice: aReajustar(subscriptions.map((s, i) => ({ id: String(i), status: s.status, priceMonth: s.priceMonth === null ? null : Number(s.priceMonth) })), preco).length,
-        billingEnabled: this.stripe.enabled,
+        // "sem Stripe" só faz sentido quando o Stripe é quem vende: no Asaas o plano não tem price
+        billingEnabled: this.stripe.enabled && !this.asaas.enabled,
       };
     });
   }
@@ -241,13 +244,18 @@ export class BillingController {
     return { ok: true };
   }
 
+  /** Asaas tem precedência quando as duas chaves existem (docs/05 — coexistência). */
+  private gateway(): 'asaas' | 'stripe' | null {
+    return this.asaas.enabled ? 'asaas' : this.stripe.enabled ? 'stripe' : null;
+  }
+
   /** Uso do mês corrente vs limites do plano — alimenta o banner de 80%/100% no painel. */
   @Get('usage')
   @NoTenantOk()
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
+      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
     }
     const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies] = await Promise.all([
       this.usage.current(user.tenantId),
@@ -262,7 +270,11 @@ export class BillingController {
     ]);
     return {
       period: periodOf(),
-      billingEnabled: this.stripe.enabled,
+      billingEnabled: !!this.gateway(),
+      /** gateway dos checkouts novos (asaas = PIX/cartão no modal; stripe = redireciona) */
+      gateway: this.gateway(),
+      /** gateway onde a assinatura atual nasceu — decide portal do Stripe x cobrança do Asaas */
+      subscriptionGateway: sub?.gateway ?? null,
       cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
       graceUntil: sub?.graceUntil ?? null,
       planId: sub?.planId ?? null,

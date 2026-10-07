@@ -18,6 +18,8 @@ model Tenant {
   isActive  Boolean  @default(true)
   /// id do Customer no Stripe (criado no primeiro checkout)
   stripeCustomerId String? @unique
+  /// cliente no Asaas (cus_…) — criado no primeiro checkout quando o gateway é o Asaas
+  asaasCustomerId  String? @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -284,6 +286,8 @@ model TenantSettings {
   defaultFlowInactivityHours Int @default(24)
   /// segundos entre escolher uma resposta rápida e ela sair (contagem com "Cancelar"); 0 = na hora
   quickReplyDelaySec Int @default(3)
+  /// motivos de perda sugeridos no encerramento "Não comprou" (o atendente ainda pode digitar outro)
+  lossReasons String[] @default(["Preço", "Prazo", "Não respondeu", "Comprou com concorrente", "Fora da área", "Só pesquisando"])
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -364,6 +368,14 @@ model WhatsAppNumber {
   warmupStartedAt DateTime?
   /// Limites da fila de envio (`Partial<SendLimits>` do shared); o que faltar = padrão do provider
   sendLimits     Json?
+  /// última vez que o WhatsApp derrubou a conexão (401 device_removed) — docs/04-providers-whatsapp.md
+  waRemovedAt    DateTime?
+  /// quedas seguidas (zera quando a anterior foi há mais de 24h)
+  waRemovedCount Int          @default(0)
+  /// reconectar antes disto pede confirmação: reconectar em cima da queda é o que agrava a restrição
+  reconnectBlockedUntil DateTime?
+  /// QR lido (sessão nova): base do aquecimento por hora das primeiras 72h (whatsapp/number-warmup.ts)
+  sessionStartedAt DateTime?
   isActive       Boolean      @default(true)
   /// Excluído pelo cliente. O registro fica (e com ele conversas, mensagens e agenda): recadastrar
   /// o MESMO telefone na MESMA conta revive este número com o histórico. `externalId` vira
@@ -423,9 +435,12 @@ model Contact {
   appointments  Appointment[]
   sales         Sale[]
 
-  /// pediu para não receber disparo. Vale para campanhas; atendimento 1-a-1 continua normal,
-  /// porque o contato pode voltar a escrever e precisa ser respondido.
+  /// pediu para não receber ("sair", "parar"…): bloqueia campanha, fluxo, boas-vindas, lembrete e
+  /// qualquer envio automático. O atendente humano continua respondendo — o contato pode voltar
+  /// a escrever e precisa ser atendido (docs/envio.md#descadastro).
   optOutAt  DateTime?
+  /// o provider disse que este telefone não tem WhatsApp (checagem antes do 1º envio)
+  waInvalidAt DateTime?
 
   campaignTargets CampaignTarget[]
   attributes      ContactAttribute[]
@@ -1186,6 +1201,13 @@ enum SubscriptionStatus {
   canceled
 }
 
+/// Gateway de cobrança. O ativo para novos checkouts sai do env (docs/05); assinaturas antigas
+/// continuam no gateway em que nasceram.
+enum BillingGateway {
+  stripe
+  asaas
+}
+
 model Subscription {
   id                 String             @id @default(uuid())
   tenantId           String             @unique
@@ -1193,8 +1215,10 @@ model Subscription {
   status             SubscriptionStatus @default(trialing)
   currentPeriodStart DateTime
   currentPeriodEnd   DateTime
-  /// id da Subscription no Stripe (sub_…)
+  /// id da assinatura no gateway (`sub_…` no Stripe, `sub_…` no Asaas) — qual deles diz `gateway`
   externalId         String?   @unique
+  /// gateway dono do `externalId`; null = sem assinatura online (atribuída pelo dono)
+  gateway            BillingGateway?
   /// Preço contratado POR ESTE cliente. Pode ser mais antigo que o do plano: no Stripe o
   /// preço de quem já assina não muda sozinho, e exibir o preço do catálogo mostraria um
   /// valor que não é o que ele paga.

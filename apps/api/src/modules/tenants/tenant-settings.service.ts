@@ -18,6 +18,7 @@ export interface SettingsUpdate {
   welcomeMode?: WelcomeMode;
   welcomeEnabled?: boolean;
   quickReplyDelaySec?: number;
+  lossReasons?: string[];
 }
 
 @Injectable()

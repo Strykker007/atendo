@@ -34,7 +34,7 @@ src/
 │       ├── numeros/        cards de números, modais de criar/trocar/QR
 │       ├── tags/           CRUD com paleta de cores
 │       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha
-│       ├── plano/          medidores de uso, excedente, explicação do limite
+│       ├── plano/          medidores de uso, excedente, explicação do limite; checkout Asaas em modal (PIX com QR + copia e cola e polling de 4 s, ou cartão) — `components/billing/AsaasCheckoutModal`
 │       ├── configuracoes/  aparência, horários de atendimento (quadros/faixas/simular), boas-vindas, fluxos padrão, segurança
 │       ├── admin/          Financeiro do dono (KPIs, série, assinaturas, faturas, margem)
 │       ├── clientes/       Clientes do dono: criar, plano/status, ativar, Entrar como
@@ -141,6 +141,8 @@ Duas decisões que não são estéticas:
 No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (por linha: valor de largura fixa à esquerda, descrição flexível, lixeira — o modal alarga para `max-w-2xl` nesse modo, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado). **Nada é obrigatório**: item só com valor vale, e "Comprou" sem valor grava só o desfecho (não vira venda). **Observação (opcional)** fica por último, abaixo do seletor de fluxo a disparar.
 
 Campos em R$ usam `components/ui/MoneyInput` (máscara de caixa: dígitos entram pela direita, exibe "1.500,00", trabalha com `number`). Está no encerramento (itens e valor livre) e no formulário de plano (mensalidade/anuidade, custo, excedentes, teto de IA; R$ por mensagem e por interação de IA com 3 casas).
+
+**Motivo de perda** (`LossReasonField`, nos dois modais): chips com os motivos de Configurações → **Motivos de perda** (`lossReasons`) + campo de texto livre. O relatório agrupa pelo texto, por isso os cadastrados ficam à vista. Em Relatórios › Vendas, o card **Motivos de perda** mostra a contagem por motivo no período.
 
 O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseModal`, o porquê está no cabeçalho do arquivo. A resposta traz `ignored`, e o toast diz o número: alguém da equipe pode ter encerrado no meio do caminho.
 

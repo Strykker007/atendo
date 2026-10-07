@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, messagePreview } from '@atendo/shared';
+import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, messagePreview } from '@atendo/shared';
 import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -21,11 +21,14 @@ import { BOT_PAUSE_CLEAR } from './bot-pause';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
+import { COLD_UNOFFICIAL_MESSAGE, isWarm } from './cold-send';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
  * sistema, que dá suporte entrando como o cliente e não tem perfil neste tenant.
  */
+/** Consulta "este telefone tem WhatsApp?" no provider do número (null = não sabe). */
+type PhoneCheck = (numberId: string, phone: string) => Promise<boolean | null>;
 type Viewer = { id: string; role: string; permissions?: readonly Permission[]; numberIds?: readonly string[]; departmentIds?: readonly string[] };
 
 /** O que a lista e o cabeçalho do chat mostram do departamento (etiqueta com cor). */
@@ -332,6 +335,45 @@ export class ConversationsService {
   }
 
   /**
+   * Checagem antes do 1º envio a um contato neste número (docs/envio.md#número-sem-whatsapp):
+   * mandar para telefone inexistente é sinal de lista comprada. `false` marca o contato e recusa;
+   * `null` (provider não sabe) deixa seguir. Quem chama passa a consulta (o provider fica no
+   * módulo do WhatsApp, que depende deste).
+   */
+  private async assertHasWhatsApp(contactId: string, numberId: string, phone: string, check?: PhoneCheck) {
+    if (!check) return;
+    const anterior = await this.prisma.conversation.findFirst({ where: { contactId, numberId, lastInboundAt: { not: null } }, select: { id: true } });
+    if (anterior) return; // já escreveu por este número: existe
+    if ((await check(numberId, phone)) === false) {
+      await this.prisma.contact.update({ where: { id: contactId }, data: { waInvalidAt: new Date() } });
+      throw new BadRequestException({ code: 'contact_no_whatsapp', message: `O número ${phone} não tem WhatsApp.` });
+    }
+  }
+
+  /** Última mensagem do contato NESTE número, somando as conversas dele aqui — base do envio frio. */
+  private async lastInboundOnNumber(c: { contactId: string; numberId: string; lastInboundAt: Date | null }) {
+    if (isWarm(c.lastInboundAt)) return c.lastInboundAt;
+    const r = await this.prisma.conversation.aggregate({ where: { contactId: c.contactId, numberId: c.numberId }, _max: { lastInboundAt: true } });
+    return r._max.lastInboundAt;
+  }
+
+  /**
+   * Regra do envio frio (cold-send.ts): o contato não escreveu neste número nas últimas 24h.
+   * Não oficial → 409 `cold_send_unofficial`. Oficial → a Meta já exige template (checado
+   * antes); para o atendente entra também o recurso do plano. Envio do sistema não confere o
+   * recurso: campanha e agenda têm os próprios.
+   */
+  private async assertColdAllowed(c: { tenantId: string; contactId: string; numberId: string; lastInboundAt: Date | null; number: { provider: string } }, author?: Viewer) {
+    if (isWarm(await this.lastInboundOnNumber(c))) return;
+    if (c.number.provider !== 'meta') throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
+    if (!author || author.role === 'super_admin') return;
+    const plan = await this.usage.limits(c.tenantId);
+    if (!plan?.limits.features?.includes('proactive_messaging')) {
+      throw new ForbiddenException({ code: 'feature_proactive', message: `"${PLAN_FEATURE_LABEL.proactive_messaging}" não está incluído no seu plano: falar com quem não escreveu nas últimas 24h depende dele. Faça upgrade em Plano e uso.` });
+    }
+  }
+
+  /**
    * Envio pelo sistema (fluxos de automação): sem autor humano, não assume a conversa,
    * respeita quota e janela de 24h, passa pela mesma fila.
    */
@@ -343,6 +385,8 @@ export class ConversationsService {
     template?: NonNullable<OutboundMessage['template']>;
     /** envia em conversa encerrada sem reabrir (lembrete): ela continua encerrada até o contato responder */
     allowClosed?: boolean;
+    /** dispensa a regra do envio frio — só a Agenda (lembretes e aviso ao profissional), ver cold-send.ts */
+    allowCold?: boolean;
   }) {
     const key = opts?.idempotencyKey;
     if (key) {
@@ -350,12 +394,16 @@ export class ConversationsService {
       const dup = await this.byIdempotencyKey(conversationId, key);
       if (dup) return dup;
     }
-    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true } });
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true, contact: { select: { optOutAt: true, waInvalidAt: true } } } });
     if (!conv || (conv.status === 'closed' && !opts?.allowClosed)) throw new BadRequestException('Conversa indisponível');
+    // descadastro vale para TODO envio automático (docs/envio.md#descadastro); o atendente segue respondendo
+    if (conv.contact.optOutAt) throw new BadRequestException({ code: 'contact_opted_out', message: 'O contato pediu para não receber mensagens automáticas.' });
+    if (conv.contact.waInvalidAt) throw new BadRequestException({ code: 'contact_no_whatsapp', message: 'Este telefone não tem WhatsApp.' });
     if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
     const template = opts?.template;
     if (template && conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
     if (conv.number.provider === 'meta' && !template && !inMetaWindow(conv.lastInboundAt)) throw new BadRequestException('Fora da janela de 24h da Meta');
+    if (!opts?.allowCold) await this.assertColdAllowed(conv);
     const quota = await this.usage.canSend(conv.tenantId, template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
     // no histórico do painel a mensagem interativa aparece como texto + opções numeradas
@@ -389,7 +437,7 @@ export class ConversationsService {
    * `outsideWindow`: número Meta e contato fora da janela de 24h → pede o template a quem chamou
    * (recebe o número, porque o template é aprovado por conta). Sem ele, o envio é recusado.
    */
-  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; outsideWindow?: (numberId: string) => Promise<Omit<OutboundMessage, 'to'> | null> }) {
+  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; allowCold?: boolean; checkPhone?: PhoneCheck; outsideWindow?: (numberId: string) => Promise<Omit<OutboundMessage, 'to'> | null> }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
     let conv = await this.prisma.conversation.findFirst({ where: { tenantId, contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } });
     if (!conv) {
@@ -397,7 +445,8 @@ export class ConversationsService {
       conv = (opts?.allowClosed && (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId: number.id }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } })))
         || (await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() }, include: { number: { select: { provider: true } } } }));
     }
-    const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed };
+    await this.assertHasWhatsApp(contact.id, conv.numberId, contact.phone, opts?.checkPhone);
+    const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed, allowCold: opts?.allowCold };
     if (conv.number.provider === 'meta' && !inMetaWindow(conv.lastInboundAt) && opts?.outsideWindow) {
       const tpl = await opts.outsideWindow(conv.numberId);
       if (!tpl?.template) throw new BadRequestException('Fora da janela de 24h da Meta e sem template configurado');
@@ -407,15 +456,16 @@ export class ConversationsService {
   }
 
   /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */
-  async sendToPhone(tenantId: string, phone: string, text: string, opts?: { closeAfter?: boolean; contactName?: string; preferredNumberId?: string | null; idempotencyKey?: string }) {
+  async sendToPhone(tenantId: string, phone: string, text: string, opts?: { closeAfter?: boolean; contactName?: string; preferredNumberId?: string | null; idempotencyKey?: string; allowCold?: boolean; checkPhone?: PhoneCheck }) {
     const clean = phone.replace(/\D/g, '');
     const contact = await this.prisma.contact.upsert({ where: { tenantId_phone: { tenantId, phone: clean } }, create: { tenantId, phone: clean, name: opts?.contactName, ...(opts?.contactName && { nameSource: 'manual' as const }) }, update: {} });
     const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
+    await this.assertHasWhatsApp(contact.id, number.id, clean, opts?.checkPhone);
     let conv = await this.prisma.conversation.findFirst({ where: { contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } });
     if (!conv) conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
     // conversa fechada: sendAsSystem exige aberta → abre, envia, fecha de novo (não polui a fila)
     if (conv.status === 'closed') await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'in_progress' } });
-    const m = await this.sendAsSystem(conv.id, text, undefined, undefined, { idempotencyKey: opts?.idempotencyKey });
+    const m = await this.sendAsSystem(conv.id, text, undefined, undefined, { idempotencyKey: opts?.idempotencyKey, allowCold: opts?.allowCold });
     if (opts?.closeAfter !== false) {
       const fechada = await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date(), ...BOT_PAUSE_CLEAR } });
       // o envio acima emitiu a conversa aberta; sem este aviso ela ficava em "Em atendimento" até o F5
@@ -483,6 +533,7 @@ export class ConversationsService {
       const inWindow = conv.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
       if (!inWindow) throw new BadRequestException('Janela de 24h da Meta expirou. Envie um template aprovado.');
     }
+    await this.assertColdAllowed(conv, author);
 
     const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
@@ -620,6 +671,7 @@ export class ConversationsService {
       template?: { definition: MessageTemplate; header?: TemplateValues; body?: TemplateValues };
       idempotencyKey?: string;
     },
+    checkPhone?: PhoneCheck,
   ) {
     if (!canUseNumber(author, input.numberId)) throw new ForbiddenException('Você não opera este número.');
     const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: input.numberId, tenantId, isActive: true } });
@@ -655,6 +707,10 @@ export class ConversationsService {
       const inWindow = conv?.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
       if (!inWindow) throw new BadRequestException('Na API oficial só dá para falar primeiro com template aprovado (o contato não escreveu nas últimas 24h).');
     }
+    // telefone sem WhatsApp: diz isso (e não "contato frio"), antes de criar/reabrir
+    await this.assertHasWhatsApp(contact.id, number.id, contact.phone, checkPhone);
+    // envio frio antes de criar/reabrir: recusado não pode deixar conversa reaberta à toa
+    await this.assertColdAllowed({ tenantId, contactId: contact.id, numberId: number.id, lastInboundAt: conv?.lastInboundAt ?? null, number }, author);
     const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
 
@@ -1034,7 +1090,8 @@ export class ConversationsService {
   }
 
   /** Atualiza a ficha do contato. Campo vazio limpa — o atendente apaga o que não vale mais. */
-  async updateContact(tenantId: string, contactId: string, data: { name?: string; email?: string; address?: string; note1?: string; note2?: string }) {
+  async updateContact(tenantId: string, contactId: string, input: { name?: string; email?: string; address?: string; note1?: string; note2?: string; resubscribe?: true }) {
+    const { resubscribe, ...data } = input;
     const limpo = Object.fromEntries(
       Object.entries(data).map(([k, v]) => [k, typeof v === 'string' && !v.trim() ? null : v?.trim()]),
     );
@@ -1046,6 +1103,8 @@ export class ConversationsService {
       if (atual && atual.name === limpo.name) delete limpo.name;
       else (limpo as Record<string, unknown>).nameSource = limpo.name ? 'manual' : 'whatsapp';
     }
+    // descadastro só sai por pedido explícito (o contato pediu ao atendente para voltar a receber)
+    if (resubscribe) limpo.optOutAt = null;
     const contact = await this.prisma.contact.update({ where: { id: contactId, tenantId }, data: limpo }).catch((err) => {
       if (String((err as { code?: string })?.code) === 'P2025') throw new NotFoundException('Contato não encontrado');
       throw err;

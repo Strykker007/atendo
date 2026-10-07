@@ -33,7 +33,11 @@ export const useSwitchProvider = () => {
 export const useConnectNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api<NumberItem & { qrCode?: string }>(`/numbers/${id}/connect`, { method: 'POST' }),
+    // `force`: reconectar durante a pausa após queda forçada pelo WhatsApp (409 reconnect_paused)
+    mutationFn: (v: string | { id: string; force?: boolean }) => {
+      const { id, force } = typeof v === 'string' ? { id: v, force: undefined } : v;
+      return api<NumberItem & { qrCode?: string }>(`/numbers/${id}/connect`, { method: 'POST', body: JSON.stringify({ force }) });
+    },
     onSuccess: invalidateNumbers(qc),
   });
 };

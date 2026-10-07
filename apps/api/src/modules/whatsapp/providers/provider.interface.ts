@@ -111,7 +111,13 @@ export interface WhatsAppProvider {
    * Evolution implementa. Devolve `null` quando o contato não tem foto ou a esconde.
    */
   fetchProfilePicture?(ctx: NumberContext, phone: string): Promise<MediaPayload | null>;
-  markRead(ctx: NumberContext, externalMessageId: string): Promise<void>;
+  /** `phone`: telefone do contato, para o provider que precisa do chat além do id */
+  markRead(ctx: NumberContext, externalMessageId: string, phone?: string): Promise<void>;
+  /**
+   * O telefone tem conta no WhatsApp? `null` = não deu para saber (não bloqueia). Opcional: a
+   * Meta não oferece a consulta.
+   */
+  hasWhatsApp?(ctx: NumberContext, phone: string): Promise<boolean | null>;
   /** Reage a uma mensagem. Não é mensagem: não gera id, não entra no histórico. Lança se o provider recusar. */
   react(ctx: NumberContext, reaction: OutboundReaction): Promise<void>;
   /**

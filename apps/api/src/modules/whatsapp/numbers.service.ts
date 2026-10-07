@@ -37,6 +37,12 @@ export class NumbersService {
   }
 
   /** Reação do atendente a uma mensagem. Lança se o provider recusar — quem chama não grava nada. */
+  /** O telefone tem WhatsApp? `null` = o provider não sabe dizer (Meta) ou falhou — não bloqueia. */
+  async hasWhatsApp(numberId: string, phone: string): Promise<boolean | null> {
+    const ctx = await this.context(numberId);
+    return (await this.registry.get(ctx.provider).hasWhatsApp?.(ctx, phone)) ?? null;
+  }
+
   async react(numberId: string, reaction: OutboundReaction) {
     const ctx = await this.context(numberId);
     await this.registry.get(ctx.provider).react(ctx, reaction);
@@ -133,6 +139,8 @@ export class NumbersService {
    */
   async remove(numberId: string) {
     const ctx = await this.context(numberId);
+    // mesmo motivo do `disconnect`: o 401 do logout não pode virar "removido pelo WhatsApp"
+    await this.prisma.whatsAppNumber.update({ where: { id: numberId }, data: { status: 'disconnected' } });
     const provider = this.registry.get(ctx.provider);
     await (provider.destroy ? provider.destroy(ctx) : provider.disconnect(ctx)).catch(() => undefined);
     await this.prisma.whatsAppNumber.update({
@@ -145,8 +153,17 @@ export class NumbersService {
   /** Desconecta a sessão (logout na Evolution) sem excluir: o número e as conversas ficam; "Reconectar" gera QR novo. */
   async disconnect(numberId: string) {
     const ctx = await this.context(numberId);
-    await this.registry.get(ctx.provider).disconnect(ctx);
+    // marca ANTES do logout: o webhook do logout chega com 401 e, com o número ainda
+    // "conectado", seria lido como queda forçada pelo WhatsApp (ver number-removal.ts)
+    const { status } = await this.prisma.whatsAppNumber.findUniqueOrThrow({ where: { id: numberId }, select: { status: true } });
     await this.prisma.whatsAppNumber.update({ where: { id: numberId }, data: { status: 'disconnected' } });
+    try {
+      await this.registry.get(ctx.provider).disconnect(ctx);
+    } catch (err) {
+      // logout não saiu: a sessão segue de pé, o status também
+      await this.prisma.whatsAppNumber.update({ where: { id: numberId }, data: { status } });
+      throw err;
+    }
   }
 
   async findByExternal(provider: ProviderKind, externalId: string) {

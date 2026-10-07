@@ -87,7 +87,7 @@ class ReportsController {
       this.prisma.conversationEvent.count({ where: { tenantId: t, type: 'closed', outcome: 'lost', createdAt: { gte: from, lt: to } } }),
     ]);
     const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
-    const sales = await this.sales(t, from, to);
+    const [sales, lostReasons] = await Promise.all([this.sales(t, from, to), this.lostReasons(t, from, to)]);
     return {
       period: { from, to },
       kpis: {
@@ -105,6 +105,7 @@ class ReportsController {
         winRate: won._count._all + lost > 0 ? won._count._all / (won._count._all + lost) : null,
       },
       sales,
+      lostReasons,
       series: { byDay, byAgent, byOrigin, byCampaign: byCampaign.filter((c) => c.label !== '(orgânico)'), byTag: byTag.filter((c) => c.label !== '(sem tag)').sort((a, b) => b.value - a.value).slice(0, 8), byStatus },
     };
   }
@@ -227,6 +228,24 @@ class ReportsController {
       byDay: byDay.map((r) => ({ label: r.label, value: Number(r.value) })),
       byAgent: byAgent.map((r) => ({ label: r.label, value: Number(r.value), count: Number(r.count), avgTicket: Number(r.value) / Number(r.count) })),
     };
+  }
+
+  /**
+   * "Não comprou" por motivo, no período do encerramento. Sai do histórico (`conversation_events`)
+   * pelo mesmo motivo das vendas: reabrir limpa o motivo da conversa. O encerramento em massa
+   * grava "<motivo> · encerrado em massa" — o sufixo sai para cair na mesma barra.
+   */
+  private async lostReasons(tenantId: string, from: Date, to: Date) {
+    const rows = await this.prisma.$queryRaw<{ label: string; value: number }[]>(Prisma.sql`
+      select coalesce(nullif(trim(regexp_replace(coalesce(e.reason, ''), '(\\s*·\\s*)?encerrado em massa$', '')), ''), '(sem motivo)') as label,
+             count(*)::int as value
+      from conversation_events e
+      where e."tenantId" = ${tenantId} and e.type = 'closed' and e.outcome = 'lost'
+        and e."createdAt" >= ${from} and e."createdAt" < ${to}
+      group by 1
+      order by 2 desc, 1
+    `);
+    return rows.map((r) => ({ label: r.label, value: Number(r.value) }));
   }
 
   /** Conversas agrupadas. Parametrizado via Prisma.sql — sem concatenação de string do usuário. */

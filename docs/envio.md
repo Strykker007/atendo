@@ -134,6 +134,81 @@ para o campo para revisar). Trocar de conversa cancela. Erro no envio devolve o 
 Fora do modo de responder (nota interna, número desconectado, conversa encerrada…) a resposta
 só entra no campo. Configuração: *Configurações → Respostas rápidas* (`TenantSettings.quickReplyDelaySec`).
 
+### Envio frio
+
+Mensagem para quem **não escreveu naquele número nas últimas 24 h** (a mesma janela da Meta,
+somando todas as conversas do contato no número). É a causa nº 1 de banimento no não oficial,
+então (`conversations/cold-send.ts`, `ConversationsService.assertColdAllowed`):
+
+| Número | Contato escreveu < 24 h | Contato frio |
+|---|---|---|
+| **Evolution** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
+| **Meta** | sai normal | só template (regra da Meta) **e** o recurso `proactive_messaging` no plano (403 `feature_proactive`) — só para envio do atendente |
+
+Vale para responder no chat, encaminhar, agendadas, "Iniciar conversa" (checado **antes** de
+criar/reabrir a conversa) e envio do sistema (fluxo que retoma dias depois, por exemplo).
+**Exceção:** lembretes e aviso ao profissional da Agenda (`allowCold`) — o cliente pediu o
+contato ao agendar, o texto é esperado e o volume é baixo. **Transmissão em massa** só inicia em
+número oficial (é envio frio por definição). A tela *Nova conversa* explica a regra antes do erro.
+
+### Envio automático
+
+Mensagem sem autor humano (fluxo, boas-vindas, faixa, lembrete, campanha) no **não oficial**:
+
+- espera um sorteio de **4–10 s** (`AUTO_GAP_MS`) desde o último envio do número, de qualquer
+  origem (`wa:last`, atualizado na reserva e na entrega). Com o número ocioso, a 1ª também espera;
+- teto de **automáticas por hora** no número (`autoPerHour`, padrão 80 Evolution / 5000 Meta,
+  janela deslizante `wa:auto`). Estourou → o envio espera a vaga (log `warn`), nunca é descartado.
+
+A resposta do atendente **não** espera nada disso — só o perfil do número. Texto de robô colado e
+em volume é o padrão que o WhatsApp pune; conversa humana não.
+
+### Aquecimento
+
+Sessão nova (QR lido: `pending_qr → connected` grava `WhatsAppNumber.sessionStartedAt`) no
+**não oficial** passa 72 h aquecendo (`whatsapp/number-warmup.ts`). Reinício de servidor ou
+oscilação de rede não reabre as 72 h.
+
+| Desde o QR | Contatos **novos** por hora | Piso entre envios do número |
+|---|---|---|
+| 0–24 h | 20 | 8 s (vale também para o atendente) |
+| 24–48 h | 50 | — |
+| 48–72 h | 80 | — |
+| > 72 h | livre | — |
+
+"Novo" = contato que ainda não recebeu nada do número **na última hora** (`wa:wconv`, janela
+deslizante). Quem já está conversando passa direto; o contato que não coube espera a vaga
+(o job volta para a fila — se passar de *Expirar na fila após*, falha como qualquer envio
+parado). Motivo: a Drogaria Total caiu duas vezes no 1º dia com tráfego saudável, mas ~28
+contatos/h logo após o QR. O card do número em **Números** mostra a fase e até quando vai.
+
+### Humanização
+
+No não oficial, antes de entregar:
+- **marca como lida** a última mensagem recebida da conversa (uma vez por mensagem, `wa:read`;
+  a Evolution v2 pede `remoteJid` + `fromMe` + `id`, resolvido como na edição, por causa do LID);
+- mensagem **automática** aparece **"digitando…"** (no áudio, "gravando…") por 40 ms/caractere,
+  entre 2 e 7 s (`OutboundMessage.typingMs` → `delay` da Evolution). A do atendente não ganha
+  atraso: ele já digitou de verdade.
+
+### Descadastro
+
+"sair", "parar", "descadastrar", "remover", "stop" (mensagem só com a palavra) marcam
+`Contact.optOutAt`. **"cancelar"** só conta quando não é resposta: com fluxo esperando resposta
+ou agendamento futuro do contato, segue para o fluxo/agenda (sem isto, quem cancelava um horário
+parava de receber lembretes). Descadastrado não entra em **nenhum** envio automático — campanha,
+fluxo, boas-vindas, faixa, lembrete (`sendAsSystem` recusa com `contact_opted_out`) — e a
+automação nem roda para as mensagens dele. O atendente continua respondendo. A ficha do contato
+mostra o aviso e o botão "O contato pediu para voltar a receber" (`PATCH contacts/:id {resubscribe: true}`).
+
+### Número sem WhatsApp
+
+Antes do 1º envio a um contato num número (contato que nunca escreveu por ele), a Evolution
+confere se o telefone tem WhatsApp (`POST /chat/whatsappNumbers`): "Iniciar conversa", lembrete
+e aviso ao profissional da Agenda. Não tem → `Contact.waInvalidAt`, envio recusado
+(`contact_no_whatsapp`) e aviso na ficha. Falha na consulta ou provider que não sabe (Meta) não
+bloqueia. A marca some quando o contato escreve.
+
 ## Valores padrão
 
 Centralizados em `packages/shared/src/send-limits.ts`.
@@ -144,6 +219,8 @@ Centralizados em `packages/shared/src/send-limits.ts`.
 | Intervalo mínimo na conversa | 1 s | 1 s | 0–60 s | idem |
 | Rajada por conversa | 6 msgs / 30 s | 10 msgs / 30 s | 1–100 / 5–600 s | idem |
 | Expirar na fila após | 30 min | 30 min | 1–1440 min | idem |
+| Automáticas por hora (número) | 80 | 5000 | 1–5000 | idem |
+| Espaçamento do automático | 4–10 s | — | — | `AUTO_GAP_MS` (shared) |
 | Retry | 5 tentativas, base 3 s, ×2, jitter ±50%, teto 120 s | | — | `SEND_RETRY` (código) |
 | Contagem da resposta rápida | 3 s | | 0–30 s | Configurações (por cliente) |
 | Recheck fora da vez / desconectado | 5 s / 60 s | | — | `send-queue.ts` (código) |

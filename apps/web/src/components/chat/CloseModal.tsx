@@ -7,7 +7,35 @@ import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { useFlows, useHasFeature, useSetStatus, useTenantSettings, type ConversationOutcome } from '@/lib/hooks';
 
+/** padrão enquanto as configurações carregam — a lista do cliente vem de Configurações → Motivos de perda */
 export const MOTIVOS = ['Preço', 'Prazo', 'Não respondeu', 'Comprou com concorrente', 'Fora da área', 'Só pesquisando'];
+
+/**
+ * Motivo de perda: um clique nos cadastrados ou texto livre. Texto livre continua valendo
+ * (caso raro não deveria exigir passar em Configurações), mas o relatório agrupa pelo texto —
+ * por isso os cadastrados ficam à vista, para a equipe escrever sempre igual.
+ */
+export function LossReasonField({ value, onChange, hint, placeholder }: { value: string; onChange: (v: string) => void; hint: string; placeholder: string }) {
+  const settings = useTenantSettings();
+  const motivos = settings.data?.lossReasons ?? MOTIVOS;
+  return (
+    // div, não o <label> do Field: clicar no texto do label acionaria o primeiro chip
+    <div className="text-sm space-y-1">
+      <span className="block text-ink font-medium">Motivo</span>
+      {motivos.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {motivos.map((m) => (
+            <button key={m} type="button" onClick={() => onChange(value === m ? '' : m)} className={`rounded-full border px-2.5 py-1 text-[12px] ${value === m ? 'border-danger text-danger bg-danger-soft' : 'border-line text-muted hover:bg-field'}`}>
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
+      <input className={inputCls} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} maxLength={200} aria-label="Motivo" />
+      <span className="block text-xs text-faint">{hint}</span>
+    </div>
+  );
+}
 
 /** As três saídas possíveis. Exportado porque o encerramento em massa usa as mesmas. */
 export const OUTCOMES: { id: ConversationOutcome; label: string; icon: React.ReactNode; cls: string }[] = [
@@ -151,10 +179,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
         )}
 
         {outcome === 'lost' && (
-          <Field label="Motivo" hint="É o que mostra onde você está perdendo negócio.">
-            <input className={inputCls} list="motivos-perda" placeholder="Preço, prazo, não respondeu…" value={motivo} onChange={(e) => setMotivo(e.target.value)} autoFocus />
-            <datalist id="motivos-perda">{MOTIVOS.map((m) => <option key={m} value={m} />)}</datalist>
-          </Field>
+          <LossReasonField value={motivo} onChange={setMotivo} hint="É o que mostra onde você está perdendo negócio." placeholder="Ou escreva outro motivo" />
         )}
 
         {flowsFeature.has && (

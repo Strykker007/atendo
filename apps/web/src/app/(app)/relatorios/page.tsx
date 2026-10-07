@@ -273,6 +273,11 @@ function Vendas({ overview, range }: { overview: NonNullable<ReturnType<typeof u
             </table>
           )}
         </Card>
+        <Card title="Motivos de perda" hint='Encerramentos "Não comprou" por motivo — onde o negócio escapa'>
+          {overview.lostReasons.length ? (
+            <ReportChart def={{ metric: 'lost', groupBy: 'tag', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.lostReasons} height={220} />
+          ) : <p className="py-10 text-center text-[13px] text-muted">Nenhum &quot;Não comprou&quot; no período.</p>}
+        </Card>
       </div>
     </section>
   );

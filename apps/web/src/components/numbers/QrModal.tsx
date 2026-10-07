@@ -42,7 +42,8 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
 
   async function refresh() {
     if (!numberId) return;
-    const r = await connect.mutateAsync(numberId);
+    // o modal só abre depois de passar pela pausa (ou de confirmar o risco): QR novo não pergunta de novo
+    const r = await connect.mutateAsync({ id: numberId, force: true });
     if (r.qrCode) qc.setQueryData(['number-qr', numberId], r.qrCode);
   }
 

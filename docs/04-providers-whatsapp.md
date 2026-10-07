@@ -212,6 +212,37 @@ Além destas, a fila aplica limites por minuto do número, intervalo mínimo e r
 conversa, ordem por conversa e pausa quando o número cai — ver [Envio](envio.md).
 
 
+### Quando o WhatsApp derruba o número (`401 device_removed`)
+
+O WhatsApp pode encerrar sozinho a sessão do "aparelho conectado" (a Evolution): o
+`connection.update` chega com `state: close` e `statusReason: 401` (`stream:error` `conflict
+device_removed`). Ou alguém removeu o aparelho no celular, ou o WhatsApp desconfiou do uso
+(conexão não oficial, denúncias/bloqueios, conteúdo contra a política comercial). Caso real que
+motivou isto: Drogaria Total, duas quedas em 17 h no primeiro dia de uso, reconexão 2 min
+depois da segunda — e a conta terminou restrita, com o padrão de envio saudável (≈ tantas
+enviadas quanto recebidas, sem campanha).
+
+- **Detecção** (`InboundService.numberConnectionChanged`): 401 com o número **conectado** grava
+  `waRemovedAt`, `waRemovedCount` e `reconnectBlockedUntil` (`whatsapp/number-removal.ts`,
+  migração `20261029000600_number_wa_removed`). O "Desconectar"/"Excluir" do painel marca
+  `disconnected` **antes** do logout, então o 401 do próprio logout não conta como queda.
+- **Pausa de reconexão**: 2 h na primeira queda; 24 h se cair de novo dentro de 24 h.
+  `POST /numbers/:id/connect` responde **409 `reconnect_paused`** durante a pausa; com
+  `{ force: true }` reconecta (fica no log quem confirmou). Não é bloqueio duro: o negócio
+  pode precisar do número, mas decide sabendo do risco.
+- **Tela**: faixa vermelha no topo de todas as telas (`WaRemovedBanner`) enquanto o número
+  derrubado segue fora (até 24 h), card no número em **Números** e, ao tentar reconectar na
+  pausa, modal com o porquê e o que fazer (`components/numbers/WaRemovedNotice.tsx`). O texto
+  é para o cliente leigo: deixa claro que não foi falha do sistema, lista os motivos e manda
+  olhar o aviso de restrição no celular antes de reconectar.
+
+### Versão da Evolution
+
+A imagem é **fixa** (`evoapicloud/evolution-api:v2.3.7` nos dois `infra/docker-compose*.yml`,
+amd64 e arm64). Com `:latest` cada deploy podia trocar o cliente não oficial sem teste — e é ele
+que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número de teste, depois
+trocar a tag e fazer o deploy.
+
 ## Mensagem enviada pelo celular do cliente
 
 O WhatsApp entrega as mensagens que **saem** do número no mesmo evento das recebidas

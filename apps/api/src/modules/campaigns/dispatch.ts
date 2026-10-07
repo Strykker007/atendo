@@ -103,18 +103,33 @@ export function eligible(t: TargetInput): Eligibility {
 
 /** Palavras que, recebidas do contato, marcam descadastro. */
 export const OPT_OUT_WORDS = ['sair', 'parar', 'cancelar', 'descadastrar', 'remover', 'stop'];
+/**
+ * Palavras que também são RESPOSTA comum: "cancelar" é como se cancela um horário no robô de
+ * agendamento. Só viram descadastro quando não há nada esperando resposta (o inbound confere).
+ */
+export const AMBIGUOUS_OPT_OUT_WORDS = ['cancelar'];
 
 /**
  * A mensagem recebida é um pedido de descadastro? Deliberadamente **estrita** — roda em toda
  * mensagem que entra, e marcar por engano faria o cliente parar de receber sem ter pedido.
  */
 export function isOptOut(text?: string | null): boolean {
-  if (!text) return false;
-  const clean = text
+  const clean = normalizeOptOut(text);
+  return !!clean && OPT_OUT_WORDS.includes(clean);
+}
+
+/** "cancelar" e afins: descadastro só se não for resposta a fluxo/agendamento. */
+export function isAmbiguousOptOut(text?: string | null): boolean {
+  const clean = normalizeOptOut(text);
+  return !!clean && AMBIGUOUS_OPT_OUT_WORDS.includes(clean);
+}
+
+function normalizeOptOut(text?: string | null): string | null {
+  if (!text) return null;
+  return text
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/[.!?]+$/, '');
-  return OPT_OUT_WORDS.includes(clean);
 }

@@ -117,6 +117,8 @@ class ContactDto {
   @IsOptional() @IsString() @MaxLength(300) address?: string;
   @IsOptional() @IsString() @MaxLength(1000) note1?: string;
   @IsOptional() @IsString() @MaxLength(1000) note2?: string;
+  /** volta a receber mensagens automáticas (o contato pediu ao atendente) — só `true` */
+  @IsOptional() @IsIn([true]) resubscribe?: true;
 }
 class TagsDto {
   @IsArray() @IsUUID('4', { each: true }) tagIds: string[];
@@ -169,7 +171,7 @@ export class ConversationsController {
       await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: dto.numberId, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
       template = { definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language), header: dto.template.header, body: dto.template.body };
     }
-    return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey });
+    return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey }, (numberId, phone) => this.numbers.hasWhatsApp(numberId, phone));
   }
 
   /** Nota interna (cadeado) — só equipe vê. */

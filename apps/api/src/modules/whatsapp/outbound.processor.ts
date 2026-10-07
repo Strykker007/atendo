@@ -17,6 +17,8 @@ import { SendPacer } from './send-pacer';
 import { countsTowardDailyLimit } from './sending-policy';
 import { isTransientSendError, retryDelayMs } from './providers/provider-error';
 import { expiredReason, headOf, planSend, promoteNext } from './send-queue';
+import { typingMs, warmupPhase } from './number-warmup';
+import type { NumberContext } from './providers/provider.interface';
 
 /**
  * Único lugar que entrega mensagens ao provider (docs/envio.md). Recebe mensagens já
@@ -65,7 +67,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     const numberId = message.numberId ?? message.conversation.numberId;
     const num = await this.prisma.whatsAppNumber.findUniqueOrThrow({
       where: { id: numberId },
-      select: { id: true, tenantId: true, provider: true, status: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true, sendLimits: true },
+      select: { id: true, tenantId: true, provider: true, status: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true, sendLimits: true, sessionStartedAt: true },
     });
     if (num.tenantId !== tenantId) {
       const reason = 'Número de outro cliente — envio bloqueado';
@@ -118,9 +120,22 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       await this.next(message.conversationId);
       throw new UnrecoverableError(day.reason!);
     }
+    // aquecimento da sessão (QR lido há < 72h): poucos contatos NOVOS por hora; quem já recebeu
+    // nesta hora segue direto. Não reserva vaga: volta para a fila e tenta de novo na hora certa.
+    const aquecendo = warmupPhase(num);
+    if (aquecendo && !job.data.pacedUntil) {
+      const wait = await this.pacer.claimWarmupConversation(num.id, message.conversation.contactId, aquecendo.newConvPerHour);
+      if (wait > 0) {
+        this.log.warn(`Número ${num.id} aquecendo (fase ${aquecendo.phase}, ${aquecendo.newConvPerHour} contatos novos/h): envio ${message.id} adiado ${Math.round(wait / 1000)}s`);
+        return this.later(job, token, Date.now() + wait, { messageId: job.data.messageId, minGapMs: job.data.minGapMs });
+      }
+    }
     // reserva a vaga uma única vez; nas reentradas o job já tem a dele
     if (!job.data.pacedUntil) {
-      const { waitMs, burst } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits, minGapMs: job.data.minGapMs });
+      // sem autor = automático (fluxo, boas-vindas, lembrete, campanha): espaçamento de 4–10 s e teto por hora
+      const automated = !message.authorId;
+      const { waitMs, burst, autoCapped } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits, minGapMs: job.data.minGapMs, automated, provider: num.provider, warmupGapMs: aquecendo?.minGapMs });
+      if (autoCapped) this.log.warn(`Número ${num.id}: teto de ${limits.autoPerHour} automáticas/h atingido, envio ${message.id} adiado ${Math.round(waitMs / 1000)}s`);
       if (burst) this.log.warn(`Rajada na conversa ${message.conversationId}: envio ${message.id} adiado ${Math.round(waitMs / 1000)}s (limite ${limits.convBurstMax}/${limits.convBurstWindowSec}s)`);
       if (waitMs > 0) {
         const until = Date.now() + waitMs;
@@ -143,7 +158,12 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       media: message.mediaUrl ? { url: message.mediaUrl, mimeType: message.mediaMime ?? undefined, fileName: message.mediaName ?? undefined, caption: message.text ?? undefined, voice: raw.voice } : undefined,
       quotedExternalId: message.quotedId ?? undefined,
       template: raw.template,
+      // humanização: o automático aparece "digitando…" antes de chegar (o atendente já digitou de verdade)
+      typingMs: !message.authorId && num.provider !== 'meta' ? typingMs((message.text ?? '').length) : undefined,
     };
+
+    // humanização: quem responde leu antes — marca como lida a última recebida da conversa
+    if (num.provider !== 'meta') await this.markLastInboundRead(provider, ctx, message.conversationId, message.conversation.contact.phone);
 
     let result;
     try {
@@ -197,6 +217,16 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       this.log.error(`Uso não registrado para ${message.id} (mensagem foi entregue): ${err instanceof Error ? err.message : err}`);
     }
     await this.next(message.conversationId);
+  }
+
+  /** Marca a última recebida da conversa como lida no provider (uma vez por mensagem). Nunca derruba o envio. */
+  private async markLastInboundRead(provider: { markRead(ctx: NumberContext, id: string, phone?: string): Promise<void> }, ctx: NumberContext, conversationId: string, phone: string) {
+    try {
+      const last = await this.prisma.message.findFirst({ where: { conversationId, direction: 'in', externalId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { externalId: true } });
+      if (last?.externalId && (await this.pacer.shouldMarkRead(conversationId, last.externalId))) await provider.markRead(ctx, last.externalId, phone);
+    } catch (err) {
+      this.log.debug(`marcar como lida: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /** Devolve o job para a fila até `until` (não conta como tentativa). */

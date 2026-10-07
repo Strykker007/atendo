@@ -113,18 +113,20 @@ export class EvolutionProvider implements WhatsAppProvider {
     let r: any;
     // citação vai em todo tipo de envio (texto, mídia e voz): a Evolution acha a citada pelo id
     const quoted = m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined;
+    // `delay`: a Evolution mostra "digitando…" (no áudio, "gravando…") por esse tempo e só então entrega
+    const delay = m.typingMs && m.typingMs > 0 ? Math.round(m.typingMs) : undefined;
     if (m.type === MessageType.TEXT || m.interactive) {
       // Botões/listas não funcionam de forma confiável em contas não-oficiais: vira lista numerada
       const text = m.interactive?.options.length ? `${m.text ?? ''}\n\n${m.interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : (m.text ?? '');
       r = await this.api(`/message/sendText/${name}`, {
         method: 'POST',
-        body: JSON.stringify({ number: m.to, text, quoted }),
+        body: JSON.stringify({ number: m.to, text, quoted, delay }),
       }, this.shard(ctx));
     } else if (m.type === MessageType.AUDIO && media && m.media?.voice !== false) {
       // áudio como "mensagem de voz" (PTT), igual ao gravado no app
       r = await this.api(`/message/sendWhatsAppAudio/${name}`, {
         method: 'POST',
-        body: JSON.stringify({ number: m.to, audio: media.data.toString('base64'), quoted }),
+        body: JSON.stringify({ number: m.to, audio: media.data.toString('base64'), quoted, delay }),
       }, this.shard(ctx));
     } else if (media || m.media) {
       // a Evolution aceita `media` como URL ou base64 — mandamos base64 para não expor o storage
@@ -139,6 +141,7 @@ export class EvolutionProvider implements WhatsAppProvider {
           fileName: media?.fileName ?? m.media?.fileName,
           caption: m.type === MessageType.AUDIO ? undefined : (m.media?.caption ?? m.text),
           quoted,
+          delay,
         }),
       }, this.shard(ctx));
     } else {
@@ -199,11 +202,31 @@ export class EvolutionProvider implements WhatsAppProvider {
     return { data, mimeType: res.headers.get('content-type') ?? 'image/jpeg', fileName: `${phone}.jpg` };
   }
 
-  async markRead(ctx: NumberContext, externalMessageId: string) {
+  /**
+   * v2 pede a key inteira (`remoteJid` + `fromMe` + `id`). O jid vem de como a Evolution gravou a
+   * mensagem (pode ser `@lid`); `phone` é o plano B quando não acha o registro.
+   */
+  async markRead(ctx: NumberContext, externalMessageId: string, phone?: string) {
+    const remoteJid = await this.storedRemoteJid(ctx, externalMessageId, phone ?? '');
+    if (!remoteJid.includes('@') || remoteJid.startsWith('@')) return;
     await this.api(`/chat/markMessageAsRead/${this.instance(ctx)}`, {
       method: 'POST',
-      body: JSON.stringify({ readMessages: [{ id: externalMessageId }] }),
+      body: JSON.stringify({ readMessages: [{ remoteJid, fromMe: false, id: externalMessageId }] }),
     }, this.shard(ctx)).catch(() => undefined);
+  }
+
+  /** `POST /chat/whatsappNumbers`: `[{ exists, jid, number }]`. Erro/resposta estranha = não sabe. */
+  async hasWhatsApp(ctx: NumberContext, phone: string): Promise<boolean | null> {
+    try {
+      const r = await this.api<any>(`/chat/whatsappNumbers/${this.instance(ctx)}`, {
+        method: 'POST',
+        body: JSON.stringify({ numbers: [phone.replace(/\D/g, '')] }),
+      }, this.shard(ctx));
+      const row = Array.isArray(r) ? r[0] : null;
+      return typeof row?.exists === 'boolean' ? row.exists : null;
+    } catch {
+      return null;
+    }
   }
 
   /** A Evolution localiza a reagida pela key inteira: chat + id + se fomos nós que mandamos. */
