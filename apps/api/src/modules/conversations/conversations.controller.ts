@@ -1,4 +1,4 @@
-import { BadRequestException, UnprocessableEntityException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
@@ -377,6 +377,20 @@ export class ConversationsController {
   @Patch('contacts/:contactId/tags')
   contactTags(@CurrentUser() u: AuthUser, @Param('contactId') contactId: string, @Body() dto: TagsDto) {
     return this.conversations.setContactTags(u.tenantId, contactId, dto.tagIds);
+  }
+
+  /**
+   * Atendente digitando: mostra "digitando…" ao contato (só número não oficial, conversa aberta e
+   * com número conectado). Responde na hora; o painel chama no máximo a cada 5 s.
+   */
+  @Post(':id/typing')
+  @HttpCode(204)
+  async typing(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id, tenantId: u.tenantId, status: { not: 'closed' }, number: { provider: 'evolution', status: 'connected' } },
+      select: { numberId: true, contact: { select: { phone: true } } },
+    });
+    if (conv) this.numbers.sendTyping(conv.numberId, conv.contact.phone);
   }
 
   @Post(':id/read')

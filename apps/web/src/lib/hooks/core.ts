@@ -11,7 +11,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; endsAt: string } | null }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -229,6 +229,17 @@ export function useTyping(conversationId: string | null): Typing {
  * a pessoa abria a conversa, lia tudo, e o número continuava lá para sempre. Um contador que
  * nunca zera é pior que contador nenhum, porque ensina a ignorá-lo.
  */
+/**
+ * Atendente digitando → "digitando…" no WhatsApp do contato (só número não oficial; a API decide).
+ * No máximo um aviso a cada 5 s por conversa; falha é ignorada — é enfeite, não pode travar o chat.
+ */
+const typingSentAt = new Map<string, number>();
+export function notifyTyping(conversationId: string | null | undefined) {
+  if (!conversationId || Date.now() - (typingSentAt.get(conversationId) ?? 0) < 5_000) return;
+  typingSentAt.set(conversationId, Date.now());
+  api(`/conversations/${conversationId}/typing`, { method: 'POST' }).catch(() => undefined);
+}
+
 export const useMarkRead = () => {
   const qc = useQueryClient();
   return useMutation({

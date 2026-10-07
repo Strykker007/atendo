@@ -136,6 +136,8 @@ export interface WhatsAppProvider {
    * isto o "digitando…" nunca chega. Opcional: a Meta não tem esse recurso.
    */
   subscribePresence?(ctx: NumberContext, phone: string): Promise<void>;
+  /** "digitando…" para o contato por `ms` (atendente escrevendo no painel). Só no não oficial. */
+  sendTyping?(ctx: NumberContext, phone: string, ms: number): Promise<void>;
   /**
    * Nome que o provider guardou para o contato (agenda ou pushName, sem distinção). Usado só
    * para dar nome a contato que nasceu sem nenhum. Opcional: a Meta não tem agenda.

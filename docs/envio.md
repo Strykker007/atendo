@@ -166,15 +166,21 @@ em volume é o padrão que o WhatsApp pune; conversa humana não.
 ### Aquecimento
 
 Sessão nova (QR lido: `pending_qr → connected` grava `WhatsAppNumber.sessionStartedAt`) no
-**não oficial** passa 72 h aquecendo (`whatsapp/number-warmup.ts`). Reinício de servidor ou
-oscilação de rede não reabre as 72 h.
+**não oficial** passa **7 dias** aquecendo (`whatsapp/number-warmup.ts`). Reinício de servidor ou
+oscilação de rede não reabre o aquecimento.
 
-| Desde o QR | Contatos **novos** por hora | Piso entre envios do número |
-|---|---|---|
-| 0–24 h | 20 | 8 s (vale também para o atendente) |
-| 24–48 h | 50 | — |
-| 48–72 h | 80 | — |
-| > 72 h | livre | — |
+| Desde o QR | Contatos **novos** por hora | Automáticas por hora | Piso entre envios do número |
+|---|---|---|---|
+| 0–24 h | 20 | 30 | 8 s (vale também para o atendente) |
+| 24–48 h | 50 | 50 | — |
+| 48–72 h | 80 | 60 | — |
+| 72 h–7 dias | 120 | 70 | — |
+| > 7 dias | livre | padrão da conexão (80) | — |
+
+**Automáticas por hora**: vale o menor entre a fase e o configurado na conexão. A mensagem do robô
+acima do teto espera a vaga (e falha se passar de *Expirar na fila após*, como qualquer envio
+parado); a resposta do atendente não entra nessa conta. Motivo: a Drog. Nova Farma foi restrita em
+7 h com ~50 automáticas/h — saudação de fluxo em quase toda conversa — num número recém-pareado.
 
 "Novo" = contato que ainda não recebeu nada do número **na última hora** (`wa:wconv`, janela
 deslizante). Quem já está conversando passa direto; o contato que não coube espera a vaga
@@ -189,7 +195,18 @@ No não oficial, antes de entregar:
   a Evolution v2 pede `remoteJid` + `fromMe` + `id`, resolvido como na edição, por causa do LID);
 - mensagem **automática** aparece **"digitando…"** (no áudio, "gravando…") por 40 ms/caractere,
   entre 2 e 7 s (`OutboundMessage.typingMs` → `delay` da Evolution). A do atendente não ganha
-  atraso: ele já digitou de verdade.
+  atraso: ele já digitou de verdade;
+- enquanto o **atendente digita** no painel, o contato vê **"digitando…"** (`POST
+  /conversations/:id/typing` → `sendPresence composing` por 6 s; no máximo um a cada 5 s por
+  conversa, no painel e na API). Só número não oficial conectado e conversa aberta. Sem isto a
+  resposta humana aparecia do nada, sem o "digitando" que todo WhatsApp Web real mostra antes.
+
+### Variações de texto
+
+Em toda mensagem **automática** (`sendAsSystem`: fluxo, boas-vindas, faixa, lembrete) o trecho
+`{Oi|Olá|Bom dia}` vira uma das opções, sorteada a cada envio (`conversations/spin.ts`). `{{nome}}`
+(variável) e `{texto}` sem barra ficam intactos. O editor de fluxos mostra a dica ao lado do
+"Inserir variável". Resposta rápida e mensagem do atendente saem como estão.
 
 ### Descadastro
 

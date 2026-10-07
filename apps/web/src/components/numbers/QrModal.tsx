@@ -21,8 +21,11 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
   const connected = number?.status === 'connected';
   // depois de conectar, QR antigo (do connect inicial) não vale mais: só um QR novo vindo do socket
   const [seenConnected, setSeenConnected] = useState(false);
+  // checklist anti-banimento antes de mostrar o QR (docs/04 › Proteção contra bloqueio)
+  const [checks, setChecks] = useState([false, false, false]);
+  const checklistOk = checks.every(Boolean);
   useEffect(() => { if (connected) setSeenConnected(true); }, [connected]);
-  useEffect(() => { setSeenConnected(false); }, [numberId]);
+  useEffect(() => { setSeenConnected(false); setChecks([false, false, false]); }, [numberId]);
   const qr = live.data ?? (seenConnected ? undefined : initialQr);
   const syncing = !connected && !qr && seenConnected;
 
@@ -60,6 +63,8 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
             <div className="w-8 h-8 mx-auto rounded-full border-2 border-accent border-t-transparent animate-spin mb-3" />
             Sincronizando com o celular… se o WhatsApp pedir um QR novo, ele aparece aqui.
           </div>
+        ) : !checklistOk ? (
+          <ChecklistAntesDoQr checks={checks} onChange={setChecks} />
         ) : qr ? (
           <>
             <img src={qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`} alt="QR code" className="mx-auto w-64 h-64 rounded-lg border border-line bg-white p-1" />
@@ -77,12 +82,41 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
           </div>
         )}
         <div className="flex justify-center gap-2">
-          {!connected && (
+          {!connected && checklistOk && (
             <Button variant="ghost" icon={<RefreshCw size={14} />} onClick={() => refresh().catch(toast.err)} loading={connect.isPending} loadingText="Gerando…">Gerar novo QR</Button>
           )}
           <Button variant="ghost" onClick={onClose}>{connected ? 'Fechar' : 'Depois'}</Button>
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * O que o sistema não consegue medir e mais derruba número não oficial: chip sem histórico,
+ * pareado logo após registrar, e aparelhos antigos sobrando. Não bloqueia — o QR aparece quando
+ * a pessoa confirma os três —, mas obriga a ler antes de conectar.
+ */
+const ITENS = [
+  { t: 'O número já é usado no celular há pelo menos 14 dias', d: 'Conversas, áudios e grupos de verdade. Chip novo conectado direto no sistema é o padrão que o WhatsApp mais pune.' },
+  { t: 'O chip foi registrado no WhatsApp há mais de 24 horas', d: 'Registrar e conectar logo em seguida é sinal de automação.' },
+  { t: 'Removi os aparelhos antigos em "Dispositivos conectados"', d: 'Faça isso antes de ler o QR, não depois — remover depois derruba a conexão nova.' },
+];
+
+function ChecklistAntesDoQr({ checks, onChange }: { checks: boolean[]; onChange: (c: boolean[]) => void }) {
+  return (
+    <div className="text-left space-y-3">
+      <p className="text-sm text-muted">Antes de conectar, confirme. Número que cai na primeira semana quase sempre falha em um destes pontos:</p>
+      {ITENS.map((it, i) => (
+        <label key={i} className="flex gap-3 rounded-lg border border-line p-3 cursor-pointer hover:bg-field">
+          <input type="checkbox" className="mt-0.5" checked={checks[i]} onChange={(e) => onChange(checks.map((c, j) => (j === i ? e.target.checked : c)))} />
+          <span className="text-sm">
+            <span className="font-medium text-ink">{it.t}</span>
+            <span className="block text-xs text-faint mt-0.5">{it.d}</span>
+          </span>
+        </label>
+      ))}
+      <p className="text-xs text-faint">Depois de conectar, o número passa 7 dias aquecendo: poucos contatos novos e menos mensagens automáticas por hora no começo.</p>
+    </div>
   );
 }

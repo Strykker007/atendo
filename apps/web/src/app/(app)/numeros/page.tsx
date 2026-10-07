@@ -163,9 +163,9 @@ export default function NumerosPage() {
                 {/* aquecimento (docs/envio.md#aquecimento): o cliente precisa saber por que a resposta demora */}
                 {n.warmup && n.status === 'connected' && (
                   <div className="rounded-xl bg-warn-soft text-warn-ink px-3 py-2 text-[12.5px]">
-                    <b>Aquecendo o número — fase {n.warmup.phase} de 3.</b> Conectado há pouco: até <b>{n.warmup.newConvPerHour} contatos novos por hora</b>
+                    <b>Aquecendo o número — fase {n.warmup.phase} de 4.</b> Conectado há pouco: até <b>{n.warmup.newConvPerHour} contatos novos por hora</b>, <b>{n.warmup.autoPerHour} mensagens automáticas por hora</b>
                     {n.warmup.minGapMs > 0 && <> e {Math.round(n.warmup.minGapMs / 1000)} s entre envios</>}, até {new Date(n.warmup.endsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}.
-                    Quem já está conversando segue sendo respondido; os demais esperam a vez. Número recém-conectado com volume alto é o principal motivo de queda.
+                    Quem já está conversando segue sendo respondido; os demais (e o robô acima do teto) esperam a vez. Número recém-conectado com volume alto é o principal motivo de queda.
                   </div>
                 )}
 

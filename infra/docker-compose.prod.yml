@@ -111,6 +111,12 @@ services:
       WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
       WEBHOOK_EVENTS_PRESENCE_UPDATE: "true"
       LOG_LEVEL: ERROR,WARN
+      # Como o aparelho aparece em "Dispositivos conectados" e no handshake com o WhatsApp
+      # (Baileys: [cliente, navegador, versão]). O padrão da Evolution é "Evolution API" — marca
+      # explícita de cliente não oficial. Windows + Chrome = um WhatsApp Web comum.
+      # Só vale para sessões NOVAS (QR lido depois do deploy). Ver docs/04-providers-whatsapp.md
+      CONFIG_SESSION_PHONE_CLIENT: Windows
+      CONFIG_SESSION_PHONE_NAME: Chrome
     volumes: ["./volumes/evolution:/evolution/instances"]
 
   # Backup diário: bancos + sessões da Evolution, com envio para storage remoto.

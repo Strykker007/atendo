@@ -36,6 +36,23 @@ export class NumbersService {
     }
   }
 
+  /** último "digitando…" enviado por número+contato: o painel avisa a cada tecla, o WhatsApp não */
+  private readonly typingAt = new Map<string, number>();
+
+  /**
+   * Atendente digitando no painel → "digitando…" no WhatsApp do contato, no máximo um a cada
+   * 5 s (cada um dura 6 s). Nunca lança e não espera o provider: é humanização, não envio.
+   */
+  sendTyping(numberId: string, phone: string) {
+    const key = `${numberId}:${phone}`;
+    if (Date.now() - (this.typingAt.get(key) ?? 0) < 5_000) return;
+    this.typingAt.set(key, Date.now());
+    if (this.typingAt.size > 5_000) this.typingAt.clear(); // não cresce para sempre
+    void this.context(numberId)
+      .then((ctx) => this.registry.get(ctx.provider).sendTyping?.(ctx, phone, 6_000))
+      .catch(() => undefined);
+  }
+
   /** Reação do atendente a uma mensagem. Lança se o provider recusar — quem chama não grava nada. */
   /** O telefone tem WhatsApp? `null` = o provider não sabe dizer (Meta) ou falhou — não bloqueia. */
   async hasWhatsApp(numberId: string, phone: string): Promise<boolean | null> {

@@ -134,8 +134,10 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     if (!job.data.pacedUntil) {
       // sem autor = automático (fluxo, boas-vindas, lembrete, campanha): espaçamento de 4–10 s e teto por hora
       const automated = !message.authorId;
-      const { waitMs, burst, autoCapped } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits, minGapMs: job.data.minGapMs, automated, provider: num.provider, warmupGapMs: aquecendo?.minGapMs });
-      if (autoCapped) this.log.warn(`Número ${num.id}: teto de ${limits.autoPerHour} automáticas/h atingido, envio ${message.id} adiado ${Math.round(waitMs / 1000)}s`);
+      // aquecendo: o robô tem teto por hora menor (o menor entre a fase e o configurado na conexão)
+      const ritmo = aquecendo ? { ...limits, autoPerHour: Math.min(limits.autoPerHour, aquecendo.autoPerHour) } : limits;
+      const { waitMs, burst, autoCapped } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits: ritmo, minGapMs: job.data.minGapMs, automated, provider: num.provider, warmupGapMs: aquecendo?.minGapMs });
+      if (autoCapped) this.log.warn(`Número ${num.id}: teto de ${ritmo.autoPerHour} automáticas/h atingido, envio ${message.id} adiado ${Math.round(waitMs / 1000)}s`);
       if (burst) this.log.warn(`Rajada na conversa ${message.conversationId}: envio ${message.id} adiado ${Math.round(waitMs / 1000)}s (limite ${limits.convBurstMax}/${limits.convBurstWindowSec}s)`);
       if (waitMs > 0) {
         const until = Date.now() + waitMs;

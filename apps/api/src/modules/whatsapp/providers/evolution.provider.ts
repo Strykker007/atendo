@@ -296,6 +296,18 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   /**
+   * "digitando…" enquanto o atendente escreve no painel. Sem isto a resposta humana chegava do
+   * nada, sem o "digitando" que todo WhatsApp Web real mostra antes — padrão de cliente
+   * automatizado. A Evolution segura a requisição pelo `delay` e volta para `paused` sozinha.
+   */
+  async sendTyping(ctx: NumberContext, phone: string, ms: number) {
+    await this.api(`/chat/sendPresence/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ number: phone, presence: 'composing', delay: ms }),
+    }, this.shard(ctx));
+  }
+
+  /**
    * Agenda inteira da instância (`POST /chat/findContacts` sem filtro): telefone + nome.
    * Mesmo filtro do webhook `contacts.upsert` — só `@s.whatsapp.net` (sem grupo, status, @lid)
    * e só nome que não seja o próprio número.

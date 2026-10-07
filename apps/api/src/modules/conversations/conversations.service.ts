@@ -21,6 +21,7 @@ import { BOT_PAUSE_CLEAR } from './bot-pause';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
+import { spin } from './spin';
 import { COLD_UNOFFICIAL_MESSAGE, isWarm } from './cold-send';
 
 /**
@@ -406,6 +407,8 @@ export class ConversationsService {
     if (!opts?.allowCold) await this.assertColdAllowed(conv);
     const quota = await this.usage.canSend(conv.tenantId, template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
+    // variações `{Oi|Olá}` sorteadas por envio: robô mandando o texto idêntico a todos é padrão de spam
+    if (text) text = spin(text);
     // no histórico do painel a mensagem interativa aparece como texto + opções numeradas
     const shown = interactive?.options.length ? `${text ?? ''}\n\n${interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : text;
     const created = await this.createOnce(conversationId, key, () => this.prisma.message.create({
