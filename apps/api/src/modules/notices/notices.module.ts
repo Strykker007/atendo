@@ -7,7 +7,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { ConversationsModule } from '../conversations/conversations.module';
-import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { ConversationsGateway, isOwner } from '../conversations/conversations.gateway';
+import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
 class CreateNoticeDto {
   @IsString() @IsNotEmpty() @MaxLength(120) title: string;
@@ -33,10 +34,11 @@ class NoticesController {
     private readonly gateway: ConversationsGateway,
   ) {}
 
-  /** Avisos ativos — qualquer usuário logado (cliente ou dono). */
+  /** Avisos ativos — para os clientes. O dono escreveu os avisos: o sino dele fica vazio. */
   @Get('notices/active')
   @NoTenantOk()
-  active() {
+  active(@CurrentUser() u: AuthUser) {
+    if (isOwner(u)) return [];
     return this.prisma.systemNotice.findMany({ where: { active: true }, orderBy: { createdAt: 'desc' }, take: ACTIVE_LIMIT });
   }
 

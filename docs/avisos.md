@@ -10,12 +10,12 @@ Avisos globais do dono do sistema (super_admin) para **todos os clientes**: manu
 
 | Método | Rota | Quem | |
 |---|---|---|---|
-| GET | `/notices/active` | todo usuário logado | ativos, mais novos primeiro (até 30) |
+| GET | `/notices/active` | usuário de cliente | ativos, mais novos primeiro (até 30); para o dono (super_admin ou impersonando) volta `[]` |
 | GET | `/super-admin/notices` | super_admin | todos |
 | POST | `/super-admin/notices` | super_admin | cria e emite `system_notice` |
 | PATCH | `/super-admin/notices/:id` | super_admin | `{active}` |
 
-Tempo real: todo socket autenticado entra na sala `global` além da `tenant:<id>`; `ConversationsGateway.emitSystemNotice` emite nela (funciona também a partir do worker, via Redis).
+Tempo real: todo socket de **cliente** entra na sala `global` além da `tenant:<id>`; o dono (`super_admin`, ou com `impersonatorId`) não entra — ele escreve o aviso, não recebe de volta (`isOwner` no gateway); `ConversationsGateway.emitSystemNotice` emite nela (funciona também a partir do worker, via Redis).
 
 ## Front
 
