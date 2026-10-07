@@ -9,6 +9,7 @@ import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permi
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache } from './core';
 import type { MessageTemplate, TemplateValues } from '@atendo/shared';
+import { receiveSystemNotice, type SystemNotice } from './avisos';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -97,6 +98,8 @@ export function useRealtime() {
       // tag principal, posse, status e última mensagem mudam o quadro
       qc.invalidateQueries({ queryKey: ['kanban'] });
     });
+    // aviso global do dono do sistema: popup no topo + sino
+    socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     socket.on('scheduled_messages', (e: { conversationId: string }) => qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }));
     socket.on('appointment', () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['contact-card'] }); });

@@ -1512,3 +1512,22 @@ model ScheduledMessage {
   @@index([tenantId, status])
   @@map("scheduled_messages")
 }
+
+enum SystemNoticeType {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// Aviso global do dono do sistema (manutenção, instabilidade, novidade) — vale para todos os clientes
+model SystemNotice {
+  id        String           @id @default(uuid())
+  title     String
+  message   String
+  type      SystemNoticeType @default(INFO)
+  active    Boolean          @default(true)
+  createdAt DateTime         @default(now())
+
+  @@index([active, createdAt])
+  @@map("system_notices")
+}

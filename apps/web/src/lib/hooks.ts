@@ -8,6 +8,7 @@
  */
 export * from './hooks/core';
 export * from './hooks/numeros';
+export * from './hooks/avisos';
 export * from './hooks/tags';
 export * from './hooks/equipe';
 export * from './hooks/respostas';

@@ -20,6 +20,7 @@
 | [Apagar mensagem e limpar histórico](apagar-mensagens.md) | Dev / Cliente | Quem pode apagar, apagar para todos (Evolution) × só no painel (Meta), registro de auditoria e conteúdo original |
 | [Variáveis `{{...}}`](variaveis.md) | Dev / Cliente | Variáveis comuns a fluxos, respostas rápidas, campanhas e chat: empresa, saudação, primeiro nome, campos da ficha |
 | [Agendamento de mensagens](agendamento-de-mensagens.md) | Dev / Cliente | Atendente agenda uma mensagem para sair depois; job de 1 minuto, regras de envio, cancelamento |
+| [Avisos do sistema](avisos.md) | Dev / Dono | Avisos globais do super_admin: popup ao vivo, sino no menu e tela de publicação |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |

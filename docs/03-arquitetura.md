@@ -113,7 +113,7 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 
 ## Tempo real
 
-`ConversationsGateway` (Socket.IO). O cliente conecta com `auth.token` = access token; o gateway valida o JWT e coloca o socket na sala `tenant:<id>`. Eventos:
+`ConversationsGateway` (Socket.IO). O cliente conecta com `auth.token` = access token; o gateway valida o JWT e coloca o socket na sala `tenant:<id>` e na sala `global` (todo usuário logado, inclusive o dono). Eventos:
 
 | Evento | Payload | Quando |
 |---|---|---|
@@ -122,6 +122,7 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 | `number` | `{id, status, qrCode?}` | QR novo, conectou, caiu |
 | `appointment` | `{id}` | agendamento criado/alterado |
 | `kanban` | `{}` | colunas do Kanban mudaram (ordem, tag virou/deixou de ser etapa, criada, excluída) |
+| `system_notice` | `SystemNotice` | aviso global publicado pelo dono (sala `global`) — ver [avisos.md](avisos.md) |
 | `typing` | `TypingEvent` `{conversationId, state}` | contato digitando (`composing`), gravando (`recording`) ou parou (`paused`). Efêmero, só Evolution |
 
 Mover card no Kanban é trocar a tag principal e sai como `conversation`, como qualquer outra mudança no atendimento.

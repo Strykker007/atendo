@@ -4,14 +4,16 @@ import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { Emitter } from '@socket.io/redis-emitter';
 import Redis from 'ioredis';
-import type { Conversation, WhatsAppNumber } from '@prisma/client';
+import type { Conversation, SystemNotice, WhatsAppNumber } from '@prisma/client';
 // type-only: o service importa este gateway em tempo de execução, então um import de valor aqui fecharia o ciclo
 import type { PresentedMessage } from './conversations.service';
 import type { TypingEvent } from '@atendo/shared';
 import { env } from '../../config/env';
 
+const GLOBAL_ROOM = 'global';
+
 /**
- * Cada tenant tem uma "sala". Eventos: message, messages_cleared, conversation, number, appointment, kanban, typing.
+ * Cada tenant tem uma "sala"; todos também entram na sala global (evento system_notice). Eventos: message, messages_cleared, conversation, number, appointment, kanban, typing.
  *
  * O worker (`worker.ts`) não tem servidor Socket.IO — sem isto, todo evento emitido por um job
  * que caiu lá (mensagem recebida, status do envio) sumia em silêncio. Nesse caso publicamos
@@ -31,6 +33,8 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
       const token = client.handshake.auth?.token as string;
       const payload = await this.jwt.verifyAsync<{ tenantId: string }>(token, { secret: env.JWT_ACCESS_SECRET });
       await client.join(`tenant:${payload.tenantId}`);
+      // sala de todo mundo logado (inclusive o dono, sem tenant): avisos globais do sistema
+      await client.join(GLOBAL_ROOM);
     } catch {
       client.disconnect(true);
     }
@@ -41,7 +45,10 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
   }
 
   private room(tenantId: string) {
-    const room = `tenant:${tenantId}`;
+    return this.to(`tenant:${tenantId}`);
+  }
+
+  private to(room: string) {
     if (this.server) return this.server.to(room);
     if (!this.emitter) {
       this.redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
@@ -50,6 +57,10 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
     return this.emitter.to(room);
   }
 
+  /** Aviso do dono do sistema para todos os clientes conectados (popup no topo + sino). */
+  emitSystemNotice(notice: SystemNotice) {
+    this.to(GLOBAL_ROOM).emit('system_notice', notice);
+  }
   emitMessage(tenantId: string, message: PresentedMessage) {
     this.room(tenantId).emit('message', message);
   }

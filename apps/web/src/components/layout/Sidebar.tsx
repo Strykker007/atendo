@@ -2,12 +2,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3 } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
 import { CompanySwitcher } from './CompanySwitcher';
+import { NoticeBell } from './SystemNotices';
 import { useTheme, applyTheme } from '@/lib/theme';
 import { useConversationCounts, useMe, usePermissions } from '@/lib/hooks';
 import type { Permission } from '@atendo/shared';
@@ -16,6 +17,7 @@ const OWNER_ITEMS = [
   { href: '/admin', label: 'Financeiro', icon: ShieldCheck },
   { href: '/clientes', label: 'Clientes', icon: Building2 },
   { href: '/planos', label: 'Planos', icon: Package },
+  { href: '/avisos', label: 'Avisos', icon: Megaphone },
 ];
 /**
  * `need`: a permissão sem a qual o item some do menu.
@@ -81,7 +83,9 @@ export function Sidebar() {
         ) : (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/marca/vogo-escuro.png" alt="VOGO.CHAT" className="h-6 w-auto flex-1 object-contain object-left" />
+            <img src="/marca/vogo-escuro.png" alt="VOGO.CHAT" className="h-6 w-auto flex-1 min-w-0 object-contain object-left" />
+            {/* avisos globais do sistema: não há barra superior, então o sino mora no topo do menu */}
+            <NoticeBell />
             <button onClick={toggleSidebar} className="p-1 -mr-1 rounded-md text-side-ink/60 hover:text-white hover:bg-white/5" title="Recolher menu">
               <PanelLeftClose size={17} />
             </button>
@@ -89,9 +93,12 @@ export function Sidebar() {
         )}
       </div>
       {collapsed && (
-        <button onClick={toggleSidebar} className="mx-auto mb-1 p-1 rounded-md text-side-ink/60 hover:text-white hover:bg-white/5" title="Expandir menu">
-          <PanelLeftOpen size={17} />
-        </button>
+        <>
+          <button onClick={toggleSidebar} className="mx-auto mb-1 p-1 rounded-md text-side-ink/60 hover:text-white hover:bg-white/5" title="Expandir menu">
+            <PanelLeftOpen size={17} />
+          </button>
+          <NoticeBell className="mx-auto mb-1" />
+        </>
       )}
       {/* empresa/unidade ativa: some quando o cliente não usa empresas */}
       {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}

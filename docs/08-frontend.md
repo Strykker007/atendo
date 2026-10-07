@@ -138,7 +138,7 @@ Duas decisões que não são estéticas:
 - **Trocar de filtro limpa a seleção** (`useEffect` em status/número/origem/atendente). Encerrar em massa o que saiu da tela é fechar no escuro, e não há como desfazer trinta de uma vez.
 - **Só vale o que está visível** (`marcadosVisiveis`): o que foi marcado e sumiu do filtro não entra no pedido.
 
-No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (descrição flexível + valor de largura fixa por linha — o modal alarga para `max-w-2xl` nesse modo, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado).
+No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (por linha: valor de largura fixa à esquerda, descrição flexível, lixeira — o modal alarga para `max-w-2xl` nesse modo, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado). **Nada é obrigatório**: item só com valor vale, e "Comprou" sem valor grava só o desfecho (não vira venda). **Observação (opcional)** fica por último, abaixo do seletor de fluxo a disparar.
 
 Campos em R$ usam `components/ui/MoneyInput` (máscara de caixa: dígitos entram pela direita, exibe "1.500,00", trabalha com `number`). Está no encerramento (itens e valor livre) e no formulário de plano (mensalidade/anuidade, custo, excedentes, teto de IA; R$ por mensagem e por interação de IA com 3 casas).
 
