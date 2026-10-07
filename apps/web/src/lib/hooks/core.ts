@@ -65,6 +65,11 @@ export interface Upload { key: string; url: string; mimeType: string; fileName: 
 export type SendInput = ({ type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
   /** responder citando uma mensagem (o id dela no provider) */
   quotedExternalId?: string;
+  /**
+   * Caracteres que o atendente NÃO digitou (resposta rápida, colado, só mídia): a API mostra
+   * "digitando…" ao contato pelo tempo de escrevê-los antes de entregar. Ausente = tudo digitado.
+   */
+  simulateTypingChars?: number;
   /** uma por envio (não por tentativa): a API devolve a mesma mensagem se a requisição repetir */
   idempotencyKey?: string;
 };

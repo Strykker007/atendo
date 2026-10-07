@@ -505,7 +505,7 @@ export class ConversationsService {
    * o número, e não há fallback para outro: se o canal não pode enviar, a mensagem não sai.
    * `expectedNumberId` é o canal que a tela mostrava; se a conversa não está mais nele, 409 sem enviar.
    */
-  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string; idempotencyKey?: string }) {
+  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string; idempotencyKey?: string; simulateTypingChars?: number }) {
     const authorId = author.id;
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
@@ -580,7 +580,11 @@ export class ConversationsService {
         // encaminhado, então no celular do contato chega como mensagem comum
         forwarded: input.forwarded ?? false,
         authorId,
-        raw: input.template ? ({ template: input.template } as Prisma.InputJsonValue) : undefined,
+        // `simulateTypingChars`: envio do atendente que ninguém digitou (resposta rápida, encaminhada,
+        // agendada, só mídia) — o envio mostra "digitando…" por esse tamanho (docs/envio.md#humanização)
+        raw: input.template || input.simulateTypingChars !== undefined
+          ? ({ ...(input.template && { template: input.template }), ...(input.simulateTypingChars !== undefined && { simulateTypingChars: input.simulateTypingChars }) } as Prisma.InputJsonValue)
+          : undefined,
       },
       include: MESSAGE_INCLUDE,
     }));
@@ -759,7 +763,8 @@ export class ConversationsService {
     for (const id of pedidos) {
       if (!ok.has(id)) { failed.push({ conversationId: id, error: 'Conversa não encontrada' }); continue; }
       try {
-        sent.push(await this.send(tenantId, author, id, input));
+        // encaminhar não é digitar: "digitando…" simulado pelo tamanho do texto
+        sent.push(await this.send(tenantId, author, id, { ...input, simulateTypingChars: (input.text ?? '').length }));
       } catch (err) {
         failed.push({ conversationId: id, error: err instanceof Error ? err.message : String(err) });
       }

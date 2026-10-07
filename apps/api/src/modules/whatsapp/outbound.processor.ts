@@ -159,7 +159,10 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
 
     const ctx = await this.numbers.context(numberId);
     const provider = this.registry.get(ctx.provider);
-    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string; voice?: boolean };
+    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string; voice?: boolean; simulateTypingChars?: number };
+    // envio do atendente que ninguém digitou (resposta rápida, encaminhada, agendada, só mídia):
+    // "digitando…" pelo tempo de escrever o texto, sem a reação (ele já está na conversa)
+    const simulado = message.authorId && num.provider !== 'meta' && typeof raw.simulateTypingChars === 'number' ? humanTiming(raw.simulateTypingChars).typingMs : undefined;
 
     const outbound: OutboundMessage = {
       to: message.conversation.contact.phone,
@@ -172,7 +175,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       template: raw.template,
       // humanização: o automático aparece "digitando…" pelo tempo que uma pessoa levaria para
       // escrever o texto (o atendente já digitou de verdade); mídia sem texto usa o "gravando" curto
-      typingMs: humano ? (message.text ? humano.typingMs : typingMs(0)) : undefined,
+      typingMs: humano ? (message.text ? humano.typingMs : typingMs(0)) : simulado,
     };
 
     // humanização: quem responde leu antes — marca como lida a última recebida da conversa

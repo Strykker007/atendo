@@ -1,5 +1,5 @@
 import { BadRequestException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS } from './conversations.service';
@@ -50,6 +50,8 @@ class SendDto {
   @IsOptional() @IsUUID() expectedNumberId?: string;
   /** gerada pela tela por envio: repetir a requisição com a mesma chave devolve a mesma mensagem */
   @IsOptional() @IsString() @MaxLength(100) idempotencyKey?: string;
+  /** caracteres que o atendente não digitou (resposta rápida, colado, só mídia): "digitando…" simulado */
+  @IsOptional() @IsInt() @Min(0) @Max(4096) simulateTypingChars?: number;
 }
 class StartDto {
   @IsUUID() numberId: string;

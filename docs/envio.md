@@ -200,7 +200,18 @@ No não oficial, antes de entregar:
   - **"digitando…"** pelo tempo de escrever o texto: 3,5–6 caracteres/s sorteado por mensagem,
     entre 1,5 e 15 s (`OutboundMessage.typingMs` → `delay` da Evolution, que segura o worker —
     daí o teto). Ex.: 40 caracteres ≈ 7–11 s. Mídia sem texto: "gravando…" de 2 s.
-  A do atendente não ganha atraso: ele já digitou de verdade;
+  A do atendente digitada no painel não ganha atraso: ele já digitou de verdade;
+- envio do **atendente que ninguém digitou** ganha o mesmo **"digitando…" simulado** (sem a reação:
+  ele já está na conversa), pelo tamanho do que não foi digitado — `simulateTypingChars`, gravado em
+  `messages.raw`:
+  - **resposta rápida** (sai pela contagem) e **mídia pela prévia** (legenda): o painel manda o
+    tamanho do texto;
+  - **campo de texto**: o painel conta os caracteres digitados de verdade (`inputType` de inserção;
+    colar/arrastar não conta) e manda só a diferença — resposta rápida inserida no campo e texto
+    colado ganham "digitando", o digitado não. A assinatura `*Nome:*` não entra na conta;
+  - **só mídia** (sem legenda): 1,5 s;
+  - **encaminhar** e **agendada**: a API marca sozinha com o tamanho do texto;
+  - áudio gravado no painel não ganha: a gravação já levou o tempo real;
 - **atendente digitando** no painel → **"digitando…"** no WhatsApp do contato, com começo e fim
   (`useTypingPresence` → `POST /conversations/:id/typing {state}`):
   - `composing` ao começar, renovado a cada 2 s enquanto digita; `paused` com 3 s sem teclar, ao
