@@ -228,7 +228,7 @@ O resumo vem de `messagePreview` (shared): texto puro, ou o ícone do tipo na fr
 
 Com `quoted.messageId` a caixa é clicável: rola até a bolha citada (`id="msg-<id>"`) e a destaca por um instante. Se ela ainda não foi carregada (paginação), um aviso pede para rolar para cima.
 
-**Resposta a status (os "stories")** é o motivo de a segunda origem existir: o status não é mensagem da conversa e some em 24h. O conteúdo citado é guardado no momento em que a resposta chega, então meses depois a conversa ainda mostra *"Resposta ao status — 📷 Foto: Promoção 20%"* em cima do "quero esse". Só funciona no provider QR; a API oficial da Meta não entrega status.
+**Resposta a status (os "stories")** é o motivo de a segunda origem existir: o status não é mensagem da conversa e some em 24h. O conteúdo citado é guardado no momento em que a resposta chega, então meses depois a conversa ainda mostra o selo **"Respondido do seu Stories"** e *"📷 Foto: Promoção 20%"* em cima do "quero esse". Quando o status era foto/vídeo, a miniatura aparece ao lado (`quoted.mediaUrl`) e o bloco inteiro abre no `MediaViewerModal` — a mídia do status entra na lista de mídias da conversa logo antes da mensagem que responde. Enquanto o worker baixa (`quoted.mediaType` preenchido sem `mediaUrl`) e enquanto o navegador carrega a imagem, um spinner ocupa o lugar da miniatura. Só funciona no provider QR; a API oficial da Meta não entrega status.
 
 ## Barra do composer
 

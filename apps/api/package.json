@@ -12,6 +12,7 @@
     "test": "vitest run",
     "prisma": "prisma",
     "stripe:sync": "tsc -p tsconfig.build.json --outDir .scripts-build && node .scripts-build/scripts/stripe-sync.js",
+    "quoted:backfill": "tsc -p tsconfig.build.json --outDir .scripts-build && node .scripts-build/scripts/backfill-quoted.js",
     "test:watch": "vitest"
   },
   "prisma": {

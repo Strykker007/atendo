@@ -5,7 +5,7 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, FileCheck2 } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, FileCheck2, CircleDashed, Play, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
@@ -138,9 +138,11 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
   const [previa, setPrevia] = useState<File | null>(null);
   // imagens e vídeos desta conversa, na ordem em que aparecem: as setas do visualizador andam por eles
-  const midias: ViewerMedia[] = mensagens
-    .filter((m) => ['image', 'sticker', 'video'].includes(m.type) && m.mediaUrl && !m.deletedAt)
-    .map((m) => ({ url: m.mediaUrl!, nome: m.mediaName, tipo: m.type === 'video' ? 'video' : 'image' }));
+  // a foto/vídeo do status respondido entra antes da mensagem: é o que ela está respondendo
+  const midias: ViewerMedia[] = mensagens.filter((m) => !m.deletedAt).flatMap((m) => [
+    ...(m.quoted?.mediaUrl ? [{ url: m.quoted.mediaUrl, nome: 'Status respondido', tipo: m.quoted.mediaType ?? 'image' } as ViewerMedia] : []),
+    ...(['image', 'sticker', 'video'].includes(m.type) && m.mediaUrl ? [{ url: m.mediaUrl, nome: m.mediaName, tipo: m.type === 'video' ? 'video' : 'image' } as ViewerMedia] : []),
+  ]);
   const [vendoMidia, setVendoMidia] = useState<string | null>(null);
   const indiceMidia = midias.findIndex((i) => i.url === vendoMidia);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -904,7 +906,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
       {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onEditar={onEditar} podeReagir={canResend} />}
       <div className={cn('relative max-w-[72%] px-2.5 py-1.5 text-[13px]', m.reactions?.length && 'mb-3', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
         {m.forwarded && <ForwardedLabel score={m.forwardingScore} />}
-        <Citacao m={m} citada={citada} contato={contato} />
+        <Citacao m={m} citada={citada} contato={contato} onVerMidia={onVerMidia} />
         {estruturado ?? (
           <>
             <MediaBody m={m} onVerMidia={onVerMidia} />
@@ -1096,15 +1098,16 @@ function BotaoResponder({ m, onResponder }: { m: Message; onResponder: (m: Messa
  * Três origens, em ordem de preferência: a mensagem que temos no histórico, o texto que o
  * provider mandou junto (`quotedPreview`) e, no fim, um rótulo genérico. A segunda existe
  * por causa do **status**: o story some em 24h e não é mensagem da conversa, então sem o
- * texto guardado sobraria "quero esse" sem ninguém saber o quê.
+ * texto guardado sobraria "quero esse" sem ninguém saber o quê. Pelo mesmo motivo a foto/vídeo
+ * do status vem guardada (`quoted.mediaUrl`) e abre no visualizador.
  */
-function Citacao({ m, citada, contato }: { m: Message; citada?: Message; contato: string }) {
+function Citacao({ m, citada, contato, onVerMidia }: { m: Message; citada?: Message; contato: string; onVerMidia?: (url: string) => void }) {
   const q = m.quoted;
   if (!q && !m.quotedId && !m.quotedPreview) return null;
   const texto = q?.preview || (citada ? resumoDaMensagem(citada) : m.quotedPreview) || 'Mensagem';
   const fromStatus = q?.fromStatus ?? m.quotedFromStatus;
   const direcao = q?.direction ?? citada?.direction;
-  const autor = fromStatus ? 'Resposta ao status' : q?.authorName ?? (direcao === 'out' ? 'Você' : direcao === 'in' ? contato : 'Mensagem citada');
+  const autor = fromStatus ? contato : q?.authorName ?? (direcao === 'out' ? 'Você' : direcao === 'in' ? contato : 'Mensagem citada');
   const alvo = q?.messageId ?? citada?.id;
   const conteudo = (
     <>
@@ -1113,6 +1116,36 @@ function Citacao({ m, citada, contato }: { m: Message; citada?: Message; contato
     </>
   );
   const caixa = 'mb-1 block w-full text-left rounded-md border-l-[3px] border-accent bg-black/5 dark:bg-white/10 px-2 py-1';
+  if (fromStatus) {
+    const midia = q?.mediaUrl;
+    // tipo sem URL: o worker ainda está baixando o status
+    const baixando = !midia && !!q?.mediaType;
+    return (
+      <div className="mb-1">
+        <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10.5px] font-semibold text-accent">
+          <CircleDashed size={11} /> Respondido do seu Stories
+        </div>
+        {/* com mídia, o bloco inteiro abre o status no visualizador */}
+        <button type="button" disabled={!midia} onClick={() => midia && onVerMidia?.(midia)} title={midia ? 'Ver o status' : undefined} className={cn(caixa, 'mb-0 flex items-center gap-2', midia && 'hover:bg-black/10 dark:hover:bg-white/15 cursor-zoom-in')}>
+          <div className="min-w-0 flex-1">{conteudo}</div>
+          {baixando && (
+            <div className="grid h-14 w-14 shrink-0 place-items-center rounded bg-black/10 dark:bg-white/10" title="Carregando o status…">
+              <Loader2 size={16} className="animate-spin opacity-60" />
+            </div>
+          )}
+          {midia && (
+            <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded bg-black/10 dark:bg-white/10">
+              {/* atrás da imagem: aparece enquanto o navegador baixa e some quando ela cobre */}
+              <Loader2 size={16} className="absolute inset-0 m-auto animate-spin opacity-60" />
+              {q?.mediaType === 'video'
+                ? <><video src={midia} muted preload="metadata" className="relative h-14 w-14 object-cover" /><Play size={16} className="absolute inset-0 m-auto text-white drop-shadow" /></>
+                : <img src={midia} alt="Status respondido" className="relative h-14 w-14 object-cover" />}
+            </div>
+          )}
+        </button>
+      </div>
+    );
+  }
   if (!alvo) return <div className={caixa}>{conteudo}</div>;
   return (
     <button type="button" onClick={() => irParaMensagem(alvo)} title="Ir para a mensagem citada" className={cn(caixa, 'hover:bg-black/10 dark:hover:bg-white/15 cursor-pointer')}>

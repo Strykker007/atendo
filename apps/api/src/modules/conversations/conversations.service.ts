@@ -113,7 +113,7 @@ export class ConversationsService {
       // Apagada: o original continua no banco (auditoria) e NÃO sai daqui — nem por socket,
       // que vai para a sala do tenant inteiro. Quem tem `conversations.view_deleted` lê por
       // `deletedOriginal()`. Reação e citação também saem: as duas carregam pedaço do conteúdo.
-      return { ...rest, text: null, mediaUrl: null, mediaMime: null, mediaName: null, content: null, reactions: null, error: null, quotedId: null, quotedMessageId: null, quotedPreview: null, quotedMessage: null, quoted: null };
+      return { ...rest, text: null, mediaUrl: null, mediaMime: null, mediaName: null, content: null, reactions: null, error: null, quotedId: null, quotedMessageId: null, quotedPreview: null, quotedMediaUrl: null, quotedMediaMime: null, quotedMessage: null, quoted: null };
     }
     const mediaUrl = m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl;
     return { ...rest, mediaUrl, quoted: this.quotedRef(m) };
@@ -135,6 +135,8 @@ export class ConversationsService {
       // enviada pelo painel: nome do atendente. Recebida: null, o front usa o nome do contato.
       authorName: q?.direction === 'out' ? q.author?.name ?? null : null,
       fromStatus: m.quotedFromStatus,
+      mediaUrl: m.quotedMediaUrl ? this.storage.signedUrl(m.quotedMediaUrl) : null,
+      mediaType: m.quotedMediaMime ? (m.quotedMediaMime.startsWith('video/') ? 'video' : 'image') : null,
     };
   }
 

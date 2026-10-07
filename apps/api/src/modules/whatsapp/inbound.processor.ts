@@ -1,6 +1,7 @@
 import { Processor } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { ProviderRegistry } from './providers/provider.registry';
+import type { MediaPayload } from './providers/provider.interface';
 import { NumbersService } from './numbers.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { InboundService } from '../conversations/inbound.service';
@@ -110,6 +111,28 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
           const reason = err instanceof Error ? err.message : String(err);
           this.log.warn(`Mídia de ${msg.externalId} não baixada: ${reason}`);
           await this.inbound.mediaFailed(saved.id, number.tenantId, reason);
+        }
+      }
+
+      // resposta a status com foto/vídeo: guarda a mídia do status, que some em 24h. Sem a
+      // mídia inteira, fica a miniatura do payload. Falha aqui só tira o preview, nunca a mensagem
+      if (saved && msg.quotedFromStatus && msg.quotedMedia) {
+        const provider = this.registry.get(job.data.provider);
+        let media: MediaPayload | null = null;
+        try {
+          if (provider.fetchQuotedMedia) media = await provider.fetchQuotedMedia(await this.numbers.context(number.id), msg);
+        } catch (err) {
+          this.log.debug(`mídia do status citado em ${msg.externalId}: ${err instanceof Error ? err.message : err}`);
+        }
+        if (!media && msg.quotedMedia.thumbnail) media = { data: Buffer.from(msg.quotedMedia.thumbnail, 'base64'), mimeType: 'image/jpeg' };
+        try {
+          if (!media) throw new Error('sem mídia nem miniatura');
+          const key = this.storage.makeKey(number.tenantId, media.mimeType);
+          await this.storage.put(key, media.data, media.mimeType);
+          await this.inbound.attachQuotedMedia(saved.id, number.tenantId, key, media.mimeType);
+        } catch (err) {
+          this.log.warn(`status citado de ${msg.externalId}: ${err instanceof Error ? err.message : err}`);
+          await this.inbound.quotedMediaFailed(saved.id, number.tenantId).catch(() => undefined);
         }
       }
     }

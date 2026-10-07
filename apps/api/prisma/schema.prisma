@@ -749,6 +749,10 @@ model Message {
   quotedPreview  String?
   /// a citação era um status/story, não uma mensagem da conversa
   quotedFromStatus Boolean @default(false)
+  /// Foto/vídeo do status respondido, no NOSSO storage (chave). Mesmo motivo do `quotedPreview`:
+  /// o story some em 24h. Baixado pelo worker; sem a mídia inteira, fica a miniatura que veio no payload
+  quotedMediaUrl  String?
+  quotedMediaMime String?
   /// Reações (emoji) recebidas: `MessageReaction[]`. Reação não vira mensagem — só marca esta.
   reactions      Json?
   /// Estrutura que não cabe em text/media (`MessageContent` do shared): botões, lista,

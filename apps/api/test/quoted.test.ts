@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lerCitacao } from '../src/modules/whatsapp/providers/quoted';
+import { bytesEmBase64, lerCitacao } from '../src/modules/whatsapp/providers/quoted';
 
 describe('lerCitacao', () => {
   it('mensagem comum, sem citação', () => {
@@ -18,7 +18,32 @@ describe('lerCitacao', () => {
         contextInfo: { remoteJid: 'status@broadcast', stanzaId: 'ST1', quotedMessage: { imageMessage: { caption: 'Promoção: 20% em toda a loja' } } },
       },
     });
-    expect(c).toEqual({ externalId: 'ST1', preview: '📷 Foto: Promoção: 20% em toda a loja', fromStatus: true });
+    expect(c).toMatchObject({ externalId: 'ST1', preview: '📷 Foto: Promoção: 20% em toda a loja', fromStatus: true, media: { kind: 'image' } });
+  });
+
+  it('resposta a status em texto puro: o contexto vem fora de `message` (payload real da Evolution)', () => {
+    const thumb = { 0: 255, 1: 216, 2: 255, 3: 224 };
+    const c = lerCitacao({ conversation: 'Quero' }, {
+      stanzaId: '2A62482F3871E2CD9478',
+      remoteJid: 'status@broadcast',
+      participant: '12013627551880@lid',
+      quotedMessage: { conversation: '', imageMessage: { caption: '', mimetype: 'image/jpeg', mediaKey: { 0: 30, 1: 122 }, jpegThumbnail: thumb } },
+    });
+    expect(c).toEqual({
+      externalId: '2A62482F3871E2CD9478',
+      preview: '📷 Foto',
+      fromStatus: true,
+      media: { kind: 'image', mimeType: 'image/jpeg', thumbnail: Buffer.from([255, 216, 255, 224]).toString('base64') },
+    });
+  });
+
+  it('contexto do topo sem citação (mensagem comum da Evolution) não vira citação', () => {
+    expect(lerCitacao({ conversation: 'oi' }, { mentionedJid: [], statusAttributions: [] })).toBeUndefined();
+  });
+
+  it('bytes do quotedMessage voltam em base64 para a Evolution baixar a mídia', () => {
+    expect(bytesEmBase64({ imageMessage: { mediaKey: { 0: 30, 1: 122 }, url: 'u', scanLengths: [1, 2] } }))
+      .toEqual({ imageMessage: { mediaKey: Buffer.from([30, 122]).toString('base64'), url: 'u', scanLengths: [1, 2] } });
   });
 
   it('status sem legenda ainda diz o que era', () => {

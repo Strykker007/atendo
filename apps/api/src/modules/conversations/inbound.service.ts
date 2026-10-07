@@ -26,6 +26,13 @@ import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTroca
  * Depende de `ConversationsService` (e não o contrário): quem recebe precisa reabrir conversa e
  * apresentar mensagem; quem atende nunca precisa saber de webhook.
  */
+/**
+ * Resposta a status com foto/vídeo: o tipo já entra na criação, sem a URL — é o que a tela lê
+ * como "carregando" até o worker guardar a mídia (`attachQuotedMedia`) ou desistir (`quotedMediaFailed`).
+ */
+const mimeDoStatusCitado = (msg: InboundMessage) =>
+  msg.quotedFromStatus && msg.quotedMedia ? msg.quotedMedia.mimeType ?? (msg.quotedMedia.kind === 'video' ? 'video/mp4' : 'image/jpeg') : undefined;
+
 @Injectable()
 export class InboundService {
   private readonly log = new Logger(InboundService.name);
@@ -46,6 +53,18 @@ export class InboundService {
   /** Chamado pelo worker depois de baixar a mídia recebida. */
   async attachMedia(messageId: string, tenantId: string, key: string, mimeType: string, fileName?: string) {
     const m = await this.prisma.message.update({ where: { id: messageId }, data: { mediaUrl: key, mediaMime: mimeType, mediaName: fileName }, include: MESSAGE_INCLUDE });
+    this.gateway.emitMessage(tenantId, this.conversations.present(m));
+  }
+
+  /** Chamado pelo worker depois de guardar a foto/vídeo do status que o contato respondeu. */
+  async attachQuotedMedia(messageId: string, tenantId: string, key: string, mimeType: string) {
+    const m = await this.prisma.message.update({ where: { id: messageId }, data: { quotedMediaUrl: key, quotedMediaMime: mimeType }, include: MESSAGE_INCLUDE });
+    this.gateway.emitMessage(tenantId, this.conversations.present(m));
+  }
+
+  /** Não deu para guardar nem a mídia nem a miniatura do status: tira o "carregando" da tela. */
+  async quotedMediaFailed(messageId: string, tenantId: string) {
+    const m = await this.prisma.message.update({ where: { id: messageId }, data: { quotedMediaMime: null }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(tenantId, this.conversations.present(m));
   }
 
@@ -118,6 +137,7 @@ export class InboundService {
         quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
         quotedPreview: msg.quotedPreview,
         quotedFromStatus: msg.quotedFromStatus ?? false,
+        quotedMediaMime: mimeDoStatusCitado(msg),
         // guarda o payload do provider + o id da opção já traduzido: é assim que o motor de
         // fluxos e os lembretes sabem em qual botão o contato tocou, sem conhecer Meta/Evolution
         raw: { ...(msg.raw as object), ...(msg.interactiveReplyId ? { interactiveReplyId: msg.interactiveReplyId } : {}) } as Prisma.InputJsonValue,
@@ -197,6 +217,7 @@ export class InboundService {
         quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
         quotedPreview: msg.quotedPreview,
         quotedFromStatus: msg.quotedFromStatus ?? false,
+        quotedMediaMime: mimeDoStatusCitado(msg),
         raw: msg.raw as Prisma.InputJsonValue,
         createdAt: msg.timestamp,
       },

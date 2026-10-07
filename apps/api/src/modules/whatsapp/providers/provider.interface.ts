@@ -102,6 +102,11 @@ export interface WhatsAppProvider {
   /** Baixa a mídia de uma mensagem recebida (id/raw vêm do InboundMessage). */
   fetchMedia(ctx: NumberContext, message: InboundMessage): Promise<MediaPayload | null>;
   /**
+   * Foto/vídeo do status que o contato respondeu (`quotedFromStatus`). Opcional: só a Evolution
+   * entrega resposta a status com a mídia citada.
+   */
+  fetchQuotedMedia?(ctx: NumberContext, message: InboundMessage): Promise<MediaPayload | null>;
+  /**
    * Foto de perfil do contato. Opcional: a API oficial da Meta não expõe isto, então só a
    * Evolution implementa. Devolve `null` quando o contato não tem foto ou a esconde.
    */

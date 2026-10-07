@@ -30,6 +30,11 @@ export interface InboundMessage {
   quotedPreview?: string;
   /** a citação era um status/story (some em 24h, não é mensagem da conversa) */
   quotedFromStatus?: boolean;
+  /**
+   * Foto/vídeo do status citado. `thumbnail` (base64 JPEG) é a miniatura que vem no próprio
+   * payload — reserva para quando a mídia inteira não puder mais ser baixada.
+   */
+  quotedMedia?: { kind: 'image' | 'video'; mimeType?: string; thumbnail?: string };
   /** id da opção escolhida num menu interativo (botão/lista), quando o provider informa */
   interactiveReplyId?: string;
   /** De onde o lead veio, quando o provider informa (anúncio Click-to-WhatsApp, link com contexto). */
@@ -229,6 +234,10 @@ export interface QuotedRef {
   authorName: string | null;
   /** citação de status/story: some em 24h, não é mensagem da conversa */
   fromStatus: boolean;
+  /** foto/vídeo do status citado (URL assinada); null quando não tem ou ainda não baixou */
+  mediaUrl: string | null;
+  /** com `mediaUrl` null, o tipo preenchido = a mídia ainda está sendo baixada */
+  mediaType: 'image' | 'video' | null;
 }
 
 export interface MessageDTO {

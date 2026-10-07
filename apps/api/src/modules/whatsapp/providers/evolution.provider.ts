@@ -3,8 +3,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BillingCategory, MessageStatus, MessageType, NumberStatus } from '@atendo/shared';
 import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
-import { lerCitacao } from './quoted';
-import { contextInfoDe, desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
+import { bytesEmBase64, contextoDaCitacao, lerCitacao } from './quoted';
+import { desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
 import type { MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeProviderError, ProviderSendError } from './provider-error';
 
@@ -157,6 +157,28 @@ export class EvolutionProvider implements WhatsAppProvider {
     }, this.shard(ctx));
     if (!r?.base64) return null;
     return { data: Buffer.from(r.base64, 'base64'), mimeType: r.mimetype ?? msg.media.mimeType ?? 'application/octet-stream', fileName: r.fileName ?? msg.media.fileName };
+  }
+
+  /**
+   * Foto/vídeo do status que o contato respondeu. O status não é mensagem nossa, então não há
+   * key para a Evolution buscar: mandamos o próprio `quotedMessage` (traz url + mediaKey) e ela
+   * descriptografa. Passadas as 24h o WhatsApp apaga o arquivo e isto falha — quem chama cai
+   * na miniatura.
+   */
+  async fetchQuotedMedia(ctx: NumberContext, msg: InboundMessage): Promise<MediaPayload | null> {
+    if (!msg.quotedFromStatus || !msg.quotedMedia) return null;
+    const raw = msg.raw as any;
+    const ctxInfo = contextoDaCitacao(raw?.message, raw?.contextInfo);
+    if (!ctxInfo?.quotedMessage) return null;
+    const r = await this.api<any>(`/chat/getBase64FromMediaMessage/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        message: { key: { id: ctxInfo.stanzaId, remoteJid: 'status@broadcast', participant: ctxInfo.participant, fromMe: false }, message: bytesEmBase64(ctxInfo.quotedMessage) },
+        convertToMp4: false,
+      }),
+    }, this.shard(ctx));
+    if (!r?.base64) return null;
+    return { data: Buffer.from(r.base64, 'base64'), mimeType: r.mimetype ?? msg.quotedMedia.mimeType ?? (msg.quotedMedia.kind === 'video' ? 'video/mp4' : 'image/jpeg') };
   }
 
   /**
@@ -405,7 +427,8 @@ export class EvolutionProvider implements WhatsAppProvider {
     const msg = desembrulhar(m.message);
     const from = String(m.key.remoteJid).replace(/@.*$/, '');
     const lido = lerConteudo(m.message);
-    const citacao = lerCitacao(msg);
+    // resposta em texto puro: o contexto (citação, status) vem no topo do webhook, fora de `message`
+    const citacao = lerCitacao(msg, m.contextInfo);
     return {
       provider: 'evolution',
       externalId: m.key.id,
@@ -424,7 +447,8 @@ export class EvolutionProvider implements WhatsAppProvider {
       quotedExternalId: citacao?.externalId,
       quotedPreview: citacao?.preview,
       quotedFromStatus: citacao?.fromStatus,
-      referral: this.referralOf(msg),
+      quotedMedia: citacao?.media,
+      referral: this.referralOf(msg, m.contextInfo),
       timestamp: new Date(Number(m.messageTimestamp) * 1000),
       raw: m,
     };
@@ -433,10 +457,11 @@ export class EvolutionProvider implements WhatsAppProvider {
   /**
    * Via Baileys, um clique em anúncio chega com `contextInfo.externalAdReply`
    * (title, body, sourceUrl, sourceId, ctwaClid) ou `conversionSource`. Menos completo que a Meta,
-   * mas suficiente para marcar a origem.
+   * mas suficiente para marcar a origem. Em texto puro o `contextInfo` vem no topo do webhook
+   * (`externo`), igual à citação.
    */
-  private referralOf(msg: any): InboundMessage['referral'] | undefined {
-    const ctx = contextInfoDe(msg);
+  private referralOf(msg: any, externo?: any): InboundMessage['referral'] | undefined {
+    const ctx = contextoDaCitacao(msg, externo);
     const ad = ctx?.externalAdReply;
     if (ad) {
       const isAd = ad.sourceType === 'ad' || !!ad.ctwaClid || /facebook\.com\/ads|fb\.me\/ad|instagram\.com/i.test(ad.sourceUrl ?? '');
