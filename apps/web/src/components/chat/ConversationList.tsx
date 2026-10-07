@@ -94,9 +94,12 @@ export function ConversationList() {
     const c = conversations.data?.find((x) => x.id === conversationId);
     if (c) setFixada(c);
   }, [conversations.data, conversationId]);
-  const fixadaFora = fixada && fixada.id === conversationId && conversations.data && !conversations.data.some((c) => c.id === fixada.id)
+  const fixadaAtual = fixada && fixada.id === conversationId && conversations.data && !conversations.data.some((c) => c.id === fixada.id)
     ? { ...fixada, ...(aberta?.id === fixada.id ? aberta : {}) }
     : null;
+  // encerrada não fica fixada fora de "Encerradas": encerrar é sair da fila, não uma resposta
+  // que muda de aba — senão ela seguia em "Em atendimento" até trocar de conversa ou dar F5
+  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') ? fixadaAtual : null;
   const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas

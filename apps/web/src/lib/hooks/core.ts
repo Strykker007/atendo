@@ -370,7 +370,15 @@ export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; reason?: string; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
-    onSuccess: (_, v) => invConv(qc, v.id),
+    onSuccess: (_, v) => {
+      // sai na hora das listas de outro status (sem esperar o refetch) e a aberta já vê o novo status
+      for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
+        if ((key[1] as { status?: ConversationStatus } | undefined)?.status === v.status) continue;
+        qc.setQueryData<Conversation[]>(key, (old) => old?.filter((c) => c.id !== v.id));
+      }
+      qc.setQueryData<Conversation>(['conversation', v.id], (old) => (old ? { ...old, status: v.status } : old));
+      invConv(qc, v.id);
+    },
   });
 };
 

@@ -598,7 +598,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             <span className="hidden sm:inline">Encerrar</span>
           </Button>
         ) : (
-          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => toast.ok('Conversa reaberta')).catch(toast.err)} title="Reabrir">
+          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Conversa reaberta'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Reabrir">
             <span className="hidden sm:inline">Reabrir</span>
           </Button>
         )}
@@ -654,7 +654,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <div ref={bottomRef} />
       </div>
 
-      {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} />}
+      {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} onClosed={() => setFilterStatus('closed', true)} />}
       {historico && <HistorySheet conversationId={conv.id} onClose={() => setHistorico(false)} />}
       {editando && <EditMessageModal m={editando} onClose={() => setEditando(null)} />}
       <ConfirmDialog

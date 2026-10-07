@@ -31,7 +31,7 @@ const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId', none: 'noneFlo
  * A venda abre em lista de itens (descrição + valor, total somado); quem preferir troca para
  * texto livre e informa o total à mão.
  */
-export function CloseModal({ conversationId, onClose }: { conversationId: string; onClose: () => void }) {
+export function CloseModal({ conversationId, onClose, onClosed }: { conversationId: string; onClose: () => void; /** encerrou de fato (a tela leva a aba junto) */ onClosed?: () => void }) {
   const setStatus = useSetStatus();
   const flowsFeature = useHasFeature('flows');
   const flows = useFlows();
@@ -90,6 +90,7 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
       });
       toast.ok('Atendimento encerrado');
       onClose();
+      onClosed?.();
     } catch (err) { toast.err(err); }
   }
 

@@ -7,7 +7,7 @@ import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingEvent, SendLimits } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
-import { Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache } from './core';
+import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache } from './core';
 import type { MessageTemplate, TemplateValues } from '@atendo/shared';
 
 // ---- Números ----
@@ -80,7 +80,14 @@ export function useRealtime() {
       const next: Typing = e.state === 'paused' ? null : { state: e.state, at: Date.now() };
       qc.setQueryData<Typing>(['typing', e.conversationId], next);
     });
-    socket.on('conversation', (c: { id: string }) => {
+    socket.on('conversation', (c: { id: string; status?: ConversationStatus }) => {
+      // encerrada (por outro atendente, pelo robô ou pelo sistema): sai na hora das listas de outro status
+      if (c.status === 'closed') {
+        for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
+          if ((key[1] as { status?: ConversationStatus } | undefined)?.status === 'closed') continue;
+          qc.setQueryData<Conversation[]>(key, (old) => old?.filter((x) => x.id !== c.id));
+        }
+      }
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', c.id] });
       qc.invalidateQueries({ queryKey: ['conversation-counts'] });
