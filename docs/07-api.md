@@ -31,6 +31,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/tenants` | super_admin | Lista clientes com plano e contagens |
 | POST | `/tenants` | super_admin | Cria cliente + assinatura + admin. Plano gratuito nasce `active`; pago, `trialing` |
 | PATCH | `/tenants/:id` | super_admin | `name`, `isActive`, `planId`, `subscriptionStatus` (ajuste manual sem Stripe). Trocar para plano gratuito: assinatura `active`, preço 0, e a assinatura paga no Stripe (se houver) é cancelada |
+| GET | `/notices/active` | todos (inclusive dono) | Avisos globais ativos, mais novos primeiro (até 30) — ver [avisos.md](avisos.md) |
+| GET | `/super-admin/notices` | super_admin | Todos os avisos (ativos e desativados) |
+| POST | `/super-admin/notices` | super_admin | `{title, message, type?: INFO \| WARNING \| CRITICAL}` — grava e emite `system_notice` para todos os conectados |
+| PATCH | `/super-admin/notices/:id` | super_admin | `{active}` — desativar tira do sino de todos |
 | POST | `/tenants/:id/impersonate` | super_admin | `{accessToken, tenant}` — "entrar como" (token com o tenant, papel admin, `impersonatorId`) |
 | GET | `/tenants/me/agents` | todos | Atendentes do meu tenant (todos podem listar para transferir) |
 | POST | `/tenants/me/agents` | tenant_admin, manager | Cria atendente (`role: agent`) ou gerente (`role: manager`, só admin); respeita `maxAgents` |
@@ -69,7 +73,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/conversations/:id/scheduled-messages` | todos | Mensagens agendadas `pending`/`failed` da conversa ([Agendamento de mensagens](agendamento-de-mensagens.md)) |
 | POST | `/conversations/:id/scheduled-messages` | `conversations.schedule_message` | Agenda `{content, scheduledFor (ISO), mediaKey?, mediaType?, mediaName?, mediaMime?}`. ≥ 1 min à frente, ≤ 365 dias; conversa de outra pessoa = 409; Meta fora da janela de 24h = 400. Socket `scheduled_messages` |
 | DELETE | `/conversations/:id/scheduled-messages/:scheduledId` | `conversations.schedule_message` | Cancela pendente / dispensa falhada (já enviada = 404) |
-| PATCH | `/conversations/:id/status` | todos | `{status: waiting \| in_progress \| closed, outcome?, value?, reason?, products?, items?, notes?, flowId?}`. No encerramento `won` o `value` (> 0) é obrigatório e grava uma linha em `sales` com `products`/`notes`. Com `items` (`[{description, value}]`, até 50) o total é a soma dos itens — `value` e `products` enviados são ignorados (o resumo vira as descrições). `flowId` ausente = fluxo padrão do resultado (`wonFlowId`…) ou o geral (`onCloseFlowId`); `null` = nenhum |
+| PATCH | `/conversations/:id/status` | todos | `{status: waiting \| in_progress \| closed, outcome?, value?, reason?, products?, items?, notes?, flowId?}`. No encerramento `won`, `value` > 0 grava uma linha em `sales` com `products`/`notes`; sem valor fica só o desfecho (sem venda). Com `items` (`[{description?, value}]`, até 50 — descrição opcional) o total é a soma dos itens — `value` enviado é ignorado e o resumo `products` vira as descrições preenchidas. `flowId` ausente = fluxo padrão do resultado (`wonFlowId`…) ou o geral (`onCloseFlowId`); `null` = nenhum |
 | POST | `/conversations/bulk/close` | todos | `{ids[], outcome?, reason?}` — encerra até 200. Devolve `{closed, ignored}`. O recorte (números do usuário; atendente comum só o que é dele ou está sem dono) é feito no service, porque o `ConversationScopeGuard` olha `:id` e aqui a lista vem no corpo. Sem valor de venda e sem fluxo, de propósito |
 | GET | `/conversations/:id/events` | todos | Histórico do atendimento: `claimed`, `transferred`, `released`, `closed`, `reopened`, `bot_paused`, `bot_resumed`, `department_changed` (`reason` "A → B"), com ator, alvo, desfecho congelado e data |
 | POST | `/conversations/:id/bot/pause` | todos (feature `flows`) | Pausa o robô só nesta conversa. Body `{ minutes?: 30 \| 60 \| 240 \| null }` (nulo = até retomar). Interrompe o fluxo em andamento. Ver [fluxos › Pausar o robô](fluxos.md#pausar-o-robô-na-conversa) |
@@ -89,6 +93,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Departamentos** | | | |
 | GET | `/departments` | todos | Com participantes e nº de conversas abertas |
 | POST / PATCH / DELETE | `/departments[/:id]` | `team.manage` | `{name, description?, color?, isActive?, userIds?}` (`userIds` substitui). Excluir deixa as conversas sem departamento. Ver [Departamentos](departamentos.md) |
+| **Empresas / unidades** | | | Toda rota aceita o header `x-company-id` (empresa do seletor): vira escopo de números. Ver [Empresas](empresas.md) |
+| GET | `/companies` | todos | Empresas do cliente com números e pessoas vinculadas |
+| GET | `/companies/mine` | todos | Empresas que o usuário pode escolher no seletor (`[]` = cliente sem empresas) |
+| POST / PATCH / DELETE | `/companies[/:id]` | `settings.manage` | `{name, cnpj?, description?, numberIds?, userIds?}` (listas substituem; marcar um número tira ele da outra empresa). `POST` checa `maxCompanies` do plano. Excluir deixa os números sem empresa |
 | **Tags** | | | |
 | GET | `/tags` | todos | Com contagem de conversas |
 | POST / PATCH / DELETE | `/tags[/:id]` | `tags.manage` | `{name, color, isKanban?, position?}`. Lista vem na ordem do Kanban (`position`, nome). Emite `kanban` |
@@ -117,7 +125,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Billing** | | | |
 | GET | `/billing/plans` | todos | Planos ativos com limites, `billingCycle`, `isFree`, `durationDays`, `priceYear` e `stripePriceId`. Cliente só recebe `monthly`/`yearly`; super_admin recebe todos (inclui gratuitos, para atribuir) |
 | GET | `/billing/plans/all` | super_admin | Catálogo completo (inclui inativos) com `subscribers` e `billingEnabled` |
-| POST | `/billing/plans` | super_admin | Cria plano. `{name, priceMonth, billingModel, limits, isFree?, billingCycle?, durationDays?, priceYear?}` — `limits` validado campo a campo (`maxNumbers/maxAgents/maxFlows/maxQuickReplies`: `null` = ilimitado). Gratuito zera preço e força `hardLimit`. Cria produto+preço no Stripe quando a cobrança está ligada |
+| POST | `/billing/plans` | super_admin | Cria plano. `{name, priceMonth, billingModel, limits, isFree?, billingCycle?, durationDays?, priceYear?}` — `limits` validado campo a campo (`maxNumbers/maxAgents/maxFlows/maxQuickReplies/maxCompanies`: `null` = ilimitado). Gratuito zera preço e força `hardLimit`. Cria produto+preço no Stripe quando a cobrança está ligada |
 | PATCH | `/billing/plans/:id` | super_admin | Edita. Trocar `billingCycle` com assinantes = 400. Mudar `priceMonth` (ou `priceYear`) cria um preço novo no Stripe e arquiva o antigo (preço é imutável lá). `applyToExisting: {mode: 'never'\|'scheduled'\|'now', days?}` decide o que acontece com quem já assina — padrão `never` |
 | DELETE | `/billing/plans/:id` | super_admin | Só sem assinantes (senão 400). Arquiva o produto no Stripe |
 | GET | `/billing/invoices` | todos | Faturas do tenant (espelho do Stripe) |

@@ -17,6 +17,10 @@ export interface AuthUser {
   numberIds?: string[];
   /** departamentos do usuário; vazio = todos (ver department-scope.ts) */
   departmentIds?: string[];
+  /** empresa selecionada no painel (header `x-company-id`), já validada; null/ausente = todas */
+  companyId?: string | null;
+  /** empresas que a pessoa pode selecionar; ausente = cliente sem empresas (ver company-scope.ts) */
+  companyIds?: string[];
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthUser => {

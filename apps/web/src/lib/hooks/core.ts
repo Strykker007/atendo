@@ -11,7 +11,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -80,7 +80,7 @@ export interface Usage {
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
   planId: string | null;
-  used: { messages: number; templates: number; numbers: number; agents: number; flows: number; quickReplies: number; messagesIn: number; conversations: number };
+  used: { messages: number; templates: number; numbers: number; agents: number; flows: number; quickReplies: number; messagesIn: number; conversations: number; companies?: number };
   limits: PlanLimits | null;
   status: string | null;
   plan: string | null;
@@ -370,7 +370,15 @@ export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; reason?: string; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
-    onSuccess: (_, v) => invConv(qc, v.id),
+    onSuccess: (_, v) => {
+      // sai na hora das listas de outro status (sem esperar o refetch) e a aberta já vê o novo status
+      for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
+        if ((key[1] as { status?: ConversationStatus } | undefined)?.status === v.status) continue;
+        qc.setQueryData<Conversation[]>(key, (old) => old?.filter((c) => c.id !== v.id));
+      }
+      qc.setQueryData<Conversation>(['conversation', v.id], (old) => (old ? { ...old, status: v.status } : old));
+      invConv(qc, v.id);
+    },
   });
 };
 

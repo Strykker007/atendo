@@ -14,11 +14,13 @@
 | [10 — Fluxos de automação](10-fluxos-de-automacao.md) | Dev / Cliente | Blocos, gatilhos, motor, editor, API |
 | [Fluxos — referência técnica](fluxos.md) | Dev | Arquitetura editor/motor, como criar um bloco, status dos blocos do construtor |
 | [Envio — fila, ordem e ritmo](envio.md) | Dev / Operação | Fila única, ordem por conversa, limites por conexão, retry, reconexão, respostas rápidas e valores padrão |
+| [Empresas e unidades](empresas.md) | Dev / Cliente | Matriz e filiais: números por empresa, quem opera cada uma, seletor do menu e limite do plano |
 | [Departamentos](departamentos.md) | Dev / Cliente | Departamentos, quem vê qual fila, transferência entre departamentos e integração com o Distribuidor/Ação |
 | [Editar mensagem enviada](editar-mensagens.md) | Dev / Cliente | Permissão `conversations.edit_message`, prazo de 15 min do WhatsApp, Evolution × Meta, auditoria do texto anterior |
 | [Apagar mensagem e limpar histórico](apagar-mensagens.md) | Dev / Cliente | Quem pode apagar, apagar para todos (Evolution) × só no painel (Meta), registro de auditoria e conteúdo original |
 | [Variáveis `{{...}}`](variaveis.md) | Dev / Cliente | Variáveis comuns a fluxos, respostas rápidas, campanhas e chat: empresa, saudação, primeiro nome, campos da ficha |
 | [Agendamento de mensagens](agendamento-de-mensagens.md) | Dev / Cliente | Atendente agenda uma mensagem para sair depois; job de 1 minuto, regras de envio, cancelamento |
+| [Avisos do sistema](avisos.md) | Dev / Dono | Avisos globais do super_admin: popup ao vivo, sino no menu e tela de publicação |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |

@@ -79,16 +79,16 @@ class NoteDto {
   @IsString() @IsNotEmpty() @MaxLength(4096) text: string;
 }
 class SaleItemDto {
-  @IsString() @IsNotEmpty() @MaxLength(200) description: string;
+  /** opcional: dá para registrar só o valor */
+  @IsOptional() @IsString() @MaxLength(200) description?: string;
   @IsNumber() @Min(0) @Max(9_999_999) value: number;
 }
 class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;
   /** desfecho do atendimento, só no encerramento */
   @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
-  /** valor da venda — obrigatório quando encerra como `won` */
-  @ValidateIf((o: StatusDto) => o.status === 'closed' && o.outcome === 'won')
-  @IsNumber({}, { message: 'Informe o valor da compra' }) @Min(0.01, { message: 'Informe o valor da compra' }) @Max(9_999_999)
+  /** valor da venda — opcional: "Comprou" sem valor registra o desfecho, mas não gera venda */
+  @IsOptional() @IsNumber() @Min(0) @Max(9_999_999)
   value?: number;
   /** venda: o que foi comprado e observações do fechamento */
   @IsOptional() @IsString() @MaxLength(500) products?: string;

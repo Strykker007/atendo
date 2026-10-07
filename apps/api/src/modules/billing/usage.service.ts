@@ -121,6 +121,7 @@ export class UsageService {
       case 'maxAgents': return this.prisma.user.count({ where: { tenantId, isActive: true, role: { in: ['agent', 'manager'] } } });
       case 'maxFlows': return this.prisma.flow.count({ where: { tenantId, isActive: true } });
       case 'maxQuickReplies': return this.prisma.quickReply.count({ where: { folder: { tenantId } } });
+      case 'maxCompanies': return this.prisma.company.count({ where: { tenantId } });
     }
   }
 

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronDown, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
@@ -45,7 +45,7 @@ export function useMinuto() {
 }
 
 export function ConversationList() {
-  const { numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation } = useUI();
+  const { companyId, numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation, groupByAssignee, toggleGroupByAssignee } = useUI();
   const me = useMe();
   // quem vê a fila da equipe é decidido pela PERMISSÃO, não pelo papel: é isso que permite um
   // "atendente líder" enxergar a equipe, e um gerente com o acesso retirado deixar de ver
@@ -75,6 +75,10 @@ export function ConversationList() {
   const [iniciando, setIniciando] = useState(false);
   const conversations = useConversations({ status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
+  // com uma empresa escolhida no menu, o seletor oferece só os números dela (docs/empresas.md)
+  const numerosDaEmpresa = (numbers.data ?? []).filter((n) => !companyId || n.companyId === companyId);
+  // seções do modo agrupado que a pessoa recolheu (chave = id do atendente ou FILA)
+  const [recolhidos, setRecolhidos] = usePersistedState<string[]>('grupos-recolhidos', []);
   const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0);
 
   const visiveis = conversations.data ?? [];
@@ -90,9 +94,12 @@ export function ConversationList() {
     const c = conversations.data?.find((x) => x.id === conversationId);
     if (c) setFixada(c);
   }, [conversations.data, conversationId]);
-  const fixadaFora = fixada && fixada.id === conversationId && conversations.data && !conversations.data.some((c) => c.id === fixada.id)
+  const fixadaAtual = fixada && fixada.id === conversationId && conversations.data && !conversations.data.some((c) => c.id === fixada.id)
     ? { ...fixada, ...(aberta?.id === fixada.id ? aberta : {}) }
     : null;
+  // encerrada não fica fixada fora de "Encerradas": encerrar é sair da fila, não uma resposta
+  // que muda de aba — senão ela seguia em "Em atendimento" até trocar de conversa ou dar F5
+  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') ? fixadaAtual : null;
   const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
@@ -118,7 +125,7 @@ export function ConversationList() {
             className="w-full appearance-none rounded-lg bg-field text-ink pl-8 pr-24 py-1.5 text-[12.5px] font-display font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40"
           >
             <option value="">Todos os números</option>
-            {numbers.data?.map((n) => (
+            {numerosDaEmpresa.map((n) => (
               <option key={n.id} value={n.id}>{n.label} · {n.phone.slice(-4)}</option>
             ))}
           </select>
@@ -150,9 +157,9 @@ export function ConversationList() {
         )}
       </div>
 
-      {/* Filtro principal com contadores */}
-      <div className="px-2.5 pt-2">
-        <div className="grid grid-cols-3 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
+      {/* Filtro principal com contadores; ao lado, o agrupamento por atendente */}
+      <div className="px-2.5 pt-2 flex items-center gap-1.5">
+        <div className="flex-1 min-w-0 grid grid-cols-3 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
           {ORDER.map((s) => {
             const m = STATUS_META[s];
             const n = counts.data?.[s];
@@ -167,6 +174,14 @@ export function ConversationList() {
             );
           })}
         </div>
+        <button
+          onClick={toggleGroupByAssignee}
+          title={groupByAssignee ? 'Agrupado por atendente — voltar à lista cronológica' : 'Agrupar por atendente'}
+          aria-pressed={groupByAssignee}
+          className={cn('shrink-0 w-8 h-8 rounded-lg grid place-items-center', groupByAssignee ? 'bg-accent-soft text-accent-ink ring-1 ring-accent' : 'text-faint hover:text-ink hover:bg-field')}
+        >
+          <Users size={15} />
+        </button>
       </div>
 
       {/* Busca sempre à vista; o resto dos filtros atrás do ícone */}
@@ -272,17 +287,36 @@ export function ConversationList() {
             <p className="text-sm text-muted">Nenhuma conversa em <b className="text-ink">{STATUS_META[status].short.toLowerCase()}</b>.</p>
           </div>
         )}
-        {linhas.map((c) => (
-          <ConversationRow
-            key={c.id}
-            c={c}
-            active={c.id === conversationId}
-            onClick={() => (selecionando ? alternar(c.id) : setConversation(c.id))}
-            agora={agora}
-            selecionando={selecionando}
-            marcado={marcados.includes(c.id)}
-          />
-        ))}
+        {(groupByAssignee ? agruparPorAtendente(linhas) : [{ key: '', nome: '', itens: linhas, naoLidas: 0 }]).map((g) => {
+          const fechado = !!g.key && recolhidos.includes(g.key);
+          return (
+            <div key={g.key || 'lista'}>
+              {g.key && (
+                <button
+                  onClick={() => setRecolhidos((r) => (r.includes(g.key) ? r.filter((k) => k !== g.key) : [...r, g.key]))}
+                  aria-expanded={!fechado}
+                  className="sticky top-0 z-[1] w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-panel border-b border-line text-left hover:bg-field"
+                >
+                  {fechado ? <ChevronRight size={14} className="text-faint shrink-0" /> : <ChevronDown size={14} className="text-faint shrink-0" />}
+                  <span className={cn('text-[12px] font-semibold truncate', g.key === FILA ? 'text-wait' : 'text-ink')}>{g.nome}</span>
+                  <span className="tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-field text-muted shrink-0">{g.itens.length}</span>
+                  {g.naoLidas > 0 && <span className="ml-auto tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0" title="Mensagens não lidas">{g.naoLidas}</span>}
+                </button>
+              )}
+              {!fechado && g.itens.map((c) => (
+                <ConversationRow
+                  key={c.id}
+                  c={c}
+                  active={c.id === conversationId}
+                  onClick={() => (selecionando ? alternar(c.id) : setConversation(c.id))}
+                  agora={agora}
+                  selecionando={selecionando}
+                  marcado={marcados.includes(c.id)}
+                />
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       {encerrando && (
@@ -291,6 +325,26 @@ export function ConversationList() {
       {iniciando && <NewConversationModal onClose={() => setIniciando(false)} />}
     </>
   );
+}
+
+/** Chave da seção das conversas sem atendente (aguardando distribuição). */
+const FILA = '__fila__';
+
+/**
+ * Modo agrupado: uma seção por atendente responsável, em ordem alfabética, e a fila (sem
+ * atendente) por último. Dentro de cada seção a ordem é a mesma da lista — o agrupamento não
+ * reordena, só separa; quem estava esperando há mais tempo continua no topo da seção dele.
+ */
+function agruparPorAtendente(lista: Conversation[]) {
+  const grupos = new Map<string, { key: string; nome: string; itens: Conversation[]; naoLidas: number }>();
+  for (const c of lista) {
+    const key = c.assignee?.id ?? FILA;
+    const g = grupos.get(key) ?? { key, nome: c.assignee?.name ?? 'Sem atendente · Fila', itens: [], naoLidas: 0 };
+    g.itens.push(c);
+    g.naoLidas += c.unreadCount;
+    grupos.set(key, g);
+  }
+  return [...grupos.values()].sort((a, b) => Number(a.key === FILA) - Number(b.key === FILA) || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
 function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean }) {

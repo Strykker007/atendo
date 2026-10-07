@@ -5,6 +5,7 @@ import { env } from '../../config/env';
 import { TenantGuard } from './tenant.guard';
 import type { AuthUser } from './current-user.decorator';
 import { PermissionsService } from './permissions.service';
+import { COMPANY_HEADER, allowedCompanies, effectiveNumberIds } from './company-scope';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -30,6 +31,23 @@ export class JwtAuthGuard implements CanActivate {
     req.user.permissions = scope.permissions;
     req.user.numberIds = scope.numberIds;
     req.user.departmentIds = scope.departmentIds;
+
+    // empresa/unidade vira números (ver company-scope.ts): só consulta quando o cliente tem empresas
+    if (req.user.tenantId && req.user.role !== 'super_admin') {
+      const companyNumbers = await this.permissions.companyNumbers(req.user.tenantId);
+      if (companyNumbers.size) {
+        const pedida = req.headers[COMPANY_HEADER];
+        const efetivo = effectiveNumberIds({
+          userNumberIds: scope.numberIds,
+          userCompanyIds: scope.companyIds,
+          companyNumbers,
+          activeCompanyId: typeof pedida === 'string' ? pedida : null,
+        });
+        req.user.numberIds = efetivo.numberIds;
+        req.user.companyId = efetivo.companyId;
+        req.user.companyIds = allowedCompanies(scope.companyIds, companyNumbers);
+      }
+    }
 
     // dono do sistema (sem tenant) só entra em rotas marcadas com @NoTenantOk
     return this.tenantGuard.canActivate(ctx);

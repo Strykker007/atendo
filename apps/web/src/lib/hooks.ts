@@ -8,6 +8,7 @@
  */
 export * from './hooks/core';
 export * from './hooks/numeros';
+export * from './hooks/avisos';
 export * from './hooks/tags';
 export * from './hooks/equipe';
 export * from './hooks/respostas';
@@ -20,6 +21,7 @@ export * from './hooks/ia';
 export * from './hooks/configuracoes';
 export * from './hooks/kanban';
 export * from './hooks/departamentos';
+export * from './hooks/empresas';
 export * from './hooks/campos';
 export * from './hooks/agendadas';
 export * from './hooks/variaveis';

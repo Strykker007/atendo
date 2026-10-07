@@ -12,6 +12,7 @@ import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import { QuickReplySection } from '@/components/settings/QuickReplySection';
 import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
+import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
@@ -35,10 +36,11 @@ export default function ConfiguracoesPage() {
 
   return (
     <PageShell width="max-w-4xl">
-      <PageHeader title="Configurações" subtitle="Aparência do painel, departamentos, horários de atendimento, boas-vindas, variáveis globais e segurança." />
+      <PageHeader title="Configurações" subtitle="Aparência do painel, empresas, departamentos, horários de atendimento, boas-vindas, variáveis globais e segurança." />
 
       {!isOwner && podeNumeros && <NumbersSection />}
       <AppearanceSection />
+      {!isOwner && podeConfigurar && <CompaniesSection />}
       {!isOwner && podeEquipe && <DepartmentsSection />}
       {!isOwner && podeConfigurar && <ScheduleSection />}
       {!isOwner && podeConfigurar && <WelcomeSection />}

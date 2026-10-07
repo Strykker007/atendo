@@ -23,7 +23,9 @@ import { env } from './config/env';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
+import { CompaniesModule } from './modules/companies/companies.module';
 import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
+import { NoticesModule } from './modules/notices/notices.module';
 
 @Module({
   imports: [
@@ -39,6 +41,7 @@ import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-
     ContactAttributesModule,
     GlobalVariablesModule,
     DepartmentsModule,
+    CompaniesModule,
     KanbanModule,
     QuickRepliesModule,
     BillingModule,
@@ -49,6 +52,7 @@ import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-
     SchedulingModule,
     ScheduledMessagesModule,
     AiModule,
+    NoticesModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -24,6 +24,8 @@ provider_pricing (global, sem tenant)
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA.
 
+**companies** / **user_companies** — empresas/unidades do cliente (nome único por cliente, CNPJ opcional só com dígitos) e quem opera cada uma (N:N; sem linha = todas). `whatsapp_numbers.companyId` opcional (`SetNull` ao excluir): um número pertence a no máximo uma empresa. Ver [Empresas](empresas.md).
+
 **departments** / **user_departments** — departamentos do cliente (nome único, cor, ativo) e quem participa (N:N; sem linha = sem restrição). `conversations.departmentId` opcional (`SetNull` ao excluir). Ver [Departamentos](departamentos.md).
 
 **refresh_tokens** — só o hash SHA-256 do token; `revokedAt` permite logout e rotação. Guardamos `userAgent`/`ip` para auditoria.
@@ -148,3 +150,5 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 **scheduled_messages** — mensagem que o atendente agendou na conversa (`userId` = autor, `content`, anexo opcional por `mediaKey`, `scheduledFor`, `status` `ScheduledMessageStatus`: pending, sent, cancelled, failed + `error`, `messageId`). Job de 1 minuto envia pelo caminho do chat. Ver [Agendamento de mensagens](agendamento-de-mensagens.md).
 
 **phonebook_entries** — agenda do celular de cada número (`numberId`, `phone`, `name`, `previousName` = nome antes da última troca, único por número + telefone), vinda da sincronização de contatos da Evolution. **Não é contato** e não aparece no painel; serve para o contato nascer com o nome da agenda. Cai junto com o número (cascade). `searchText` (também em **contacts**) é coluna **gerada** no banco só para a [busca textual](07-api.md#busca-textual-de-contatos), com índice GIN `pg_trgm`; o `PrismaService` a omite das respostas. Ver [providers › De onde vem o nome do contato](04-providers-whatsapp.md#de-onde-vem-o-nome-do-contato-contactsnamesource).
+
+**system_notices** — avisos globais do dono (`SystemNotice`): `title`, `message`, `type` (`INFO`/`WARNING`/`CRITICAL`), `active`, `createdAt`. Sem `tenantId` — vale para todos os clientes. Ver [avisos.md](avisos.md).

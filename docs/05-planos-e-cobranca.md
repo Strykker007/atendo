@@ -24,6 +24,7 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
   maxAgents: 6,                   // atendentes/gerentes ativos — null = ilimitado
   maxFlows: 10,                   // fluxos ATIVOS (rascunho desativado não conta) — ausente/null = ilimitado
   maxQuickReplies: 200,           // respostas rápidas — ausente/null = ilimitado
+  maxCompanies: 3,                // empresas/unidades (docs/empresas.md) — ausente/null = ilimitado
   includedMessagesMonth: 10000,   // mensagens ENVIADAS incluídas — null = ilimitado
   includedTemplatesMonth: 500,    // templates incluídos — null = ilimitado (custo Meta sem teto!)
   // includedConversationsMonth: null = ilimitado; AUSENTE = 0 (planos antigos limitavam por mensagem)
@@ -75,6 +76,7 @@ Colunas em `plans` (não em `limits`, porque mudam o comportamento do gateway):
 | `maxAgents` | agentes + gerentes ativos | `POST /tenants/me/agents` (`@RequireLimit`) |
 | `maxFlows` | fluxos com `isActive` | criar ativo, ativar no `PATCH`, ativar em lote (o lote inteiro é recusado se não couber). Duplicar/importar criam desativados e não contam |
 | `maxQuickReplies` | respostas rápidas | criar, duplicar e importar (tudo ou nada) |
+| `maxCompanies` | empresas/unidades cadastradas | `POST /companies` (`@RequireLimit`) |
 
 ### Onde o custo é cadastrado
 

@@ -1,5 +1,5 @@
 'use client';
-import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, Sparkles, Workflow, Zap } from 'lucide-react';
+import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, Sparkles, Workflow, Zap, Store } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
@@ -119,6 +119,7 @@ function PlanoInner() {
         <Meter icon={<Users size={18} />} label="Atendentes" used={u.used.agents} max={L.maxAgents} hard />
         {L.maxFlows != null && <Meter icon={<Workflow size={18} />} label="Fluxos ativos" used={u.used.flows} max={L.maxFlows} hard hint="Rascunhos desativados não contam." />}
         {L.maxQuickReplies != null && <Meter icon={<Zap size={18} />} label="Respostas rápidas" used={u.used.quickReplies} max={L.maxQuickReplies} hard />}
+        {L.maxCompanies != null && <Meter icon={<Store size={18} />} label="Empresas / unidades" used={u.used.companies ?? 0} max={L.maxCompanies} hard />}
         <AiMeter limits={L} />
       </div>
 

@@ -9,6 +9,7 @@ import { Toaster } from '@/components/ui/Toast';
 import { NavigationProgress } from '@/components/layout/NavigationProgress';
 import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
 import { VersionWatcher } from '@/components/layout/VersionWatcher';
+import { NoticePopups } from '@/components/layout/SystemNotices';
 
 /** Shell autenticado: menu lateral + área do módulo. */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -60,6 +61,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div key={pathname} className="flex-1 min-h-0 flex animate-fade-in">{children}</div>
       </div>
       <Toaster />
+      <NoticePopups />
       <VersionWatcher />
     </div>
   );

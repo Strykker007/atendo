@@ -40,14 +40,14 @@ src/
 │       ├── clientes/       Clientes do dono: criar, plano/status, ativar, Entrar como
 │       └── relatorios/     abre com visão pronta (KPIs + 4 gráficos do período); 'Relatório personalizado' expande o construtor (métrica, agrupamento, filtros, tabela, CSV, salvos)
 ├── components/
-│   ├── layout/Sidebar.tsx | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')
-│   ├── chat/ConversationList | ChatPane | TagPicker | QuickRepliesPanel
+│   ├── layout/Sidebar.tsx | CompanySwitcher.tsx (empresa ativa, ver empresas.md) | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')
+│   ├── chat/ConversationList (botão 👥 agrupa a fila por atendente) | ChatPane | TagPicker | QuickRepliesPanel
 │   ├── numbers/ProviderForm | NumberDialogs | QrModal
 │   └── ui/Modal | Toast | Confirm | Page   primitivos: modal, toasts, confirmação, cabeçalho/shell de página
 └── lib/
-    ├── api.ts      fetch com Bearer, refresh automático em 401, cookie de refresh
+    ├── api.ts      fetch com Bearer, header x-company-id (empresa ativa), refresh automático em 401, cookie de refresh
     ├── hooks.ts    todos os useQuery/useMutation + useRealtime (socket → cache)
-    ├── store.ts    zustand: sidebar, painel direito, número/status/tags/conversa selecionados
+    ├── store.ts    zustand: sidebar, painel direito, empresa/número/status/tags/conversa selecionados, agrupar por atendente
     └── utils.ts    cn()
 ```
 
@@ -138,7 +138,7 @@ Duas decisões que não são estéticas:
 - **Trocar de filtro limpa a seleção** (`useEffect` em status/número/origem/atendente). Encerrar em massa o que saiu da tela é fechar no escuro, e não há como desfazer trinta de uma vez.
 - **Só vale o que está visível** (`marcadosVisiveis`): o que foi marcado e sumiu do filtro não entra no pedido.
 
-No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (descrição flexível + valor de largura fixa por linha — o modal alarga para `max-w-2xl` nesse modo, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado).
+No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (por linha: valor de largura fixa à esquerda, descrição flexível, lixeira — o modal alarga para `max-w-2xl` nesse modo, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado). **Nada é obrigatório**: item só com valor vale, e "Comprou" sem valor grava só o desfecho (não vira venda). **Observação (opcional)** fica por último, abaixo do seletor de fluxo a disparar.
 
 Campos em R$ usam `components/ui/MoneyInput` (máscara de caixa: dígitos entram pela direita, exibe "1.500,00", trabalha com `number`). Está no encerramento (itens e valor livre) e no formulário de plano (mensalidade/anuidade, custo, excedentes, teto de IA; R$ por mensagem e por interação de IA com 3 casas).
 
@@ -307,7 +307,7 @@ Ator vazio aparece como **Automação**, nunca em branco: em auditoria, campo va
 - Erros de mutação: `toast.err(err)`; sucesso: `toast.ok('…')` (`components/ui/Toast.tsx`). Confirmações destrutivas usam `ConfirmDialog`, nunca `window.confirm`.
 - `useMe()` dá role/nome do usuário logado; telas escondem ações de admin quando `role === 'agent'` (o back também bloqueia — a UI é só conveniência).
 - Respostas rápidas comunicam com o composer por um `CustomEvent('atendo:insert-text')` — evita acoplar os dois painéis.
-- O `ChatPane` carrega a conversa por id (`useConversation`), não a procura na lista — assim ela não some quando muda de status. Responder uma conversa em *Aguardando* **não troca a aba**: trocar para *Em atendimento* fazia a lista inteira "sumir" (depois de restaurar o histórico tudo volta para a fila, e em *Em atendimento* só estava a recém-respondida). Em vez disso, a conversa aberta que deixa de casar com o filtro fica **fixada no topo** da lista (`ConversationList` → `fixada`, com os dados frescos de `useConversation`) até trocar de conversa ou de filtro. O envio atualiza só a linha dela nas listas em cache (`moverConversaParaTopo`: prévia, hora e topo na ordem *recentes*); as outras linhas ficam intactas e o refetch do socket corrige o resto. *Assumir* continua levando para *Em atendimento* — é ação explícita de posse.
+- O `ChatPane` carrega a conversa por id (`useConversation`), não a procura na lista — assim ela não some quando muda de status. Responder uma conversa em *Aguardando* **não troca a aba**: trocar para *Em atendimento* fazia a lista inteira "sumir" (depois de restaurar o histórico tudo volta para a fila, e em *Em atendimento* só estava a recém-respondida). Em vez disso, a conversa aberta que deixa de casar com o filtro fica **fixada no topo** da lista (`ConversationList` → `fixada`, com os dados frescos de `useConversation`) até trocar de conversa ou de filtro — **exceto quando é encerrada**: fora da aba *Encerradas* a conversa encerrada nunca fica fixada (senão seguia em *Em atendimento* até um F5). Ao encerrar, `useSetStatus` já a tira das listas em cache de outro status e atualiza o status de `['conversation', id]` antes do refetch; o socket `conversation` com `status: 'closed'` faz o mesmo nas telas dos outros atendentes (encerramento por fluxo/sistema incluído). O envio atualiza só a linha dela nas listas em cache (`moverConversaParaTopo`: prévia, hora e topo na ordem *recentes*); as outras linhas ficam intactas e o refetch do socket corrige o resto. *Assumir* e *Reabrir* levam para *Em atendimento*, *Encerrar* leva para *Encerradas* e *Devolver* para *Aguardando* — são ações explícitas sobre a conversa aberta, então a aba acompanha e ela continua aberta (`setStatus(status, true)`).
 - Posse: em *Aguardando* o cabeçalho tem **Assumir**; em *Em atendimento* (dono ou admin) tem **Transferir** (menu com atendentes + *Devolver à fila*). Se outra atendente é dona, o composer vira um aviso. A aba chama-se **Atendendo** para todos os perfis (o atendente comum continua vendo só as dele); admin tem um seletor "Todos / Só as minhas / <atendente>".
 - **Nota interna** (permissão `conversations.internal_note`): passagem de bastão, orientação de orçamento, observações — só a equipe vê, nunca vai ao WhatsApp. Fica sempre à vista como **aba** logo acima do campo: *Mensagem para o cliente* (padrão) | *Nota interna* 🔒 (`AbasDoEnvio`). Também liga por **Alt+N** (usa `e.code`, porque no Mac Alt+N é tecla morta) ou pelo botão "Nota interna" nas barras em que não dá para responder (encerrada, número desconectado, cota). Ligado, o composer vira âmbar com borda tracejada, a aba fica dourada com *"Visível só para a equipe"* e o botão vira **Adicionar nota** (`POST …/notes`); Esc ou a aba *Mensagem para o cliente* saem. O texto da nota é um estado **separado** do da resposta — desligar o modo nunca transforma a nota em mensagem ao cliente. Sem anexo, áudio, assinatura nem resposta rápida com contagem no modo nota. Reseta ao trocar de conversa.
 - Cadeado (conversa de outra pessoa): ninguém responde ao cliente por ela; quem tem a permissão de nota vê o cadeado no lugar do composer e abre o modo nota; quem não tem vê só o aviso de quem está atendendo.

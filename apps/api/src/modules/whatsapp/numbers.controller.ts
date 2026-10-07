@@ -63,7 +63,7 @@ export class NumbersController {
   list(@CurrentUser() user: AuthUser) {
     return this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId, deletedAt: null },
-      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });
   }

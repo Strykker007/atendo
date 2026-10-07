@@ -27,11 +27,11 @@ const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId', none: 'noneFlo
  *
  * Cada desfecho pode ter um fluxo padrão (Configurações → Fluxos padrão): escolher o desfecho
  * já pré-seleciona o fluxo dele, então o caso comum é um clique. Trocar ou pôr "Nenhum" vale
- * só para este encerramento. "Comprou" grava a venda (valor obrigatório, produtos, observações).
- * A venda abre em lista de itens (descrição + valor, total somado); quem preferir troca para
- * texto livre e informa o total à mão.
+ * só para este encerramento. "Comprou" grava a venda quando há valor (produtos e observação
+ * opcionais); sem valor, fica só o desfecho. A venda abre em lista de itens (valor + descrição,
+ * total somado; item só com valor vale); quem preferir troca para texto livre e informa o total.
  */
-export function CloseModal({ conversationId, onClose }: { conversationId: string; onClose: () => void }) {
+export function CloseModal({ conversationId, onClose, onClosed }: { conversationId: string; onClose: () => void; /** encerrou de fato (a tela leva a aba junto) */ onClosed?: () => void }) {
   const setStatus = useSetStatus();
   const flowsFeature = useHasFeature('flows');
   const flows = useFlows();
@@ -70,9 +70,8 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const lista = outcome === 'won' && modoLista;
-    if (lista && itensValidos.some((i) => !i.description)) return toast.err(new Error('Descreva cada item da venda'));
-    const value = outcome === 'won' ? (lista ? totalItens : valor ?? 0) : undefined;
-    if (outcome === 'won' && !(value! > 0)) return toast.err(new Error('Informe o valor da compra'));
+    // nada é obrigatório: sem valor, "Comprou" registra só o desfecho (não entra como venda)
+    const value = outcome === 'won' ? (lista ? totalItens : valor ?? 0) || undefined : undefined;
     try {
       await setStatus.mutateAsync({
         id: conversationId,
@@ -82,7 +81,7 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
         reason: outcome === 'lost' ? motivo || undefined : undefined,
         products: outcome === 'won' && !lista ? produtos.trim() || undefined : undefined,
         // em lista, a API soma os itens e monta o resumo em `products`
-        items: lista ? itensValidos : undefined,
+        items: lista && itensValidos.length ? itensValidos : undefined,
         notes: outcome === 'won' ? observacoes.trim() || undefined : undefined,
         // sem o recurso o servidor decide; com ele, o que está na tela é o que vale ("Nenhum" = null).
         // Antes de carregar as configurações, deixa o servidor aplicar o padrão.
@@ -90,6 +89,7 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
       });
       toast.ok('Atendimento encerrado');
       onClose();
+      onClosed?.();
     } catch (err) { toast.err(err); }
   }
 
@@ -114,18 +114,16 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
         {outcome === 'won' && (
           <>
             {modoLista ? (
-              <Field label="Itens da venda *" hint="O total soma faturamento, ticket médio e desempenho por atendente.">
+              <Field label="Itens da venda" hint="Opcional. O total soma faturamento, ticket médio e desempenho por atendente.">
                 <div className="space-y-2">
                   {itens.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-2">
+                      <MoneyInput className="w-36 shrink-0" nullable value={item.valor} onChange={(v) => mudarItem(idx, { valor: v })} aria-label="Valor do item" autoFocus={idx === 0} />
                       {/* min-w-0: sem ele o input não encolhe abaixo da largura intrínseca e a descrição fica espremida */}
-                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Produto ou serviço" value={item.descricao} onChange={(e) => mudarItem(idx, { descricao: e.target.value })} maxLength={200} autoFocus={idx === 0} />
-                      <MoneyInput className="w-40 shrink-0" nullable value={item.valor} onChange={(v) => mudarItem(idx, { valor: v })} aria-label="Valor do item" />
-                      {itens.length > 1 && (
-                        <button type="button" aria-label="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="shrink-0 p-2 rounded-lg text-muted hover:text-danger hover:bg-field">
-                          <Trash2 size={14} />
-                        </button>
-                      )}
+                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Produto ou serviço (opcional)" value={item.descricao} onChange={(e) => mudarItem(idx, { descricao: e.target.value })} maxLength={200} />
+                      <button type="button" aria-label="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="shrink-0 p-2 rounded-lg text-muted hover:text-danger hover:bg-field">
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   ))}
                   <div className="flex items-center justify-between">
@@ -138,8 +136,8 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
               </Field>
             ) : (
               <>
-                <Field label="Valor da compra (R$) *" hint="É o que soma faturamento, ticket médio e desempenho por atendente.">
-                  <MoneyInput nullable value={valor} onChange={setValor} required autoFocus />
+                <Field label="Valor da compra (R$)" hint="Opcional. É o que soma faturamento, ticket médio e desempenho por atendente.">
+                  <MoneyInput nullable value={valor} onChange={setValor} autoFocus />
                 </Field>
                 <Field label="Produtos / descrição">
                   <textarea className={`${inputCls} resize-none`} rows={3} placeholder="O que foi comprado" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
@@ -149,9 +147,6 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
             <button type="button" onClick={() => setModoLista((m) => !m)} className="text-[12px] text-muted underline hover:text-ink">
               {modoLista ? 'Mudar para campo de texto livre' : 'Mudar para lista de itens'}
             </button>
-            <Field label="Observações">
-              <textarea className={`${inputCls} resize-none`} rows={2} placeholder="Forma de pagamento, entrega, desconto…" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
-            </Field>
           </>
         )}
 
@@ -168,6 +163,13 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
               <option value="">Nenhum</option>
               {ativos.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
+          </Field>
+        )}
+
+        {/* por último, abaixo do fluxo: é o fecho do formulário, não parte da venda */}
+        {outcome === 'won' && (
+          <Field label="Observação (opcional)">
+            <textarea className={`${inputCls} resize-none`} rows={2} placeholder="Forma de pagamento, entrega, desconto…" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
           </Field>
         )}
 

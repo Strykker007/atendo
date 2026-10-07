@@ -416,7 +416,11 @@ export class ConversationsService {
     // conversa fechada: sendAsSystem exige aberta → abre, envia, fecha de novo (não polui a fila)
     if (conv.status === 'closed') await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'in_progress' } });
     const m = await this.sendAsSystem(conv.id, text, undefined, undefined, { idempotencyKey: opts?.idempotencyKey });
-    if (opts?.closeAfter !== false) await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date(), ...BOT_PAUSE_CLEAR } });
+    if (opts?.closeAfter !== false) {
+      const fechada = await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date(), ...BOT_PAUSE_CLEAR } });
+      // o envio acima emitiu a conversa aberta; sem este aviso ela ficava em "Em atendimento" até o F5
+      this.gateway.emitConversation(fechada.tenantId, fechada);
+    }
     return m;
   }
 
@@ -1060,14 +1064,15 @@ export class ConversationsService {
     id: string,
     status: ConversationStatus,
     userId: string,
-    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string; products?: string; items?: { description: string; value: number }[]; notes?: string },
+    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string; products?: string; items?: { description?: string; value: number }[]; notes?: string },
   ) {
     // venda em lista: o total é a soma dos itens, calculada aqui — não confia na conta do front
-    const itens = outcome?.outcome === 'won' ? outcome.items?.map((i) => ({ description: i.description.trim(), value: Math.round(i.value * 100) / 100 })).filter((i) => i.description) : undefined;
+    // item só com valor (sem descrição) vale; linha vazia é descartada
+    const itens = outcome?.outcome === 'won' ? outcome.items?.map((i) => ({ description: i.description?.trim() ?? '', value: Math.round(i.value * 100) / 100 })).filter((i) => i.description || i.value > 0) : undefined;
     if (itens?.length) {
       const total = Math.round(itens.reduce((a, i) => a + i.value * 100, 0)) / 100;
-      if (!(total > 0)) throw new BadRequestException('Informe o valor da compra');
-      outcome = { ...outcome!, value: total, products: itens.map((i) => i.description).join('; ').slice(0, 500) };
+      const descricoes = itens.map((i) => i.description).filter(Boolean);
+      outcome = { ...outcome!, value: total > 0 ? total : undefined, products: descricoes.length ? descricoes.join('; ').slice(0, 500) : outcome!.products };
     }
     // o desfecho só faz sentido ao encerrar; reabrir limpa, porque o atendimento continua
     const desfecho =
@@ -1076,7 +1081,7 @@ export class ConversationsService {
         : outcome && outcome.outcome !== 'none'
           ? {
               outcome: outcome.outcome,
-              outcomeValue: outcome.outcome === 'won' && outcome.value != null ? new Prisma.Decimal(outcome.value) : null,
+              outcomeValue: outcome.outcome === 'won' && outcome.value ? new Prisma.Decimal(outcome.value) : null,
               outcomeReason: outcome.outcome === 'lost' ? (outcome.reason?.trim() || null) : null,
               outcomeAt: new Date(),
               outcomeById: userId,

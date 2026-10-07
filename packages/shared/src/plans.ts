@@ -26,6 +26,8 @@ export interface PlanLimits {
   maxFlows?: number | null;
   /** respostas rápidas cadastradas. Ausente/`null` = ilimitado */
   maxQuickReplies?: number | null;
+  /** empresas/unidades cadastradas (docs/empresas.md). Ausente/`null` = ilimitado */
+  maxCompanies?: number | null;
   /**
    * Qual unidade conta para a quota deste plano. Ausente = `messages` (planos antigos).
    * O ledger registra **as duas** sempre; isto decide qual limita e qual vira excedente.
@@ -78,8 +80,8 @@ export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
 };
 
 /** Limites de quantidade checados na criação/ativação (ver `PlanLimitGuard` na API). */
-export type CountLimit = 'maxNumbers' | 'maxAgents' | 'maxFlows' | 'maxQuickReplies';
-export const COUNT_LIMIT_LABEL: Record<CountLimit, string> = { maxNumbers: 'números de WhatsApp', maxAgents: 'usuários', maxFlows: 'fluxos ativos', maxQuickReplies: 'respostas rápidas' };
+export type CountLimit = 'maxNumbers' | 'maxAgents' | 'maxFlows' | 'maxQuickReplies' | 'maxCompanies';
+export const COUNT_LIMIT_LABEL: Record<CountLimit, string> = { maxNumbers: 'números de WhatsApp', maxAgents: 'usuários', maxFlows: 'fluxos ativos', maxQuickReplies: 'respostas rápidas', maxCompanies: 'empresas' };
 /** Teto do limite; `null` = ilimitado. Campo ausente (plano antigo) também é ilimitado. */
 export const countLimit = (limits: PlanLimits, key: CountLimit): number | null => {
   const v = limits[key];
