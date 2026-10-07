@@ -5,7 +5,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useAgents, useNumbers, useUsage, useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, type Company } from '@/lib/hooks';
+import { useAgents, useNumbers, useUsage, useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, useAdminCompanies, useAdminCompanyOptions, useAdminCreateCompany, useAdminUpdateCompany, useAdminDeleteCompany, type Company, type CompanyInput } from '@/lib/hooks';
 
 type Draft = { id?: string; name: string; cnpj: string; description: string; numberIds: string[]; userIds: string[] };
 
@@ -19,11 +19,32 @@ function mascaraCnpj(v: string) {
     .replace(/(\d{4})(\d)/, '$1-$2');
 }
 
+type Mut<T> = { mutateAsync: (v: T) => Promise<unknown>; isPending: boolean };
+interface Source {
+  companies: Company[];
+  loading: boolean;
+  numbers: { id: string; label: string; phone: string }[];
+  people: { id: string; name: string; isActive: boolean }[];
+  max: number | null;
+  create: Mut<CompanyInput>;
+  update: Mut<Partial<CompanyInput> & { id: string }>;
+  remove: Mut<string>;
+  /** dono do sistema: pode passar do limite do plano (só avisa) */
+  owner?: boolean;
+}
+
 /**
  * Empresas/unidades (matriz, filial Centro…): cada uma agrupa números de WhatsApp, e quem opera
  * a unidade enxerga só as conversas desses números. Quantas cabem vem do plano. Ver docs/empresas.md.
+ *
+ * Sem `tenantId`: a conta logada (Configurações). Com `tenantId`: o dono mexendo no cliente pela
+ * tela Clientes, sem "Entrar como".
  */
-export function CompaniesSection() {
+export function CompaniesSection({ tenantId }: { tenantId?: string } = {}) {
+  return tenantId ? <OwnerCompanies tenantId={tenantId} /> : <TenantCompanies />;
+}
+
+function TenantCompanies() {
   const companies = useCompanies();
   const numbers = useNumbers();
   const agents = useAgents();
@@ -31,12 +52,23 @@ export function CompaniesSection() {
   const create = useCreateCompany();
   const update = useUpdateCompany();
   const remove = useDeleteCompany();
+  return <CompaniesView companies={companies.data ?? []} loading={companies.isLoading} numbers={numbers.data ?? []} people={agents.data ?? []} max={usage.data?.limits?.maxCompanies ?? null} create={create} update={update} remove={remove} />;
+}
+
+function OwnerCompanies({ tenantId }: { tenantId: string }) {
+  const companies = useAdminCompanies(tenantId);
+  const opts = useAdminCompanyOptions(tenantId);
+  const create = useAdminCreateCompany(tenantId);
+  const update = useAdminUpdateCompany(tenantId);
+  const remove = useAdminDeleteCompany(tenantId);
+  return <CompaniesView owner companies={companies.data ?? []} loading={companies.isLoading} numbers={opts.data?.numbers ?? []} people={opts.data?.users ?? []} max={opts.data?.maxCompanies ?? null} create={create} update={update} remove={remove} />;
+}
+
+function CompaniesView({ companies: lista, loading, numbers, people, max, create, update, remove, owner }: Source) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [deleting, setDeleting] = useState<Company | null>(null);
-  const lista = companies.data ?? [];
-  const max = usage.data?.limits?.maxCompanies ?? null;
   const cheio = max !== null && lista.length >= max;
-  const pessoas = (agents.data ?? []).filter((a) => a.isActive || editing?.userIds.includes(a.id));
+  const pessoas = people.filter((a) => a.isActive || editing?.userIds.includes(a.id));
   // número de outra empresa aparece com o nome dela: marcar aqui MOVE o número
   const donoDoNumero = new Map(lista.flatMap((c) => c.numbers.map((n) => [n.id, c] as const)));
 
@@ -70,14 +102,16 @@ export function CompaniesSection() {
           <p className="text-sm text-muted">
             Separe matriz e filiais. Cada empresa reúne números de WhatsApp; quem é vinculado a ela vê só as conversas desses números
             e alterna entre as suas unidades pelo seletor no menu. Sem empresas, todo mundo vê todos os números.
-            {max !== null && <> Seu plano permite <b className="text-ink">{max}</b> empresa(s).</>}
+            {max !== null && (owner
+              ? <> O plano deste cliente permite <b className="text-ink">{max}</b> empresa(s){lista.length > max && <span className="text-warn-ink"> — já está acima, por decisão sua</span>}.</>
+              : <> Seu plano permite <b className="text-ink">{max}</b> empresa(s).</>)}
           </p>
         </div>
-        <Button onClick={() => abrir()} icon={<Plus size={16} />} disabled={cheio} title={cheio ? 'Limite do plano atingido' : undefined}>Nova empresa</Button>
+        <Button onClick={() => abrir()} icon={<Plus size={16} />} disabled={cheio && !owner} title={cheio ? (owner ? 'Acima do limite do plano — você pode criar mesmo assim' : 'Limite do plano atingido') : undefined}>Nova empresa</Button>
       </div>
 
-      {companies.isLoading && <div className="h-12 rounded-lg bg-field animate-pulse" />}
-      {!companies.isLoading && lista.length === 0 && <p className="text-sm text-muted rounded-lg bg-field px-3 py-3">Nenhuma empresa cadastrada.</p>}
+      {loading && <div className="h-12 rounded-lg bg-field animate-pulse" />}
+      {!loading && lista.length === 0 && <p className="text-sm text-muted rounded-lg bg-field px-3 py-3">Nenhuma empresa cadastrada.</p>}
 
       <ul className="divide-y divide-line">
         {lista.map((c) => (
@@ -105,8 +139,8 @@ export function CompaniesSection() {
             </div>
             <Field label="Números" hint="Um número pertence a uma empresa só: marcar aqui tira ele da outra.">
               <div className="max-h-44 overflow-y-auto rounded-lg border border-line divide-y divide-line">
-                {(numbers.data ?? []).length === 0 && <div className="px-3 py-2 text-xs text-muted">Nenhum número cadastrado.</div>}
-                {numbers.data?.map((n) => {
+                {numbers.length === 0 && <div className="px-3 py-2 text-xs text-muted">Nenhum número cadastrado.</div>}
+                {numbers.map((n) => {
                   const outra = donoDoNumero.get(n.id);
                   return (
                     <label key={n.id} className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink cursor-pointer hover:bg-field">

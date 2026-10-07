@@ -99,6 +99,9 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/companies` | todos | Empresas do cliente com números e pessoas vinculadas |
 | GET | `/companies/mine` | todos | Empresas que o usuário pode escolher no seletor (`[]` = cliente sem empresas) |
 | POST / PATCH / DELETE | `/companies[/:id]` | `settings.manage` | `{name, cnpj?, description?, numberIds?, userIds?}` (listas substituem; marcar um número tira ele da outra empresa). `POST` checa `maxCompanies` do plano. Excluir deixa os números sem empresa |
+| GET | `/admin/tenants/:tenantId/companies` | super_admin | Empresas do cliente (mesmo formato de `GET /companies`) |
+| GET | `/admin/tenants/:tenantId/companies/options` | super_admin | `{numbers[{id,label,phone}], users[{id,name,isActive}], maxCompanies}` para o formulário |
+| POST / PATCH / DELETE | `/admin/tenants/:tenantId/companies[/:id]` | super_admin | Mesmo corpo de `/companies`. **Sem** o limite `maxCompanies` do plano (exceção do dono) |
 | **Tags** | | | |
 | GET | `/tags` | todos | Com contagem de conversas |
 | POST / PATCH / DELETE | `/tags[/:id]` | `tags.manage` | `{name, color, isKanban?, position?}`. Lista vem na ordem do Kanban (`position`, nome). Emite `kanban` |

@@ -45,6 +45,10 @@ vai com o header.
 - **Cadastro** em *Configurações → Empresas e unidades* (`settings.manage`): nome, CNPJ,
   descrição, quais números e quais pessoas.
 - **Lista de conversas**: o seletor de número mostra só os números da empresa ativa.
+- **Pelo dono** (*Clientes → Empresas*, sem "Entrar como"): o mesmo formulário (`CompaniesSection
+  tenantId=…`), via `/admin/tenants/:tenantId/companies` (super_admin). O dono **não** esbarra no
+  `maxCompanies`: o limite é para o autoatendimento do cliente, e passar dele é decisão do dono — a
+  tela mostra o limite do plano e avisa quando o cliente está acima.
 
 ## Fila agrupada por atendente
 

@@ -2,7 +2,8 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Building2, Eye, Power, Pencil } from 'lucide-react';
+import { Plus, Building2, Eye, Power, Pencil, Store } from 'lucide-react';
+import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -29,6 +30,8 @@ export default function ClientesPage() {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [editando, setEditando] = useState<TenantRow | null>(null);
+  // empresas/unidades do cliente, direto daqui (sem "Entrar como")
+  const [empresasDe, setEmpresasDe] = useState<TenantRow | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   if (me.data && me.data.role !== 'super_admin') return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
@@ -83,6 +86,7 @@ export default function ClientesPage() {
                     <td className="px-3 py-2.5 text-right tnum">{t._count.conversations}</td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                       <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditando(t)} title="Editar dados do cliente">Editar</Button>
+                      <Button size="sm" variant="ghost" className="ml-1" icon={<Store size={13} />} onClick={() => setEmpresasDe(t)} title="Empresas e unidades do cliente">Empresas</Button>
                       <Button size="sm" variant="ghost" className="ml-1" icon={<Power size={13} />} onClick={() => patch(t, { isActive: !t.isActive })} loading={busy === t.id && update.isPending} title={t.isActive ? 'Desativar cliente' : 'Ativar cliente'}>{t.isActive ? 'Desativar' : 'Ativar'}</Button>
                       <Button size="sm" className="ml-1" icon={<Eye size={13} />} onClick={() => enter(t)} loading={busy === t.id && impersonate.isPending} loadingText="Entrando…">Entrar como</Button>
                     </td>
@@ -95,6 +99,9 @@ export default function ClientesPage() {
       )}
       <CreateTenantModal open={creating} onClose={() => setCreating(false)} />
       {editando && <EditTenantModal tenant={editando} onClose={() => setEditando(null)} />}
+      <Modal open={!!empresasDe} onClose={() => setEmpresasDe(null)} title={`Empresas — ${empresasDe?.name ?? ''}`} width="max-w-2xl">
+        {empresasDe && <CompaniesSection tenantId={empresasDe.id} />}
+      </Modal>
     </PageShell>
   );
 }
