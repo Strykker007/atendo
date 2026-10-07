@@ -245,6 +245,7 @@ export class FlowEngineService {
       paused,
       newAttendance: isNewConversation || !!situation?.isNewContact || !!situation?.returningAfterClosed,
       activeRun: !!active,
+      hoursSinceLastMessage: situation?.hoursSinceLastMessage,
     });
 
     const auto = new AutoReply(this, conversation, now);

@@ -13,6 +13,7 @@ import { ConversationsGateway } from './conversations.gateway';
 import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './conversations.service';
 import { decidirEntrada, voltandoDepoisDeEncerrado } from './reopen';
 import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
+import { planRemoval } from '../whatsapp/number-removal';
 
 /**
  * Tudo que **entra** pelo provider: mensagem recebida, mensagem digitada no celular, confirmação
@@ -455,14 +456,19 @@ export class InboundService {
     // Logo após parear, o WhatsApp reinicia o socket ('connecting'): é sincronização, não queda.
     // Um número já conectado não regride por causa disso.
     if (c.transient && number.status === 'connected') return;
-    if (c.loggedOut) this.log.warn(`Número ${number.label} (${number.phone}) foi desconectado pelo celular (dispositivo removido)`);
+    // 401 com o número CONECTADO = o WhatsApp (ou alguém no celular) removeu o aparelho. O
+    // "Desconectar" do painel marca `disconnected` antes de chamar o provider, então não cai aqui.
+    const removido = c.loggedOut && number.status === 'connected' ? planRemoval(number, new Date()) : null;
+    if (removido) this.log.warn(`Número ${number.label} (${number.phone}) removido pelo WhatsApp (401 device_removed) — queda ${removido.waRemovedCount} em 24h, reconexão em pausa até ${removido.reconnectBlockedUntil.toISOString()}`);
     // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
     const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
     // Aquecimento desligado (a pedido): número novo não começa mais com teto de envios por dia.
-    const warmup: { warmupStartedAt?: Date } = {};
-    await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...(phone && { phone }) } }).catch(async (err) => {
+    // O aquecimento POR HORA (number-warmup.ts) começa quando um QR novo é lido — reinício de
+    // servidor ou oscilação de rede não reabre as 72h.
+    const warmup: { warmupStartedAt?: Date; sessionStartedAt?: Date } = c.status === 'connected' && number.status === 'pending_qr' ? { sessionStartedAt: new Date() } : {};
+    await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido, ...(phone && { phone }) } }).catch(async (err) => {
       // conflito de unique (tenantId, phone): mantém o telefone antigo, só atualiza status
-      if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup } });
+      if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido } });
       else throw err;
     });
     this.gateway.emitNumber(number.tenantId, { id: number.id, status: c.status, qrCode: c.qrCode });

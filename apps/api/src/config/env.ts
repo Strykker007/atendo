@@ -47,6 +47,15 @@ const schema = z.object({
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
   STRIPE_CURRENCY: z.string().default('brl'),
+  /**
+   * Asaas (PIX + cartão). Com a chave preenchida, o Asaas vira o gateway dos checkouts novos;
+   * o Stripe continua atendendo quem já assina por lá (docs/05).
+   * Sandbox: https://api-sandbox.asaas.com/v3
+   */
+  ASAAS_API_KEY: z.string().optional().default(''),
+  ASAAS_BASE_URL: z.string().url().default('https://api.asaas.com/v3'),
+  /** token cadastrado no webhook do Asaas; chega no header `asaas-access-token` */
+  ASAAS_WEBHOOK_TOKEN: z.string().optional().default(''),
   RESEND_API_KEY: z.string().optional().default(''),
   // ---- IA ----
   /** none = IA desligada (o front esconde os recursos) */

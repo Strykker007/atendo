@@ -17,6 +17,8 @@ import { SendPacer } from './send-pacer';
 import { countsTowardDailyLimit } from './sending-policy';
 import { isTransientSendError, retryDelayMs } from './providers/provider-error';
 import { expiredReason, headOf, planSend, promoteNext } from './send-queue';
+import { humanTiming, typingMs, warmupPhase } from './number-warmup';
+import type { NumberContext } from './providers/provider.interface';
 
 /**
  * Único lugar que entrega mensagens ao provider (docs/envio.md). Recebe mensagens já
@@ -65,7 +67,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     const numberId = message.numberId ?? message.conversation.numberId;
     const num = await this.prisma.whatsAppNumber.findUniqueOrThrow({
       where: { id: numberId },
-      select: { id: true, tenantId: true, provider: true, status: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true, sendLimits: true },
+      select: { id: true, tenantId: true, provider: true, status: true, sendDelay: true, sendDailyLimit: true, warmupStartedAt: true, sendLimits: true, sessionStartedAt: true },
     });
     if (num.tenantId !== tenantId) {
       const reason = 'Número de outro cliente — envio bloqueado';
@@ -107,6 +109,16 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
         return this.later(job, token, Date.now() + plan.delayMs, { messageId: job.data.messageId, minGapMs: job.data.minGapMs });
     }
 
+    // ---- humanização: o robô "lê" antes de começar a digitar ----
+    // tempo de reação contado da última mensagem do contato (na 2ª mensagem seguida já passou);
+    // esperado com o job adiado, sem segurar o worker. Ver humanTiming.
+    const automatico = !message.authorId && num.provider !== 'meta';
+    const humano = automatico ? humanTiming((message.text ?? '').length) : null;
+    if (humano && !job.data.reacted && !job.data.pacedUntil && message.conversation.lastInboundAt) {
+      const wait = humano.reactMs - (Date.now() - message.conversation.lastInboundAt.getTime());
+      if (wait > 0) return this.later(job, token, Date.now() + wait, { ...job.data, reacted: true });
+    }
+
     // ---- proteção do número (bloqueio/banimento) ----
     // teto do dia e aquecimento valem só para envio proativo; resposta de atendimento nunca trava
     const proativo = countsTowardDailyLimit(message.conversation.lastInboundAt);
@@ -118,9 +130,24 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       await this.next(message.conversationId);
       throw new UnrecoverableError(day.reason!);
     }
+    // aquecimento da sessão (QR lido há < 72h): poucos contatos NOVOS por hora; quem já recebeu
+    // nesta hora segue direto. Não reserva vaga: volta para a fila e tenta de novo na hora certa.
+    const aquecendo = warmupPhase(num);
+    if (aquecendo && !job.data.pacedUntil) {
+      const wait = await this.pacer.claimWarmupConversation(num.id, message.conversation.contactId, aquecendo.newConvPerHour);
+      if (wait > 0) {
+        this.log.warn(`Número ${num.id} aquecendo (fase ${aquecendo.phase}, ${aquecendo.newConvPerHour} contatos novos/h): envio ${message.id} adiado ${Math.round(wait / 1000)}s`);
+        return this.later(job, token, Date.now() + wait, { messageId: job.data.messageId, minGapMs: job.data.minGapMs });
+      }
+    }
     // reserva a vaga uma única vez; nas reentradas o job já tem a dele
     if (!job.data.pacedUntil) {
-      const { waitMs, burst } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits, minGapMs: job.data.minGapMs });
+      // sem autor = automático (fluxo, boas-vindas, lembrete, campanha): espaçamento de 4–10 s e teto por hora
+      const automated = !message.authorId;
+      // aquecendo: o robô tem teto por hora menor (o menor entre a fase e o configurado na conexão)
+      const ritmo = aquecendo ? { ...limits, autoPerHour: Math.min(limits.autoPerHour, aquecendo.autoPerHour) } : limits;
+      const { waitMs, burst, autoCapped } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits: ritmo, minGapMs: job.data.minGapMs, automated, provider: num.provider, warmupGapMs: aquecendo?.minGapMs });
+      if (autoCapped) this.log.warn(`Número ${num.id}: teto de ${ritmo.autoPerHour} automáticas/h atingido, envio ${message.id} adiado ${Math.round(waitMs / 1000)}s`);
       if (burst) this.log.warn(`Rajada na conversa ${message.conversationId}: envio ${message.id} adiado ${Math.round(waitMs / 1000)}s (limite ${limits.convBurstMax}/${limits.convBurstWindowSec}s)`);
       if (waitMs > 0) {
         const until = Date.now() + waitMs;
@@ -132,7 +159,10 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
 
     const ctx = await this.numbers.context(numberId);
     const provider = this.registry.get(ctx.provider);
-    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string; voice?: boolean };
+    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string; voice?: boolean; simulateTypingChars?: number };
+    // envio do atendente que ninguém digitou (resposta rápida, encaminhada, agendada, só mídia):
+    // "digitando…" pelo tempo de escrever o texto, sem a reação (ele já está na conversa)
+    const simulado = message.authorId && num.provider !== 'meta' && typeof raw.simulateTypingChars === 'number' ? humanTiming(raw.simulateTypingChars).typingMs : undefined;
 
     const outbound: OutboundMessage = {
       to: message.conversation.contact.phone,
@@ -143,7 +173,17 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       media: message.mediaUrl ? { url: message.mediaUrl, mimeType: message.mediaMime ?? undefined, fileName: message.mediaName ?? undefined, caption: message.text ?? undefined, voice: raw.voice } : undefined,
       quotedExternalId: message.quotedId ?? undefined,
       template: raw.template,
+      // humanização: o automático aparece "digitando…" pelo tempo que uma pessoa levaria para
+      // escrever o texto (o atendente já digitou de verdade); mídia sem texto usa o "gravando" curto
+      typingMs: humano ? (message.text ? humano.typingMs : typingMs(0)) : simulado,
     };
+
+    // humanização: quem responde está online (sem isto o "digitando" não aparece — a instância
+    // conecta offline) e leu antes — marca como lida a última recebida da conversa
+    if (num.provider !== 'meta') {
+      await this.numbers.markOnline(numberId);
+      await this.markLastInboundRead(provider, ctx, message.conversationId, message.conversation.contact.phone);
+    }
 
     let result;
     try {
@@ -197,6 +237,16 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       this.log.error(`Uso não registrado para ${message.id} (mensagem foi entregue): ${err instanceof Error ? err.message : err}`);
     }
     await this.next(message.conversationId);
+  }
+
+  /** Marca a última recebida da conversa como lida no provider (uma vez por mensagem). Nunca derruba o envio. */
+  private async markLastInboundRead(provider: { markRead(ctx: NumberContext, id: string, phone?: string): Promise<void> }, ctx: NumberContext, conversationId: string, phone: string) {
+    try {
+      const last = await this.prisma.message.findFirst({ where: { conversationId, direction: 'in', externalId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { externalId: true } });
+      if (last?.externalId && (await this.pacer.shouldMarkRead(conversationId, last.externalId))) await provider.markRead(ctx, last.externalId, phone);
+    } catch (err) {
+      this.log.debug(`marcar como lida: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /** Devolve o job para a fila até `until` (não conta como tentativa). */

@@ -8,6 +8,7 @@ import { UsageService, periodOf } from './usage.service';
 import { MailService } from '../../common/mail/mail.service';
 import { aReajustar, porExtenso } from './reprice';
 import { freePeriod, rollMonthly } from './plan-rules';
+import { AsaasService } from './asaas.service';
 
 /** Price do Stripe de um plano: anual cobra `priceYear` por ano; o resto, a mensalidade. */
 const stripePriceOf = (p: Plan) =>
@@ -37,6 +38,7 @@ export class StripeService {
     private readonly prisma: PrismaService,
     private readonly usage: UsageService,
     private readonly mail: MailService,
+    private readonly asaas: AsaasService,
   ) {}
 
   private get client(): Stripe {
@@ -65,6 +67,9 @@ export class StripeService {
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
 
     // já tem assinatura Stripe ativa → troca de plano direto na assinatura (proration), sem novo checkout
+    if (sub?.externalId && sub.gateway === 'asaas' && ['active', 'past_due', 'trialing', 'suspended'].includes(sub.status)) {
+      throw new BadRequestException('Sua assinatura é cobrada pelo Asaas (PIX/cartão). Fale com o suporte para migrar.');
+    }
     if (sub?.externalId && ['active', 'past_due', 'trialing'].includes(sub.status)) {
       const s = await this.client.subscriptions.retrieve(sub.externalId);
       await this.client.subscriptions.update(sub.externalId, {
@@ -165,8 +170,8 @@ export class StripeService {
 
     await this.prisma.subscription.upsert({
       where: { tenantId },
-      create: { tenantId, planId: plan?.id ?? existing?.planId ?? (await this.prisma.plan.findFirstOrThrow()).id, status, externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil, priceMonth: cobrado },
-      update: { ...(plan && { planId: plan.id }), status, externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil, canceledAt: s.canceled_at ? new Date(s.canceled_at * 1000) : null, ...(cobrado !== undefined && { priceMonth: cobrado }) },
+      create: { tenantId, planId: plan?.id ?? existing?.planId ?? (await this.prisma.plan.findFirstOrThrow()).id, status, gateway: 'stripe', externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil, priceMonth: cobrado },
+      update: { ...(plan && { planId: plan.id }), status, gateway: 'stripe', externalId: s.id, currentPeriodStart: start, currentPeriodEnd: end, cancelAtPeriodEnd: s.cancel_at_period_end, graceUntil, canceledAt: s.canceled_at ? new Date(s.canceled_at * 1000) : null, ...(cobrado !== undefined && { priceMonth: cobrado }) },
     });
     this.log.log(`assinatura ${s.id} → tenant ${tenantId}: ${status}`);
   }
@@ -279,13 +284,18 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
     const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: planId } });
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
     if (plan.isFree) {
-      if (sub?.externalId && this.enabled && ['active', 'past_due', 'trialing', 'suspended'].includes(sub.status)) {
-        await this.client.subscriptions.cancel(sub.externalId, { prorate: false });
-        this.log.log(`tenant ${tenantId}: assinatura ${sub.externalId} cancelada no Stripe (plano gratuito ${plan.name})`);
+      if (sub?.externalId && ['active', 'past_due', 'trialing', 'suspended'].includes(sub.status)) {
+        if (sub.gateway === 'asaas') {
+          await this.asaas.cancelSubscription(sub.externalId);
+          this.log.log(`tenant ${tenantId}: assinatura ${sub.externalId} cancelada no Asaas (plano gratuito ${plan.name})`);
+        } else if (this.enabled) {
+          await this.client.subscriptions.cancel(sub.externalId, { prorate: false });
+          this.log.log(`tenant ${tenantId}: assinatura ${sub.externalId} cancelada no Stripe (plano gratuito ${plan.name})`);
+        }
       }
       const { start, end } = freePeriod(plan.durationDays);
       // sempre `active`: o status que vinha do formulário era o do plano anterior (ex.: past_due)
-      const data = { planId, status: 'active' as const, currentPeriodStart: start, currentPeriodEnd: end, priceMonth: 0, externalId: null, cancelAtPeriodEnd: false, graceUntil: null, canceledAt: null };
+      const data = { planId, status: 'active' as const, currentPeriodStart: start, currentPeriodEnd: end, priceMonth: 0, externalId: null, gateway: null, cancelAtPeriodEnd: false, graceUntil: null, canceledAt: null };
       return this.prisma.subscription.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
     }
     const now = new Date();
@@ -412,7 +422,10 @@ Seu plano e seu uso: ${env.WEB_ORIGIN}/plano`,
       for (const alvo of alvos) {
         const sub = plan.subscriptions.find((x) => x.id === alvo.id)!;
         try {
-          if (sub.externalId && plan.stripePriceId && this.enabled) {
+          if (sub.externalId && sub.gateway === 'asaas') {
+            // no Asaas o valor mora na assinatura: muda só as próximas cobranças
+            await this.asaas.updateSubscriptionValue(sub.externalId, plan.billingCycle === 'yearly' ? Number(plan.priceYear ?? 0) : novo);
+          } else if (sub.externalId && plan.stripePriceId && this.enabled) {
             const atual = await this.client.subscriptions.retrieve(sub.externalId);
             const item = atual.items.data[0];
             if (item) {

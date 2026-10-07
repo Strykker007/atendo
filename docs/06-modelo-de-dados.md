@@ -20,7 +20,7 @@ provider_pricing (global, sem tenant)
 
 ### Tenancy
 
-**tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` criado no primeiro checkout.
+**tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente.
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA.
 
@@ -64,7 +64,7 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 **plans** — `limits` jsonb (`PlanLimits`). `billingModel` informativo (`fixed | usage | hybrid`). `stripePriceId` (`price_…`) criado por `pnpm stripe:sync` (só `monthly`/`yearly`). `billingCycle` (`free | monthly | yearly | custom`), `isFree` (= `billingCycle = free`), `durationDays` (dias de gratuidade; null = permanente), `priceYear` (anual; `priceMonth` vira o equivalente mensal). Ver docs/05.
 
-**subscriptions** — 1:1 com tenant. `status`: `trialing | active | past_due | suspended | canceled`. `externalId` = `sub_…` do Stripe; `cancelAtPeriodEnd`; `graceUntil`.
+**subscriptions** — 1:1 com tenant. `status`: `trialing | active | past_due | suspended | canceled`. `externalId` = id da assinatura no gateway, e `gateway` (`stripe | asaas | null`) diz qual — null = sem cobrança online (atribuída pelo dono). `currentPeriodEnd` = próximo vencimento. `cancelAtPeriodEnd`; `graceUntil`.
 
 **provider_pricing** — histórico de preços por `(provider, country, category)`; sempre inserir, nunca editar.
 
@@ -78,7 +78,7 @@ entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` qua
 
 **usage_alerts** — quais alertas já disparamos (única por tenant/período/métrica/threshold).
 
-**invoices** — espelho da fatura do Stripe: base + excedente, `externalId` (`in_…`), `hostedUrl`. Única por tenant/período.
+**invoices** — espelho da fatura do Stripe (`in_…`) ou da cobrança do Asaas (`pay_…`; excedente vira cobrança avulsa com `baseAmount = 0`): base + excedente, `externalId`, `hostedUrl` (link de pagamento). Única por tenant/período.
 
 ### Relatórios
 
@@ -126,7 +126,7 @@ Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
 relatórios), chave `attendanceActive` (feriado/férias: vale a faixa Fechado sem mexer nos
 horários) + `attendanceChangedAt`, fluxos padrão (inclusive `wonFlowId`/`lostFlowId`/`noneFlowId`,
 o fluxo de encerramento por resultado) e **boas-vindas** (`welcomeEnabled`,
-`welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)).
+`welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; nasce com Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`).
 
 **business_schedules** — quadros de horários ([Horários](horarios.md)): `name`, `timezone`,
 `isDefault` (um por cliente) e `config` (JSON `ScheduleConfig`: faixas, Fechado, grade semanal,
@@ -150,5 +150,7 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 **scheduled_messages** — mensagem que o atendente agendou na conversa (`userId` = autor, `content`, anexo opcional por `mediaKey`, `scheduledFor`, `status` `ScheduledMessageStatus`: pending, sent, cancelled, failed + `error`, `messageId`). Job de 1 minuto envia pelo caminho do chat. Ver [Agendamento de mensagens](agendamento-de-mensagens.md).
 
 **phonebook_entries** — agenda do celular de cada número (`numberId`, `phone`, `name`, `previousName` = nome antes da última troca, único por número + telefone), vinda da sincronização de contatos da Evolution. **Não é contato** e não aparece no painel; serve para o contato nascer com o nome da agenda. Cai junto com o número (cascade). `searchText` (também em **contacts**) é coluna **gerada** no banco só para a [busca textual](07-api.md#busca-textual-de-contatos), com índice GIN `pg_trgm`; o `PrismaService` a omite das respostas. Ver [providers › De onde vem o nome do contato](04-providers-whatsapp.md#de-onde-vem-o-nome-do-contato-contactsnamesource).
+
+**contacts.optOutAt / waInvalidAt** — descadastro de todo envio automático e telefone que a checagem disse não ter WhatsApp ([Envio](envio.md#descadastro)). **whatsapp_numbers.sessionStartedAt** — QR lido, base do aquecimento de 72 h; `waRemovedAt`/`waRemovedCount`/`reconnectBlockedUntil` — queda forçada pelo WhatsApp. Migrações `20261029000600_number_wa_removed` e `20261029000700_warmup_optout`.
 
 **system_notices** — avisos globais do dono (`SystemNotice`): `title`, `message`, `type` (`INFO`/`WARNING`/`CRITICAL`), `active`, `createdAt`. Sem `tenantId` — vale para todos os clientes. Ver [avisos.md](avisos.md).

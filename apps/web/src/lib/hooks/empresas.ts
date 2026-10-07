@@ -20,3 +20,13 @@ const invCompanies = (qc: ReturnType<typeof useQueryClient>) => () => { qc.inval
 export const useCreateCompany = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: CompanyInput) => api<Company>('/companies', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invCompanies(qc) }); };
 export const useUpdateCompany = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<CompanyInput> & { id: string }) => api<Company>(`/companies/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invCompanies(qc) }); };
 export const useDeleteCompany = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/companies/${id}`, { method: 'DELETE' }), onSuccess: invCompanies(qc) }); };
+
+// ---- Dono (super_admin): empresas de qualquer cliente, sem "Entrar como" ----
+const adminBase = (tenantId: string) => `/admin/tenants/${tenantId}/companies`;
+export interface CompanyOptions { numbers: { id: string; label: string; phone: string }[]; users: { id: string; name: string; isActive: boolean }[]; maxCompanies: number | null }
+export const useAdminCompanies = (tenantId: string) => useQuery({ queryKey: ['admin-companies', tenantId], queryFn: () => api<Company[]>(adminBase(tenantId)) });
+export const useAdminCompanyOptions = (tenantId: string) => useQuery({ queryKey: ['admin-companies-options', tenantId], queryFn: () => api<CompanyOptions>(`${adminBase(tenantId)}/options`) });
+const invAdmin = (qc: ReturnType<typeof useQueryClient>, tenantId: string) => () => { qc.invalidateQueries({ queryKey: ['admin-companies', tenantId] }); qc.invalidateQueries({ queryKey: ['tenants'] }); };
+export const useAdminCreateCompany = (tenantId: string) => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: CompanyInput) => api<Company>(adminBase(tenantId), { method: 'POST', body: JSON.stringify(b) }), onSuccess: invAdmin(qc, tenantId) }); };
+export const useAdminUpdateCompany = (tenantId: string) => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<CompanyInput> & { id: string }) => api<Company>(`${adminBase(tenantId)}/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invAdmin(qc, tenantId) }); };
+export const useAdminDeleteCompany = (tenantId: string) => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`${adminBase(tenantId)}/${id}`, { method: 'DELETE' }), onSuccess: invAdmin(qc, tenantId) }); };

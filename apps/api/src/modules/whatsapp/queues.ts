@@ -19,4 +19,6 @@ export interface OutboundJob {
    * Conteúdo ("esperar X s antes desta"). Soma-se ao ritmo do número como o maior dos dois.
    */
   minGapMs?: number;
+  /** automático: o tempo de reação (humanTiming) já foi esperado — não espera de novo nas reentradas */
+  reacted?: boolean;
 }

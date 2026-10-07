@@ -11,6 +11,7 @@ import { ScheduleSection } from '@/components/settings/ScheduleSection';
 import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import { QuickReplySection } from '@/components/settings/QuickReplySection';
+import { LossReasonsSection } from '@/components/settings/LossReasonsSection';
 import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
 import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
@@ -46,6 +47,7 @@ export default function ConfiguracoesPage() {
       {!isOwner && podeConfigurar && <WelcomeSection />}
       {!isOwner && podeConfigurar && <DefaultFlowsSection />}
       {!isOwner && podeConfigurar && <QuickReplySection />}
+      {!isOwner && podeConfigurar && <LossReasonsSection />}
       {!isOwner && podeVariaveis && <GlobalVariablesSection />}
       {!me.data?.impersonatorId && <SecuritySection />}
 

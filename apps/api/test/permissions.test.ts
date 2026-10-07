@@ -44,9 +44,10 @@ describe('can', () => {
     expect(can(p('super_admin', []), 'numbers.manage')).toBe(true);
   });
 
-  it('atendente padrão não mexe em cobrança nem em números', () => {
+  it('atendente padrão não mexe em cobrança, mas conecta números', () => {
     expect(can(p('agent'), 'billing.manage')).toBe(false);
-    expect(can(p('agent'), 'numbers.manage')).toBe(false);
+    // desde agent_default_permissions o atendente reconecta o número sem depender do admin
+    expect(can(p('agent'), 'numbers.manage')).toBe(true);
     // o padrão do atendente reproduz o acesso que ele já tinha antes dos perfis
     expect(can(p('agent'), 'quick_replies.manage')).toBe(true);
     expect(can(p('agent'), 'reports.view')).toBe(true);

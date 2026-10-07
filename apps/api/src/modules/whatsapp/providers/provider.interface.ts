@@ -111,7 +111,13 @@ export interface WhatsAppProvider {
    * Evolution implementa. Devolve `null` quando o contato não tem foto ou a esconde.
    */
   fetchProfilePicture?(ctx: NumberContext, phone: string): Promise<MediaPayload | null>;
-  markRead(ctx: NumberContext, externalMessageId: string): Promise<void>;
+  /** `phone`: telefone do contato, para o provider que precisa do chat além do id */
+  markRead(ctx: NumberContext, externalMessageId: string, phone?: string): Promise<void>;
+  /**
+   * O telefone tem conta no WhatsApp? `null` = não deu para saber (não bloqueia). Opcional: a
+   * Meta não oferece a consulta.
+   */
+  hasWhatsApp?(ctx: NumberContext, phone: string): Promise<boolean | null>;
   /** Reage a uma mensagem. Não é mensagem: não gera id, não entra no histórico. Lança se o provider recusar. */
   react(ctx: NumberContext, reaction: OutboundReaction): Promise<void>;
   /**
@@ -130,6 +136,13 @@ export interface WhatsAppProvider {
    * isto o "digitando…" nunca chega. Opcional: a Meta não tem esse recurso.
    */
   subscribePresence?(ctx: NumberContext, phone: string): Promise<void>;
+  /**
+   * Presença para o contato (atendente escrevendo no painel). `composing` dura `ms` e volta a
+   * `paused` sozinho; `paused` encerra na hora. Só no não oficial.
+   */
+  sendTyping?(ctx: NumberContext, phone: string, ms: number, state?: 'composing' | 'paused'): Promise<void>;
+  /** online/offline da conta inteira. O WhatsApp não mostra "digitando" de quem está offline. */
+  setOnline?(ctx: NumberContext, online: boolean): Promise<void>;
   /**
    * Nome que o provider guardou para o contato (agenda ou pushName, sem distinção). Usado só
    * para dar nome a contato que nasceu sem nenhum. Opcional: a Meta não tem agenda.

@@ -24,7 +24,7 @@ export function UsageBanner() {
     <div className={`flex items-center gap-2 px-4 py-1.5 text-[13px] ${blocked || u.status === 'suspended' ? 'bg-danger text-white' : 'bg-warn-soft text-warn-ink'}`}>
       <AlertTriangle size={16} className="shrink-0" />
       <span className="flex-1">{text}</span>
-      <Link href="/plano" className="underline font-medium whitespace-nowrap">Ver plano</Link>
+      <Link href="/plano" className="underline font-medium whitespace-nowrap">{u.status === 'past_due' || u.status === 'suspended' ? 'Pagar agora' : 'Ver plano'}</Link>
     </div>
   );
 }

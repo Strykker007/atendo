@@ -3,11 +3,12 @@ import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, 
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
-import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature , useCan} from '@/lib/hooks';
+import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature, useCan, useAsaasPending, type Plan, type AsaasPayment } from '@/lib/hooks';
+import { AsaasCheckoutModal } from '@/components/billing/AsaasCheckoutModal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, Suspense } from 'react';
+import { useCallback, useEffect, useState, Suspense } from 'react';
 import { ExternalLink, Check, Receipt } from 'lucide-react';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -28,7 +29,7 @@ export default function PlanoPage() {
 }
 
 function PlanoInner() {
-  const { data: u, refetch } = useUsage();
+  const { data: u, refetch, error } = useUsage();
   const me = useMe();
   // esconder na tela é conveniência; quem autoriza é a API
   const isAdmin = useCan('billing.manage');
@@ -37,6 +38,13 @@ function PlanoInner() {
   const checkout = useCheckout();
   const portal = usePortal();
   const params = useSearchParams();
+  // Asaas: checkout em modal (PIX/cartão) em vez de redirecionar
+  const [asaasPlan, setAsaasPlan] = useState<Plan | null>(null);
+  const [asaasPay, setAsaasPay] = useState<AsaasPayment | null>(null);
+  const asaasSub = u?.subscriptionGateway === 'asaas';
+  const pending = useAsaasPending(isAdmin && asaasSub);
+  const openPayment = pending.data?.payment ?? null;
+  const closeAsaas = useCallback(() => { setAsaasPlan(null); setAsaasPay(null); }, []);
   useEffect(() => {
     if (params.get('success')) { toast.ok('Assinatura confirmada! Obrigado.'); refetch(); }
     if (params.get('changed')) { toast.ok('Plano alterado. A diferença é ajustada na próxima fatura.'); refetch(); }
@@ -44,6 +52,17 @@ function PlanoInner() {
   }, [params, refetch]);
 
   const go = (p: Promise<{ url: string }>) => p.then((r) => { window.location.href = r.url; }).catch(toast.err);
+  // sem isto um erro da API deixava o skeleton girando para sempre
+  if (!u && error) return (
+    <PageShell width="max-w-4xl">
+      <PageHeader title="Plano e uso" />
+      <div className="flex gap-2 rounded-xl bg-danger-soft border border-danger/30 p-4 text-sm text-danger-ink">
+        <AlertTriangle size={18} className="shrink-0" />
+        <span className="flex-1">Não foi possível carregar o plano: {error instanceof Error ? error.message : String(error)}</span>
+        <button className="underline font-medium" onClick={() => refetch()}>Tentar de novo</button>
+      </div>
+    </PageShell>
+  );
   if (!u) return (
     <PageShell width="max-w-4xl">
       <PageHeader title="Plano e uso" subtitle="Carregando consumo…" />
@@ -90,12 +109,18 @@ function PlanoInner() {
           </div>
         )}
         <div>
-          <div className="text-xs text-muted">{u.freePlan ? 'Gratuidade' : 'Renova em'}</div>
+          <div className="text-xs text-muted">{u.freePlan ? 'Gratuidade' : asaasSub ? 'Próximo vencimento' : 'Renova em'}</div>
           <div className="font-medium">{u.freePlan ? (fimGratis ? `até ${fimGratis}` : 'Permanente') : u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}</div>
         </div>
         <span className={cn('text-xs rounded-full px-2.5 py-1', st.cls)}>{st.label}</span>
-        {isAdmin && u.billingEnabled && !u.freePlan && (
+        {/* portal só existe no Stripe; no Asaas o caminho é pagar a cobrança em aberto aqui */}
+        {isAdmin && !u.freePlan && (u.subscriptionGateway ?? u.gateway) === 'stripe' && (
           <Button size="sm" variant="ghost" icon={<ExternalLink size={13} />} loading={portal.isPending} onClick={() => go(portal.mutateAsync())}>Pagamento e faturas</Button>
+        )}
+        {isAdmin && asaasSub && openPayment && (
+          <Button size="sm" variant={openPayment.status === 'OVERDUE' ? 'primary' : 'ghost'} onClick={() => setAsaasPay(openPayment)}>
+            Pagar {brl(openPayment.value)}{openPayment.status === 'OVERDUE' ? ' (vencida)' : ` · vence ${new Date(`${openPayment.dueDate}T12:00:00`).toLocaleDateString('pt-BR')}`}
+          </Button>
         )}
       </div>
       {u.cancelAtPeriodEnd && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Cancelamento agendado: a assinatura termina em {u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}. Você pode reativar em “Pagamento e faturas”.</p>}
@@ -143,7 +168,8 @@ function PlanoInner() {
               const L = p.limits;
               // botão desabilitado precisa dizer por quê: sem isto o cliente vê um botão
               // morto e não sabe se é ele, se é o sistema, ou se quebrou
-              const semPreco = u.billingEnabled && !p.stripePriceId;
+              // no Asaas o valor vai na assinatura: plano não precisa de price para ser vendido
+              const semPreco = u.gateway === 'stripe' && !p.stripePriceId;
               return (
                 <div key={p.id} className={cn('rounded-2xl border p-5 space-y-3 bg-panel', current ? 'border-accent ring-1 ring-accent' : 'border-line')}>
                   <div className="flex items-baseline justify-between">
@@ -161,7 +187,7 @@ function PlanoInner() {
                     <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{qtdMes(L.includedTemplatesMonth, 'templates', 'ilimitados')}</li>
                     <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.hardLimit ? 'Bloqueia ao atingir o limite' : `Excedente ${brl(L.overagePricePerMessage ?? 0)}/msg`}</li>
                   </ul>
-                  <Button className="w-full" variant={current ? 'ghost' : 'primary'} disabled={current || !u.billingEnabled || !p.stripePriceId} loading={checkout.isPending && checkout.variables === p.id} onClick={() => go(checkout.mutateAsync(p.id))}>
+                  <Button className="w-full" variant={current ? 'ghost' : 'primary'} disabled={current || !u.billingEnabled || semPreco} loading={checkout.isPending && checkout.variables === p.id} onClick={() => (u.gateway === 'asaas' ? setAsaasPlan(p) : go(checkout.mutateAsync(p.id)))}>
                     {current ? 'Plano atual' : u.status && u.status !== 'canceled' && u.billingEnabled ? 'Mudar para este' : 'Assinar'}
                   </Button>
                   {semPreco && <p className="text-xs text-muted text-center">Este plano ainda não está à venda online — fale com o suporte para mudar.</p>}
@@ -171,6 +197,8 @@ function PlanoInner() {
           </div>
         </section>
       )}
+
+      <AsaasCheckoutModal plan={asaasPlan} payment={asaasPay} onClose={closeAsaas} />
 
       {/* Faturas */}
       {isAdmin && !!invoices.data?.length && (

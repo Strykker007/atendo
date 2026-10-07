@@ -39,6 +39,8 @@ class SettingsDto {
   @IsOptional() @IsBoolean() welcomeEnabled?: boolean;
   /** respostas rápidas: segundos entre escolher e enviar (contagem com Cancelar); 0 = na hora */
   @IsOptional() @IsInt() @Min(0) @Max(QUICK_REPLY_DELAY_MAX_SEC) quickReplyDelaySec?: number;
+  /** motivos de perda sugeridos no encerramento */
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(200, { each: true }) lossReasons?: string[];
 }
 class ScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(60) name?: string;
@@ -77,6 +79,8 @@ export class TenantSettingsController {
   @RequirePermission('settings.manage')
   update(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     if (dto.timezone && !isTimezone(dto.timezone)) throw new BadRequestException('Fuso horário inválido.');
+    // sem vazio e sem repetido (ignorando maiúsculas): repetido viraria duas barras iguais no relatório
+    if (dto.lossReasons) dto.lossReasons = dto.lossReasons.map((m) => m.trim()).filter((m, i, l) => m && l.findIndex((x) => x.toLowerCase() === m.toLowerCase()) === i);
     if (dto.welcomeMessages) {
       const errors = dto.welcomeMessages.flatMap((w, i) => {
         if (!w || typeof w.id !== 'string' || !Array.isArray(w.items) || !w.items.length) return [`Boas-vindas ${i + 1}: adicione ao menos uma mensagem.`];

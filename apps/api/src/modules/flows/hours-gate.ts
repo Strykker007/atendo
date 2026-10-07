@@ -16,7 +16,20 @@ export interface InboundPlan {
   notifyIfUnhandled: boolean;
 }
 
-export function planInbound(i: { behavior: BandBehavior; reply: BandReplyKind; paused: boolean; newAttendance: boolean; activeRun: boolean }): InboundPlan {
+/**
+ * Boas-vindas não repetem para quem conversou há menos disto (docs/horarios.md): o contato que
+ * volta uma hora depois de encerrado recebia a mesma saudação de novo — texto idêntico de robô
+ * repetido para a mesma pessoa é sinal de spam para o WhatsApp. O resto do atendimento segue.
+ */
+export const WELCOME_COOLDOWN_HOURS = 6;
+
+export function planInbound(i: { behavior: BandBehavior; reply: BandReplyKind; paused: boolean; newAttendance: boolean; activeRun: boolean; /** horas desde a última mensagem com o contato; null = primeira vez */ hoursSinceLastMessage?: number | null }): InboundPlan {
+  const plan = planBand(i);
+  if (plan.welcome && i.hoursSinceLastMessage != null && i.hoursSinceLastMessage < WELCOME_COOLDOWN_HOURS) return { ...plan, welcome: false };
+  return plan;
+}
+
+function planBand(i: { behavior: BandBehavior; reply: BandReplyKind; paused: boolean; newAttendance: boolean; activeRun: boolean }): InboundPlan {
   // robô pausado: só a mensagem da faixa continua (não inicia fluxo, não manda boas-vindas)
   if (i.paused) return { welcome: false, notifyFirst: i.behavior !== 'normal' && i.reply === 'message', proceed: false, notifyIfUnhandled: false };
   switch (i.behavior) {

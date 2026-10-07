@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
-import { Modal, Field, inputCls } from '@/components/ui/Modal';
+import { Modal, Field } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useBulkClose, type ConversationOutcome } from '@/lib/hooks';
-import { MOTIVOS, OUTCOMES } from './CloseModal';
+import { LossReasonField, OUTCOMES } from './CloseModal';
 
 /**
  * Encerrar vários atendimentos selecionados.
@@ -53,10 +53,7 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
         </Field>
 
         {outcome === 'lost' && (
-          <Field label="Motivo" hint="O mais comum aqui é “não respondeu”, que é justamente o que entope a fila.">
-            <input className={inputCls} list="motivos-perda-massa" placeholder="Não respondeu, preço, prazo…" value={motivo} onChange={(e) => setMotivo(e.target.value)} autoFocus />
-            <datalist id="motivos-perda-massa">{MOTIVOS.map((m) => <option key={m} value={m} />)}</datalist>
-          </Field>
+          <LossReasonField value={motivo} onChange={setMotivo} hint="O mais comum aqui é “não respondeu”, que é justamente o que entope a fila." placeholder="Ou escreva outro motivo" />
         )}
 
         <div className="flex justify-end gap-2 pt-1">

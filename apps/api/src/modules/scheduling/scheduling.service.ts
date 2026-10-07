@@ -173,6 +173,9 @@ export class SchedulingService {
     }
   }
 
+  /** telefone sem WhatsApp não recebe lembrete (e o contato fica marcado) */
+  private readonly checkPhone = (numberId: string, phone: string) => this.numbers.hasWhatsApp(numberId, phone);
+
   private async sendClientReminder(a: Prisma.AppointmentGetPayload<{ include: { contact: true; service: true; professional: true } }>, tz: string, minutesBefore: number, template: ReminderTemplate | null, preferredNumberId: string | null) {
     const when = toLocal(a.startAt, tz);
     const soon = minutesBefore <= 120;
@@ -182,7 +185,8 @@ export class SchedulingService {
       ? async (numberId: string) => this.conversations.templateMessage(a.tenantId, a.contactId, await this.numbers.template(numberId, template.name, template.language), template, { vars: reminderVars(a, when) })
       : undefined;
     // chave por agendamento + antecedência: tick repetido do job não manda o lembrete duas vezes
-    const common = { idempotencyKey: `reminder-${a.id}-${minutesBefore}`, allowClosed: true, outsideWindow, preferredNumberId };
+    // allowCold: lembrete é a exceção do envio frio (cold-send.ts) — o cliente pediu ao agendar
+    const common = { idempotencyKey: `reminder-${a.id}-${minutesBefore}`, allowClosed: true, allowCold: true, outsideWindow, preferredNumberId, checkPhone: this.checkPhone };
     if (soon) {
       // lembrete de última hora: só avisa, não pede resposta
       await this.conversations.sendToContact(a.tenantId, a.contactId, `Olá ${a.contact.name ?? ''}! Lembrete: seu horário de *${a.service.name}* com ${a.professional.name} é hoje às ${when.hm}. Até já! 💈`, common);
@@ -201,7 +205,7 @@ export class SchedulingService {
     const hist = await this.contactHistory(a.contactId);
     const histText = hist.visits ? `Cliente há ${hist.visits} visita${hist.visits > 1 ? 's' : ''}${hist.last ? `, última em ${toLocal(hist.last.startAt, tz).label} (${hist.last.service.name})` : ''}.` : 'Primeira visita.';
     const text = `💈 Próximo: *${a.contact.name ?? a.contact.phone}* às ${when.hm} — ${a.service.name} (${a.service.durationMin} min).\n${histText}${a.notes ? `\nObs.: ${a.notes}` : ''}${a.status === 'confirmed' ? '\n✅ Confirmado pelo cliente.' : ''}`;
-    await this.conversations.sendToPhone(a.tenantId, a.professional.phone!, text, { closeAfter: true, contactName: a.professional.name, idempotencyKey: `pro-reminder-${a.id}` });
+    await this.conversations.sendToPhone(a.tenantId, a.professional.phone!, text, { closeAfter: true, contactName: a.professional.name, idempotencyKey: `pro-reminder-${a.id}`, allowCold: true, checkPhone: this.checkPhone });
   }
 
   /**

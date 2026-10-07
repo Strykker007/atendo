@@ -1,8 +1,9 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Logger, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
 import { defaultSendDelay } from './sending-policy';
+import { warmupPhase } from './number-warmup';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { NumbersService } from './numbers.service';
@@ -48,9 +49,15 @@ class UpdateNumberDto {
   @IsOptional() @IsNumber() @Min(0) @Max(99_999) infraCostMonth?: number;
 }
 
+class ConnectDto {
+  /** reconectar mesmo durante a pausa após queda forçada (o usuário confirmou o risco) */
+  @IsOptional() @IsBoolean() force?: boolean;
+}
+
 @Controller('numbers')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class NumbersController {
+  private readonly log = new Logger(NumbersController.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
@@ -60,12 +67,14 @@ export class NumbersController {
   ) {}
 
   @Get()
-  list(@CurrentUser() user: AuthUser) {
-    return this.prisma.whatsAppNumber.findMany({
+  async list(@CurrentUser() user: AuthUser) {
+    const rows = await this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId, deletedAt: null },
-      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });
+    // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts)
+    return rows.map((n) => ({ ...n, warmup: warmupPhase(n) }));
   }
 
   @Post()
@@ -215,11 +224,24 @@ export class NumbersController {
     return { ok: true };
   }
 
-  /** Reconecta (gera QR novo na Evolution, revalida token na Meta). */
+  /**
+   * Reconecta (gera QR novo na Evolution, revalida token na Meta). Durante a pausa depois de o
+   * WhatsApp derrubar o número (number-removal.ts), responde 409 `reconnect_paused` — a tela
+   * explica o risco e só segue com `force: true`.
+   */
   @Post(':id/connect')
   @RequirePermission('numbers.manage')
-  async connect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async connect(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ConnectDto) {
     const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
+    if (n.reconnectBlockedUntil && n.reconnectBlockedUntil > new Date() && !dto?.force) {
+      throw new ConflictException({
+        code: 'reconnect_paused',
+        until: n.reconnectBlockedUntil,
+        removedCount: n.waRemovedCount,
+        message: 'O WhatsApp desconectou este número há pouco. Reconectar agora aumenta o risco de restrição da conta.',
+      });
+    }
+    if (n.reconnectBlockedUntil && n.reconnectBlockedUntil > new Date()) this.log.warn(`Número ${n.label} (${n.phone}) reconectado durante a pausa, confirmado por ${user.id}`);
     const ctx = await this.numbers.context(n.id);
     return this.numbers.switchProvider(n.id, n.provider, ctx.config as any);
   }

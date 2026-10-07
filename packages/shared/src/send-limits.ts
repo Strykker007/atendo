@@ -19,11 +19,13 @@ export interface SendLimits {
   convBurstWindowSec: number;
   /** mensagem que ficou na fila mais que isso (ex.: número desconectado) expira como falha */
   maxQueueAgeMin: number;
+  /** envio AUTOMÁTICO (fluxo, boas-vindas, lembrete…) por hora no número; resposta do atendente não conta */
+  autoPerHour: number;
 }
 
 export const SEND_LIMIT_DEFAULTS: Record<SendProvider, SendLimits> = {
-  evolution: { ratePerMinute: 40, convMinIntervalSec: 1, convBurstMax: 6, convBurstWindowSec: 30, maxQueueAgeMin: 30 },
-  meta: { ratePerMinute: 80, convMinIntervalSec: 1, convBurstMax: 10, convBurstWindowSec: 30, maxQueueAgeMin: 30 },
+  evolution: { ratePerMinute: 40, convMinIntervalSec: 1, convBurstMax: 6, convBurstWindowSec: 30, maxQueueAgeMin: 30, autoPerHour: 80 },
+  meta: { ratePerMinute: 80, convMinIntervalSec: 1, convBurstMax: 10, convBurstWindowSec: 30, maxQueueAgeMin: 30, autoPerHour: 5000 },
 };
 
 /** Faixas aceitas na configuração (API valida, tela usa como min/max dos campos). */
@@ -33,6 +35,7 @@ export const SEND_LIMIT_RANGES: Record<keyof SendLimits, [number, number]> = {
   convBurstMax: [1, 100],
   convBurstWindowSec: [5, 600],
   maxQueueAgeMin: [1, 1440],
+  autoPerHour: [1, 5000],
 };
 
 export const SEND_LIMIT_LABEL: Record<keyof SendLimits, string> = {
@@ -41,7 +44,15 @@ export const SEND_LIMIT_LABEL: Record<keyof SendLimits, string> = {
   convBurstMax: 'Rajada: mensagens por conversa',
   convBurstWindowSec: 'Rajada: janela (s)',
   maxQueueAgeMin: 'Expirar na fila após (min)',
+  autoPerHour: 'Automáticas por hora (número)',
 };
+
+/**
+ * Espaçamento do envio AUTOMÁTICO no não oficial (docs/envio.md#envio-automático): sorteado a
+ * cada mensagem, conta do último envio do número (de qualquer origem). Resposta do atendente não
+ * espera isto — só o perfil do número.
+ */
+export const AUTO_GAP_MS: [number, number] = [4_000, 10_000];
 
 /** Padrão do provider + o que a conexão sobrescreveu. Valor fora da faixa é ignorado. */
 export function resolveSendLimits(provider: SendProvider, overrides?: Partial<SendLimits> | null): SendLimits {

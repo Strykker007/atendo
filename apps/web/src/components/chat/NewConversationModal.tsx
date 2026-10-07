@@ -7,7 +7,7 @@ import { PhoneInput, formatPhone } from '@/components/ui/PhoneInput';
 import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useDebounced, useNumbers, usePhonebook, useStartCandidates, useStartConversation, type PhonebookItem, type StartCandidates } from '@/lib/hooks';
+import { useDebounced, useHasFeature, useNumbers, usePhonebook, useStartCandidates, useStartConversation, type PhonebookItem, type StartCandidates } from '@/lib/hooks';
 import { TemplateFields, useTemplateChoice } from './TemplateFields';
 
 type ContatoSel = { id: string; name: string | null; phone: string };
@@ -25,6 +25,8 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
   const [numberId, setNumberId] = useState<string>('');
   const number = conectados.find((n) => n.id === numberId);
   const isMeta = number?.provider === 'meta';
+  // envio frio (docs/envio.md#envio-frio): falar primeiro só pelo oficial e com o recurso no plano
+  const proativo = useHasFeature('proactive_messaging');
 
   const [contato, setContato] = useState<ContatoSel | null>(null);
   const [busca, setBusca] = useState('');
@@ -183,6 +185,18 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
               </button>
             ))}
           </div>
+        )}
+
+        {number && !isMeta && (
+          <p className="rounded-lg bg-warn-soft text-warn-ink px-3 py-2 text-[12.5px]">
+            Pelo número <b>QR (não oficial)</b> só dá para escrever para quem mandou mensagem <b>neste número nas últimas 24 horas</b>.
+            Falar primeiro com quem não escreveu é a principal causa de bloqueio — para isso, use um número oficial.
+          </p>
+        )}
+        {usandoTemplate && !proativo.loading && !proativo.has && (
+          <p className="rounded-lg bg-warn-soft text-warn-ink px-3 py-2 text-[12.5px]">
+            Iniciar conversa com quem não escreveu nas últimas 24h depende do recurso <b>Mensagem ativa (número oficial)</b>, que não está no seu plano.
+          </p>
         )}
 
         {usandoTemplate ? (

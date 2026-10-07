@@ -1,5 +1,5 @@
-import { BadRequestException, UnprocessableEntityException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { BadRequestException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS } from './conversations.service';
@@ -50,6 +50,8 @@ class SendDto {
   @IsOptional() @IsUUID() expectedNumberId?: string;
   /** gerada pela tela por envio: repetir a requisição com a mesma chave devolve a mesma mensagem */
   @IsOptional() @IsString() @MaxLength(100) idempotencyKey?: string;
+  /** caracteres que o atendente não digitou (resposta rápida, colado, só mídia): "digitando…" simulado */
+  @IsOptional() @IsInt() @Min(0) @Max(4096) simulateTypingChars?: number;
 }
 class StartDto {
   @IsUUID() numberId: string;
@@ -117,6 +119,8 @@ class ContactDto {
   @IsOptional() @IsString() @MaxLength(300) address?: string;
   @IsOptional() @IsString() @MaxLength(1000) note1?: string;
   @IsOptional() @IsString() @MaxLength(1000) note2?: string;
+  /** volta a receber mensagens automáticas (o contato pediu ao atendente) — só `true` */
+  @IsOptional() @IsIn([true]) resubscribe?: true;
 }
 class TagsDto {
   @IsArray() @IsUUID('4', { each: true }) tagIds: string[];
@@ -128,6 +132,10 @@ class BotPauseDto {
 class PrimaryTagDto implements SetPrimaryTagInput {
   /** null = tirar da etapa (coluna "Sem etapa" do Kanban) */
   @ValidateIf((_, v) => v !== null) @IsUUID() tagId: string | null;
+}
+
+class TypingDto {
+  @IsOptional() @IsIn(['composing', 'paused']) state?: 'composing' | 'paused';
 }
 
 @Controller('conversations')
@@ -169,7 +177,7 @@ export class ConversationsController {
       await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: dto.numberId, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
       template = { definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language), header: dto.template.header, body: dto.template.body };
     }
-    return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey });
+    return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey }, (numberId, phone) => this.numbers.hasWhatsApp(numberId, phone));
   }
 
   /** Nota interna (cadeado) — só equipe vê. */
@@ -375,6 +383,21 @@ export class ConversationsController {
   @Patch('contacts/:contactId/tags')
   contactTags(@CurrentUser() u: AuthUser, @Param('contactId') contactId: string, @Body() dto: TagsDto) {
     return this.conversations.setContactTags(u.tenantId, contactId, dto.tagIds);
+  }
+
+  /**
+   * Atendente digitando: `composing` (renovado pelo painel a cada ~2 s enquanto digita) mostra
+   * "digitando…" ao contato; `paused` (parou, enviou, saiu) apaga. Só número não oficial, conversa
+   * aberta e número conectado. Responde na hora.
+   */
+  @Post(':id/typing')
+  @HttpCode(204)
+  async typing(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: TypingDto) {
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id, tenantId: u.tenantId, status: { not: 'closed' }, number: { provider: 'evolution', status: 'connected' } },
+      select: { numberId: true, contact: { select: { phone: true } } },
+    });
+    if (conv) this.numbers.setTyping(conv.numberId, conv.contact.phone, dto.state ?? 'composing');
   }
 
   @Post(':id/read')

@@ -69,6 +69,30 @@ export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: 
             <div className="text-[12px] text-muted tnum">{formatPhone(contact.phone)}</div>
           </div>
         </div>
+
+        {/* descadastro e telefone sem WhatsApp (docs/envio.md): o atendente precisa saber por que o robô não responde */}
+        {contact.optOutAt && (
+          <div className="rounded-lg bg-warn-soft text-warn-ink px-3 py-2 text-[12.5px] space-y-1.5">
+            <p>
+              Em {new Date(contact.optOutAt).toLocaleDateString('pt-BR')} o contato pediu para <b>não receber mensagens automáticas</b> (&quot;sair&quot;, &quot;parar&quot;…).
+              Fluxos, boas-vindas, lembretes e campanhas não saem para ele; você continua respondendo normalmente.
+            </p>
+            {podeEditar && (
+              <button
+                type="button"
+                className="font-medium underline"
+                onClick={() => update.mutateAsync({ contactId: contact.id, resubscribe: true }).then(() => toast.ok('O contato volta a receber mensagens automáticas')).catch(toast.err)}
+              >
+                O contato pediu para voltar a receber
+              </button>
+            )}
+          </div>
+        )}
+        {contact.waInvalidAt && (
+          <p className="rounded-lg bg-danger-soft text-danger-ink px-3 py-2 text-[12.5px]">
+            A checagem do WhatsApp disse que este telefone <b>não tem WhatsApp</b>. Confira o número — mensagens automáticas não saem para ele até o contato escrever.
+          </p>
+        )}
         <Field label="Nome"><input readOnly={!podeEditar} className={inputCls} value={form.name} onChange={set('name')} maxLength={80} placeholder="Como o cliente se chama" /></Field>
         <Field label="E-mail"><input readOnly={!podeEditar} className={inputCls} type="email" value={form.email} onChange={set('email')} maxLength={160} placeholder="para orçamento, nota fiscal…" /></Field>
         <Field label="Endereço"><input readOnly={!podeEditar} className={inputCls} value={form.address} onChange={set('address')} maxLength={300} placeholder="Rua, número, bairro, cidade" /></Field>

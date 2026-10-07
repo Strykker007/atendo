@@ -1,3 +1,4 @@
+import { RedisService } from '../../common/redis/redis.service';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -9,12 +10,20 @@ import type { EvolutionNumberConfig } from './providers/evolution.provider';
 import { defaultSendDelay } from './sending-policy';
 import type { MessageTemplate } from '@atendo/shared';
 
+/** bloco de "digitando…" (a Evolution fecha com `paused` no fim de cada um) */
+const TYPING_CHUNK_MS = 5_000;
+/** sem renovação do painel nesse tempo = parou de digitar */
+const TYPING_IDLE_MS = 4_000;
+/** sem envio nem digitação nesse tempo, a conta volta a offline */
+const ONLINE_MS = 45_000;
+
 @Injectable()
 export class NumbersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
     private readonly registry: ProviderRegistry,
+    private readonly redis: RedisService,
   ) {}
 
   /** última assinatura de presença por número+contato: abrir a mesma conversa várias vezes não repete a chamada */
@@ -36,7 +45,102 @@ export class NumbersService {
     }
   }
 
+  /**
+   * "digitando…" do atendente, com começo e fim (docs/envio.md#humanização).
+   *
+   * A Evolution não segura o "digitando" aberto: `sendPresence` manda `composing`, espera o
+   * `delay` e SEMPRE fecha com `paused`. Então, enquanto o painel avisa que a pessoa digita
+   * (`composing`, renovado a cada ~2 s), um laço único por contato manda blocos de 5 s em
+   * sequência — sem sobrepor, senão o `paused` de um bloco apagaria o seguinte. `paused` (parou,
+   * enviou, saiu da conversa) encerra na hora e o laço não abre outro bloco.
+   *
+   * Estado no Redis porque há mais de uma instância da API: `typing:until` diz até quando a
+   * pessoa está digitando; `typing:loop` garante um laço só. Nunca lança: é humanização.
+   */
+  /** quando cada número deve conferir se fica offline (um timer por número neste processo) */
+  private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /**
+   * Conta online enquanto há atividade (envio, "digitando"), offline ~45 s depois da última —
+   * como alguém com o WhatsApp Web aberto. Sem isto o WhatsApp não mostra "digitando" (a instância
+   * conecta offline), e o oposto — `alwaysOnline` — deixaria o número online 24 h, padrão de robô.
+   *
+   * `wa:online:<número>` no Redis é a janela (renovada a cada atividade); só a 1ª atividade da
+   * janela chama a Evolution. O timer de cada processo confere ao fim: se ninguém renovou, manda
+   * offline. Processo reiniciado perde o timer — a próxima atividade abre e fecha a janela de novo.
+   * Nunca lança. Efeito colateral: com a conta online o celular da loja não toca notificação.
+   */
+  async markOnline(numberId: string) {
+    try {
+      const key = `wa:online:${numberId}`;
+      const nova = (await this.redis.set(key, '1', 'PX', ONLINE_MS, 'NX')) === 'OK';
+      if (!nova) await this.redis.pexpire(key, ONLINE_MS);
+      const old = this.offlineTimers.get(numberId);
+      if (old) clearTimeout(old);
+      const t = setTimeout(() => void this.maybeOffline(numberId), ONLINE_MS + 1_000);
+      t.unref?.();
+      this.offlineTimers.set(numberId, t);
+      if (nova) {
+        const ctx = await this.context(numberId);
+        await this.registry.get(ctx.provider).setOnline?.(ctx, true);
+      }
+    } catch {
+      /* humanização: nunca atrapalha o envio */
+    }
+  }
+
+  private async maybeOffline(numberId: string) {
+    this.offlineTimers.delete(numberId);
+    try {
+      if (await this.redis.exists(`wa:online:${numberId}`)) return; // alguém renovou
+      const ctx = await this.context(numberId);
+      await this.registry.get(ctx.provider).setOnline?.(ctx, false);
+    } catch {
+      /* idem */
+    }
+  }
+
+  setTyping(numberId: string, phone: string, state: 'composing' | 'paused') {
+    const key = `${numberId}:${phone}`;
+    void this.typingStep(numberId, phone, key, state).catch(() => undefined);
+  }
+
+  private async typingStep(numberId: string, phone: string, key: string, state: 'composing' | 'paused') {
+    const until = `typing:until:${key}`;
+    const loop = `typing:loop:${key}`;
+    if (state === 'paused') {
+      const estava = await this.redis.del(until);
+      if (!estava) return; // já parado: não manda nada ao WhatsApp
+      const ctx = await this.context(numberId);
+      await this.registry.get(ctx.provider).sendTyping?.(ctx, phone, 0, 'paused');
+      return;
+    }
+    // sem notícia do painel em 4 s (aba fechada, rede caiu) = parou
+    await this.redis.set(until, '1', 'PX', TYPING_IDLE_MS);
+    // "digitando" de conta offline não aparece para o contato
+    await this.markOnline(numberId);
+    if ((await this.redis.set(loop, '1', 'PX', TYPING_CHUNK_MS * 3, 'NX')) !== 'OK') return; // laço já rodando
+    try {
+      const ctx = await this.context(numberId);
+      const provider = this.registry.get(ctx.provider);
+      if (!provider.sendTyping) return;
+      // teto de segurança: ninguém digita uma mensagem só por mais de 2 min
+      for (let i = 0; i < 24 && (await this.redis.exists(until)); i++) {
+        await this.redis.pexpire(loop, TYPING_CHUNK_MS * 3);
+        await provider.sendTyping(ctx, phone, TYPING_CHUNK_MS, 'composing');
+      }
+    } finally {
+      await this.redis.del(loop);
+    }
+  }
+
   /** Reação do atendente a uma mensagem. Lança se o provider recusar — quem chama não grava nada. */
+  /** O telefone tem WhatsApp? `null` = o provider não sabe dizer (Meta) ou falhou — não bloqueia. */
+  async hasWhatsApp(numberId: string, phone: string): Promise<boolean | null> {
+    const ctx = await this.context(numberId);
+    return (await this.registry.get(ctx.provider).hasWhatsApp?.(ctx, phone)) ?? null;
+  }
+
   async react(numberId: string, reaction: OutboundReaction) {
     const ctx = await this.context(numberId);
     await this.registry.get(ctx.provider).react(ctx, reaction);
@@ -133,6 +237,8 @@ export class NumbersService {
    */
   async remove(numberId: string) {
     const ctx = await this.context(numberId);
+    // mesmo motivo do `disconnect`: o 401 do logout não pode virar "removido pelo WhatsApp"
+    await this.prisma.whatsAppNumber.update({ where: { id: numberId }, data: { status: 'disconnected' } });
     const provider = this.registry.get(ctx.provider);
     await (provider.destroy ? provider.destroy(ctx) : provider.disconnect(ctx)).catch(() => undefined);
     await this.prisma.whatsAppNumber.update({
@@ -145,8 +251,17 @@ export class NumbersService {
   /** Desconecta a sessão (logout na Evolution) sem excluir: o número e as conversas ficam; "Reconectar" gera QR novo. */
   async disconnect(numberId: string) {
     const ctx = await this.context(numberId);
-    await this.registry.get(ctx.provider).disconnect(ctx);
+    // marca ANTES do logout: o webhook do logout chega com 401 e, com o número ainda
+    // "conectado", seria lido como queda forçada pelo WhatsApp (ver number-removal.ts)
+    const { status } = await this.prisma.whatsAppNumber.findUniqueOrThrow({ where: { id: numberId }, select: { status: true } });
     await this.prisma.whatsAppNumber.update({ where: { id: numberId }, data: { status: 'disconnected' } });
+    try {
+      await this.registry.get(ctx.provider).disconnect(ctx);
+    } catch (err) {
+      // logout não saiu: a sessão segue de pé, o status também
+      await this.prisma.whatsAppNumber.update({ where: { id: numberId }, data: { status } });
+      throw err;
+    }
   }
 
   async findByExternal(provider: ProviderKind, externalId: string) {

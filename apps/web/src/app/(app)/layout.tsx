@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { api, getAccessToken, setAccessToken } from '@/lib/api';
 import { useRealtime } from '@/lib/hooks';
 import { UsageBanner } from '@/components/layout/UsageBanner';
+import { WaRemovedBanner } from '@/components/numbers/WaRemovedNotice';
 import { Toaster } from '@/components/ui/Toast';
 import { NavigationProgress } from '@/components/layout/NavigationProgress';
 import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
@@ -58,6 +59,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div className="flex-1 min-w-0 flex flex-col">
         <ImpersonationBanner />
         <UsageBanner />
+        <WaRemovedBanner />
         <div key={pathname} className="flex-1 min-h-0 flex animate-fade-in">{children}</div>
       </div>
       <Toaster />

@@ -15,6 +15,24 @@ export const usePlans = () => useQuery({ queryKey: ['plans'], queryFn: () => api
 export const useInvoices = () => useQuery({ queryKey: ['invoices'], queryFn: () => api<Invoice[]>('/billing/invoices') });
 export const useCheckout = () => useMutation({ mutationFn: (planId: string) => api<{ url: string }>('/billing/checkout', { method: 'POST', body: JSON.stringify({ planId }) }) });
 export const usePortal = () => useMutation({ mutationFn: () => api<{ url: string }>('/billing/portal', { method: 'POST' }) });
+
+// ---- Cobrança (Asaas: PIX + cartão) ----
+export interface AsaasPayment { id: string; status: string; paid: boolean; billingType: string; value: number; dueDate: string; invoiceUrl: string | null; pix: { encodedImage: string; payload: string; expirationDate: string } | null }
+export interface AsaasCustomerData { name: string; cpfCnpj: string; email: string | null; mobilePhone: string | null; postalCode: string | null; addressNumber: string | null }
+export interface AsaasCheckoutInput {
+  planId: string;
+  billingType: 'PIX' | 'CREDIT_CARD';
+  customer: { name?: string; cpfCnpj: string; email?: string; mobilePhone?: string };
+  card?: { holderName: string; number: string; expiryMonth: string; expiryYear: string; ccv: string };
+  holder?: { name: string; email: string; cpfCnpj: string; postalCode: string; addressNumber: string; phone: string };
+}
+export const useAsaasCustomer = (enabled: boolean) => useQuery({ queryKey: ['asaas-customer'], queryFn: () => api<AsaasCustomerData | null>('/billing/asaas/customer'), enabled, staleTime: Infinity });
+export const useAsaasPending = (enabled: boolean) => useQuery({ queryKey: ['asaas-pending'], queryFn: () => api<{ payment: AsaasPayment | null }>('/billing/asaas/pending'), enabled });
+export const useAsaasCheckout = () => useMutation({ mutationFn: (input: AsaasCheckoutInput) => api<{ payment: AsaasPayment | null }>('/billing/asaas/checkout', { method: 'POST', body: JSON.stringify(input) }) });
+/** Polling do PIX: consulta o Asaas a cada 4 s até a cobrança ser paga. */
+export const useAsaasPaymentStatus = (id: string | null, active: boolean) =>
+  useQuery({ queryKey: ['asaas-payment', id], queryFn: () => api<AsaasPayment>(`/billing/asaas/payments/${id}`), enabled: !!id && active, refetchInterval: 4000 });
+
 export interface MarginRow { tenantId: string; name: string; plan: string | null; status: string | null; revenue: number; overage: number; providerCost: number; infraCost: number; margin: number; marginPct: number; messagesSent: number; templatesSent: number }
 export const useMargin = (period?: string) => useQuery({ queryKey: ['margin', period], queryFn: () => api<MarginRow[]>(`/billing/margin${period ? `?period=${period}` : ''}`) });
 

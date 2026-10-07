@@ -33,6 +33,7 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
   hardLimit: false,               // true = bloqueia ao estourar; false = cobra excedente
   graceDays: 7,                   // tolerância após falha de pagamento
   features: ['flows', 'scheduling'] // funcionalidades plugáveis (docs/10 e 13); ausente = nenhuma
+  // 'proactive_messaging' = falar primeiro com quem não escreveu em 24h, só pelo número oficial (envio.md#envio-frio)
 }
 ```
 
@@ -166,6 +167,49 @@ Limites de **quantidade** (números, atendentes, fluxos ativos, respostas rápid
 
 Ao passar de **80%** e **100%** de mensagens ou templates, `usage_alerts` registra (chave única por tenant/período/métrica/threshold — nunca dispara duas vezes). Hoje só loga; enviar e-mail e mostrar banner no painel está no roadmap. `GET /billing/usage` já devolve `used` e `limits` para o front calcular a porcentagem.
 
+## Gateway: Stripe ou Asaas
+
+Os dois coexistem; o **env escolhe quem vende**: com `ASAAS_API_KEY` preenchida, checkouts novos vão para o Asaas (PIX + cartão, em modal na própria tela `/plano`); sem ela, para o Stripe. Assinaturas que já existem seguem no gateway onde nasceram (`subscriptions.gateway`) — o webhook do Stripe continua processando as dele enquanto `STRIPE_SECRET_KEY` existir. Um cliente com assinatura viva no Stripe não consegue abrir outra no Asaas (400), para não ser cobrado duas vezes. `GET /billing/usage` devolve `gateway` (dos checkouts novos) e `subscriptionGateway` (da assinatura atual): o front mostra o portal do Stripe ou o botão "Pagar" do Asaas conforme o segundo.
+
+## Cobrança com Asaas (PIX + cartão)
+
+Código: `apps/api/src/modules/billing/asaas.service.ts` (+ `asaas.controller.ts`). Mesmo modelo do Stripe: tenant vira Customer (`tenants.asaasCustomerId`), a assinatura do Asaas é a fonte da verdade, `subscriptions`/`invoices` são espelhos. No Asaas não há "price": o valor (`priceMonth`, ou `priceYear` com ciclo `YEARLY` no plano anual) vai na própria assinatura, então plano não precisa de sync.
+
+### Configurar
+
+1. `ASAAS_API_KEY` (sandbox: crie conta em sandbox.asaas.com e use `ASAAS_BASE_URL=https://api-sandbox.asaas.com/v3`; produção: `https://api.asaas.com/v3`, o padrão).
+2. Webhook no painel do Asaas → `https://<api>/webhooks/asaas`, com um token de autenticação qualquer, copiado para `ASAAS_WEBHOOK_TOKEN`. Eventos de cobrança (`PAYMENT_*`) e de assinatura (`SUBSCRIPTION_DELETED`/`INACTIVATED`).
+3. Cartão: a tokenização (`/creditCard/tokenizeCreditCard`) precisa estar habilitada na conta do Asaas — em produção é pedida ao gerente da conta. No sandbox já vem ligada.
+
+### Fluxo
+
+| Ação | O que acontece |
+|---|---|
+| *Assinar* (PIX) | Modal pede CPF/CNPJ → `POST /billing/asaas/checkout` cria/atualiza o Customer e a assinatura com 1º vencimento **hoje** → devolve QR + copia e cola. O modal consulta `GET /billing/asaas/payments/:id` a cada 4 s; ao cair, fecha e a tela atualiza. Cada renovação gera uma cobrança PIX nova (o Asaas manda por e-mail e ela aparece no botão "Pagar" de `/plano`). |
+| *Assinar* (cartão) | Cartão + titular (nome, e-mail, CPF/CNPJ, CEP, número, telefone — exigência antifraude do Asaas) → tokenizado no Asaas → assinatura com `creditCardToken`, renovada sozinha no cartão. Os dados do cartão **passam pela API e não são gravados nem logados**. |
+| *Mudar para este* (já assina pelo Asaas) | `PUT` na mesma assinatura: valor, ciclo e forma de pagamento; a cobrança em aberto é atualizada (`updatePendingPayments`). **Sem proporcional** — o Asaas não calcula. |
+| *Pagar* (renovação/atraso) | `GET /billing/asaas/pending` → cobrança em aberto mais antiga (vencida primeiro) → mesmo modal, direto no QR. |
+
+O status local **só muda com o pagamento**: assinatura nova nasce `trialing` (ou mantém o status que tinha) até o webhook — ou o polling — ver a cobrança paga.
+
+### Webhook (`POST /webhooks/asaas`)
+
+Autenticado pelo header `asaas-access-token` (comparação em tempo constante). Tenant achado pelo `customer` da cobrança.
+
+| Evento | Efeito |
+|---|---|
+| `PAYMENT_RECEIVED` / `PAYMENT_CONFIRMED` | fatura `paid`; assinatura → `active`, `graceUntil = null`, `currentPeriodEnd` = `nextDueDate` da assinatura no Asaas (só avança, nunca volta) |
+| `PAYMENT_OVERDUE` | fatura segue `open`; assinatura `active`/`trialing` → `past_due` com `graceUntil = hoje + graceDays` + e-mail aos admins. O job diário suspende quando a carência vence (mesmo `suspendOverdue` do Stripe). Banner no topo de todas as telas com "Pagar agora" |
+| `PAYMENT_CREATED` | espelha a fatura; se for cobrança de ciclo (não a primeira), cobra o **excedente** do mês que fechou como cobrança avulsa (`billingType: UNDEFINED`, `externalReference = overage:<tenant>:<YYYY-MM>`), uma vez por mês |
+| `PAYMENT_DELETED` / `PAYMENT_REFUNDED` | fatura `void` |
+| `SUBSCRIPTION_DELETED` / `INACTIVATED` | assinatura → `canceled`, só se ainda for a atual do tenant |
+
+O polling do modal aplica o mesmo efeito de `PAYMENT_RECEIVED` (idempotente): em dev o webhook não chega e, em produção, pode atrasar.
+
+**Plano gratuito atribuído pelo dono** cancela a assinatura no Asaas (`DELETE /subscriptions/:id`), como faz no Stripe. **Reajuste** de quem já assina muda o valor da assinatura no Asaas sem mexer na cobrança já gerada.
+
+**Limitação:** excedente em cartão não é debitado automaticamente — vira cobrança avulsa que o cliente paga pelo link (PIX, boleto ou cartão). Para debitar direto seria preciso guardar o token do cartão.
+
 ## Cobrança com Stripe
 
 **Modelo:** cada `Plan` = um Price mensal recorrente no Stripe. O tenant vira um Customer no primeiro checkout. A assinatura do Stripe é a fonte da verdade; a tabela `subscriptions` é um espelho mantido pelos webhooks. Código: `apps/api/src/modules/billing/stripe.service.ts`.
@@ -186,7 +230,7 @@ Ao passar de **80%** e **100%** de mensagens ou templates, `usage_alerts` regist
    Copie o `whsec_…` impresso para `STRIPE_WEBHOOK_SECRET`. Em produção, cadastre `https://<api>/webhooks/stripe` no dashboard com os eventos: `checkout.session.completed`, `customer.subscription.*`, `invoice.created`, `invoice.finalized`, `invoice.paid`, `invoice.payment_failed`, `invoice.voided`.
 5. Cartão de teste: `4242 4242 4242 4242`, qualquer data futura e CVC. Para simular falha: `4000 0000 0000 0341`.
 
-Sem `STRIPE_SECRET_KEY` o sistema funciona normalmente, só sem autoatendimento: `GET /billing/usage` devolve `billingEnabled: false` e a tela mostra "fale com o suporte".
+Sem `STRIPE_SECRET_KEY` **e** sem `ASAAS_API_KEY` o sistema funciona normalmente, só sem autoatendimento: `GET /billing/usage` devolve `billingEnabled: false` e a tela mostra "fale com o suporte".
 
 ### Fluxos
 

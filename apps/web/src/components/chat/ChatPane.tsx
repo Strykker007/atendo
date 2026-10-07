@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { ZoomableAvatar } from './AvatarViewer';
@@ -133,6 +133,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const setContactTags = useSetContactTags();
   const usage = useUsage();
   const [text, setText] = useState('');
+  // "digitando…" no WhatsApp do contato enquanto o atendente escreve (começo e fim)
+  const presenca = useTypingPresence(conversationId);
+  // quantos caracteres do campo foram digitados de verdade: o resto (resposta rápida inserida,
+  // colado) ganha "digitando…" simulado na entrega — senão chega ao contato do nada
+  const digitados = useRef(0);
+  useEffect(() => { digitados.current = 0; }, [conversationId]);
   const [attachment, setAttachment] = useState<Upload | null>(null);
   const [uploading, setUploading] = useState(false);
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
@@ -239,7 +245,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     try {
       const up = await uploadFile(file);
       setPrevia(null);
-      await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, idempotencyKey: crypto.randomUUID() });
+      await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, simulateTypingChars: (caption ?? '').length, idempotencyKey: crypto.randomUUID() });
     } catch (err) {
       toast.err(err); // a prévia continua aberta: o arquivo escolhido não se perde no erro
     } finally {
@@ -403,7 +409,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       const input = r.media
         ? { type: mediaTypeOf(r.media.mimeType), mediaKey: r.media.key, text: assinar(r.text) || undefined, media: { url: r.media.url, mimeType: r.media.mimeType, fileName: r.media.fileName } } as const
         : { type: 'text', text: assinar(r.text) } as const;
-      send.mutateAsync({ ...input, idempotencyKey: r.key }).catch((err) => {
+      // resposta rápida ninguém digitou: "digitando…" simulado pelo tamanho do texto
+      send.mutateAsync({ ...input, simulateTypingChars: r.text.trim().length, idempotencyKey: r.key }).catch((err) => {
         // não perde o texto: volta para o campo para revisar e mandar de novo
         if (r.media) setAttachment(r.media);
         setText(r.text);
@@ -451,6 +458,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
+    presenca.parar();
     if (noteMode) {
       const nota = textoNota.trim();
       if (!nota || sendNote.isPending) return;
@@ -466,6 +474,10 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     const t = assinar(text);
     if ((!t && !attachment) || send.isPending) return;
     const att = attachment;
+    // sobre o texto do campo, não o assinado: a assinatura (*Nome:*) não conta como "não digitado"
+    const naoDigitado = Math.max(0, text.trim().length - digitados.current);
+    digitados.current = 0;
+    const simular = naoDigitado > 0 || (att && !t) ? { simulateTypingChars: naoDigitado } : {};
     setText('');
     setAttachment(null);
     // uma chave por envio: se a requisição repetir (rede, clique duplo), a API devolve a mesma mensagem
@@ -474,9 +486,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       // citação segue o id do provider: é ele que o WhatsApp entende do outro lado
       const citando = respondendo?.externalId ? { quotedExternalId: respondendo.externalId } : {};
       if (att) {
-        await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando, idempotencyKey });
+        await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando, ...simular, idempotencyKey });
       } else {
-        await send.mutateAsync({ type: 'text', text: t, ...citando, idempotencyKey });
+        await send.mutateAsync({ type: 'text', text: t, ...citando, ...simular, idempotencyKey });
       }
       setRespondendo(null);
       // Responder NÃO troca a aba da lista. Trocava para "Em atendimento" para a conversa não
@@ -790,7 +802,14 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               <textarea
                 ref={campoRef}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => {
+                  const tipo = (e.nativeEvent as InputEvent).inputType ?? '';
+                  if (tipo.startsWith('insert') && tipo !== 'insertFromPaste' && tipo !== 'insertFromDrop') digitados.current += Math.max(0, e.target.value.length - text.length);
+                  if (!e.target.value) digitados.current = 0;
+                  setText(e.target.value);
+                  presenca.digitou(e.target.value);
+                }}
+                onBlur={presenca.parar}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}
                 onPaste={colar}
                 rows={1}

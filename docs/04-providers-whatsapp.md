@@ -193,7 +193,7 @@ número na tela **Números**:
 |---|---|
 | **Intervalo entre envios** | Faixas `instant` (só oficial — **padrão da Meta**), `fast` 1–2s (**padrão da Evolution**), `short` 3–4s, `moderate` 3–5s (3000–5000ms), `medium` 25–60s, `long` 60–250s. Vale entre quaisquer dois envios do número (todas as conversas), por isso o padrão antigo (`short` para todos) fazia a fila virar minutos com vários atendentes; a migration `send_delay_mais_rapido` passou `short` → `fast` (Meta → `instant`). Criar o número ou trocar de provider aplica o padrão do provider (`defaultSendDelay`). O valor é **sorteado dentro da faixa a cada envio** — intervalo fixo é assinatura de robô. Conta da **entrega** da mensagem anterior, e a 1ª mensagem com o número ocioso também espera um sorteio ([Envio](envio.md)) |
 | **Teto diário** | **Desligado.** Saiu da tela; a migration `sem_teto_diario` zerou `sendDailyLimit` (0 = sem teto) em todos os números. O código ainda respeitaria um valor > 0 só em envio proativo (`countsTowardDailyLimit`), mas nada o configura |
-| **Aquecimento** | **Desligado.** Número novo não inicia mais aquecimento (`numberConnectionChanged`) e a migration `sem_teto_diario` limpou `warmupStartedAt` |
+| **Aquecimento** | O antigo (`warmupStartedAt`, rampa por dia) está **desligado**. Vale desde 10/2026 o aquecimento **por sessão**: 7 dias desde o QR, com contatos novos e automáticas por hora limitados — ver [Envio › Aquecimento](envio.md#aquecimento) |
 
 Implementação: `sending-policy.ts` (puro e testado) decide faixa, teto e rampa;
 `SendPacer` reserva a vaga do próximo envio no Redis com **script Lua atômico** — com
@@ -211,6 +211,55 @@ saiu.
 Além destas, a fila aplica limites por minuto do número, intervalo mínimo e rajada por
 conversa, ordem por conversa e pausa quando o número cai — ver [Envio](envio.md).
 
+
+### Identificação do aparelho
+
+`CONFIG_SESSION_PHONE_CLIENT: Windows` e `CONFIG_SESSION_PHONE_NAME: Chrome` na Evolution (os dois
+`infra/docker-compose*.yml`). Sem isto a Evolution se apresenta como **"Evolution API"** — no
+handshake e em *Dispositivos conectados* do celular —, marca explícita de cliente não oficial.
+**Só vale para sessões novas**: número já pareado continua com o nome antigo até ler o QR de novo.
+
+### Checklist antes do QR
+
+O `QrModal` só mostra o QR depois de a pessoa confirmar três pontos que o sistema não mede e que
+mais derrubam número: uso humano do chip há ≥ 14 dias, registro no WhatsApp há > 24 h, aparelhos
+antigos removidos **antes** de ler o QR. Não fica gravado; serve para obrigar a leitura.
+
+### Proxy
+
+Não usado: a instância sai pelo IP do servidor. Avaliar proxy brasileiro (Evolution `/proxy/set`
+por instância) só se o servidor estiver fora do Brasil.
+
+### Quando o WhatsApp derruba o número (`401 device_removed`)
+
+O WhatsApp pode encerrar sozinho a sessão do "aparelho conectado" (a Evolution): o
+`connection.update` chega com `state: close` e `statusReason: 401` (`stream:error` `conflict
+device_removed`). Ou alguém removeu o aparelho no celular, ou o WhatsApp desconfiou do uso
+(conexão não oficial, denúncias/bloqueios, conteúdo contra a política comercial). Caso real que
+motivou isto: Drogaria Total, duas quedas em 17 h no primeiro dia de uso, reconexão 2 min
+depois da segunda — e a conta terminou restrita, com o padrão de envio saudável (≈ tantas
+enviadas quanto recebidas, sem campanha).
+
+- **Detecção** (`InboundService.numberConnectionChanged`): 401 com o número **conectado** grava
+  `waRemovedAt`, `waRemovedCount` e `reconnectBlockedUntil` (`whatsapp/number-removal.ts`,
+  migração `20261029000600_number_wa_removed`). O "Desconectar"/"Excluir" do painel marca
+  `disconnected` **antes** do logout, então o 401 do próprio logout não conta como queda.
+- **Pausa de reconexão**: 2 h na primeira queda; 24 h se cair de novo dentro de 24 h.
+  `POST /numbers/:id/connect` responde **409 `reconnect_paused`** durante a pausa; com
+  `{ force: true }` reconecta (fica no log quem confirmou). Não é bloqueio duro: o negócio
+  pode precisar do número, mas decide sabendo do risco.
+- **Tela**: faixa vermelha no topo de todas as telas (`WaRemovedBanner`) enquanto o número
+  derrubado segue fora (até 24 h), card no número em **Números** e, ao tentar reconectar na
+  pausa, modal com o porquê e o que fazer (`components/numbers/WaRemovedNotice.tsx`). O texto
+  é para o cliente leigo: deixa claro que não foi falha do sistema, lista os motivos e manda
+  olhar o aviso de restrição no celular antes de reconectar.
+
+### Versão da Evolution
+
+A imagem é **fixa** (`evoapicloud/evolution-api:v2.3.7` nos dois `infra/docker-compose*.yml`,
+amd64 e arm64). Com `:latest` cada deploy podia trocar o cliente não oficial sem teste — e é ele
+que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número de teste, depois
+trocar a tag e fazer o deploy.
 
 ## Mensagem enviada pelo celular do cliente
 

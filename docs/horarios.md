@@ -48,6 +48,8 @@ Mensagens automáticas (boas-vindas e faixa) **não criam FlowRun**: não aparec
 
 ## Boas-vindas
 
+**Cooldown de 6 h** (`WELCOME_COOLDOWN_HOURS`, `planInbound`): quem trocou mensagem com a empresa há menos de 6 h (qualquer conversa do contato) não recebe as boas-vindas de novo — o atendimento segue normal (faixa, fluxos). Mesma saudação de robô repetida para a mesma pessoa é sinal de spam.
+
 `TenantSettings.welcomeEnabled` (liga/desliga sem apagar), `welcomeMessages: WelcomeMessage[]` (`{ id, items: ContentItem[] }`, até 20), `welcomeMode: 'random' | 'sequential'`, `welcomeCursor` (contador atômico do sequencial).
 
 - **Quando**: começo de atendimento — contato novo, conversa criada ou contato voltando depois de encerrado.

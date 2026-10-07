@@ -11,7 +11,7 @@ import { FlowEngineService } from '../flows/flow-engine.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { enrichContext } from '../../common/observability/request-context';
-import { isOptOut } from '../campaigns/dispatch';
+import { isAmbiguousOptOut, isOptOut } from '../campaigns/dispatch';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { shouldRefreshAvatar } from './avatar-refresh';
 
@@ -70,16 +70,22 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       // o que o cliente digitou no celular dele entra no histórico, mas não aciona nada:
       // responder com um fluxo ao dono do número seria o robô conversando com o chefe
       if (result && !result.fromMe) {
-        // "sair"/"parar": descadastra do disparo em massa. Vem antes da automação porque
-        // responder com um fluxo a quem pediu para sair é o caminho curto para a denúncia.
-        // Não encerra o atendimento: a pessoa pode voltar a escrever e precisa ser atendida.
-        if (isOptOut(result.message.text)) {
+        // "sair"/"parar": descadastra de TODO envio automático (campanha, fluxo, boas-vindas,
+        // lembrete). Vem antes da automação porque responder com um fluxo a quem pediu para sair
+        // é o caminho curto para a denúncia. Não encerra o atendimento: a pessoa pode voltar a
+        // escrever e precisa ser atendida por gente.
+        if (isOptOut(result.message.text) && !(isAmbiguousOptOut(result.message.text) && (await this.awaitingAnswer(result.conversation.id, result.conversation.contactId)))) {
           await this.prisma.contact.update({ where: { id: result.conversation.contactId }, data: { optOutAt: new Date() } })
-            .then(() => this.log.log(`Contato ${result.conversation.contactId} pediu para não receber disparos`))
+            .then(() => this.log.log(`Contato ${result.conversation.contactId} pediu para não receber mensagens automáticas`))
             .catch((err) => this.log.error(`descadastro: ${err instanceof Error ? err.message : err}`));
         }
+        // descadastrado (agora ou antes): nada de robô — a conversa fica para o atendente
+        const ficha = await this.prisma.contact.findUnique({ where: { id: result.conversation.contactId }, select: { optOutAt: true, waInvalidAt: true } });
+        const descadastrado = !!ficha?.optOutAt;
+        // escreveu, então tem WhatsApp: a marca da checagem antiga não vale mais
+        if (ficha?.waInvalidAt) await this.prisma.contact.update({ where: { id: result.conversation.contactId }, data: { waInvalidAt: null } }).catch(() => undefined);
         // "1"/"2" em resposta a lembrete de agendamento tem prioridade sobre fluxos
-        const handled = await this.scheduling.onInbound(number.tenantId, result.conversation.contactId, result.conversation.id, result.message.text ?? '', msg.interactiveReplyId).catch((err) => { this.log.error(`agenda: ${err instanceof Error ? err.message : err}`); return false; });
+        const handled = descadastrado || await this.scheduling.onInbound(number.tenantId, result.conversation.contactId, result.conversation.id, result.message.text ?? '', msg.interactiveReplyId).catch((err) => { this.log.error(`agenda: ${err instanceof Error ? err.message : err}`); return false; });
         if (!handled) await this.flows.onInbound(number, result.conversation, result.message, result.isNew, { isNewContact: result.isNewContact, returningAfterClosed: result.returningAfterClosed, hoursSinceLastMessage: result.hoursSinceLastMessage }).catch((err) => this.log.error(`fluxo: ${err instanceof Error ? err.message : err}`));
       }
       // foto de perfil do contato: na primeira mensagem e depois só de tempos em tempos.
@@ -163,5 +169,18 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       const number = await this.numbers.findByExternal(job.data.provider, parsed.connection.externalNumberId);
       if (number) await this.inbound.numberConnectionChanged(number, parsed.connection);
     }
+  }
+
+  /**
+   * "cancelar" é resposta, não descadastro, quando há um fluxo esperando resposta ou um
+   * agendamento futuro (o robô de agenda aceita "cancelar"). Sem isto, quem cancelava um horário
+   * parava de receber lembretes para sempre.
+   */
+  private async awaitingAnswer(conversationId: string, contactId: string) {
+    const [run, appt] = await Promise.all([
+      this.prisma.flowRun.findFirst({ where: { conversationId, status: { in: ['running', 'waiting'] } }, select: { id: true } }),
+      this.prisma.appointment.findFirst({ where: { contactId, startAt: { gt: new Date() }, status: { in: ['scheduled', 'confirmed'] } }, select: { id: true } }),
+    ]);
+    return !!run || !!appt;
   }
 }

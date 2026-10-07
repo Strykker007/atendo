@@ -141,6 +141,8 @@ export class ScheduledMessagesService {
         ...(media && { mediaKey: s.mediaKey!, media: { url: s.mediaKey!, mimeType: s.mediaMime ?? undefined, fileName: s.mediaName ?? undefined } }),
         // job repetido (worker reiniciou no meio) não manda duas vezes
         idempotencyKey: `scheduled-${s.id}`,
+        // sai sozinha no horário, sem ninguém digitando: "digitando…" simulado pelo tamanho do texto
+        simulateTypingChars: (s.content ?? '').length,
       });
       await this.prisma.scheduledMessage.update({ where: { id }, data: { status: 'sent', sentAt: new Date(), messageId: message.id, error: null } });
     } catch (err) {

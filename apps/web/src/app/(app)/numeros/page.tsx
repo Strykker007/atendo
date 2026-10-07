@@ -11,6 +11,9 @@ import { SendingCard } from '@/components/numbers/SendingCard';
 import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { NUMBER_PALETTE } from '@/components/chat/ChannelBadge';
+import { Modal } from '@/components/ui/Modal';
+import { WaRemovedCard, WaRemovedExplanation } from '@/components/numbers/WaRemovedNotice';
+import { ApiError } from '@/lib/api';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   connected: { label: 'Conectado', cls: 'bg-ok' },
@@ -34,6 +37,8 @@ export default function NumerosPage() {
   const [qr, setQr] = useState<{ id: string; initial?: string } | null>(null);
   const [deleting, setDeleting] = useState<NumberItem | null>(null);
   const [disconnecting, setDisconnecting] = useState<NumberItem | null>(null);
+  /** reconectar caiu na pausa após queda forçada pelo WhatsApp: confirma o risco antes */
+  const [pausado, setPausado] = useState<NumberItem | null>(null);
 
   // null = ilimitado; undefined = ainda carregando/sem plano
   const max = usage.data?.limits?.maxNumbers;
@@ -45,17 +50,19 @@ export default function NumerosPage() {
     if (r.provider === 'evolution') setQr({ id: r.id, initial: r.qrCode });
   };
 
-  async function reconnect(n: NumberItem) {
+  async function reconnect(n: NumberItem, force = false) {
     setBusyId(n.id);
     // Evolution: abre o modal na hora em "Gerando QR…" — o QR chega quando a API responder
     if (n.provider === 'evolution') setQr({ id: n.id });
     try {
-      const r = await connect.mutateAsync(n.id);
+      const r = await connect.mutateAsync({ id: n.id, force });
       if (n.provider === 'evolution') setQr({ id: n.id, initial: r.qrCode });
       else toast.ok(r.status === 'connected' ? 'Credenciais válidas' : 'Não foi possível validar');
     } catch (err) {
       if (n.provider === 'evolution') setQr(null);
-      toast.err(err);
+      // pausa após queda forçada: a API recusou de propósito — explica e deixa decidir
+      if (err instanceof ApiError && err.code === 'reconnect_paused') setPausado(n);
+      else toast.err(err);
     } finally {
       setBusyId(null);
     }
@@ -151,6 +158,17 @@ export default function NumerosPage() {
                   </div>
                 )}
 
+                <WaRemovedCard number={n} />
+
+                {/* aquecimento (docs/envio.md#aquecimento): o cliente precisa saber por que a resposta demora */}
+                {n.warmup && n.status === 'connected' && (
+                  <div className="rounded-xl bg-warn-soft text-warn-ink px-3 py-2 text-[12.5px]">
+                    <b>Aquecendo o número — fase {n.warmup.phase} de 4.</b> Conectado há pouco: até <b>{n.warmup.newConvPerHour} contatos novos por hora</b>, <b>{n.warmup.autoPerHour} mensagens automáticas por hora</b>
+                    {n.warmup.minGapMs > 0 && <> e {Math.round(n.warmup.minGapMs / 1000)} s entre envios</>}, até {new Date(n.warmup.endsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}.
+                    Quem já está conversando segue sendo respondido; os demais (e o robô acima do teto) esperam a vez. Número recém-conectado com volume alto é o principal motivo de queda.
+                  </div>
+                )}
+
                 {n.isActive && <SendingCard number={n} />}
 
                 <div className="flex flex-wrap gap-2">
@@ -182,6 +200,17 @@ export default function NumerosPage() {
       <CreateNumberModal open={creating} onClose={() => setCreating(false)} onDone={afterConnect} />
       <SwitchProviderModal number={switching} onClose={() => setSwitching(null)} onDone={afterConnect} />
       <QrModal numberId={qr?.id ?? null} initialQr={qr?.initial} onClose={() => setQr(null)} />
+      {pausado && (
+        <Modal open onClose={() => setPausado(null)} title="Melhor esperar para reconectar" width="max-w-xl">
+          <div className="space-y-4">
+            <WaRemovedExplanation number={pausado} />
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" onClick={() => { const n = pausado; setPausado(null); reconnect(n, true); }}>Entendi o risco, reconectar agora</Button>
+              <Button onClick={() => setPausado(null)}>Vou esperar</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}
