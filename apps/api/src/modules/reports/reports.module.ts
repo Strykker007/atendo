@@ -23,6 +23,25 @@ export const ReportDefinition = z.object({
 });
 export type ReportDefinition = z.infer<typeof ReportDefinition>;
 
+const SalesDetailsQuery = z.object({
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
+  userId: z.string().uuid().optional(),
+  contactId: z.string().uuid().optional(),
+  phone: z.string().max(40).optional(),
+  customerName: z.string().max(120).optional(),
+  search: z.string().trim().max(120).optional().transform((v) => v || undefined),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+/** "5511999998888" → "+55 11 99999-8888". Fora do padrão BR devolve só com o "+". */
+function formatPhone(phone: string) {
+  const d = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
+  const br = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
+  return br ? `+55 ${br[1]} ${br[2]}-${br[3]}` : `+${d}`;
+}
+
 @Controller('reports')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermission('reports.view')
@@ -87,6 +106,78 @@ class ReportsController {
       },
       sales,
       series: { byDay, byAgent, byOrigin, byCampaign: byCampaign.filter((c) => c.label !== '(orgânico)'), byTag: byTag.filter((c) => c.label !== '(sem tag)').sort((a, b) => b.value - a.value).slice(0, 8), byStatus },
+    };
+  }
+
+  /**
+   * Detalhamento de vendas (tabela `sales`): lista paginada + resumo do filtro ativo.
+   * `endDate` é exclusivo, como no resto dos relatórios. `search` casa nome do cliente,
+   * número (só dígitos) ou produto — no texto livre (`products`) e na descrição dos `items`.
+   */
+  @Get('sales/details')
+  async salesDetails(@CurrentUser() u: AuthUser, @Query() q: Record<string, string | undefined>) {
+    const f = SalesDetailsQuery.parse(q);
+    const to = f.endDate ?? new Date(Date.now() + 86_400_000);
+    const from = f.startDate ?? new Date(to.getTime() - 30 * 86_400_000);
+    // escapa curingas do ILIKE: o termo continua parametrizado, isto só evita "%" casar tudo
+    const like = (v: string) => `%${v.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const digits = (v: string) => v.replace(/\D/g, '');
+    // itens gravados como array JSON; venda em texto livre tem `items` nulo
+    const itensDe = Prisma.sql`jsonb_array_elements(case when jsonb_typeof(s.items) = 'array' then s.items else '[]'::jsonb end)`;
+    const produtoCasa = (t: string) => Prisma.sql`(s.products ilike ${like(t)} or exists (select 1 from ${itensDe} i where i->>'description' ilike ${like(t)}))`;
+
+    const conds: Prisma.Sql[] = [Prisma.sql`s."tenantId" = ${u.tenantId}`, Prisma.sql`s."closedAt" >= ${from}`, Prisma.sql`s."closedAt" < ${to}`];
+    if (f.userId) conds.push(Prisma.sql`s."userId" = ${f.userId}`);
+    if (f.contactId) conds.push(Prisma.sql`s."contactId" = ${f.contactId}`);
+    if (f.phone && digits(f.phone)) conds.push(Prisma.sql`c.phone like ${like(digits(f.phone))}`);
+    if (f.customerName) conds.push(Prisma.sql`c.name ilike ${like(f.customerName)}`);
+    if (f.search) {
+      const ors = [Prisma.sql`c.name ilike ${like(f.search)}`, produtoCasa(f.search)];
+      if (digits(f.search).length >= 3) ors.push(Prisma.sql`c.phone like ${like(digits(f.search))}`);
+      conds.push(Prisma.sql`(${Prisma.join(ors, ' or ')})`);
+    }
+    const where = Prisma.join(conds, ' and ');
+    const from_ = Prisma.sql`from sales s join contacts c on c.id = s."contactId" left join users usr on usr.id = s."userId"`;
+
+    const [rows, resumo, agents] = await Promise.all([
+      this.prisma.$queryRaw<{ id: string; closedAt: Date; amount: number; products: string | null; items: unknown; notes: string | null; conversationId: string; contactId: string; contactName: string | null; phone: string; userId: string | null; userName: string | null }[]>(Prisma.sql`
+        select s.id, s."closedAt", s.amount::float as amount, s.products, s.items, s.notes, s."conversationId",
+               c.id as "contactId", c.name as "contactName", c.phone, s."userId", usr.name as "userName"
+        ${from_} where ${where}
+        order by s."closedAt" desc
+        limit ${f.pageSize} offset ${(f.page - 1) * f.pageSize}
+      `),
+      this.prisma.$queryRaw<{ count: number; revenue: number | null; items: number | null }[]>(Prisma.sql`
+        select count(*)::int as count, sum(s.amount)::float as revenue,
+               -- venda em texto livre conta como 1 produto
+               sum(case when jsonb_typeof(s.items) = 'array' then jsonb_array_length(s.items) else 1 end)::int as items
+        ${from_} where ${where}
+      `),
+      // atendentes do tenant para o filtro (inclui quem não vendeu, para o dropdown não "sumir" gente)
+      this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    ]);
+    const count = Number(resumo[0]?.count ?? 0);
+    const revenue = Number(resumo[0]?.revenue ?? 0);
+    return {
+      period: { from, to },
+      page: f.page,
+      pageSize: f.pageSize,
+      total: count,
+      summary: { count, revenue, avgTicket: count ? revenue / count : null, itemsSold: Number(resumo[0]?.items ?? 0) },
+      agents,
+      rows: rows.map((r) => ({
+        id: r.id,
+        closedAt: r.closedAt,
+        amount: Number(r.amount),
+        conversationId: r.conversationId,
+        contact: { id: r.contactId, name: r.contactName, phone: r.phone, phoneFormatted: formatPhone(r.phone) },
+        user: r.userId ? { id: r.userId, name: r.userName } : null,
+        // texto livre vira um item só, para a UI listar do mesmo jeito
+        items: Array.isArray(r.items)
+          ? (r.items as { description?: unknown; value?: unknown }[]).map((i) => ({ description: String(i.description ?? ''), value: Number(i.value ?? 0) }))
+          : [{ description: r.products ?? '(sem descrição)', value: Number(r.amount) }],
+        notes: r.notes,
+      })),
     };
   }
 

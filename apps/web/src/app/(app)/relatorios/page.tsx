@@ -12,6 +12,7 @@ import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/comp
 import { useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
+import { SalesDetails } from '@/components/reports/SalesDetails';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
@@ -109,6 +110,7 @@ export default function RelatoriosPage() {
           </div>
 
           <Vendas overview={overview.data} range={range} />
+          <SalesDetails />
         </>
       )}
 

@@ -138,7 +138,7 @@ Duas decisões que não são estéticas:
 - **Trocar de filtro limpa a seleção** (`useEffect` em status/número/origem/atendente). Encerrar em massa o que saiu da tela é fechar no escuro, e não há como desfazer trinta de uma vez.
 - **Só vale o que está visível** (`marcadosVisiveis`): o que foi marcado e sumiu do filtro não entra no pedido.
 
-No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (descrição + valor por linha, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado).
+No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (descrição flexível + valor de largura fixa por linha — o modal alarga para `max-w-2xl` nesse modo, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado).
 
 O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseModal`, o porquê está no cabeçalho do arquivo. A resposta traz `ignored`, e o toast diz o número: alguém da equipe pode ter encerrado no meio do caminho.
 
@@ -295,6 +295,7 @@ Ator vazio aparece como **Automação**, nunca em branco: em auditoria, campo va
 - Cores categóricas `--c1…--c6` em **ordem fixa**, validadas para daltonismo e contraste nos dois temas (script `validate_palette` do skill dataviz). Nunca gerar cor extra: além de 6, agrupar.
 - `XAxis`/`YAxis` precisam ser filhos **diretos** do chart — Fragment quebra a detecção do Recharts.
 - Métrica `revenue` formata em R$ (tooltip `fmtBRL`, eixo compacto "12 mil"); `win_rate` em %. A seção **Vendas** da visão pronta (KPIs faturado/ticket médio/conversão, faturamento por dia, vendas por atendente com tabela) usa `overview.sales`, que vem da tabela `sales`.
+- **Detalhamento de vendas** (`components/reports/SalesDetails.tsx`, hook `useSaleDetails`) fica abaixo da seção Vendas, com período próprio (Hoje/7/30 dias/Personalizado), dropdown de atendente e busca por cliente/número/produto (debounce 350 ms). Resumo do filtro ativo (produtos vendidos, faturamento, ticket médio) vale para todas as páginas; clicar na linha expande os itens.
 
 ## Padrões
 

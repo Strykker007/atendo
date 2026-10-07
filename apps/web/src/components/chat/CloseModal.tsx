@@ -100,7 +100,7 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
   }
 
   return (
-    <Modal open onClose={onClose} title="Encerrar atendimento">
+    <Modal open onClose={onClose} title="Encerrar atendimento" width={outcome === 'won' && modoLista ? 'max-w-2xl' : undefined}>
       <form onSubmit={submit} className="space-y-4">
         <Field label="Resultado" hint="Alimenta o relatório de vendas. Pode deixar sem resultado.">
           <div className="flex flex-wrap gap-2">
@@ -123,11 +123,12 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
               <Field label="Itens da venda *" hint="O total soma faturamento, ticket médio e desempenho por atendente.">
                 <div className="space-y-2">
                   {itens.map((item, idx) => (
-                    <div key={idx} className="flex gap-2">
-                      <input className={`${inputCls} flex-1`} placeholder="Produto ou serviço" value={item.descricao} onChange={(e) => mudarItem(idx, 'descricao', e.target.value)} maxLength={200} autoFocus={idx === 0} />
-                      <input className={`${inputCls} w-28`} inputMode="decimal" placeholder="R$ 0,00" value={item.valor} onChange={(e) => mudarItem(idx, 'valor', e.target.value)} />
+                    <div key={idx} className="flex items-center gap-2">
+                      {/* min-w-0: sem ele o input não encolhe abaixo da largura intrínseca e a descrição fica espremida */}
+                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Produto ou serviço" value={item.descricao} onChange={(e) => mudarItem(idx, 'descricao', e.target.value)} maxLength={200} autoFocus={idx === 0} />
+                      <input className={`${inputCls} !w-36 shrink-0 text-right tnum`} inputMode="decimal" placeholder="R$ 0,00" value={item.valor} onChange={(e) => mudarItem(idx, 'valor', e.target.value)} />
                       {itens.length > 1 && (
-                        <button type="button" aria-label="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="shrink-0 px-2 text-muted hover:text-danger">
+                        <button type="button" aria-label="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="shrink-0 p-2 rounded-lg text-muted hover:text-danger hover:bg-field">
                           <Trash2 size={14} />
                         </button>
                       )}

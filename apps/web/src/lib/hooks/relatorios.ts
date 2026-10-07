@@ -1,7 +1,7 @@
 'use client';
 /** Relatórios. */
 'use client';
-import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
@@ -32,4 +32,30 @@ export const useSaveReport = () => {
 export const useDeleteSavedReport = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/reports/saved/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }) });
+};
+
+// ---- Relatórios: detalhamento de vendas ----
+export interface SaleDetailsFilters { startDate: string; endDate: string; userId?: string; search?: string; page: number; pageSize?: number }
+export interface SaleDetailsRow {
+  id: string;
+  closedAt: string;
+  amount: number;
+  conversationId: string;
+  contact: { id: string; name: string | null; phone: string; phoneFormatted: string };
+  user: { id: string; name: string | null } | null;
+  items: { description: string; value: number }[];
+  notes: string | null;
+}
+export interface SaleDetails {
+  page: number;
+  pageSize: number;
+  total: number;
+  /** resumo do filtro inteiro, não só da página */
+  summary: { count: number; revenue: number; avgTicket: number | null; itemsSold: number };
+  agents: { id: string; name: string }[];
+  rows: SaleDetailsRow[];
+}
+export const useSaleDetails = (f: SaleDetailsFilters) => {
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
+  return useQuery({ queryKey: ['sale-details', qs.toString()], queryFn: () => api<SaleDetails>(`/reports/sales/details?${qs}`), placeholderData: keepPreviousData });
 };
