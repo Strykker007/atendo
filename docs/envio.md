@@ -191,6 +191,14 @@ contatos/h logo após o QR. O card do número em **Números** mostra a fase e at
 ### Humanização
 
 No não oficial, antes de entregar:
+- **fica online** (`NumbersService.markOnline` → Evolution `/instance/setPresence available`) e
+  volta a **offline ~45 s depois da última atividade** (envio ou "digitando"). A instância conecta
+  offline (`alwaysOnline: false` → `markOnlineOnConnect: false`) e **o WhatsApp não exibe
+  "digitando" de conta offline**: o `delay` acontecia, mas o contato não via nada. `alwaysOnline`
+  resolveria deixando o número online 24 h — padrão de robô. Janela no Redis (`wa:online:<número>`),
+  só a 1ª atividade chama a Evolution; o timer de cada processo manda offline se ninguém renovou.
+  Efeito colateral: enquanto online, o celular da loja não toca notificação (como com o WhatsApp
+  Web aberto);
 - **marca como lida** a última mensagem recebida da conversa (uma vez por mensagem, `wa:read`;
   a Evolution v2 pede `remoteJid` + `fromMe` + `id`, resolvido como na edição, por causa do LID);
 - mensagem **automática** sai no tempo de uma pessoa (`humanTiming`, `whatsapp/number-warmup.ts`):

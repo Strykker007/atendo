@@ -301,6 +301,19 @@ export class EvolutionProvider implements WhatsAppProvider {
    * automatizado. A Evolution segura a requisição pelo `delay` e volta para `paused` sozinha
    * (a v2.3.7 sempre fecha com `paused`) — quem mantém aberto é o laço de NumbersService.setTyping.
    */
+  /**
+   * Online/offline da conta (`/instance/setPresence`). A instância conecta offline
+   * (`alwaysOnline: false` → `markOnlineOnConnect: false`) e o WhatsApp não exibe "digitando" de
+   * conta offline — o `delay` acontecia, mas o contato não via nada. Quem liga e desliga é
+   * NumbersService.markOnline: online só enquanto há envio/digitação, como uma pessoa.
+   */
+  async setOnline(ctx: NumberContext, online: boolean) {
+    await this.api(`/instance/setPresence/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ presence: online ? 'available' : 'unavailable' }),
+    }, this.shard(ctx));
+  }
+
   async sendTyping(ctx: NumberContext, phone: string, ms: number, state: 'composing' | 'paused' = 'composing') {
     await this.api(`/chat/sendPresence/${this.instance(ctx)}`, {
       method: 'POST',

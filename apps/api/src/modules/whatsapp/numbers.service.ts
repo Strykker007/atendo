@@ -14,6 +14,8 @@ import type { MessageTemplate } from '@atendo/shared';
 const TYPING_CHUNK_MS = 5_000;
 /** sem renovação do painel nesse tempo = parou de digitar */
 const TYPING_IDLE_MS = 4_000;
+/** sem envio nem digitação nesse tempo, a conta volta a offline */
+const ONLINE_MS = 45_000;
 
 @Injectable()
 export class NumbersService {
@@ -55,6 +57,49 @@ export class NumbersService {
    * Estado no Redis porque há mais de uma instância da API: `typing:until` diz até quando a
    * pessoa está digitando; `typing:loop` garante um laço só. Nunca lança: é humanização.
    */
+  /** quando cada número deve conferir se fica offline (um timer por número neste processo) */
+  private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /**
+   * Conta online enquanto há atividade (envio, "digitando"), offline ~45 s depois da última —
+   * como alguém com o WhatsApp Web aberto. Sem isto o WhatsApp não mostra "digitando" (a instância
+   * conecta offline), e o oposto — `alwaysOnline` — deixaria o número online 24 h, padrão de robô.
+   *
+   * `wa:online:<número>` no Redis é a janela (renovada a cada atividade); só a 1ª atividade da
+   * janela chama a Evolution. O timer de cada processo confere ao fim: se ninguém renovou, manda
+   * offline. Processo reiniciado perde o timer — a próxima atividade abre e fecha a janela de novo.
+   * Nunca lança. Efeito colateral: com a conta online o celular da loja não toca notificação.
+   */
+  async markOnline(numberId: string) {
+    try {
+      const key = `wa:online:${numberId}`;
+      const nova = (await this.redis.set(key, '1', 'PX', ONLINE_MS, 'NX')) === 'OK';
+      if (!nova) await this.redis.pexpire(key, ONLINE_MS);
+      const old = this.offlineTimers.get(numberId);
+      if (old) clearTimeout(old);
+      const t = setTimeout(() => void this.maybeOffline(numberId), ONLINE_MS + 1_000);
+      t.unref?.();
+      this.offlineTimers.set(numberId, t);
+      if (nova) {
+        const ctx = await this.context(numberId);
+        await this.registry.get(ctx.provider).setOnline?.(ctx, true);
+      }
+    } catch {
+      /* humanização: nunca atrapalha o envio */
+    }
+  }
+
+  private async maybeOffline(numberId: string) {
+    this.offlineTimers.delete(numberId);
+    try {
+      if (await this.redis.exists(`wa:online:${numberId}`)) return; // alguém renovou
+      const ctx = await this.context(numberId);
+      await this.registry.get(ctx.provider).setOnline?.(ctx, false);
+    } catch {
+      /* idem */
+    }
+  }
+
   setTyping(numberId: string, phone: string, state: 'composing' | 'paused') {
     const key = `${numberId}:${phone}`;
     void this.typingStep(numberId, phone, key, state).catch(() => undefined);
@@ -72,6 +117,8 @@ export class NumbersService {
     }
     // sem notícia do painel em 4 s (aba fechada, rede caiu) = parou
     await this.redis.set(until, '1', 'PX', TYPING_IDLE_MS);
+    // "digitando" de conta offline não aparece para o contato
+    await this.markOnline(numberId);
     if ((await this.redis.set(loop, '1', 'PX', TYPING_CHUNK_MS * 3, 'NX')) !== 'OK') return; // laço já rodando
     try {
       const ctx = await this.context(numberId);

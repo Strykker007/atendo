@@ -141,6 +141,8 @@ export interface WhatsAppProvider {
    * `paused` sozinho; `paused` encerra na hora. Só no não oficial.
    */
   sendTyping?(ctx: NumberContext, phone: string, ms: number, state?: 'composing' | 'paused'): Promise<void>;
+  /** online/offline da conta inteira. O WhatsApp não mostra "digitando" de quem está offline. */
+  setOnline?(ctx: NumberContext, online: boolean): Promise<void>;
   /**
    * Nome que o provider guardou para o contato (agenda ou pushName, sem distinção). Usado só
    * para dar nome a contato que nasceu sem nenhum. Opcional: a Meta não tem agenda.

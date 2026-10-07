@@ -178,8 +178,12 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       typingMs: humano ? (message.text ? humano.typingMs : typingMs(0)) : simulado,
     };
 
-    // humanização: quem responde leu antes — marca como lida a última recebida da conversa
-    if (num.provider !== 'meta') await this.markLastInboundRead(provider, ctx, message.conversationId, message.conversation.contact.phone);
+    // humanização: quem responde está online (sem isto o "digitando" não aparece — a instância
+    // conecta offline) e leu antes — marca como lida a última recebida da conversa
+    if (num.provider !== 'meta') {
+      await this.numbers.markOnline(numberId);
+      await this.markLastInboundRead(provider, ctx, message.conversationId, message.conversation.contact.phone);
+    }
 
     let result;
     try {
