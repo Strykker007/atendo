@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, MinusCircle, Plus, Trash2 } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
@@ -22,6 +22,8 @@ const lerValor = (v: string) => {
   return Number(/\.\d{3}$/.test(t) ? t.replace(/\./g, '') : t);
 };
 
+const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
 /** campo de configuração com o fluxo padrão de cada desfecho */
 const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId', none: 'noneFlowId' } as const;
 
@@ -32,6 +34,8 @@ const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId', none: 'noneFlo
  * Cada desfecho pode ter um fluxo padrão (Configurações → Fluxos padrão): escolher o desfecho
  * já pré-seleciona o fluxo dele, então o caso comum é um clique. Trocar ou pôr "Nenhum" vale
  * só para este encerramento. "Comprou" grava a venda (valor obrigatório, produtos, observações).
+ * A venda abre em lista de itens (descrição + valor, total somado); quem preferir troca para
+ * texto livre e informa o total à mão.
  */
 export function CloseModal({ conversationId, onClose }: { conversationId: string; onClose: () => void }) {
   const setStatus = useSetStatus();
@@ -41,6 +45,8 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
   const [outcome, setOutcome] = useState<ConversationOutcome>('none');
   const [valor, setValor] = useState('');
   const [produtos, setProdutos] = useState('');
+  const [modoLista, setModoLista] = useState(true);
+  const [itens, setItens] = useState([{ descricao: '', valor: '' }]);
   const [observacoes, setObservacoes] = useState('');
   const [motivo, setMotivo] = useState('');
   const [flowId, setFlowId] = useState('');
@@ -62,9 +68,16 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
   }, [carregou, outcome]);
   const ehPadrao = !!flowId && flowId === padraoDe(outcome);
 
+  const itensValidos = itens.map((i) => ({ description: i.descricao.trim(), value: lerValor(i.valor) || 0 })).filter((i) => i.description || i.value);
+  const totalItens = Math.round(itensValidos.reduce((a, i) => a + i.value * 100, 0)) / 100;
+  const mudarItem = (idx: number, campo: 'descricao' | 'valor', v: string) =>
+    setItens((l) => l.map((i, n) => (n === idx ? { ...i, [campo]: campo === 'valor' ? v.replace(/[^\d.,]/g, '') : v } : i)));
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const value = outcome === 'won' ? lerValor(valor) : undefined;
+    const lista = outcome === 'won' && modoLista;
+    if (lista && itensValidos.some((i) => !i.description)) return toast.err(new Error('Descreva cada item da venda'));
+    const value = outcome === 'won' ? (lista ? totalItens : lerValor(valor)) : undefined;
     if (outcome === 'won' && !(value! > 0)) return toast.err(new Error('Informe o valor da compra'));
     try {
       await setStatus.mutateAsync({
@@ -73,7 +86,9 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
         outcome,
         value,
         reason: outcome === 'lost' ? motivo || undefined : undefined,
-        products: outcome === 'won' ? produtos.trim() || undefined : undefined,
+        products: outcome === 'won' && !lista ? produtos.trim() || undefined : undefined,
+        // em lista, a API soma os itens e monta o resumo em `products`
+        items: lista ? itensValidos : undefined,
         notes: outcome === 'won' ? observacoes.trim() || undefined : undefined,
         // sem o recurso o servidor decide; com ele, o que está na tela é o que vale ("Nenhum" = null).
         // Antes de carregar as configurações, deixa o servidor aplicar o padrão.
@@ -104,12 +119,41 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
 
         {outcome === 'won' && (
           <>
-            <Field label="Valor da compra (R$) *" hint="É o que soma faturamento, ticket médio e desempenho por atendente.">
-              <input className={inputCls} inputMode="decimal" placeholder="0,00" value={valor} onChange={(e) => setValor(e.target.value.replace(/[^\d.,]/g, ''))} required autoFocus />
-            </Field>
-            <Field label="Produtos / descrição">
-              <input className={inputCls} placeholder="O que foi comprado" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
-            </Field>
+            {modoLista ? (
+              <Field label="Itens da venda *" hint="O total soma faturamento, ticket médio e desempenho por atendente.">
+                <div className="space-y-2">
+                  {itens.map((item, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <input className={`${inputCls} flex-1`} placeholder="Produto ou serviço" value={item.descricao} onChange={(e) => mudarItem(idx, 'descricao', e.target.value)} maxLength={200} autoFocus={idx === 0} />
+                      <input className={`${inputCls} w-28`} inputMode="decimal" placeholder="R$ 0,00" value={item.valor} onChange={(e) => mudarItem(idx, 'valor', e.target.value)} />
+                      {itens.length > 1 && (
+                        <button type="button" aria-label="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="shrink-0 px-2 text-muted hover:text-danger">
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between">
+                    <button type="button" disabled={itens.length >= 50} onClick={() => setItens((l) => [...l, { descricao: '', valor: '' }])} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline disabled:opacity-50">
+                      <Plus size={14} /> Adicionar item
+                    </button>
+                    <span className="text-[13px] text-muted">Total: <b className="text-ink tnum">{fmtBRL(totalItens)}</b></span>
+                  </div>
+                </div>
+              </Field>
+            ) : (
+              <>
+                <Field label="Valor da compra (R$) *" hint="É o que soma faturamento, ticket médio e desempenho por atendente.">
+                  <input className={inputCls} inputMode="decimal" placeholder="0,00" value={valor} onChange={(e) => setValor(e.target.value.replace(/[^\d.,]/g, ''))} required autoFocus />
+                </Field>
+                <Field label="Produtos / descrição">
+                  <textarea className={`${inputCls} resize-none`} rows={3} placeholder="O que foi comprado" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
+                </Field>
+              </>
+            )}
+            <button type="button" onClick={() => setModoLista((m) => !m)} className="text-[12px] text-muted underline hover:text-ink">
+              {modoLista ? 'Mudar para campo de texto livre' : 'Mudar para lista de itens'}
+            </button>
             <Field label="Observações">
               <textarea className={`${inputCls} resize-none`} rows={2} placeholder="Forma de pagamento, entrega, desconto…" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
             </Field>

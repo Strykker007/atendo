@@ -1058,8 +1058,15 @@ export class ConversationsService {
     id: string,
     status: ConversationStatus,
     userId: string,
-    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string; products?: string; notes?: string },
+    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string; products?: string; items?: { description: string; value: number }[]; notes?: string },
   ) {
+    // venda em lista: o total é a soma dos itens, calculada aqui — não confia na conta do front
+    const itens = outcome?.outcome === 'won' ? outcome.items?.map((i) => ({ description: i.description.trim(), value: Math.round(i.value * 100) / 100 })).filter((i) => i.description) : undefined;
+    if (itens?.length) {
+      const total = Math.round(itens.reduce((a, i) => a + i.value * 100, 0)) / 100;
+      if (!(total > 0)) throw new BadRequestException('Informe o valor da compra');
+      outcome = { ...outcome!, value: total, products: itens.map((i) => i.description).join('; ').slice(0, 500) };
+    }
     // o desfecho só faz sentido ao encerrar; reabrir limpa, porque o atendimento continua
     const desfecho =
       status !== 'closed'
@@ -1112,6 +1119,7 @@ export class ConversationsService {
           userId: vendedor,
           amount: conv.outcomeValue,
           products: outcome.products?.trim() || null,
+          items: itens?.length ? itens : undefined,
           notes: outcome.notes?.trim() || null,
           closedAt: conv.closedAt ?? new Date(),
         },

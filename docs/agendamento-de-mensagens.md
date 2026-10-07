@@ -7,8 +7,9 @@ confundir com o [Agendamento de horários](13-agendamento.md) (agenda de barbear
 
 Permissão `conversations.schedule_message` (*Agendar mensagens para o cliente*), no grupo
 Atendimento do perfil de acesso. Não é feature de plano: é ligada por perfil, para poder ser
-vendida em qualquer plano. No padrão só o perfil **Administrador** tem (a migração acrescenta
-no Administrador não editado); Gerente e Atendente ganham quando alguém marcar. Sem ela: o
+vendida em qualquer plano. No padrão os perfis **Administrador** e **Atendente** têm (as migrações
+acrescentam nos não editados; o Atendente desde `agent_default_permissions`); Gerente ganha quando
+alguém marcar. Sem ela: o
 relógio some, o X de cancelar some e `POST`/`DELETE` dão 403. A faixa com a lista continua
 visível para todos da conversa.
 

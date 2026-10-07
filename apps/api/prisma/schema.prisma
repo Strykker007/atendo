@@ -704,8 +704,11 @@ model Sale {
   /// atendente que encerrou. Nulo = super_admin/sistema
   userId         String?
   amount         Decimal  @db.Decimal(12, 2)
-  /// o que foi comprado (texto livre)
+  /// o que foi comprado: texto livre, ou o resumo dos itens quando a venda veio em lista
   products       String?
+  /// itens da venda `[{ description, value }]`; nulo = encerrada no modo texto livre.
+  /// `amount` é sempre a soma deles — é o que os relatórios leem
+  items          Json?
   notes          String?
   closedAt       DateTime @default(now())
 

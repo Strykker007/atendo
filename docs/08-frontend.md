@@ -138,6 +138,8 @@ Duas decisões que não são estéticas:
 - **Trocar de filtro limpa a seleção** (`useEffect` em status/número/origem/atendente). Encerrar em massa o que saiu da tela é fechar no escuro, e não há como desfazer trinta de uma vez.
 - **Só vale o que está visível** (`marcadosVisiveis`): o que foi marcado e sumiu do filtro não entra no pedido.
 
+No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens** (descrição + valor por linha, "+ Adicionar item", total somado na hora) e vai como `items`; o link "Mudar para campo de texto livre" volta ao formato antigo (descrição em bloco + total digitado).
+
 O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseModal`, o porquê está no cabeçalho do arquivo. A resposta traz `ignored`, e o toast diz o número: alguém da equipe pode ter encerrado no meio do caminho.
 
 ## Marca

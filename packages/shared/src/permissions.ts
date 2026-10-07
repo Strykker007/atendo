@@ -69,8 +69,9 @@ export const DEFAULT_PERMISSIONS: Record<'tenant_admin' | 'manager' | 'agent', P
   // o padrão do atendente reproduz EXATAMENTE o que ele já podia antes dos perfis: respostas
   // rápidas e relatórios nunca foram restritos, e tirá-los agora seria perder acesso numa
   // migração. Quem quiser restringir, cria um perfil sem eles. Nota interna entrou depois
-  // (passagem de bastão entre atendentes — ver docs/08-frontend.md).
-  agent: ['conversations.internal_note', 'conversations.edit_message', 'contacts.edit', 'quick_replies.manage', 'reports.view'],
+  // (passagem de bastão entre atendentes — ver docs/08-frontend.md); transferir o atendimento
+  // dos outros, agendar mensagem e conectar números também (migration agent_default_permissions).
+  agent: ['conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.schedule_message', 'contacts.edit', 'quick_replies.manage', 'reports.view', 'numbers.manage'],
 };
 
 /** Nomes dos perfis criados junto com o cliente. */

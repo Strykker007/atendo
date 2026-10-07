@@ -78,6 +78,10 @@ class ForwardDto {
 class NoteDto {
   @IsString() @IsNotEmpty() @MaxLength(4096) text: string;
 }
+class SaleItemDto {
+  @IsString() @IsNotEmpty() @MaxLength(200) description: string;
+  @IsNumber() @Min(0) @Max(9_999_999) value: number;
+}
 class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;
   /** desfecho do atendimento, só no encerramento */
@@ -88,6 +92,8 @@ class StatusDto {
   value?: number;
   /** venda: o que foi comprado e observações do fechamento */
   @IsOptional() @IsString() @MaxLength(500) products?: string;
+  /** venda em lista: o total passa a ser a soma dos itens (o `value` enviado é ignorado) */
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => SaleItemDto) items?: SaleItemDto[];
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
   @IsOptional() @IsString() @MaxLength(200) reason?: string;
   /**
@@ -314,7 +320,7 @@ export class ConversationsController {
 
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
-    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason, products: dto.products, notes: dto.notes } : undefined);
+    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason, products: dto.products, items: dto.items, notes: dto.notes } : undefined);
     // Fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar).
     // Sem escolha no modal, vale o fluxo padrão configurado — é o caso comum: pesquisa de
     // satisfação que precisa sair em TODO encerramento, e depender de alguém lembrar de

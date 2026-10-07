@@ -81,8 +81,10 @@ entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` qua
 ### Relatórios
 
 **sales** — uma linha por atendimento encerrado como **Comprou**: `conversationId`, `contactId`,
-`userId` (quem encerrou; nulo = super_admin), `amount` (obrigatório), `products`, `notes`,
-`closedAt`. Nunca alterada nem apagada — reabrir a conversa limpa `conversations.outcome*`, mas a
+`userId` (quem encerrou; nulo = super_admin), `amount` (obrigatório), `products`, `items`, `notes`,
+`closedAt`. `items` (JSONB, `[{description, value}]`) vem da venda em lista: aí `amount` é a soma
+calculada pela API e `products` é o resumo das descrições; nulo = encerrada em texto livre
+(migração `20261029000100_sale_items`). Nunca alterada nem apagada — reabrir a conversa limpa `conversations.outcome*`, mas a
 venda que já entrou no mês continua. É a base de conversão, ticket médio e faturamento por
 atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`). Encerramento em
 massa como *Comprou* não grava venda (não tem valor). Migração `20261028000000_close_flows_and_sales`.

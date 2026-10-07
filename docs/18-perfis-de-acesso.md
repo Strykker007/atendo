@@ -34,7 +34,11 @@ perfis. Em particular, `agent` inclui `quick_replies.manage` e `reports.view`: n
 era restrito, e tirá-los na migração seria perder acesso sem ninguém pedir. Depois disso,
 `agent` ganhou `conversations.internal_note` (passagem de bastão entre atendentes): a migration
 `agent_internal_note` acrescenta a permissão aos perfis "Atendente" padrão **não editados**
-(`customized = false`); perfil editado pelo cliente fica como está. As três de apagar
+(`customized = false`); perfil editado pelo cliente fica como está. Do mesmo jeito, `agent` ganhou
+`conversations.transfer_any`, `conversations.schedule_message` e `numbers.manage` (migration
+`agent_default_permissions`) — o padrão do atendente hoje é: transferir/devolver atendimento de
+outra pessoa, nota interna, editar mensagem, agendar mensagem, editar ficha do contato, respostas
+rápidas, relatórios e números de WhatsApp. As três de apagar
 (`delete_message`, `delete_chat`, `view_deleted`) entraram do mesmo jeito nos perfis padrão Gerente e
 Administrador (migration `message_delete`) — regras em [Apagar mensagens](apagar-mensagens.md).
 `variables.manage` (variáveis da empresa) idem, nos perfis padrão Gerente e Administrador não

@@ -83,8 +83,9 @@ export function ReportChart({ def, series, height = 320 }: { def: ReportDefiniti
   if (def.chart === 'pie') {
     return (
       <ResponsiveContainer width="100%" height={height}>
-        <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" innerRadius={70} outerRadius={120} paddingAngle={2} stroke="var(--panel)" strokeWidth={2}>
+        {/* raio em % da área útil (já descontada a legenda): fixo em px cortava o topo nos cards de 220px */}
+        <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+          <Pie data={data} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="95%" paddingAngle={2} stroke="var(--panel)" strokeWidth={2}>
             {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
           </Pie>
           <Tooltip content={<TooltipBox metric={def.metric} />} />
