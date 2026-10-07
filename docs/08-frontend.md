@@ -56,6 +56,8 @@ src/
 - **Servidor** (conversas, mensagens, tags…): react-query. Chaves: `['conversations', filtros]`, `['messages', id]`, `['numbers']`, `['tags']`, `['quick-replies']`, `['usage']`, `['number-qr', id]`.
 - **UI** (colunas, filtros, seleção): zustand com `persist` — sidebar recolhida, painel direito e número selecionado sobrevivem ao reload.
 - **Token**: em memória (`lib/api.ts`), nunca em localStorage. O refresh está no cookie httpOnly; ao abrir o app, `(app)/layout.tsx` chama `/auth/refresh` para obter um access token novo.
+- **Sessão expirada**: toda chamada autenticada passa por `api()` (inclusive upload — `FormData` dispensa o `Content-Type` JSON), que renova em 401 e repete uma vez. Se o refresh também falha, `sessionExpired()` leva para `/login?expirou=1&next=<rota>`: o login explica "Sua sessão expirou" e volta para a rota (só caminho interno). Nunca mostrar "token" ao usuário.
+- **Socket e token**: se o servidor derruba o socket (token vencido na reconexão), `useRealtime` renova pelo mesmo `refresh()` e reconecta — o socket.io não reconecta sozinho após `io server disconnect`.
 
 ## Tempo real
 

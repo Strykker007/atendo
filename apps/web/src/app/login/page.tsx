@@ -1,8 +1,8 @@
 'use client';
 import { MarcaHorizontal } from '@/components/ui/Marca';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, setAccessToken } from '@/lib/api';
+import { api, setAccessToken, SESSION_EXPIRED_MESSAGE } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 
 export default function LoginPage() {
@@ -11,6 +11,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+  // a sessão caiu no meio do uso (ver sessionExpired em lib/api.ts): explica e volta para lá
+  useEffect(() => { if (new URLSearchParams(location.search).get('expirou')) setAviso(SESSION_EXPIRED_MESSAGE); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -19,7 +22,9 @@ export default function LoginPage() {
     try {
       const r = await api<{ accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }, false);
       setAccessToken(r.accessToken);
-      router.replace('/conversas');
+      // só caminho interno: `next` vem da URL e não pode virar redirecionamento para fora
+      const next = new URLSearchParams(location.search).get('next');
+      router.replace(next && /^\/(?![\/\\])/.test(next) ? next : '/conversas');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha no login');
     } finally {
@@ -34,6 +39,7 @@ export default function LoginPage() {
           <MarcaHorizontal className="h-10 w-auto max-w-full object-contain object-left" />
           <p className="text-sm text-muted">Entre para acessar o atendimento</p>
         </div>
+        {aviso && !error && <p role="status" className="text-sm rounded-lg border border-warn bg-warn-soft text-warn-ink px-3 py-2">{aviso}</p>}
         <label className="block text-sm">
           <span className="text-ink">E-mail</span>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full rounded-lg border border-line px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent/40" />
