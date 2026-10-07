@@ -5,6 +5,7 @@ import { BILLING_CYCLE_LABEL, PLAN_FEATURES, PLAN_FEATURE_LABEL, type BillingCyc
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
+import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
@@ -349,15 +350,15 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
           <Field label="Nome"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={40} required autoFocus placeholder="Starter, Pro, Cortesia…" /></Field>
           {anual ? (
             <Field label="Anuidade (R$)" hint={`Equivale a ${brl(mensal)}/mês — é o valor que entra no MRR.${form.id ? ' Mudar cria um preço novo no Stripe.' : ''}`}>
-              <input className={inputCls} inputMode="decimal" value={String(form.priceYear ?? 0)} onChange={(e) => setForm({ ...form, priceYear: Number(e.target.value.replace(',', '.')) || 0 })} required placeholder="970,00" />
+              <MoneyInput value={form.priceYear ?? 0} onChange={(v) => setForm({ ...form, priceYear: v ?? 0 })} required />
             </Field>
           ) : (
             <Field label="Mensalidade (R$)" hint={gratis ? 'Plano gratuito: sem cobrança.' : form.id && ciclo === 'monthly' ? 'Mudar o valor cria um preço novo no Stripe.' : undefined}>
-              <input className={cn(inputCls, gratis && 'opacity-60')} inputMode="decimal" disabled={gratis} value={String(gratis ? 0 : form.priceMonth)} onChange={(e) => setForm({ ...form, priceMonth: Number(e.target.value.replace(',', '.')) || 0 })} required placeholder="97,00" />
+              <MoneyInput className={cn(gratis && 'opacity-60')} disabled={gratis} value={gratis ? 0 : form.priceMonth} onChange={(v) => setForm({ ...form, priceMonth: v ?? 0 })} required />
             </Field>
           )}
           <Field label="Custo por cliente (R$/mês)" hint="O que te custa servir um cliente deste plano: suporte, infra rateada, licenças. É o que faz a margem por plano existir no Financeiro.">
-            <input className={inputCls} inputMode="decimal" value={String(form.costMonth ?? 0)} onChange={(e) => setForm({ ...form, costMonth: Number(e.target.value.replace(',', '.')) || 0 })} placeholder="0,00" />
+            <MoneyInput value={form.costMonth ?? 0} onChange={(v) => setForm({ ...form, costMonth: v ?? 0 })} />
           </Field>
         </div>
 
@@ -418,18 +419,16 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
         {!form.limits.hardLimit && (
           <div className="grid sm:grid-cols-2 gap-3 items-start">
             <Field label={porConversa ? 'R$ por conversa extra' : 'R$ por mensagem extra'}>
-              <input
-                className={inputCls}
-                inputMode="decimal"
-                value={String((porConversa ? form.limits.overagePricePerConversation : form.limits.overagePricePerMessage) ?? '')}
-                onChange={(e) => {
-                  const v = e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) || 0;
-                  lim(porConversa ? { overagePricePerConversation: v } : { overagePricePerMessage: v });
-                }}
+              {/* por mensagem costuma ser fração de centavo: 3 casas */}
+              <MoneyInput
+                nullable
+                decimals={porConversa ? 2 : 3}
+                value={porConversa ? form.limits.overagePricePerConversation : form.limits.overagePricePerMessage}
+                onChange={(v) => lim(porConversa ? { overagePricePerConversation: v } : { overagePricePerMessage: v })}
               />
             </Field>
             <Field label="R$ por template extra">
-              <input className={inputCls} inputMode="decimal" value={String(form.limits.overagePricePerTemplate ?? '')} onChange={(e) => lim({ overagePricePerTemplate: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) || 0 })} />
+              <MoneyInput nullable value={form.limits.overagePricePerTemplate} onChange={(v) => lim({ overagePricePerTemplate: v })} />
             </Field>
           </div>
         )}
@@ -466,9 +465,9 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
         {(features.includes('ai_copilot') || features.includes('ai_flows')) && (
           <div className="grid sm:grid-cols-3 gap-3 items-start">
             <Field label="Interações de IA/mês"><input className={inputCls} inputMode="numeric" value={String(form.limits.includedAiInteractionsMonth ?? 0)} onChange={(e) => lim({ includedAiInteractionsMonth: Number(e.target.value) || 0 })} /></Field>
-            {!gratis && <Field label="R$ por interação extra"><input className={inputCls} inputMode="decimal" value={String(form.limits.overagePricePerAiInteraction ?? '')} onChange={(e) => lim({ overagePricePerAiInteraction: e.target.value === '' ? null : Number(e.target.value.replace(',', '.')) || 0 })} /></Field>}
+            {!gratis && <Field label="R$ por interação extra"><MoneyInput nullable decimals={3} value={form.limits.overagePricePerAiInteraction} onChange={(v) => lim({ overagePricePerAiInteraction: v })} /></Field>}
             <Field label="Teto de custo de IA (R$)" hint="Corta o uso mesmo pagando excedente: a IA pode entrar em laço e queimar dinheiro em minutos.">
-              <input className={inputCls} inputMode="decimal" value={String(form.limits.aiMonthlyCostCap ?? '')} onChange={(e) => lim({ aiMonthlyCostCap: e.target.value === '' ? undefined : Number(e.target.value.replace(',', '.')) || 0 })} />
+              <MoneyInput nullable value={form.limits.aiMonthlyCostCap} onChange={(v) => lim({ aiMonthlyCostCap: v ?? undefined })} />
             </Field>
           </div>
         )}

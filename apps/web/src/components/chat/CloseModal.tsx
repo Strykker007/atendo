@@ -4,6 +4,7 @@ import { CheckCircle2, XCircle, MinusCircle, Plus, Trash2 } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
+import { MoneyInput } from '@/components/ui/MoneyInput';
 import { useFlows, useHasFeature, useSetStatus, useTenantSettings, type ConversationOutcome } from '@/lib/hooks';
 
 export const MOTIVOS = ['Preço', 'Prazo', 'Não respondeu', 'Comprou com concorrente', 'Fora da área', 'Só pesquisando'];
@@ -14,13 +15,6 @@ export const OUTCOMES: { id: ConversationOutcome; label: string; icon: React.Rea
   { id: 'lost', label: 'Não comprou', icon: <XCircle size={15} />, cls: 'border-danger text-danger bg-danger-soft' },
   { id: 'none', label: 'Sem resultado', icon: <MinusCircle size={15} />, cls: 'border-line text-muted bg-field' },
 ];
-
-/** "1.500,90", "1500,9", "150.50" e "1.500" → número. Vírgula é sempre o decimal; sem ela, ponto seguido de 3 dígitos é milhar. */
-const lerValor = (v: string) => {
-  const t = v.trim();
-  if (t.includes(',')) return Number(t.replace(/\./g, '').replace(',', '.'));
-  return Number(/\.\d{3}$/.test(t) ? t.replace(/\./g, '') : t);
-};
 
 const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -43,10 +37,10 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
   const flows = useFlows();
   const settings = useTenantSettings();
   const [outcome, setOutcome] = useState<ConversationOutcome>('none');
-  const [valor, setValor] = useState('');
+  const [valor, setValor] = useState<number | null>(null);
   const [produtos, setProdutos] = useState('');
   const [modoLista, setModoLista] = useState(true);
-  const [itens, setItens] = useState([{ descricao: '', valor: '' }]);
+  const [itens, setItens] = useState<{ descricao: string; valor: number | null }[]>([{ descricao: '', valor: null }]);
   const [observacoes, setObservacoes] = useState('');
   const [motivo, setMotivo] = useState('');
   const [flowId, setFlowId] = useState('');
@@ -68,16 +62,16 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
   }, [carregou, outcome]);
   const ehPadrao = !!flowId && flowId === padraoDe(outcome);
 
-  const itensValidos = itens.map((i) => ({ description: i.descricao.trim(), value: lerValor(i.valor) || 0 })).filter((i) => i.description || i.value);
+  const itensValidos = itens.map((i) => ({ description: i.descricao.trim(), value: i.valor ?? 0 })).filter((i) => i.description || i.value);
   const totalItens = Math.round(itensValidos.reduce((a, i) => a + i.value * 100, 0)) / 100;
-  const mudarItem = (idx: number, campo: 'descricao' | 'valor', v: string) =>
-    setItens((l) => l.map((i, n) => (n === idx ? { ...i, [campo]: campo === 'valor' ? v.replace(/[^\d.,]/g, '') : v } : i)));
+  const mudarItem = (idx: number, patch: Partial<(typeof itens)[number]>) =>
+    setItens((l) => l.map((i, n) => (n === idx ? { ...i, ...patch } : i)));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const lista = outcome === 'won' && modoLista;
     if (lista && itensValidos.some((i) => !i.description)) return toast.err(new Error('Descreva cada item da venda'));
-    const value = outcome === 'won' ? (lista ? totalItens : lerValor(valor)) : undefined;
+    const value = outcome === 'won' ? (lista ? totalItens : valor ?? 0) : undefined;
     if (outcome === 'won' && !(value! > 0)) return toast.err(new Error('Informe o valor da compra'));
     try {
       await setStatus.mutateAsync({
@@ -125,8 +119,8 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
                   {itens.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-2">
                       {/* min-w-0: sem ele o input não encolhe abaixo da largura intrínseca e a descrição fica espremida */}
-                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Produto ou serviço" value={item.descricao} onChange={(e) => mudarItem(idx, 'descricao', e.target.value)} maxLength={200} autoFocus={idx === 0} />
-                      <input className={`${inputCls} !w-36 shrink-0 text-right tnum`} inputMode="decimal" placeholder="R$ 0,00" value={item.valor} onChange={(e) => mudarItem(idx, 'valor', e.target.value)} />
+                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Produto ou serviço" value={item.descricao} onChange={(e) => mudarItem(idx, { descricao: e.target.value })} maxLength={200} autoFocus={idx === 0} />
+                      <MoneyInput className="w-40 shrink-0" nullable value={item.valor} onChange={(v) => mudarItem(idx, { valor: v })} aria-label="Valor do item" />
                       {itens.length > 1 && (
                         <button type="button" aria-label="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="shrink-0 p-2 rounded-lg text-muted hover:text-danger hover:bg-field">
                           <Trash2 size={14} />
@@ -135,7 +129,7 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
                     </div>
                   ))}
                   <div className="flex items-center justify-between">
-                    <button type="button" disabled={itens.length >= 50} onClick={() => setItens((l) => [...l, { descricao: '', valor: '' }])} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline disabled:opacity-50">
+                    <button type="button" disabled={itens.length >= 50} onClick={() => setItens((l) => [...l, { descricao: '', valor: null }])} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline disabled:opacity-50">
                       <Plus size={14} /> Adicionar item
                     </button>
                     <span className="text-[13px] text-muted">Total: <b className="text-ink tnum">{fmtBRL(totalItens)}</b></span>
@@ -145,7 +139,7 @@ export function CloseModal({ conversationId, onClose }: { conversationId: string
             ) : (
               <>
                 <Field label="Valor da compra (R$) *" hint="É o que soma faturamento, ticket médio e desempenho por atendente.">
-                  <input className={inputCls} inputMode="decimal" placeholder="0,00" value={valor} onChange={(e) => setValor(e.target.value.replace(/[^\d.,]/g, ''))} required autoFocus />
+                  <MoneyInput nullable value={valor} onChange={setValor} required autoFocus />
                 </Field>
                 <Field label="Produtos / descrição">
                   <textarea className={`${inputCls} resize-none`} rows={3} placeholder="O que foi comprado" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
