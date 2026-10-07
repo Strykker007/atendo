@@ -298,12 +298,13 @@ export class EvolutionProvider implements WhatsAppProvider {
   /**
    * "digitando…" enquanto o atendente escreve no painel. Sem isto a resposta humana chegava do
    * nada, sem o "digitando" que todo WhatsApp Web real mostra antes — padrão de cliente
-   * automatizado. A Evolution segura a requisição pelo `delay` e volta para `paused` sozinha.
+   * automatizado. A Evolution segura a requisição pelo `delay` e volta para `paused` sozinha
+   * (a v2.3.7 sempre fecha com `paused`) — quem mantém aberto é o laço de NumbersService.setTyping.
    */
-  async sendTyping(ctx: NumberContext, phone: string, ms: number) {
+  async sendTyping(ctx: NumberContext, phone: string, ms: number, state: 'composing' | 'paused' = 'composing') {
     await this.api(`/chat/sendPresence/${this.instance(ctx)}`, {
       method: 'POST',
-      body: JSON.stringify({ number: phone, presence: 'composing', delay: ms }),
+      body: JSON.stringify({ number: phone, presence: state, delay: state === 'paused' ? 0 : ms }),
     }, this.shard(ctx));
   }
 

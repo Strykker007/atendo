@@ -42,7 +42,23 @@ export function warmupPhase(n: { provider: string; sessionStartedAt: Date | null
   return { phase: i + 1, newConvPerHour: f.newConvPerHour, minGapMs: f.minGapMs, autoPerHour: f.autoPerHour, endsAt: new Date(n.sessionStartedAt.getTime() + f.ateHoras * HORA) };
 }
 
-/** "Digitando…" antes do automático: 40 ms por caractere, entre 2 e 7 s. */
+/**
+ * Quanto uma pessoa levaria para mandar este texto (mensagem automática no não oficial):
+ * - **reação** — perceber a mensagem e começar a responder: 1,2–3 s, mais um pouco quanto maior a
+ *   resposta (pensar no que escrever), até +2 s. Aplicada contando da última mensagem do contato:
+ *   na 2ª mensagem seguida do fluxo ela já passou e não soma;
+ * - **digitação** — "digitando…" visível: 3,5 a 6 caracteres por segundo (≈ 210–360 por minuto,
+ *   gente comum no celular), sorteado por mensagem, entre 1,5 e 15 s. O teto existe porque a
+ *   Evolution segura o worker durante o "digitando": um texto longo de verdade levaria minutos.
+ */
+export function humanTiming(textLength: number, random: () => number = Math.random) {
+  const reactMs = Math.round(1_200 + random() * 1_800 + Math.min(2_000, textLength * 10));
+  const cps = 3.5 + random() * 2.5;
+  const typingMs = Math.round(Math.min(15_000, Math.max(1_500, (textLength / cps) * 1_000)));
+  return { reactMs, typingMs };
+}
+
+/** "Gravando…"/"digitando…" de mídia sem texto: 40 ms por caractere, entre 2 e 7 s. */
 export function typingMs(textLength: number) {
   return Math.min(7_000, Math.max(2_000, Math.round(textLength * 40)));
 }

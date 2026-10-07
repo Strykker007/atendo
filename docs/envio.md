@@ -193,13 +193,27 @@ contatos/h logo após o QR. O card do número em **Números** mostra a fase e at
 No não oficial, antes de entregar:
 - **marca como lida** a última mensagem recebida da conversa (uma vez por mensagem, `wa:read`;
   a Evolution v2 pede `remoteJid` + `fromMe` + `id`, resolvido como na edição, por causa do LID);
-- mensagem **automática** aparece **"digitando…"** (no áudio, "gravando…") por 40 ms/caractere,
-  entre 2 e 7 s (`OutboundMessage.typingMs` → `delay` da Evolution). A do atendente não ganha
-  atraso: ele já digitou de verdade;
-- enquanto o **atendente digita** no painel, o contato vê **"digitando…"** (`POST
-  /conversations/:id/typing` → `sendPresence composing` por 6 s; no máximo um a cada 5 s por
-  conversa, no painel e na API). Só número não oficial conectado e conversa aberta. Sem isto a
-  resposta humana aparecia do nada, sem o "digitando" que todo WhatsApp Web real mostra antes.
+- mensagem **automática** sai no tempo de uma pessoa (`humanTiming`, `whatsapp/number-warmup.ts`):
+  - **reação** antes de começar: 1,2–3 s + 10 ms por caractere da resposta (até +2 s), contada da
+    última mensagem do contato. O job é adiado (não segura o worker) e marcado `reacted`; na 2ª
+    mensagem seguida do fluxo a reação já passou e não soma;
+  - **"digitando…"** pelo tempo de escrever o texto: 3,5–6 caracteres/s sorteado por mensagem,
+    entre 1,5 e 15 s (`OutboundMessage.typingMs` → `delay` da Evolution, que segura o worker —
+    daí o teto). Ex.: 40 caracteres ≈ 7–11 s. Mídia sem texto: "gravando…" de 2 s.
+  A do atendente não ganha atraso: ele já digitou de verdade;
+- **atendente digitando** no painel → **"digitando…"** no WhatsApp do contato, com começo e fim
+  (`useTypingPresence` → `POST /conversations/:id/typing {state}`):
+  - `composing` ao começar, renovado a cada 2 s enquanto digita; `paused` com 3 s sem teclar, ao
+    enviar, ao apagar o texto, ao sair do campo ou trocar de conversa;
+  - a Evolution v2.3.7 não deixa o "digitando" aberto (`sendPresence` sempre fecha com `paused`
+    depois do `delay`), então `NumbersService.setTyping` mantém **um laço por contato** mandando
+    blocos de 5 s em sequência — sobrepor blocos faria o `paused` de um apagar o outro. Estado no
+    Redis (`typing:until` com 4 s de validade, `typing:loop` como trava) por haver mais de uma
+    instância da API; teto de 2 min. `paused` encerra na hora;
+  - só número não oficial conectado e conversa aberta. Sem isto a resposta humana chegava do nada,
+    sem o "digitando" que todo WhatsApp Web real mostra antes;
+  - cada `sendPresence` faz a Evolution conferir o número (`whatsappNumber`), mas com cache local
+    dela: contato que já conversou não gera consulta ao WhatsApp.
 
 ### Variações de texto
 

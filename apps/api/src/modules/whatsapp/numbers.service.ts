@@ -1,3 +1,4 @@
+import { RedisService } from '../../common/redis/redis.service';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -9,12 +10,18 @@ import type { EvolutionNumberConfig } from './providers/evolution.provider';
 import { defaultSendDelay } from './sending-policy';
 import type { MessageTemplate } from '@atendo/shared';
 
+/** bloco de "digitando…" (a Evolution fecha com `paused` no fim de cada um) */
+const TYPING_CHUNK_MS = 5_000;
+/** sem renovação do painel nesse tempo = parou de digitar */
+const TYPING_IDLE_MS = 4_000;
+
 @Injectable()
 export class NumbersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
     private readonly registry: ProviderRegistry,
+    private readonly redis: RedisService,
   ) {}
 
   /** última assinatura de presença por número+contato: abrir a mesma conversa várias vezes não repete a chamada */
@@ -36,21 +43,48 @@ export class NumbersService {
     }
   }
 
-  /** último "digitando…" enviado por número+contato: o painel avisa a cada tecla, o WhatsApp não */
-  private readonly typingAt = new Map<string, number>();
-
   /**
-   * Atendente digitando no painel → "digitando…" no WhatsApp do contato, no máximo um a cada
-   * 5 s (cada um dura 6 s). Nunca lança e não espera o provider: é humanização, não envio.
+   * "digitando…" do atendente, com começo e fim (docs/envio.md#humanização).
+   *
+   * A Evolution não segura o "digitando" aberto: `sendPresence` manda `composing`, espera o
+   * `delay` e SEMPRE fecha com `paused`. Então, enquanto o painel avisa que a pessoa digita
+   * (`composing`, renovado a cada ~2 s), um laço único por contato manda blocos de 5 s em
+   * sequência — sem sobrepor, senão o `paused` de um bloco apagaria o seguinte. `paused` (parou,
+   * enviou, saiu da conversa) encerra na hora e o laço não abre outro bloco.
+   *
+   * Estado no Redis porque há mais de uma instância da API: `typing:until` diz até quando a
+   * pessoa está digitando; `typing:loop` garante um laço só. Nunca lança: é humanização.
    */
-  sendTyping(numberId: string, phone: string) {
+  setTyping(numberId: string, phone: string, state: 'composing' | 'paused') {
     const key = `${numberId}:${phone}`;
-    if (Date.now() - (this.typingAt.get(key) ?? 0) < 5_000) return;
-    this.typingAt.set(key, Date.now());
-    if (this.typingAt.size > 5_000) this.typingAt.clear(); // não cresce para sempre
-    void this.context(numberId)
-      .then((ctx) => this.registry.get(ctx.provider).sendTyping?.(ctx, phone, 6_000))
-      .catch(() => undefined);
+    void this.typingStep(numberId, phone, key, state).catch(() => undefined);
+  }
+
+  private async typingStep(numberId: string, phone: string, key: string, state: 'composing' | 'paused') {
+    const until = `typing:until:${key}`;
+    const loop = `typing:loop:${key}`;
+    if (state === 'paused') {
+      const estava = await this.redis.del(until);
+      if (!estava) return; // já parado: não manda nada ao WhatsApp
+      const ctx = await this.context(numberId);
+      await this.registry.get(ctx.provider).sendTyping?.(ctx, phone, 0, 'paused');
+      return;
+    }
+    // sem notícia do painel em 4 s (aba fechada, rede caiu) = parou
+    await this.redis.set(until, '1', 'PX', TYPING_IDLE_MS);
+    if ((await this.redis.set(loop, '1', 'PX', TYPING_CHUNK_MS * 3, 'NX')) !== 'OK') return; // laço já rodando
+    try {
+      const ctx = await this.context(numberId);
+      const provider = this.registry.get(ctx.provider);
+      if (!provider.sendTyping) return;
+      // teto de segurança: ninguém digita uma mensagem só por mais de 2 min
+      for (let i = 0; i < 24 && (await this.redis.exists(until)); i++) {
+        await this.redis.pexpire(loop, TYPING_CHUNK_MS * 3);
+        await provider.sendTyping(ctx, phone, TYPING_CHUNK_MS, 'composing');
+      }
+    } finally {
+      await this.redis.del(loop);
+    }
   }
 
   /** Reação do atendente a uma mensagem. Lança se o provider recusar — quem chama não grava nada. */

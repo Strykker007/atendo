@@ -17,7 +17,7 @@ import { SendPacer } from './send-pacer';
 import { countsTowardDailyLimit } from './sending-policy';
 import { isTransientSendError, retryDelayMs } from './providers/provider-error';
 import { expiredReason, headOf, planSend, promoteNext } from './send-queue';
-import { typingMs, warmupPhase } from './number-warmup';
+import { humanTiming, typingMs, warmupPhase } from './number-warmup';
 import type { NumberContext } from './providers/provider.interface';
 
 /**
@@ -109,6 +109,16 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
         return this.later(job, token, Date.now() + plan.delayMs, { messageId: job.data.messageId, minGapMs: job.data.minGapMs });
     }
 
+    // ---- humanização: o robô "lê" antes de começar a digitar ----
+    // tempo de reação contado da última mensagem do contato (na 2ª mensagem seguida já passou);
+    // esperado com o job adiado, sem segurar o worker. Ver humanTiming.
+    const automatico = !message.authorId && num.provider !== 'meta';
+    const humano = automatico ? humanTiming((message.text ?? '').length) : null;
+    if (humano && !job.data.reacted && !job.data.pacedUntil && message.conversation.lastInboundAt) {
+      const wait = humano.reactMs - (Date.now() - message.conversation.lastInboundAt.getTime());
+      if (wait > 0) return this.later(job, token, Date.now() + wait, { ...job.data, reacted: true });
+    }
+
     // ---- proteção do número (bloqueio/banimento) ----
     // teto do dia e aquecimento valem só para envio proativo; resposta de atendimento nunca trava
     const proativo = countsTowardDailyLimit(message.conversation.lastInboundAt);
@@ -160,8 +170,9 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       media: message.mediaUrl ? { url: message.mediaUrl, mimeType: message.mediaMime ?? undefined, fileName: message.mediaName ?? undefined, caption: message.text ?? undefined, voice: raw.voice } : undefined,
       quotedExternalId: message.quotedId ?? undefined,
       template: raw.template,
-      // humanização: o automático aparece "digitando…" antes de chegar (o atendente já digitou de verdade)
-      typingMs: !message.authorId && num.provider !== 'meta' ? typingMs((message.text ?? '').length) : undefined,
+      // humanização: o automático aparece "digitando…" pelo tempo que uma pessoa levaria para
+      // escrever o texto (o atendente já digitou de verdade); mídia sem texto usa o "gravando" curto
+      typingMs: humano ? (message.text ? humano.typingMs : typingMs(0)) : undefined,
     };
 
     // humanização: quem responde leu antes — marca como lida a última recebida da conversa

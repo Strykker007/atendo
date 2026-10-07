@@ -132,6 +132,10 @@ class PrimaryTagDto implements SetPrimaryTagInput {
   @ValidateIf((_, v) => v !== null) @IsUUID() tagId: string | null;
 }
 
+class TypingDto {
+  @IsOptional() @IsIn(['composing', 'paused']) state?: 'composing' | 'paused';
+}
+
 @Controller('conversations')
 @UseGuards(JwtAuthGuard, PermissionsGuard, ConversationScopeGuard)
 export class ConversationsController {
@@ -380,17 +384,18 @@ export class ConversationsController {
   }
 
   /**
-   * Atendente digitando: mostra "digitando…" ao contato (só número não oficial, conversa aberta e
-   * com número conectado). Responde na hora; o painel chama no máximo a cada 5 s.
+   * Atendente digitando: `composing` (renovado pelo painel a cada ~2 s enquanto digita) mostra
+   * "digitando…" ao contato; `paused` (parou, enviou, saiu) apaga. Só número não oficial, conversa
+   * aberta e número conectado. Responde na hora.
    */
   @Post(':id/typing')
   @HttpCode(204)
-  async typing(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+  async typing(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: TypingDto) {
     const conv = await this.prisma.conversation.findFirst({
       where: { id, tenantId: u.tenantId, status: { not: 'closed' }, number: { provider: 'evolution', status: 'connected' } },
       select: { numberId: true, contact: { select: { phone: true } } },
     });
-    if (conv) this.numbers.sendTyping(conv.numberId, conv.contact.phone);
+    if (conv) this.numbers.setTyping(conv.numberId, conv.contact.phone, dto.state ?? 'composing');
   }
 
   @Post(':id/read')

@@ -3,7 +3,7 @@
  * É o que quase toda tela usa — por isso os outros arquivos importam daqui, e nunca o contrário. */
 'use client';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, getAccessToken, onAccessToken } from '../api';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
@@ -230,14 +230,44 @@ export function useTyping(conversationId: string | null): Typing {
  * nunca zera é pior que contador nenhum, porque ensina a ignorá-lo.
  */
 /**
- * Atendente digitando → "digitando…" no WhatsApp do contato (só número não oficial; a API decide).
- * No máximo um aviso a cada 5 s por conversa; falha é ignorada — é enfeite, não pode travar o chat.
+ * "digitando…" do atendente no WhatsApp do contato, com começo e fim (só número não oficial; a API
+ * decide). Enquanto a pessoa digita, renova a cada 2 s; 3 s sem teclar, enviar, apagar o texto ou
+ * trocar de conversa manda "parou". Falha é ignorada — é humanização, não pode travar o chat.
  */
-const typingSentAt = new Map<string, number>();
-export function notifyTyping(conversationId: string | null | undefined) {
-  if (!conversationId || Date.now() - (typingSentAt.get(conversationId) ?? 0) < 5_000) return;
-  typingSentAt.set(conversationId, Date.now());
-  api(`/conversations/${conversationId}/typing`, { method: 'POST' }).catch(() => undefined);
+export function useTypingPresence(conversationId: string | null | undefined) {
+  const ativo = useRef<string | null>(null);
+  const ultimo = useRef(0);
+  const ocioso = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const post = (id: string, state: 'composing' | 'paused') =>
+    api(`/conversations/${id}/typing`, { method: 'POST', body: JSON.stringify({ state }) }).catch(() => undefined);
+
+  const parar = useCallback(() => {
+    if (ocioso.current) clearTimeout(ocioso.current);
+    ocioso.current = null;
+    const id = ativo.current;
+    ativo.current = null;
+    ultimo.current = 0;
+    if (id) void post(id, 'paused');
+  }, []);
+
+  /** chamar a cada mudança do texto */
+  const digitou = useCallback((text: string) => {
+    if (!conversationId || !text.trim()) return parar();
+    if (ativo.current && ativo.current !== conversationId) parar();
+    if (Date.now() - ultimo.current >= 2_000) {
+      ativo.current = conversationId;
+      ultimo.current = Date.now();
+      void post(conversationId, 'composing');
+    }
+    if (ocioso.current) clearTimeout(ocioso.current);
+    ocioso.current = setTimeout(parar, 3_000);
+  }, [conversationId, parar]);
+
+  // trocou de conversa ou saiu da tela: para o "digitando" da anterior
+  useEffect(() => parar, [conversationId, parar]);
+
+  return { digitou, parar };
 }
 
 export const useMarkRead = () => {

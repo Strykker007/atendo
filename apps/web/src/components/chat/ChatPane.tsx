@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, notifyTyping, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { ZoomableAvatar } from './AvatarViewer';
@@ -133,6 +133,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const setContactTags = useSetContactTags();
   const usage = useUsage();
   const [text, setText] = useState('');
+  // "digitando…" no WhatsApp do contato enquanto o atendente escreve (começo e fim)
+  const presenca = useTypingPresence(conversationId);
   const [attachment, setAttachment] = useState<Upload | null>(null);
   const [uploading, setUploading] = useState(false);
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
@@ -451,6 +453,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
+    presenca.parar();
     if (noteMode) {
       const nota = textoNota.trim();
       if (!nota || sendNote.isPending) return;
@@ -790,7 +793,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               <textarea
                 ref={campoRef}
                 value={text}
-                onChange={(e) => { setText(e.target.value); if (e.target.value.trim()) notifyTyping(conversationId); }}
+                onChange={(e) => { setText(e.target.value); presenca.digitou(e.target.value); }}
+                onBlur={presenca.parar}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}
                 onPaste={colar}
                 rows={1}
