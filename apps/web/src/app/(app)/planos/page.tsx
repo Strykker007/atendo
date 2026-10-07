@@ -51,6 +51,7 @@ const PADRAO: PlanInput = {
     maxAgents: 2,
     maxFlows: null,
     maxQuickReplies: null,
+    maxCompanies: null,
     billingUnit: 'conversations',
     includedConversationsMonth: 500,
     overagePricePerConversation: null,
@@ -147,6 +148,7 @@ export default function PlanosPage() {
               {(p.limits.maxFlows != null || p.limits.maxQuickReplies != null) && (
                 <li>{qtd(p.limits.maxFlows, 'fluxo ativo', 'fluxos ativos')} · {qtd(p.limits.maxQuickReplies, 'resposta rápida', 'respostas rápidas')}</li>
               )}
+              {p.limits.maxCompanies != null && <li>{qtd(p.limits.maxCompanies, 'empresa', 'empresas')}</li>}
               <li>
                 {p.limits.billingUnit === 'conversations'
                   ? p.limits.includedConversationsMonth === null ? 'conversas ilimitadas' : `${(p.limits.includedConversationsMonth ?? 0).toLocaleString('pt-BR')} conversas/mês`
@@ -400,11 +402,12 @@ function FormularioPlano({ form, setForm, onSubmit, salvando, precoOriginal, ass
         </div>
 
         <Field label="Limites de quantidade" hint="Checados na hora de criar (ou ativar, no caso dos fluxos). O que já existe acima do limite continua funcionando.">
-          <div className="grid sm:grid-cols-4 gap-3 items-start">
+          <div className="grid sm:grid-cols-5 gap-3 items-start">
             <Limite rotulo="Números (conexões)" chave="maxNumbers" limits={form.limits} lim={lim} padrao={1} />
             <Limite rotulo="Usuários" chave="maxAgents" limits={form.limits} lim={lim} padrao={2} />
             <Limite rotulo="Fluxos ativos" chave="maxFlows" limits={form.limits} lim={lim} padrao={5} />
             <Limite rotulo="Respostas rápidas" chave="maxQuickReplies" limits={form.limits} lim={lim} padrao={50} />
+            <Limite rotulo="Empresas / unidades" chave="maxCompanies" limits={form.limits} lim={lim} padrao={1} />
           </div>
         </Field>
 

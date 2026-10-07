@@ -89,6 +89,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Departamentos** | | | |
 | GET | `/departments` | todos | Com participantes e nº de conversas abertas |
 | POST / PATCH / DELETE | `/departments[/:id]` | `team.manage` | `{name, description?, color?, isActive?, userIds?}` (`userIds` substitui). Excluir deixa as conversas sem departamento. Ver [Departamentos](departamentos.md) |
+| **Empresas / unidades** | | | Toda rota aceita o header `x-company-id` (empresa do seletor): vira escopo de números. Ver [Empresas](empresas.md) |
+| GET | `/companies` | todos | Empresas do cliente com números e pessoas vinculadas |
+| GET | `/companies/mine` | todos | Empresas que o usuário pode escolher no seletor (`[]` = cliente sem empresas) |
+| POST / PATCH / DELETE | `/companies[/:id]` | `settings.manage` | `{name, cnpj?, description?, numberIds?, userIds?}` (listas substituem; marcar um número tira ele da outra empresa). `POST` checa `maxCompanies` do plano. Excluir deixa os números sem empresa |
 | **Tags** | | | |
 | GET | `/tags` | todos | Com contagem de conversas |
 | POST / PATCH / DELETE | `/tags[/:id]` | `tags.manage` | `{name, color, isKanban?, position?}`. Lista vem na ordem do Kanban (`position`, nome). Emite `kanban` |
@@ -117,7 +121,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Billing** | | | |
 | GET | `/billing/plans` | todos | Planos ativos com limites, `billingCycle`, `isFree`, `durationDays`, `priceYear` e `stripePriceId`. Cliente só recebe `monthly`/`yearly`; super_admin recebe todos (inclui gratuitos, para atribuir) |
 | GET | `/billing/plans/all` | super_admin | Catálogo completo (inclui inativos) com `subscribers` e `billingEnabled` |
-| POST | `/billing/plans` | super_admin | Cria plano. `{name, priceMonth, billingModel, limits, isFree?, billingCycle?, durationDays?, priceYear?}` — `limits` validado campo a campo (`maxNumbers/maxAgents/maxFlows/maxQuickReplies`: `null` = ilimitado). Gratuito zera preço e força `hardLimit`. Cria produto+preço no Stripe quando a cobrança está ligada |
+| POST | `/billing/plans` | super_admin | Cria plano. `{name, priceMonth, billingModel, limits, isFree?, billingCycle?, durationDays?, priceYear?}` — `limits` validado campo a campo (`maxNumbers/maxAgents/maxFlows/maxQuickReplies/maxCompanies`: `null` = ilimitado). Gratuito zera preço e força `hardLimit`. Cria produto+preço no Stripe quando a cobrança está ligada |
 | PATCH | `/billing/plans/:id` | super_admin | Edita. Trocar `billingCycle` com assinantes = 400. Mudar `priceMonth` (ou `priceYear`) cria um preço novo no Stripe e arquiva o antigo (preço é imutável lá). `applyToExisting: {mode: 'never'\|'scheduled'\|'now', days?}` decide o que acontece com quem já assina — padrão `never` |
 | DELETE | `/billing/plans/:id` | super_admin | Só sem assinantes (senão 400). Arquiva o produto no Stripe |
 | GET | `/billing/invoices` | todos | Faturas do tenant (espelho do Stripe) |

@@ -24,6 +24,8 @@ provider_pricing (global, sem tenant)
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA.
 
+**companies** / **user_companies** — empresas/unidades do cliente (nome único por cliente, CNPJ opcional só com dígitos) e quem opera cada uma (N:N; sem linha = todas). `whatsapp_numbers.companyId` opcional (`SetNull` ao excluir): um número pertence a no máximo uma empresa. Ver [Empresas](empresas.md).
+
 **departments** / **user_departments** — departamentos do cliente (nome único, cor, ativo) e quem participa (N:N; sem linha = sem restrição). `conversations.departmentId` opcional (`SetNull` ao excluir). Ver [Departamentos](departamentos.md).
 
 **refresh_tokens** — só o hash SHA-256 do token; `revokedAt` permite logout e rotação. Guardamos `userAgent`/`ip` para auditoria.

@@ -24,6 +24,7 @@ class PlanLimitsDto {
   @IsOptional() @IsInt() @Min(0) @Max(1000) maxAgents: number | null;
   @IsOptional() @IsInt() @Min(0) @Max(10_000) maxFlows?: number | null;
   @IsOptional() @IsInt() @Min(0) @Max(100_000) maxQuickReplies?: number | null;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) maxCompanies?: number | null;
   @IsOptional() @IsIn(['messages', 'conversations']) billingUnit?: 'messages' | 'conversations';
   /** incluídos/mês: `null` = ilimitado */
   @IsOptional() @IsInt() @Min(0) includedMessagesMonth: number | null;
@@ -246,9 +247,9 @@ export class BillingController {
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
+      return { period: periodOf(), billingEnabled: this.stripe.enabled, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
     }
-    const [used, plan, sub, numbers, agents, counter, flows, quickReplies] = await Promise.all([
+    const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies] = await Promise.all([
       this.usage.current(user.tenantId),
       this.usage.limits(user.tenantId),
       this.prisma.subscription.findUnique({ where: { tenantId: user.tenantId }, include: { plan: true } }),
@@ -257,6 +258,7 @@ export class BillingController {
       this.prisma.usageCounter.findUnique({ where: { tenantId_period: { tenantId: user.tenantId, period: periodOf() } } }),
       this.prisma.flow.count({ where: { tenantId: user.tenantId, isActive: true } }),
       this.prisma.quickReply.count({ where: { folder: { tenantId: user.tenantId } } }),
+      this.prisma.company.count({ where: { tenantId: user.tenantId } }),
     ]);
     return {
       period: periodOf(),
@@ -264,7 +266,7 @@ export class BillingController {
       cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
       graceUntil: sub?.graceUntil ?? null,
       planId: sub?.planId ?? null,
-      used: { ...used, numbers, agents, flows, quickReplies, messagesIn: counter?.messagesIn ?? 0 },
+      used: { ...used, numbers, agents, flows, quickReplies, companies, messagesIn: counter?.messagesIn ?? 0 },
       limits: plan?.limits ?? null,
       status: sub?.status ?? null,
       plan: sub?.plan.name ?? null,

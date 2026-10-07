@@ -46,6 +46,7 @@ model Tenant {
   conversationEvents ConversationEvent[]
   sales         Sale[]
   departments   Department[]
+  companies     Company[]
 
   scheduledMessages ScheduledMessage[]
   globalVariables GlobalVariable[]
@@ -91,6 +92,7 @@ model User {
   sales         Sale[]
   botPauses     Conversation[] @relation("botPausedBy")
   departments   UserDepartment[]
+  companies     UserCompany[]
 
   scheduledMessages ScheduledMessage[]
   @@index([tenantId])
@@ -112,6 +114,42 @@ model UserNumber {
   @@id([userId, numberId])
   @@index([numberId])
   @@map("user_numbers")
+}
+
+/// Empresa/unidade do cliente (matriz, filial Centro, filial Norte…). Agrupa números: quem
+/// opera a unidade enxerga só as conversas dos números dela. Ver docs/empresas.md.
+/// Quantas o cliente pode ter vem de `PlanLimits.maxCompanies`.
+model Company {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  /// CNPJ só com dígitos; opcional (unidade interna não precisa)
+  cnpj        String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  numbers WhatsAppNumber[]
+  users   UserCompany[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("companies")
+}
+
+/// Quais empresas o usuário opera (N:N). **Sem nenhuma linha = todas**, pela mesma razão do
+/// `UserNumber`: cadastrar a primeira empresa não pode trancar a equipe inteira para fora.
+model UserCompany {
+  userId    String
+  companyId String
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@id([userId, companyId])
+  @@index([companyId])
+  @@map("user_companies")
 }
 
 /// Departamento (Vendas, Suporte, Balcão…). Separa a fila: conversa com departamento só
@@ -333,10 +371,13 @@ model WhatsAppNumber {
   deletedAt      DateTime?
   /// quadro de horários próprio; nulo = o padrão do cliente
   scheduleId     String?
+  /// empresa/unidade dona do número; nulo = sem empresa (só quem não é restrito a empresa vê)
+  companyId      String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
   schedule      BusinessSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   conversations Conversation[]
   messages      Message[]
@@ -348,6 +389,7 @@ model WhatsAppNumber {
   @@unique([provider, externalId])
   @@unique([tenantId, phone])
   @@index([tenantId])
+  @@index([companyId])
   @@map("whatsapp_numbers")
 }
 

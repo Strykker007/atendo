@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
+import { CompanySwitcher } from './CompanySwitcher';
 import { useTheme, applyTheme } from '@/lib/theme';
 import { useConversationCounts, useMe, usePermissions } from '@/lib/hooks';
 import type { Permission } from '@atendo/shared';
@@ -92,6 +93,8 @@ export function Sidebar() {
           <PanelLeftOpen size={17} />
         </button>
       )}
+      {/* empresa/unidade ativa: some quando o cliente não usa empresas */}
+      {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}
 
       <nav className="flex-1 py-2">
         {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items.filter((i) => !i.need || permitido(i.need))).map(({ href, label, icon: Icon }) => {

@@ -1,4 +1,5 @@
 'use client';
+import { useUI } from './store';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 let accessToken: string | null = null;
@@ -65,12 +66,19 @@ export class ApiError extends Error {
   }
 }
 
-/** fetch com Bearer + refresh automático em 401 (uma tentativa). */
+/**
+ * fetch com Bearer + refresh automático em 401 (uma tentativa).
+ *
+ * A empresa escolhida no seletor vai em TODA chamada (`x-company-id`): a API converte isso no
+ * escopo de números, e assim conversas, contadores e kanban respeitam a unidade sem cada tela
+ * precisar lembrar de passar o filtro (docs/empresas.md).
+ */
 export async function api<T = unknown>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const companyId = useUI.getState().companyId;
   const res = await fetch(`${API}${path}`, {
     ...init,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(accessToken && { Authorization: `Bearer ${accessToken}` }), ...init.headers },
+    headers: { 'Content-Type': 'application/json', ...(accessToken && { Authorization: `Bearer ${accessToken}` }), ...(companyId && { 'x-company-id': companyId }), ...init.headers },
   });
   if (res.status === 401 && retry && (await refresh())) return api<T>(path, init, false);
   if (!res.ok) {

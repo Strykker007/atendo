@@ -23,6 +23,7 @@ import { env } from './config/env';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
+import { CompaniesModule } from './modules/companies/companies.module';
 import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
 
 @Module({
@@ -39,6 +40,7 @@ import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-
     ContactAttributesModule,
     GlobalVariablesModule,
     DepartmentsModule,
+    CompaniesModule,
     KanbanModule,
     QuickRepliesModule,
     BillingModule,

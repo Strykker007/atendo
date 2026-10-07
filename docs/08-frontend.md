@@ -40,14 +40,14 @@ src/
 │       ├── clientes/       Clientes do dono: criar, plano/status, ativar, Entrar como
 │       └── relatorios/     abre com visão pronta (KPIs + 4 gráficos do período); 'Relatório personalizado' expande o construtor (métrica, agrupamento, filtros, tabela, CSV, salvos)
 ├── components/
-│   ├── layout/Sidebar.tsx | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')
-│   ├── chat/ConversationList | ChatPane | TagPicker | QuickRepliesPanel
+│   ├── layout/Sidebar.tsx | CompanySwitcher.tsx (empresa ativa, ver empresas.md) | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')
+│   ├── chat/ConversationList (botão 👥 agrupa a fila por atendente) | ChatPane | TagPicker | QuickRepliesPanel
 │   ├── numbers/ProviderForm | NumberDialogs | QrModal
 │   └── ui/Modal | Toast | Confirm | Page   primitivos: modal, toasts, confirmação, cabeçalho/shell de página
 └── lib/
-    ├── api.ts      fetch com Bearer, refresh automático em 401, cookie de refresh
+    ├── api.ts      fetch com Bearer, header x-company-id (empresa ativa), refresh automático em 401, cookie de refresh
     ├── hooks.ts    todos os useQuery/useMutation + useRealtime (socket → cache)
-    ├── store.ts    zustand: sidebar, painel direito, número/status/tags/conversa selecionados
+    ├── store.ts    zustand: sidebar, painel direito, empresa/número/status/tags/conversa selecionados, agrupar por atendente
     └── utils.ts    cn()
 ```
 
