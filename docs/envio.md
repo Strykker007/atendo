@@ -127,6 +127,16 @@ Na tela, mensagem `failed` mostra o erro e **Tentar novamente**
 (`POST /conversations/:id/messages/:messageId/resend`). Se a conversa mudou de canal desde a
 falha, 409 `number_changed` — não reenvia pelo número antigo.
 
+### Segurada pela proteção não expira
+
+Mensagem que espera por **proteção do número** (aquecimento, teto de automáticas, ritmo) não é
+fila parada: ela já aparece com ✓ e sai em segundo plano quando houver vaga. `holdForProtection`
+(`send-queue.ts`) move `Message.queuedAt` para o horário em que ela deve sair, então o prazo de
+*Expirar na fila após* conta dali; quem espera a vez atrás dela na conversa também é renovado.
+Expira só o que está preso de verdade: número desconectado ou job perdido. **Teto de 6 h** desde a
+criação (`PROTECTION_HOLD_MAX_MS`): depois disso volta o prazo normal, porque uma boas-vindas 6 h
+depois já não faz sentido. Antes, no aquecimento, o fluxo acima do teto virava falha em 30 min.
+
 ### Na tela: ✓ na hora
 
 Mensagem `pending` (na fila, esperando o ritmo do número, o aquecimento ou o "digitando…") já
@@ -196,14 +206,12 @@ oscilação de rede não reabre o aquecimento.
 | > 7 dias | livre | padrão da conexão (80) | — |
 
 **Automáticas por hora**: vale o menor entre a fase e o configurado na conexão. A mensagem do robô
-acima do teto espera a vaga (e falha se passar de *Expirar na fila após*, como qualquer envio
-parado); a resposta do atendente não entra nessa conta. Motivo: a Drog. Nova Farma foi restrita em
+acima do teto espera a vaga em segundo plano, sem expirar (até 6 h); a resposta do atendente não entra nessa conta. Motivo: a Drog. Nova Farma foi restrita em
 7 h com ~50 automáticas/h — saudação de fluxo em quase toda conversa — num número recém-pareado.
 
 "Novo" = contato que ainda não recebeu nada do número **na última hora** (`wa:wconv`, janela
 deslizante). Quem já está conversando passa direto; o contato que não coube espera a vaga
-(o job volta para a fila — se passar de *Expirar na fila após*, falha como qualquer envio
-parado). Motivo: a Drogaria Total caiu duas vezes no 1º dia com tráfego saudável, mas ~28
+em segundo plano (o job volta para a fila; ver [Segurada pela proteção não expira](#segurada-pela-proteção-não-expira)). Motivo: a Drogaria Total caiu duas vezes no 1º dia com tráfego saudável, mas ~28
 contatos/h logo após o QR. O card do número em **Números** mostra a fase e até quando vai.
 
 Valores afrouxados em 10/2026 (antes: 20/30/8 s, 50/50, 80/60, 120/70): com eles um fluxo de

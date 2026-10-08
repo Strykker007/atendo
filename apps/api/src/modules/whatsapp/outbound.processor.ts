@@ -16,7 +16,7 @@ import { enrichContext } from '../../common/observability/request-context';
 import { SendPacer } from './send-pacer';
 import { countsTowardDailyLimit } from './sending-policy';
 import { isTransientSendError, retryDelayMs } from './providers/provider-error';
-import { expiredReason, headOf, planSend, promoteNext } from './send-queue';
+import { expiredReason, headOf, holdForProtection, planSend, promoteNext } from './send-queue';
 import { humanTiming, typingMs, warmupPhase } from './number-warmup';
 import type { NumberContext } from './providers/provider.interface';
 
@@ -93,6 +93,8 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
         await this.fail(message, tenantId, plan.reason);
         return this.next(message.conversationId);
       case 'wait_turn':
+        // a da frente está viva (segurada pela proteção, não presa): esta também não envelhece
+        if (!plan.staleHead && num.status === 'connected') await holdForProtection(this.prisma, message, Date.now());
         if (plan.staleHead) {
           // a da frente ficou presa (ex.: job perdido): expira para não travar a conversa
           const stale = await this.prisma.message.updateMany({ where: { id: plan.staleHead, status: 'pending' }, data: { status: 'failed', error: expiredReason(limits.maxQueueAgeMin) } });
@@ -137,6 +139,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       const wait = await this.pacer.claimWarmupConversation(num.id, message.conversation.contactId, aquecendo.newConvPerHour);
       if (wait > 0) {
         this.log.warn(`Número ${num.id} aquecendo (fase ${aquecendo.phase}, ${aquecendo.newConvPerHour} contatos novos/h): envio ${message.id} adiado ${Math.round(wait / 1000)}s`);
+        await holdForProtection(this.prisma, message, Date.now() + wait);
         return this.later(job, token, Date.now() + wait, { messageId: job.data.messageId, minGapMs: job.data.minGapMs });
       }
     }
@@ -151,6 +154,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       if (burst) this.log.warn(`Rajada na conversa ${message.conversationId}: envio ${message.id} adiado ${Math.round(waitMs / 1000)}s (limite ${limits.convBurstMax}/${limits.convBurstWindowSec}s)`);
       if (waitMs > 0) {
         const until = Date.now() + waitMs;
+        await holdForProtection(this.prisma, message, until);
         this.log.debug(`Envio ${message.id} adiado ${waitMs}ms (perfil ${num.sendDelay})`);
         // devolve o job para a fila com atraso em vez de segurar o worker parado
         return this.later(job, token, until, { ...job.data, pacedUntil: until });

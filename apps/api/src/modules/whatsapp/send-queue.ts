@@ -111,6 +111,21 @@ export interface PlanInput {
   maxQueueAgeMin: number;
 }
 
+/**
+ * Mensagem segurada pela PROTEÇÃO do número (aquecimento, teto de automáticas, ritmo) não é fila
+ * parada: na tela ela já aparece com ✓ e sai em segundo plano quando houver vaga. Por isso o prazo
+ * de expirar (`maxQueueAgeMin`) passa a contar de `until` — o horário em que ela deve sair — e
+ * não de quando entrou. Só expira o que está preso de verdade (número desconectado, job perdido).
+ * Teto: depois de `PROTECTION_HOLD_MAX_MS` desde a criação, volta a valer o prazo normal — uma
+ * boas-vindas que sairia 6 h depois já não faz sentido.
+ */
+export const PROTECTION_HOLD_MAX_MS = 6 * 60 * 60_000;
+
+export async function holdForProtection(prisma: PrismaService, m: { id: string; createdAt: Date }, until: number) {
+  if (until - m.createdAt.getTime() > PROTECTION_HOLD_MAX_MS) return;
+  await prisma.message.updateMany({ where: { id: m.id, status: 'pending' }, data: { queuedAt: new Date(until) } });
+}
+
 export const expiredReason = (min: number) => `Não saiu: ficou mais de ${min} min esperando a vez (número desconectado ou o ritmo de proteção do número segurou o envio). Envie de novo se ainda fizer sentido.`;
 
 export function planSend(i: PlanInput): SendPlan {

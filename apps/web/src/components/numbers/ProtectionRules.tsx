@@ -34,7 +34,7 @@ export function ProtectionRules({ numberId }: { numberId: string }) {
         </li>
         <li>
           <b className="text-ink">Robô com limite por hora.</b> Fluxos e mensagens automáticas têm um teto por hora e esperam alguns segundos entre si.
-          Passou do teto, a mensagem espera a vez — não se perde.
+          Passou do teto, a mensagem já aparece como enviada e sai sozinha quando houver vaga — não se perde.
         </li>
         <li>
           <b className="text-ink">Primeira semana.</b> Logo depois de ler o QR Code o número &quot;aquece&quot;: poucos contatos novos por hora, aumentando a cada dia.
@@ -43,7 +43,7 @@ export function ProtectionRules({ numberId }: { numberId: string }) {
           <b className="text-ink">Quem pediu para sair.</b> Contato que mandou &quot;sair&quot;, &quot;parar&quot; ou &quot;stop&quot; não recebe mais mensagens automáticas. O atendente continua respondendo.
         </li>
         <li>
-          <b className="text-ink">Mensagem que não sai.</b> Se o número desconectar, os envios esperam; passou de 30 minutos parados, viram falha (ícone vermelho) com o motivo e o botão Tentar novamente.
+          <b className="text-ink">Mensagem que não sai.</b> Se o número desconectar, os envios esperam; passou de 30 minutos parados, viram falha (ícone vermelho) com o motivo e o botão Tentar novamente. Espera causada pelas proteções acima não vira falha.
         </li>
       </ul>
     </details>
