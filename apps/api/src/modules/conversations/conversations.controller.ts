@@ -134,6 +134,11 @@ class PrimaryTagDto implements SetPrimaryTagInput {
   @ValidateIf((_, v) => v !== null) @IsUUID() tagId: string | null;
 }
 
+class UnreadDto {
+  /** marca como não lido a partir desta mensagem; ausente = a conversa toda */
+  @IsOptional() @IsUUID() messageId?: string;
+}
+
 class TypingDto {
   @IsOptional() @IsIn(['composing', 'paused']) state?: 'composing' | 'paused';
 }
@@ -418,5 +423,11 @@ export class ConversationsController {
       .then((c) => c && this.numbers.subscribePresence(conv.numberId, c.phone))
       .catch(() => undefined);
     return conv;
+  }
+
+  /** Marcar como não lida (a conversa toda ou a partir de uma mensagem). Só no painel. */
+  @Patch(':id/unread')
+  markUnread(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UnreadDto) {
+    return this.conversations.markUnread(u.tenantId, id, dto.messageId);
   }
 }

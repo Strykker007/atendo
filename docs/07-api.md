@@ -92,6 +92,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | DELETE | `/tenants/me/global-variables/:id` | `variables.manage` | Remove |
 | PUT | `/contact-attributes/:contactId` | `contacts.edit` | `{items: {label, type, value}[]}` (até 50) **substitui** a lista. Linha toda em branco é ignorada; nome sem valor (ou o contrário), número/data inválidos e nome repetido = 400 |
 | POST | `/conversations/:id/read` | todos | Zera não-lidas. Também assina o "digitando…" do contato no provider (Evolution; no máx. 1×/2 min por contato, sem esperar a resposta) |
+| PATCH | `/conversations/:id/unread` | todos | Marcar como não lida. Body opcional `{ messageId }`: conta como não lidas as recebidas a partir dela; sem ele, no mínimo 1 (mantém as que já havia). Nunca menos de 1. Emite a conversa pelo socket. Só no painel — nada vai ao provider |
 | POST | `/conversations/:id/typing` | todos | `{state?: 'composing'\|'paused'}` (padrão `composing`). Atendente digitando → "digitando…" no WhatsApp do contato enquanto o painel renovar (a cada ~2 s; expira em 4 s sem renovação); `paused` apaga na hora. Só Evolution conectada e conversa aberta. 204, nunca falha |
 | **Departamentos** | | | |
 | GET | `/departments` | todos | Com participantes e nº de conversas abertas |

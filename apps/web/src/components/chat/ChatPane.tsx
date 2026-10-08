@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { ZoomableAvatar } from './AvatarViewer';
@@ -263,6 +263,18 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
    * ele está olhando para ela.
    */
   const marcarLida = useMarkRead();
+  const marcarNaoLida = useMarkUnread();
+  /**
+   * Não lida a partir de uma mensagem recebida. A conversa fecha (fora do Kanban): aberta, o
+   * efeito abaixo a marcaria como lida de novo na próxima mensagem que chegasse.
+   */
+  const naoLidaDaqui = (m: Message) => {
+    if (!conversationId) return;
+    marcarNaoLida.mutateAsync({ id: conversationId, messageId: m.id })
+      .then(() => toast.ok('Marcada como não lida'))
+      .catch(toast.err);
+    if (!embedded) setConversation(null);
+  };
   useEffect(() => {
     if (!conversationId) return;
     marcarLida.mutate(conversationId);
@@ -663,7 +675,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
       </div>
@@ -899,7 +911,7 @@ export function resumoDaMensagem(m: Message): string {
   return messagePreview(m);
 }
 
-function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
+function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
   const estruturado = structuredBody(m);
@@ -957,7 +969,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
           </div>
         )}
       </div>
-      {!out && <AcoesDaBolha m={m} out={false} onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} podeReagir={canResend} />}
+      {!out && <AcoesDaBolha m={m} out={false} onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onNaoLida={onNaoLida} podeReagir={canResend} />}
     </div>
   );
 }
@@ -1042,7 +1054,7 @@ function mudouODia(anterior: Message | undefined, atual: Message) {
  * Só para mensagem que chegou ao WhatsApp — sem `externalId` não há o que citar nem reagir.
  * Apagar é a exceção: pendente (cancela o envio) e com falha também saem do histórico.
  */
-function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, onEditar, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; podeReagir: boolean }) {
+function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; podeReagir: boolean }) {
   const apagar = onApagar && <BotaoAcao titulo="Apagar" onClick={() => onApagar(m)}><Trash2 size={14} /></BotaoAcao>;
   // editar vale também na fila (sem `externalId`): o texto novo é o que sai
   const editar = onEditar && <BotaoAcao titulo="Editar" onClick={() => onEditar(m)}><Pencil size={14} /></BotaoAcao>;
@@ -1051,7 +1063,9 @@ function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, onEditar, p
   const responder = onResponder && <BotaoResponder m={m} onResponder={onResponder} />;
   // figurinha não sai pelos providers; o resto vira envio normal (mídia, texto ou link)
   const encaminhar = onEncaminhar && m.type !== 'sticker' && <BotaoAcao titulo="Encaminhar" onClick={() => onEncaminhar(m)}><Forward size={14} /></BotaoAcao>;
-  return <div className="flex items-center shrink-0">{out ? <>{apagar}{editar}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{apagar}</>}</div>;
+  // só nas recebidas: é o que o contato mandou que fica pendente de leitura
+  const naoLida = onNaoLida && !out && <BotaoAcao titulo="Marcar como não lida a partir daqui" onClick={() => onNaoLida(m)}><Mail size={14} /></BotaoAcao>;
+  return <div className="flex items-center shrink-0">{out ? <>{apagar}{editar}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{naoLida}{apagar}</>}</div>;
 }
 
 function BotaoAcao({ titulo, onClick, children }: { titulo: string; onClick: () => void; children: React.ReactNode }) {

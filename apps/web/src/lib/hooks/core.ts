@@ -293,6 +293,28 @@ export const useMarkRead = () => {
 };
 
 /**
+ * Marcar como não lida (docs/08-frontend.md). `messageId` = a partir daquela mensagem.
+ * O badge aparece na hora; o número exato vem do servidor (e chega aos outros pelo socket).
+ */
+export const useMarkUnread = () => {
+  const qc = useQueryClient();
+  const aplicar = (id: string, n: (atual: number) => number) =>
+    qc.setQueriesData<Conversation[]>({ queryKey: ['conversations'] }, (old) =>
+      old?.map((c) => (c.id === id ? { ...c, unreadCount: n(c.unreadCount) } : c)),
+    );
+  return useMutation({
+    mutationFn: ({ id, messageId }: { id: string; messageId?: string }) =>
+      api<{ unreadCount: number }>(`/conversations/${id}/unread`, { method: 'PATCH', body: JSON.stringify({ messageId }) }),
+    onMutate: ({ id }) => aplicar(id, (atual) => Math.max(atual, 1)),
+    onSuccess: (conv, { id }) => {
+      aplicar(id, () => conv.unreadCount);
+      qc.invalidateQueries({ queryKey: ['conversation-counts'] });
+    },
+    onError: () => qc.invalidateQueries({ queryKey: ['conversations'] }),
+  });
+};
+
+/**
  * Envio do atendente. `expectedNumberId` é o canal que a tela está mostrando: a API só confere
  * (quem escolhe o número é a conversa) e devolve 409 `number_changed` se a conversa mudou de canal —
  * aí recarrega a conversa para a tela mostrar o canal novo antes de qualquer reenvio.

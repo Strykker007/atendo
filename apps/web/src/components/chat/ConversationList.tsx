@@ -1,11 +1,11 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useConversation, useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { useMarkRead, useMarkUnread, useConversation, useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
@@ -351,7 +351,10 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: {
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   const m = STATUS_META[c.status];
+  /** menu do card: clique direito no card ou os três pontos que aparecem no hover */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   return (
+    <div className="relative group" onContextMenu={(e) => { if (selecionando) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}>
     <button onClick={onClick} className={cn('relative w-full text-left pl-3.5 pr-2.5 py-2 flex gap-2.5 border-b border-line hover:bg-field transition-colors', active && !selecionando && 'bg-accent-soft hover:bg-accent-soft', selecionando && marcado && 'bg-accent-soft')}>
       {/* faixa de status (semáforo) */}
       <span className={cn('absolute left-0 top-0 bottom-0 w-[5px]', m.bar)} aria-hidden />
@@ -388,6 +391,72 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: {
         </div>
       </div>
     </button>
+      {/* irmão do card, não filho: botão dentro de botão é HTML inválido */}
+      {!selecionando && (
+        <button
+          type="button"
+          title="Mais opções"
+          aria-label="Mais opções"
+          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.right, y: r.bottom }); }}
+          className={cn('absolute right-2 top-1.5 p-0.5 rounded bg-field text-muted hover:text-ink opacity-0 group-hover:opacity-100 focus:opacity-100', menu && 'opacity-100')}
+        >
+          <MoreVertical size={14} />
+        </button>
+      )}
+      {menu && <MenuDoCard c={c} active={active} pos={menu} onFechar={() => setMenu(null)} />}
+    </div>
+  );
+}
+
+/**
+ * Menu do card. "Marcar como não lida" é lembrete do atendente, como no WhatsApp: só o painel
+ * muda, o contato não fica sabendo. Se a conversa está aberta, ela fecha — aberta, a tela a
+ * marcaria como lida de novo na próxima mensagem.
+ */
+function MenuDoCard({ c, active, pos, onFechar }: { c: Conversation; active: boolean; pos: { x: number; y: number }; onFechar: () => void }) {
+  const setConversation = useUI((s) => s.setConversation);
+  const marcarNaoLida = useMarkUnread();
+  const marcarLida = useMarkRead();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fora = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onFechar(); };
+    const tecla = (e: KeyboardEvent) => e.key === 'Escape' && onFechar();
+    // a lista rola por baixo de um menu fixo: fechar é melhor que deixá-lo solto no ar
+    window.addEventListener('mousedown', fora);
+    window.addEventListener('keydown', tecla);
+    window.addEventListener('scroll', onFechar, true);
+    return () => {
+      window.removeEventListener('mousedown', fora);
+      window.removeEventListener('keydown', tecla);
+      window.removeEventListener('scroll', onFechar, true);
+    };
+  }, [onFechar]);
+
+  const naoLida = c.unreadCount > 0;
+  // não deixa o menu sair pela borda da janela
+  const left = Math.min(pos.x, window.innerWidth - 200);
+  const top = Math.min(pos.y, window.innerHeight - 48);
+  return createPortal(
+    <div ref={ref} role="menu" style={{ left, top }} className="fixed z-50 w-[190px] py-1 rounded-lg border border-line bg-panel shadow-lg">
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          if (naoLida) marcarLida.mutate(c.id);
+          else {
+            marcarNaoLida.mutate({ id: c.id });
+            if (active) setConversation(null);
+          }
+          onFechar();
+        }}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-ink hover:bg-field"
+      >
+        {naoLida ? <MailOpen size={14} className="text-muted" /> : <Mail size={14} className="text-muted" />}
+        {naoLida ? 'Marcar como lida' : 'Marcar como não lida'}
+      </button>
+    </div>,
+    document.body,
   );
 }
 

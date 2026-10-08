@@ -1507,6 +1507,32 @@ export class ConversationsService {
   async markRead(tenantId: string, id: string) {
     return this.prisma.conversation.update({ where: { id, tenantId }, data: { unreadCount: 0 } });
   }
+
+  /**
+   * "Marcar como não lida", como no WhatsApp: lembrete do atendente para voltar à conversa.
+   *
+   * Sem `messageId`, a conversa fica com ao menos 1 não lida (as que já havia continuam).
+   * Com `messageId`, conta como não lido tudo o que o contato mandou dali em diante — a
+   * mesma regra do recibo de leitura do celular (`InboundService.lidaNoCelular`), só que no
+   * sentido inverso. Nunca menos de 1: marcar numa mensagem nossa ainda deixa o aviso.
+   *
+   * Só mexe no painel: o contato não fica sabendo (o recibo azul que já saiu não volta).
+   */
+  async markUnread(tenantId: string, id: string, messageId?: string) {
+    const atual = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { unreadCount: true } });
+    if (!atual) throw new NotFoundException('Conversa não encontrada');
+    let unreadCount = Math.max(atual.unreadCount, 1);
+    if (messageId) {
+      const m = await this.prisma.message.findFirst({ where: { id: messageId, conversationId: id }, select: { createdAt: true } });
+      if (!m) throw new NotFoundException('Mensagem não encontrada');
+      const desde = await this.prisma.message.count({ where: { conversationId: id, direction: 'in', createdAt: { gte: m.createdAt } } });
+      unreadCount = Math.max(desde, 1);
+    }
+    const conv = await this.prisma.conversation.update({ where: { id, tenantId }, data: { unreadCount } });
+    // os outros atendentes veem o badge voltar na hora
+    this.gateway.emitConversation(tenantId, conv);
+    return conv;
+  }
 }
 
 /**

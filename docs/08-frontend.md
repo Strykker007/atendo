@@ -168,6 +168,8 @@ O botão de recolher o painel saiu daqui: ele já existe no topo do próprio pai
 
 A rota `POST /conversations/:id/read` existia desde o começo e **ninguém a chamava**: o balão de não lidas aparecia e nunca mais saía. Agora abrir a conversa marca como lida (otimista no cache, para não piscar).
 
+**Marcar como não lida** (`useMarkUnread` → `PATCH /conversations/:id/unread`): no card da lista, clique direito ou os três pontos do hover abrem um menu com *Marcar como não lida* (ou *Marcar como lida*, se já houver não lidas). Na conversa, as mensagens recebidas ganham a ação ✉ *Marcar como não lida a partir daqui*. O badge aparece na hora (otimista) e o número exato vem da resposta; os outros atendentes recebem pelo socket. Se a conversa marcada é a que está aberta, ela **fecha** (fora do Kanban) — aberta, o efeito de "abriu = leu" a marcaria como lida de novo na próxima mensagem. O contato não fica sabendo: o recibo de leitura que já saiu não volta.
+
 O socket do tempo real era criado num `useEffect` que desistia quando ainda não havia token — e o token chega depois, de uma chamada de refresh. Quando a corrida dava errado, o socket **nunca** era criado e o painel só recebia mensagem nova depois de um F5. `setAccessToken` agora avisa quem estiver esperando (`onAccessToken`), e o efeito refaz a conexão quando o token aparece.
 
 ## Recolher os dois painéis
