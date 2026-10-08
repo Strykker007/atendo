@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { AuthService } from '../auth/auth.service';
@@ -27,11 +28,31 @@ class CreateTenantDto {
   /** Sem senha = o admin recebe convite por e-mail para definir a dele */
   @IsOptional() @IsString() @MinLength(8) adminPassword?: string;
 }
+/** Dados cadastrais. String vazia limpa o campo. */
+class TenantProfileDto {
+  @IsOptional() @IsString() @MaxLength(150) legalName?: string;
+  /** CPF (11) ou CNPJ (14) — pontuação é removida antes de validar */
+  @IsOptional() @IsString() @MaxLength(20) document?: string;
+  @IsOptional() @IsString() @MaxLength(80) contactName?: string;
+  @IsOptional() @IsString() @MaxLength(120) billingEmail?: string;
+  @IsOptional() @IsString() @MaxLength(20) phone?: string;
+  @IsOptional() @IsString() @MaxLength(10) zipCode?: string;
+  @IsOptional() @IsString() @MaxLength(150) street?: string;
+  @IsOptional() @IsString() @MaxLength(20) addressNumber?: string;
+  @IsOptional() @IsString() @MaxLength(80) complement?: string;
+  @IsOptional() @IsString() @MaxLength(80) district?: string;
+  @IsOptional() @IsString() @MaxLength(80) city?: string;
+  @IsOptional() @IsString() @MaxLength(2) state?: string;
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
+}
 class UpdateTenantDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsUUID() planId?: string;
   @IsOptional() @IsIn(['trialing', 'active', 'past_due', 'suspended', 'canceled']) subscriptionStatus?: 'trialing' | 'active' | 'past_due' | 'suspended' | 'canceled';
+  /** vencimento do plano (`AAAA-MM-DD`). Só para assinatura sem gateway: no Stripe/Asaas quem manda é o gateway */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) currentPeriodEnd?: string;
+  @IsOptional() @ValidateNested() @Type(() => TenantProfileDto) profile?: TenantProfileDto;
 }
 class CreateAgentDto {
   @IsEmail() email: string;
@@ -52,7 +73,6 @@ class UpdateAgentDto {
   @IsOptional() @IsString() @MinLength(8) password?: string;
 }
 
-/** Gestão de clientes (super_admin) e de atendentes (tenant_admin). */
 /**
  * Motivos de perda com que todo cliente novo nasce (Configurações → Motivos de perda). Os dois
  * catálogos vêm primeiro: a lista do encerramento segue esta ordem, então "fixado" é estar no
@@ -70,6 +90,23 @@ const DEFAULT_LOSS_REASONS = [
   '👹 OFERTAR PRODUTOS',
 ];
 
+const onlyDigits = (v: string) => v.replace(/\D/g, '');
+
+/** Normaliza os dados cadastrais: vazio vira null, documento/telefone/CEP só dígitos, UF maiúscula. */
+function cleanProfile(p: TenantProfileDto) {
+  const out: Record<string, string | null> = {};
+  for (const [k, raw] of Object.entries(p) as [keyof TenantProfileDto, string | undefined][]) {
+    if (raw === undefined) continue;
+    const v = raw.trim();
+    out[k] = v === '' ? null : k === 'document' || k === 'phone' || k === 'zipCode' ? onlyDigits(v) : k === 'state' ? v.toUpperCase() : v;
+  }
+  if (out.document && out.document.length !== 11 && out.document.length !== 14) throw new BadRequestException('CPF deve ter 11 dígitos e CNPJ, 14.');
+  if (out.billingEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(out.billingEmail)) throw new BadRequestException('E-mail financeiro inválido.');
+  if (out.state && !/^[A-Z]{2}$/.test(out.state)) throw new BadRequestException('UF deve ter duas letras.');
+  return out;
+}
+
+/** Gestão de clientes (super_admin) e de atendentes (tenant_admin). */
 @Controller('tenants')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 class TenantsController {
@@ -95,11 +132,20 @@ class TenantsController {
   @NoTenantOk()
   @Roles('super_admin')
   async updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
-    if (dto.name !== undefined || dto.isActive !== undefined) await this.prisma.tenant.update({ where: { id }, data: { name: dto.name, isActive: dto.isActive } });
-    const sub = await this.prisma.subscription.findUnique({ where: { tenantId: id }, select: { planId: true } });
+    const perfil = dto.profile ? cleanProfile(dto.profile) : {};
+    if (dto.name !== undefined || dto.isActive !== undefined || dto.profile) await this.prisma.tenant.update({ where: { id }, data: { name: dto.name, isActive: dto.isActive, ...perfil } });
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId: id }, select: { planId: true, gateway: true } });
     // troca de plano (inclusive para um gratuito, que cancela a cobrança no Stripe) — ver assignPlan
     if (dto.planId && dto.planId !== sub?.planId) await this.stripe.assignPlan(id, dto.planId, dto.subscriptionStatus);
     else if (dto.subscriptionStatus && sub) await this.prisma.subscription.update({ where: { tenantId: id }, data: { status: dto.subscriptionStatus, graceUntil: null } });
+    // depois da troca de plano: assignPlan recalcula o período, e a data escolhida tem de prevalecer
+    if (dto.currentPeriodEnd) {
+      if (!sub) throw new BadRequestException('Cliente sem assinatura.');
+      // o webhook do gateway sobrescreveria a data na próxima cobrança
+      if (sub.gateway) throw new BadRequestException(`O vencimento desta assinatura é controlado pelo ${sub.gateway === 'stripe' ? 'Stripe' : 'Asaas'}.`);
+      // fim do dia no horário de Brasília: "vence dia 10" vale o dia 10 inteiro
+      await this.prisma.subscription.update({ where: { tenantId: id }, data: { currentPeriodEnd: new Date(`${dto.currentPeriodEnd}T23:59:59-03:00`) } });
+    }
     return this.prisma.tenant.findUniqueOrThrow({ where: { id }, include: { subscription: { include: { plan: true } } } });
   }
 

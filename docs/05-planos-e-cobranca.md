@@ -63,6 +63,8 @@ Colunas em `plans` (não em `limits`, porque mudam o comportamento do gateway):
 - Criar cliente já num plano gratuito: assinatura nasce `active` (os pagos seguem nascendo `trialing`).
 - Job diário (`expireFreePlans`, junto da reconciliação): degustação vencida → `suspended` + e-mail "seu período gratuito terminou" (recebe mensagens, não envia; o cliente assina um plano pago em `/plano` e o webhook reativa). Permanente → só rola `currentPeriodEnd` um mês. O job lê o `durationDays` **atual** do plano: tornar o plano permanente estende quem já está nele.
 
+**Vencimento** (`Subscription.currentPeriodEnd`): coluna *Vencimento* em Clientes — vermelho se vencido, âmbar até 7 dias; gratuito permanente mostra "Não vence". O dono edita a data em Clientes → Editar **só quando a assinatura não tem gateway** (personalizado, gratuito, atribuída à mão); com Stripe/Asaas o webhook é a fonte e o campo fica só leitura. Em degustação gratuita a data é a que o `expireFreePlans` usa — mudar estende ou encurta o teste. Nos demais planos sem gateway a data é **controle**: nada suspende sozinho ao vencer; o dono muda o status.
+
 **Personalizado** (`custom`): valor negociado e cobrado por fora. Sem Stripe, sem checkout; o dono atribui em Clientes como hoje (status manual).
 
 **Trocar a modalidade** de um plano com assinantes é recusado (400): deixaria assinatura no Stripe cobrando um plano gratuito, ou cliente "pago" sem cobrança. O caminho é criar outro plano e mover os clientes. Sem assinantes, virar gratuito/personalizado arquiva o price no Stripe; mensal↔anual cria um price novo com o intervalo certo.
