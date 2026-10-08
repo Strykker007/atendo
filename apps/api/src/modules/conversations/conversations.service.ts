@@ -200,8 +200,12 @@ export class ConversationsService {
       include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
+      // "Encerradas": quem acabou de encerrar primeiro (`closedAt`). Pela última mensagem, a recém-
+      // encerrada podia cair abaixo das 50 primeiras e só "aparecia" depois de outra mensagem
       orderBy:
-        q.sort === 'waiting'
+        q.status === 'closed'
+          ? [{ closedAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
+          : q.sort === 'waiting'
           ? [{ awaitingSince: { sort: 'asc', nulls: 'last' } }, { lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
           // `nulls: 'last'`: no Postgres o DESC põe nulo PRIMEIRO, e conversa sem mensagem
           // (criada e nunca usada) encabeçava a lista para sempre. `id` desempata: com hora
