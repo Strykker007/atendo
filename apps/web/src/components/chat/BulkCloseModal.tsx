@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
-import { Modal, Field } from '@/components/ui/Modal';
+import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useBulkClose, type ConversationOutcome } from '@/lib/hooks';
-import { LossReasonField, OUTCOMES } from './CloseModal';
+import { LossReasonField, OUTCOMES, Secao } from './CloseModal';
 
 /**
  * Encerrar vários atendimentos selecionados.
@@ -37,26 +37,29 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
   return (
     <Modal open onClose={onClose} title={`Encerrar ${ids.length} atendimento(s)`}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Resultado" hint="Vale para todos os selecionados. O valor da venda não entra aqui — esse é por atendimento.">
-          <div className="flex flex-wrap gap-2">
+        <Secao titulo="Resultado" dica="Vale para todos os selecionados. O valor da venda não entra aqui — esse é por atendimento.">
+          <div className="grid grid-cols-3 gap-2">
             {OUTCOMES.map((o) => (
               <button
                 key={o.id}
                 type="button"
+                aria-pressed={outcome === o.id}
                 onClick={() => setOutcome(o.id)}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-medium ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
               >
                 {o.icon} {o.label}
               </button>
             ))}
           </div>
-        </Field>
+        </Secao>
 
         {outcome === 'lost' && (
-          <LossReasonField value={motivo} onChange={setMotivo} hint="O mais comum aqui é “não respondeu”, que é justamente o que entope a fila." placeholder="Ou escreva outro motivo" />
+          <div className="border-t border-line pt-4">
+            <LossReasonField value={motivo} onChange={setMotivo} hint="O mais comum aqui é “não respondeu”, que é justamente o que entope a fila." placeholder="Outro motivo…" />
+          </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex justify-end gap-2 border-t border-line pt-4">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={bulk.isPending} loadingText="Encerrando…">Encerrar {ids.length}</Button>
         </div>

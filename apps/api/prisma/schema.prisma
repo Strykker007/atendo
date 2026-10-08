@@ -20,6 +20,27 @@ model Tenant {
   stripeCustomerId String? @unique
   /// cliente no Asaas (cus_…) — criado no primeiro checkout quando o gateway é o Asaas
   asaasCustomerId  String? @unique
+  // ---- dados cadastrais (só o dono do sistema vê e edita — tela Clientes) ----
+  /// razão social (nome jurídico; `name` é o nome fantasia que aparece no painel)
+  legalName      String?
+  /// CPF ou CNPJ, só dígitos
+  document       String?
+  /// pessoa de contato do cliente (quem fechou, quem responde pela conta)
+  contactName    String?
+  /// e-mail para cobrança e avisos administrativos — não é o login do admin
+  billingEmail   String?
+  /// telefone, só dígitos
+  phone          String?
+  zipCode        String?
+  street         String?
+  addressNumber  String?
+  complement     String?
+  district       String?
+  city           String?
+  /// UF, duas letras
+  state          String?
+  /// anotações internas do dono sobre o cliente
+  notes          String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -279,6 +279,11 @@ Centralizados em `packages/shared/src/send-limits.ts`.
 provider. O perfil de intervalo (`sendDelay`), o teto diário e o aquecimento continuam como
 em [04 — Providers](04-providers-whatsapp.md#proteção-contra-bloqueio-e-banimento) e somam-se a estes.
 
+**Quem ajusta**: só o dono do sistema (`super_admin`, ou "entrando como" o cliente). O cartão
+*Proteção do número* (intervalo, limites da fila, custo da linha) não aparece para o cliente, e
+`PATCH /numbers/:id` descarta `sendDelay`, `sendLimits`, `sendDailyLimit`, `endWarmup` e
+`infraCostMonth` vindos de quem não é o dono — o cliente acelerando o ritmo queimava a própria linha.
+
 ## Arquivos
 
 | Arquivo | Papel |

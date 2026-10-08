@@ -24,6 +24,8 @@ export const useCreateFlow = () => { const qc = useQueryClient(); return useMuta
 export const useUpdateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<Flow> & { id: string }) => api<Flow>(`/flows/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
 /** Fluxos com "Conectar com outro fluxo" apontando para este — aviso antes de excluir. */
 export const fetchFlowReferences = (id: string) => api<{ id: string; name: string }[]>(`/flows/${id}/references`);
+/** Exclui vários de uma vez — tudo ou nada. */
+export const useDeleteFlows = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (ids: string[]) => api<{ deleted: number }>('/flows/delete', { method: 'POST', body: JSON.stringify({ ids }) }), onSuccess: invFlows(qc) }); };
 export const useDeleteFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/flows/${id}`, { method: 'DELETE' }), onSuccess: invFlows(qc) }); };
 /** Cópia dentro do mesmo cliente — mantém etiquetas, atendentes e anexos. */
 export const useDuplicateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Flow>(`/flows/${id}/duplicate`, { method: 'POST' }), onSuccess: invFlows(qc) }); };
@@ -51,10 +53,12 @@ export const useActiveRun = (conversationId: string | null) => useQuery({ queryK
 export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as PlanFeature), loading: u.isLoading }; };
 
 // ---- Clientes (dono) ----
-export interface TenantRow { id: string; name: string; slug: string; isActive: boolean; createdAt: string; subscription: { status: string; currentPeriodEnd: string; plan: { id: string; name: string; priceMonth: string; isFree: boolean; billingCycle: BillingCycle; durationDays: number | null } } | null; users: { email: string; name: string }[]; _count: { numbers: number; users: number; conversations: number } }
+/** Dados cadastrais do cliente (tela Clientes, só o dono). Documento, telefone e CEP só com dígitos. */
+export interface TenantProfile { legalName: string | null; document: string | null; contactName: string | null; billingEmail: string | null; phone: string | null; zipCode: string | null; street: string | null; addressNumber: string | null; complement: string | null; district: string | null; city: string | null; state: string | null; notes: string | null }
+export interface TenantRow extends TenantProfile { id: string; name: string; slug: string; isActive: boolean; createdAt: string; subscription: { status: string; currentPeriodEnd: string; /** null = atribuída pelo dono; com gateway, o vencimento é dele */ gateway: 'stripe' | 'asaas' | null; plan: { id: string; name: string; priceMonth: string; isFree: boolean; billingCycle: BillingCycle; durationDays: number | null } } | null; users: { email: string; name: string }[]; _count: { numbers: number; users: number; conversations: number } }
 export const useTenants = () => useQuery({ queryKey: ['tenants'], queryFn: () => api<TenantRow[]>('/tenants') });
 export const useCreateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; slug: string; planId: string; adminEmail: string; adminName: string; adminPassword?: string }) => api('/tenants', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tenants'] }) }); };
-export const useUpdateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) => api(`/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); } }); };
+export const useUpdateTenant = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string; /** AAAA-MM-DD */ currentPeriodEnd?: string; profile?: Partial<Record<keyof TenantProfile, string>> }) => api(`/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); } }); };
 export const useImpersonate = () => useMutation({ mutationFn: (tenantId: string) => api<{ accessToken: string; tenant: { id: string; name: string } }>(`/tenants/${tenantId}/impersonate`, { method: 'POST' }) });
 
 // ---- Relatórios: visão pronta ----

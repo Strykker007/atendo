@@ -11,13 +11,39 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { impersonation, setAccessToken } from '@/lib/api';
-import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, type Plan, type TenantRow } from '@/lib/hooks';
+import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, type Plan, type TenantRow, type TenantProfile } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 /** Rótulo do plano nos seletores: gratuito aparece como tal (e com o prazo), não como "R$ 0,00". */
 const planoLabel = (p: Plan, sufixo = '') =>
   p.isFree ? `${p.name} · Gratuito${p.durationDays ? ` (${p.durationDays} dias)` : ''}` : p.billingCycle === 'custom' ? `${p.name} · Personalizado` : `${p.name} · ${brl(Number(p.priceMonth))}${sufixo}`;
 const STATUS: Record<string, [string, string]> = { trialing: ['Teste', 'bg-warn-soft text-warn-ink'], active: ['Ativa', 'bg-ok-soft text-ok'], past_due: ['Pendente', 'bg-warn-soft text-warn-ink'], suspended: ['Suspensa', 'bg-danger-soft text-danger-ink'], canceled: ['Cancelada', 'bg-field text-muted'] };
+
+/** "AAAA-MM-DD" do vencimento no horário de Brasília (o input de data e a API falam assim). */
+const diaSP = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+
+/** Vencimento com o alerta: vencido em vermelho, até 7 dias em âmbar. */
+function Vencimento({ sub }: { sub: NonNullable<TenantRow['subscription']> }) {
+  // gratuito permanente não vence
+  if (sub.plan.isFree && !sub.plan.durationDays) return <span className="text-[12px] text-faint">Não vence</span>;
+  const fim = new Date(sub.currentPeriodEnd);
+  const dias = Math.ceil((fim.getTime() - Date.now()) / 86_400_000);
+  const [cls, sufixo] = dias < 0 ? ['text-danger-ink font-semibold', `vencido há ${-dias} dia${dias === -1 ? '' : 's'}`] : dias <= 7 ? ['text-warn-ink font-semibold', dias === 0 ? 'vence hoje' : `em ${dias} dia${dias === 1 ? '' : 's'}`] : ['text-ink', ''];
+  return (
+    <div className={cn('text-[12px] tnum', cls)} title={sub.gateway ? `Controlado pelo ${sub.gateway === 'stripe' ? 'Stripe' : 'Asaas'}` : 'Definido manualmente — edite em Editar'}>
+      {fim.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+      {sufixo && <div className="text-[10.5px] font-normal">{sufixo}</div>}
+    </div>
+  );
+}
+
+/** CPF/CNPJ com pontuação para exibir (o banco guarda só dígitos). */
+const fmtDoc = (d: string | null) => {
+  if (!d) return '';
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  return d;
+};
 
 /** Gestão de clientes pelo dono: criar, plano/status, entrar como. */
 export default function ClientesPage() {
@@ -57,13 +83,13 @@ export default function ClientesPage() {
       {tenants.data && (
         <div className="rounded-2xl bg-panel border border-line overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="px-4 py-2.5">Cliente</th><th className="px-3 py-2.5">Admin</th><th className="px-3 py-2.5">Plano</th><th className="px-3 py-2.5">Assinatura</th><th className="px-3 py-2.5 text-right">Números</th><th className="px-3 py-2.5 text-right">Usuários</th><th className="px-3 py-2.5 text-right">Conversas</th><th className="px-4 py-2.5"></th></tr></thead>
+            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="px-4 py-2.5">Cliente</th><th className="px-3 py-2.5">Admin</th><th className="px-3 py-2.5">Plano</th><th className="px-3 py-2.5">Assinatura</th><th className="px-3 py-2.5">Vencimento</th><th className="px-3 py-2.5 text-right">Números</th><th className="px-3 py-2.5 text-right">Usuários</th><th className="px-3 py-2.5 text-right">Conversas</th><th className="px-4 py-2.5"></th></tr></thead>
             <tbody className="divide-y divide-line">
               {tenants.data.map((t) => {
                 const st = STATUS[t.subscription?.status ?? ''] ?? ['—', 'bg-field text-muted'];
                 return (
                   <tr key={t.id} className={cn(!t.isActive && 'opacity-50')}>
-                    <td className="px-4 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}</div></td>
+                    <td className="px-4 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}</div>{(t.legalName || t.document) && <div className="text-[11px] text-muted truncate max-w-[16rem]">{[t.legalName, fmtDoc(t.document)].filter(Boolean).join(' · ')}</div>}</td>
                     <td className="px-3 py-2.5 text-muted">{t.users[0]?.email ?? '—'}</td>
                     <td className="px-3 py-2.5">
                       <select value={t.subscription?.plan.id ?? ''} disabled={busy === t.id} onChange={(e) => patch(t, { planId: e.target.value })} className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1">
@@ -81,6 +107,7 @@ export default function ClientesPage() {
                         {Object.entries(STATUS).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}
                       </select>
                     </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">{t.subscription ? <Vencimento sub={t.subscription} /> : <span className="text-faint">—</span>}</td>
                     <td className="px-3 py-2.5 text-right tnum">{t._count.numbers}</td>
                     <td className="px-3 py-2.5 text-right tnum">{t._count.users}</td>
                     <td className="px-3 py-2.5 text-right tnum">{t._count.conversations}</td>
@@ -160,12 +187,22 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
     subscriptionStatus: tenant.subscription?.status ?? 'active',
     isActive: tenant.isActive,
   });
+  const vencimentoInicial = tenant.subscription ? diaSP(tenant.subscription.currentPeriodEnd) : '';
+  const [vencimento, setVencimento] = useState(vencimentoInicial);
+  const [perfil, setPerfil] = useState<Record<keyof TenantProfile, string>>(() => ({
+    legalName: tenant.legalName ?? '', document: fmtDoc(tenant.document), contactName: tenant.contactName ?? '', billingEmail: tenant.billingEmail ?? '',
+    phone: tenant.phone ?? '', zipCode: tenant.zipCode ?? '', street: tenant.street ?? '', addressNumber: tenant.addressNumber ?? '', complement: tenant.complement ?? '',
+    district: tenant.district ?? '', city: tenant.city ?? '', state: tenant.state ?? '', notes: tenant.notes ?? '',
+  }));
+  const campo = (k: keyof TenantProfile) => ({ value: perfil[k], onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setPerfil({ ...perfil, [k]: e.target.value }) });
+  // com gateway, a data vem do Stripe/Asaas e o webhook sobrescreveria a edição
+  const gateway = tenant.subscription?.gateway;
   return (
-    <Modal open onClose={onClose} title={`Editar ${tenant.name}`}>
+    <Modal open onClose={onClose} title={`Editar ${tenant.name}`} width="max-w-2xl">
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          update.mutateAsync({ id: tenant.id, ...f, planId: f.planId || undefined })
+          update.mutateAsync({ id: tenant.id, ...f, planId: f.planId || undefined, profile: perfil, ...(vencimento && vencimento !== vencimentoInicial && { currentPeriodEnd: vencimento }) })
             .then(() => { toast.ok('Cliente atualizado'); onClose(); })
             .catch(toast.err);
         }}
@@ -191,6 +228,38 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
             </select>
           </Field>
         </div>
+        {tenant.subscription && (
+          <Field
+            label="Vencimento do plano"
+            hint={gateway
+              ? `Controlado pelo ${gateway === 'stripe' ? 'Stripe' : 'Asaas'}: muda sozinho a cada cobrança paga.`
+              : 'Até quando o plano vale. Vale o dia inteiro (horário de Brasília). Ao renovar, avance a data.'}
+          >
+            <input type="date" className={cn(inputCls, 'sm:w-56', gateway && 'opacity-60')} value={vencimento} onChange={(e) => setVencimento(e.target.value)} disabled={!!gateway} required={!gateway} />
+          </Field>
+        )}
+
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted pt-1">Dados cadastrais</div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Razão social"><input className={inputCls} {...campo('legalName')} maxLength={150} /></Field>
+          <Field label="CPF / CNPJ"><input className={inputCls} {...campo('document')} maxLength={20} inputMode="numeric" placeholder="00.000.000/0000-00" /></Field>
+          <Field label="Responsável" hint="Quem responde pela conta."><input className={inputCls} {...campo('contactName')} maxLength={80} /></Field>
+          <Field label="Telefone"><input className={inputCls} {...campo('phone')} maxLength={20} inputMode="tel" placeholder="(11) 99999-9999" /></Field>
+          <Field label="E-mail financeiro" hint="Para cobrança e avisos. Não é o login."><input type="email" className={inputCls} {...campo('billingEmail')} maxLength={120} /></Field>
+          <Field label="CEP"><input className={inputCls} {...campo('zipCode')} maxLength={10} inputMode="numeric" placeholder="00000-000" /></Field>
+        </div>
+        <div className="grid sm:grid-cols-[1fr_7rem] gap-3">
+          <Field label="Endereço"><input className={inputCls} {...campo('street')} maxLength={150} placeholder="Rua, avenida…" /></Field>
+          <Field label="Número"><input className={inputCls} {...campo('addressNumber')} maxLength={20} /></Field>
+        </div>
+        <div className="grid sm:grid-cols-[1fr_1fr_1fr_4.5rem] gap-3">
+          <Field label="Complemento"><input className={inputCls} {...campo('complement')} maxLength={80} /></Field>
+          <Field label="Bairro"><input className={inputCls} {...campo('district')} maxLength={80} /></Field>
+          <Field label="Cidade"><input className={inputCls} {...campo('city')} maxLength={80} /></Field>
+          <Field label="UF"><input className={cn(inputCls, 'uppercase')} {...campo('state')} maxLength={2} /></Field>
+        </div>
+        <Field label="Observações" hint="Só você vê."><textarea className={cn(inputCls, 'min-h-[4.5rem]')} {...campo('notes')} maxLength={2000} /></Field>
+
         <Field label="Acesso" hint="Desativado, ninguém da empresa consegue entrar — as conversas e o histórico ficam guardados.">
           <div className="flex gap-2">
             {[[true, 'Ativo'], [false, 'Desativado']].map(([v, l]) => (

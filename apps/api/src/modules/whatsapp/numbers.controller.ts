@@ -120,18 +120,27 @@ export class NumbersController {
   @Patch(':id')
   @RequirePermission('numbers.manage')
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
-    const { infraCostMonth, sendLimits, endWarmup, ...resto } = dto;
-    const limites = sendLimits === undefined ? {} : { sendLimits: sendLimits === null ? Prisma.DbNull : (cleanSendLimits(sendLimits) as Prisma.InputJsonValue) };
-    // Chega no corpo mas é descartado para quem não é o dono: devolver 403 vazaria que o campo
-    // existe, e ele não é assunto do cliente.
+    const { infraCostMonth, sendLimits, endWarmup, sendDelay, sendDailyLimit, ...resto } = dto;
+    // Custo da linha e ritmo de envio (intervalo, limites da fila, teto diário, aquecimento) são
+    // do dono do sistema. Chegam no corpo mas são descartados para o cliente: devolver 403
+    // vazaria que o campo existe. O ritmo é o que protege o número de bloqueio — o cliente
+    // acelerando para "andar mais rápido" queimava a própria linha.
     // `impersonatorId` entra porque o dono edita isto **entrando como o cliente** — o token de
     // impersonação carrega papel de admin do cliente, então checar só o papel trancaria o
-    // próprio dono para fora do único lugar onde o campo aparece.
+    // próprio dono para fora do único lugar onde os campos aparecem.
     const ehDono = user.role === 'super_admin' || !!user.impersonatorId;
-    const custo = ehDono && infraCostMonth !== undefined ? { infraCostMonth } : {};
+    const doDono = ehDono
+      ? {
+          ...(infraCostMonth !== undefined && { infraCostMonth }),
+          ...(sendDelay !== undefined && { sendDelay }),
+          ...(sendDailyLimit !== undefined && { sendDailyLimit }),
+          ...(sendLimits !== undefined && { sendLimits: sendLimits === null ? Prisma.DbNull : (cleanSendLimits(sendLimits) as Prisma.InputJsonValue) }),
+          ...(endWarmup && { warmupStartedAt: null }),
+        }
+      : {};
     return this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId, deletedAt: null },
-      data: { ...resto, ...custo, ...limites, ...(endWarmup && { warmupStartedAt: null }) },
+      data: { ...resto, ...doDono },
       select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
     });
   }

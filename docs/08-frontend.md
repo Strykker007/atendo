@@ -56,6 +56,8 @@ src/
 - **Servidor** (conversas, mensagens, tags…): react-query. Chaves: `['conversations', filtros]`, `['messages', id]`, `['numbers']`, `['tags']`, `['quick-replies']`, `['usage']`, `['number-qr', id]`.
 - **UI** (colunas, filtros, seleção): zustand com `persist` — sidebar recolhida, painel direito e número selecionado sobrevivem ao reload.
 - **Token**: em memória (`lib/api.ts`), nunca em localStorage. O refresh está no cookie httpOnly; ao abrir o app, `(app)/layout.tsx` chama `/auth/refresh` para obter um access token novo.
+- **Sessão expirada**: toda chamada autenticada passa por `api()` (inclusive upload — `FormData` dispensa o `Content-Type` JSON), que renova em 401 e repete uma vez. Se o refresh também falha, `sessionExpired()` leva para `/login?expirou=1&next=<rota>`: o login explica "Sua sessão expirou" e volta para a rota (só caminho interno). Nunca mostrar "token" ao usuário.
+- **Socket e token**: se o servidor derruba o socket (token vencido na reconexão), `useRealtime` renova pelo mesmo `refresh()` e reconecta — o socket.io não reconecta sozinho após `io server disconnect`. O socket também é refeito quando o **cliente do token** muda (dono entrando/saindo de um cliente): ele entra na sala `tenant:<id>` só no handshake, e sem isso o dono impersonando não recebia mensagens nem status (enviado/entregue/lido).
 
 ## Tempo real
 
@@ -142,7 +144,11 @@ No encerramento individual (`CloseModal`), **Comprou** abre em **lista de itens*
 
 Campos em R$ usam `components/ui/MoneyInput` (máscara de caixa: dígitos entram pela direita, exibe "1.500,00", trabalha com `number`). Está no encerramento (itens e valor livre) e no formulário de plano (mensalidade/anuidade, custo, excedentes, teto de IA; R$ por mensagem e por interação de IA com 3 casas).
 
+**Layout dos modais de encerramento** (`CloseModal`, `BulkCloseModal`): cada bloco usa `Secao` — rótulo, "opcional" quando cabe, a explicação **logo abaixo do rótulo** (antes vinha depois do campo e parecia do bloco seguinte) e então o campo; blocos separados por linha. Resultado em três botões de mesma largura. Itens da venda com cabeçalho de colunas (Valor / Produto ou serviço) e total no rodapé; a troca lista ↔ texto livre fica à direita do título. A ordem dos blocos não mudou: Resultado → venda ou motivo → fluxo → observação.
+
 **Motivo de perda** (`LossReasonField`, nos dois modais): chips com os motivos de Configurações → **Motivos de perda** (`lossReasons`) + campo de texto livre. O relatório agrupa pelo texto, por isso os cadastrados ficam à vista. Em Relatórios › Vendas, o card **Motivos de perda** mostra a contagem por motivo no período.
+
+**Configurações → Motivos de perda** (`LossReasonsSection`): lista numerada e ordenável por arrastar (a ordem é a dos chips no encerramento), renomear na linha (clique ou lápis; Enter salva, Esc cancela), remover com confirmação na própria linha, campo "Novo motivo" com Enter — colar várias linhas adiciona todas, ignorando repetidos —, contador "N de 30" e **Restaurar padrão** (`DEFAULT_LOSS_REASONS`, packages/shared). As alterações aparecem na hora e voltam atrás se a API recusar.
 
 O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseModal`, o porquê está no cabeçalho do arquivo. A resposta traz `ignored`, e o toast diz o número: alguém da equipe pode ter encerrado no meio do caminho.
 

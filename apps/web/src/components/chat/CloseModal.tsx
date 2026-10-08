@@ -1,14 +1,38 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, XCircle, MinusCircle, Plus, Trash2 } from 'lucide-react';
-import { Modal, Field, inputCls } from '@/components/ui/Modal';
+import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { useFlows, useHasFeature, useSetStatus, useTenantSettings, type ConversationOutcome } from '@/lib/hooks';
+import { DEFAULT_LOSS_REASONS } from '@atendo/shared';
 
 /** padrão enquanto as configurações carregam — a lista do cliente vem de Configurações → Motivos de perda */
-export const MOTIVOS = ['Preço', 'Prazo', 'Não respondeu', 'Comprou com concorrente', 'Fora da área', 'Só pesquisando'];
+export const MOTIVOS = DEFAULT_LOSS_REASONS;
+
+/**
+ * Bloco do formulário de encerramento: rótulo, explicação logo abaixo dele e o campo. A dica
+ * vinha depois do campo e parecia pertencer ao bloco seguinte; aqui tudo fica alinhado à
+ * esquerda e na mesma ordem em todas as seções. `acao` fica à direita do rótulo (ex.: trocar
+ * lista por texto livre), em vez de um link solto entre as seções.
+ */
+export function Secao({ titulo, opcional, dica, acao, children, htmlFor }: { titulo: string; opcional?: boolean; dica?: string; acao?: React.ReactNode; children: React.ReactNode; htmlFor?: string }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <label htmlFor={htmlFor} className="block text-sm font-medium text-ink">
+            {titulo}{opcional && <span className="ml-1.5 text-[11px] font-normal text-faint">opcional</span>}
+          </label>
+          {dica && <p className="text-xs text-muted mt-0.5">{dica}</p>}
+        </div>
+        {acao && <div className="shrink-0">{acao}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 /**
  * Motivo de perda: um clique nos cadastrados ou texto livre. Texto livre continua valendo
@@ -18,22 +42,21 @@ export const MOTIVOS = ['Preço', 'Prazo', 'Não respondeu', 'Comprou com concor
 export function LossReasonField({ value, onChange, hint, placeholder }: { value: string; onChange: (v: string) => void; hint: string; placeholder: string }) {
   const settings = useTenantSettings();
   const motivos = settings.data?.lossReasons ?? MOTIVOS;
+  const cadastrado = motivos.includes(value);
   return (
-    // div, não o <label> do Field: clicar no texto do label acionaria o primeiro chip
-    <div className="text-sm space-y-1">
-      <span className="block text-ink font-medium">Motivo</span>
+    <Secao titulo="Motivo" opcional dica={`${hint} Escolha um da lista ou escreva outro.`} htmlFor="motivo-livre">
       {motivos.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {motivos.map((m) => (
-            <button key={m} type="button" onClick={() => onChange(value === m ? '' : m)} className={`rounded-full border px-2.5 py-1 text-[12px] ${value === m ? 'border-danger text-danger bg-danger-soft' : 'border-line text-muted hover:bg-field'}`}>
+            <button key={m} type="button" aria-pressed={value === m} onClick={() => onChange(value === m ? '' : m)} className={`rounded-full border px-2.5 py-1 text-[12px] ${value === m ? 'border-danger text-danger bg-danger-soft font-medium' : 'border-line text-muted hover:bg-field hover:text-ink'}`}>
               {m}
             </button>
           ))}
         </div>
       )}
-      <input className={inputCls} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} maxLength={200} aria-label="Motivo" />
-      <span className="block text-xs text-faint">{hint}</span>
-    </div>
+      {/* escolheu um chip: o campo livre fica vazio, para não parecer que são duas respostas */}
+      <input id="motivo-livre" className={inputCls} placeholder={placeholder} value={cadastrado ? '' : value} onChange={(e) => onChange(e.target.value)} maxLength={200} />
+    </Secao>
   );
 }
 
@@ -124,81 +147,105 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   return (
     <Modal open onClose={onClose} title="Encerrar atendimento" width={outcome === 'won' && modoLista ? 'max-w-2xl' : undefined}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Resultado" hint="Alimenta o relatório de vendas. Pode deixar sem resultado.">
-          <div className="flex flex-wrap gap-2">
+        <Secao titulo="Resultado" dica="Alimenta o relatório de vendas. Se a conversa não teve venda em jogo, deixe “Sem resultado”.">
+          <div className="grid grid-cols-3 gap-2">
             {OUTCOMES.map((o) => (
               <button
                 key={o.id}
                 type="button"
+                aria-pressed={outcome === o.id}
                 onClick={() => { setOutcome(o.id); escolheuFluxo.current = false; }}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-medium ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
               >
                 {o.icon} {o.label}
               </button>
             ))}
           </div>
-        </Field>
+        </Secao>
 
         {outcome === 'won' && (
-          <>
+          <div className="border-t border-line pt-4">
             {modoLista ? (
-              <Field label="Itens da venda" hint="Opcional. O total soma faturamento, ticket médio e desempenho por atendente.">
+              <Secao
+                titulo="Itens da venda"
+                opcional
+                dica="O total soma faturamento, ticket médio e desempenho por atendente. Item só com valor também vale."
+                acao={<button type="button" onClick={() => setModoLista(false)} className="text-[12px] text-muted underline hover:text-ink">Usar texto livre</button>}
+              >
                 <div className="space-y-2">
+                  {/* cabeçalho das colunas: sem ele não dava para saber qual campo era o quê */}
+                  <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-faint">
+                    <span className="w-36 shrink-0">Valor (R$)</span>
+                    <span className="flex-1">Produto ou serviço</span>
+                    <span className="w-9 shrink-0" />
+                  </div>
                   {itens.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-2">
-                      <MoneyInput className="w-36 shrink-0" nullable value={item.valor} onChange={(v) => mudarItem(idx, { valor: v })} aria-label="Valor do item" autoFocus={idx === 0} />
+                      <MoneyInput className="w-36 shrink-0" nullable value={item.valor} onChange={(v) => mudarItem(idx, { valor: v })} aria-label={`Valor do item ${idx + 1}`} autoFocus={idx === 0} />
                       {/* min-w-0: sem ele o input não encolhe abaixo da largura intrínseca e a descrição fica espremida */}
-                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Produto ou serviço (opcional)" value={item.descricao} onChange={(e) => mudarItem(idx, { descricao: e.target.value })} maxLength={200} />
-                      <button type="button" aria-label="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="shrink-0 p-2 rounded-lg text-muted hover:text-danger hover:bg-field">
+                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Ex.: Fralda G, pacote com 40" aria-label={`Produto do item ${idx + 1}`} value={item.descricao} onChange={(e) => mudarItem(idx, { descricao: e.target.value })} maxLength={200} />
+                      <button type="button" aria-label="Remover item" title="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="w-9 h-9 shrink-0 grid place-items-center rounded-lg text-muted hover:text-danger hover:bg-field">
                         <Trash2 size={14} />
                       </button>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between border-t border-line pt-2">
                     <button type="button" disabled={itens.length >= 50} onClick={() => setItens((l) => [...l, { descricao: '', valor: null }])} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline disabled:opacity-50">
                       <Plus size={14} /> Adicionar item
                     </button>
-                    <span className="text-[13px] text-muted">Total: <b className="text-ink tnum">{fmtBRL(totalItens)}</b></span>
+                    <span className="text-[13px] text-muted">Total <b className="ml-1 text-ink tnum">{fmtBRL(totalItens)}</b></span>
                   </div>
                 </div>
-              </Field>
+              </Secao>
             ) : (
-              <>
-                <Field label="Valor da compra (R$)" hint="Opcional. É o que soma faturamento, ticket médio e desempenho por atendente.">
-                  <MoneyInput nullable value={valor} onChange={setValor} autoFocus />
-                </Field>
-                <Field label="Produtos / descrição">
-                  <textarea className={`${inputCls} resize-none`} rows={3} placeholder="O que foi comprado" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
-                </Field>
-              </>
+              <div className="space-y-4">
+                <Secao
+                  titulo="Valor da compra (R$)"
+                  opcional
+                  dica="Soma faturamento, ticket médio e desempenho por atendente."
+                  acao={<button type="button" onClick={() => setModoLista(true)} className="text-[12px] text-muted underline hover:text-ink">Usar lista de itens</button>}
+                >
+                  <MoneyInput className="sm:w-56" nullable value={valor} onChange={setValor} autoFocus aria-label="Valor da compra" />
+                </Secao>
+                <Secao titulo="Produtos / descrição" opcional dica="O que foi comprado, do jeito que preferir." htmlFor="produtos-livre">
+                  <textarea id="produtos-livre" className={`${inputCls} resize-none`} rows={3} placeholder="Ex.: 2 pacotes de fralda G e 1 perfume" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
+                </Secao>
+              </div>
             )}
-            <button type="button" onClick={() => setModoLista((m) => !m)} className="text-[12px] text-muted underline hover:text-ink">
-              {modoLista ? 'Mudar para campo de texto livre' : 'Mudar para lista de itens'}
-            </button>
-          </>
+          </div>
         )}
 
         {outcome === 'lost' && (
-          <LossReasonField value={motivo} onChange={setMotivo} hint="É o que mostra onde você está perdendo negócio." placeholder="Ou escreva outro motivo" />
+          <div className="border-t border-line pt-4">
+            <LossReasonField value={motivo} onChange={setMotivo} hint="É o que mostra onde você está perdendo negócio." placeholder="Outro motivo…" />
+          </div>
         )}
 
         {flowsFeature.has && (
-          <Field label="Disparar fluxo ao encerrar" hint={ehPadrao ? 'Fluxo padrão deste resultado — pode trocar só para este atendimento.' : 'Pesquisa de satisfação, pós-venda, recuperação.'}>
-            <select className={inputCls} value={flowId} onChange={(e) => { setFlowId(e.target.value); escolheuFluxo.current = true; }}>
-              <option value="">Nenhum</option>
-              {ativos.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
-          </Field>
+          <div className="border-t border-line pt-4">
+            <Secao
+              titulo="Fluxo ao encerrar"
+              dica={ehPadrao ? 'Já vem o fluxo padrão deste resultado. Pode trocar ou escolher “Nenhum” só para este atendimento.' : 'Mensagem automática enviada ao contato depois de encerrar: pesquisa de satisfação, pós-venda, recuperação.'}
+              htmlFor="fluxo-encerrar"
+            >
+              <select id="fluxo-encerrar" className={inputCls} value={flowId} onChange={(e) => { setFlowId(e.target.value); escolheuFluxo.current = true; }}>
+                <option value="">Nenhum</option>
+                {ativos.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </Secao>
+          </div>
         )}
 
         {/* por último, abaixo do fluxo: é o fecho do formulário, não parte da venda */}
         {outcome === 'won' && (
-          <Field label="Observação (opcional)">
-            <textarea className={`${inputCls} resize-none`} rows={2} placeholder="Forma de pagamento, entrega, desconto…" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
-          </Field>
+          <div className="border-t border-line pt-4">
+            <Secao titulo="Observação" opcional dica="Fica registrada na venda; o contato não vê." htmlFor="obs-venda">
+              <textarea id="obs-venda" className={`${inputCls} resize-none`} rows={2} placeholder="Forma de pagamento, entrega, desconto…" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
+            </Secao>
+          </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex justify-end gap-2 border-t border-line pt-4">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={setStatus.isPending} loadingText="Encerrando…">Encerrar</Button>
         </div>

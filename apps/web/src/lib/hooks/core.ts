@@ -5,7 +5,7 @@
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api, ApiError, getAccessToken, onAccessToken } from '../api';
+import { api, ApiError, onAccessToken } from '../api';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
@@ -399,19 +399,12 @@ export const useForwardMessage = () => {
   });
 };
 
-/** Upload multipart (não passa pelo helper `api` porque o Content-Type é do FormData). */
-export async function uploadFile(file: File): Promise<Upload> {
+/** Upload multipart: passa pelo `api` (que já trata FormData) para ganhar o refresh do token. */
+export const uploadFile = (file: File) => {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/uploads`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { Authorization: `Bearer ${getAccessToken()}` },
-    body: form,
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Erro ${res.status}`);
-  return res.json();
-}
+  return api<Upload>('/uploads', { method: 'POST', body: form });
+};
 
 export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'document' =>
   mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'document';

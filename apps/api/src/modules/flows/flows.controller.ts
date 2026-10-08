@@ -137,6 +137,20 @@ export class FlowsController {
   }
 
   /**
+   * Exclui vários (seleção na listagem; a tela pede para digitar EXCLUIR). Tudo ou nada: se algum
+   * id não for deste cliente, nada é apagado. Execuções saem junto (cascade), como no individual.
+   */
+  @Post('delete')
+  @RequirePermission('flows.manage')
+  async removeBatch(@CurrentUser() u: AuthUser, @Body() dto: IdsDto) {
+    const ids = [...new Set(dto.ids)];
+    const found = await this.prisma.flow.count({ where: { id: { in: ids }, tenantId: u.tenantId } });
+    if (found !== ids.length) throw new BadRequestException('Fluxo não encontrado.');
+    const { count } = await this.prisma.flow.deleteMany({ where: { id: { in: ids }, tenantId: u.tenantId } });
+    return { deleted: count };
+  }
+
+  /**
    * Cópia dentro do MESMO cliente: nada precisa ser traduzido, as etiquetas e os atendentes
    * referenciados continuam valendo. Nasce desativada para não começar a responder sozinha.
    * Mantida por compatibilidade; a tela usa a versão em lote.

@@ -24,11 +24,15 @@ export function SendingCard({ number }: { number: NumberItem }) {
   const me = useMe();
   const update = useUpdateNumber();
   const oficial = number.provider === 'meta';
+  // Tudo aqui é do dono do sistema (inclusive "entrando como" o cliente): ritmo de envio e
+  // custo da linha. O cliente acelerando o intervalo queimava o próprio número. A API também
+  // descarta esses campos para quem não é o dono.
+  if (!(me.data?.role === 'super_admin' || me.data?.impersonatorId)) return null;
 
   return (
     <div className="rounded-lg bg-field/60 p-2.5 space-y-2 text-[12px]">
       <div className="flex items-center gap-1.5 text-muted font-medium">
-        <ShieldAlert size={13} /> Proteção do número
+        <ShieldAlert size={13} /> Proteção do número <span className="text-[10px] font-normal text-faint">(só o dono do sistema vê)</span>
       </div>
 
       {/* teto diário e aquecimento saíram da tela: número não tem mais limite de envios por dia */}
@@ -45,25 +49,22 @@ export function SendingCard({ number }: { number: NumberItem }) {
         </select>
       </label>
 
-      {/* Custo da linha: só o dono do sistema vê e edita. Para o cliente, quanto a operação
-          custa não é informação dele — e é esse número que faz a margem por cliente no
-          Financeiro deixar de ser estimativa. */}
-      {(me.data?.role === 'super_admin' || me.data?.impersonatorId) && (
-        <label className="flex items-center gap-2">
-          <span className="text-[11px] text-faint leading-tight flex-1">Custo mensal desta linha (R$)</span>
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            className={cn(inputCls, 'h-8 py-0 w-28 text-right')}
-            defaultValue={Number(number.infraCostMonth ?? 0)}
-            onBlur={(e) => {
-              const v = Number(e.target.value);
-              if (v !== Number(number.infraCostMonth ?? 0)) update.mutateAsync({ id: number.id, infraCostMonth: v }).then(() => toast.ok('Custo da linha salvo')).catch(toast.err);
-            }}
-          />
-        </label>
-      )}
+      {/* Custo da linha: para o cliente, quanto a operação custa não é informação dele — e é
+          esse número que faz a margem por cliente no Financeiro deixar de ser estimativa. */}
+      <label className="flex items-center gap-2">
+        <span className="text-[11px] text-faint leading-tight flex-1">Custo mensal desta linha (R$)</span>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          className={cn(inputCls, 'h-8 py-0 w-28 text-right')}
+          defaultValue={Number(number.infraCostMonth ?? 0)}
+          onBlur={(e) => {
+            const v = Number(e.target.value);
+            if (v !== Number(number.infraCostMonth ?? 0)) update.mutateAsync({ id: number.id, infraCostMonth: v }).then(() => toast.ok('Custo da linha salvo')).catch(toast.err);
+          }}
+        />
+      </label>
 
       <QueueLimits number={number} />
     </div>

@@ -12,6 +12,9 @@ import { env } from '../../config/env';
 
 const GLOBAL_ROOM = 'global';
 
+/** Dono do sistema, logado como ele mesmo ou "entrando como" um cliente. */
+export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role === 'super_admin' || !!u.impersonatorId;
+
 /**
  * Cada tenant tem uma "sala"; todos também entram na sala global (evento system_notice). Eventos: message, messages_cleared, conversation, number, appointment, kanban, typing.
  *
@@ -31,10 +34,11 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
   async handleConnection(client: Socket) {
     try {
       const token = client.handshake.auth?.token as string;
-      const payload = await this.jwt.verifyAsync<{ tenantId: string }>(token, { secret: env.JWT_ACCESS_SECRET });
-      await client.join(`tenant:${payload.tenantId}`);
-      // sala de todo mundo logado (inclusive o dono, sem tenant): avisos globais do sistema
-      await client.join(GLOBAL_ROOM);
+      const payload = await this.jwt.verifyAsync<{ tenantId: string; role: string; impersonatorId?: string }>(token, { secret: env.JWT_ACCESS_SECRET });
+      if (payload.tenantId) await client.join(`tenant:${payload.tenantId}`);
+      // sala dos clientes logados: avisos globais do sistema. O dono é quem escreve o aviso —
+      // não recebe de volta, nem quando está "entrando como" um cliente.
+      if (!isOwner(payload)) await client.join(GLOBAL_ROOM);
     } catch {
       client.disconnect(true);
     }

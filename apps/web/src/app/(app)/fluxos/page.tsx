@@ -9,7 +9,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { hasWebhookBody, type FlowDefinition } from '@atendo/shared';
-import { useFlows, useDeleteFlow, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useSetFlowsActive, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
+import { useFlows, useDeleteFlow, useDeleteFlows, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useSetFlowsActive, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
@@ -20,6 +20,8 @@ export default function FluxosPage() {
   const feature = useHasFeature('flows');
   const flows = useFlows();
   const remove = useDeleteFlow();
+  const removeMany = useDeleteFlows();
+  const [deletingMany, setDeletingMany] = useState(false);
   const duplicate = useDuplicateFlows();
   const update = useUpdateFlow();
   const exportFlow = useExportFlow();
@@ -144,6 +146,7 @@ export default function FluxosPage() {
                   <Button size="sm" variant="ghost" icon={<PowerOff size={13} />} loading={setActive.isPending && !setActive.variables?.isActive} onClick={() => onSetActive(false)}>Desativar</Button>
                   <Button size="sm" variant="ghost" icon={<Copy size={13} />} loading={duplicate.isPending} onClick={() => onDuplicate(sel)}>Duplicar</Button>
                   <Button size="sm" variant="ghost" icon={<Download size={13} />} loading={exportFlows.isPending} onClick={onExportSelected}>Exportar selecionados</Button>
+                  <Button size="sm" variant="ghost" className="text-danger" icon={<Trash2 size={13} />} onClick={() => setDeletingMany(true)}>Excluir</Button>
                 </>
               )}
             </div>
@@ -195,6 +198,22 @@ export default function FluxosPage() {
         </div>
       )}
       <ConfirmDialog open={!!pendingDownload} onClose={() => setPendingDownload(null)} title="Exportar fluxo" confirmLabel="Baixar mesmo assim" text="Este arquivo contém o corpo de webhooks. Verifique se não há tokens ou senhas." onConfirm={() => { if (pendingDownload) downloadJson(pendingDownload.data, pendingDownload.file); }} />
+      <ConfirmDialog
+        open={deletingMany}
+        onClose={() => setDeletingMany(false)}
+        title={allOn ? 'Excluir todos os fluxos' : `Excluir ${sel.length} fluxo(s)`}
+        danger
+        typeToConfirm="EXCLUIR"
+        confirmLabel="Excluir"
+        text={`${sel.length === 1 ? 'O fluxo selecionado será removido' : `Os ${sel.length} fluxos selecionados serão removidos`}, com o histórico de execuções. Não dá para desfazer — se quiser guardar uma cópia, use "Exportar selecionados" antes.\n\nConversas que estiverem num desses fluxos param nele, e onde outro fluxo conecta a um excluído a conversa vai para a fila de atendimento.`}
+        onConfirm={async () => {
+          try {
+            const { deleted } = await removeMany.mutateAsync(sel);
+            toast.ok(`${deleted} fluxo(s) excluído(s).`);
+            setSelected([]);
+          } catch (err) { toast.err(err); throw err; }
+        }}
+      />
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} title="Excluir fluxo" danger confirmLabel="Excluir" text={`"${deleting?.name}" e seu histórico de execuções serão removidos.${deleting?.refs?.length ? ` Atenção: ${deleting.refs.length === 1 ? 'o fluxo' : 'os fluxos'} ${deleting.refs.map((r) => `"${r.name}"`).join(', ')} ${deleting.refs.length === 1 ? 'conecta' : 'conectam'} a este — depois de excluído, nesse ponto a conversa vai para a fila de atendimento.` : ''}`} onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Fluxo excluído'); } catch (err) { toast.err(err); throw err; } }} />
     </PageShell>
   );

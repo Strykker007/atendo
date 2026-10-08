@@ -23,7 +23,7 @@ export class JwtAuthGuard implements CanActivate {
       const payload = await this.jwt.verifyAsync<AuthUser & { sub: string; impersonatorId?: string }>(token, { secret: env.JWT_ACCESS_SECRET });
       req.user = { id: payload.sub, tenantId: payload.tenantId, role: payload.role, email: payload.email, name: payload.name, impersonatorId: payload.impersonatorId };
     } catch {
-      throw new UnauthorizedException('Token inválido ou expirado');
+      throw new UnauthorizedException('Sua sessão expirou. Entre novamente para continuar.');
     }
     // a lista fica pronta para TODA rota: além do PermissionsGuard, os services de conversa
     // decidem por permissão (quem vê os atendimentos da equipe, quem transfere os dos outros)

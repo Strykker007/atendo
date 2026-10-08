@@ -40,7 +40,7 @@ export const impersonation = {
  * derrubando a sessão inteira a cada 15 minutos.
  */
 let inFlight: Promise<boolean> | null = null;
-function refresh(): Promise<boolean> {
+export function refresh(): Promise<boolean> {
   inFlight ??= doRefresh().finally(() => { inFlight = null; });
   return inFlight;
 }
@@ -48,12 +48,13 @@ function refresh(): Promise<boolean> {
 async function doRefresh(): Promise<boolean> {
   const r = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
   if (!r.ok) return false;
-  accessToken = (await r.json()).accessToken;
+  // pelo setter: o socket do tempo real precisa saber do token novo
+  setAccessToken((await r.json()).accessToken);
   // se o dono estava dentro de um cliente, volta para lá com um token novo de impersonação
   const imp = impersonation.get();
   if (imp) {
     const i = await fetch(`${API}/tenants/${imp.tenantId}/impersonate`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${accessToken}` } });
-    if (i.ok) accessToken = (await i.json()).accessToken;
+    if (i.ok) setAccessToken((await i.json()).accessToken);
     else impersonation.set(null);
   }
   return true;
@@ -67,6 +68,23 @@ export class ApiError extends Error {
 }
 
 /**
+ * Sessão acabou de vez (refresh cookie vencido ou revogado): manda para o login com um aviso
+ * em português. Antes, o "Token inválido ou expirado" da API caía cru num toast e a pessoa
+ * ficava presa numa tela que não carregava nada, sem saber o que fazer.
+ */
+let saindo = false;
+function sessionExpired() {
+  if (saindo || typeof window === 'undefined') return;
+  saindo = true;
+  setAccessToken(null);
+  impersonation.set(null);
+  const volta = location.pathname + location.search;
+  location.href = `/login?expirou=1&next=${encodeURIComponent(volta)}`;
+}
+
+export const SESSION_EXPIRED_MESSAGE = 'Sua sessão expirou. Entre novamente para continuar.';
+
+/**
  * fetch com Bearer + refresh automático em 401 (uma tentativa).
  *
  * A empresa escolhida no seletor vai em TODA chamada (`x-company-id`): a API converte isso no
@@ -75,12 +93,18 @@ export class ApiError extends Error {
  */
 export async function api<T = unknown>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const companyId = useUI.getState().companyId;
+  // FormData (upload): o navegador põe o Content-Type com o boundary
+  const json = !(init.body instanceof FormData);
   const res = await fetch(`${API}${path}`, {
     ...init,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(accessToken && { Authorization: `Bearer ${accessToken}` }), ...(companyId && { 'x-company-id': companyId }), ...init.headers },
+    headers: { ...(json && { 'Content-Type': 'application/json' }), ...(accessToken && { Authorization: `Bearer ${accessToken}` }), ...(companyId && { 'x-company-id': companyId }), ...init.headers },
   });
-  if (res.status === 401 && retry && (await refresh())) return api<T>(path, init, false);
+  if (res.status === 401 && retry) {
+    if (await refresh()) return api<T>(path, init, false);
+    // havia sessão e ela não renova mais: login, nunca a mensagem técnica
+    if (accessToken) { sessionExpired(); throw new ApiError(SESSION_EXPIRED_MESSAGE, 401, 'SESSION_EXPIRED'); }
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(body.message ?? `Erro ${res.status}`, res.status, body.code);

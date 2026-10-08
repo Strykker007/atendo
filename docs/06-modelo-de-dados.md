@@ -20,7 +20,7 @@ provider_pricing (global, sem tenant)
 
 ### Tenancy
 
-**tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente.
+**tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente. Dados cadastrais (só o dono, tela Clientes → Editar): `legalName` (razão social), `document` (CPF/CNPJ, só dígitos), `contactName`, `billingEmail` (não é o login), `phone`, endereço (`zipCode`, `street`, `addressNumber`, `complement`, `district`, `city`, `state`) e `notes` — migração `20261031000000_tenant_profile`.
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA.
 
@@ -126,7 +126,7 @@ Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
 relatórios), chave `attendanceActive` (feriado/férias: vale a faixa Fechado sem mexer nos
 horários) + `attendanceChangedAt`, fluxos padrão (inclusive `wonFlowId`/`lostFlowId`/`noneFlowId`,
 o fluxo de encerramento por resultado) e **boas-vindas** (`welcomeEnabled`,
-`welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; nasce com Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`).
+`welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; o `@default` é Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`; cliente criado por `POST /tenants` nasce com `DEFAULT_LOSS_REASONS` de `packages/shared/src/loss-reasons.ts`: Não respondeu, Achou caro, Falta de estoque, Desistiu, Só pesquisando, Comprou em outro lugar, Vai vir na loja, Fora da área de entrega, Produto não comercializado, Outros).
 
 **business_schedules** — quadros de horários ([Horários](horarios.md)): `name`, `timezone`,
 `isDefault` (um por cliente) e `config` (JSON `ScheduleConfig`: faixas, Fechado, grade semanal,
