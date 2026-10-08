@@ -295,6 +295,15 @@ Três cuidados nesse caminho:
    nome; o nome certo chega na primeira mensagem do contato. A migração
    `20261016000000_nome_contato_pushname_proprio` limpou os que já tinham nascido assim.
 
+### Lida no celular zera as não-lidas do painel
+
+Quando o cliente abre a conversa no WhatsApp do celular, a Evolution repassa o recibo do
+aparelho como `messages.update` com `READ` numa mensagem **recebida** (`fromMe: false`). Em
+`InboundService.applyStatus`, "lida" numa mensagem `in` recalcula `unreadCount` da conversa
+para o número de recebidas **depois** dela (só diminui: recibo atrasado não apaga mensagem
+nova) e emite `conversation` pelo socket — lista e quadro atualizam o badge. A Meta não manda
+recibo de mensagem recebida, então no número oficial o badge só zera abrindo no painel.
+
 ### De onde vem o nome do contato (`contacts.nameSource`)
 
 Prioridade **manual > agenda > whatsapp**:
