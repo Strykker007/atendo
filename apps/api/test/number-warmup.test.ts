@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { humanTiming, typingMs, warmupPhase } from '../src/modules/whatsapp/number-warmup';
+import { humanTiming, typingMs, warmupPhase, warmupStartOnPair } from '../src/modules/whatsapp/number-warmup';
 
 const t0 = new Date('2026-10-07T12:00:00Z');
 const h = (n: number) => new Date(t0.getTime() + n * 3_600_000);
@@ -33,4 +33,16 @@ describe('tempo humano da automação', () => {
   it('velocidade desconhecida cai no normal', () => expect(humanTiming(40, max, 'x' as never).typingMs).toBe(6667));
   it('reação mínima 1,2 s + 10 ms por caractere', () => expect(humanTiming(50, min).reactMs).toBe(1700));
   it('reação com resposta longa: no máximo +2 s', () => expect(humanTiming(1000, max).reactMs).toBe(5000));
+});
+
+describe('QR lido de novo: aquecimento recomeça ou continua', () => {
+  const inicio = new Date('2026-10-01T10:00:00Z');
+  const agora = new Date('2026-10-03T10:00:00Z');
+  const base = { sessionStartedAt: inicio, waRemovedAt: null, phone: '5562999990000' };
+  it('primeiro QR: começa agora', () => expect(warmupStartOnPair({ ...base, sessionStartedAt: null }, '5562999990000', agora)).toEqual(agora));
+  it('mesmo telefone reconectado: continua de onde estava', () => expect(warmupStartOnPair(base, '5562999990000', agora)).toBeNull());
+  it('sem telefone no evento: continua', () => expect(warmupStartOnPair(base, undefined, agora)).toBeNull());
+  it('o WhatsApp derrubou nesta sessão: recomeça', () => expect(warmupStartOnPair({ ...base, waRemovedAt: new Date('2026-10-02T10:00:00Z') }, '5562999990000', agora)).toEqual(agora));
+  it('queda antiga, antes desta sessão: continua', () => expect(warmupStartOnPair({ ...base, waRemovedAt: new Date('2026-09-20T10:00:00Z') }, '5562999990000', agora)).toBeNull());
+  it('outro telefone leu o QR: recomeça', () => expect(warmupStartOnPair(base, '5562988887777', agora)).toEqual(agora));
 });

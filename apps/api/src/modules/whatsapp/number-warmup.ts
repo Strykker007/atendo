@@ -49,6 +49,24 @@ export function warmupPhase(n: { provider: string; sessionStartedAt: Date | null
 }
 
 /**
+ * Novo QR lido: o aquecimento recomeça ou continua de onde estava?
+ *
+ * Reconectar o MESMO celular (desconectou pelo painel, trocou de aparelho do mesmo chip, sessão
+ * caiu) continua a contagem — o número já vinha conversando e voltar à fase 1 travava a loja por
+ * dias sem motivo. Recomeça (devolve `now`) quando:
+ * - nunca aqueceu (primeiro QR);
+ * - o WhatsApp derrubou o número nesta sessão (`waRemovedAt` depois do início) — é o maior risco;
+ * - quem leu o QR é outro telefone (outro chip, outra conta).
+ * Devolve `null` para manter o `sessionStartedAt` atual.
+ */
+export function warmupStartOnPair(n: { sessionStartedAt: Date | null; waRemovedAt: Date | null; phone: string }, pairedPhone: string | undefined, now = new Date()): Date | null {
+  if (!n.sessionStartedAt) return now;
+  if (n.waRemovedAt && n.waRemovedAt >= n.sessionStartedAt) return now;
+  if (pairedPhone && pairedPhone !== n.phone) return now;
+  return null;
+}
+
+/**
  * Quanto uma pessoa levaria para mandar este texto (mensagem automática no não oficial):
  * - **reação** — perceber a mensagem e começar a responder: 1,2–3 s, mais um pouco quanto maior a
  *   resposta (pensar no que escrever), até +2 s. Aplicada contando da última mensagem do contato:

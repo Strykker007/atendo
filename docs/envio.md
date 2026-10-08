@@ -203,7 +203,10 @@ em volume é o padrão que o WhatsApp pune; conversa humana não.
 
 Sessão nova (QR lido: `pending_qr → connected` grava `WhatsAppNumber.sessionStartedAt`) no
 **não oficial** passa **7 dias** aquecendo (`whatsapp/number-warmup.ts`). Reinício de servidor ou
-oscilação de rede não reabre o aquecimento.
+oscilação de rede não reabre o aquecimento. **Ler o QR de novo no mesmo telefone continua de onde
+parou** (e, se os 7 dias já passaram, não volta a aquecer): `warmupStartOnPair` mantém o
+`sessionStartedAt`. Recomeça do zero só se o WhatsApp derrubou o número nessa sessão (`waRemovedAt`
+depois do início) ou se quem leu o QR é outro telefone.
 
 | Desde o QR | Contatos **novos** por hora | Automáticas por hora | Piso entre envios do número |
 |---|---|---|---|
