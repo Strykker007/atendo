@@ -11,7 +11,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import type { Message, MessageDirection, MessageType } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
-import { enqueueOutbound, promoteNext, requeueSeq } from '../whatsapp/send-queue';
+import { enqueueOutbound, promoteNext, removeOutboundJob, requeueSeq } from '../whatsapp/send-queue';
 import type { Permission } from '@atendo/shared';
 import { canUseNumber, narrowTo, numberFilter } from '../auth/number-scope';
 import { buildTemplateSend } from '../whatsapp/templates';
@@ -845,10 +845,16 @@ export class ConversationsService {
       throw new ConflictException({ code: 'number_changed', message: `O canal desta conversa mudou para "${m.conversation.number.label}". Envie a mensagem de novo.` });
     }
     if (m.conversation.number.status !== 'connected') throw new BadRequestException(`O número "${m.conversation.number.label}" está desconectado.`);
-    const r = await this.prisma.message.updateMany({ where: { id: m.id, status: 'failed' }, data: { status: 'pending', error: null } });
+    // `externalId: null`: a falha pode ter vindo DEPOIS de o provider aceitar (status ERROR do
+    // WhatsApp no webhook). Com o id antigo o worker achava que já tinha saído, só marcava
+    // "enviada" e nada chegava ao contato — o reenvio tem de mandar de verdade.
+    const r = await this.prisma.message.updateMany({ where: { id: m.id, status: 'failed' }, data: { status: 'pending', error: null, externalId: null } });
     if (r.count === 0) throw new ConflictException('Esta mensagem já foi reenviada.');
     const queueSeq = await requeueSeq(this.prisma, m.id);
+    for (const seq of new Set([m.queueSeq, queueSeq ?? m.queueSeq])) await removeOutboundJob(this.outbound, { id: m.id, queueSeq: seq });
     await enqueueOutbound(this.outbound, { id: m.id, queueSeq: queueSeq ?? m.queueSeq });
+    // ela passou para a frente: se a próxima da conversa já estava esperando a vez, quem sai agora é esta
+    await promoteNext(this.prisma, this.outbound, m.conversationId);
     const updated = await this.prisma.message.findUniqueOrThrow({ where: { id: m.id }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(tenantId, this.present(updated));
     return this.present(updated);

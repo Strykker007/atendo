@@ -42,12 +42,32 @@ export async function enqueueOutbound(queue: Queue<OutboundJob>, m: { id: string
   await queue.add('send', { messageId: m.id, ...(minGapMs > 0 && { minGapMs }) }, { ...OUTBOUND_JOB_OPTS, jobId: outboundJobId(m) });
 }
 
-/** Volta uma mensagem com falha para o fim da fila: `queueSeq` novo, prazo de expiração recomeça. */
+/**
+ * "Tentar novamente": a mensagem volta para a fila **na frente** das pendentes da conversa —
+ * `queueSeq` = menor pendente − 1. Se ela era a 1ª de um fluxo, tem de chegar antes das que
+ * ainda não saíram (as que já saíram não dá para desfazer). Sem pendentes, pega um número novo.
+ * O prazo de expiração recomeça. `queueSeq` não é único: repetir o valor de uma mensagem antiga
+ * já enviada não atrapalha (a vez só olha as pendentes).
+ */
 export async function requeueSeq(prisma: PrismaService, messageId: string) {
   const rows = await prisma.$queryRaw<{ queueSeq: bigint }[]>(Prisma.sql`
-    UPDATE "messages" SET "queueSeq" = nextval(pg_get_serial_sequence('messages', 'queueSeq')), "queuedAt" = now()
-    WHERE "id" = ${messageId} RETURNING "queueSeq"`);
+    UPDATE "messages" m SET "queueSeq" = COALESCE(
+        (SELECT MIN(o."queueSeq") - 1 FROM "messages" o
+          WHERE o."conversationId" = m."conversationId" AND o."direction" = 'out' AND o."status" = 'pending'
+            AND o."internal" = false AND o."id" <> m."id"),
+        nextval(pg_get_serial_sequence('messages', 'queueSeq'))),
+      "queuedAt" = now()
+    WHERE m."id" = ${messageId} RETURNING m."queueSeq"`);
   return rows[0]?.queueSeq;
+}
+
+/**
+ * Tira da fila o job antigo da mensagem antes de enfileirar de novo: com o mesmo `jobId`
+ * (`out-<id>-<queueSeq>`) o BullMQ ignoraria o `add` em silêncio e a mensagem ficaria parada.
+ */
+export async function removeOutboundJob(queue: Queue<OutboundJob>, m: { id: string; queueSeq: bigint | number }) {
+  const job = await queue.getJob(outboundJobId(m));
+  if (job) await job.remove().catch(() => undefined);
 }
 
 const PENDING_OUT = { direction: 'out', status: 'pending', internal: false } as const;

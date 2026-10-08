@@ -57,7 +57,12 @@ o recheck de 5 s é só rede de segurança. Conversas diferentes continuam em pa
 - Uma mensagem em retry segura as seguintes da mesma conversa — de propósito: sair a 2ª antes
   da 1ª é o que se quer evitar.
 - Se a cabeça ficar presa (ex.: job perdido) além do prazo de expiração, o próximo job a expira.
-- **Tentar novamente** dá `queueSeq` novo: a mensagem vai para o fim da fila da conversa.
+- **Tentar novamente** passa a mensagem **para a frente** das pendentes da conversa (`queueSeq` =
+  menor pendente − 1; sem pendentes, número novo) e promove o job: a 1ª mensagem de um fluxo que
+  falhou chega antes das que ainda não saíram. O job antigo é removido antes (mesmo `jobId` faria o
+  BullMQ ignorar o novo) e o `externalId` é apagado: a falha pode ter vindo depois de o provider
+  aceitar (status `ERROR` do WhatsApp no webhook), e com o id antigo o worker só marcava "enviada"
+  sem mandar nada.
 - O intervalo do bloco Conteúdo continua valendo: ele é aplicado pelo motor **antes** de
   enfileirar, então soma-se ao ritmo da fila (o intervalo efetivo é pelo menos o maior dos
   dois). Não é mais necessário para garantir ordem.
