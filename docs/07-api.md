@@ -29,7 +29,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 |---|---|---|---|
 | **Tenants** | | | |
 | GET | `/tenants` | super_admin | Lista clientes com plano e contagens |
-| POST | `/tenants` | super_admin | Cria cliente + assinatura + admin + respostas rápidas padrão (docs/08-frontend.md). Plano gratuito nasce `active`; pago, `trialing` |
+| POST | `/tenants` | super_admin | Cria cliente + assinatura + admin. Plano gratuito nasce `active`; pago, `trialing` |
 | PATCH | `/tenants/:id` | super_admin | `name`, `isActive`, `planId`, `subscriptionStatus` (ajuste manual sem Stripe). Trocar para plano gratuito: assinatura `active`, preço 0, e a assinatura paga no Stripe (se houver) é cancelada |
 | GET | `/notices/active` | todos (inclusive dono) | Avisos globais ativos, mais novos primeiro (até 30) — ver [avisos.md](avisos.md) |
 | GET | `/super-admin/notices` | super_admin | Todos os avisos (ativos e desativados) |
@@ -111,7 +111,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Respostas rápidas** | | | |
 | GET | `/quick-replies` | todos | Pastas com respostas |
 | POST / PATCH / DELETE | `/quick-replies/folders[/:id]` | todos | Pastas |
-| POST / PATCH / DELETE | `/quick-replies[/:id]` | todos | Respostas; `isPinned` fixa no topo do painel do chat |
+| POST / PATCH / DELETE | `/quick-replies[/:id]` | todos | Respostas |
 | PATCH | `/quick-replies/folders/reorder` | `quick_replies.manage` | `{ items: [{ id, position }] }` — ordem das pastas |
 | PATCH | `/quick-replies/reorder` | `quick_replies.manage` | `{ items: [{ id, position, folderId? }] }` — ordem das respostas; `folderId` move para outra pasta (do mesmo tenant) |
 | POST | `/quick-replies/duplicate` | `quick_replies.manage` | `{ ids }` → `{ replies }` — cópia na mesma pasta, título com " (cópia)", anexo mantido (mesmo cliente) |

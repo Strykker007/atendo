@@ -937,8 +937,6 @@ model QuickReply {
   mediaName String?
   mediaMime String?
   position Int     @default(0)
-  /// fixada: aparece em "Fixadas", no topo do painel do chat, além da própria pasta
-  isPinned Boolean @default(false)
 
   folder QuickReplyFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 

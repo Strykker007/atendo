@@ -73,7 +73,7 @@ export type SendInput = ({ type: 'text'; text: string } | { type: 'image' | 'aud
   /** uma por envio (não por tentativa): a API devolve a mesma mensagem se a requisição repetir */
   idempotencyKey?: string;
 };
-export interface QuickReplyItem { id: string; title: string; body: string; /** fixada: também aparece em "Fixadas", no topo do painel do chat */ isPinned?: boolean; mediaKey?: string | null; mediaType?: 'image' | 'audio' | 'video' | 'document' | null; mediaName?: string | null; mediaMime?: string | null; mediaUrl?: string | null }
+export interface QuickReplyItem { id: string; title: string; body: string; mediaKey?: string | null; mediaType?: 'image' | 'audio' | 'video' | 'document' | null; mediaName?: string | null; mediaMime?: string | null; mediaUrl?: string | null }
 export interface Folder { id: string; name: string; replies: QuickReplyItem[] }
 
 export const useNumbers = () => useQuery({ queryKey: ['numbers'], queryFn: () => api<NumberItem[]>('/numbers') });

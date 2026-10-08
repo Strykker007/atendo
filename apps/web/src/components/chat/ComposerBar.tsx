@@ -193,8 +193,7 @@ function MenuRespostas({ conversationId, onFechar }: { conversationId: string; o
   const me = useMe();
   const conv = useConversation(conversationId).data;
   const [q, setQ] = useState('');
-  // fixadas primeiro, como no painel da direita
-  const todas = (folders.data ?? []).flatMap((f) => f.replies.map((r) => ({ ...r, pasta: f.name }))).sort((a, b) => Number(!!b.isPinned) - Number(!!a.isPinned));
+  const todas = (folders.data ?? []).flatMap((f) => f.replies.map((r) => ({ ...r, pasta: f.name })));
   const filtradas = todas.filter((r) => !q || `${r.title} ${r.body}`.toLowerCase().includes(q.toLowerCase()));
 
   const resolver = (r: QuickReplyItem) => {
@@ -204,8 +203,6 @@ function MenuRespostas({ conversationId, onFechar }: { conversationId: string; o
 
   // mesmo caminho do painel da direita: contagem regressiva e envio (ou só insere, fora do modo de responder)
   const escolher = (r: QuickReplyItem) => {
-    // resposta padrão ainda não escrita: o envio sairia vazio para o contato
-    if (!r.body.trim() && !r.mediaKey) { toast.warn(`"${r.title}" ainda não tem texto. Escreva em Respostas rápidas antes de usar.`); return; }
     const media = r.mediaKey && r.mediaUrl ? { key: r.mediaKey, url: r.mediaUrl, mimeType: r.mediaMime ?? '', fileName: r.mediaName ?? 'arquivo', size: 0 } : undefined;
     window.dispatchEvent(new CustomEvent<QuickReplyEventDetail>(QUICK_REPLY_EVENT, { detail: { title: r.title, text: resolver(r), media } }));
   };
@@ -220,8 +217,8 @@ function MenuRespostas({ conversationId, onFechar }: { conversationId: string; o
         {filtradas.length === 0 && <p className="px-3 py-3 text-[12px] text-faint">Nenhuma resposta encontrada.</p>}
         {filtradas.map((r) => (
           <button key={r.id} type="button" onClick={() => { escolher(r); onFechar(); }} className="w-full text-left px-3 py-1.5 hover:bg-accent-soft">
-            <div className="text-[12.5px] font-medium text-ink truncate">{r.isPinned && '★ '}{r.title}</div>
-            <div className="text-[11px] text-muted truncate">{r.body || r.mediaName || 'Sem texto ainda'}</div>
+            <div className="text-[12.5px] font-medium text-ink truncate">{r.title}</div>
+            <div className="text-[11px] text-muted truncate">{r.body || r.mediaName}</div>
           </button>
         ))}
       </div>
