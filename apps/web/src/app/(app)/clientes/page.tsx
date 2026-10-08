@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
+import { useBrand } from '@/lib/brand-context';
 import { impersonation, setAccessToken } from '@/lib/api';
 import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, type Plan, type TenantRow, type TenantProfile } from '@/lib/hooks';
 
@@ -47,6 +48,7 @@ const fmtDoc = (d: string | null) => {
 
 /** Gestão de clientes pelo dono: criar, plano/status, entrar como. */
 export default function ClientesPage() {
+  const { brandName } = useBrand();
   const me = useMe();
   const tenants = useTenants();
   const plans = usePlans();
@@ -78,7 +80,7 @@ export default function ClientesPage() {
 
   return (
     <PageShell width="max-w-6xl">
-      <PageHeader title="Clientes" subtitle="Todos os clientes do Atendo. Entre em qualquer um para ver o sistema como o admin dele." action={<Button icon={<Plus size={16} />} onClick={() => setCreating(true)}>Novo cliente</Button>} />
+      <PageHeader title="Clientes" subtitle={`Todos os clientes do ${brandName}. Entre em qualquer um para ver o sistema como o admin dele.`} action={<Button icon={<Plus size={16} />} onClick={() => setCreating(true)}>Novo cliente</Button>} />
       {tenants.isLoading && <SkeletonRows rows={3} />}
       {tenants.data && (
         <div className="rounded-2xl bg-panel border border-line overflow-x-auto">

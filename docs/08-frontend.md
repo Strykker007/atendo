@@ -156,7 +156,11 @@ O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseMo
 
 A logo fica em `apps/web/public/marca/`, em três recortes: `vogo.png` (original, fundo claro), `vogo-escuro.png` (texto em branco, para o menu lateral, que é escuro nos dois temas) e `vogo-icone.png` (só o robô, para o menu recolhido). A versão escura é gerada do original clareando os pixels **sem cor** — o vermelho da marca fica intacto e o "CHAT", que é preto, sumiria no fundo do menu.
 
-Login e telas de convite/recuperação usam a logo horizontal (`MarcaHorizontal`, `components/ui/Marca.tsx`): `vogo-horizontal.png` no tema claro e `vogo-horizontal-escuro.png` no escuro (gerada da clara clareando os pixels sem cor; bordas transparentes cortadas). O título da aba é "VOGO.CHAT". O aviso de versão e as telas do dono (Financeiro, Clientes) ainda dizem "Atendo".
+Login e telas de convite/recuperação usam a logo horizontal (`MarcaHorizontal`, `components/ui/Marca.tsx`): `vogo-horizontal.png` no tema claro e `vogo-horizontal-escuro.png` no escuro (gerada da clara clareando os pixels sem cor; bordas transparentes cortadas).
+
+### Marcas próprias (white-label)
+
+O painel pode servir outras marcas (vertentes) com o mesmo código — logo, cores, nome e favicon por domínio ou por deploy. Tudo em [19 — Marcas e vertentes](19-marcas-e-vertentes.md). Regra para o front: nome do produto sai de `useBrand().brandName` e logo dos componentes de `components/ui/Marca.tsx`, nunca fixo.
 
 ## Cabeçalho do chat
 
