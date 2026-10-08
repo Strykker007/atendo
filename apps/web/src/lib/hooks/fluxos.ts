@@ -24,6 +24,8 @@ export const useCreateFlow = () => { const qc = useQueryClient(); return useMuta
 export const useUpdateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<Flow> & { id: string }) => api<Flow>(`/flows/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
 /** Fluxos com "Conectar com outro fluxo" apontando para este — aviso antes de excluir. */
 export const fetchFlowReferences = (id: string) => api<{ id: string; name: string }[]>(`/flows/${id}/references`);
+/** Exclui vários de uma vez — tudo ou nada. */
+export const useDeleteFlows = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (ids: string[]) => api<{ deleted: number }>('/flows/delete', { method: 'POST', body: JSON.stringify({ ids }) }), onSuccess: invFlows(qc) }); };
 export const useDeleteFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/flows/${id}`, { method: 'DELETE' }), onSuccess: invFlows(qc) }); };
 /** Cópia dentro do mesmo cliente — mantém etiquetas, atendentes e anexos. */
 export const useDuplicateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Flow>(`/flows/${id}/duplicate`, { method: 'POST' }), onSuccess: invFlows(qc) }); };

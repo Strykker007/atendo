@@ -96,6 +96,7 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 | POST / PATCH / DELETE | `/flows[/:id]` | admin, gerente | CRUD (valida a definição). `PATCH {isActive: true}` sem `definition` valida o desenho **salvo** — ativar pela lista não liga fluxo quebrado. `PATCH` com `version` diferente da do banco → 409 `flow_version_conflict` ([controle de versão](fluxos.md#controle-de-versão-ao-salvar)); toda escrita incrementa `version` |
 | POST | `/flows/:id/duplicate` | admin, gerente | Cópia no mesmo cliente (legado; a tela usa o lote) |
 | POST | `/flows/duplicate` | admin, gerente | `{ids}` → `{flows}` — cópias em lote |
+| POST | `/flows/delete` | admin, gerente | `{ids}` → `{deleted}` — exclusão em lote, tudo ou nada (id de outro cliente recusa o lote); execuções saem junto |
 | POST | `/flows/active` | admin, gerente | `{ids, isActive}` → `{updated, failed[{id,name,reason}]}` — ativar/desativar em lote; ativar valida cada desenho e os inválidos ficam como estavam |
 | GET | `/flows/:id/export` | admin, gerente | `{portable, warnings}` para outro cliente |
 | POST | `/flows/export` | admin, gerente | `{ids}` → `{bundle, warnings}` — vários num arquivo |
@@ -164,7 +165,9 @@ importação é **tudo ou nada** (um item inválido recusa o arquivo antes de cr
 nome repetido ganha " (cópia)". Na **importação** todos os nós (inclusive o Início) e ligações
 ganham **ids novos** (`renewFlowIds`, que reescreve `{{menu_<id>}}`); na duplicação no mesmo
 cliente os ids dos nós são mantidos. O fluxo em si sempre ganha id novo. A listagem também
-**ativa/desativa** e **duplica** em lote.
+**ativa/desativa**, **duplica** e **exclui** em lote. Excluir pede para digitar **EXCLUIR**
+(`ConfirmDialog` com `typeToConfirm`) — com "selecionar todos" marcado, um clique apagaria o
+cliente inteiro de automação.
 
 **Copiar para outra empresa**: não existe — cada usuário pertence a um único cliente
 (`User.tenantId`). Para levar a outro cliente, exporte e importe (o super admin faz isso
