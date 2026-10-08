@@ -102,7 +102,7 @@ Validação ao salvar (`flow-validation.ts`): exatamente um Início e conectado;
 | POST | `/flows/export` | admin, gerente | `{ids}` → `{bundle, warnings}` — vários num arquivo |
 | POST | `/flows/import` | admin, gerente | `{portable}` (individual **ou** lote) → `{flows, flow, warnings}` |
 | GET | `/flows/:id/runs` | todos* | `byStatus` + últimas execuções |
-| POST | `/flows/:id/start` | todos* | `{conversationId, resumeBot?}` — disparo manual. Robô pausado: 409 `bot_paused`; com `resumeBot: true` retoma o robô e inicia |
+| POST | `/flows/:id/start` | todos* | `{conversationId, resumeBot?}` — disparo manual. Robô pausado: 409 `bot_paused`; com `resumeBot: true` retoma o robô e inicia. Antes de criar o run confere o que faria o 1º envio falhar: encerrada, desconectado ou descadastrado = 400; contato frio no QR gasta 1 das 10 vagas do dia (sem vaga = 409 `cold_quota_exhausted`); frio no oficial = 400 ([Envio frio](envio.md#envio-frio)) |
 | GET | `/conversations/:id/flow` | todos | Run ativo ou `null` |
 | POST | `/conversations/:id/flow/stop` | todos | Para o run ativo |
 | POST | `/conversations/:id/bot/pause` · `/bot/resume` | todos (feature `flows`) | Pausa/retoma o robô só na conversa ([fluxos.md](fluxos.md#pausar-o-robô-na-conversa)) |

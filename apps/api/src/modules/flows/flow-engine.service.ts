@@ -107,6 +107,9 @@ export class FlowEngineService {
     const def = flow.definition as unknown as FlowDefinition;
     const startNode = def.nodes.find((n) => n.type === 'start');
     if (!startNode) throw new BadRequestException('Fluxo sem nó de início');
+    // disparado por uma pessoa: o que faria o 1º envio falhar (contato frio, encerrada,
+    // desconectado) vira erro na tela agora, em vez de um run que "não faz nada"
+    if (startedById) await this.conversations.assertFlowCanStart(conversationId);
 
     await this.stop(conversationId, 'substituído por outro fluxo');
     const run = await this.prisma.flowRun.create({

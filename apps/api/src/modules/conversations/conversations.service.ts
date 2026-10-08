@@ -22,7 +22,7 @@ import { InterpolationService } from '../../common/interpolation/interpolation.s
 import { textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
 import { spin } from './spin';
-import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, isWarm } from './cold-send';
+import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, hasColdSlot, isWarm } from './cold-send';
 import { RedisService } from '../../common/redis/redis.service';
 
 /**
@@ -374,7 +374,11 @@ export class ConversationsService {
   private async assertColdAllowed(c: { tenantId: string; contactId: string; numberId: string; lastInboundAt: Date | null; number: { provider: string } }, author?: Viewer) {
     if (isWarm(await this.lastInboundOnNumber(c))) return;
     if (c.number.provider !== 'meta') {
-      if (!author) throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
+      if (!author) {
+        // automático: só segue se um atendente já gastou a vaga deste contato (falou primeiro ou disparou o fluxo)
+        if (await hasColdSlot(this.redis, c.numberId, c.contactId)) return;
+        throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
+      }
       const vaga = await claimColdContact(this.redis, c.numberId, c.contactId);
       if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
       return;
@@ -384,6 +388,23 @@ export class ConversationsService {
     if (!plan?.limits.features?.includes('proactive_messaging')) {
       throw new ForbiddenException({ code: 'feature_proactive', message: `"${PLAN_FEATURE_LABEL.proactive_messaging}" não está incluído no seu plano: falar com quem não escreveu nas últimas 24h depende dele. Faça upgrade em Plano e uso.` });
     }
+  }
+
+  /**
+   * Antes de um fluxo disparado À MÃO começar: o que faria ele falhar em silêncio no 1º envio vira
+   * erro na hora, para o atendente. Contato frio no QR gasta uma vaga do dia (como se o atendente
+   * tivesse escrito) — depois disso as mensagens do fluxo passam (`hasColdSlot`).
+   */
+  async assertFlowCanStart(conversationId: string) {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: { select: { provider: true, status: true } }, contact: { select: { optOutAt: true } } } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para iniciar um fluxo.');
+    if (conv.number.status !== 'connected') throw new BadRequestException('O número está desconectado: o fluxo não teria como enviar. Conecte de novo em Números.');
+    if (conv.contact.optOutAt) throw new BadRequestException('O contato pediu para não receber mensagens automáticas, então o fluxo não pode ser enviado. Responda pelo campo de mensagem.');
+    if (isWarm(await this.lastInboundOnNumber(conv))) return;
+    if (conv.number.provider === 'meta') throw new BadRequestException('O contato não escreve há mais de 24 horas: na API oficial, depois disso só sai template aprovado. Use "Enviar template".');
+    const vaga = await claimColdContact(this.redis, conv.numberId, conv.contactId);
+    if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
   }
 
   /** Vagas de contato frio usadas no número (só não oficial; o oficial fala primeiro por template). */

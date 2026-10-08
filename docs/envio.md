@@ -164,6 +164,14 @@ então (`conversations/cold-send.ts`, `ConversationsService.assertColdAllowed`):
 | **Evolution — automático** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
 | **Meta** | sai normal | só template (regra da Meta) **e** o recurso `proactive_messaging` no plano (403 `feature_proactive`) — só para envio do atendente |
 
+**Fluxo disparado à mão** conta como o atendente: `FlowEngineService.start` com `startedById` chama
+`ConversationsService.assertFlowCanStart` antes de criar o run. Contato frio no QR gasta uma vaga
+(sem vaga → 409 `cold_quota_exhausted` na tela); no oficial, 400 pedindo template. Conversa
+encerrada, número desconectado e contato descadastrado também viram erro na hora — antes o run
+nascia e falhava no 1º envio, e o atendente via só que "nada aconteceu". Com a vaga gasta, o
+automático daquela conversa passa (`hasColdSlot`): as mensagens do fluxo e o que vier depois nas
+24 h. Fluxo por gatilho continua recusado para contato frio.
+
 **Vagas de contato frio** (Evolution): sorted set no Redis `wa:cold:<número>` com o contato e o
 instante da 1ª mensagem, janela deslizante de 24 h, reserva atômica (Lua). Escrever de novo para o
 mesmo contato dentro das 24 h não gasta outra vaga; a vaga volta 24 h depois de usada. Vale para

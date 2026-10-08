@@ -16,7 +16,7 @@ export const COLD_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const isWarm = (lastInboundAt: Date | null | undefined, now = Date.now()) => !!lastInboundAt && now - lastInboundAt.getTime() < COLD_WINDOW_MS;
 
-/** Automático (fluxo, boas-vindas…) para contato frio no não oficial. */
+/** Automático (fluxo, boas-vindas…) para contato frio no não oficial, sem atendente que tenha falado primeiro. */
 export const COLD_UNOFFICIAL_MESSAGE =
   'Este contato não escreve neste número há mais de 24 horas. Para proteger o número de bloqueio, ' +
   'mensagem automática só sai para quem escreveu nas últimas 24 horas. Assim que o contato responder, ' +
@@ -69,6 +69,15 @@ async function runClaim(redis: Redis, numberId: string, contactId: string) {
 }
 
 export const claimColdContact = (redis: Redis, numberId: string, contactId: string) => runClaim(redis, numberId, contactId);
+
+/**
+ * O contato já tem vaga de contato frio no número (um atendente falou primeiro com ele nas últimas
+ * 24 h, inclusive disparando um fluxo à mão): a automação dessa conversa pode seguir.
+ */
+export async function hasColdSlot(redis: Redis, numberId: string, contactId: string) {
+  const score = await redis.zscore(coldKey(numberId), contactId);
+  return !!score && Date.now() - Number(score) < COLD_WINDOW_MS;
+}
 
 /** Só consulta (contato vazio não reserva): quantas vagas o número usou nas últimas 24 h. */
 export const coldQuota = (redis: Redis, numberId: string) => runClaim(redis, numberId, '');
