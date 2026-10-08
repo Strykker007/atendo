@@ -88,7 +88,7 @@ export default function TemplateEditorPage() {
           </div>
           <label className="flex items-start gap-2 text-sm text-ink cursor-pointer">
             <input type="checkbox" className="mt-0.5" checked={isDefault} onChange={(e) => { setIsDefault(e.target.checked); setDirty(true); }} />
-            <span><Star size={13} className="inline -mt-0.5 text-warn-ink" /> Modelo padrão <span className="text-muted">— já vem escolhido no "Novo cliente" e é usado quando a criação não diz qual. Só um pode ser o padrão.</span></span>
+            <span><Star size={13} className="inline -mt-0.5 text-warn-ink" /> Modelo padrão <span className="text-muted">— já vem escolhido no “Novo cliente” e é usado quando a criação não diz qual. Só um pode ser o padrão.</span></span>
           </label>
         </div>
 
@@ -341,7 +341,7 @@ function LossReasonsSection({ value, fallback, onChange }: { value?: string[]; f
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 className="font-display font-semibold text-ink">Motivos de não compra</h2>
-          <p className="text-[12px] text-muted">Chips do encerramento "Não comprou", nesta ordem. {value ? 'Lista própria do modelo.' : 'Usando os do catálogo do sistema.'}</p>
+          <p className="text-[12px] text-muted">Chips do encerramento “Não comprou”, nesta ordem. {value ? 'Lista própria do modelo.' : 'Usando os do catálogo do sistema.'}</p>
         </div>
         {value && <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => onChange(undefined)}>Usar os do catálogo</Button>}
       </div>

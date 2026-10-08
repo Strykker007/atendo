@@ -50,7 +50,7 @@ export function TenantTemplatesDialog({ open, onClose }: { open: boolean; onClos
 
   return (
     <Modal open={open} onClose={onClose} title="Modelos de perfil" width="max-w-2xl">
-      <p className="text-[12px] text-muted -mt-1 mb-4">Cliente criado com um modelo já nasce com as permissões padrão de Administrador, Gerente e Atendente, as respostas rápidas, os fluxos (desligados, para o admin revisar) e os motivos de não compra do modelo. O modelo marcado como padrão já vem escolhido no "Novo cliente". Mudar o modelo não altera clientes já criados.</p>
+      <p className="text-[12px] text-muted -mt-1 mb-4">Cliente criado com um modelo já nasce com as permissões padrão de Administrador, Gerente e Atendente, as respostas rápidas, os fluxos (desligados, para o admin revisar) e os motivos de não compra do modelo. O modelo marcado como padrão já vem escolhido no “Novo cliente”. Mudar o modelo não altera clientes já criados.</p>
       <input ref={newFile} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onImport(f); }} />
       <input ref={replaceFile} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onReplace(f); else setReplacing(null); }} />
       <div className="flex flex-wrap gap-2 mb-4">
