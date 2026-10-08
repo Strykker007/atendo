@@ -376,15 +376,16 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: {
           <SeloEspera desde={c.awaitingSince} encerrada={c.status === 'closed'} agora={agora} />
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
-        {(c.tags.length > 0 || (c.contact.tags?.length ?? 0) > 0 || c.assignee || c.origin !== 'organic' || c.department) && (
-          // linha única e de altura fixa: nada quebra para baixo, então todo card tem a mesma altura
-          <div className="flex flex-nowrap items-center gap-1 mt-1 h-5 min-w-0">
-            <DepartmentBadge department={c.department} className="max-w-[110px] shrink-0" />
-            <OriginBadge origin={c.origin} data={c.originData} />
-            <TagsDoCard c={c} />
-            {c.assignee && c.status === 'in_progress' && <span className="ml-auto text-[10px] text-faint truncate min-w-0">↳ {c.assignee.name}</span>}
-          </div>
-        )}
+        {/* linha única, de altura fixa e sempre presente (mesmo vazia): nada quebra para baixo e
+            todo card tem a mesma altura em qualquer aba. Se só aparecesse quando há badge, a fila
+            "Aguardando" (quase sempre sem atendente/tag) ficava com cards mais baixos que as outras */}
+        <div className="flex flex-nowrap items-center gap-1 mt-1 h-5 min-w-0">
+          <DepartmentBadge department={c.department} className="max-w-[110px] shrink-0" />
+          <OriginBadge origin={c.origin} data={c.originData} />
+          <TagsDoCard c={c} />
+          {/* responsável em qualquer status: em "Encerrado" diz quem atendeu, em "Aguardando" quem vai pegar */}
+          {c.assignee && <span className="ml-auto text-[10px] text-faint truncate min-w-0">↳ {c.assignee.name}</span>}
+        </div>
       </div>
     </button>
   );
