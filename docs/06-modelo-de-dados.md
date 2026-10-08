@@ -126,7 +126,7 @@ Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
 relatórios), chave `attendanceActive` (feriado/férias: vale a faixa Fechado sem mexer nos
 horários) + `attendanceChangedAt`, fluxos padrão (inclusive `wonFlowId`/`lostFlowId`/`noneFlowId`,
 o fluxo de encerramento por resultado) e **boas-vindas** (`welcomeEnabled`,
-`welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; nasce com Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`).
+`welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; o `@default` é Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`; cliente criado por `POST /tenants` nasce com a lista `DEFAULT_LOSS_REASONS` de `tenants.module.ts`, catálogos primeiro).
 
 **business_schedules** — quadros de horários ([Horários](horarios.md)): `name`, `timezone`,
 `isDefault` (um por cliente) e `config` (JSON `ScheduleConfig`: faixas, Fechado, grade semanal,

@@ -53,6 +53,23 @@ class UpdateAgentDto {
 }
 
 /** Gestão de clientes (super_admin) e de atendentes (tenant_admin). */
+/**
+ * Motivos de perda com que todo cliente novo nasce (Configurações → Motivos de perda). Os dois
+ * catálogos vêm primeiro: a lista do encerramento segue esta ordem, então "fixado" é estar no
+ * topo. Gravado aqui e não no `@default` do schema: a configuração nasce no primeiro acesso, e
+ * mudar o default trocaria a lista de clientes antigos que ainda não abriram a configuração.
+ */
+const DEFAULT_LOSS_REASONS = [
+  '🟡🍼 CATÁLOGO DE FRALDAS',
+  '🟡🔥 CATÁLOGO PERFUMARIA',
+  'Boas Vindas',
+  'Boas Vindas - Entregas Encerradas',
+  'Boas Vindas - Entregas após 08:30',
+  'Loja Fechada',
+  '🔄 TENTANDO CONTATO IA',
+  '👹 OFERTAR PRODUTOS',
+];
+
 @Controller('tenants')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 class TenantsController {
@@ -110,6 +127,7 @@ class TenantsController {
       },
       include: { subscription: true },
     });
+    await this.prisma.tenantSettings.upsert({ where: { tenantId: tenant.id }, create: { tenantId: tenant.id, lossReasons: DEFAULT_LOSS_REASONS }, update: { lossReasons: DEFAULT_LOSS_REASONS } });
     if (dto.adminPassword) {
       await this.prisma.user.create({ data: { tenantId: tenant.id, email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash: await this.auth.hashPassword(dto.adminPassword), passwordSetAt: new Date() } });
     } else {
