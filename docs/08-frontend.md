@@ -323,6 +323,7 @@ Ator vazio aparece como **Automação**, nunca em branco: em auditoria, campo va
 - Número desconectado: o composer é substituído por um aviso com link para *Números* (o back também recusa o envio). Mensagens com `status: failed` mostram o erro e o botão **Tentar novamente** (`POST …/resend`). Todo envio do chat leva uma `idempotencyKey` (UUID por envio). Resposta rápida escolhida sai após contagem com Cancelar/Editar (`QuickReplyCountdown`, ver [Envio](envio.md#respostas-rápidas)).
 - Prévia da última mensagem (lista e Kanban): sempre via `formatPreview` (`lib/utils.ts`) — a API grava `[tipo]` quando não há texto e o helper traduz (`[image]` → "📷 Imagem", `[unknown]` → "Mensagem"; vazio → "Sem mensagens"). Prévias novas já saem traduzidas da API (`messagePreview` do shared: texto, ou "📍 Nome do lugar", "👤 Maria", "Mensagem interativa"…); o helper fica para as linhas antigas.
 - Mídia: `MediaBody` renderiza imagem/áudio/vídeo/documento a partir de `mediaUrl` (assinada, expira em 1 h — ao expirar, refetch das mensagens renova). Anexo no composer: `uploadFile()` → prévia → envio com `mediaKey`.
+- **Velocidade do áudio** (`AudioMessage`): botão `1x` → `1.5x` → `2x` ao lado do tempo. A velocidade é **uma só para todos os áudios** (store `useAudioSpeed` em `lib/audio-speed.ts`, zustand `persist` na chave `vogochat_audio_speed` do `localStorage`): mudar em um áudio aplica na hora aos que estão na tela — inclusive o que está tocando — e aos de outras conversas e aos que chegarem depois. Por navegador, não por usuário.
 
 
 ## Mídia no chat
