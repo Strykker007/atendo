@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { useFlows, useHasFeature, useSetStatus, useTenantSettings, type ConversationOutcome } from '@/lib/hooks';
+import { DEFAULT_LOSS_REASONS } from '@atendo/shared';
 
 /** padrão enquanto as configurações carregam — a lista do cliente vem de Configurações → Motivos de perda */
-export const MOTIVOS = ['Preço', 'Prazo', 'Não respondeu', 'Comprou com concorrente', 'Fora da área', 'Só pesquisando'];
+export const MOTIVOS = DEFAULT_LOSS_REASONS;
 
 /**
  * Motivo de perda: um clique nos cadastrados ou texto livre. Texto livre continua valendo
