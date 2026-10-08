@@ -189,10 +189,10 @@ oscilação de rede não reabre o aquecimento.
 
 | Desde o QR | Contatos **novos** por hora | Automáticas por hora | Piso entre envios do número |
 |---|---|---|---|
-| 0–24 h | 20 | 30 | 8 s (vale também para o atendente) |
-| 24–48 h | 50 | 50 | — |
-| 48–72 h | 80 | 60 | — |
-| 72 h–7 dias | 120 | 70 | — |
+| 0–24 h | 30 | 45 | 5 s (vale também para o atendente) |
+| 24–48 h | 60 | 60 | — |
+| 48–72 h | 90 | 70 | — |
+| 72 h–7 dias | 120 | 80 (= padrão) | — |
 | > 7 dias | livre | padrão da conexão (80) | — |
 
 **Automáticas por hora**: vale o menor entre a fase e o configurado na conexão. A mensagem do robô
@@ -205,6 +205,10 @@ deslizante). Quem já está conversando passa direto; o contato que não coube e
 (o job volta para a fila — se passar de *Expirar na fila após*, falha como qualquer envio
 parado). Motivo: a Drogaria Total caiu duas vezes no 1º dia com tráfego saudável, mas ~28
 contatos/h logo após o QR. O card do número em **Números** mostra a fase e até quando vai.
+
+Valores afrouxados em 10/2026 (antes: 20/30/8 s, 50/50, 80/60, 120/70): com eles um fluxo de
+boas-vindas de 3 mensagens atendia ~10 clientes por hora na fase 1 e o resto expirava na fila.
+A fase 1 continua perto dos números que derrubaram as duas farmácias — é o maior risco que sobra.
 
 ### Humanização
 

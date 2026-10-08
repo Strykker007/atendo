@@ -24,12 +24,16 @@ export interface WarmupPhase {
   endsAt: Date;
 }
 
+// 10/2026: afrouxado a pedido — com 20 contatos, 30 automáticas/h e 8 s entre envios, um fluxo de
+// boas-vindas de 3 mensagens atendia ~10 clientes por hora e o resto expirava na fila; nos
+// primeiros dias o sistema ficava inviável. A fase 1 fica perto dos casos que caíram (Drogaria
+// Total ~28 contatos/h, Nova Farma ~50 automáticas/h): é o maior risco que sobra.
 const FASES: { ateHoras: number; newConvPerHour: number; minGapMs: number; autoPerHour: number }[] = [
-  { ateHoras: 24, newConvPerHour: 20, minGapMs: 8_000, autoPerHour: 30 },
-  { ateHoras: 48, newConvPerHour: 50, minGapMs: 0, autoPerHour: 50 },
-  { ateHoras: 72, newConvPerHour: 80, minGapMs: 0, autoPerHour: 60 },
-  // até o 7º dia: contatos novos já folgados, só o robô ainda abaixo do padrão (80/h)
-  { ateHoras: 168, newConvPerHour: 120, minGapMs: 0, autoPerHour: 70 },
+  { ateHoras: 24, newConvPerHour: 30, minGapMs: 5_000, autoPerHour: 45 },
+  { ateHoras: 48, newConvPerHour: 60, minGapMs: 0, autoPerHour: 60 },
+  { ateHoras: 72, newConvPerHour: 90, minGapMs: 0, autoPerHour: 70 },
+  // até o 7º dia: robô já no padrão da conexão (80/h); só os contatos novos ainda limitados
+  { ateHoras: 168, newConvPerHour: 120, minGapMs: 0, autoPerHour: 80 },
 ];
 export const WARMUP_TOTAL_HOURS = 168;
 export const WARMUP_PHASES = FASES.length;
