@@ -960,6 +960,8 @@ model Flow {
   /// aparece como atalho na aba Fluxos do chat. Fluxo que roda sozinho (nova conversa,
   /// palavra-chave) não precisa estar lá — vira ruído para quem atende.
   showInChat  Boolean  @default(true)
+  /// fixado no topo: aparece primeiro na listagem e na aba Fluxos do chat (os mais usados)
+  isPinned    Boolean  @default(false)
   /// FlowTrigger (packages/shared)
   trigger     Json
   /// FlowDefinition (packages/shared): nós + arestas

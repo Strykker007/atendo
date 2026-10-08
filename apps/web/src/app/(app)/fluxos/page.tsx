@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, Power, PowerOff } from 'lucide-react';
+import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, Power, PowerOff, Star } from 'lucide-react';
 import { cn, downloadJson, safeFileName } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -187,6 +187,14 @@ export default function FluxosPage() {
                     className={cn('p-1 rounded-md', f.showInChat ? 'text-accent-ink bg-accent-soft' : 'text-faint hover:text-ink')}
                   >
                     <Pin size={15} className={cn(f.showInChat && 'fill-current')} />
+                  </button>
+                  {/* estrela, não alfinete: o alfinete já é "atalho no chat" */}
+                  <button
+                    title={f.isPinned ? 'Fixado no topo — clique para desafixar' : 'Fixar no topo da lista e do chat'}
+                    onClick={() => update.mutateAsync({ id: f.id, isPinned: !f.isPinned }).then(() => toast.ok(f.isPinned ? 'Fluxo desafixado' : 'Fluxo fixado no topo')).catch(toast.err)}
+                    className={cn('p-1 rounded-md', f.isPinned ? 'text-warn-ink bg-warn-soft' : 'text-faint hover:text-ink')}
+                  >
+                    <Star size={15} className={cn(f.isPinned && 'fill-current')} />
                   </button>
                   <button title="Duplicar neste cliente" onClick={() => onDuplicate([f.id])} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
                   <button title="Exportar para usar em outro cliente" onClick={() => onExport(f)} className="text-faint hover:text-accent-ink p-1"><Download size={15} /></button>

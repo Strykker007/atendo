@@ -27,6 +27,7 @@ class UpdateFlowDto {
   @IsOptional() @IsString() @MaxLength(300) description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsBoolean() showInChat?: boolean;
+  @IsOptional() @IsBoolean() isPinned?: boolean;
   @IsOptional() @IsObject() trigger?: FlowTrigger;
   @IsOptional() @IsObject() definition?: FlowDefinition;
   /** versão que o editor carregou; diferente da do banco = 409 `flow_version_conflict`. Ausente (interruptor da lista) = sem checagem */
@@ -60,8 +61,9 @@ export class FlowsController {
   list(@CurrentUser() u: AuthUser) {
     return this.prisma.flow.findMany({
       where: { tenantId: u.tenantId },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true, description: true, isActive: true, showInChat: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
+      // fixados primeiro: a mesma ordem vale para a aba Fluxos do chat
+      orderBy: [{ isPinned: 'desc' }, { name: 'asc' }],
+      select: { id: true, name: true, description: true, isActive: true, showInChat: true, isPinned: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
     });
   }
 

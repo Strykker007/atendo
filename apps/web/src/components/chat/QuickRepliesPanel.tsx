@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose } from 'lucide-react';
+import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose, Star } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { type QuickReplyItem, useFlows, useHasFeature, useActiveRun } from '@/lib/hooks';
@@ -135,7 +135,7 @@ function FlowsTab() {
           return (
             <li key={f.id} className={cn('flex items-center gap-2 px-3 py-2', running && 'bg-accent-soft/60')}>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-medium text-ink truncate flex items-center gap-1.5">{running && <span className="animate-pulse">🤖</span>}{f.name}{running && <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-ink bg-accent-soft rounded px-1">rodando</span>}</div>
+                <div className="text-[13px] font-medium text-ink truncate flex items-center gap-1.5">{running && <span className="animate-pulse">🤖</span>}{f.isPinned && <Star size={11} className="shrink-0 fill-current text-warn-ink" aria-label="Fixado" />}{f.name}{running && <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-ink bg-accent-soft rounded px-1">rodando</span>}</div>
                 {f.description && <div className="text-[11px] text-muted truncate">{f.description}</div>}
               </div>
               <Button size="sm" variant={running ? 'ghost' : 'primary'} icon={<Play size={12} />} disabled={!conversationId} loading={start.isPending && start.variables?.flowId === f.id} onClick={() => conversationId && run(f, conversationId, `Fluxo "${f.name}" ${running ? 'reiniciado' : 'iniciado'}`)}>{running ? 'Reiniciar' : 'Iniciar'}</Button>
