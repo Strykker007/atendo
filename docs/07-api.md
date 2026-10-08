@@ -47,7 +47,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/numbers` | tenant_admin | Cria e conecta (respeita `maxNumbers`) |
 | PUT | `/numbers/:id/provider` | tenant_admin | **Troca de provider** |
 | POST | `/numbers/:id/connect` | tenant_admin | Reconecta / QR novo. `{force?}`: durante a pausa após o WhatsApp derrubar o número responde 409 `reconnect_paused` (`until`, `removedCount`); `force: true` reconecta mesmo assim — ver [providers](04-providers-whatsapp.md#quando-o-whatsapp-derruba-o-número-401-device_removed). `GET /numbers` traz `waRemovedAt`, `waRemovedCount`, `reconnectBlockedUntil` |
-| PATCH | `/numbers/:id` | tenant_admin | Label / cor (`color`, `#rrggbb`) / ativo / `sendDelay` / `sendLimits` (`sendDailyLimit` e `endWarmup` ainda são aceitos, mas a tela não usa mais — teto diário desligado) |
+| PATCH | `/numbers/:id` | tenant_admin | Label / cor (`color`, `#rrggbb`) / ativo. `sendDelay`, `sendLimits`, `sendDailyLimit`, `endWarmup` e `infraCostMonth` só valem para o dono (super_admin ou impersonando); do cliente são descartados em silêncio |
 | POST | `/numbers/:id/disconnect` | `numbers.manage` | Encerra a sessão (logout na Evolution) sem excluir; número e conversas ficam, status `disconnected` |
 | DELETE | `/numbers/:id` | tenant_admin | Exclui = tira do provider e **arquiva** (`deletedAt`): conversas ficam guardadas, fora da lista. `POST /numbers` com o mesmo telefone na mesma conta revive o número com o histórico; telefone ativo duplicado → 409 |
 | **Conversas** | | | |
