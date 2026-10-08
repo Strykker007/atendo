@@ -668,7 +668,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <div ref={bottomRef} />
       </div>
 
-      {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} onClosed={() => setFilterStatus('closed', true)} />}
+      {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} onClosed={() => { if (!embedded) ui.setConversation(null); }} />}
       {historico && <HistorySheet conversationId={conv.id} onClose={() => setHistorico(false)} />}
       {editando && <EditMessageModal m={editando} onClose={() => setEditando(null)} />}
       <ConfirmDialog
