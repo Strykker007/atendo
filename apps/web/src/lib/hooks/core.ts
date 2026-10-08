@@ -299,7 +299,8 @@ export const useSendMessage = (conversationId: string | null, expectedNumberId?:
   return useMutation({
     mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ ...input, expectedNumberId }) }),
     // aparece na hora, mesmo se o socket estiver reconectando
-    onSuccess: (m) => { upsertMessageInCache(qc, m); moverConversaParaTopo(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); },
+    // cold-quota: responder contato frio no não oficial gasta uma vaga do dia
+    onSuccess: (m) => { upsertMessageInCache(qc, m); moverConversaParaTopo(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['cold-quota'] }); },
     onError: (err) => {
       if (err instanceof ApiError && err.code === 'number_changed') {
         qc.invalidateQueries({ queryKey: ['conversation', conversationId] });

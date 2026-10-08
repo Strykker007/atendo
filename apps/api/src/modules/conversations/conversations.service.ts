@@ -22,7 +22,8 @@ import { InterpolationService } from '../../common/interpolation/interpolation.s
 import { textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
 import { spin } from './spin';
-import { COLD_UNOFFICIAL_MESSAGE, isWarm } from './cold-send';
+import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, isWarm } from './cold-send';
+import { RedisService } from '../../common/redis/redis.service';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -100,6 +101,7 @@ export class ConversationsService {
     private readonly gateway: ConversationsGateway,
     private readonly storage: StorageService,
     private readonly interpolation: InterpolationService,
+    private readonly redis: RedisService,
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {}
 
@@ -360,18 +362,32 @@ export class ConversationsService {
 
   /**
    * Regra do envio frio (cold-send.ts): o contato não escreveu neste número nas últimas 24h.
-   * Não oficial → 409 `cold_send_unofficial`. Oficial → a Meta já exige template (checado
-   * antes); para o atendente entra também o recurso do plano. Envio do sistema não confere o
-   * recurso: campanha e agenda têm os próprios.
+   * Não oficial → o atendente gasta uma das vagas de contato frio do dia (409
+   * `cold_quota_exhausted` quando acabam); o automático é recusado (409 `cold_send_unofficial`).
+   * Oficial → a Meta já exige template (checado antes); para o atendente entra também o recurso
+   * do plano. Envio do sistema não confere o recurso: campanha e agenda têm os próprios.
    */
   private async assertColdAllowed(c: { tenantId: string; contactId: string; numberId: string; lastInboundAt: Date | null; number: { provider: string } }, author?: Viewer) {
     if (isWarm(await this.lastInboundOnNumber(c))) return;
-    if (c.number.provider !== 'meta') throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
+    if (c.number.provider !== 'meta') {
+      if (!author) throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
+      const vaga = await claimColdContact(this.redis, c.numberId, c.contactId);
+      if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
+      return;
+    }
     if (!author || author.role === 'super_admin') return;
     const plan = await this.usage.limits(c.tenantId);
     if (!plan?.limits.features?.includes('proactive_messaging')) {
       throw new ForbiddenException({ code: 'feature_proactive', message: `"${PLAN_FEATURE_LABEL.proactive_messaging}" não está incluído no seu plano: falar com quem não escreveu nas últimas 24h depende dele. Faça upgrade em Plano e uso.` });
     }
+  }
+
+  /** Vagas de contato frio usadas no número (só não oficial; o oficial fala primeiro por template). */
+  async coldQuota(tenantId: string, numberId: string) {
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: numberId, tenantId, deletedAt: null }, select: { provider: true } });
+    if (!number) throw new NotFoundException('Número não encontrado');
+    if (number.provider === 'meta') return null;
+    return coldQuota(this.redis, numberId);
   }
 
   /**
@@ -400,10 +416,10 @@ export class ConversationsService {
     // descadastro vale para TODO envio automático (docs/envio.md#descadastro); o atendente segue respondendo
     if (conv.contact.optOutAt) throw new BadRequestException({ code: 'contact_opted_out', message: 'O contato pediu para não receber mensagens automáticas.' });
     if (conv.contact.waInvalidAt) throw new BadRequestException({ code: 'contact_no_whatsapp', message: 'Este telefone não tem WhatsApp.' });
-    if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
+    if (conv.number.status !== 'connected') throw new BadRequestException('O número está desconectado: a mensagem automática não saiu. Conecte de novo em Números (QR Code).');
     const template = opts?.template;
     if (template && conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
-    if (conv.number.provider === 'meta' && !template && !inMetaWindow(conv.lastInboundAt)) throw new BadRequestException('Fora da janela de 24h da Meta');
+    if (conv.number.provider === 'meta' && !template && !inMetaWindow(conv.lastInboundAt)) throw new BadRequestException('O contato não escreve há mais de 24 horas: na API oficial da Meta, depois disso só sai template aprovado.');
     if (!opts?.allowCold) await this.assertColdAllowed(conv);
     const quota = await this.usage.canSend(conv.tenantId, template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
@@ -426,7 +442,7 @@ export class ConversationsService {
   private async systemNumber(tenantId: string, preferredId?: string | null) {
     const n = (preferredId && (await this.prisma.whatsAppNumber.findFirst({ where: { id: preferredId, tenantId, status: 'connected', isActive: true } })))
       || (await this.prisma.whatsAppNumber.findFirst({ where: { tenantId, status: 'connected', isActive: true }, orderBy: { createdAt: 'asc' } }));
-    if (!n) throw new BadRequestException('Nenhum número conectado para enviar');
+    if (!n) throw new BadRequestException('Nenhum número conectado para enviar. Conecte um número em Números.');
     return n;
   }
 
@@ -452,7 +468,7 @@ export class ConversationsService {
     const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed, allowCold: opts?.allowCold };
     if (conv.number.provider === 'meta' && !inMetaWindow(conv.lastInboundAt) && opts?.outsideWindow) {
       const tpl = await opts.outsideWindow(conv.numberId);
-      if (!tpl?.template) throw new BadRequestException('Fora da janela de 24h da Meta e sem template configurado');
+      if (!tpl?.template) throw new BadRequestException('O contato não escreve há mais de 24 horas e não há template aprovado configurado para este envio (na API oficial, depois de 24 horas só sai template).');
       return this.sendAsSystem(conv.id, tpl.text, undefined, undefined, { ...send, template: tpl.template });
     }
     return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, send);

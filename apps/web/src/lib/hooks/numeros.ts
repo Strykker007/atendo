@@ -157,7 +157,7 @@ export const useStartConversation = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: StartConversationInput) => api<{ conversationId: string; message: Message }>('/conversations/start', { method: 'POST', body: JSON.stringify(b) }),
-    onSuccess: (r) => { upsertMessageInCache(qc, r.message); invConv(qc, r.conversationId); qc.invalidateQueries({ queryKey: ['usage'] }); },
+    onSuccess: (r) => { upsertMessageInCache(qc, r.message); invConv(qc, r.conversationId); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['cold-quota'] }); },
   });
 };
 
@@ -189,6 +189,16 @@ export interface StartCandidates {
   contacts: { id: string; name: string | null; phone: string }[];
   phonebook: { phone: string; name: string; numberId: string }[];
 }
+/** Vagas de contato frio do número não oficial nas últimas 24 h (`null` no oficial). docs/envio.md#envio-frio */
+export interface ColdQuota { ok: boolean; used: number; max: number; resetsAt: string | null }
+export const useColdQuota = (numberId: string | null | undefined, enabled = true) =>
+  useQuery({
+    queryKey: ['cold-quota', numberId],
+    enabled: enabled && !!numberId,
+    queryFn: () => api<ColdQuota | null>(`/conversations/cold-quota?numberId=${numberId}`),
+    staleTime: 15_000,
+  });
+
 /** `q` já com debounce; menos de 2 letras não busca. Mantém o resultado anterior enquanto o novo chega. */
 export const useStartCandidates = (q: string, enabled = true) =>
   useQuery({

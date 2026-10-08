@@ -25,9 +25,12 @@ describe('tempo humano da automação', () => {
   const min = () => 0;
   const max = () => 0.999999;
   it('frase curta: digita pelo menos 1,5 s', () => expect(humanTiming(5, min).typingMs).toBe(1500));
-  it('100 caracteres: 17–29 s viram o teto de 15 s no mais lento', () => expect(humanTiming(100, min).typingMs).toBe(15_000));
+  it('100 caracteres: 17–29 s viram o teto de 10 s no mais lento', () => expect(humanTiming(100, min).typingMs).toBe(10_000));
   it('40 caracteres no mais rápido (6/s) ≈ 6,7 s', () => expect(humanTiming(40, max).typingMs).toBe(6667));
-  it('40 caracteres no mais lento (3,5/s) ≈ 11,4 s', () => expect(humanTiming(40, min).typingMs).toBe(11429));
+  it('30 caracteres no mais lento (3,5/s) ≈ 8,6 s', () => expect(humanTiming(30, min).typingMs).toBe(8571));
+  it('atendente rápido (9/s): 60 caracteres ≈ 6,7 s', () => expect(humanTiming(60, max, 'fast').typingMs).toBe(6667));
+  it('atendente devagar (2/s): 15 caracteres = 7,5 s', () => expect(humanTiming(15, min, 'slow').typingMs).toBe(7500));
+  it('velocidade desconhecida cai no normal', () => expect(humanTiming(40, max, 'x' as never).typingMs).toBe(6667));
   it('reação mínima 1,2 s + 10 ms por caractere', () => expect(humanTiming(50, min).reactMs).toBe(1700));
   it('reação com resposta longa: no máximo +2 s', () => expect(humanTiming(1000, max).reactMs).toBe(5000));
 });

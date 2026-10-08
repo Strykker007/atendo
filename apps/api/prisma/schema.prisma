@@ -96,6 +96,8 @@ model User {
   profileId    String?
   isActive     Boolean   @default(true)
   totpSecret   String?   // 2FA opcional (criptografado)
+  /// velocidade do "digitando…" simulado (slow | normal | fast) — TYPING_SPEEDS no shared
+  typingSpeed  String    @default("normal")
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

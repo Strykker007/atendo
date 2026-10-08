@@ -34,7 +34,7 @@ qualquer origem ──▶ ConversationsService.send / sendAsSystem
                          ▼   OutboundProcessor (concorrência 20)
    1. não está pending / já tem externalId → nada / só corrige status
    2. planSend (puro, send-queue.ts):
-        queuedAt + prazo vencido            → falha "Expirou na fila"
+        queuedAt + prazo vencido            → falha "Não saiu: ficou mais de N min esperando a vez"
         há pendente anterior na conversa    → espera a vez (job atrasado 5 s; promovido antes)
         número não conectado                → pausa (job atrasado 60 s, sem chamar o provider)
    3. teto do dia — desligado (todo número com sendDailyLimit 0, sem aquecimento);
@@ -103,7 +103,7 @@ Número fora de `connected`: a fila dele para — nenhum job chama o provider; a
 descartada. Ao reconectar (webhook de conexão em `InboundService.numberConnectionChanged` ou
 health check de 5 min), `resumeNumber` promove a cabeça de cada conversa do número, da mais
 antiga para a mais nova; o ritmo do número espalha os envios. O que passou do prazo
-(`maxQueueAgeMin`) **expira como falha** ("Expirou na fila…") em vez de sair fora de contexto.
+(`maxQueueAgeMin`) **expira como falha** ("Não saiu: ficou mais de N min esperando a vez…") em vez de sair fora de contexto.
 
 ### Deduplicação
 - `Message.idempotencyKey` com unique `(conversationId, idempotencyKey)`. Repetir o mesmo
@@ -127,6 +127,14 @@ Na tela, mensagem `failed` mostra o erro e **Tentar novamente**
 (`POST /conversations/:id/messages/:messageId/resend`). Se a conversa mudou de canal desde a
 falha, 409 `number_changed` — não reenvia pelo número antigo.
 
+### Na tela: ✓ na hora
+
+Mensagem `pending` (na fila, esperando o ritmo do número, o aquecimento ou o "digitando…") já
+aparece com **✓ cinza**, como se tivesse chegado ao servidor do WhatsApp. Antes aparecia o relógio
+e o atendente achava que tinha travado — o atraso é proposital. **Só a tela muda**: a fila segue
+igual; a mensagem vira ✓✓ quando o aparelho do contato recebe e, se não sair, vira falha (ícone
+vermelho, motivo e *Tentar novamente*). `StatusIcon` em `ChatPane.tsx`.
+
 ### Respostas rápidas
 Escolher uma resposta (painel da direita ou menu ⚡ do campo) agenda o envio: barra
 "Enviando *Título* em Ns…" com **Cancelar** e **Editar** (Editar = comportamento antigo: vai
@@ -142,8 +150,18 @@ então (`conversations/cold-send.ts`, `ConversationsService.assertColdAllowed`):
 
 | Número | Contato escreveu < 24 h | Contato frio |
 |---|---|---|
-| **Evolution** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
+| **Evolution — atendente** | sai normal | até **10 contatos frios por dia** no número (`COLD_CONTACTS_PER_DAY`); acabou → 409 `cold_quota_exhausted`, com quando libera |
+| **Evolution — automático** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
 | **Meta** | sai normal | só template (regra da Meta) **e** o recurso `proactive_messaging` no plano (403 `feature_proactive`) — só para envio do atendente |
+
+**Vagas de contato frio** (Evolution): sorted set no Redis `wa:cold:<número>` com o contato e o
+instante da 1ª mensagem, janela deslizante de 24 h, reserva atômica (Lua). Escrever de novo para o
+mesmo contato dentro das 24 h não gasta outra vaga; a vaga volta 24 h depois de usada. Vale para
+qualquer número QR, novo ou antigo — antes não havia vaga nenhuma e o cliente não conseguia nem
+retomar um orçamento. `GET /conversations/cold-quota?numberId=` devolve `{ used, max, resetsAt }`
+(`null` no oficial). A tela avisa antes do erro: *Nova conversa* mostra quantas restam, o chat mostra
+uma faixa acima do campo quando o contato está frio, e *Números* lista todas as regras de proteção
+do número QR (`components/numbers/ProtectionRules.tsx`).
 
 Vale para responder no chat, encaminhar, agendadas, "Iniciar conversa" (checado **antes** de
 criar/reabrir a conversa) e envio do sistema (fluxo que retoma dias depois, por exemplo).
@@ -206,12 +224,15 @@ No não oficial, antes de entregar:
     última mensagem do contato. O job é adiado (não segura o worker) e marcado `reacted`; na 2ª
     mensagem seguida do fluxo a reação já passou e não soma;
   - **"digitando…"** pelo tempo de escrever o texto: 3,5–6 caracteres/s sorteado por mensagem,
-    entre 1,5 e 15 s (`OutboundMessage.typingMs` → `delay` da Evolution, que segura o worker —
-    daí o teto). Ex.: 40 caracteres ≈ 7–11 s. Mídia sem texto: "gravando…" de 2 s.
+    entre 1,5 e 10 s (`TYPING_MAX_MS`; `OutboundMessage.typingMs` → `delay` da Evolution, que segura
+    o worker e atrasa a mensagem — daí o teto). Ex.: 40 caracteres ≈ 7–10 s. Mídia sem texto:
+    "gravando…" de 2 s.
   A do atendente digitada no painel não ganha atraso: ele já digitou de verdade;
 - envio do **atendente que ninguém digitou** ganha o mesmo **"digitando…" simulado** (sem a reação:
   ele já está na conversa), pelo tamanho do que não foi digitado — `simulateTypingChars`, gravado em
-  `messages.raw`:
+  `messages.raw` — na **velocidade daquele atendente** (`User.typingSpeed`, escolhida em *Equipe →
+  Digitação*: Devagar 2–3,5, Normal 3,5–6, Rápido 6–9 caracteres/s; `TYPING_SPEEDS` no shared), com
+  o mesmo teto de 10 s. O automático usa Normal:
   - **resposta rápida** (sai pela contagem) e **mídia pela prévia** (legenda): o painel manda o
     tamanho do texto;
   - **campo de texto**: o painel conta os caracteres digitados de verdade (`inputType` de inserção;

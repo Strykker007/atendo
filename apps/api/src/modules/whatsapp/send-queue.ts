@@ -111,7 +111,7 @@ export interface PlanInput {
   maxQueueAgeMin: number;
 }
 
-export const expiredReason = (min: number) => `Expirou na fila: ficou mais de ${min} min sem poder sair (número desconectado ou fila parada). Envie de novo se ainda fizer sentido.`;
+export const expiredReason = (min: number) => `Não saiu: ficou mais de ${min} min esperando a vez (número desconectado ou o ritmo de proteção do número segurou o envio). Envie de novo se ainda fizer sentido.`;
 
 export function planSend(i: PlanInput): SendPlan {
   if (i.message.status !== 'pending' || i.message.internal) return { action: 'skip' };

@@ -1,3 +1,5 @@
+import { TYPING_MAX_MS, TYPING_SPEEDS, type TypingSpeed } from '@atendo/shared';
+
 /**
  * Aquecimento da sessão (docs/envio.md#aquecimento): número recém-pareado (QR lido) com volume
  * alto logo de cara é o padrão que derrubou a Drogaria Total — duas quedas no primeiro dia,
@@ -47,14 +49,16 @@ export function warmupPhase(n: { provider: string; sessionStartedAt: Date | null
  * - **reação** — perceber a mensagem e começar a responder: 1,2–3 s, mais um pouco quanto maior a
  *   resposta (pensar no que escrever), até +2 s. Aplicada contando da última mensagem do contato:
  *   na 2ª mensagem seguida do fluxo ela já passou e não soma;
- * - **digitação** — "digitando…" visível: 3,5 a 6 caracteres por segundo (≈ 210–360 por minuto,
- *   gente comum no celular), sorteado por mensagem, entre 1,5 e 15 s. O teto existe porque a
- *   Evolution segura o worker durante o "digitando": um texto longo de verdade levaria minutos.
+ * - **digitação** — "digitando…" visível na velocidade do atendente (`TYPING_SPEEDS`; `normal` =
+ *   3,5 a 6 caracteres por segundo, gente comum no celular), sorteada por mensagem, entre 1,5 e
+ *   10 s (`TYPING_MAX_MS`). O teto existe porque a Evolution segura o worker durante o
+ *   "digitando" e a mensagem demora a sair: um texto longo de verdade levaria minutos.
  */
-export function humanTiming(textLength: number, random: () => number = Math.random) {
+export function humanTiming(textLength: number, random: () => number = Math.random, speed: TypingSpeed = 'normal') {
   const reactMs = Math.round(1_200 + random() * 1_800 + Math.min(2_000, textLength * 10));
-  const cps = 3.5 + random() * 2.5;
-  const typingMs = Math.round(Math.min(15_000, Math.max(1_500, (textLength / cps) * 1_000)));
+  const [min, max] = (TYPING_SPEEDS[speed] ?? TYPING_SPEEDS.normal).cps;
+  const cps = min + random() * (max - min);
+  const typingMs = Math.round(Math.min(TYPING_MAX_MS, Math.max(1_500, (textLength / cps) * 1_000)));
   return { reactMs, typingMs };
 }
 

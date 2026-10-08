@@ -8,7 +8,7 @@ import { NumbersService } from './numbers.service';
 import { UsageService } from '../billing/usage.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from './queues';
-import { resolveSendLimits, SEND_RETRY, type OutboundMessage, type MessageType, type SendLimits, type SendProvider } from '@atendo/shared';
+import { resolveSendLimits, SEND_RETRY, type OutboundMessage, type MessageType, type SendLimits, type SendProvider, type TypingSpeed } from '@atendo/shared';
 import { StorageService } from '../../common/storage/storage.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
@@ -48,7 +48,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
   protected async handle(job: Job<OutboundJob>, token?: string) {
     const message = await this.prisma.message.findUnique({
       where: { id: job.data.messageId },
-      include: { conversation: { include: { contact: true } } },
+      include: { conversation: { include: { contact: true } }, author: { select: { typingSpeed: true } } },
     });
     // apagada antes de sair (docs/apagar-mensagens.md): o cancelamento grava `failed` junto; isto é a 2ª barreira
     if (!message || message.status !== 'pending' || message.internal || message.deletedAt) return;
@@ -162,7 +162,8 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string; voice?: boolean; simulateTypingChars?: number };
     // envio do atendente que ninguém digitou (resposta rápida, encaminhada, agendada, só mídia):
     // "digitando…" pelo tempo de escrever o texto, sem a reação (ele já está na conversa)
-    const simulado = message.authorId && num.provider !== 'meta' && typeof raw.simulateTypingChars === 'number' ? humanTiming(raw.simulateTypingChars).typingMs : undefined;
+    // na velocidade de digitação daquele atendente (Equipe → editar)
+    const simulado = message.authorId && num.provider !== 'meta' && typeof raw.simulateTypingChars === 'number' ? humanTiming(raw.simulateTypingChars, Math.random, message.author?.typingSpeed as TypingSpeed).typingMs : undefined;
 
     const outbound: OutboundMessage = {
       to: message.conversation.contact.phone,

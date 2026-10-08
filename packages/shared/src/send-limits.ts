@@ -72,3 +72,26 @@ export const SEND_RETRY = { attempts: 5, baseDelayMs: 3_000, maxDelayMs: 120_000
 /** Respostas rápidas: segundos entre escolher a resposta e ela sair (0 = na hora). */
 export const QUICK_REPLY_DELAY_DEFAULT_SEC = 3;
 export const QUICK_REPLY_DELAY_MAX_SEC = 30;
+
+/**
+ * Velocidade de digitação de cada atendente — o "digitando…" simulado das mensagens que ele não
+ * digitou de verdade (resposta rápida, texto colado, encaminhada, agendada). Caracteres por
+ * segundo, sorteado dentro da faixa a cada mensagem. Mensagem automática (fluxo, boas-vindas)
+ * usa `normal`.
+ */
+export const TYPING_SPEEDS = {
+  slow: { label: 'Devagar', cps: [2, 3.5] },
+  normal: { label: 'Normal', cps: [3.5, 6] },
+  fast: { label: 'Rápido', cps: [6, 9] },
+} as const;
+export type TypingSpeed = keyof typeof TYPING_SPEEDS;
+export const TYPING_SPEED_KEYS = Object.keys(TYPING_SPEEDS) as TypingSpeed[];
+
+/** Teto do "digitando…" simulado: texto longo não segura a mensagem mais que isso. */
+export const TYPING_MAX_MS = 10_000;
+
+/**
+ * Número não oficial pode falar primeiro com até N contatos frios (sem mensagem dele nas últimas
+ * 24 h) por dia — janela deslizante de 24 h, só envio do atendente. Ver docs/envio.md#envio-frio.
+ */
+export const COLD_CONTACTS_PER_DAY = 10;

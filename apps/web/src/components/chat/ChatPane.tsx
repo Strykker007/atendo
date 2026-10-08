@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { ZoomableAvatar } from './AvatarViewer';
@@ -446,6 +446,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const numberOffline = channelOffline(conv.number);
   /** API oficial e o contato não escreve há 24h: texto livre seria recusado, só template */
   const janelaFechada = conv.number.provider === 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
+  /** QR (não oficial) e o contato não escreve há 24h: responder gasta uma vaga de contato frio do número */
+  const contatoFrio = conv.number.provider !== 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
   /** quem aparece como autor da citação recebida e na faixa "Respondendo a …" */
   const nomeContato = conv.contact.name ?? `+${conv.contact.phone}`;
@@ -775,6 +777,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           {podeNota && <AbasDoEnvio nota={false} onNota={setModoNota} />}
+          {contatoFrio && <ColdContactNotice numberId={conv.number.id} />}
           {rapida && <QuickReplyCountdown pending={rapida} onCancel={() => setRapida(null)} onEdit={editarRapida} />}
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
@@ -1222,9 +1225,35 @@ function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) =
 }
 const labelOf = (t: string) => ({ image: 'imagem', audio: 'áudio', video: 'vídeo', document: 'documento', sticker: 'figurinha', location: 'localização', contact: 'contato' } as Record<string, string>)[t] ?? t;
 
-/** Ticks do WhatsApp: relógio → ✓ servidor → ✓✓ aparelho → ✓✓ ciano lido. Vem do webhook de status. */
+/**
+ * Aviso acima do campo quando o contato não escreve há 24h num número QR: deixa claro, antes do
+ * erro, que responder gasta uma das vagas diárias de contato frio (docs/envio.md#envio-frio).
+ */
+function ColdContactNotice({ numberId }: { numberId: string }) {
+  const cota = useColdQuota(numberId);
+  if (!cota.data) return null;
+  const restam = Math.max(0, cota.data.max - cota.data.used);
+  const libera = cota.data.resetsAt ? new Date(cota.data.resetsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
+  return (
+    <div className={cn('flex items-start gap-2 rounded-lg px-3 py-2 text-[12.5px]', restam ? 'bg-field text-muted' : 'bg-warn-soft text-warn-ink')}>
+      <Clock size={14} className="shrink-0 mt-0.5" />
+      <span>
+        Este contato não escreve neste número há mais de 24 horas. Para proteger o número de bloqueio, ele pode falar primeiro com até <b>{cota.data.max} contatos assim por dia</b>
+        {restam ? <> — restam <b>{restam}</b> hoje. Se você já falou com este contato nas últimas 24 horas, não gasta outra vaga.</> : <> e o limite foi atingido{libera ? <>; uma vaga libera em <b>{libera}</b></> : null}. Se você já falou com este contato hoje, pode continuar.</>}
+        {' '}Quando ele responder, este aviso some.
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Ticks do WhatsApp: ✓ servidor → ✓✓ aparelho → ✓✓ ciano lido. Vem do webhook de status.
+ * `pending` (na fila, esperando o ritmo de proteção do número) já aparece com ✓: o atrasado é
+ * intencional e o relógio fazia o atendente achar que travou e mandar de novo. Só a tela mente —
+ * a fila segue igual, e se a mensagem não sair vira falha (ícone vermelho) como sempre.
+ */
 function StatusIcon({ status, error }: { status: string; error?: string | null }) {
-  if (status === 'pending') return <span title="Enviando"><Clock size={12} className="opacity-70" /></span>;
+  if (status === 'pending') return <span title="Enviada"><Check size={13} /></span>;
   if (status === 'sent') return <span title="Enviada"><Check size={13} /></span>;
   if (status === 'delivered') return <span title="Entregue"><CheckCheck size={13} /></span>;
   if (status === 'read') return <span title="Lida"><CheckCheck size={13} className="text-chat-tick-read" /></span>;

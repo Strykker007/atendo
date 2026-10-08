@@ -7,6 +7,7 @@ import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber,
 import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
+import { ProtectionRules } from '@/components/numbers/ProtectionRules';
 import { SendingCard } from '@/components/numbers/SendingCard';
 import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
@@ -168,6 +169,8 @@ export default function NumerosPage() {
                     Quem já está conversando segue sendo respondido; os demais (e o robô acima do teto) esperam a vez. Número recém-conectado com volume alto é o principal motivo de queda.
                   </div>
                 )}
+
+                {n.provider === 'evolution' && n.isActive && n.status === 'connected' && <ProtectionRules numberId={n.id} />}
 
                 {n.isActive && <SendingCard number={n} />}
 

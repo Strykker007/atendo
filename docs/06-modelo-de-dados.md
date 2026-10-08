@@ -22,7 +22,7 @@ provider_pricing (global, sem tenant)
 
 **tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente. Dados cadastrais (só o dono, tela Clientes → Editar): `legalName` (razão social), `document` (CPF/CNPJ, só dígitos), `contactName`, `billingEmail` (não é o login), `phone`, endereço (`zipCode`, `street`, `addressNumber`, `complement`, `district`, `city`, `state`) e `notes` — migração `20261031000000_tenant_profile`.
 
-**users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA.
+**users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA. `typingSpeed` (`slow`|`normal`|`fast`, padrão `normal`) = velocidade do "digitando…" simulado das mensagens que a pessoa não digitou ([Envio](envio.md#humanização)).
 
 **companies** / **user_companies** — empresas/unidades do cliente (nome único por cliente, CNPJ opcional só com dígitos) e quem opera cada uma (N:N; sem linha = todas). `whatsapp_numbers.companyId` opcional (`SetNull` ao excluir): um número pertence a no máximo uma empresa. Ver [Empresas](empresas.md).
 
