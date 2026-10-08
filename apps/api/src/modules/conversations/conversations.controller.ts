@@ -207,6 +207,16 @@ export class ConversationsController {
     return this.conversations.release(u.tenantId, id, u);
   }
 
+  /**
+   * Vagas de contato frio do número não oficial nas últimas 24 h (docs/envio.md#envio-frio) —
+   * a tela mostra "restam N" antes do atendente esbarrar no limite. `null` no número oficial.
+   */
+  @Get('cold-quota')
+  coldQuota(@CurrentUser() u: AuthUser, @Query('numberId') numberId = '') {
+    if (!/^[0-9a-f-]{36}$/i.test(numberId)) throw new BadRequestException('numberId inválido');
+    return this.conversations.coldQuota(u.tenantId, numberId);
+  }
+
   @Get('counts')
   counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string, @Query('departmentId') departmentId?: string) {
     // fora do DTO: valida aqui o mesmo formato do filtro da lista

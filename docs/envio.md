@@ -34,7 +34,7 @@ qualquer origem ──▶ ConversationsService.send / sendAsSystem
                          ▼   OutboundProcessor (concorrência 20)
    1. não está pending / já tem externalId → nada / só corrige status
    2. planSend (puro, send-queue.ts):
-        queuedAt + prazo vencido            → falha "Expirou na fila"
+        queuedAt + prazo vencido            → falha "Não saiu: ficou mais de N min esperando a vez"
         há pendente anterior na conversa    → espera a vez (job atrasado 5 s; promovido antes)
         número não conectado                → pausa (job atrasado 60 s, sem chamar o provider)
    3. teto do dia — desligado (todo número com sendDailyLimit 0, sem aquecimento);
@@ -57,7 +57,12 @@ o recheck de 5 s é só rede de segurança. Conversas diferentes continuam em pa
 - Uma mensagem em retry segura as seguintes da mesma conversa — de propósito: sair a 2ª antes
   da 1ª é o que se quer evitar.
 - Se a cabeça ficar presa (ex.: job perdido) além do prazo de expiração, o próximo job a expira.
-- **Tentar novamente** dá `queueSeq` novo: a mensagem vai para o fim da fila da conversa.
+- **Tentar novamente** passa a mensagem **para a frente** das pendentes da conversa (`queueSeq` =
+  menor pendente − 1; sem pendentes, número novo) e promove o job: a 1ª mensagem de um fluxo que
+  falhou chega antes das que ainda não saíram. O job antigo é removido antes (mesmo `jobId` faria o
+  BullMQ ignorar o novo) e o `externalId` é apagado: a falha pode ter vindo depois de o provider
+  aceitar (status `ERROR` do WhatsApp no webhook), e com o id antigo o worker só marcava "enviada"
+  sem mandar nada.
 - O intervalo do bloco Conteúdo continua valendo: ele é aplicado pelo motor **antes** de
   enfileirar, então soma-se ao ritmo da fila (o intervalo efetivo é pelo menos o maior dos
   dois). Não é mais necessário para garantir ordem.
@@ -103,7 +108,7 @@ Número fora de `connected`: a fila dele para — nenhum job chama o provider; a
 descartada. Ao reconectar (webhook de conexão em `InboundService.numberConnectionChanged` ou
 health check de 5 min), `resumeNumber` promove a cabeça de cada conversa do número, da mais
 antiga para a mais nova; o ritmo do número espalha os envios. O que passou do prazo
-(`maxQueueAgeMin`) **expira como falha** ("Expirou na fila…") em vez de sair fora de contexto.
+(`maxQueueAgeMin`) **expira como falha** ("Não saiu: ficou mais de N min esperando a vez…") em vez de sair fora de contexto.
 
 ### Deduplicação
 - `Message.idempotencyKey` com unique `(conversationId, idempotencyKey)`. Repetir o mesmo
@@ -127,6 +132,24 @@ Na tela, mensagem `failed` mostra o erro e **Tentar novamente**
 (`POST /conversations/:id/messages/:messageId/resend`). Se a conversa mudou de canal desde a
 falha, 409 `number_changed` — não reenvia pelo número antigo.
 
+### Segurada pela proteção não expira
+
+Mensagem que espera por **proteção do número** (aquecimento, teto de automáticas, ritmo) não é
+fila parada: ela já aparece com ✓ e sai em segundo plano quando houver vaga. `holdForProtection`
+(`send-queue.ts`) move `Message.queuedAt` para o horário em que ela deve sair, então o prazo de
+*Expirar na fila após* conta dali; quem espera a vez atrás dela na conversa também é renovado.
+Expira só o que está preso de verdade: número desconectado ou job perdido. **Teto de 6 h** desde a
+criação (`PROTECTION_HOLD_MAX_MS`): depois disso volta o prazo normal, porque uma boas-vindas 6 h
+depois já não faz sentido. Antes, no aquecimento, o fluxo acima do teto virava falha em 30 min.
+
+### Na tela: ✓ na hora
+
+Mensagem `pending` (na fila, esperando o ritmo do número, o aquecimento ou o "digitando…") já
+aparece com **✓ cinza**, como se tivesse chegado ao servidor do WhatsApp. Antes aparecia o relógio
+e o atendente achava que tinha travado — o atraso é proposital. **Só a tela muda**: a fila segue
+igual; a mensagem vira ✓✓ quando o aparelho do contato recebe e, se não sair, vira falha (ícone
+vermelho, motivo e *Tentar novamente*). `StatusIcon` em `ChatPane.tsx`.
+
 ### Respostas rápidas
 Escolher uma resposta (painel da direita ou menu ⚡ do campo) agenda o envio: barra
 "Enviando *Título* em Ns…" com **Cancelar** e **Editar** (Editar = comportamento antigo: vai
@@ -142,8 +165,26 @@ então (`conversations/cold-send.ts`, `ConversationsService.assertColdAllowed`):
 
 | Número | Contato escreveu < 24 h | Contato frio |
 |---|---|---|
-| **Evolution** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
+| **Evolution — atendente** | sai normal | até **10 contatos frios por dia** no número (`COLD_CONTACTS_PER_DAY`); acabou → 409 `cold_quota_exhausted`, com quando libera |
+| **Evolution — automático** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
 | **Meta** | sai normal | só template (regra da Meta) **e** o recurso `proactive_messaging` no plano (403 `feature_proactive`) — só para envio do atendente |
+
+**Fluxo disparado à mão** conta como o atendente: `FlowEngineService.start` com `startedById` chama
+`ConversationsService.assertFlowCanStart` antes de criar o run. Contato frio no QR gasta uma vaga
+(sem vaga → 409 `cold_quota_exhausted` na tela); no oficial, 400 pedindo template. Conversa
+encerrada, número desconectado e contato descadastrado também viram erro na hora — antes o run
+nascia e falhava no 1º envio, e o atendente via só que "nada aconteceu". Com a vaga gasta, o
+automático daquela conversa passa (`hasColdSlot`): as mensagens do fluxo e o que vier depois nas
+24 h. Fluxo por gatilho continua recusado para contato frio.
+
+**Vagas de contato frio** (Evolution): sorted set no Redis `wa:cold:<número>` com o contato e o
+instante da 1ª mensagem, janela deslizante de 24 h, reserva atômica (Lua). Escrever de novo para o
+mesmo contato dentro das 24 h não gasta outra vaga; a vaga volta 24 h depois de usada. Vale para
+qualquer número QR, novo ou antigo — antes não havia vaga nenhuma e o cliente não conseguia nem
+retomar um orçamento. `GET /conversations/cold-quota?numberId=` devolve `{ used, max, resetsAt }`
+(`null` no oficial). A tela avisa antes do erro: *Nova conversa* mostra quantas restam, o chat mostra
+uma faixa acima do campo quando o contato está frio, e *Números* lista todas as regras de proteção
+do número QR (`components/numbers/ProtectionRules.tsx`).
 
 Vale para responder no chat, encaminhar, agendadas, "Iniciar conversa" (checado **antes** de
 criar/reabrir a conversa) e envio do sistema (fluxo que retoma dias depois, por exemplo).
@@ -167,26 +208,31 @@ em volume é o padrão que o WhatsApp pune; conversa humana não.
 
 Sessão nova (QR lido: `pending_qr → connected` grava `WhatsAppNumber.sessionStartedAt`) no
 **não oficial** passa **7 dias** aquecendo (`whatsapp/number-warmup.ts`). Reinício de servidor ou
-oscilação de rede não reabre o aquecimento.
+oscilação de rede não reabre o aquecimento. **Ler o QR de novo no mesmo telefone continua de onde
+parou** (e, se os 7 dias já passaram, não volta a aquecer): `warmupStartOnPair` mantém o
+`sessionStartedAt`. Recomeça do zero só se o WhatsApp derrubou o número nessa sessão (`waRemovedAt`
+depois do início) ou se quem leu o QR é outro telefone.
 
 | Desde o QR | Contatos **novos** por hora | Automáticas por hora | Piso entre envios do número |
 |---|---|---|---|
-| 0–24 h | 20 | 30 | 8 s (vale também para o atendente) |
-| 24–48 h | 50 | 50 | — |
-| 48–72 h | 80 | 60 | — |
-| 72 h–7 dias | 120 | 70 | — |
+| 0–24 h | 30 | 45 | 5 s (vale também para o atendente) |
+| 24–48 h | 60 | 60 | — |
+| 48–72 h | 90 | 70 | — |
+| 72 h–7 dias | 120 | 80 (= padrão) | — |
 | > 7 dias | livre | padrão da conexão (80) | — |
 
 **Automáticas por hora**: vale o menor entre a fase e o configurado na conexão. A mensagem do robô
-acima do teto espera a vaga (e falha se passar de *Expirar na fila após*, como qualquer envio
-parado); a resposta do atendente não entra nessa conta. Motivo: a Drog. Nova Farma foi restrita em
+acima do teto espera a vaga em segundo plano, sem expirar (até 6 h); a resposta do atendente não entra nessa conta. Motivo: a Drog. Nova Farma foi restrita em
 7 h com ~50 automáticas/h — saudação de fluxo em quase toda conversa — num número recém-pareado.
 
 "Novo" = contato que ainda não recebeu nada do número **na última hora** (`wa:wconv`, janela
 deslizante). Quem já está conversando passa direto; o contato que não coube espera a vaga
-(o job volta para a fila — se passar de *Expirar na fila após*, falha como qualquer envio
-parado). Motivo: a Drogaria Total caiu duas vezes no 1º dia com tráfego saudável, mas ~28
+em segundo plano (o job volta para a fila; ver [Segurada pela proteção não expira](#segurada-pela-proteção-não-expira)). Motivo: a Drogaria Total caiu duas vezes no 1º dia com tráfego saudável, mas ~28
 contatos/h logo após o QR. O card do número em **Números** mostra a fase e até quando vai.
+
+Valores afrouxados em 10/2026 (antes: 20/30/8 s, 50/50, 80/60, 120/70): com eles um fluxo de
+boas-vindas de 3 mensagens atendia ~10 clientes por hora na fase 1 e o resto expirava na fila.
+A fase 1 continua perto dos números que derrubaram as duas farmácias — é o maior risco que sobra.
 
 ### Humanização
 
@@ -206,12 +252,15 @@ No não oficial, antes de entregar:
     última mensagem do contato. O job é adiado (não segura o worker) e marcado `reacted`; na 2ª
     mensagem seguida do fluxo a reação já passou e não soma;
   - **"digitando…"** pelo tempo de escrever o texto: 3,5–6 caracteres/s sorteado por mensagem,
-    entre 1,5 e 15 s (`OutboundMessage.typingMs` → `delay` da Evolution, que segura o worker —
-    daí o teto). Ex.: 40 caracteres ≈ 7–11 s. Mídia sem texto: "gravando…" de 2 s.
+    entre 1,5 e 10 s (`TYPING_MAX_MS`; `OutboundMessage.typingMs` → `delay` da Evolution, que segura
+    o worker e atrasa a mensagem — daí o teto). Ex.: 40 caracteres ≈ 7–10 s. Mídia sem texto:
+    "gravando…" de 2 s.
   A do atendente digitada no painel não ganha atraso: ele já digitou de verdade;
 - envio do **atendente que ninguém digitou** ganha o mesmo **"digitando…" simulado** (sem a reação:
   ele já está na conversa), pelo tamanho do que não foi digitado — `simulateTypingChars`, gravado em
-  `messages.raw`:
+  `messages.raw` — na **velocidade daquele atendente** (`User.typingSpeed`, escolhida em *Equipe →
+  Digitação*: Devagar 2–3,5, Normal 3,5–6, Rápido 6–9 caracteres/s; `TYPING_SPEEDS` no shared), com
+  o mesmo teto de 10 s. O automático usa Normal:
   - **resposta rápida** (sai pela contagem) e **mídia pela prévia** (legenda): o painel manda o
     tamanho do texto;
   - **campo de texto**: o painel conta os caracteres digitados de verdade (`inputType` de inserção;

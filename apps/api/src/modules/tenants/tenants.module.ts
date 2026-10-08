@@ -18,7 +18,7 @@ import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { StripeService } from '../billing/stripe.service';
 import { freePeriod } from '../billing/plan-rules';
-import { DEFAULT_LOSS_REASONS } from '@atendo/shared';
+import { DEFAULT_LOSS_REASONS, TYPING_SPEED_KEYS, type TypingSpeed } from '@atendo/shared';
 
 class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
@@ -72,6 +72,8 @@ class UpdateAgentDto {
   @IsOptional() @IsArray() @IsUUID('4', { each: true }) numberIds?: string[];
   /** Redefinir senha do atendente */
   @IsOptional() @IsString() @MinLength(8) password?: string;
+  /** Velocidade do "digitando…" simulado das mensagens que ele não digitou (TYPING_SPEEDS) */
+  @IsOptional() @IsIn(TYPING_SPEED_KEYS) typingSpeed?: TypingSpeed;
 }
 
 const onlyDigits = (v: string) => v.replace(/\D/g, '');
@@ -171,7 +173,7 @@ class TenantsController {
   /** Todos podem listar (precisam para transferir); só admin gerencia. */
   @Get('me/agents')
   agents(@CurrentUser() u: AuthUser) {
-    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
+    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
   }
 
   @Post('me/agents')
@@ -237,8 +239,10 @@ class TenantsController {
     if (password || dto.isActive === false) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
-    // gerente não altera admins nem outros gerentes
-    const editable = u.role === 'manager' ? (['agent'] as const) : (['agent', 'manager'] as const);
+    // gerente não altera admins nem outros gerentes. Só a velocidade de digitação vale para qualquer
+    // um da equipe (admin também atende) — não dá acesso nem tira de ninguém
+    const onlySpeed = Object.entries(dto).every(([k, v]) => k === 'typingSpeed' || v === undefined);
+    const editable = onlySpeed ? (['agent', 'manager', 'tenant_admin'] as const) : u.role === 'manager' ? (['agent'] as const) : (['agent', 'manager'] as const);
     const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, isActive: true } });
 
     if (numberIds) {

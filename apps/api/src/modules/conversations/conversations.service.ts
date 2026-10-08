@@ -11,7 +11,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import type { Message, MessageDirection, MessageType } from '@prisma/client';
 import { ConversationsGateway } from './conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
-import { enqueueOutbound, promoteNext, requeueSeq } from '../whatsapp/send-queue';
+import { enqueueOutbound, promoteNext, removeOutboundJob, requeueSeq } from '../whatsapp/send-queue';
 import type { Permission } from '@atendo/shared';
 import { canUseNumber, narrowTo, numberFilter } from '../auth/number-scope';
 import { buildTemplateSend } from '../whatsapp/templates';
@@ -22,7 +22,8 @@ import { InterpolationService } from '../../common/interpolation/interpolation.s
 import { textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
 import { spin } from './spin';
-import { COLD_UNOFFICIAL_MESSAGE, isWarm } from './cold-send';
+import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, hasColdSlot, isWarm } from './cold-send';
+import { RedisService } from '../../common/redis/redis.service';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -100,6 +101,7 @@ export class ConversationsService {
     private readonly gateway: ConversationsGateway,
     private readonly storage: StorageService,
     private readonly interpolation: InterpolationService,
+    private readonly redis: RedisService,
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {}
 
@@ -198,8 +200,12 @@ export class ConversationsService {
       include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
+      // "Encerradas": quem acabou de encerrar primeiro (`closedAt`). Pela última mensagem, a recém-
+      // encerrada podia cair abaixo das 50 primeiras e só "aparecia" depois de outra mensagem
       orderBy:
-        q.sort === 'waiting'
+        q.status === 'closed'
+          ? [{ closedAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
+          : q.sort === 'waiting'
           ? [{ awaitingSince: { sort: 'asc', nulls: 'last' } }, { lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
           // `nulls: 'last'`: no Postgres o DESC põe nulo PRIMEIRO, e conversa sem mensagem
           // (criada e nunca usada) encabeçava a lista para sempre. `id` desempata: com hora
@@ -360,18 +366,53 @@ export class ConversationsService {
 
   /**
    * Regra do envio frio (cold-send.ts): o contato não escreveu neste número nas últimas 24h.
-   * Não oficial → 409 `cold_send_unofficial`. Oficial → a Meta já exige template (checado
-   * antes); para o atendente entra também o recurso do plano. Envio do sistema não confere o
-   * recurso: campanha e agenda têm os próprios.
+   * Não oficial → o atendente gasta uma das vagas de contato frio do dia (409
+   * `cold_quota_exhausted` quando acabam); o automático é recusado (409 `cold_send_unofficial`).
+   * Oficial → a Meta já exige template (checado antes); para o atendente entra também o recurso
+   * do plano. Envio do sistema não confere o recurso: campanha e agenda têm os próprios.
    */
   private async assertColdAllowed(c: { tenantId: string; contactId: string; numberId: string; lastInboundAt: Date | null; number: { provider: string } }, author?: Viewer) {
     if (isWarm(await this.lastInboundOnNumber(c))) return;
-    if (c.number.provider !== 'meta') throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
+    if (c.number.provider !== 'meta') {
+      if (!author) {
+        // automático: só segue se um atendente já gastou a vaga deste contato (falou primeiro ou disparou o fluxo)
+        if (await hasColdSlot(this.redis, c.numberId, c.contactId)) return;
+        throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
+      }
+      const vaga = await claimColdContact(this.redis, c.numberId, c.contactId);
+      if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
+      return;
+    }
     if (!author || author.role === 'super_admin') return;
     const plan = await this.usage.limits(c.tenantId);
     if (!plan?.limits.features?.includes('proactive_messaging')) {
       throw new ForbiddenException({ code: 'feature_proactive', message: `"${PLAN_FEATURE_LABEL.proactive_messaging}" não está incluído no seu plano: falar com quem não escreveu nas últimas 24h depende dele. Faça upgrade em Plano e uso.` });
     }
+  }
+
+  /**
+   * Antes de um fluxo disparado À MÃO começar: o que faria ele falhar em silêncio no 1º envio vira
+   * erro na hora, para o atendente. Contato frio no QR gasta uma vaga do dia (como se o atendente
+   * tivesse escrito) — depois disso as mensagens do fluxo passam (`hasColdSlot`).
+   */
+  async assertFlowCanStart(conversationId: string) {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: { select: { provider: true, status: true } }, contact: { select: { optOutAt: true } } } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para iniciar um fluxo.');
+    if (conv.number.status !== 'connected') throw new BadRequestException('O número está desconectado: o fluxo não teria como enviar. Conecte de novo em Números.');
+    if (conv.contact.optOutAt) throw new BadRequestException('O contato pediu para não receber mensagens automáticas, então o fluxo não pode ser enviado. Responda pelo campo de mensagem.');
+    if (isWarm(await this.lastInboundOnNumber(conv))) return;
+    if (conv.number.provider === 'meta') throw new BadRequestException('O contato não escreve há mais de 24 horas: na API oficial, depois disso só sai template aprovado. Use "Enviar template".');
+    const vaga = await claimColdContact(this.redis, conv.numberId, conv.contactId);
+    if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
+  }
+
+  /** Vagas de contato frio usadas no número (só não oficial; o oficial fala primeiro por template). */
+  async coldQuota(tenantId: string, numberId: string) {
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: numberId, tenantId, deletedAt: null }, select: { provider: true } });
+    if (!number) throw new NotFoundException('Número não encontrado');
+    if (number.provider === 'meta') return null;
+    return coldQuota(this.redis, numberId);
   }
 
   /**
@@ -400,10 +441,10 @@ export class ConversationsService {
     // descadastro vale para TODO envio automático (docs/envio.md#descadastro); o atendente segue respondendo
     if (conv.contact.optOutAt) throw new BadRequestException({ code: 'contact_opted_out', message: 'O contato pediu para não receber mensagens automáticas.' });
     if (conv.contact.waInvalidAt) throw new BadRequestException({ code: 'contact_no_whatsapp', message: 'Este telefone não tem WhatsApp.' });
-    if (conv.number.status !== 'connected') throw new BadRequestException('Número desconectado');
+    if (conv.number.status !== 'connected') throw new BadRequestException('O número está desconectado: a mensagem automática não saiu. Conecte de novo em Números (QR Code).');
     const template = opts?.template;
     if (template && conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
-    if (conv.number.provider === 'meta' && !template && !inMetaWindow(conv.lastInboundAt)) throw new BadRequestException('Fora da janela de 24h da Meta');
+    if (conv.number.provider === 'meta' && !template && !inMetaWindow(conv.lastInboundAt)) throw new BadRequestException('O contato não escreve há mais de 24 horas: na API oficial da Meta, depois disso só sai template aprovado.');
     if (!opts?.allowCold) await this.assertColdAllowed(conv);
     const quota = await this.usage.canSend(conv.tenantId, template ? 'templates' : 'messages');
     if (!quota.ok) throw new ForbiddenException(quota.reason);
@@ -426,7 +467,7 @@ export class ConversationsService {
   private async systemNumber(tenantId: string, preferredId?: string | null) {
     const n = (preferredId && (await this.prisma.whatsAppNumber.findFirst({ where: { id: preferredId, tenantId, status: 'connected', isActive: true } })))
       || (await this.prisma.whatsAppNumber.findFirst({ where: { tenantId, status: 'connected', isActive: true }, orderBy: { createdAt: 'asc' } }));
-    if (!n) throw new BadRequestException('Nenhum número conectado para enviar');
+    if (!n) throw new BadRequestException('Nenhum número conectado para enviar. Conecte um número em Números.');
     return n;
   }
 
@@ -452,7 +493,7 @@ export class ConversationsService {
     const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed, allowCold: opts?.allowCold };
     if (conv.number.provider === 'meta' && !inMetaWindow(conv.lastInboundAt) && opts?.outsideWindow) {
       const tpl = await opts.outsideWindow(conv.numberId);
-      if (!tpl?.template) throw new BadRequestException('Fora da janela de 24h da Meta e sem template configurado');
+      if (!tpl?.template) throw new BadRequestException('O contato não escreve há mais de 24 horas e não há template aprovado configurado para este envio (na API oficial, depois de 24 horas só sai template).');
       return this.sendAsSystem(conv.id, tpl.text, undefined, undefined, { ...send, template: tpl.template });
     }
     return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, send);
@@ -804,10 +845,16 @@ export class ConversationsService {
       throw new ConflictException({ code: 'number_changed', message: `O canal desta conversa mudou para "${m.conversation.number.label}". Envie a mensagem de novo.` });
     }
     if (m.conversation.number.status !== 'connected') throw new BadRequestException(`O número "${m.conversation.number.label}" está desconectado.`);
-    const r = await this.prisma.message.updateMany({ where: { id: m.id, status: 'failed' }, data: { status: 'pending', error: null } });
+    // `externalId: null`: a falha pode ter vindo DEPOIS de o provider aceitar (status ERROR do
+    // WhatsApp no webhook). Com o id antigo o worker achava que já tinha saído, só marcava
+    // "enviada" e nada chegava ao contato — o reenvio tem de mandar de verdade.
+    const r = await this.prisma.message.updateMany({ where: { id: m.id, status: 'failed' }, data: { status: 'pending', error: null, externalId: null } });
     if (r.count === 0) throw new ConflictException('Esta mensagem já foi reenviada.');
     const queueSeq = await requeueSeq(this.prisma, m.id);
+    for (const seq of new Set([m.queueSeq, queueSeq ?? m.queueSeq])) await removeOutboundJob(this.outbound, { id: m.id, queueSeq: seq });
     await enqueueOutbound(this.outbound, { id: m.id, queueSeq: queueSeq ?? m.queueSeq });
+    // ela passou para a frente: se a próxima da conversa já estava esperando a vez, quem sai agora é esta
+    await promoteNext(this.prisma, this.outbound, m.conversationId);
     const updated = await this.prisma.message.findUniqueOrThrow({ where: { id: m.id }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(tenantId, this.present(updated));
     return this.present(updated);

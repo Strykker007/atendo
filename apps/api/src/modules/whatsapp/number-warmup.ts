@@ -1,3 +1,5 @@
+import { TYPING_MAX_MS, TYPING_SPEEDS, type TypingSpeed } from '@atendo/shared';
+
 /**
  * Aquecimento da sessão (docs/envio.md#aquecimento): número recém-pareado (QR lido) com volume
  * alto logo de cara é o padrão que derrubou a Drogaria Total — duas quedas no primeiro dia,
@@ -22,12 +24,16 @@ export interface WarmupPhase {
   endsAt: Date;
 }
 
+// 10/2026: afrouxado a pedido — com 20 contatos, 30 automáticas/h e 8 s entre envios, um fluxo de
+// boas-vindas de 3 mensagens atendia ~10 clientes por hora e o resto expirava na fila; nos
+// primeiros dias o sistema ficava inviável. A fase 1 fica perto dos casos que caíram (Drogaria
+// Total ~28 contatos/h, Nova Farma ~50 automáticas/h): é o maior risco que sobra.
 const FASES: { ateHoras: number; newConvPerHour: number; minGapMs: number; autoPerHour: number }[] = [
-  { ateHoras: 24, newConvPerHour: 20, minGapMs: 8_000, autoPerHour: 30 },
-  { ateHoras: 48, newConvPerHour: 50, minGapMs: 0, autoPerHour: 50 },
-  { ateHoras: 72, newConvPerHour: 80, minGapMs: 0, autoPerHour: 60 },
-  // até o 7º dia: contatos novos já folgados, só o robô ainda abaixo do padrão (80/h)
-  { ateHoras: 168, newConvPerHour: 120, minGapMs: 0, autoPerHour: 70 },
+  { ateHoras: 24, newConvPerHour: 30, minGapMs: 5_000, autoPerHour: 45 },
+  { ateHoras: 48, newConvPerHour: 60, minGapMs: 0, autoPerHour: 60 },
+  { ateHoras: 72, newConvPerHour: 90, minGapMs: 0, autoPerHour: 70 },
+  // até o 7º dia: robô já no padrão da conexão (80/h); só os contatos novos ainda limitados
+  { ateHoras: 168, newConvPerHour: 120, minGapMs: 0, autoPerHour: 80 },
 ];
 export const WARMUP_TOTAL_HOURS = 168;
 export const WARMUP_PHASES = FASES.length;
@@ -43,18 +49,38 @@ export function warmupPhase(n: { provider: string; sessionStartedAt: Date | null
 }
 
 /**
+ * Novo QR lido: o aquecimento recomeça ou continua de onde estava?
+ *
+ * Reconectar o MESMO celular (desconectou pelo painel, trocou de aparelho do mesmo chip, sessão
+ * caiu) continua a contagem — o número já vinha conversando e voltar à fase 1 travava a loja por
+ * dias sem motivo. Recomeça (devolve `now`) quando:
+ * - nunca aqueceu (primeiro QR);
+ * - o WhatsApp derrubou o número nesta sessão (`waRemovedAt` depois do início) — é o maior risco;
+ * - quem leu o QR é outro telefone (outro chip, outra conta).
+ * Devolve `null` para manter o `sessionStartedAt` atual.
+ */
+export function warmupStartOnPair(n: { sessionStartedAt: Date | null; waRemovedAt: Date | null; phone: string }, pairedPhone: string | undefined, now = new Date()): Date | null {
+  if (!n.sessionStartedAt) return now;
+  if (n.waRemovedAt && n.waRemovedAt >= n.sessionStartedAt) return now;
+  if (pairedPhone && pairedPhone !== n.phone) return now;
+  return null;
+}
+
+/**
  * Quanto uma pessoa levaria para mandar este texto (mensagem automática no não oficial):
  * - **reação** — perceber a mensagem e começar a responder: 1,2–3 s, mais um pouco quanto maior a
  *   resposta (pensar no que escrever), até +2 s. Aplicada contando da última mensagem do contato:
  *   na 2ª mensagem seguida do fluxo ela já passou e não soma;
- * - **digitação** — "digitando…" visível: 3,5 a 6 caracteres por segundo (≈ 210–360 por minuto,
- *   gente comum no celular), sorteado por mensagem, entre 1,5 e 15 s. O teto existe porque a
- *   Evolution segura o worker durante o "digitando": um texto longo de verdade levaria minutos.
+ * - **digitação** — "digitando…" visível na velocidade do atendente (`TYPING_SPEEDS`; `normal` =
+ *   3,5 a 6 caracteres por segundo, gente comum no celular), sorteada por mensagem, entre 1,5 e
+ *   10 s (`TYPING_MAX_MS`). O teto existe porque a Evolution segura o worker durante o
+ *   "digitando" e a mensagem demora a sair: um texto longo de verdade levaria minutos.
  */
-export function humanTiming(textLength: number, random: () => number = Math.random) {
+export function humanTiming(textLength: number, random: () => number = Math.random, speed: TypingSpeed = 'normal') {
   const reactMs = Math.round(1_200 + random() * 1_800 + Math.min(2_000, textLength * 10));
-  const cps = 3.5 + random() * 2.5;
-  const typingMs = Math.round(Math.min(15_000, Math.max(1_500, (textLength / cps) * 1_000)));
+  const [min, max] = (TYPING_SPEEDS[speed] ?? TYPING_SPEEDS.normal).cps;
+  const cps = min + random() * (max - min);
+  const typingMs = Math.round(Math.min(TYPING_MAX_MS, Math.max(1_500, (textLength / cps) * 1_000)));
   return { reactMs, typingMs };
 }
 

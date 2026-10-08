@@ -107,6 +107,9 @@ export class FlowEngineService {
     const def = flow.definition as unknown as FlowDefinition;
     const startNode = def.nodes.find((n) => n.type === 'start');
     if (!startNode) throw new BadRequestException('Fluxo sem nó de início');
+    // disparado por uma pessoa: o que faria o 1º envio falhar (contato frio, encerrada,
+    // desconectado) vira erro na tela agora, em vez de um run que "não faz nada"
+    if (startedById) await this.conversations.assertFlowCanStart(conversationId);
 
     await this.stop(conversationId, 'substituído por outro fluxo');
     const run = await this.prisma.flowRun.create({
@@ -125,6 +128,12 @@ export class FlowEngineService {
       await this.conversations.setStatus(conv.tenantId, conversationId, 'in_progress', startedById);
     }
     await this.advance(run.id);
+    if (startedById) {
+      // disparo manual: se o fluxo já parou com erro no começo, a tela tem de dizer — antes
+      // aparecia "Fluxo disparado" e nada chegava ao contato
+      const after = await this.prisma.flowRun.findUnique({ where: { id: run.id }, select: { status: true, error: true } });
+      if (after?.status === 'failed') throw new BadRequestException({ code: 'flow_failed', message: `O fluxo não foi enviado: ${after.error ?? 'erro ao executar o primeiro passo.'}` });
+    }
     return run;
   }
 

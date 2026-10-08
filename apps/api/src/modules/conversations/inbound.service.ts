@@ -14,6 +14,7 @@ import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './convers
 import { decidirEntrada, voltandoDepoisDeEncerrado } from './reopen';
 import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
+import { warmupStartOnPair } from '../whatsapp/number-warmup';
 
 /**
  * Tudo que **entra** pelo provider: mensagem recebida, mensagem digitada no celular, confirmação
@@ -463,9 +464,11 @@ export class InboundService {
     // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
     const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
     // Aquecimento desligado (a pedido): número novo não começa mais com teto de envios por dia.
-    // O aquecimento POR HORA (number-warmup.ts) começa quando um QR novo é lido — reinício de
-    // servidor ou oscilação de rede não reabre as 72h.
-    const warmup: { warmupStartedAt?: Date; sessionStartedAt?: Date } = c.status === 'connected' && number.status === 'pending_qr' ? { sessionStartedAt: new Date() } : {};
+    // O aquecimento POR HORA (number-warmup.ts) começa no primeiro QR. QR de novo no mesmo
+    // telefone continua a contagem; recomeça se o WhatsApp derrubou o número ou se é outro
+    // telefone (warmupStartOnPair). Reinício de servidor ou oscilação de rede não mexem nele.
+    const recomeco = c.status === 'connected' && number.status === 'pending_qr' ? warmupStartOnPair(number, c.phone) : null;
+    const warmup: { warmupStartedAt?: Date; sessionStartedAt?: Date } = recomeco ? { sessionStartedAt: recomeco } : {};
     await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido, ...(phone && { phone }) } }).catch(async (err) => {
       // conflito de unique (tenantId, phone): mantém o telefone antigo, só atualiza status
       if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido } });

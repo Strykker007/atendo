@@ -5,12 +5,12 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingSpeed } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 // ---- Equipe ----
 export type Role = 'tenant_admin' | 'manager' | 'agent' | 'super_admin';
-export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null; profile?: { id: string; name: string } | null; numbers?: { numberId: string }[]; departments?: { departmentId: string }[] }
+export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; typingSpeed?: TypingSpeed; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null; profile?: { id: string; name: string } | null; numbers?: { numberId: string }[]; departments?: { departmentId: string }[] }
 export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
 export const useCreateAgent = () => {
   const qc = useQueryClient();
@@ -23,5 +23,5 @@ export const useChangePassword = () => useMutation({ mutationFn: (b: { current: 
 
 export const useUpdateAgent = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; password?: string; profileId?: string; numberIds?: string[] }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; password?: string; profileId?: string; numberIds?: string[]; typingSpeed?: TypingSpeed }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };

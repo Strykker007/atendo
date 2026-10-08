@@ -7,7 +7,7 @@ import { PhoneInput, formatPhone } from '@/components/ui/PhoneInput';
 import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useDebounced, useHasFeature, useNumbers, usePhonebook, useStartCandidates, useStartConversation, type PhonebookItem, type StartCandidates } from '@/lib/hooks';
+import { useDebounced, useHasFeature, useNumbers, usePhonebook, useStartCandidates, useStartConversation, useColdQuota, type PhonebookItem, type StartCandidates } from '@/lib/hooks';
 import { TemplateFields, useTemplateChoice } from './TemplateFields';
 
 type ContatoSel = { id: string; name: string | null; phone: string };
@@ -25,7 +25,8 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
   const [numberId, setNumberId] = useState<string>('');
   const number = conectados.find((n) => n.id === numberId);
   const isMeta = number?.provider === 'meta';
-  // envio frio (docs/envio.md#envio-frio): falar primeiro só pelo oficial e com o recurso no plano
+  const cotaFria = useColdQuota(number?.id, !!number && !isMeta);
+  // envio frio (docs/envio.md#envio-frio): no oficial, template + recurso no plano; no QR, até 10 contatos frios por dia
   const proativo = useHasFeature('proactive_messaging');
 
   const [contato, setContato] = useState<ContatoSel | null>(null);
@@ -188,9 +189,13 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
         )}
 
         {number && !isMeta && (
-          <p className="rounded-lg bg-warn-soft text-warn-ink px-3 py-2 text-[12.5px]">
-            Pelo número <b>QR (não oficial)</b> só dá para escrever para quem mandou mensagem <b>neste número nas últimas 24 horas</b>.
-            Falar primeiro com quem não escreveu é a principal causa de bloqueio — para isso, use um número oficial.
+          <p className={cn('rounded-lg px-3 py-2 text-[12.5px]', cotaFria.data && cotaFria.data.used >= cotaFria.data.max ? 'bg-warn-soft text-warn-ink' : 'bg-field text-muted')}>
+            Pelo número <b>QR (não oficial)</b>, falar primeiro com quem <b>não escreveu neste número nas últimas 24 horas</b> é a principal causa de bloqueio.
+            Por isso cada número pode chamar até <b>{cotaFria.data?.max ?? 10} contatos assim por dia</b>
+            {cotaFria.data && (cotaFria.data.used >= cotaFria.data.max
+              ? <> — o limite de hoje foi atingido{cotaFria.data.resetsAt ? <>; uma vaga libera em <b>{new Date(cotaFria.data.resetsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></> : null}</>
+              : <> — restam <b>{cotaFria.data.max - cotaFria.data.used}</b></>)}.
+            {' '}Quem escreveu nas últimas 24 horas não conta. Para chamar muitos contatos, use um número oficial.
           </p>
         )}
         {usandoTemplate && !proativo.loading && !proativo.has && (

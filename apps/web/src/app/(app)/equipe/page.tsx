@@ -11,6 +11,7 @@ import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendIn
 import { AccessProfiles } from '@/components/settings/AccessProfiles';
 import { NumberScopeButton } from '@/components/settings/NumberScope';
 import { MailCheck, Send, Link as LinkIcon } from 'lucide-react';
+import { TYPING_SPEEDS, TYPING_SPEED_KEYS, type TypingSpeed } from '@atendo/shared';
 
 export default function EquipePage() {
   const me = useMe();
@@ -20,6 +21,7 @@ export default function EquipePage() {
   const agents = useAgents();
   const profiles = useProfiles();
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
+  const [savingSpeedId, setSavingSpeedId] = useState<string | null>(null);
   const usage = useUsage();
   const create = useCreateAgent();
   const update = useUpdateAgent();
@@ -65,7 +67,7 @@ export default function EquipePage() {
         <div className="rounded-2xl bg-panel border border-line overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide">
-              <tr><th className="px-5 py-2.5">Nome</th><th className="px-5 py-2.5 hidden sm:table-cell">E-mail</th><th className="px-5 py-2.5">Perfil de acesso</th><th className="px-5 py-2.5">Números</th><th className="px-5 py-2.5 hidden md:table-cell">Último acesso</th><th className="px-5 py-2.5"></th></tr>
+              <tr><th className="px-5 py-2.5">Nome</th><th className="px-5 py-2.5 hidden sm:table-cell">E-mail</th><th className="px-5 py-2.5">Perfil de acesso</th><th className="px-5 py-2.5">Números</th><th className="px-5 py-2.5 hidden lg:table-cell" title="Velocidade do &quot;digitando…&quot; que o contato vê nas mensagens que a pessoa não digitou (resposta rápida, texto colado, encaminhada, agendada). Máximo de 10 segundos por mensagem.">Digitação</th><th className="px-5 py-2.5 hidden md:table-cell">Último acesso</th><th className="px-5 py-2.5"></th></tr>
             </thead>
             <tbody className="divide-y divide-line">
               {agents.data.map((a) => (
@@ -93,6 +95,25 @@ export default function EquipePage() {
                     )}
                   </td>
                   <td className="px-5 py-3"><NumberScopeButton agent={a} /></td>
+                  <td className="px-5 py-3 hidden lg:table-cell">
+                    {canManageTeam ? (
+                      <select
+                        value={a.typingSpeed ?? 'normal'}
+                        disabled={savingSpeedId === a.id}
+                        title="Quanto tempo o contato vê &quot;digitando…&quot; antes da resposta rápida ou do texto colado chegar. Escolha o ritmo real desta pessoa."
+                        onChange={async (e) => {
+                          setSavingSpeedId(a.id);
+                          try { await update.mutateAsync({ id: a.id, typingSpeed: e.target.value as TypingSpeed }); toast.ok('Velocidade de digitação atualizada'); }
+                          catch (err) { toast.err(err); } finally { setSavingSpeedId(null); }
+                        }}
+                        className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1"
+                      >
+                        {TYPING_SPEED_KEYS.map((k) => <option key={k} value={k}>{TYPING_SPEEDS[k].label}</option>)}
+                      </select>
+                    ) : (
+                      <span className="text-xs text-muted">{TYPING_SPEEDS[a.typingSpeed ?? 'normal']?.label}</span>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-muted hidden md:table-cell">
                     {a.invitedAt && !a.passwordSetAt ? <span className="inline-flex items-center gap-1 text-xs rounded-full bg-warn-soft text-warn-ink px-2 py-0.5"><MailCheck size={12} /> convite pendente</span> : a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}
                   </td>

@@ -120,6 +120,9 @@ export const useConversations = (q: { status: ConversationStatus; numberId: stri
       if (q.sort && q.sort !== 'recent') p.set('sort', q.sort);
       return api<Conversation[]>(`/conversations?${p}`);
     },
+    // sempre "velha": trocar de aba busca de novo (troca de chave só refaz a busca de dado velho).
+    // A lista de outra aba no cache podia ser de antes de encerrar/assumir
+    staleTime: 0,
   });
 
 export const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
@@ -299,7 +302,8 @@ export const useSendMessage = (conversationId: string | null, expectedNumberId?:
   return useMutation({
     mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ ...input, expectedNumberId }) }),
     // aparece na hora, mesmo se o socket estiver reconectando
-    onSuccess: (m) => { upsertMessageInCache(qc, m); moverConversaParaTopo(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); },
+    // cold-quota: responder contato frio no não oficial gasta uma vaga do dia
+    onSuccess: (m) => { upsertMessageInCache(qc, m); moverConversaParaTopo(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['cold-quota'] }); },
     onError: (err) => {
       if (err instanceof ApiError && err.code === 'number_changed') {
         qc.invalidateQueries({ queryKey: ['conversation', conversationId] });

@@ -42,12 +42,32 @@ export async function enqueueOutbound(queue: Queue<OutboundJob>, m: { id: string
   await queue.add('send', { messageId: m.id, ...(minGapMs > 0 && { minGapMs }) }, { ...OUTBOUND_JOB_OPTS, jobId: outboundJobId(m) });
 }
 
-/** Volta uma mensagem com falha para o fim da fila: `queueSeq` novo, prazo de expiração recomeça. */
+/**
+ * "Tentar novamente": a mensagem volta para a fila **na frente** das pendentes da conversa —
+ * `queueSeq` = menor pendente − 1. Se ela era a 1ª de um fluxo, tem de chegar antes das que
+ * ainda não saíram (as que já saíram não dá para desfazer). Sem pendentes, pega um número novo.
+ * O prazo de expiração recomeça. `queueSeq` não é único: repetir o valor de uma mensagem antiga
+ * já enviada não atrapalha (a vez só olha as pendentes).
+ */
 export async function requeueSeq(prisma: PrismaService, messageId: string) {
   const rows = await prisma.$queryRaw<{ queueSeq: bigint }[]>(Prisma.sql`
-    UPDATE "messages" SET "queueSeq" = nextval(pg_get_serial_sequence('messages', 'queueSeq')), "queuedAt" = now()
-    WHERE "id" = ${messageId} RETURNING "queueSeq"`);
+    UPDATE "messages" m SET "queueSeq" = COALESCE(
+        (SELECT MIN(o."queueSeq") - 1 FROM "messages" o
+          WHERE o."conversationId" = m."conversationId" AND o."direction" = 'out' AND o."status" = 'pending'
+            AND o."internal" = false AND o."id" <> m."id"),
+        nextval(pg_get_serial_sequence('messages', 'queueSeq'))),
+      "queuedAt" = now()
+    WHERE m."id" = ${messageId} RETURNING m."queueSeq"`);
   return rows[0]?.queueSeq;
+}
+
+/**
+ * Tira da fila o job antigo da mensagem antes de enfileirar de novo: com o mesmo `jobId`
+ * (`out-<id>-<queueSeq>`) o BullMQ ignoraria o `add` em silêncio e a mensagem ficaria parada.
+ */
+export async function removeOutboundJob(queue: Queue<OutboundJob>, m: { id: string; queueSeq: bigint | number }) {
+  const job = await queue.getJob(outboundJobId(m));
+  if (job) await job.remove().catch(() => undefined);
 }
 
 const PENDING_OUT = { direction: 'out', status: 'pending', internal: false } as const;
@@ -111,7 +131,22 @@ export interface PlanInput {
   maxQueueAgeMin: number;
 }
 
-export const expiredReason = (min: number) => `Expirou na fila: ficou mais de ${min} min sem poder sair (número desconectado ou fila parada). Envie de novo se ainda fizer sentido.`;
+/**
+ * Mensagem segurada pela PROTEÇÃO do número (aquecimento, teto de automáticas, ritmo) não é fila
+ * parada: na tela ela já aparece com ✓ e sai em segundo plano quando houver vaga. Por isso o prazo
+ * de expirar (`maxQueueAgeMin`) passa a contar de `until` — o horário em que ela deve sair — e
+ * não de quando entrou. Só expira o que está preso de verdade (número desconectado, job perdido).
+ * Teto: depois de `PROTECTION_HOLD_MAX_MS` desde a criação, volta a valer o prazo normal — uma
+ * boas-vindas que sairia 6 h depois já não faz sentido.
+ */
+export const PROTECTION_HOLD_MAX_MS = 6 * 60 * 60_000;
+
+export async function holdForProtection(prisma: PrismaService, m: { id: string; createdAt: Date }, until: number) {
+  if (until - m.createdAt.getTime() > PROTECTION_HOLD_MAX_MS) return;
+  await prisma.message.updateMany({ where: { id: m.id, status: 'pending' }, data: { queuedAt: new Date(until) } });
+}
+
+export const expiredReason = (min: number) => `Não saiu: ficou mais de ${min} min esperando a vez (número desconectado ou o ritmo de proteção do número segurou o envio). Envie de novo se ainda fizer sentido.`;
 
 export function planSend(i: PlanInput): SendPlan {
   if (i.message.status !== 'pending' || i.message.internal) return { action: 'skip' };

@@ -96,6 +96,8 @@ model User {
   profileId    String?
   isActive     Boolean   @default(true)
   totpSecret   String?   // 2FA opcional (criptografado)
+  /// velocidade do "digitando…" simulado (slow | normal | fast) — TYPING_SPEEDS no shared
+  typingSpeed  String    @default("normal")
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -850,7 +852,7 @@ model Message {
   error          String?
   raw            Json?
   /// Ordem na fila de envio (docs/envio.md): numa conversa só sai a mensagem pendente de menor
-  /// `queueSeq`. "Tentar novamente" pega um número novo — volta para o fim da fila.
+  /// `queueSeq`. "Tentar novamente" passa para a frente das pendentes da conversa (requeueSeq).
   queueSeq       BigInt           @default(autoincrement())
   /// quando entrou (ou voltou) na fila de envio — base do prazo de expiração
   queuedAt       DateTime         @default(now())
