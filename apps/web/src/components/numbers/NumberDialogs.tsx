@@ -45,7 +45,7 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
   );
 }
 
-/** A troca oficial <-> não-oficial. Uma tela, um clique. */
+/** A troca Meta Cloud API <-> Conexão Web. Uma tela, um clique. */
 export function SwitchProviderModal({ number, onClose, onDone }: { number: NumberItem | null; onClose: () => void; onDone: Done }) {
   const ps = useProviderState(number?.provider === 'meta' ? 'evolution' : 'meta');
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +68,7 @@ export function SwitchProviderModal({ number, onClose, onDone }: { number: Numbe
     <Modal open={!!number} onClose={onClose} title={`Trocar provider · ${number?.label ?? ''}`}>
       <form onSubmit={submit} className="space-y-4">
         <p className="text-sm text-muted">
-          Atualmente em <b>{number?.provider === 'meta' ? 'Oficial (Meta)' : 'Não-oficial (QR)'}</b>. As conversas e o histórico continuam intactos; só a forma de enviar e receber muda.
+          Atualmente em <b>{number?.provider === 'meta' ? 'Meta Cloud API' : 'Conexão Web (QR Code)'}</b>. As conversas e o histórico continuam intactos; só a forma de enviar e receber muda.
         </p>
         <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} />
         {ps.provider === 'meta' && (

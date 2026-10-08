@@ -134,7 +134,7 @@ export function ConversationList() {
             {selectedNumber && (
               <span className={cn('inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-wider rounded px-1.5 py-0.5', selectedNumber.provider === 'meta' ? 'bg-meta-soft text-meta-ink' : 'bg-evo-soft text-evo-ink')}>
                 {selectedNumber.provider === 'meta' ? <ShieldCheck size={10} /> : <QrCode size={10} />}
-                {selectedNumber.provider === 'meta' ? 'Oficial' : 'QR'}
+                {selectedNumber.provider === 'meta' ? 'Meta' : 'QR'}
               </span>
             )}
             <ChevronDown size={15} className="text-faint" />

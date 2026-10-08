@@ -153,7 +153,7 @@ export interface ReserveInput {
   warmupGapMs?: number;
 }
 
-/** espaçamento do automático: só no não oficial (a Meta não pune ritmo) */
+/** espaçamento do automático: só no QR (a Meta não pune ritmo) */
 const autoGapMs = (i: ReserveInput) => (i.automated && i.provider !== 'meta' ? AUTO_GAP_MS[0] + Math.floor(Math.random() * (AUTO_GAP_MS[1] - AUTO_GAP_MS[0] + 1)) : 0);
 
 @Injectable()

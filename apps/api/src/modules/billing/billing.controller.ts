@@ -255,9 +255,9 @@ export class BillingController {
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
+      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
     }
-    const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies] = await Promise.all([
+    const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies, tenant] = await Promise.all([
       this.usage.current(user.tenantId),
       this.usage.limits(user.tenantId),
       this.prisma.subscription.findUnique({ where: { tenantId: user.tenantId }, include: { plan: true } }),
@@ -267,6 +267,7 @@ export class BillingController {
       this.prisma.flow.count({ where: { tenantId: user.tenantId, isActive: true } }),
       this.prisma.quickReply.count({ where: { folder: { tenantId: user.tenantId } } }),
       this.prisma.company.count({ where: { tenantId: user.tenantId } }),
+      this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { billingType: true } }),
     ]);
     return {
       period: periodOf(),
@@ -287,7 +288,10 @@ export class BillingController {
       billingCycle: sub?.plan.billingCycle ?? null,
       // o que ELE paga, não o preço de tabela: quem assinou antes de um reajuste continua no
       // valor contratado, e mostrar o do catálogo seria avisar de uma cobrança que não existe
-      priceMonth: sub ? Number(sub.priceMonth ?? sub.plan.priceMonth) : null,
+      // grupo consolidado: preço por empresa × unidades (docs/empresas.md#cobrança)
+      priceMonth: sub ? Number(sub.priceMonth ?? sub.plan.priceMonth) * Math.max(1, sub.units) : null,
+      units: sub?.units ?? 1,
+      billingType: tenant?.billingType ?? 'INDIVIDUAL',
       /** reajuste já avisado e ainda não aplicado — a tela do cliente mostra antes de chegar */
       priceChange:
         sub && sub.plan.priceAppliesToExistingAt && Number(sub.priceMonth ?? sub.plan.priceMonth) !== Number(sub.plan.priceMonth)

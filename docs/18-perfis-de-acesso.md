@@ -87,12 +87,19 @@ tela é conveniência, não segurança.
 | POST | `/profiles` | `profiles.manage` | Cria (filtra por `grantable`) |
 | PATCH | `/profiles/:id` | `profiles.manage` | Edita (filtra por `grantable`) |
 | DELETE | `/profiles/:id` | `profiles.manage` | Exclui (recusa padrão e em uso) |
-| PATCH | `/tenants/me/agents/:id` | `team.manage` | `profileId` vincula; `""` desvincula |
+| PATCH | `/tenants/me/agents/:id` | `team.manage` | `profileId` vincula; `""` desvincula. `name`: admin da conta renomeia qualquer pessoa; gerente, só atendentes. `email`/`role` (`agent`\|`manager`): mesma regra de alcance, `role` só pelo admin; revogam as sessões e invalidam o cache de permissões |
+| PATCH | `/auth/me` | — | `{name}`: cada um edita o próprio nome (Configurações → Meu perfil) |
 
 ## Interface
 
 **Equipe** ganhou a seção **Perfis de acesso** e a coluna "Papel" virou **Perfil de acesso**,
 com seletor por pessoa. `useCan('x')` esconde o que a pessoa não pode fazer.
+
+## Perfis na criação do cliente
+
+`POST /tenants` já cria os três perfis padrão na mesma transação (antes nasciam no primeiro
+acesso à tela). Com um **modelo de perfil**, Gerente/Atendente vêm com a matriz do modelo
+(`customized`) e membros novos entram no perfil do papel — ver [20](20-modelos-de-perfil.md).
 
 ## Próximo passo
 
@@ -169,3 +176,19 @@ Fica em **Equipe → coluna Números**. Nenhum marcado = **todos**, que é o pad
 Antes isto era um ícone de telefone solto na coluna de ações **que sumia quando o cliente tinha menos de dois números** — ou seja, a funcionalidade existia no banco e não tinha como ser configurada por quem tem um número hoje e dois amanhã. Agora é coluna com o resumo escrito.
 
 Isto é **escopo de dados, não permissão**: "pode configurar números" (`numbers.manage`) é outra coisa, e nenhuma permissão restringe por número.
+
+## Gestão da conexão do número
+
+`numbers.manage` diz **se** a pessoa mexe em números; o escopo de números diz **em quais**.
+Conectar (QR Code), reconectar, desconectar, trocar provider, editar, sincronizar agenda e
+excluir passam pelos dois (`canManageNumber` em `number-scope.ts`):
+
+| Quem | Gerencia |
+|---|---|
+| Admin da conta (`tenant_admin`) e dono entrando como cliente | qualquer número da conta, mesmo se restringido no atendimento |
+| Demais com `numbers.manage` | só os números que operam (nenhum marcado = todos) |
+| Sem `numbers.manage` | nenhum |
+
+Quem é restrito e cadastra um número novo passa a operá-lo automaticamente — senão perderia o
+QR do número que acabou de criar. `GET /numbers` devolve `manageable` por número e a tela de
+Números só mostra os botões de gestão onde a API vai aceitar.

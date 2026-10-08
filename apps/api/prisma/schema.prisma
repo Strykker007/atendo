@@ -41,9 +41,17 @@ model Tenant {
   state          String?
   /// anotações internas do dono sobre o cliente
   notes          String?
+  /// Como a assinatura do cliente é calculada (docs/empresas.md#cobrança). INDIVIDUAL = preço
+  /// cheio do plano, independente de quantas empresas; CONSOLIDATED_GROUP = holding: preço do
+  /// plano × empresas ativas que herdam a assinatura do grupo (`subscriptions.units`).
+  billingType    BillingType @default(INDIVIDUAL)
+  /// modelo de perfil (vertical) usado na criação — só registro de origem; apagar o modelo não
+  /// mexe no que o cliente já recebeu. Clientes com modelo ligam membros novos ao perfil padrão do papel.
+  templateId     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  template      TenantTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   users         User[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
@@ -70,10 +78,31 @@ model Tenant {
   sales         Sale[]
   departments   Department[]
   companies     Company[]
+  companySubscriptions CompanySubscription[]
 
   scheduledMessages ScheduledMessage[]
   globalVariables GlobalVariable[]
   @@map("tenants")
+}
+
+/// Modelo de perfil (vertical: Farmácia, Clínica…): o que um cliente novo já recebe ao nascer —
+/// matriz de permissões dos perfis, respostas rápidas e fluxos. Só o dono do sistema mexe.
+/// Ver docs/20-modelos-de-perfil.md.
+model TenantTemplate {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  /// o modelo pré-escolhido no "Novo cliente" e usado quando a criação não diz qual — no máximo um
+  isDefault   Boolean  @default(false)
+  /// TemplateContent (tenants/tenant-template.ts): perfis + respostas rápidas + fluxos + motivos de não compra, no
+  /// formato portável — sem ids, etiquetas por nome, sem mídia
+  content     Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenants Tenant[]
+
+  @@map("tenant_templates")
 }
 
 enum Role {
@@ -151,12 +180,18 @@ model Company {
   /// CNPJ só com dígitos; opcional (unidade interna não precisa)
   cnpj        String?
   description String?
+  /// CONSOLIDATED_GROUP (padrão) = herda a assinatura do cliente; INDIVIDUAL = tem a sua
+  /// própria (`company_subscriptions`). Só o dono muda.
+  billingType BillingType @default(CONSOLIDATED_GROUP)
+  /// Ativa para cobrança: inativa não entra na conta do grupo nem gera vencimento. Só o dono muda.
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  numbers WhatsAppNumber[]
-  users   UserCompany[]
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  numbers      WhatsAppNumber[]
+  users        UserCompany[]
+  subscription CompanySubscription?
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -348,7 +383,7 @@ enum WhatsAppProvider {
   evolution
 }
 
-/// Faixas de atraso entre envios. Rajada é o padrão que o WhatsApp pune no não-oficial.
+/// Faixas de atraso entre envios. Rajada é o padrão que o WhatsApp pune no QR.
 enum SendDelayProfile {
   instant
   fast
@@ -373,7 +408,7 @@ model WhatsAppNumber {
   label    String
   /// Cor do canal: diferencia de relance, na lista e no chat, por qual número a conversa entrou
   color    String @default("#64748b")
-  /// A troca oficial <-> não-oficial é somente este campo.
+  /// A troca Meta <-> QR é somente este campo.
   provider WhatsAppProvider @default(evolution)
   /// Identificador do número dentro do provider: phone_number_id (Meta) ou instanceName (Evolution)
   externalId     String
@@ -382,7 +417,7 @@ model WhatsAppNumber {
   status         NumberStatus @default(disconnected)
   /// Rateio de infra por mês, usado só no relatório de margem (Evolution)
   infraCostMonth Decimal      @default(0) @db.Decimal(10, 2)
-  // ---- proteção contra bloqueio/banimento (só faz sentido no não-oficial) ----
+  // ---- proteção contra bloqueio/banimento (só faz sentido no QR) ----
   /// intervalo entre envios deste número; `instant` só para a API oficial
   sendDelay      SendDelayProfile @default(fast)
   /// teto de envios PROATIVOS por dia (resposta dentro de 24h não conta). 0 = sem teto (padrão)
@@ -1212,6 +1247,7 @@ model Plan {
   updatedAt    DateTime     @updatedAt
 
   subscriptions Subscription[]
+  companySubscriptions CompanySubscription[]
 
   @@map("plans")
 }
@@ -1231,6 +1267,13 @@ enum BillingGateway {
   asaas
 }
 
+/// Modo de cobrança (docs/empresas.md#cobrança). No tenant: se o preço escala por empresa.
+/// Na empresa: se ela herda a assinatura do grupo ou tem a própria.
+enum BillingType {
+  INDIVIDUAL
+  CONSOLIDATED_GROUP
+}
+
 model Subscription {
   id                 String             @id @default(uuid())
   tenantId           String             @unique
@@ -1246,6 +1289,9 @@ model Subscription {
   /// preço de quem já assina não muda sozinho, e exibir o preço do catálogo mostraria um
   /// valor que não é o que ele paga.
   priceMonth         Decimal?  @db.Decimal(10, 2)
+  /// Quantas unidades a assinatura cobra: 1, ou as empresas ativas que herdam a assinatura
+  /// quando `tenants.billingType = CONSOLIDATED_GROUP`. Valor do ciclo = priceMonth × units.
+  units              Int       @default(1)
   /// avisa que o cliente pediu cancelamento ao fim do período
   cancelAtPeriodEnd  Boolean   @default(false)
   graceUntil         DateTime?
@@ -1257,6 +1303,31 @@ model Subscription {
   plan   Plan   @relation(fields: [planId], references: [id])
 
   @@map("subscriptions")
+}
+
+/// Assinatura própria de uma empresa em modo INDIVIDUAL. Define só o preço e o vencimento da
+/// unidade — os limites de uso continuam vindo da assinatura do cliente. Sem gateway: é paga
+/// por cobrança avulsa do Asaas no painel de vencimentos (sozinha ou junto com outras).
+model CompanySubscription {
+  id                 String             @id @default(uuid())
+  tenantId           String
+  companyId          String             @unique
+  planId             String
+  status             SubscriptionStatus @default(active)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  /// preço contratado (equivalente mensal); null = o do plano
+  priceMonth         Decimal?           @db.Decimal(10, 2)
+  canceledAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan    Plan    @relation(fields: [planId], references: [id])
+
+  @@index([tenantId])
+  @@map("company_subscriptions")
 }
 
 enum BillingCategory {
@@ -1414,6 +1485,9 @@ model Invoice {
   hostedUrl     String?
   dueAt         DateTime?
   paidAt        DateTime?
+  /// Cobrança consolidada do painel de vencimentos: o que ela quita (grupo e/ou empresas),
+  /// congelado na emissão. Formato `ConsolidatedItem[]` (billing/dues.service.ts). Null = fatura comum.
+  items         Json?
   createdAt     DateTime      @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)

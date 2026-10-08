@@ -4,7 +4,7 @@
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api, getAccessToken, onAccessToken } from '../api';
+import { api, getAccessToken, onAccessToken, refresh } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingSpeed } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
@@ -19,9 +19,20 @@ export const useCreateAgent = () => {
 export const useResendInvite = () => useMutation({ mutationFn: (id: string) => api<{ ok: boolean; emailSent: boolean; inviteLink: string }>(`/tenants/me/agents/${id}/resend-invite`, { method: 'POST' }) });
 /** Link de convite para mandar por WhatsApp — não depende de e-mail configurado. */
 export const useInviteLink = () => useMutation({ mutationFn: (id: string) => api<{ link: string; expiresInHours: number }>(`/tenants/me/agents/${id}/invite-link`, { method: 'POST' }) });
+/**
+ * Nome de exibição de quem está logado. O nome também vai no access token (é o que a API usa
+ * como autor de nota, assinatura etc.): renova a sessão para o token novo já sair com ele.
+ */
+export const useUpdateMe = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { name: string }) => api<{ id: string; name: string }>('/auth/me', { method: 'PATCH', body: JSON.stringify(b) }),
+    onSuccess: async () => { await refresh(); qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['agents'] }); },
+  });
+};
 export const useChangePassword = () => useMutation({ mutationFn: (b: { current: string; password: string }) => api('/auth/change-password', { method: 'POST', body: JSON.stringify(b) }) });
 
 export const useUpdateAgent = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; password?: string; profileId?: string; numberIds?: string[]; typingSpeed?: TypingSpeed }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; email?: string; role?: 'agent' | 'manager'; isActive?: boolean; password?: string; profileId?: string; numberIds?: string[]; typingSpeed?: TypingSpeed }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };

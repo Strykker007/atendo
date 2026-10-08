@@ -93,7 +93,7 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
 }
 
 /**
- * O que o sistema não consegue medir e mais derruba número não oficial: chip sem histórico,
+ * O que o sistema não consegue medir e mais derruba número QR: chip sem histórico,
  * pareado logo após registrar, e aparelhos antigos sobrando. Não bloqueia — o QR aparece quando
  * a pessoa confirma os três —, mas obriga a ler antes de conectar.
  */

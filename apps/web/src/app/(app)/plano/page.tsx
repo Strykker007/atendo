@@ -3,13 +3,15 @@ import { CreditCard, MessageSquare, FileText, Smartphone, Users, AlertTriangle, 
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
-import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature, useCan, useAsaasPending, type Plan, type AsaasPayment } from '@/lib/hooks';
+import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature, useCan, useAsaasPending, useCompanies, type Plan, type AsaasPayment } from '@/lib/hooks';
 import { AsaasCheckoutModal } from '@/components/billing/AsaasCheckoutModal';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState, Suspense } from 'react';
-import { ExternalLink, Check, Receipt } from 'lucide-react';
+import { ExternalLink, Check, Receipt, CalendarClock } from 'lucide-react';
+import Link from 'next/link';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   trialing: { label: 'Período de teste', cls: 'bg-meta-soft text-meta-ink' },
@@ -45,6 +47,9 @@ function PlanoInner() {
   const pending = useAsaasPending(isAdmin && asaasSub);
   const openPayment = pending.data?.payment ?? null;
   const closeAsaas = useCallback(() => { setAsaasPlan(null); setAsaasPay(null); }, []);
+  // com empresas, trocar de plano pede confirmação dizendo para quais empresas vale
+  const [confirmar, setConfirmar] = useState<Plan | null>(null);
+  const companies = useCompanies();
   useEffect(() => {
     if (params.get('success')) { toast.ok('Assinatura confirmada! Obrigado.'); refetch(); }
     if (params.get('changed')) { toast.ok('Plano alterado. A diferença é ajustada na próxima fatura.'); refetch(); }
@@ -78,6 +83,18 @@ function PlanoInner() {
   const fimGratis = u.freePlan?.durationDays && u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : null;
   const [y, m] = u.period.split('-');
   const periodLabel = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  // Com empresas, o plano desta tela é o do GRUPO: vale para as que herdam. As de plano próprio
+  // (só o dono configura) não mudam aqui — e a tela precisa dizer isso, senão o cliente não sabe
+  // de qual empresa está trocando o plano. Ver docs/empresas.md#cobrança.
+  const empresas = (companies.data ?? []).filter((c) => c.isActive);
+  const temEmpresas = empresas.length > 0;
+  const doGrupo = empresas.filter((c) => c.billingType === 'CONSOLIDATED_GROUP');
+  const proprias = empresas.filter((c) => c.billingType === 'INDIVIDUAL');
+  const nomes = (l: { name: string }[]) => l.map((c) => c.name).join(', ');
+  const escopo = temEmpresas
+    ? `Vale para ${doGrupo.length ? nomes(doGrupo) : 'a conta (nenhuma empresa herda o plano do grupo)'}.${proprias.length ? ` Não muda: ${nomes(proprias)} (plano próprio).` : ''}`
+    : undefined;
+  const escolher = (p: Plan) => (u.gateway === 'asaas' ? setAsaasPlan(p) : go(checkout.mutateAsync(p.id)));
 
   return (
     <PageShell width="max-w-4xl">
@@ -87,12 +104,13 @@ function PlanoInner() {
       <div className="rounded-2xl bg-panel border border-line p-4 flex flex-wrap items-center gap-5">
         <div className="w-12 h-12 rounded-xl bg-accent-soft text-accent grid place-items-center"><CreditCard size={22} /></div>
         <div className="flex-1 min-w-40">
-          <div className="text-xs text-muted">Plano atual</div>
+          <div className="text-xs text-muted">{temEmpresas ? 'Plano do grupo' : 'Plano atual'}</div>
           <div className="text-lg font-semibold">{u.plan}</div>
+          {temEmpresas && <div className="text-xs text-muted">{doGrupo.length ? <>Vale para <b className="text-ink font-medium">{nomes(doGrupo)}</b></> : 'Nenhuma empresa usa o plano do grupo'}</div>}
         </div>
         <div>
           <div className="text-xs text-muted">Mensalidade</div>
-          <div className="font-medium">{u.freePlan ? 'Gratuito' : u.priceMonth != null ? brl(u.priceMonth) : '—'}{u.billingCycle === 'yearly' && <span className="text-[11px] text-muted font-normal"> (plano anual)</span>}</div>
+          <div className="font-medium">{u.freePlan ? 'Gratuito' : u.priceMonth != null ? brl(u.priceMonth) : '—'}{u.billingCycle === 'yearly' && <span className="text-[11px] text-muted font-normal"> (plano anual)</span>}{u.units > 1 && <span className="text-[11px] text-muted font-normal"> · {u.units} empresas</span>}</div>
           {/* reajuste já avisado: aparece aqui também, não só no e-mail, porque e-mail se perde
               e a conta do mês que vem não pode ser surpresa */}
           {u.priceChange && (
@@ -123,6 +141,28 @@ function PlanoInner() {
           </Button>
         )}
       </div>
+      {proprias.length > 0 && (
+        <div className="rounded-2xl bg-panel border border-line">
+          <div className="px-4 py-2.5 border-b border-line text-sm font-medium text-ink flex items-center gap-2"><Store size={15} className="text-muted" /> Empresas com plano próprio</div>
+          <ul className="divide-y divide-line">
+            {proprias.map((c) => (
+              <li key={c.id} className="px-4 py-2 flex flex-wrap items-baseline gap-x-3 text-sm">
+                <span className="font-medium text-ink">{c.name}</span>
+                <span className="text-muted">{c.subscription ? c.subscription.plan.name : 'plano a definir'}</span>
+                {c.subscription && <span className="ml-auto text-xs text-faint">vence {new Date(c.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')}</span>}
+              </li>
+            ))}
+          </ul>
+          <p className="px-4 py-2 border-t border-line text-xs text-muted">Pagas em Vencimentos. Para trocar o plano de uma delas, fale com o suporte.</p>
+        </div>
+      )}
+      {isAdmin && (
+        <Link href="/plano/vencimentos" className="flex items-center gap-3 rounded-2xl bg-panel border border-line px-4 py-3 text-sm hover:border-accent">
+          <CalendarClock size={18} className="text-accent shrink-0" />
+          <span className="flex-1"><b className="text-ink">Vencimentos</b> <span className="text-muted">— assinatura do grupo e de cada empresa numa lista só; pague tudo num boleto/PIX único.</span></span>
+          <span className="text-accent-ink text-xs font-medium">Abrir</span>
+        </Link>
+      )}
       {u.cancelAtPeriodEnd && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Cancelamento agendado: a assinatura termina em {u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}. Você pode reativar em “Pagamento e faturas”.</p>}
 
       {(u.status === 'past_due' || u.status === 'suspended') && (
@@ -160,7 +200,8 @@ function PlanoInner() {
       {/* Planos */}
       {isAdmin && (
         <section className="space-y-3">
-          <h2 className="font-display font-semibold text-ink">Planos</h2>
+          <h2 className="font-display font-semibold text-ink">{temEmpresas ? 'Mudar o plano do grupo' : 'Planos'}</h2>
+          {escopo && <p className="text-sm text-muted -mt-2">{escopo}</p>}
           {!u.billingEnabled && <p className="text-sm text-muted">Cobrança online ainda não configurada — para mudar de plano, fale com o suporte.</p>}
           <div className="grid gap-4 md:grid-cols-3">
             {plans.data?.map((p) => {
@@ -187,7 +228,7 @@ function PlanoInner() {
                     <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{qtdMes(L.includedTemplatesMonth, 'templates', 'ilimitados')}</li>
                     <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{L.hardLimit ? 'Bloqueia ao atingir o limite' : `Excedente ${brl(L.overagePricePerMessage ?? 0)}/msg`}</li>
                   </ul>
-                  <Button className="w-full" variant={current ? 'ghost' : 'primary'} disabled={current || !u.billingEnabled || semPreco} loading={checkout.isPending && checkout.variables === p.id} onClick={() => (u.gateway === 'asaas' ? setAsaasPlan(p) : go(checkout.mutateAsync(p.id)))}>
+                  <Button className="w-full" variant={current ? 'ghost' : 'primary'} disabled={current || !u.billingEnabled || semPreco} loading={checkout.isPending && checkout.variables === p.id} onClick={() => (temEmpresas ? setConfirmar(p) : escolher(p))}>
                     {current ? 'Plano atual' : u.status && u.status !== 'canceled' && u.billingEnabled ? 'Mudar para este' : 'Assinar'}
                   </Button>
                   {semPreco && <p className="text-xs text-muted text-center">Este plano ainda não está à venda online — fale com o suporte para mudar.</p>}
@@ -198,7 +239,15 @@ function PlanoInner() {
         </section>
       )}
 
-      <AsaasCheckoutModal plan={asaasPlan} payment={asaasPay} onClose={closeAsaas} />
+      <AsaasCheckoutModal plan={asaasPlan} payment={asaasPay} escopo={escopo} onClose={closeAsaas} />
+      <ConfirmDialog
+        open={!!confirmar}
+        title={`Mudar o plano do grupo para ${confirmar?.name ?? ''}?`}
+        text={escopo ?? ''}
+        confirmLabel="Continuar"
+        onConfirm={() => { if (confirmar) escolher(confirmar); }}
+        onClose={() => setConfirmar(null)}
+      />
 
       {/* Faturas */}
       {isAdmin && !!invoices.data?.length && (

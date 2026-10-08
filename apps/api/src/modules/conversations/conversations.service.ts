@@ -366,7 +366,7 @@ export class ConversationsService {
 
   /**
    * Regra do envio frio (cold-send.ts): o contato não escreveu neste número nas últimas 24h.
-   * Não oficial → o atendente gasta uma das vagas de contato frio do dia (409
+   * QR → o atendente gasta uma das vagas de contato frio do dia (409
    * `cold_quota_exhausted` quando acabam); o automático é recusado (409 `cold_send_unofficial`).
    * Oficial → a Meta já exige template (checado antes); para o atendente entra também o recurso
    * do plano. Envio do sistema não confere o recurso: campanha e agenda têm os próprios.
@@ -407,7 +407,7 @@ export class ConversationsService {
     if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
   }
 
-  /** Vagas de contato frio usadas no número (só não oficial; o oficial fala primeiro por template). */
+  /** Vagas de contato frio usadas no número (só QR; o oficial fala primeiro por template). */
   async coldQuota(tenantId: string, numberId: string) {
     const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: numberId, tenantId, deletedAt: null }, select: { provider: true } });
     if (!number) throw new NotFoundException('Número não encontrado');
@@ -446,7 +446,7 @@ export class ConversationsService {
     if (template && conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
     if (conv.number.provider === 'meta' && !template && !inMetaWindow(conv.lastInboundAt)) throw new BadRequestException('O contato não escreve há mais de 24 horas: na API oficial da Meta, depois disso só sai template aprovado.');
     if (!opts?.allowCold) await this.assertColdAllowed(conv);
-    const quota = await this.usage.canSend(conv.tenantId, template ? 'templates' : 'messages');
+    const quota = await this.usage.canSend(conv.tenantId, template ? 'templates' : 'messages', conv.numberId);
     if (!quota.ok) throw new ForbiddenException(quota.reason);
     // variações `{Oi|Olá}` sorteadas por envio: robô mandando o texto idêntico a todos é padrão de spam
     if (text) text = spin(text);
@@ -579,7 +579,7 @@ export class ConversationsService {
     }
     await this.assertColdAllowed(conv, author);
 
-    const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages');
+    const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages', conv.numberId);
     if (!quota.ok) throw new ForbiddenException(quota.reason);
 
     // Responder = assumir. Atômico: se outra atendente assumiu no meio tempo, falha com o nome dela.
@@ -759,7 +759,7 @@ export class ConversationsService {
     await this.assertHasWhatsApp(contact.id, number.id, contact.phone, checkPhone);
     // envio frio antes de criar/reabrir: recusado não pode deixar conversa reaberta à toa
     await this.assertColdAllowed({ tenantId, contactId: contact.id, numberId: number.id, lastInboundAt: conv?.lastInboundAt ?? null, number }, author);
-    const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages');
+    const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages', number.id);
     if (!quota.ok) throw new ForbiddenException(quota.reason);
 
     // template: variáveis do painel ({{contact.first_name}}…) resolvidas antes de ir para a Meta

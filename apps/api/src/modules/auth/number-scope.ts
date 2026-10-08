@@ -44,3 +44,16 @@ export function narrowTo(user: Scoped, requested?: string | null): { in: string[
   if (canUseNumber(user, requested)) return requested;
   return null;
 }
+
+/**
+ * Quem pode **gerenciar a conexão** (QR, reconectar, desconectar, trocar provider, excluir) de
+ * um número. `numbers.manage` diz "pode mexer em números"; isto diz "em qual".
+ *
+ * O admin da conta (e o dono do sistema, inclusive entrando como o cliente) mexe em qualquer
+ * número — mesmo que tenha sido restringido para atender só alguns: ele responde pela conta
+ * inteira. Os demais só nos números que operam (lista vazia = todos, como em `canUseNumber`).
+ */
+export function canManageNumber(user: Scoped & { impersonatorId?: string }, numberId: string | null | undefined): boolean {
+  if (user.role === 'tenant_admin' || user.impersonatorId) return true;
+  return canUseNumber(user, numberId);
+}

@@ -8,7 +8,7 @@ Plataforma SaaS de atendimento via WhatsApp: múltiplos clientes (tenants), múl
 |---|---|
 | API | NestJS 11 (TypeScript), Prisma, PostgreSQL 16, Redis 7, BullMQ, Socket.IO |
 | Web | Next.js 15 (App Router), React 19, Tailwind, TanStack Query, Zustand |
-| WhatsApp | `WhatsAppProvider` com dois adapters: **Meta Cloud API** (oficial) e **Evolution API** (não-oficial, QR code) |
+| WhatsApp | `WhatsAppProvider` com dois adapters: **Meta Cloud API** (oficial) e **Evolution API** (QR code) |
 | Monorepo | pnpm workspaces + Turborepo |
 
 ```

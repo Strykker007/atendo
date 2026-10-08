@@ -87,7 +87,7 @@ export class CampaignsService {
     const number = await this.prisma.whatsAppNumber.findUniqueOrThrow({ where: { id: campaign.numberId } });
     if (number.status !== 'connected') throw new BadRequestException(`O número "${number.label}" está desconectado.`);
     // transmissão é envio frio por definição (docs/envio.md#envio-frio): só pelo número oficial
-    if (number.provider !== 'meta') throw new BadRequestException(`Transmissão em massa só sai pelo número oficial (API da Meta). Pelo número não oficial ela é a causa nº 1 de bloqueio — troque o número da campanha.`);
+    if (number.provider !== 'meta') throw new BadRequestException(`Transmissão em massa só sai por número Meta Cloud API. Pela Conexão Web (QR Code) ela é a causa nº 1 de bloqueio — troque o número da campanha.`);
 
     const updated = await this.prisma.campaign.update({
       where: { id },

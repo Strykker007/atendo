@@ -76,10 +76,10 @@ services:
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
     volumes: ["./volumes/redis:/data"]
 
-  # Provider não-oficial. Para muitos números, repita este bloco como evolution-2, evolution-3 (shards).
+  # Provider QR code. Para muitos números, repita este bloco como evolution-2, evolution-3 (shards).
   evolution:
     # versão FIXA (docs/04-providers-whatsapp.md#versão-da-evolution): `:latest` atualizava sozinha
-    # a cada deploy — mudança de comportamento do cliente não oficial sem ninguém testar. Trocar
+    # a cada deploy — mudança de comportamento do cliente WhatsApp Web sem ninguém testar. Trocar
     # só depois de testar a nova em homologação.
     image: evoapicloud/evolution-api:v2.3.7
     restart: unless-stopped
@@ -114,7 +114,7 @@ services:
       LOG_LEVEL: ERROR,WARN
       # Como o aparelho aparece em "Dispositivos conectados" e no handshake com o WhatsApp
       # (Baileys: [cliente, navegador, versão]). O padrão da Evolution é "Evolution API" — marca
-      # explícita de cliente não oficial. Windows + Chrome = um WhatsApp Web comum.
+      # explícita de cliente WhatsApp Web. Windows + Chrome = um WhatsApp Web comum.
       # Só vale para sessões NOVAS (QR lido depois do deploy). Ver docs/04-providers-whatsapp.md
       CONFIG_SESSION_PHONE_CLIENT: Windows
       CONFIG_SESSION_PHONE_NAME: Chrome

@@ -29,7 +29,7 @@ export function WaRemovedExplanation({ number }: { number: NumberItem }) {
       <p className="font-medium">Isso acontece por um destes motivos:</p>
       <ul className="list-disc pl-5 space-y-0.5">
         <li>alguém removeu o aparelho em <b>WhatsApp → Aparelhos conectados</b>, no celular do número;</li>
-        <li>o WhatsApp considerou o uso suspeito: conexão não oficial (por QR Code), <b>contatos bloqueando ou denunciando</b> o número, ou conteúdo contra a política comercial dele (por exemplo, venda de medicamentos).</li>
+        <li>o WhatsApp considerou o uso suspeito: conexão pelo WhatsApp QR Code (Conexão Web), <b>contatos bloqueando ou denunciando</b> o número, ou conteúdo contra a política comercial dele (por exemplo, venda de medicamentos).</li>
       </ul>
       <p className="font-medium">O que fazer:</p>
       <ol className="list-decimal pl-5 space-y-0.5">
@@ -39,7 +39,7 @@ export function WaRemovedExplanation({ number }: { number: NumberItem }) {
           {number.reconnectBlockedUntil && emPausa(number) && <> — o recomendado é a partir de <b>{hora(number.reconnectBlockedUntil)}</b></>}.
           Reconectar logo em seguida é o que costuma transformar a queda em restrição da conta.
         </li>
-        <li>Se voltar a cair, considere a <b>API oficial do WhatsApp (Meta)</b>, que não depende de QR Code.</li>
+        <li>Se voltar a cair, considere a <b>Meta Cloud API</b>, que não depende de QR Code.</li>
       </ol>
     </div>
   );

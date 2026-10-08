@@ -424,7 +424,8 @@ Seu plano e seu uso: ${env.WEB_ORIGIN}/plano`,
         try {
           if (sub.externalId && sub.gateway === 'asaas') {
             // no Asaas o valor mora na assinatura: muda só as próximas cobranças
-            await this.asaas.updateSubscriptionValue(sub.externalId, plan.billingCycle === 'yearly' ? Number(plan.priceYear ?? 0) : novo);
+            // grupo consolidado: o valor da assinatura é o do plano × empresas (`units`)
+            await this.asaas.updateSubscriptionValue(sub.externalId, (plan.billingCycle === 'yearly' ? Number(plan.priceYear ?? 0) : novo) * Math.max(1, sub.units));
           } else if (sub.externalId && plan.stripePriceId && this.enabled) {
             const atual = await this.client.subscriptions.retrieve(sub.externalId);
             const item = atual.items.data[0];

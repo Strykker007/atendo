@@ -4,7 +4,7 @@ import { COLD_CONTACTS_PER_DAY, TYPING_MAX_MS } from '@atendo/shared';
 import { useColdQuota } from '@/lib/hooks';
 
 /**
- * Todas as travas de proteção do número QR (não oficial) num lugar só, em linguagem de cliente.
+ * Todas as travas de proteção do número QR num lugar só, em linguagem de cliente.
  * Antes cada regra aparecia só no erro dela — a pessoa esbarrava sem saber que a regra existia.
  * Detalhes técnicos em docs/envio.md.
  */
@@ -30,7 +30,7 @@ export function ProtectionRules({ numberId }: { numberId: string }) {
         <li>
           <b className="text-ink">Contato que não escreveu nas últimas 24 horas.</b> O atendente pode falar primeiro com até {COLD_CONTACTS_PER_DAY} contatos assim por dia
           {restam !== null && <> (restam <b className="text-ink">{restam}</b> agora)</>}. Mensagem automática (fluxo, boas-vindas) não sai para eles.
-          Para chamar muitos contatos, use um número oficial.
+          Para chamar muitos contatos, use um número Meta Cloud API.
         </li>
         <li>
           <b className="text-ink">Robô com limite por hora.</b> Fluxos e mensagens automáticas têm um teto por hora e esperam alguns segundos entre si.

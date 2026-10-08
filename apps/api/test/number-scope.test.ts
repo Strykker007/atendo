@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canUseNumber, narrowTo, numberFilter, unrestricted, type Scoped } from '../src/modules/auth/number-scope';
+import { canManageNumber, canUseNumber, narrowTo, numberFilter, unrestricted, type Scoped } from '../src/modules/auth/number-scope';
 
 const u = (numberIds?: string[], role = 'agent'): Scoped => ({ role, numberIds });
 
@@ -50,5 +50,22 @@ describe('narrowTo', () => {
   it('pedido proibido vira null — nunca "sem filtro"', () => {
     // devolver undefined aqui mostraria justamente os números que a pessoa não pode ver
     expect(narrowTo(u(['n1']), 'n3')).toBeNull();
+  });
+});
+
+describe('gestão da conexão do número', () => {
+  it('admin da conta gerencia qualquer número, mesmo restringido no atendimento', () => {
+    expect(canManageNumber(u(['n1'], 'tenant_admin'), 'n9')).toBe(true);
+  });
+  it('dono entrando como o cliente gerencia qualquer número', () => {
+    expect(canManageNumber({ ...u(['n1'], 'tenant_admin'), impersonatorId: 'dono' }, 'n9')).toBe(true);
+  });
+  it('atendente restringido só gerencia o número que opera', () => {
+    expect(canManageNumber(u(['n1']), 'n1')).toBe(true);
+    expect(canManageNumber(u(['n1']), 'n9')).toBe(false);
+    expect(canManageNumber(u(['n1'], 'manager'), 'n9')).toBe(false);
+  });
+  it('sem vínculo gerencia todos (lista vazia = todos)', () => {
+    expect(canManageNumber(u([]), 'n9')).toBe(true);
   });
 });

@@ -19,11 +19,13 @@ export class FinanceService {
 
   async overview(months = 12) {
     const periods = this.periods(months);
-    const [subs, invoices, counters, tenants] = await Promise.all([
+    const [subs, invoices, counters, tenants, companySubs] = await Promise.all([
       this.prisma.subscription.findMany({ include: { plan: true, tenant: { select: { name: true } } } }),
       this.prisma.invoice.findMany({ where: { period: { in: periods } }, include: { tenant: { select: { name: true } } }, orderBy: { createdAt: 'desc' } }),
       this.prisma.usageCounter.findMany({ where: { period: { in: periods } } }),
       this.prisma.tenant.findMany({ select: { id: true, createdAt: true, numbers: { select: { infraCostMonth: true } } } }),
+      // assinaturas próprias de empresas (modo INDIVIDUAL — docs/empresas.md#cobrança)
+      this.prisma.companySubscription.findMany({ where: { status: { in: ['active', 'past_due'] }, company: { isActive: true, billingType: 'INDIVIDUAL' } }, include: { plan: true } }),
     ]);
 
     const infraTotal = tenants.reduce((a, t) => a + t.numbers.reduce((b, n) => b + Number(n.infraCostMonth), 0), 0);
@@ -60,8 +62,10 @@ export class FinanceService {
     // o preço contratado manda sobre o de tabela: cliente congelado num preço antigo rende o
     // que ele paga, não o que o plano custa hoje — somar o do catálogo inflaria o MRR.
     // Contratado zerado em plano pago é resto de plano gratuito/cadastro, não preço: usa o do plano
-    const price = (s: (typeof subs)[number]) => Number(s.priceMonth ?? 0) > 0 ? Number(s.priceMonth) : Number(s.plan.priceMonth);
-    const mrr = active.filter(paying).reduce((a, s) => a + price(s), 0);
+    // grupo consolidado cobra o preço por empresa: × `units`
+    const price = (s: (typeof subs)[number]) => (Number(s.priceMonth ?? 0) > 0 ? Number(s.priceMonth) : Number(s.plan.priceMonth)) * Math.max(1, s.units);
+    const companyPrice = (c: (typeof companySubs)[number]) => (c.priceMonth !== null ? Number(c.priceMonth) : Number(c.plan.priceMonth));
+    const mrr = active.filter(paying).reduce((a, s) => a + price(s), 0) + companySubs.reduce((a, c) => a + companyPrice(c), 0);
     const byPlan = Object.values(
       active.reduce<Record<string, { plan: string; count: number; trialing: number; mrr: number; cost: number; margin: number }>>((acc, s) => {
         const k = s.plan.name;
@@ -76,6 +80,12 @@ export class FinanceService {
         return acc;
       }, {}),
     );
+    // empresa com assinatura própria soma receita no plano dela (não conta como cliente novo)
+    for (const c of companySubs) {
+      const k = byPlan.find((b) => b.plan === c.plan.name) ?? (byPlan.push({ plan: c.plan.name, count: 0, trialing: 0, mrr: 0, cost: 0, margin: 0 }), byPlan[byPlan.length - 1]);
+      k.mrr += companyPrice(c);
+      k.margin = k.mrr - k.cost;
+    }
     /** custo fixo cadastrado nos planos, somado por cliente ativo */
     const planCost = active.reduce((a, s) => a + Number(s.plan.costMonth), 0);
     const current = series[series.length - 1];

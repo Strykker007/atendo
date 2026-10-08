@@ -1,5 +1,13 @@
 # 04 — Providers WhatsApp
 
+## Nomenclatura na interface
+
+Na tela, os providers se chamam **Meta Cloud API** (`meta`) e **Conexão Web** / **WhatsApp QR
+Code** (`evolution`). Nem a tela nem os textos/docs usam termos que desvalorizem a conexão QR
+— nos textos ela é "QR" / "Conexão Web". Os identificadores internos
+(`unofficial` na categoria de cobrança, `cold_send_unofficial`) continuam como estão: renomear
+exigiria migração do enum e mudaria o contrato da API.
+
 ## O contrato
 
 Tudo que fala com o WhatsApp implementa `WhatsAppProvider` (`apps/api/src/modules/whatsapp/providers/provider.interface.ts`):
@@ -39,7 +47,7 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 
 ## Comparação
 
-| | Meta Cloud API (oficial) | Evolution API (não-oficial) |
+| | Meta Cloud API (oficial) | Evolution API (QR code) |
 |---|---|---|
 | Número | Precisa estar numa WABA (conta comercial Meta); não pode estar em uso no app comum | Qualquer número, inclusive o pessoal |
 | Conexão | Token permanente + `phone_number_id` | QR code (emula WhatsApp Web via Baileys) |
@@ -82,7 +90,7 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 | Provider | Como sai | Como volta |
 |---|---|---|
 | **Meta** | até 3 opções → **botões**; 4–10 → **lista** (`interactive.type = list`) | `messages[].type = 'interactive'` com `button_reply`/`list_reply` → `InboundMessage.interactiveReplyId` + `text` = título |
-| **Evolution** | texto + **lista numerada** ("1 - Corte", "2 - Barba") — botões não são confiáveis em contas não-oficiais desde 2022 (muitos aparelhos não renderizam) | número, ou texto da opção |
+| **Evolution** | texto + **lista numerada** ("1 - Corte", "2 - Barba") — botões não são confiáveis em contas QR desde 2022 (muitos aparelhos não renderizam) | número, ou texto da opção |
 
 O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineService.choose`). Assim o mesmo fluxo funciona nos dois providers e ganha botões de verdade quando o cliente migra para a Meta. No histórico do painel a mensagem interativa aparece como texto + opções numeradas.
 
@@ -185,7 +193,7 @@ Nada mais precisa mudar.
 
 ## Proteção contra bloqueio e banimento
 
-O WhatsApp pune padrão de robô no número **não oficial**: rajada de mensagens, intervalo
+O WhatsApp pune padrão de robô no número **QR**: rajada de mensagens, intervalo
 sempre igual e volume alto num número recém-conectado. Três defesas, configuradas por
 número na tela **Números**:
 
@@ -216,7 +224,7 @@ conversa, ordem por conversa e pausa quando o número cai — ver [Envio](envio.
 
 `CONFIG_SESSION_PHONE_CLIENT: Windows` e `CONFIG_SESSION_PHONE_NAME: Chrome` na Evolution (os dois
 `infra/docker-compose*.yml`). Sem isto a Evolution se apresenta como **"Evolution API"** — no
-handshake e em *Dispositivos conectados* do celular —, marca explícita de cliente não oficial.
+handshake e em *Dispositivos conectados* do celular —, marca explícita de cliente automatizado.
 **Só vale para sessões novas**: número já pareado continua com o nome antigo até ler o QR de novo.
 
 ### Checklist antes do QR
@@ -235,7 +243,7 @@ por instância) só se o servidor estiver fora do Brasil.
 O WhatsApp pode encerrar sozinho a sessão do "aparelho conectado" (a Evolution): o
 `connection.update` chega com `state: close` e `statusReason: 401` (`stream:error` `conflict
 device_removed`). Ou alguém removeu o aparelho no celular, ou o WhatsApp desconfiou do uso
-(conexão não oficial, denúncias/bloqueios, conteúdo contra a política comercial). Caso real que
+(conexão via QR, denúncias/bloqueios, conteúdo contra a política comercial). Caso real que
 motivou isto: Drogaria Total, duas quedas em 17 h no primeiro dia de uso, reconexão 2 min
 depois da segunda — e a conta terminou restrita, com o padrão de envio saudável (≈ tantas
 enviadas quanto recebidas, sem campanha).
@@ -257,7 +265,7 @@ enviadas quanto recebidas, sem campanha).
 ### Versão da Evolution
 
 A imagem é **fixa** (`evoapicloud/evolution-api:v2.3.7` nos dois `infra/docker-compose*.yml`,
-amd64 e arm64). Com `:latest` cada deploy podia trocar o cliente não oficial sem teste — e é ele
+amd64 e arm64). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web sem teste — e é ele
 que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número de teste, depois
 trocar a tag e fazer o deploy.
 

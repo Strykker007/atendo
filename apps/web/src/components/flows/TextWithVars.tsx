@@ -110,7 +110,7 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
         </div>
         <span className="text-[10.5px] text-faint truncate ml-2" title="O texto entre {{ }} é trocado pelo valor na hora do envio">{'{{ }}'} vira o valor no envio</span>
         {/* só nos fluxos: o robô sorteia as variações; resposta rápida sai como está (docs/envio.md#variações-de-texto) */}
-        {flowVarsGroup && <span className="text-[10.5px] text-faint truncate ml-2" title="Ex.: {Oi|Olá|Bom dia}, tudo bem? — cada contato recebe uma das opções. Texto idêntico para muita gente é padrão de spam no número não oficial.">{'{Oi|Olá}'} sorteia uma</span>}
+        {flowVarsGroup && <span className="text-[10.5px] text-faint truncate ml-2" title="Ex.: {Oi|Olá|Bom dia}, tudo bem? — cada contato recebe uma das opções. Texto idêntico para muita gente é padrão de spam na Conexão Web (QR Code).">{'{Oi|Olá}'} sorteia uma</span>}
       </div>
       {open && (
         <div data-overlay className="absolute z-30 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-64 overflow-y-auto text-sm">

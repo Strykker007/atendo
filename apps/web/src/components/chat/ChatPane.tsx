@@ -458,7 +458,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const numberOffline = channelOffline(conv.number);
   /** API oficial e o contato não escreve há 24h: texto livre seria recusado, só template */
   const janelaFechada = conv.number.provider === 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
-  /** QR (não oficial) e o contato não escreve há 24h: responder gasta uma vaga de contato frio do número */
+  /** QR e o contato não escreve há 24h: responder gasta uma vaga de contato frio do número */
   const contatoFrio = conv.number.provider !== 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
   /** quem aparece como autor da citação recebida e na faixa "Respondendo a …" */

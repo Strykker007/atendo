@@ -1,7 +1,7 @@
 /**
  * O WhatsApp derrubou a sessão do "aparelho conectado" (Evolution: `401 device_removed`).
  *
- * Acontece quando o WhatsApp desconfia do uso (conexão não oficial, denúncias, conteúdo) ou
+ * Acontece quando o WhatsApp desconfia do uso (conexão via QR, denúncias, conteúdo) ou
  * quando alguém remove o aparelho em "Aparelhos conectados" no celular. Reconectar logo em
  * seguida é o que costuma transformar a queda em restrição da conta — caso real: Drogaria
  * Total, duas quedas em 17h com reconexão em 2 min, e o número terminou restrito.

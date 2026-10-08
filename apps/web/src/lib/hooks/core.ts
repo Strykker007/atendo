@@ -11,7 +11,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -79,6 +79,9 @@ export interface Folder { id: string; name: string; replies: QuickReplyItem[] }
 export const useNumbers = () => useQuery({ queryKey: ['numbers'], queryFn: () => api<NumberItem[]>('/numbers') });
 export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => api<Tag[]>('/tags') });
 export const useQuickReplies = () => useQuery({ queryKey: ['quick-replies'], queryFn: () => api<Folder[]>('/quick-replies') });
+/** No cliente: se o preço escala por empresa. Na empresa: herda do grupo ou tem assinatura própria (docs/empresas.md#cobrança). */
+export type BillingType = 'INDIVIDUAL' | 'CONSOLIDATED_GROUP';
+
 export interface Usage {
   period: string;
   billingEnabled: boolean;
@@ -96,7 +99,11 @@ export interface Usage {
   /** plano gratuito: sem fatura. `durationDays` null = permanente; senão termina em `currentPeriodEnd` */
   freePlan: { durationDays: number | null } | null;
   billingCycle: BillingCycle | null;
+  /** valor do ciclo já multiplicado pelas unidades do grupo */
   priceMonth: number | null;
+  /** grupo consolidado: quantas empresas a assinatura cobra (1 fora do grupo) */
+  units: number;
+  billingType: BillingType;
   /** reajuste já avisado e ainda não aplicado */
   priceChange: { priceMonth: number; at: string } | null;
   currentPeriodEnd: string | null;
@@ -238,7 +245,7 @@ export function useTyping(conversationId: string | null): Typing {
  * nunca zera é pior que contador nenhum, porque ensina a ignorá-lo.
  */
 /**
- * "digitando…" do atendente no WhatsApp do contato, com começo e fim (só número não oficial; a API
+ * "digitando…" do atendente no WhatsApp do contato, com começo e fim (só número QR; a API
  * decide). Enquanto a pessoa digita, renova a cada 2 s; 3 s sem teclar, enviar, apagar o texto ou
  * trocar de conversa manda "parou". Falha é ignorada — é humanização, não pode travar o chat.
  */
@@ -324,7 +331,7 @@ export const useSendMessage = (conversationId: string | null, expectedNumberId?:
   return useMutation({
     mutationFn: (input: SendInput) => api<Message>(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ ...input, expectedNumberId }) }),
     // aparece na hora, mesmo se o socket estiver reconectando
-    // cold-quota: responder contato frio no não oficial gasta uma vaga do dia
+    // cold-quota: responder contato frio no QR gasta uma vaga do dia
     onSuccess: (m) => { upsertMessageInCache(qc, m); moverConversaParaTopo(qc, m); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['cold-quota'] }); },
     onError: (err) => {
       if (err instanceof ApiError && err.code === 'number_changed') {

@@ -13,7 +13,8 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { SendPacer } from './send-pacer';
-import { canUseNumber } from '../auth/number-scope';
+import { PermissionsService } from '../auth/permissions.service';
+import { canManageNumber, canUseNumber, unrestricted } from '../auth/number-scope';
 import { ContactsSyncScheduler } from './contacts-sync';
 import { textSearch } from '../../common/text-search';
 import { phoneVariants } from '../conversations/phone-variants';
@@ -64,6 +65,7 @@ export class NumbersController {
     private readonly numbers: NumbersService,
     private readonly pacer: SendPacer,
     private readonly contactsSync: ContactsSyncScheduler,
+    private readonly permissions: PermissionsService,
   ) {}
 
   @Get()
@@ -73,8 +75,17 @@ export class NumbersController {
       select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });
-    // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts)
-    return rows.map((n) => ({ ...n, warmup: warmupPhase(n) }));
+    // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts).
+    // `manageable`: a tela mostra QR/reconectar/excluir só onde a API vai aceitar
+    const podeGerenciar = !!user.permissions?.includes('numbers.manage') || user.role === 'super_admin';
+    return rows.map((n) => ({ ...n, warmup: warmupPhase(n), manageable: podeGerenciar && canManageNumber(user, n.id) }));
+  }
+
+  /** Número da conta que esta pessoa pode gerenciar (ver `canManageNumber`); senão 403. */
+  private async manageable(user: AuthUser, id: string) {
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
+    if (!canManageNumber(user, n.id)) throw new ForbiddenException('Você só gerencia a conexão dos números que atende. Peça ao administrador da conta.');
+    return n;
   }
 
   @Post()
@@ -106,20 +117,27 @@ export class NumbersController {
     const n = existing
       ? await this.prisma.whatsAppNumber.update({ where: { id: existing.id }, data: { ...data, deletedAt: null, isActive: true, status: 'disconnected' } })
       : await this.prisma.whatsAppNumber.create({ data: { tenantId: user.tenantId, phone, ...data } });
+    // quem só opera alguns números e cadastra um novo passa a operá-lo — senão perderia o
+    // acesso ao QR do número que acabou de criar
+    if (!unrestricted(user) && user.role !== 'tenant_admin') {
+      await this.prisma.userNumber.createMany({ data: [{ userId: user.id, numberId: n.id }], skipDuplicates: true });
+      this.permissions.invalidate();
+    }
     return this.numbers.switchProvider(n.id, dto.provider, config as any);
   }
 
-  /** A troca oficial <-> não-oficial. */
+  /** A troca Meta Cloud API <-> Conexão Web (QR Code). */
   @Put(':id/provider')
   @RequirePermission('numbers.manage')
   async switchProvider(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: SwitchProviderDto) {
-    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
+    await this.manageable(user, id);
     return this.numbers.switchProvider(id, dto.provider, dto.config as any);
   }
 
   @Patch(':id')
   @RequirePermission('numbers.manage')
-  update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
+  async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
+    await this.manageable(user, id);
     const { infraCostMonth, sendLimits, endWarmup, sendDelay, sendDailyLimit, ...resto } = dto;
     // Custo da linha e ritmo de envio (intervalo, limites da fila, teto diário, aquecimento) são
     // do dono do sistema. Chegam no corpo mas são descartados para o cliente: devolver 403
@@ -208,8 +226,8 @@ export class NumbersController {
   @Post(':id/contacts/sync')
   @RequirePermission('numbers.manage')
   async syncContacts(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null }, select: { id: true, provider: true, status: true } });
-    if (n.provider !== 'evolution') throw new BadRequestException('A API oficial não dá acesso à agenda do celular.');
+    const n = await this.manageable(user, id);
+    if (n.provider !== 'evolution') throw new BadRequestException('A Meta Cloud API não dá acesso à agenda do celular.');
     if (n.status !== 'connected') throw new BadRequestException('Conecte o número para sincronizar a agenda.');
     await this.contactsSync.enqueue(n.id);
     return { queued: true };
@@ -219,7 +237,7 @@ export class NumbersController {
   @Delete(':id')
   @RequirePermission('numbers.manage')
   async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
+    await this.manageable(user, id);
     await this.numbers.remove(id);
     return { ok: true };
   }
@@ -228,7 +246,7 @@ export class NumbersController {
   @Post(':id/disconnect')
   @RequirePermission('numbers.manage')
   async disconnect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
+    await this.manageable(user, id);
     await this.numbers.disconnect(id);
     return { ok: true };
   }
@@ -241,7 +259,7 @@ export class NumbersController {
   @Post(':id/connect')
   @RequirePermission('numbers.manage')
   async connect(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ConnectDto) {
-    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null } });
+    const n = await this.manageable(user, id);
     if (n.reconnectBlockedUntil && n.reconnectBlockedUntil > new Date() && !dto?.force) {
       throw new ConflictException({
         code: 'reconnect_paused',

@@ -71,7 +71,7 @@ describe('eligible', () => {
     expect(t({ optedOut: true, provider: 'meta', hasTemplate: true })).toMatchObject({ ok: false });
   });
 
-  it('no não-oficial não há janela de 24h', () => {
+  it('no QR não há janela de 24h', () => {
     expect(t({ lastInboundAt: null })).toEqual({ ok: true });
   });
 

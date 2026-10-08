@@ -4,7 +4,7 @@ import { COLD_CONTACTS_PER_DAY } from '@atendo/shared';
 /**
  * Envio frio (docs/envio.md#envio-frio): mensagem para quem não escreveu nas últimas 24h.
  *
- * É a causa nº 1 de banimento no número não oficial (Evolution). A regra: no não oficial o
+ * É a causa nº 1 de banimento no número QR (Evolution). A regra: no QR o
  * atendente pode falar primeiro com até `COLD_CONTACTS_PER_DAY` contatos frios por dia no número
  * (janela deslizante de 24 h; voltar a escrever para o mesmo contato não gasta outra vaga) — o
  * suficiente para retomar um cliente sem virar disparo. Envio automático (fluxo, boas-vindas)
@@ -16,7 +16,7 @@ export const COLD_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const isWarm = (lastInboundAt: Date | null | undefined, now = Date.now()) => !!lastInboundAt && now - lastInboundAt.getTime() < COLD_WINDOW_MS;
 
-/** Automático (fluxo, boas-vindas…) para contato frio no não oficial, sem atendente que tenha falado primeiro. */
+/** Automático (fluxo, boas-vindas…) para contato frio no QR, sem atendente que tenha falado primeiro. */
 export const COLD_UNOFFICIAL_MESSAGE =
   'Este contato não escreve neste número há mais de 24 horas. Para proteger o número de bloqueio, ' +
   'mensagem automática só sai para quem escreveu nas últimas 24 horas. Assim que o contato responder, ' +

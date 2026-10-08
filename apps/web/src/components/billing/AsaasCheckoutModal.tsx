@@ -19,7 +19,8 @@ const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', curren
  * PIX: mostra QR + copia e cola e consulta a situação a cada 4 s até o pagamento cair.
  * Cartão: os dados vão para a API só para serem tokenizados no Asaas; nada fica salvo aqui.
  */
-export function AsaasCheckoutModal({ plan, payment: initial, onClose }: { plan?: Plan | null; payment?: AsaasPayment | null; onClose: () => void }) {
+/** `escopo`: para quem vale a troca (ex.: as empresas do grupo) — com várias empresas, sem isso não dá para saber. */
+export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: { plan?: Plan | null; payment?: AsaasPayment | null; escopo?: string; onClose: () => void }) {
   const open = !!plan || !!initial;
   const qc = useQueryClient();
   const me = useMe();
@@ -84,6 +85,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, onClose }: { plan?:
 
   return (
     <Modal open={open} onClose={onClose} title={plan ? `Assinar ${plan.name} — ${valor}` : `Pagar ${valor}`} width="max-w-md">
+      {plan && escopo && !paid && <p className="mb-3 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">{escopo}</p>}
       {paid ? (
         <div className="py-8 text-center text-accent">
           <CheckCircle2 size={56} className="mx-auto" />

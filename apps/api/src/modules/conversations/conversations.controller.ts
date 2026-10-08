@@ -213,7 +213,7 @@ export class ConversationsController {
   }
 
   /**
-   * Vagas de contato frio do número não oficial nas últimas 24 h (docs/envio.md#envio-frio) —
+   * Vagas de contato frio do número QR nas últimas 24 h (docs/envio.md#envio-frio) —
    * a tela mostra "restam N" antes do atendente esbarrar no limite. `null` no número oficial.
    */
   @Get('cold-quota')
@@ -402,7 +402,7 @@ export class ConversationsController {
 
   /**
    * Atendente digitando: `composing` (renovado pelo painel a cada ~2 s enquanto digita) mostra
-   * "digitando…" ao contato; `paused` (parou, enviou, saiu) apaga. Só número não oficial, conversa
+   * "digitando…" ao contato; `paused` (parou, enviou, saiu) apaga. Só número QR, conversa
    * aberta e número conectado. Responde na hora.
    */
   @Post(':id/typing')

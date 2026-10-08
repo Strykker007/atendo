@@ -1,11 +1,12 @@
 'use client';
 import { useState } from 'react';
-import { Store, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Store, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useAgents, useNumbers, useUsage, useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, useAdminCompanies, useAdminCompanyOptions, useAdminCreateCompany, useAdminUpdateCompany, useAdminDeleteCompany, type Company, type CompanyInput } from '@/lib/hooks';
+import { MoneyInput } from '@/components/ui/MoneyInput';
+import { useAgents, useNumbers, useUsage, useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, useAdminCompanies, useAdminCompanyOptions, useAdminCreateCompany, useAdminUpdateCompany, useAdminDeleteCompany, useAdminCompanyBilling, usePlans, type Company, type CompanyInput, type CompanyBillingInput } from '@/lib/hooks';
 
 type Draft = { id?: string; name: string; cnpj: string; description: string; numberIds: string[]; userIds: string[] };
 
@@ -31,6 +32,8 @@ interface Source {
   remove: Mut<string>;
   /** dono do sistema: pode passar do limite do plano (só avisa) */
   owner?: boolean;
+  /** só o dono: assinatura própria ou herdada do grupo (docs/empresas.md#cobrança) */
+  billing?: Mut<CompanyBillingInput>;
 }
 
 /**
@@ -61,11 +64,13 @@ function OwnerCompanies({ tenantId }: { tenantId: string }) {
   const create = useAdminCreateCompany(tenantId);
   const update = useAdminUpdateCompany(tenantId);
   const remove = useAdminDeleteCompany(tenantId);
-  return <CompaniesView owner companies={companies.data ?? []} loading={companies.isLoading} numbers={opts.data?.numbers ?? []} people={opts.data?.users ?? []} max={opts.data?.maxCompanies ?? null} create={create} update={update} remove={remove} />;
+  const billing = useAdminCompanyBilling(tenantId);
+  return <CompaniesView owner billing={billing} companies={companies.data ?? []} loading={companies.isLoading} numbers={opts.data?.numbers ?? []} people={opts.data?.users ?? []} max={opts.data?.maxCompanies ?? null} create={create} update={update} remove={remove} />;
 }
 
-function CompaniesView({ companies: lista, loading, numbers, people, max, create, update, remove, owner }: Source) {
+function CompaniesView({ companies: lista, loading, numbers, people, max, create, update, remove, owner, billing }: Source) {
   const [editing, setEditing] = useState<Draft | null>(null);
+  const [cobranca, setCobranca] = useState<Company | null>(null);
   const [deleting, setDeleting] = useState<Company | null>(null);
   const cheio = max !== null && lista.length >= max;
   const pessoas = people.filter((a) => a.isActive || editing?.userIds.includes(a.id));
@@ -122,7 +127,10 @@ function CompaniesView({ companies: lista, loading, numbers, people, max, create
               <div className="text-xs text-muted truncate">
                 {c.numbers.length ? c.numbers.map((n) => n.label).join(', ') : 'Nenhum número'} · {c.users.length ? `${c.users.length} pessoa(s)` : 'ninguém vinculado'}
               </div>
+              <div className="text-[11px] text-faint truncate">{resumoCobranca(c)}</div>
             </div>
+            {/* com rótulo: só o ícone de carteira, ninguém achava onde se escolhe o plano da empresa */}
+            {billing && <Button size="sm" variant="ghost" icon={<Wallet size={13} />} onClick={() => setCobranca(c)} title="Plano e cobrança desta empresa">Plano</Button>}
             <button onClick={() => abrir(c)} className="p-1.5 rounded-md text-faint hover:text-ink hover:bg-field" title="Editar"><Pencil size={15} /></button>
             <button onClick={() => setDeleting(c)} className="p-1.5 rounded-md text-faint hover:text-danger hover:bg-field" title="Excluir"><Trash2 size={15} /></button>
           </li>
@@ -172,6 +180,8 @@ function CompaniesView({ companies: lista, loading, numbers, people, max, create
         )}
       </Modal>
 
+      {billing && cobranca && <BillingModal company={cobranca} billing={billing} onClose={() => setCobranca(null)} />}
+
       <ConfirmDialog
         open={!!deleting}
         title="Excluir empresa"
@@ -185,5 +195,102 @@ function CompaniesView({ companies: lista, loading, numbers, people, max, create
         onClose={() => setDeleting(null)}
       />
     </section>
+  );
+}
+
+const STATUS_ASSINATURA: Record<string, string> = { trialing: 'Em teste', active: 'Ativa', past_due: 'Pagamento pendente', suspended: 'Suspensa', canceled: 'Cancelada' };
+const diaSP = (iso: string) => new Date(new Date(iso).getTime() - 3 * 3_600_000).toISOString().slice(0, 10);
+
+function resumoCobranca(c: Company) {
+  if (!c.isActive) return 'Inativa para cobrança';
+  if (c.billingType === 'CONSOLIDATED_GROUP') return 'Plano: o do grupo (paga junto com o cliente)';
+  if (!c.subscription) return 'Plano próprio: ainda não escolhido';
+  return `Plano próprio: ${c.subscription.plan.name} · ${STATUS_ASSINATURA[c.subscription.status] ?? c.subscription.status} · vence ${new Date(c.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')}`;
+}
+
+type BillingCompany = Pick<Company, 'id' | 'name' | 'billingType' | 'isActive' | 'subscription'>;
+
+/** Plano/cobrança de uma empresa aberto direto da tabela de Clientes (sem passar pela lista de empresas). */
+export function CompanyBillingDialog({ tenantId, company, groupPlan, onClose }: { tenantId: string; company: BillingCompany; groupPlan?: string; onClose: () => void }) {
+  const billing = useAdminCompanyBilling(tenantId);
+  return <BillingModal company={company} billing={billing} groupPlan={groupPlan} onClose={onClose} />;
+}
+
+/**
+ * Cobrança da empresa (só o dono): herda a assinatura do cliente ou tem a própria, com plano,
+ * preço, vencimento e status. Suspensa/cancelada para o envio dos números dela.
+ */
+function BillingModal({ company, billing, groupPlan, onClose }: { company: BillingCompany; billing: Mut<CompanyBillingInput>; groupPlan?: string; onClose: () => void }) {
+  const plans = usePlans();
+  const sub = company.subscription;
+  const [f, setF] = useState({
+    billingType: company.billingType,
+    isActive: company.isActive,
+    planId: sub?.planId ?? '',
+    priceMonth: sub?.priceMonth != null ? Number(sub.priceMonth) : null as number | null,
+    currentPeriodEnd: sub ? diaSP(sub.currentPeriodEnd) : '',
+    status: sub?.status ?? 'active',
+  });
+  const propria = f.billingType === 'INDIVIDUAL';
+
+  async function salvar() {
+    try {
+      await billing.mutateAsync({
+        id: company.id,
+        billingType: f.billingType,
+        isActive: f.isActive,
+        ...(propria && { planId: f.planId || undefined, priceMonth: f.priceMonth, status: f.status, ...(f.currentPeriodEnd && { currentPeriodEnd: f.currentPeriodEnd }) }),
+      });
+      toast.ok('Cobrança da empresa salva');
+      onClose();
+    } catch (e) {
+      toast.err(e);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Plano e cobrança — ${company.name}`}>
+      <form onSubmit={(e) => { e.preventDefault(); void salvar(); }} className="space-y-3">
+        <Field label="Plano da empresa" hint={propria ? 'A empresa tem plano, vencimento e valor próprios, pagos no painel de vencimentos do cliente. Limites de uso (números, mensagens) continuam vindo do plano do grupo.' : `Usa o plano do grupo${groupPlan ? ` (${groupPlan})` : ''} e paga junto com a assinatura do cliente. No modo grupo, conta como uma unidade no valor.`}>
+          <select className={inputCls} value={f.billingType} onChange={(e) => setF({ ...f, billingType: e.target.value as Company['billingType'] })}>
+            <option value="CONSOLIDATED_GROUP">Usa o plano do grupo{groupPlan ? ` — ${groupPlan}` : ''}</option>
+            <option value="INDIVIDUAL">Plano próprio</option>
+          </select>
+        </Field>
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input type="checkbox" checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} />
+          Ativa para cobrança <span className="text-xs text-muted">(inativa não entra no valor do grupo nem gera vencimento)</span>
+        </label>
+        {propria && (
+          <>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Field label="Plano">
+                <select className={inputCls} value={f.planId} onChange={(e) => setF({ ...f, planId: e.target.value })} required>
+                  <option value="">Escolha…</option>
+                  {plans.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Valor mensal contratado" hint="Vazio = o preço do plano.">
+                <MoneyInput className={inputCls} value={f.priceMonth} onChange={(v) => setF({ ...f, priceMonth: v })} nullable placeholder="do plano" />
+              </Field>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Field label="Próximo vencimento" hint="Vazio na criação = daqui a um ciclo.">
+                <input type="date" className={inputCls} value={f.currentPeriodEnd} onChange={(e) => setF({ ...f, currentPeriodEnd: e.target.value })} />
+              </Field>
+              <Field label="Status" hint="Suspensa ou cancelada bloqueia o envio dos números desta empresa.">
+                <select className={inputCls} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>
+                  {Object.entries(STATUS_ASSINATURA).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+              </Field>
+            </div>
+          </>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button type="submit" loading={billing.isPending} loadingText="Salvando…" disabled={propria && !f.planId}>Salvar</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

@@ -17,8 +17,8 @@ export function ProviderForm({ value, onChange, config, onConfig }: { value: Pro
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <ProviderCard active={value === 'evolution'} onClick={() => onChange('evolution')} icon={<QrCode size={20} />} title="Não-oficial (QR code)" desc="Qualquer número. Conecta em 2 min. Grátis por mensagem." />
-        <ProviderCard active={value === 'meta'} onClick={() => onChange('meta')} icon={<ShieldCheck size={20} />} title="Oficial (Meta Cloud API)" desc="Número de negócio verificado pela Meta, com suporte oficial." />
+        <ProviderCard active={value === 'evolution'} onClick={() => onChange('evolution')} icon={<QrCode size={20} />} title="Conexão Web (WhatsApp QR Code)" desc="Qualquer número. Conecta em 2 min. Grátis por mensagem." />
+        <ProviderCard active={value === 'meta'} onClick={() => onChange('meta')} icon={<ShieldCheck size={20} />} title="Meta Cloud API" desc="Número de negócio verificado pela Meta, com suporte oficial." />
       </div>
 
       {value === 'evolution' ? (

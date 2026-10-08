@@ -14,7 +14,7 @@ Serve para decidir o que construir antes de colocar um cliente pagante no ar.
 | Disparar fluxo por frase específica | Gatilho por palavra-chave (só modo "contém") |
 | Fluxo de boas-vindas para contato novo | Gatilho `new_conversation` |
 | Relatórios para gestão | Visão pronta + construtor + CSV ([08](08-frontend.md)) |
-| API oficial (Meta) e não oficial (Evolution) | Adapters trocáveis por config ([04](04-providers-whatsapp.md)) |
+| API oficial (Meta) e QR code (Evolution) | Adapters trocáveis por config ([04](04-providers-whatsapp.md)) |
 | Assistente de IA no fluxo | Bloco IA ([15](15-ia.md)) |
 
 ## Falta — e por que importa
