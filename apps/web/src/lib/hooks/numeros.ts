@@ -65,9 +65,12 @@ export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-
 /** Tempo real: aplica eventos do socket direto no cache do react-query. */
 export function useRealtime() {
   const qc = useQueryClient();
-  // reexecuta quando o token aparece: na primeira montagem ele ainda não existe
-  const [temToken, setTemToken] = useState(() => !!getAccessToken());
-  useEffect(() => { const fora = onAccessToken((t) => setTemToken(!!t)); return () => { fora(); }; }, []);
+  // reexecuta quando o token aparece (na primeira montagem ele ainda não existe) e quando muda de
+  // cliente: o dono "entrando como" um cliente troca de token sem recarregar a página, e o socket
+  // aberto com o token dele não está na sala do cliente — mensagem nova e status (enviado,
+  // entregue, lido) não chegavam. Renovação do mesmo cliente não reconecta.
+  const [sala, setSala] = useState(() => salaDoToken(getAccessToken()));
+  useEffect(() => { const fora = onAccessToken((t) => setSala(salaDoToken(t))); return () => { fora(); }; }, []);
   useEffect(() => {
     if (!getAccessToken()) return;
     // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
@@ -120,7 +123,13 @@ export function useRealtime() {
     return () => {
       socket.disconnect();
     };
-  }, [qc, temToken]);
+  }, [qc, sala]);
+}
+
+/** Cliente do token (sem validar — só decide se o socket precisa reconectar). `null` = sem token. */
+function salaDoToken(t: string | null): string | null {
+  if (!t) return null;
+  try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).tenantId ?? 'dono'; } catch { return 'token'; }
 }
 
 /** Templates aprovados (HSM) do número — só Meta; Evolution vem vazio. `sync()` ignora o cache do servidor. */

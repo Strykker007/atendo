@@ -57,7 +57,7 @@ src/
 - **UI** (colunas, filtros, seleção): zustand com `persist` — sidebar recolhida, painel direito e número selecionado sobrevivem ao reload.
 - **Token**: em memória (`lib/api.ts`), nunca em localStorage. O refresh está no cookie httpOnly; ao abrir o app, `(app)/layout.tsx` chama `/auth/refresh` para obter um access token novo.
 - **Sessão expirada**: toda chamada autenticada passa por `api()` (inclusive upload — `FormData` dispensa o `Content-Type` JSON), que renova em 401 e repete uma vez. Se o refresh também falha, `sessionExpired()` leva para `/login?expirou=1&next=<rota>`: o login explica "Sua sessão expirou" e volta para a rota (só caminho interno). Nunca mostrar "token" ao usuário.
-- **Socket e token**: se o servidor derruba o socket (token vencido na reconexão), `useRealtime` renova pelo mesmo `refresh()` e reconecta — o socket.io não reconecta sozinho após `io server disconnect`.
+- **Socket e token**: se o servidor derruba o socket (token vencido na reconexão), `useRealtime` renova pelo mesmo `refresh()` e reconecta — o socket.io não reconecta sozinho após `io server disconnect`. O socket também é refeito quando o **cliente do token** muda (dono entrando/saindo de um cliente): ele entra na sala `tenant:<id>` só no handshake, e sem isso o dono impersonando não recebia mensagens nem status (enviado/entregue/lido).
 
 ## Tempo real
 
