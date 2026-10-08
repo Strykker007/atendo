@@ -119,23 +119,6 @@ O padrão de um fluxo **novo** segue o gatilho: manual entra como atalho, autom�
 fluxos que já existiam continuam aparecendo — mudar isso retroativamente faria sumir da tela
 um atalho que alguém usava.
 
-## Fixar no topo
-
-`isPinned` (estrela na listagem — o alfinete já é o atalho no chat) põe o fluxo no topo da
-listagem e da aba **Fluxos** do chat, onde aparece com uma estrela. `GET /flows` ordena
-`isPinned desc, name asc`; `PATCH /flows/:id` aceita `{isPinned}`. Duplicar e importar nascem
-sem fixar.
-
-## Fluxos padrão do cliente novo
-
-`POST /tenants` cria 8 fluxos manuais (`tenants/default-flows.ts`): Boas Vindas, Boas Vindas -
-Entregas Encerradas, Boas Vindas - Entregas após 08:30, Loja Fechada, 🔄 TENTANDO CONTATO IA,
-🟡🍼 CATÁLOGO DE FRALDAS (fixado), 🟡🔥 CATÁLOGO PERFUMARIA (fixado) e 👹 OFERTAR PRODUTOS. Nascem
-como atalho no chat, **só com o Início e desativados**: a validação não deixa ativar um Início
-solto, e ativo o atendente dispararia, assumiria a conversa e nada seria enviado. O cliente
-monta o conteúdo e ativa; aí o atalho aparece no chat. Desativados não contam para `maxFlows`.
-Clientes que já existiam não recebem nada.
-
 Dá para alternar no editor (*Atalho no chat*) ou direto na lista de Fluxos, pelo ícone de
 alfinete.
 

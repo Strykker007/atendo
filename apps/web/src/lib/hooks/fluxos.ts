@@ -9,9 +9,9 @@ import type { BillingCycle, ConversationStatus, PlanFeature, PlanLimits, FlowDef
 import { invConv, useUsage } from './core';
 
 // ---- Fluxos de automação ----
-export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; /** fixado no topo da listagem e do chat */ isPinned: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
+export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
 /** `mediaUrls`: link assinado de cada anexo do Conteúdo (só na leitura de um fluxo). */
-export interface Flow { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; isPinned?: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string; mediaUrls?: Record<string, string>; /** optimistic locking: mandar no PATCH do editor */ version: number }
+export interface Flow { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string; mediaUrls?: Record<string, string>; /** optimistic locking: mandar no PATCH do editor */ version: number }
 /** `paused` = congelado pelo atendente; `pausedFrom` é para onde volta ao continuar. */
 export interface ActiveRun { id: string; status: 'running' | 'waiting' | 'paused'; pausedFrom?: 'running' | 'waiting' | null; currentNodeId: string | null; flow: { id: string; name: string }; startedAt: string; waitUntil: string | null }
 export interface FlowRuns { byStatus: Record<string, number>; recent: { id: string; status: string; startedAt: string; endedAt: string | null; error: string | null; contact: { name: string | null; phone: string }; conversationId: string }[] }

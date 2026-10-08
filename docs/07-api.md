@@ -29,7 +29,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 |---|---|---|---|
 | **Tenants** | | | |
 | GET | `/tenants` | super_admin | Lista clientes com plano e contagens |
-| POST | `/tenants` | super_admin | Cria cliente + assinatura + admin + fluxos padrão (docs/10-fluxos-de-automacao.md). Plano gratuito nasce `active`; pago, `trialing` |
+| POST | `/tenants` | super_admin | Cria cliente + assinatura + admin. Plano gratuito nasce `active`; pago, `trialing` |
 | PATCH | `/tenants/:id` | super_admin | `name`, `isActive`, `planId`, `subscriptionStatus` (ajuste manual sem Stripe). Trocar para plano gratuito: assinatura `active`, preço 0, e a assinatura paga no Stripe (se houver) é cancelada |
 | GET | `/notices/active` | todos (inclusive dono) | Avisos globais ativos, mais novos primeiro (até 30) — ver [avisos.md](avisos.md) |
 | GET | `/super-admin/notices` | super_admin | Todos os avisos (ativos e desativados) |
