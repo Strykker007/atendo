@@ -17,7 +17,7 @@ import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
-import { useCan, useMe, useChangePassword, useNumbers } from '@/lib/hooks';
+import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe } from '@/lib/hooks';
 
 /** Configurações do cliente: aparência, horário, fluxos padrão e segurança. As respostas
  *  rápidas saíram daqui e viraram módulo próprio (/respostas). */
@@ -37,8 +37,9 @@ export default function ConfiguracoesPage() {
 
   return (
     <PageShell width="max-w-4xl">
-      <PageHeader title="Configurações" subtitle="Aparência do painel, empresas, departamentos, horários de atendimento, boas-vindas, variáveis globais e segurança." />
+      <PageHeader title="Configurações" subtitle="Seu perfil, aparência do painel, empresas, departamentos, horários de atendimento, boas-vindas, variáveis globais e segurança." />
 
+      {!me.data?.impersonatorId && me.data && <ProfileSection name={me.data.name} />}
       {!isOwner && podeNumeros && <NumbersSection />}
       <AppearanceSection />
       {!isOwner && podeConfigurar && <CompaniesSection />}
@@ -80,6 +81,25 @@ function AppearanceSection() {
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+/** Meu perfil: o nome que a equipe vê (lista de atendentes, transferências, notas internas). */
+function ProfileSection({ name }: { name: string }) {
+  const update = useUpdateMe();
+  const [value, setValue] = useState(name);
+  const changed = value.trim() !== name && !!value.trim();
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
+      <div>
+        <h2 className="font-display font-semibold text-ink">Meu perfil</h2>
+        <p className="text-sm text-muted">O nome que aparece para a equipe e nas transferências.</p>
+      </div>
+      <form onSubmit={(e) => { e.preventDefault(); if (!changed) return; update.mutateAsync({ name: value.trim() }).then(() => toast.ok('Nome atualizado')).catch(toast.err); }} className="flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[220px]"><Field label="Nome de exibição"><input className={inputCls} value={value} onChange={(e) => setValue(e.target.value)} maxLength={80} required autoComplete="name" /></Field></div>
+        <Button type="submit" loading={update.isPending} loadingText="Salvando…" disabled={!changed}>Salvar</Button>
+      </form>
     </section>
   );
 }

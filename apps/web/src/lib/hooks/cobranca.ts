@@ -33,6 +33,37 @@ export const useAsaasCheckout = () => useMutation({ mutationFn: (input: AsaasChe
 export const useAsaasPaymentStatus = (id: string | null, active: boolean) =>
   useQuery({ queryKey: ['asaas-payment', id], queryFn: () => api<AsaasPayment>(`/billing/asaas/payments/${id}`), enabled: !!id && active, refetchInterval: 4000 });
 
+// ---- Painel de vencimentos (grupo + empresas) ----
+export type DueState = 'ok' | 'due_soon' | 'overdue' | 'free';
+export interface DueRow {
+  key: string;
+  /** group = assinatura do cliente; member = empresa que herda (paga junto com o grupo); company = assinatura própria */
+  kind: 'group' | 'member' | 'company';
+  companyId: string | null;
+  name: string;
+  plan: string | null;
+  cycle: 'monthly' | 'yearly' | null;
+  status: string | null;
+  state: DueState | null;
+  daysToDue: number | null;
+  amount: number;
+  dueDate: string | null;
+  units: number;
+  payable: boolean;
+  reason: string | null;
+  openChargeId: string | null;
+}
+export interface Dues {
+  billingType: 'INDIVIDUAL' | 'CONSOLIDATED_GROUP';
+  online: boolean;
+  summary: { totalMonth: number; overdueCount: number; overdueAmount: number; nextDue: { name: string; dueDate: string; amount: number; daysToDue: number | null } | null };
+  rows: DueRow[];
+}
+export const useDues = () => useQuery({ queryKey: ['dues'], queryFn: () => api<Dues>('/billing/dues') });
+export const usePayDues = () => useMutation({ mutationFn: (b: { keys: string[]; cpfCnpj?: string }) => api<{ payment: AsaasPayment }>('/billing/dues/pay', { method: 'POST', body: JSON.stringify(b) }) });
+/** Reabre uma cobrança já emitida (com o QR do PIX). */
+export const fetchAsaasPayment = (id: string) => api<AsaasPayment>(`/billing/asaas/payments/${encodeURIComponent(id)}?pix=1`);
+
 export interface MarginRow { tenantId: string; name: string; plan: string | null; status: string | null; revenue: number; overage: number; providerCost: number; infraCost: number; margin: number; marginPct: number; messagesSent: number; templatesSent: number }
 export const useMargin = (period?: string) => useQuery({ queryKey: ['margin', period], queryFn: () => api<MarginRow[]>(`/billing/margin${period ? `?period=${period}` : ''}`) });
 

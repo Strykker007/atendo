@@ -8,7 +8,7 @@ import { toast } from '@/components/ui/Toast';
 import { useMe, useUpdateNumber, type NumberItem, type SendDelayProfile } from '@/lib/hooks';
 
 const DELAY_LABEL: Record<SendDelayProfile, string> = {
-  instant: 'Imediato — só API oficial',
+  instant: 'Imediato — só Meta Cloud API',
   fast: 'Rápido — 1 a 2s',
   short: 'Curto — 3 a 4s',
   moderate: 'Moderado — 3 a 5s',
@@ -113,7 +113,7 @@ function QueueLimits({ number }: { number: NumberItem }) {
               />
             </label>
           ))}
-          <p className="col-span-2 text-[11px] text-muted">Vazio = padrão do {number.provider === 'meta' ? 'API oficial' : 'não oficial'}. O excedente nunca é descartado: espera a vez.</p>
+          <p className="col-span-2 text-[11px] text-muted">Vazio = padrão da {number.provider === 'meta' ? 'Meta Cloud API' : 'Conexão Web'}. O excedente nunca é descartado: espera a vez.</p>
         </div>
       )}
     </div>

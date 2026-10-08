@@ -8,7 +8,7 @@ import type { Conversation, SystemNotice, WhatsAppNumber } from '@prisma/client'
 // type-only: o service importa este gateway em tempo de execução, então um import de valor aqui fecharia o ciclo
 import type { PresentedMessage } from './conversations.service';
 import type { TypingEvent } from '@atendo/shared';
-import { env } from '../../config/env';
+import { env, webOrigins } from '../../config/env';
 
 const GLOBAL_ROOM = 'global';
 
@@ -23,7 +23,7 @@ export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role 
  * direto no Redis; o `RedisIoAdapter` da API entrega aos sockets da sala.
  */
 @Injectable()
-@WebSocketGateway({ cors: { origin: env.WEB_ORIGIN, credentials: true } })
+@WebSocketGateway({ cors: { origin: webOrigins, credentials: true } })
 export class ConversationsGateway implements OnGatewayConnection, OnModuleDestroy {
   @WebSocketServer() server?: Server;
   private redis?: Redis;

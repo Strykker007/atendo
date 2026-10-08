@@ -25,3 +25,4 @@ export * from './hooks/empresas';
 export * from './hooks/campos';
 export * from './hooks/agendadas';
 export * from './hooks/variaveis';
+export * from './hooks/modelos';

@@ -302,6 +302,21 @@ export class InboundService {
     if (st.status === 'failed' && (m.status === 'delivered' || m.status === 'read')) return; // já chegou: erro tardio é ruído
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(m.conversation.tenantId, this.conversations.present(updated));
+    if (m.direction === 'in' && st.status === 'read') await this.lidaNoCelular(m.conversationId, m.conversation.tenantId, m.createdAt);
+  }
+
+  /**
+   * "Lida" numa mensagem RECEBIDA só vem de um lugar: o próprio cliente abriu a conversa no
+   * celular (Evolution repassa o recibo do aparelho; a Meta não manda). O que ele leu no
+   * aparelho não é mais não lido no painel: sobra só o que chegou depois dela.
+   * Só diminui — o recibo pode chegar atrasado, depois de mensagens novas.
+   */
+  private async lidaNoCelular(conversationId: string, tenantId: string, ate: Date) {
+    const depois = await this.prisma.message.count({ where: { conversationId, direction: 'in', createdAt: { gt: ate } } });
+    const res = await this.prisma.conversation.updateMany({ where: { id: conversationId, tenantId, unreadCount: { gt: depois } }, data: { unreadCount: depois } });
+    if (!res.count) return;
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (conv) this.gateway.emitConversation(tenantId, conv);
   }
 
   /**

@@ -5,6 +5,7 @@ import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailService } from '../../common/mail/mail.service';
 import { UsageService, periodOf } from './usage.service';
+import { nextPeriodEnd, type ConsolidatedItem } from './dues';
 
 // ---------- Tipos da API v3 do Asaas (só o que usamos) ----------
 
@@ -71,6 +72,8 @@ const PAID = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
 /** assinatura que ainda vale: trocar de plano é alterar esta, não criar outra */
 const LIVE: SubscriptionStatus[] = ['active', 'past_due', 'trialing', 'suspended'];
 const OVERAGE_REF = 'overage:';
+/** cobrança consolidada do painel de vencimentos: `bulk:<tenant>:<uuid>` */
+export const BULK_REF = 'bulk:';
 
 /** 'YYYY-MM-DD' no fuso de Brasília — é como o Asaas lê vencimentos. */
 const ymd = (d = new Date()) => new Date(d.getTime() - 3 * 3_600_000).toISOString().slice(0, 10);
@@ -78,11 +81,14 @@ const fromYmd = (s: string) => new Date(`${s}T00:00:00-03:00`);
 const onlyDigits = (s?: string) => (s ? s.replace(/\D/g, '') : undefined);
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-/** Valor e ciclo de cobrança de um plano: anual cobra `priceYear` uma vez por ano. */
-const chargeOf = (p: Plan) =>
+/**
+ * Valor e ciclo de cobrança de um plano: anual cobra `priceYear` uma vez por ano. `units` > 1
+ * é o grupo consolidado (preço do plano × empresas ativas — docs/empresas.md#cobrança).
+ */
+export const chargeOf = (p: Plan, units = 1) =>
   p.billingCycle === 'yearly'
-    ? { value: Number(p.priceYear ?? 0), cycle: 'YEARLY' as const }
-    : { value: Number(p.priceMonth), cycle: 'MONTHLY' as const };
+    ? { value: Number(p.priceYear ?? 0) * Math.max(1, units), cycle: 'YEARLY' as const }
+    : { value: Number(p.priceMonth) * Math.max(1, units), cycle: 'MONTHLY' as const };
 
 /**
  * Integração com o Asaas (API v3) — PIX e cartão recorrentes.
@@ -186,6 +192,24 @@ export class AsaasService {
     await this.request('DELETE', `/subscriptions/${subscriptionId}`);
   }
 
+  /** Cobrança avulsa (boleto ou PIX, à escolha do cliente no link) — usada no "Pagar todos". */
+  async createCharge(dto: { customer: string; value: number; dueDate: string; description: string; externalReference: string }) {
+    return this.request<AsaasPayment>('POST', '/payments', { ...dto, billingType: 'UNDEFINED' });
+  }
+
+  async deletePayment(paymentId: string) {
+    await this.request('DELETE', `/payments/${encodeURIComponent(paymentId)}`);
+  }
+
+  /** Cobrança em aberto de uma assinatura (a mais antiga, vencida primeiro), ou null. */
+  async openSubscriptionPayment(subscriptionId: string) {
+    const list = await this.request<AsaasList<AsaasPayment>>('GET', `/subscriptions/${subscriptionId}/payments?limit=20`);
+    const order = (s: string) => (s === 'OVERDUE' ? 0 : 1);
+    return list.data
+      .filter((p) => !p.deleted && (p.status === 'PENDING' || p.status === 'OVERDUE'))
+      .sort((a, b) => order(a.status) - order(b.status) || a.dueDate.localeCompare(b.dueDate))[0] ?? null;
+  }
+
   /** Reajuste: muda o valor das próximas cobranças, sem mexer na que já foi gerada. */
   async updateSubscriptionValue(subscriptionId: string, value: number) {
     await this.request('PUT', `/subscriptions/${subscriptionId}`, { value, updatePendingPayments: false });
@@ -198,11 +222,12 @@ export class AsaasService {
     if (!plan) throw new BadRequestException('Plano não disponível para assinatura online');
     // gratuito/personalizado são atribuídos pelo dono — mesma trava do Stripe
     if (!isStripeBillable(plan.billingCycle)) throw new BadRequestException('Este plano não é assinado online. Fale com a equipe para ativá-lo.');
-    const { value, cycle } = chargeOf(plan);
-    if (value <= 0) throw new BadRequestException('Plano sem valor definido');
     if (input.billingType === 'CREDIT_CARD' && (!input.card || !input.holder)) throw new BadRequestException('Informe os dados do cartão e do titular');
 
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    // grupo consolidado: a assinatura cobra o plano por empresa ativa (`units`, mantido pelo DuesService)
+    const { value, cycle } = chargeOf(plan, sub?.units ?? 1);
+    if (value <= 0) throw new BadRequestException('Plano sem valor definido');
     // assinatura viva no Stripe: criar outra no Asaas cobraria o cliente duas vezes
     if (sub?.externalId && sub.gateway !== 'asaas' && LIVE.includes(sub.status)) {
       throw new BadRequestException('Sua assinatura atual é cobrada por cartão internacional. Cancele-a em “Pagamento e faturas” ou fale com o suporte para migrar.');
@@ -266,7 +291,7 @@ export class AsaasService {
     return this.view(tenantId, p, withPix);
   }
 
-  private async view(tenantId: string, p: AsaasPayment, withPix: boolean): Promise<PaymentView> {
+  async view(tenantId: string, p: AsaasPayment, withPix: boolean): Promise<PaymentView> {
     const paid = PAID.includes(p.status);
     if (paid) await this.onPaid(tenantId, p);
     else await this.syncInvoice(tenantId, p);
@@ -325,12 +350,50 @@ export class AsaasService {
 
   /** Pagou: assinatura volta a `active` e o próximo vencimento vem do Asaas. Idempotente. */
   private async onPaid(tenantId: string, p: AsaasPayment) {
+    if (p.externalReference?.startsWith(BULK_REF)) return this.settleConsolidated(tenantId, p);
     await this.syncInvoice(tenantId, p, 'paid');
     if (!p.subscription) return; // avulsa (excedente): só a fatura muda
+    await this.activateSubscription(tenantId, p.subscription, p.dueDate, p.id);
+  }
+
+  /**
+   * Cobrança consolidada paga: cada item volta a `active` e anda um ciclo. Webhook e polling do
+   * modal chegam juntos — quem vira a fatura para `paid` primeiro aplica, o outro não faz nada,
+   * senão o vencimento andaria dois ciclos por um pagamento.
+   */
+  private async settleConsolidated(tenantId: string, p: AsaasPayment) {
+    const claimed = await this.prisma.invoice.updateMany({ where: { tenantId, externalId: p.id, status: { not: 'paid' } }, data: { status: 'paid', paidAt: p.paymentDate ? fromYmd(p.paymentDate) : new Date() } });
+    await this.syncInvoice(tenantId, p, 'paid');
+    if (!claimed.count) return;
+    const inv = await this.prisma.invoice.findUnique({ where: { externalId: p.id }, select: { items: true } });
+    const items = (inv?.items ?? []) as unknown as ConsolidatedItem[];
+    for (const it of items) {
+      try {
+        if (it.kind === 'company' && it.companyId) {
+          const cs = await this.prisma.companySubscription.findFirst({ where: { tenantId, companyId: it.companyId } });
+          if (!cs) continue;
+          const end = nextPeriodEnd(cs.currentPeriodEnd, it.cycle);
+          await this.prisma.companySubscription.update({ where: { id: cs.id }, data: { status: 'active', currentPeriodStart: cs.currentPeriodEnd, currentPeriodEnd: end } });
+          continue;
+        }
+        const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+        if (!sub) continue;
+        // com assinatura no Asaas a data vem dela (a cobrança substituída já tinha avançado o
+        // `nextDueDate`); sem gateway, anda um ciclo a partir do vencimento
+        if (it.replacesPaymentId && sub.gateway === 'asaas' && sub.externalId) await this.activateSubscription(tenantId, sub.externalId, p.dueDate, p.id);
+        else await this.prisma.subscription.update({ where: { tenantId }, data: { status: 'active', graceUntil: null, currentPeriodStart: sub.currentPeriodEnd, currentPeriodEnd: nextPeriodEnd(sub.currentPeriodEnd, it.cycle) } });
+      } catch (err) {
+        this.log.error(`cobrança consolidada ${p.id}: item ${it.key} não foi baixado: ${(err as Error)?.message ?? err}`);
+      }
+    }
+    this.log.log(`cobrança consolidada ${p.id} paga: ${items.map((i) => i.label).join(', ')}`);
+  }
+
+  private async activateSubscription(tenantId: string, subscriptionId: string, dueDate: string, paymentId: string) {
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
-    if (!sub || sub.gateway !== 'asaas' || sub.externalId !== p.subscription) return this.log.warn(`pagamento ${p.id}: assinatura ${p.subscription} não é a atual do tenant ${tenantId}`);
-    const remote = await this.request<AsaasSubscription>('GET', `/subscriptions/${p.subscription}`).catch(() => null);
-    const start = fromYmd(p.dueDate);
+    if (!sub || sub.gateway !== 'asaas' || sub.externalId !== subscriptionId) return this.log.warn(`pagamento ${paymentId}: assinatura ${subscriptionId} não é a atual do tenant ${tenantId}`);
+    const remote = await this.request<AsaasSubscription>('GET', `/subscriptions/${subscriptionId}`).catch(() => null);
+    const start = fromYmd(dueDate);
     const end = remote?.nextDueDate ? fromYmd(remote.nextDueDate) : new Date(start.getTime() + 30 * 86_400_000);
     // o período só anda para frente: um webhook repetido de um pagamento antigo não volta a data
     const avanca = end > sub.currentPeriodEnd;
@@ -338,7 +401,7 @@ export class AsaasService {
       where: { tenantId },
       data: { status: 'active', graceUntil: null, ...(avanca && { currentPeriodStart: start, currentPeriodEnd: end }) },
     });
-    if (sub.status !== 'active') this.log.log(`tenant ${tenantId}: ${sub.status} → active (pagamento ${p.id})`);
+    if (sub.status !== 'active') this.log.log(`tenant ${tenantId}: ${sub.status} → active (pagamento ${paymentId})`);
   }
 
   /**

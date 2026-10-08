@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { SkeletonCards, SkeletonRows } from '@/components/ui/Skeleton';
 import { useFinance, useMargin, useMe } from '@/lib/hooks';
+import { useBrand } from '@/lib/brand-context';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const brlK = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
@@ -24,6 +25,7 @@ type Tab = 'visao' | 'clientes' | 'faturas' | 'margem';
 
 /** Financeiro do dono do Atendo. Só super_admin (a API também bloqueia). */
 export default function AdminPage() {
+  const { brandName } = useBrand();
   const me = useMe();
   const [tab, setTab] = useState<Tab>('visao');
   const [months, setMonths] = useState(12);
@@ -37,7 +39,7 @@ export default function AdminPage() {
 
   return (
     <PageShell width="max-w-6xl">
-      <PageHeader title="Financeiro" subtitle="Receita, custos e margem do Atendo como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso." action={
+      <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso.`} action={
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
           {([['visao', 'Visão geral'], ['clientes', 'Assinaturas'], ['faturas', 'Faturas'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>

@@ -11,13 +11,15 @@ import { FeatureGuard } from './feature.guard';
 import { StripeWebhookController } from './stripe-webhook.controller';
 import { AsaasService } from './asaas.service';
 import { AsaasController, AsaasWebhookController } from './asaas.controller';
+import { DuesService } from './dues.service';
+import { DuesController } from './dues.controller';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUE_BILLING } from '../whatsapp/queues';
 
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_BILLING }), AuthModule],
-  controllers: [BillingController, StripeWebhookController, AsaasController, AsaasWebhookController],
-  providers: [PricingService, UsageService, PlanLimitGuard, BillingProcessor, BillingScheduler, StripeService, AsaasService, FinanceService, FeatureGuard],
-  exports: [PricingService, UsageService, PlanLimitGuard, StripeService, AsaasService, FeatureGuard],
+  controllers: [BillingController, StripeWebhookController, AsaasController, AsaasWebhookController, DuesController],
+  providers: [PricingService, UsageService, PlanLimitGuard, BillingProcessor, BillingScheduler, StripeService, AsaasService, FinanceService, FeatureGuard, DuesService],
+  exports: [PricingService, UsageService, PlanLimitGuard, StripeService, AsaasService, FeatureGuard, DuesService],
 })
 export class BillingModule {}

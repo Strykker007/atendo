@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
+import { useBrand } from '@/lib/brand-context';
 
 /**
  * Avisa quando subiu versão nova.
@@ -15,6 +16,7 @@ import { RefreshCw } from 'lucide-react';
  * injetar nada no build do front.
  */
 export function VersionWatcher() {
+  const { brandName } = useBrand();
   const [novaVersao, setNovaVersao] = useState(false);
 
   useEffect(() => {
@@ -45,7 +47,7 @@ export function VersionWatcher() {
 
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl bg-ink text-panel shadow-lg px-4 py-2.5 text-sm">
-      <span>Uma versão nova do VogoChat está disponível.</span>
+      <span>Uma versão nova do {brandName} está disponível.</span>
       {/* reload() já busca o HTML de novo, e os arquivos do Next têm hash no nome:
           não é preciso ensinar atalho de navegador para ninguém */}
       <button onClick={() => window.location.reload()} className="inline-flex items-center gap-1.5 rounded-lg bg-accent text-white px-2.5 py-1 text-[13px] font-medium hover:bg-accent/90">

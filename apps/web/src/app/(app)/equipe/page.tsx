@@ -1,12 +1,14 @@
 'use client';
 import { useState } from 'react';
-import { Plus, KeyRound, Power, Users } from 'lucide-react';
+import { Plus, KeyRound, Power, Users, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
+import { refresh } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, type Agent } from '@/lib/hooks';
 import { AccessProfiles } from '@/components/settings/AccessProfiles';
 import { NumberScopeButton } from '@/components/settings/NumberScope';
@@ -27,6 +29,22 @@ export default function EquipePage() {
   const update = useUpdateAgent();
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<Agent | null>(null);
+  const [editing, setEditing] = useState<Agent | null>(null);
+  const qc = useQueryClient();
+  // nome: admin da conta edita de qualquer pessoa; gerente, só dos atendentes (a API repete a regra)
+  const canRename = (a: Agent) => canManageTeam && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager') || (a.role === 'tenant_admin' && me.data?.role === 'tenant_admin'));
+  // e-mail (login) e papel: admin edita atendentes e gerentes; gerente, só atendentes. Admin não muda o
+  // próprio login por aqui — trocar encerra as sessões da pessoa
+  const canEditAccess = (a: Agent) => canManageTeam && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager'));
+  async function saveEdit(a: Agent, b: { name?: string; email?: string; role?: 'agent' | 'manager' }) {
+    try {
+      await update.mutateAsync({ id: a.id, ...b });
+      // o próprio nome também vai no token: renova para o painel já mostrar o novo
+      if (a.id === me.data?.id) { await refresh(); qc.invalidateQueries({ queryKey: ['me'] }); }
+      toast.ok(b.email || b.role ? 'Usuário atualizado — a pessoa precisa entrar de novo' : 'Usuário atualizado');
+      setEditing(null);
+    } catch (err) { toast.err(err); }
+  }
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const resend = useResendInvite();
   const inviteLink = useInviteLink();
@@ -72,7 +90,10 @@ export default function EquipePage() {
             <tbody className="divide-y divide-line">
               {agents.data.map((a) => (
                 <tr key={a.id} className={cn(!a.isActive && 'opacity-50')}>
-                  <td className="px-5 py-3 font-medium">{a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}</td>
+                  <td className="px-5 py-3 font-medium">
+                    {a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}
+                    {canRename(a) && !canEditAccess(a) && <button onClick={() => setEditing(a)} className="ml-1.5 align-middle text-faint hover:text-ink p-0.5" title="Editar" aria-label={`Editar ${a.name}`}><Pencil size={12} /></button>}
+                  </td>
                   <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}</td>
                   <td className="px-5 py-3">
                     {canManageTeam && a.role !== 'tenant_admin' && a.role !== 'super_admin' ? (
@@ -143,6 +164,7 @@ export default function EquipePage() {
                     )}
                     {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
                       <>
+                        <Button size="sm" variant="ghost" icon={<Pencil size={12} />} onClick={() => setEditing(a)}>Editar</Button>
                         <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>
                         <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-faint hover:text-danger' : 'text-accent')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
                       </>
@@ -170,6 +192,7 @@ export default function EquipePage() {
       <AccessProfiles />
 
       <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ?? null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Atendente criado — mande o link do convite'); } else toast.ok(b.role === 'manager' ? 'Gerente criado' : 'Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
+      <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
   );
@@ -214,6 +237,46 @@ function ResetPasswordModal({ agent, onClose, onSubmit, pending }: { agent: Agen
       <form onSubmit={(e) => { e.preventDefault(); onSubmit(p); setP(''); }} className="space-y-4">
         <Field label="Nova senha" hint="As sessões ativas deste atendente serão encerradas."><input type="text" className={inputCls} value={p} onChange={(e) => setP(e.target.value)} minLength={8} required autoFocus /></Field>
         <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText="Redefinindo…">Redefinir</Button></div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canEditRole }: { agent: Agent | null; onClose: () => void; onSubmit: (b: { name?: string; email?: string; role?: 'agent' | 'manager' }) => void; pending: boolean; canEditAccess: boolean; canEditRole: boolean }) {
+  const [f, setF] = useState<{ name: string; email: string; role: 'agent' | 'manager' }>({ name: '', email: '', role: 'agent' });
+  const [forId, setForId] = useState<string | null>(null);
+  // preenche com os dados atuais ao abrir para outra pessoa
+  if (agent && forId !== agent.id) { setForId(agent.id); setF({ name: agent.name, email: agent.email, role: agent.role === 'manager' ? 'manager' : 'agent' }); }
+  if (!agent && forId) setForId(null);
+  // manda só o que mudou: e-mail/papel encerram as sessões da pessoa
+  const changes = agent ? {
+    ...(f.name.trim() !== agent.name && { name: f.name.trim() }),
+    ...(canEditAccess && f.email.trim() !== agent.email && { email: f.email.trim() }),
+    ...(canEditAccess && canEditRole && f.role !== agent.role && { role: f.role }),
+  } : {};
+  const dirty = Object.keys(changes).length > 0;
+  return (
+    <Modal open={!!agent} onClose={onClose} title={`Editar · ${agent?.name ?? ''}`} width="max-w-sm">
+      <form onSubmit={(e) => { e.preventDefault(); if (f.name.trim() && dirty) onSubmit(changes); }} className="space-y-4">
+        <Field label="Nome de exibição"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={80} required autoFocus /></Field>
+        {canEditAccess ? (
+          <Field label="E-mail" hint="É o login. Ao trocar, a pessoa precisa entrar de novo."><input type="email" className={inputCls} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={120} required /></Field>
+        ) : (
+          <p className="text-xs text-muted">{agent?.email}</p>
+        )}
+        {canEditAccess && canEditRole && (
+          <Field label="Papel">
+            <div className="grid grid-cols-2 gap-2">
+              {(['agent', 'manager'] as const).map((r) => (
+                <button type="button" key={r} onClick={() => setF({ ...f, role: r })} className={cn('rounded-lg border px-3 py-2 text-left', f.role === r ? 'border-accent bg-accent-soft' : 'border-line hover:bg-field')}>
+                  <div className="text-sm font-semibold text-ink">{r === 'agent' ? 'Atendente' : 'Gerente'}</div>
+                  <div className="text-[11px] text-muted">{r === 'agent' ? 'Atende as próprias conversas' : 'Vê todas, transfere, orienta por nota interna'}</div>
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
+        <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText="Salvando…" disabled={!f.name.trim() || !dirty}>Salvar</Button></div>
       </form>
     </Modal>
   );

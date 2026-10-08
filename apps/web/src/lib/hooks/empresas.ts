@@ -5,6 +5,11 @@ import { api } from '../api';
 
 export interface Company {
   id: string; name: string; cnpj: string | null; description: string | null; createdAt: string;
+  /** CONSOLIDATED_GROUP = herda a assinatura do cliente; INDIVIDUAL = assinatura própria */
+  billingType: 'INDIVIDUAL' | 'CONSOLIDATED_GROUP';
+  /** ativa para cobrança */
+  isActive: boolean;
+  subscription: { planId: string; status: string; currentPeriodEnd: string; priceMonth: string | null; plan: { name: string } } | null;
   numbers: { id: string; label: string; phone: string; color: string }[];
   users: { user: { id: string; name: string; isActive: boolean } }[];
 }
@@ -29,4 +34,6 @@ export const useAdminCompanyOptions = (tenantId: string) => useQuery({ queryKey:
 const invAdmin = (qc: ReturnType<typeof useQueryClient>, tenantId: string) => () => { qc.invalidateQueries({ queryKey: ['admin-companies', tenantId] }); qc.invalidateQueries({ queryKey: ['tenants'] }); };
 export const useAdminCreateCompany = (tenantId: string) => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: CompanyInput) => api<Company>(adminBase(tenantId), { method: 'POST', body: JSON.stringify(b) }), onSuccess: invAdmin(qc, tenantId) }); };
 export const useAdminUpdateCompany = (tenantId: string) => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<CompanyInput> & { id: string }) => api<Company>(`${adminBase(tenantId)}/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invAdmin(qc, tenantId) }); };
+export interface CompanyBillingInput { id: string; billingType: 'INDIVIDUAL' | 'CONSOLIDATED_GROUP'; isActive?: boolean; planId?: string; priceMonth?: number | null; /** AAAA-MM-DD */ currentPeriodEnd?: string; status?: string }
+export const useAdminCompanyBilling = (tenantId: string) => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: CompanyBillingInput) => api<Company>(`${adminBase(tenantId)}/${id}/billing`, { method: 'PUT', body: JSON.stringify(b) }), onSuccess: invAdmin(qc, tenantId) }); };
 export const useAdminDeleteCompany = (tenantId: string) => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`${adminBase(tenantId)}/${id}`, { method: 'DELETE' }), onSuccess: invAdmin(qc, tenantId) }); };

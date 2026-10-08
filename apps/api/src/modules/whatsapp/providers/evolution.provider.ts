@@ -22,7 +22,7 @@ export interface EvolutionNumberConfig {
 }
 
 /**
- * Evolution API (não-oficial, via QR code). Custo por mensagem = 0.
+ * Evolution API (via QR code). Custo por mensagem = 0.
  * Docs: https://doc.evolution-api.com
  */
 @Injectable()
@@ -116,7 +116,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     // `delay`: a Evolution mostra "digitando…" (no áudio, "gravando…") por esse tempo e só então entrega
     const delay = m.typingMs && m.typingMs > 0 ? Math.round(m.typingMs) : undefined;
     if (m.type === MessageType.TEXT || m.interactive) {
-      // Botões/listas não funcionam de forma confiável em contas não-oficiais: vira lista numerada
+      // Botões/listas não funcionam de forma confiável em contas QR: vira lista numerada
       const text = m.interactive?.options.length ? `${m.text ?? ''}\n\n${m.interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : (m.text ?? '');
       r = await this.api(`/message/sendText/${name}`, {
         method: 'POST',

@@ -3,6 +3,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { UsageService } from './usage.service';
 import { StripeService } from './stripe.service';
+import { DuesService } from './dues.service';
 import { QUEUE_BILLING } from '../whatsapp/queues';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 
@@ -11,6 +12,7 @@ export class BillingProcessor extends TrackedWorkerHost {
   constructor(
     private readonly usage: UsageService,
     private readonly stripe: StripeService,
+    private readonly dues: DuesService,
   ) {
     super(QUEUE_BILLING);
   }
@@ -23,6 +25,8 @@ export class BillingProcessor extends TrackedWorkerHost {
       await this.stripe.expireFreePlans();
       // reajustes cuja data de aviso prévio venceu
       await this.stripe.applyDuePriceChanges();
+      // grupos consolidados cuja contagem de empresas não chegou ao Asaas
+      await this.dues.syncAllGroups();
     }
   }
 }

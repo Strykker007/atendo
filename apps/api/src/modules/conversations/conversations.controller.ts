@@ -134,6 +134,11 @@ class PrimaryTagDto implements SetPrimaryTagInput {
   @ValidateIf((_, v) => v !== null) @IsUUID() tagId: string | null;
 }
 
+class UnreadDto {
+  /** marca como não lido a partir desta mensagem; ausente = a conversa toda */
+  @IsOptional() @IsUUID() messageId?: string;
+}
+
 class TypingDto {
   @IsOptional() @IsIn(['composing', 'paused']) state?: 'composing' | 'paused';
 }
@@ -208,7 +213,7 @@ export class ConversationsController {
   }
 
   /**
-   * Vagas de contato frio do número não oficial nas últimas 24 h (docs/envio.md#envio-frio) —
+   * Vagas de contato frio do número QR nas últimas 24 h (docs/envio.md#envio-frio) —
    * a tela mostra "restam N" antes do atendente esbarrar no limite. `null` no número oficial.
    */
   @Get('cold-quota')
@@ -397,7 +402,7 @@ export class ConversationsController {
 
   /**
    * Atendente digitando: `composing` (renovado pelo painel a cada ~2 s enquanto digita) mostra
-   * "digitando…" ao contato; `paused` (parou, enviou, saiu) apaga. Só número não oficial, conversa
+   * "digitando…" ao contato; `paused` (parou, enviou, saiu) apaga. Só número QR, conversa
    * aberta e número conectado. Responde na hora.
    */
   @Post(':id/typing')
@@ -418,5 +423,11 @@ export class ConversationsController {
       .then((c) => c && this.numbers.subscribePresence(conv.numberId, c.phone))
       .catch(() => undefined);
     return conv;
+  }
+
+  /** Marcar como não lida (a conversa toda ou a partir de uma mensagem). Só no painel. */
+  @Patch(':id/unread')
+  markUnread(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UnreadDto) {
+    return this.conversations.markUnread(u.tenantId, id, dto.messageId);
   }
 }

@@ -26,6 +26,13 @@ const schema = z.object({
   API_PORT: z.coerce.number().default(3001),
   API_PUBLIC_URL: z.string().url(),
   WEB_ORIGIN: z.string().url(),
+  // outras origens do painel (vertentes de marca em outro domínio), separadas por vírgula.
+  // Só liberam CORS/socket: links de e-mail e de pagamento continuam no WEB_ORIGIN.
+  WEB_EXTRA_ORIGINS: z
+    .string()
+    .default('')
+    .transform((s) => s.split(',').map((o) => o.trim()).filter(Boolean))
+    .pipe(z.array(z.string().url())),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: z.string().default('15m'),
@@ -99,4 +106,6 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+/** Origens aceitas pelo CORS da API e do socket: o painel principal + vertentes de marca. */
+export const webOrigins = [env.WEB_ORIGIN, ...env.WEB_EXTRA_ORIGINS];
 export type Env = typeof env;

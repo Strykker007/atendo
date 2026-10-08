@@ -172,7 +172,7 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
             </select>
             {number && (
               <span className={cn('absolute right-8 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-wider rounded px-1.5 py-0.5 pointer-events-none', isMeta ? 'bg-meta-soft text-meta-ink' : 'bg-evo-soft text-evo-ink')}>
-                {isMeta ? <ShieldCheck size={10} /> : <QrCode size={10} />}{isMeta ? 'Oficial' : 'QR'}
+                {isMeta ? <ShieldCheck size={10} /> : <QrCode size={10} />}{isMeta ? 'Meta' : 'QR'}
               </span>
             )}
           </div>
@@ -190,17 +190,17 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
 
         {number && !isMeta && (
           <p className={cn('rounded-lg px-3 py-2 text-[12.5px]', cotaFria.data && cotaFria.data.used >= cotaFria.data.max ? 'bg-warn-soft text-warn-ink' : 'bg-field text-muted')}>
-            Pelo número <b>QR (não oficial)</b>, falar primeiro com quem <b>não escreveu neste número nas últimas 24 horas</b> é a principal causa de bloqueio.
+            Pela <b>Conexão Web (QR Code)</b>, falar primeiro com quem <b>não escreveu neste número nas últimas 24 horas</b> é a principal causa de bloqueio.
             Por isso cada número pode chamar até <b>{cotaFria.data?.max ?? 10} contatos assim por dia</b>
             {cotaFria.data && (cotaFria.data.used >= cotaFria.data.max
               ? <> — o limite de hoje foi atingido{cotaFria.data.resetsAt ? <>; uma vaga libera em <b>{new Date(cotaFria.data.resetsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></> : null}</>
               : <> — restam <b>{cotaFria.data.max - cotaFria.data.used}</b></>)}.
-            {' '}Quem escreveu nas últimas 24 horas não conta. Para chamar muitos contatos, use um número oficial.
+            {' '}Quem escreveu nas últimas 24 horas não conta. Para chamar muitos contatos, use um número Meta Cloud API.
           </p>
         )}
         {usandoTemplate && !proativo.loading && !proativo.has && (
           <p className="rounded-lg bg-warn-soft text-warn-ink px-3 py-2 text-[12.5px]">
-            Iniciar conversa com quem não escreveu nas últimas 24h depende do recurso <b>Mensagem ativa (número oficial)</b>, que não está no seu plano.
+            Iniciar conversa com quem não escreveu nas últimas 24h depende do recurso <b>Mensagem ativa (Meta Cloud API)</b>, que não está no seu plano.
           </p>
         )}
 

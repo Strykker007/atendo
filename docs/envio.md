@@ -160,7 +160,7 @@ só entra no campo. Configuração: *Configurações → Respostas rápidas* (`T
 ### Envio frio
 
 Mensagem para quem **não escreveu naquele número nas últimas 24 h** (a mesma janela da Meta,
-somando todas as conversas do contato no número). É a causa nº 1 de banimento no não oficial,
+somando todas as conversas do contato no número). É a causa nº 1 de banimento no QR,
 então (`conversations/cold-send.ts`, `ConversationsService.assertColdAllowed`):
 
 | Número | Contato escreveu < 24 h | Contato frio |
@@ -194,7 +194,7 @@ número oficial (é envio frio por definição). A tela *Nova conversa* explica 
 
 ### Envio automático
 
-Mensagem sem autor humano (fluxo, boas-vindas, faixa, lembrete, campanha) no **não oficial**:
+Mensagem sem autor humano (fluxo, boas-vindas, faixa, lembrete, campanha) no **QR**:
 
 - espera um sorteio de **4–10 s** (`AUTO_GAP_MS`) desde o último envio do número, de qualquer
   origem (`wa:last`, atualizado na reserva e na entrega). Com o número ocioso, a 1ª também espera;
@@ -207,7 +207,7 @@ em volume é o padrão que o WhatsApp pune; conversa humana não.
 ### Aquecimento
 
 Sessão nova (QR lido: `pending_qr → connected` grava `WhatsAppNumber.sessionStartedAt`) no
-**não oficial** passa **7 dias** aquecendo (`whatsapp/number-warmup.ts`). Reinício de servidor ou
+**QR** passa **7 dias** aquecendo (`whatsapp/number-warmup.ts`). Reinício de servidor ou
 oscilação de rede não reabre o aquecimento. **Ler o QR de novo no mesmo telefone continua de onde
 parou** (e, se os 7 dias já passaram, não volta a aquecer): `warmupStartOnPair` mantém o
 `sessionStartedAt`. Recomeça do zero só se o WhatsApp derrubou o número nessa sessão (`waRemovedAt`
@@ -236,7 +236,7 @@ A fase 1 continua perto dos números que derrubaram as duas farmácias — é o 
 
 ### Humanização
 
-No não oficial, antes de entregar:
+No QR, antes de entregar:
 - **fica online** (`NumbersService.markOnline` → Evolution `/instance/setPresence available`) e
   volta a **offline ~45 s depois da última atividade** (envio ou "digitando"). A instância conecta
   offline (`alwaysOnline: false` → `markOnlineOnConnect: false`) e **o WhatsApp não exibe
@@ -278,7 +278,7 @@ No não oficial, antes de entregar:
     blocos de 5 s em sequência — sobrepor blocos faria o `paused` de um apagar o outro. Estado no
     Redis (`typing:until` com 4 s de validade, `typing:loop` como trava) por haver mais de uma
     instância da API; teto de 2 min. `paused` encerra na hora;
-  - só número não oficial conectado e conversa aberta. Sem isto a resposta humana chegava do nada,
+  - só número QR conectado e conversa aberta. Sem isto a resposta humana chegava do nada,
     sem o "digitando" que todo WhatsApp Web real mostra antes;
   - cada `sendPresence` faz a Evolution conferir o número (`whatsappNumber`), mas com cache local
     dela: contato que já conversou não gera consulta ao WhatsApp.

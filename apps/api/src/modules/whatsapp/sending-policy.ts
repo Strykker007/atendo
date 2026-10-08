@@ -28,7 +28,7 @@ export const DELAY_LABEL: Record<SendDelayProfile, string> = {
 };
 
 /**
- * Intervalo padrão de um número: a oficial não bane por ritmo (imediato); a não oficial sai no
+ * Intervalo padrão de um número: a oficial não bane por ritmo (imediato); a QR sai no
  * Rápido. Antes o padrão era 7–25s para todos — com vários atendentes no mesmo número
  * a fila virava minutos de espera.
  */

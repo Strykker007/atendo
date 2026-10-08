@@ -189,7 +189,7 @@ export interface StartCandidates {
   contacts: { id: string; name: string | null; phone: string }[];
   phonebook: { phone: string; name: string; numberId: string }[];
 }
-/** Vagas de contato frio do número não oficial nas últimas 24 h (`null` no oficial). docs/envio.md#envio-frio */
+/** Vagas de contato frio do número QR nas últimas 24 h (`null` no oficial). docs/envio.md#envio-frio */
 export interface ColdQuota { ok: boolean; used: number; max: number; resetsAt: string | null }
 export const useColdQuota = (numberId: string | null | undefined, enabled = true) =>
   useQuery({

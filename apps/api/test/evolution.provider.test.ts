@@ -316,7 +316,7 @@ describe('EvolutionProvider.send', () => {
     expect(res).toEqual({ externalId: 'EVO-ENVIADA', status: MessageStatus.SENT, billingCategory: BillingCategory.UNOFFICIAL });
   });
 
-  it('menu vira lista numerada — conta não-oficial não recebe botão de forma confiável', async () => {
+  it('menu vira lista numerada — conta QR não recebe botão de forma confiável', async () => {
     await provider.send(ctx, {
       to: '5511999999999',
       type: MessageType.TEXT,

@@ -9,6 +9,7 @@ import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
 import { CompanySwitcher } from './CompanySwitcher';
 import { NoticeBell } from './SystemNotices';
+import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
 import { useTheme, applyTheme } from '@/lib/theme';
 import { useConversationCounts, useMe, usePermissions } from '@/lib/hooks';
 import type { Permission } from '@atendo/shared';
@@ -75,15 +76,12 @@ export function Sidebar() {
       {/* recolher fica no topo, ao lado da marca: no rodapé ficava perdido no meio da gaveta
           e as pessoas não achavam */}
       <div className={cn('h-12 flex items-center gap-2.5 px-3.5', collapsed && 'justify-center px-0')}>
-        {/* a logo é escura no original e o menu tem fundo escuro: a versão `-escuro` tem o
-            texto em branco e mantém o vermelho da marca. Recolhido fica só o robô. */}
+        {/* o menu tem fundo escuro: a logo do menu é a versão com texto claro. Recolhido fica só o símbolo. */}
         {collapsed ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src="/marca/vogo-icone.png" alt="VOGO.CHAT" className="h-7 w-auto shrink-0" />
+          <MarcaIcone className="h-7 w-auto shrink-0" />
         ) : (
           <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/marca/vogo-escuro.png" alt="VOGO.CHAT" className="h-6 w-auto flex-1 min-w-0 object-contain object-left" />
+            <MarcaMenu className="h-6 w-auto flex-1 min-w-0 object-contain object-left" />
             {/* avisos globais do sistema: não há barra superior, então o sino mora no topo do menu */}
             <NoticeBell />
             <button onClick={toggleSidebar} className="p-1 -mr-1 rounded-md text-side-ink/60 hover:text-white hover:bg-white/5" title="Recolher menu">

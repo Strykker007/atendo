@@ -8,7 +8,7 @@ import { TYPING_MAX_MS, TYPING_SPEEDS, type TypingSpeed } from '@atendo/shared';
  * continua sendo respondido pelo atendente sem trava. A Drog. Nova Farma foi restrita em 7 h com
  * ~50 automáticas/h (saudação do fluxo em toda conversa) — daí o teto do robô por fase.
  *
- * Só no não oficial. Fases contadas desde `sessionStartedAt`.
+ * Só no QR. Fases contadas desde `sessionStartedAt`.
  */
 const HORA = 3_600_000;
 
@@ -67,7 +67,7 @@ export function warmupStartOnPair(n: { sessionStartedAt: Date | null; waRemovedA
 }
 
 /**
- * Quanto uma pessoa levaria para mandar este texto (mensagem automática no não oficial):
+ * Quanto uma pessoa levaria para mandar este texto (mensagem automática no QR):
  * - **reação** — perceber a mensagem e começar a responder: 1,2–3 s, mais um pouco quanto maior a
  *   resposta (pensar no que escrever), até +2 s. Aplicada contando da última mensagem do contato:
  *   na 2ª mensagem seguida do fluxo ela já passou e não soma;

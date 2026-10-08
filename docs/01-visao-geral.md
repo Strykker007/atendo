@@ -86,11 +86,11 @@ Painel à direita do chat, organizado em pastas ("sessões"). Clicar numa respos
 
 O cliente desenha o atendimento automático (menus, perguntas, condições) e dispara pelo chat ou automaticamente. Detalhes em [10 — Fluxos](10-fluxos-de-automacao.md). É uma funcionalidade **do plano** (Pro e Business).
 
-## Oficial vs. não-oficial
+## Meta Cloud API vs. QR code
 
 Cada número escolhe **como** fala com o WhatsApp:
 
 - **Oficial (Meta Cloud API)** — número de negócio, sem risco de banimento, custa por template enviado.
-- **Não-oficial (Evolution API)** — qualquer número, conecta por QR code, grátis, mas viola os termos da Meta e pode ser banido.
+- **QR code (Evolution API)** — qualquer número, conecta por QR code, grátis, mas viola os termos da Meta e pode ser banido.
 
 A troca é um clique em *Números → Trocar provider*. Detalhes em [04 — Providers](04-providers-whatsapp.md).

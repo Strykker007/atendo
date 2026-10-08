@@ -142,7 +142,16 @@ export class UsageService {
   }
 
   /** Verifica se o tenant pode enviar mais uma mensagem/template. */
-  async canSend(tenantId: string, kind: QuotaKind): Promise<QuotaDecision> {
+  async canSend(tenantId: string, kind: QuotaKind, numberId?: string): Promise<QuotaDecision> {
+    // empresa com assinatura própria suspensa/cancelada: os números dela param de enviar, e só
+    // eles — o resto do grupo segue normal (docs/empresas.md#cobrança)
+    if (numberId) {
+      const n = await this.prisma.whatsAppNumber.findUnique({ where: { id: numberId }, select: { company: { select: { name: true, billingType: true, subscription: { select: { status: true } } } } } });
+      const c = n?.company;
+      if (c?.billingType === 'INDIVIDUAL' && (c.subscription?.status === 'suspended' || c.subscription?.status === 'canceled')) {
+        return { ok: false, reason: `A assinatura de ${c.name} está ${c.subscription.status === 'suspended' ? 'suspensa' : 'cancelada'}: regularize em Plano e uso → Vencimentos para voltar a enviar.` };
+      }
+    }
     const plan = await this.limits(tenantId);
     if (!plan) return decideCanSend(null, { messages: 0, templates: 0, conversations: 0 }, kind);
     return decideCanSend(plan, await this.current(tenantId), kind);

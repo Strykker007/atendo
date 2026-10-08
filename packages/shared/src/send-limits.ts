@@ -4,7 +4,7 @@
  * Tudo que sai para o WhatsApp passa pela fila `wa-outbound`, que aplica estes limites.
  * Os limites por conexão podem ser trocados no cartão do número (`WhatsAppNumber.sendLimits`);
  * o que não for configurado cai no padrão do provider. Evolution é mais conservador que a
- * Meta porque é o não-oficial que bane por ritmo.
+ * Meta porque é o QR que bane por ritmo.
  */
 
 export type SendProvider = 'meta' | 'evolution';
@@ -48,7 +48,7 @@ export const SEND_LIMIT_LABEL: Record<keyof SendLimits, string> = {
 };
 
 /**
- * Espaçamento do envio AUTOMÁTICO no não oficial (docs/envio.md#envio-automático): sorteado a
+ * Espaçamento do envio AUTOMÁTICO no QR (docs/envio.md#envio-automático): sorteado a
  * cada mensagem, conta do último envio do número (de qualquer origem). Resposta do atendente não
  * espera isto — só o perfil do número.
  */
@@ -91,7 +91,7 @@ export const TYPING_SPEED_KEYS = Object.keys(TYPING_SPEEDS) as TypingSpeed[];
 export const TYPING_MAX_MS = 10_000;
 
 /**
- * Número não oficial pode falar primeiro com até N contatos frios (sem mensagem dele nas últimas
+ * Número QR pode falar primeiro com até N contatos frios (sem mensagem dele nas últimas
  * 24 h) por dia — janela deslizante de 24 h, só envio do atendente. Ver docs/envio.md#envio-frio.
  */
 export const COLD_CONTACTS_PER_DAY = 10;

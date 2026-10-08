@@ -138,7 +138,7 @@ export interface WhatsAppProvider {
   subscribePresence?(ctx: NumberContext, phone: string): Promise<void>;
   /**
    * Presença para o contato (atendente escrevendo no painel). `composing` dura `ms` e volta a
-   * `paused` sozinho; `paused` encerra na hora. Só no não oficial.
+   * `paused` sozinho; `paused` encerra na hora. Só no QR.
    */
   sendTyping?(ctx: NumberContext, phone: string, ms: number, state?: 'composing' | 'paused'): Promise<void>;
   /** online/offline da conta inteira. O WhatsApp não mostra "digitando" de quem está offline. */

@@ -2,16 +2,18 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Building2, Eye, Power, Pencil, Store } from 'lucide-react';
-import { CompaniesSection } from '@/components/settings/CompaniesSection';
+import { Plus, Building2, Eye, Power, Pencil, Store, Layers } from 'lucide-react';
+import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDialog';
+import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
+import { useBrand } from '@/lib/brand-context';
 import { impersonation, setAccessToken } from '@/lib/api';
-import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, type Plan, type TenantRow, type TenantProfile } from '@/lib/hooks';
+import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, useTenantTemplates, type Plan, type TenantRow, type TenantProfile } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 /** Rótulo do plano nos seletores: gratuito aparece como tal (e com o prazo), não como "R$ 0,00". */
@@ -47,6 +49,7 @@ const fmtDoc = (d: string | null) => {
 
 /** Gestão de clientes pelo dono: criar, plano/status, entrar como. */
 export default function ClientesPage() {
+  const { brandName } = useBrand();
   const me = useMe();
   const tenants = useTenants();
   const plans = usePlans();
@@ -55,9 +58,12 @@ export default function ClientesPage() {
   const qc = useQueryClient();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [modelos, setModelos] = useState(false);
   const [editando, setEditando] = useState<TenantRow | null>(null);
   // empresas/unidades do cliente, direto daqui (sem "Entrar como")
   const [empresasDe, setEmpresasDe] = useState<TenantRow | null>(null);
+  // plano de uma empresa, aberto direto da coluna Plano
+  const [planoEmpresa, setPlanoEmpresa] = useState<{ tenant: TenantRow; company: TenantRow['companies'][number] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   if (me.data && me.data.role !== 'super_admin') return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
@@ -78,7 +84,7 @@ export default function ClientesPage() {
 
   return (
     <PageShell width="max-w-6xl">
-      <PageHeader title="Clientes" subtitle="Todos os clientes do Atendo. Entre em qualquer um para ver o sistema como o admin dele." action={<Button icon={<Plus size={16} />} onClick={() => setCreating(true)}>Novo cliente</Button>} />
+      <PageHeader title="Clientes" subtitle={`Todos os clientes do ${brandName}. Entre em qualquer um para ver o sistema como o admin dele.`} action={<div className="flex gap-2"><Button variant="ghost" icon={<Layers size={16} />} onClick={() => setModelos(true)}>Modelos de perfil</Button><Button icon={<Plus size={16} />} onClick={() => setCreating(true)}>Novo cliente</Button></div>} />
       {tenants.isLoading && <SkeletonRows rows={3} />}
       {tenants.data && (
         <div className="rounded-2xl bg-panel border border-line overflow-x-auto">
@@ -92,6 +98,7 @@ export default function ClientesPage() {
                     <td className="px-4 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}</div>{(t.legalName || t.document) && <div className="text-[11px] text-muted truncate max-w-[16rem]">{[t.legalName, fmtDoc(t.document)].filter(Boolean).join(' · ')}</div>}</td>
                     <td className="px-3 py-2.5 text-muted">{t.users[0]?.email ?? '—'}</td>
                     <td className="px-3 py-2.5">
+                      {t.companies.length > 0 && <div className="text-[10px] font-semibold uppercase tracking-wide text-faint mb-0.5">Plano do grupo{t.subscription && t.subscription.units > 1 ? ` × ${t.subscription.units}` : ''}</div>}
                       <select value={t.subscription?.plan.id ?? ''} disabled={busy === t.id} onChange={(e) => patch(t, { planId: e.target.value })} className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1">
                         {!t.subscription && <option value="">Sem plano</option>}
                         {plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p)}</option>)}
@@ -100,6 +107,19 @@ export default function ClientesPage() {
                         <div className="text-[10px] font-semibold text-ok mt-0.5">
                           Gratuito{t.subscription.plan.durationDays ? ` até ${new Date(t.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')}` : ' permanente'}
                         </div>
+                      )}
+                      {/* com empresas, o plano do grupo não diz tudo: cada uma aparece com o seu e abre o plano dela */}
+                      {t.companies.length > 0 && (
+                        <ul className="mt-1.5 space-y-0.5 max-w-[14rem]">
+                          {t.companies.map((c) => (
+                            <li key={c.id}>
+                              <button onClick={() => setPlanoEmpresa({ tenant: t, company: c })} className="w-full flex items-baseline gap-1 text-left text-[11px] rounded px-1 -mx-1 hover:bg-field" title={`Plano e cobrança de ${c.name}`}>
+                                <span className="truncate text-muted">{c.name}</span>
+                                <span className={cn('ml-auto shrink-0 font-medium', planoDaEmpresa(c)[1])}>{planoDaEmpresa(c)[0]}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </td>
                     <td className="px-3 py-2.5">
@@ -129,18 +149,32 @@ export default function ClientesPage() {
       <Modal open={!!empresasDe} onClose={() => setEmpresasDe(null)} title={`Empresas — ${empresasDe?.name ?? ''}`} width="max-w-2xl">
         {empresasDe && <CompaniesSection tenantId={empresasDe.id} />}
       </Modal>
+      <TenantTemplatesDialog open={modelos} onClose={() => setModelos(false)} />
+      {planoEmpresa && <CompanyBillingDialog tenantId={planoEmpresa.tenant.id} company={planoEmpresa.company} groupPlan={planoEmpresa.tenant.subscription?.plan.name} onClose={() => setPlanoEmpresa(null)} />}
     </PageShell>
   );
+}
+
+/** Rótulo curto do plano de uma empresa na coluna Plano: [texto, classe]. */
+function planoDaEmpresa(c: TenantRow['companies'][number]): [string, string] {
+  if (!c.isActive) return ['inativa', 'text-faint'];
+  if (c.billingType === 'CONSOLIDATED_GROUP') return ['do grupo', 'text-faint'];
+  if (!c.subscription) return ['escolher plano', 'text-warn-ink'];
+  return [c.subscription.plan.name, 'text-ink'];
 }
 
 function CreateTenantModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const plans = usePlans();
   const create = useCreateTenant();
-  const [f, setF] = useState({ name: '', slug: '', planId: '', adminName: '', adminEmail: '', adminPassword: '' });
+  const templates = useTenantTemplates(open);
+  const [f, setF] = useState({ name: '', slug: '', planId: '', adminName: '', adminEmail: '', adminPassword: '', templateId: '' });
+  // modelo padrão vem escolhido; 'none' = nenhum (a API usaria o padrão se o campo faltasse)
+  const padrao = templates.data?.find((t) => t.isDefault)?.id ?? 'none';
+  const templateId = f.templateId || padrao;
   const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   return (
     <Modal open={open} onClose={onClose} title="Novo cliente">
-      <form onSubmit={(e) => { e.preventDefault(); create.mutateAsync({ ...f, adminPassword: f.adminPassword || undefined, planId: f.planId || (plans.data?.[0]?.id ?? '') }).then(() => { toast.ok(f.adminPassword ? 'Cliente criado' : `Cliente criado — convite enviado para ${f.adminEmail}`); onClose(); }).catch(toast.err); }} className="space-y-4">
+      <form onSubmit={(e) => { e.preventDefault(); create.mutateAsync({ ...f, adminPassword: f.adminPassword || undefined, templateId: templateId === 'none' ? null : templateId, planId: f.planId || (plans.data?.[0]?.id ?? '') }).then(() => { toast.ok(f.adminPassword ? 'Cliente criado' : `Cliente criado — convite enviado para ${f.adminEmail}`); onClose(); }).catch(toast.err); }} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome da empresa" hint="Como o cliente é conhecido. Aparece para ele no painel.">
             <input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, slug: slugify(e.target.value) })} required autoFocus placeholder="Farmácia Bem Estar" />
@@ -149,9 +183,17 @@ function CreateTenantModal({ open, onClose }: { open: boolean; onClose: () => vo
             <input className={inputCls} value={f.slug} onChange={(e) => setF({ ...f, slug: slugify(e.target.value) })} required pattern="[a-z0-9-]{3,40}" placeholder="farmacia-bem-estar" />
           </Field>
         </div>
-        <Field label="Plano inicial">
-          <select className={inputCls} value={f.planId} onChange={(e) => setF({ ...f, planId: e.target.value })}>{plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p, '/mês')}</option>)}</select>
-        </Field>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Plano inicial">
+            <select className={inputCls} value={f.planId} onChange={(e) => setF({ ...f, planId: e.target.value })}>{plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p, '/mês')}</option>)}</select>
+          </Field>
+          <Field label="Modelo de perfil" hint="Perfis, respostas rápidas e fluxos com que o cliente já nasce.">
+            <select className={inputCls} value={templateId} onChange={(e) => setF({ ...f, templateId: e.target.value })}>
+              {templates.data?.map((t) => <option key={t.id} value={t.id}>{t.name}{t.isDefault ? ' (padrão)' : ''}</option>)}
+              <option value="none">Nenhum — só os perfis do catálogo</option>
+            </select>
+          </Field>
+        </div>
         <div className="text-xs font-semibold uppercase tracking-wider text-muted pt-1">Administrador do cliente</div>
         <p className="text-[11px] text-muted -mt-2">É a pessoa que vai gerenciar a conta: cadastra os números, a equipe e as respostas. Ela entra com o e-mail abaixo.</p>
         <div className="grid sm:grid-cols-2 gap-3">
@@ -186,6 +228,7 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
     planId: tenant.subscription?.plan.id ?? '',
     subscriptionStatus: tenant.subscription?.status ?? 'active',
     isActive: tenant.isActive,
+    billingType: tenant.billingType,
   });
   const vencimentoInicial = tenant.subscription ? diaSP(tenant.subscription.currentPeriodEnd) : '';
   const [vencimento, setVencimento] = useState(vencimentoInicial);
@@ -202,7 +245,7 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          update.mutateAsync({ id: tenant.id, ...f, planId: f.planId || undefined, profile: perfil, ...(vencimento && vencimento !== vencimentoInicial && { currentPeriodEnd: vencimento }) })
+          update.mutateAsync({ id: tenant.id, ...f, planId: f.planId || undefined, billingType: f.billingType !== tenant.billingType ? f.billingType : undefined, profile: perfil, ...(vencimento && vencimento !== vencimentoInicial && { currentPeriodEnd: vencimento }) })
             .then(() => { toast.ok('Cliente atualizado'); onClose(); })
             .catch(toast.err);
         }}
@@ -238,6 +281,18 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
             <input type="date" className={cn(inputCls, 'sm:w-56', gateway && 'opacity-60')} value={vencimento} onChange={(e) => setVencimento(e.target.value)} disabled={!!gateway} required={!gateway} />
           </Field>
         )}
+
+        <Field
+          label="Cobrança das empresas"
+          hint={f.billingType === 'CONSOLIDATED_GROUP'
+            ? `O valor da assinatura é o plano × empresas ativas que herdam a assinatura${tenant.subscription && tenant.subscription.units > 1 ? ` (hoje ${tenant.subscription.units})` : ''}. Empresa com assinatura própria se configura em Empresas.`
+            : 'Preço cheio do plano, com quantas empresas tiver.'}
+        >
+          <select className={cn(inputCls, 'sm:w-72')} value={f.billingType} onChange={(e) => setF({ ...f, billingType: e.target.value as TenantRow['billingType'] })}>
+            <option value="INDIVIDUAL">Uma assinatura (preço fixo)</option>
+            <option value="CONSOLIDATED_GROUP">Grupo: cobra por empresa ativa</option>
+          </select>
+        </Field>
 
         <div className="text-xs font-semibold uppercase tracking-wider text-muted pt-1">Dados cadastrais</div>
         <div className="grid sm:grid-cols-2 gap-3">

@@ -105,10 +105,10 @@ pnpm --filter @atendo/web dev
 
 Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 
-### 5. Conectar um número (não-oficial)
+### 5. Conectar um número (QR code)
 
 1. Menu *Números → Novo número*.
-2. Nome "Vendas", telefone com DDI (ex.: `5511999998888`), provider *Não-oficial (QR)*.
+2. Nome "Vendas", telefone com DDI (ex.: `5511999998888`), provider *QR code*.
 3. Um QR aparece. No celular: *WhatsApp → ⋮ → Dispositivos conectados → Conectar dispositivo*.
 4. O status muda para **Conectado** sozinho (chega pelo WebSocket).
 5. Mande uma mensagem de outro celular para esse número: ela aparece em *Conversas → Aguardando*.

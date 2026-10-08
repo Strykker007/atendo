@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
+import { useBrand } from '@/lib/brand-context';
 import { useAsaasCheckout, useAsaasCustomer, useAsaasPaymentStatus, useMe, type AsaasPayment, type Plan } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -18,10 +19,12 @@ const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', curren
  * PIX: mostra QR + copia e cola e consulta a situação a cada 4 s até o pagamento cair.
  * Cartão: os dados vão para a API só para serem tokenizados no Asaas; nada fica salvo aqui.
  */
-export function AsaasCheckoutModal({ plan, payment: initial, onClose }: { plan?: Plan | null; payment?: AsaasPayment | null; onClose: () => void }) {
+/** `escopo`: para quem vale a troca (ex.: as empresas do grupo) — com várias empresas, sem isso não dá para saber. */
+export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: { plan?: Plan | null; payment?: AsaasPayment | null; escopo?: string; onClose: () => void }) {
   const open = !!plan || !!initial;
   const qc = useQueryClient();
   const me = useMe();
+  const { brandName } = useBrand();
   const customer = useAsaasCustomer(open);
   const checkout = useAsaasCheckout();
   const [method, setMethod] = useState<'PIX' | 'CREDIT_CARD'>('PIX');
@@ -82,6 +85,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, onClose }: { plan?:
 
   return (
     <Modal open={open} onClose={onClose} title={plan ? `Assinar ${plan.name} — ${valor}` : `Pagar ${valor}`} width="max-w-md">
+      {plan && escopo && !paid && <p className="mb-3 rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">{escopo}</p>}
       {paid ? (
         <div className="py-8 text-center text-accent">
           <CheckCircle2 size={56} className="mx-auto" />
@@ -133,7 +137,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, onClose }: { plan?:
                   <input className={inputCls} value={holder.phone} onChange={(e) => setHolder({ ...holder, phone: e.target.value })} required inputMode="tel" autoComplete="tel" />
                 </Field>
               </div>
-              <p className="text-xs text-faint">A cobrança se renova sozinha no cartão a cada ciclo. Os dados do cartão vão direto para o Asaas e não ficam salvos no Atendo.</p>
+              <p className="text-xs text-faint">A cobrança se renova sozinha no cartão a cada ciclo. Os dados do cartão vão direto para o Asaas e não ficam salvos no {brandName}.</p>
             </>
           )}
           {method === 'PIX' && <p className="text-xs text-faint">Geramos o QR code agora. A cada renovação, uma nova cobrança PIX fica disponível nesta tela e chega por e-mail.</p>}

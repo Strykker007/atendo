@@ -72,6 +72,16 @@ Se não foi você, ignore este e-mail — nada muda.`,
     await this.setPassword(userId, next);
   }
 
+  /**
+   * Trocar o próprio nome de exibição (logado). O nome também viaja no access token: quem
+   * chama renova a sessão (`/auth/refresh`) para o painel e as assinaturas já usarem o novo.
+   */
+  async updateName(userId: string, name: string) {
+    const clean = name.trim();
+    if (!clean) throw new BadRequestException('Informe o nome.');
+    return this.prisma.user.update({ where: { id: userId }, data: { name: clean }, select: { id: true, name: true } });
+  }
+
   /** Convite: cria o usuário sem senha utilizável e manda o link para ele definir a própria. */
   async invite(inviter: { name: string; tenantId: string }, data: { email: string; name: string; role: 'agent' | 'manager' | 'tenant_admin' }, tenantName: string) {
     const user = await this.prisma.user.create({

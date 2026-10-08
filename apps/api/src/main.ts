@@ -4,7 +4,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { env } from './config/env';
+import { env, webOrigins } from './config/env';
 import { RedisIoAdapter } from './common/socket-io.adapter';
 import { AppLogger, rootLogger } from './common/observability/app-logger';
 import { captureError, flushSentry, initSentry } from './common/observability/sentry';
@@ -28,7 +28,7 @@ async function bootstrap() {
 
   // CORP 'same-origin' (padrão do helmet) impediria <img src="http://api/media/..."> na web em outra origem
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-  app.enableCors({ origin: env.WEB_ORIGIN, credentials: true });
+  app.enableCors({ origin: webOrigins, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   app.enableShutdownHooks();
 

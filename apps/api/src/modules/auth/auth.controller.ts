@@ -1,5 +1,5 @@
-import { Body, Controller, ForbiddenException, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { Body, Controller, ForbiddenException, Get, HttpCode, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -22,6 +22,9 @@ class TokenPasswordDto {
 class ChangePasswordDto {
   @IsString() current: string;
   @IsString() @MinLength(8) password: string;
+}
+class UpdateMeDto {
+  @IsString() @MinLength(1) @MaxLength(80) name: string;
 }
 
 const COOKIE = 'atendo_rt';
@@ -98,6 +101,15 @@ export class AuthController {
     if (user.impersonatorId) throw new ForbiddenException('Dono entrando como cliente não troca a senha do cliente.');
     await this.auth.changePassword(user.id, dto.current, dto.password);
     return { ok: true };
+  }
+
+  /** Editar o próprio perfil (nome de exibição). Vale para qualquer papel. */
+  @Patch('me')
+  @NoTenantOk()
+  @UseGuards(JwtAuthGuard)
+  updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateMeDto) {
+    if (user.impersonatorId) throw new ForbiddenException('Dono entrando como cliente não altera o perfil do cliente.');
+    return this.auth.updateName(user.id, dto.name);
   }
 
   @Get('me')

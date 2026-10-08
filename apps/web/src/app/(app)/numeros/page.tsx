@@ -118,6 +118,8 @@ export default function NumerosPage() {
         <div className="grid gap-4 md:grid-cols-2">
           {numbers.data?.map((n) => {
             const st = STATUS[n.status] ?? STATUS.disconnected;
+            // admin gerencia todos; os demais, só os números que atendem (a API decide: `manageable`)
+            const gerencia = podeGerenciar && n.manageable !== false;
             return (
               <div key={n.id} className={cn('rounded-2xl bg-panel border border-line p-4 space-y-3', !n.isActive && 'opacity-60')}>
                 <div className="flex items-start justify-between gap-3">
@@ -130,7 +132,7 @@ export default function NumerosPage() {
                   </div>
                   <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', n.provider === 'meta' ? 'bg-meta-soft text-meta-ink' : 'bg-evo-soft text-evo-ink')}>
                     {n.provider === 'meta' ? <ShieldCheck size={13} /> : <QrCode size={13} />}
-                    {n.provider === 'meta' ? 'Oficial' : 'Não-oficial'}
+                    {n.provider === 'meta' ? 'Meta Cloud API' : 'Conexão Web'}
                   </span>
                 </div>
 
@@ -141,7 +143,7 @@ export default function NumerosPage() {
                 </div>
 
                 {/* cor do canal: é ela que identifica o número na lista de conversas e no chat */}
-                {podeGerenciar && (
+                {gerencia && (
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs text-muted mr-1">Cor</span>
                     {NUMBER_PALETTE.map((c) => (
@@ -175,13 +177,13 @@ export default function NumerosPage() {
                 {n.isActive && <SendingCard number={n} />}
 
                 <div className="flex flex-wrap gap-2">
-                  {n.provider === 'evolution' && n.status !== 'connected' && (
+                  {gerencia && n.provider === 'evolution' && n.status !== 'connected' && (
                     <Button size="sm" icon={<QrCode size={14} />} onClick={() => reconnect(n)} loading={busyId === n.id && connect.isPending} loadingText="Gerando QR…">Conectar (QR)</Button>
                   )}
-                  {(n.provider === 'meta' || n.status === 'connected') && (
+                  {gerencia && (n.provider === 'meta' || n.status === 'connected') && (
                     <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => reconnect(n)} loading={busyId === n.id && connect.isPending} loadingText="Validando…">Revalidar</Button>
                   )}
-                  {podeGerenciar && <>
+                  {gerencia && <>
                     {/* agenda do celular: roda sozinha a cada 6 h; o botão é para não esperar */}
                     {n.provider === 'evolution' && n.status === 'connected' && (
                       <Button size="sm" variant="ghost" icon={<BookUser size={14} />} title="Atualiza o nome dos contatos com a agenda do celular" onClick={() => syncAgenda.mutateAsync(n.id).then(() => toast.ok('Sincronizando a agenda do celular. Os nomes atualizam em alguns instantes.')).catch(toast.err)} loading={syncAgenda.isPending && syncAgenda.variables === n.id}>Sincronizar agenda</Button>

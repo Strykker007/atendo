@@ -1,5 +1,5 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Injectable, Module, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Injectable, Module, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
@@ -12,6 +12,8 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
 import type { PlanLimits } from '@atendo/shared';
+import { DuesService } from '../billing/dues.service';
+import { nextPeriodEnd } from '../billing/dues';
 
 class CompanyDto {
   @IsString() @MaxLength(60) name: string;
@@ -24,8 +26,24 @@ class CompanyDto {
   @IsOptional() @IsArray() @ArrayMaxSize(500) @IsUUID('4', { each: true }) userIds?: string[];
 }
 
+/** Cobrança da empresa (docs/empresas.md#cobrança). Só o dono mexe. */
+class CompanyBillingDto {
+  /** CONSOLIDATED_GROUP = herda a assinatura do cliente; INDIVIDUAL = assinatura própria */
+  @IsIn(['INDIVIDUAL', 'CONSOLIDATED_GROUP']) billingType: 'INDIVIDUAL' | 'CONSOLIDATED_GROUP';
+  /** ativa para cobrança: inativa não entra na conta do grupo nem gera vencimento */
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  /** plano da assinatura própria; obrigatório na primeira vez em INDIVIDUAL */
+  @IsOptional() @IsUUID() planId?: string;
+  /** preço contratado (equivalente mensal); null = o do plano */
+  @IsOptional() @IsNumber() @Min(0) @Max(99_999) priceMonth?: number | null;
+  /** próximo vencimento, `AAAA-MM-DD` */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) currentPeriodEnd?: string;
+  @IsOptional() @IsIn(['trialing', 'active', 'past_due', 'suspended', 'canceled']) status?: 'trialing' | 'active' | 'past_due' | 'suspended' | 'canceled';
+}
+
 const SELECT = {
-  id: true, name: true, cnpj: true, description: true, createdAt: true,
+  id: true, name: true, cnpj: true, description: true, createdAt: true, billingType: true, isActive: true,
+  subscription: { select: { planId: true, status: true, currentPeriodEnd: true, priceMonth: true, plan: { select: { name: true } } } },
   numbers: { where: { deletedAt: null }, select: { id: true, label: true, phone: true, color: true }, orderBy: { createdAt: 'asc' } },
   users: { select: { user: { select: { id: true, name: true, isActive: true } } } },
 } satisfies Prisma.CompanySelect;
@@ -36,7 +54,7 @@ const SELECT = {
  */
 @Injectable()
 class CompaniesService {
-  constructor(private readonly prisma: PrismaService, private readonly permissions: PermissionsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly permissions: PermissionsService, private readonly dues: DuesService) {}
 
   list(tenantId: string) {
     return this.prisma.company.findMany({ where: { tenantId }, orderBy: { name: 'asc' }, select: SELECT });
@@ -46,6 +64,8 @@ class CompaniesService {
     const { numberIds, userIds, ...data } = dto;
     const company = await this.prisma.company.create({ data: { tenantId, ...clean(data) } as Prisma.CompanyUncheckedCreateInput }).catch(duplicate);
     await this.setLinks(tenantId, company.id, numberIds, userIds);
+    // empresa nova herda a assinatura: no grupo consolidado o valor sobe uma unidade
+    await this.dues.syncGroupUnits(tenantId);
     return this.prisma.company.findUniqueOrThrow({ where: { id: company.id }, select: SELECT });
   }
 
@@ -61,7 +81,38 @@ class CompaniesService {
   async remove(tenantId: string, id: string) {
     const company = await this.prisma.company.delete({ where: { id, tenantId } });
     this.permissions.invalidate();
+    await this.dues.syncGroupUnits(tenantId);
     return company;
+  }
+
+  /**
+   * Modo de cobrança da empresa. INDIVIDUAL cria/atualiza a assinatura própria; voltar para o
+   * grupo mantém a linha antiga (histórico) mas ela deixa de valer. Recalcula o grupo no fim.
+   */
+  async setBilling(tenantId: string, id: string, dto: CompanyBillingDto) {
+    const company = await this.prisma.company.findFirstOrThrow({ where: { id, tenantId }, select: { id: true, subscription: true } });
+    await this.prisma.company.update({ where: { id }, data: { billingType: dto.billingType, ...(dto.isActive !== undefined && { isActive: dto.isActive }) } });
+    if (dto.billingType === 'INDIVIDUAL') {
+      const end = dto.currentPeriodEnd ? new Date(`${dto.currentPeriodEnd}T23:59:59-03:00`) : undefined;
+      const fields = {
+        ...(dto.planId && { planId: dto.planId }),
+        ...(dto.priceMonth !== undefined && { priceMonth: dto.priceMonth }),
+        ...(end && { currentPeriodEnd: end }),
+        ...(dto.status && { status: dto.status, canceledAt: dto.status === 'canceled' ? new Date() : null }),
+      };
+      if (company.subscription) {
+        await this.prisma.companySubscription.update({ where: { companyId: id }, data: fields });
+      } else {
+        if (!dto.planId) throw new BadRequestException('Escolha o plano da assinatura própria da empresa.');
+        const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: dto.planId } });
+        const now = new Date();
+        await this.prisma.companySubscription.create({
+          data: { tenantId, companyId: id, planId: plan.id, status: dto.status ?? 'active', currentPeriodStart: now, currentPeriodEnd: end ?? nextPeriodEnd(now, plan.billingCycle === 'yearly' ? 'yearly' : 'monthly'), priceMonth: dto.priceMonth ?? null },
+        });
+      }
+    }
+    await this.dues.syncGroupUnits(tenantId);
+    return this.prisma.company.findUniqueOrThrow({ where: { id }, select: SELECT });
   }
 
   /** Só números e usuários deste cliente: os ids vêm do corpo da requisição. */
@@ -176,6 +227,12 @@ class AdminCompaniesController {
   @Delete(':id')
   remove(@Param('tenantId', ParseUUIDPipe) tenantId: string, @Param('id') id: string) {
     return this.companies.remove(tenantId, id);
+  }
+
+  /** Assinatura própria ou herdada do grupo (docs/empresas.md#cobrança). */
+  @Put(':id/billing')
+  billing(@Param('tenantId', ParseUUIDPipe) tenantId: string, @Param('id') id: string, @Body() dto: CompanyBillingDto) {
+    return this.companies.setBilling(tenantId, id, dto);
   }
 }
 

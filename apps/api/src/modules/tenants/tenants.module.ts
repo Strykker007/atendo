@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Logger, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -17,8 +18,12 @@ import { TenantSettingsController } from './tenant-settings.controller';
 import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { StripeService } from '../billing/stripe.service';
+import { DuesService } from '../billing/dues.service';
 import { freePeriod } from '../billing/plan-rules';
-import { DEFAULT_LOSS_REASONS, TYPING_SPEED_KEYS, type TypingSpeed } from '@atendo/shared';
+import { SYSTEM_PROFILES, TYPING_SPEED_KEYS, countLimit, type PlanLimits, type TypingSpeed } from '@atendo/shared';
+import { TenantProvisioningService } from './tenant-provisioning.service';
+import { TenantTemplatesController } from './tenant-templates.controller';
+import { provisionedLossReasons, type TemplateContent } from './tenant-template';
 
 class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
@@ -28,6 +33,11 @@ class CreateTenantDto {
   @IsString() @MaxLength(80) adminName: string;
   /** Sem senha = o admin recebe convite por e-mail para definir a dele */
   @IsOptional() @IsString() @MinLength(8) adminPassword?: string;
+  /**
+   * Modelo de perfil (Farmácia, Clínica…). Ausente = o modelo marcado como padrão (se houver);
+   * `null` = nenhum: só os três perfis do catálogo.
+   */
+  @IsOptional() @IsUUID() templateId?: string | null;
 }
 /** Dados cadastrais. String vazia limpa o campo. */
 class TenantProfileDto {
@@ -54,6 +64,8 @@ class UpdateTenantDto {
   /** vencimento do plano (`AAAA-MM-DD`). Só para assinatura sem gateway: no Stripe/Asaas quem manda é o gateway */
   @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) currentPeriodEnd?: string;
   @IsOptional() @ValidateNested() @Type(() => TenantProfileDto) profile?: TenantProfileDto;
+  /** INDIVIDUAL = preço cheio do plano; CONSOLIDATED_GROUP = plano × empresas ativas (docs/empresas.md#cobrança) */
+  @IsOptional() @IsIn(['INDIVIDUAL', 'CONSOLIDATED_GROUP']) billingType?: 'INDIVIDUAL' | 'CONSOLIDATED_GROUP';
 }
 class CreateAgentDto {
   @IsEmail() email: string;
@@ -65,6 +77,10 @@ class CreateAgentDto {
 }
 class UpdateAgentDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
+  /** E-mail é o login (único na plataforma): trocar encerra as sessões da pessoa. */
+  @IsOptional() @IsEmail() @MaxLength(120) email?: string;
+  /** Só entre atendente e gerente, e só o admin da conta muda; admin não é promovido por aqui. */
+  @IsOptional() @IsIn(['agent', 'manager']) role?: 'agent' | 'manager';
   @IsOptional() @IsBoolean() isActive?: boolean;
   /** Perfil de acesso; string vazia desvincula e volta ao padrão do papel. */
   @IsOptional() @IsString() profileId?: string;
@@ -96,11 +112,14 @@ function cleanProfile(p: TenantProfileDto) {
 @Controller('tenants')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 class TenantsController {
+  private readonly log = new Logger('Tenants');
   constructor(
     private readonly prisma: PrismaService,
     private readonly auth: AuthService,
     private readonly permissions: PermissionsService,
     private readonly stripe: StripeService,
+    private readonly dues: DuesService,
+    private readonly provisioning: TenantProvisioningService,
   ) {}
 
   @Get()
@@ -109,7 +128,10 @@ class TenantsController {
   list() {
     return this.prisma.tenant.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true, isFree: true, billingCycle: true, durationDays: true } } } }, users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 }, _count: { select: { numbers: true, users: true, conversations: true } } },
+      include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true, isFree: true, billingCycle: true, durationDays: true } } } }, users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 },
+        // plano de cada empresa na própria listagem: com assinatura própria, o plano do cliente não diz tudo
+        companies: { orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { select: { planId: true, status: true, currentPeriodEnd: true, priceMonth: true, plan: { select: { name: true } } } } } },
+        _count: { select: { numbers: true, users: true, conversations: true } } },
     });
   }
 
@@ -132,6 +154,15 @@ class TenantsController {
       // fim do dia no horário de Brasília: "vence dia 10" vale o dia 10 inteiro
       await this.prisma.subscription.update({ where: { tenantId: id }, data: { currentPeriodEnd: new Date(`${dto.currentPeriodEnd}T23:59:59-03:00`) } });
     }
+    if (dto.billingType) {
+      // no Stripe o valor é o price do plano (sem quantidade): o grupo cobraria uma unidade só
+      const live = await this.prisma.subscription.findUnique({ where: { tenantId: id }, select: { gateway: true, externalId: true, status: true } });
+      if (dto.billingType === 'CONSOLIDATED_GROUP' && live?.gateway === 'stripe' && live.externalId && live.status !== 'canceled') {
+        throw new BadRequestException('Cobrança por grupo não funciona com assinatura no Stripe. Migre o cliente para o Asaas ou para uma assinatura sem gateway.');
+      }
+      await this.prisma.tenant.update({ where: { id }, data: { billingType: dto.billingType } });
+      await this.dues.syncGroupUnits(id);
+    }
     return this.prisma.tenant.findUniqueOrThrow({ where: { id }, include: { subscription: { include: { plan: true } } } });
   }
 
@@ -143,29 +174,60 @@ class TenantsController {
     return this.auth.impersonate(u, id);
   }
 
+  /**
+   * Cliente novo, num passo só: cliente, assinatura, configuração, perfis (Administrador,
+   * Gerente, Atendente + extras do modelo), respostas, fluxos e o admin — **na mesma transação**.
+   * Antes um e-mail de admin repetido deixava um cliente órfão sem ninguém para entrar.
+   * O convite por e-mail sai só depois do commit: e-mail não volta atrás.
+   */
   @Post()
   @NoTenantOk()
   @Roles('super_admin')
   async create(@Body() dto: CreateTenantDto) {
     const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: dto.planId } });
+    const template = dto.templateId
+      ? await this.prisma.tenantTemplate.findUnique({ where: { id: dto.templateId } })
+      : dto.templateId === undefined ? await this.prisma.tenantTemplate.findFirst({ where: { isDefault: true } }) : null;
+    if (dto.templateId && !template) throw new BadRequestException('Modelo de perfil não encontrado.');
+    const content = template ? (template.content as unknown as TemplateContent) : null;
+    // tudo ou nada também no limite do plano: cliente nascendo acima do limite já começa travado
+    const maxReplies = countLimit(plan.limits as unknown as PlanLimits, 'maxQuickReplies');
+    if (content && maxReplies !== null && content.quickReplies.length > maxReplies) {
+      throw new BadRequestException(`O modelo "${template!.name}" tem ${content.quickReplies.length} respostas rápidas e o plano ${plan.name} permite ${maxReplies}.`);
+    }
+    if (await this.prisma.user.count({ where: { email: dto.adminEmail } })) throw new BadRequestException('Este e-mail já está em uso.');
     // gratuito nasce ativo, sem cartão, e com o fim da degustação (se houver) como fim do período;
     // pago segue como antes: `trialing` até o primeiro checkout
     const { start, end } = freePeriod(plan.isFree ? plan.durationDays : null);
-    const tenant = await this.prisma.tenant.create({
-      data: {
-        name: dto.name,
-        slug: dto.slug,
-        subscription: { create: { planId: dto.planId, status: plan.isFree ? 'active' : 'trialing', currentPeriodStart: start, currentPeriodEnd: end, ...(plan.isFree && { priceMonth: 0 }) } },
-      },
-      include: { subscription: true },
-    });
-    // gravado aqui e não no `@default` do schema: a configuração nasce no primeiro acesso, e mudar
-    // o default trocaria a lista de clientes antigos que ainda não abriram a configuração
-    await this.prisma.tenantSettings.upsert({ where: { tenantId: tenant.id }, create: { tenantId: tenant.id, lossReasons: DEFAULT_LOSS_REASONS }, update: { lossReasons: DEFAULT_LOSS_REASONS } });
-    if (dto.adminPassword) {
-      await this.prisma.user.create({ data: { tenantId: tenant.id, email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash: await this.auth.hashPassword(dto.adminPassword), passwordSetAt: new Date() } });
-    } else {
-      await this.auth.invite({ name: 'Equipe Atendo', tenantId: tenant.id }, { email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin' }, tenant.name);
+    // hash fora da transação: é lento de propósito, e a transação segura locks enquanto espera
+    const passwordHash = await this.auth.hashPassword(dto.adminPassword ?? randomBytes(24).toString('base64url'));
+    const { tenant, admin } = await this.prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.create({
+        data: {
+          name: dto.name,
+          slug: dto.slug,
+          templateId: template?.id ?? null,
+          subscription: { create: { planId: dto.planId, status: plan.isFree ? 'active' : 'trialing', currentPeriodStart: start, currentPeriodEnd: end, ...(plan.isFree && { priceMonth: 0 }) } },
+        },
+        include: { subscription: true },
+      });
+      // gravado aqui e não no `@default` do schema: a configuração nasce no primeiro acesso, e mudar
+      // o default trocaria a lista de clientes antigos que ainda não abriram a configuração
+      await tx.tenantSettings.create({ data: { tenantId: tenant.id, lossReasons: provisionedLossReasons(content) } });
+      await this.provisioning.provision(tx, tenant.id, content);
+      const adminProfile = await tx.accessProfile.findFirstOrThrow({ where: { tenantId: tenant.id, isSystem: true, name: SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name }, select: { id: true } });
+      const admin = await tx.user.create({
+        data: {
+          tenantId: tenant.id, email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash,
+          profileId: template ? adminProfile.id : null,
+          ...(dto.adminPassword ? { passwordSetAt: new Date() } : { invitedAt: new Date() }),
+        },
+      });
+      return { tenant, admin };
+    }, { timeout: 30_000 });
+    if (!dto.adminPassword) {
+      // o e-mail é melhor esforço: sem provedor configurado, o dono usa o link copiável da equipe
+      await this.auth.sendInvite(admin.id, 'Equipe Atendo', tenant.name).catch((err) => this.log.warn(`Convite por e-mail não enviado para ${dto.adminEmail}: ${err instanceof Error ? err.message : err}`));
     }
     return tenant;
   }
@@ -186,14 +248,17 @@ class TenantsController {
     if (!dto.password) {
       const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
       const { user, link } = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: dto.email, name: dto.name, role }, tenant.name);
+      await this.provisioning.linkRoleProfile(u.tenantId, user.id, role);
       // devolve o link mesmo quando o e-mail saiu: e-mail cai em spam e some
       const invite = link ?? (await this.auth.inviteLink(user.id)).link;
       return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true, inviteLink: invite, emailSent: !!link };
     }
-    return this.prisma.user.create({
+    const created = await this.prisma.user.create({
       data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, passwordHash: await this.auth.hashPassword(dto.password), passwordSetAt: new Date() },
       select: { id: true, name: true, email: true, role: true },
     });
+    await this.provisioning.linkRoleProfile(u.tenantId, created.id, role);
+    return created;
   }
 
   /** Reenvia o convite (usuário que ainda não definiu senha). */
@@ -224,6 +289,15 @@ class TenantsController {
   @RequirePermission('team.manage')
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
     const { password, profileId, numberIds, ...rest } = dto;
+    if (dto.name !== undefined && !dto.name.trim()) throw new BadRequestException('Informe o nome.');
+    if (dto.name !== undefined) rest.name = dto.name.trim();
+    // gerente não promove ninguém a gerente (mesma regra do convite)
+    if (dto.role !== undefined && u.role === 'manager') throw new BadRequestException('Só o admin da conta muda o papel.');
+    if (dto.email !== undefined) {
+      rest.email = dto.email.trim();
+      const taken = await this.prisma.user.count({ where: { email: rest.email, id: { not: id } } });
+      if (taken) throw new BadRequestException('Este e-mail já está em uso.');
+    }
     // `passwordSetAt` é o que libera o login de quem foi convidado: sem isto, definir a
     // senha pelo painel não adiantava nada e o usuário continuava travado no convite
     const base = profileId === undefined ? rest : { ...rest, profileId: profileId || null };
@@ -235,15 +309,21 @@ class TenantsController {
     const data = password
       ? { ...base, passwordHash: await this.auth.hashPassword(password), passwordSetAt: new Date() }
       : base;
-    // revoga sessões ativas ao trocar senha ou desativar
-    if (password || dto.isActive === false) {
+    // gerente não altera admins nem outros gerentes. Só a velocidade de digitação vale para qualquer
+    // um da equipe (admin também atende) — não dá acesso nem tira de ninguém. O nome, o admin da
+    // conta edita de qualquer pessoa (inclusive de outro admin): é só rótulo, não muda acesso
+    const only = (keys: string[]) => Object.entries(dto).every(([k, v]) => keys.includes(k) || v === undefined);
+    const editable = only(['typingSpeed'])
+      ? (['agent', 'manager', 'tenant_admin'] as const)
+      : u.role === 'manager' ? (['agent'] as const)
+      : u.role === 'tenant_admin' && only(['name', 'typingSpeed']) ? (['agent', 'manager', 'tenant_admin'] as const)
+      : (['agent', 'manager'] as const);
+    const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, email: true, role: true, isActive: true } });
+    // revoga sessões ativas ao trocar senha, desativar, ou mudar login/papel (vão no token).
+    // Depois do update: se a edição for recusada, ninguém é deslogado à toa
+    if (password || dto.isActive === false || dto.email !== undefined || dto.role !== undefined) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
-    // gerente não altera admins nem outros gerentes. Só a velocidade de digitação vale para qualquer
-    // um da equipe (admin também atende) — não dá acesso nem tira de ninguém
-    const onlySpeed = Object.entries(dto).every(([k, v]) => k === 'typingSpeed' || v === undefined);
-    const editable = onlySpeed ? (['agent', 'manager', 'tenant_admin'] as const) : u.role === 'manager' ? (['agent'] as const) : (['agent', 'manager'] as const);
-    const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, isActive: true } });
 
     if (numberIds) {
       // só números deste cliente: os ids vêm do corpo da requisição
@@ -253,15 +333,20 @@ class TenantsController {
         this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: id, numberId: n.id })), skipDuplicates: true }),
       ]);
     }
-    if (profileId !== undefined || numberIds) this.permissions.invalidate();
+    // trocou o papel e continua num perfil padrão: acompanha o novo papel (perfil sob medida fica)
+    if (dto.role !== undefined && profileId === undefined) {
+      const cur = await this.prisma.user.findUnique({ where: { id }, select: { profile: { select: { isSystem: true } } } });
+      if (cur?.profile?.isSystem) await this.provisioning.linkRoleProfile(u.tenantId, id, dto.role);
+    }
+    if (profileId !== undefined || numberIds || dto.role !== undefined) this.permissions.invalidate();
     return updated;
   }
 }
 
 @Module({
   imports: [AuthModule, BillingModule],
-  controllers: [TenantsController, TenantSettingsController, ProfilesController],
-  providers: [TenantSettingsService, SchedulesService],
+  controllers: [TenantsController, TenantSettingsController, ProfilesController, TenantTemplatesController],
+  providers: [TenantSettingsService, SchedulesService, TenantProvisioningService],
   exports: [TenantSettingsService, SchedulesService],
 })
 export class TenantsModule {}

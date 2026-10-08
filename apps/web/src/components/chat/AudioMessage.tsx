@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2, Pause, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { chaveDe, gravarOnda, lerOnda, type Onda } from '@/lib/wave-cache';
+import { useAudioSpeed } from '@/lib/audio-speed';
 
 /**
  * Áudio com onda sonora, como no WhatsApp.
@@ -117,6 +118,17 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
   const [tocando, setTocando] = useState(false);
   const [atual, setAtual] = useState(0);
   const [duracao, setDuracao] = useState(() => doCache(src)?.duracao ?? 0);
+  const velocidade = useAudioSpeed((s) => s.velocidade);
+  const proximaVelocidade = useAudioSpeed((s) => s.proxima);
+
+  // mudar a velocidade em um áudio vale para todos, inclusive o que já está tocando.
+  // `defaultPlaybackRate` junto: o `load()` do play devolve o elemento ao padrão dele.
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.defaultPlaybackRate = velocidade;
+    a.playbackRate = velocidade;
+  }, [velocidade]);
 
   // a onda já nasce pronta: decodifica junto com a mensagem, sem esperar o play.
   // Tentei disparar por IntersectionObserver para economizar, mas ele reporta "fora da tela"
@@ -196,7 +208,10 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
         onPause={() => setTocando(false)}
         onEnded={() => { setTocando(false); setAtual(0); }}
         onTimeUpdate={(e) => setAtual(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setDuracao(e.currentTarget.duration)}
+        onLoadedMetadata={(e) => {
+          e.currentTarget.playbackRate = velocidade;
+          if (Number.isFinite(e.currentTarget.duration)) setDuracao(e.currentTarget.duration);
+        }}
         onError={() => setErro('Áudio indisponível — tente baixar.')}
         className="hidden"
       />
@@ -226,8 +241,19 @@ export function AudioMessage({ src, mine }: { src: string; mine?: boolean }) {
             );
           })}
         </div>
-        <div className={cn('tnum font-mono text-[10px]', mine ? 'text-white/70' : 'text-muted')}>
-          {mmss(tocando || atual > 0 ? atual : duracao)}
+        <div className={cn('flex items-center justify-between tnum font-mono text-[10px]', mine ? 'text-white/70' : 'text-muted')}>
+          <span>{mmss(tocando || atual > 0 ? atual : duracao)}</span>
+          <button
+            type="button"
+            onClick={proximaVelocidade}
+            title="Velocidade de todos os áudios"
+            className={cn(
+              'px-1.5 rounded-full font-semibold leading-4',
+              mine ? 'bg-white/20 text-white hover:bg-white/30' : 'bg-muted/15 text-ink hover:bg-muted/25',
+            )}
+          >
+            {velocidade}x
+          </button>
         </div>
       </div>
       {erro && <span className="text-[10.5px] text-danger shrink-0">{erro}</span>}

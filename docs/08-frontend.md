@@ -156,7 +156,11 @@ O modal em massa não pede valor de venda nem dispara fluxo — ver `BulkCloseMo
 
 A logo fica em `apps/web/public/marca/`, em três recortes: `vogo.png` (original, fundo claro), `vogo-escuro.png` (texto em branco, para o menu lateral, que é escuro nos dois temas) e `vogo-icone.png` (só o robô, para o menu recolhido). A versão escura é gerada do original clareando os pixels **sem cor** — o vermelho da marca fica intacto e o "CHAT", que é preto, sumiria no fundo do menu.
 
-Login e telas de convite/recuperação usam a logo horizontal (`MarcaHorizontal`, `components/ui/Marca.tsx`): `vogo-horizontal.png` no tema claro e `vogo-horizontal-escuro.png` no escuro (gerada da clara clareando os pixels sem cor; bordas transparentes cortadas). O título da aba é "VOGO.CHAT". O aviso de versão e as telas do dono (Financeiro, Clientes) ainda dizem "Atendo".
+Login e telas de convite/recuperação usam a logo horizontal (`MarcaHorizontal`, `components/ui/Marca.tsx`): `vogo-horizontal.png` no tema claro e `vogo-horizontal-escuro.png` no escuro (gerada da clara clareando os pixels sem cor; bordas transparentes cortadas).
+
+### Marcas próprias (white-label)
+
+O painel pode servir outras marcas (vertentes) com o mesmo código — logo, cores, nome e favicon por domínio ou por deploy. Tudo em [19 — Marcas e vertentes](19-marcas-e-vertentes.md). Regra para o front: nome do produto sai de `useBrand().brandName` e logo dos componentes de `components/ui/Marca.tsx`, nunca fixo.
 
 ## Cabeçalho do chat
 
@@ -167,6 +171,8 @@ O botão de recolher o painel saiu daqui: ele já existe no topo do próprio pai
 ## Não lidas e tempo real
 
 A rota `POST /conversations/:id/read` existia desde o começo e **ninguém a chamava**: o balão de não lidas aparecia e nunca mais saía. Agora abrir a conversa marca como lida (otimista no cache, para não piscar).
+
+**Marcar como não lida** (`useMarkUnread` → `PATCH /conversations/:id/unread`): no card da lista, clique direito ou os três pontos do hover abrem um menu com *Marcar como não lida* (ou *Marcar como lida*, se já houver não lidas). Na conversa, as mensagens recebidas ganham a ação ✉ *Marcar como não lida a partir daqui*. O badge aparece na hora (otimista) e o número exato vem da resposta; os outros atendentes recebem pelo socket. Se a conversa marcada é a que está aberta, ela **fecha** (fora do Kanban) — aberta, o efeito de "abriu = leu" a marcaria como lida de novo na próxima mensagem. O contato não fica sabendo: o recibo de leitura que já saiu não volta.
 
 O socket do tempo real era criado num `useEffect` que desistia quando ainda não havia token — e o token chega depois, de uma chamada de refresh. Quando a corrida dava errado, o socket **nunca** era criado e o painel só recebia mensagem nova depois de um F5. `setAccessToken` agora avisa quem estiver esperando (`onAccessToken`), e o efeito refaz a conexão quando o token aparece.
 
@@ -323,6 +329,7 @@ Ator vazio aparece como **Automação**, nunca em branco: em auditoria, campo va
 - Número desconectado: o composer é substituído por um aviso com link para *Números* (o back também recusa o envio). Mensagens com `status: failed` mostram o erro e o botão **Tentar novamente** (`POST …/resend`). Todo envio do chat leva uma `idempotencyKey` (UUID por envio). Resposta rápida escolhida sai após contagem com Cancelar/Editar (`QuickReplyCountdown`, ver [Envio](envio.md#respostas-rápidas)).
 - Prévia da última mensagem (lista e Kanban): sempre via `formatPreview` (`lib/utils.ts`) — a API grava `[tipo]` quando não há texto e o helper traduz (`[image]` → "📷 Imagem", `[unknown]` → "Mensagem"; vazio → "Sem mensagens"). Prévias novas já saem traduzidas da API (`messagePreview` do shared: texto, ou "📍 Nome do lugar", "👤 Maria", "Mensagem interativa"…); o helper fica para as linhas antigas.
 - Mídia: `MediaBody` renderiza imagem/áudio/vídeo/documento a partir de `mediaUrl` (assinada, expira em 1 h — ao expirar, refetch das mensagens renova). Anexo no composer: `uploadFile()` → prévia → envio com `mediaKey`.
+- **Velocidade do áudio** (`AudioMessage`): botão `1x` → `1.5x` → `2x` ao lado do tempo. A velocidade é **uma só para todos os áudios** (store `useAudioSpeed` em `lib/audio-speed.ts`, zustand `persist` na chave `vogochat_audio_speed` do `localStorage`): mudar em um áudio aplica na hora aos que estão na tela — inclusive o que está tocando — e aos de outras conversas e aos que chegarem depois. Por navegador, não por usuário.
 
 
 ## Mídia no chat
@@ -445,5 +452,5 @@ valor inicial. Por isso o hook só grava depois que o usuário mexeu, marcado no
 
 No chat, a tag principal aparece cheia e com estrela no `TagPicker` (não fica mais repetida ao lado do nome no cabeçalho — sobrepunha o nome) (clicar numa tag de coluna já selecionada a torna principal) e no card da `ConversationList`.
 
-No card da `ConversationList` a linha de tags é única e tem altura fixa (`flex-nowrap`, `h-5`, pílulas com `truncate`), para todos os cards terem a mesma altura. Aparecem no máximo **2 tags** (`TAGS_NO_CARD`), nesta ordem: principal, demais do atendimento, depois as do contato (📌). O resto vira uma pílula `+N`; no hover, um tooltip mostra nome e cor das ocultas. Ele é renderizado por portal com `position: fixed` para a rolagem da lista não cortá-lo. O limite vale **só para o card**: o cabeçalho do chat e a ficha do contato continuam mostrando todas as tags.
+As três abas (Atendendo, Aguardando, Encerrado) usam o mesmo card (`ConversationRow`); o que muda por status é só a cor da faixa e o selo de espera (oculto em encerradas). No card, a linha de tags é única, tem altura fixa (`flex-nowrap`, `h-5`, pílulas com `truncate`) e é sempre renderizada, mesmo vazia, para todos os cards terem a mesma altura em qualquer aba. O responsável (`↳ nome`) aparece em qualquer status. Aparecem no máximo **2 tags** (`TAGS_NO_CARD`), nesta ordem: principal, demais do atendimento, depois as do contato (📌). O resto vira uma pílula `+N`; no hover, um tooltip mostra nome e cor das ocultas. Ele é renderizado por portal com `position: fixed` para a rolagem da lista não cortá-lo. O limite vale **só para o card**: o cabeçalho do chat e a ficha do contato continuam mostrando todas as tags.
 

@@ -14,17 +14,22 @@ tenants ─┬─ users ─── refresh_tokens
          └─ saved_reports
 
 provider_pricing (global, sem tenant)
+tenant_templates (global) ── tenants.templateId
 ```
 
 ## Tabelas e por que existem
 
 ### Tenancy
 
-**tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente. Dados cadastrais (só o dono, tela Clientes → Editar): `legalName` (razão social), `document` (CPF/CNPJ, só dígitos), `contactName`, `billingEmail` (não é o login), `phone`, endereço (`zipCode`, `street`, `addressNumber`, `complement`, `district`, `city`, `state`) e `notes` — migração `20261031000000_tenant_profile`.
+**tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente. Dados cadastrais (só o dono, tela Clientes → Editar): `legalName` (razão social), `document` (CPF/CNPJ, só dígitos), `contactName`, `billingEmail` (não é o login), `phone`, endereço (`zipCode`, `street`, `addressNumber`, `complement`, `district`, `city`, `state`) e `notes` — migração `20261031000000_tenant_profile`. `templateId` = modelo de perfil usado na criação (SetNull ao excluir o modelo) — migração `20261109000000_tenant_templates`.
+
+**tenant_templates** — modelos de perfil (verticais) do dono do sistema: `name` único, `description`, `isDefault` (no máximo um, garantido na API — migração `20261110000000_tenant_template_default`), `content` (JSON: perfis, respostas rápidas, fluxos em formato portável e `lossReasons` opcional). Só lido na criação do cliente — ver [20](20-modelos-de-perfil.md).
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA. `typingSpeed` (`slow`|`normal`|`fast`, padrão `normal`) = velocidade do "digitando…" simulado das mensagens que a pessoa não digitou ([Envio](envio.md#humanização)).
 
-**companies** / **user_companies** — empresas/unidades do cliente (nome único por cliente, CNPJ opcional só com dígitos) e quem opera cada uma (N:N; sem linha = todas). `whatsapp_numbers.companyId` opcional (`SetNull` ao excluir): um número pertence a no máximo uma empresa. Ver [Empresas](empresas.md).
+**companies** / **user_companies** — empresas/unidades do cliente (nome único por cliente, CNPJ opcional só com dígitos) e quem opera cada uma (N:N; sem linha = todas). `whatsapp_numbers.companyId` opcional (`SetNull` ao excluir): um número pertence a no máximo uma empresa. `companies.billingType` (`CONSOLIDATED_GROUP` herda a assinatura do cliente; `INDIVIDUAL` tem a própria) e `companies.isActive` (ativa para cobrança). Ver [Empresas](empresas.md).
+
+**company_subscriptions** — assinatura própria de uma empresa em modo `INDIVIDUAL` (1:1 com `companies`): plano, `priceMonth` contratado (null = do plano), `status`, `currentPeriodEnd`. Só preço e vencimento — limites continuam na assinatura do cliente. Ver [Empresas → Cobrança](empresas.md#cobrança).
 
 **departments** / **user_departments** — departamentos do cliente (nome único, cor, ativo) e quem participa (N:N; sem linha = sem restrição). `conversations.departmentId` opcional (`SetNull` ao excluir). Ver [Departamentos](departamentos.md).
 
@@ -64,7 +69,7 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 **plans** — `limits` jsonb (`PlanLimits`). `billingModel` informativo (`fixed | usage | hybrid`). `stripePriceId` (`price_…`) criado por `pnpm stripe:sync` (só `monthly`/`yearly`). `billingCycle` (`free | monthly | yearly | custom`), `isFree` (= `billingCycle = free`), `durationDays` (dias de gratuidade; null = permanente), `priceYear` (anual; `priceMonth` vira o equivalente mensal). Ver docs/05.
 
-**subscriptions** — 1:1 com tenant. `status`: `trialing | active | past_due | suspended | canceled`. `externalId` = id da assinatura no gateway, e `gateway` (`stripe | asaas | null`) diz qual — null = sem cobrança online (atribuída pelo dono). `currentPeriodEnd` = próximo vencimento. `cancelAtPeriodEnd`; `graceUntil`.
+**subscriptions** — 1:1 com tenant. `status`: `trialing | active | past_due | suspended | canceled`. `externalId` = id da assinatura no gateway, e `gateway` (`stripe | asaas | null`) diz qual — null = sem cobrança online (atribuída pelo dono). `currentPeriodEnd` = próximo vencimento. `cancelAtPeriodEnd`; `graceUntil`. `units` = unidades cobradas (empresas ativas no grupo consolidado — `tenants.billingType`; 1 fora dele); valor do ciclo = `priceMonth × units`. `invoices.items` guarda o que uma cobrança consolidada do painel de vencimentos quita.
 
 **provider_pricing** — histórico de preços por `(provider, country, category)`; sempre inserir, nunca editar.
 
@@ -107,6 +112,7 @@ massa como *Comprou* não grava venda (não tem valor). Migração `202610280000
 | BillingCategory | service, utility, marketing, authentication, unofficial |
 | SubscriptionStatus | trialing, active, past_due, suspended, canceled |
 | InvoiceStatus | draft, open, paid, failed, void |
+| BillingType | INDIVIDUAL, CONSOLIDATED_GROUP (em `tenants` e `companies` — [empresas.md#cobrança](empresas.md#cobrança)) |
 
 Os mesmos enums existem em `packages/shared/src/enums.ts` para o front. Ao mudar um, mude nos dois.
 

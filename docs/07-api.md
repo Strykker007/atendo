@@ -28,9 +28,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | Método | Rota | Role | Descrição |
 |---|---|---|---|
 | **Tenants** | | | |
-| GET | `/tenants` | super_admin | Lista clientes com plano e contagens |
-| POST | `/tenants` | super_admin | Cria cliente + assinatura + admin + motivos de perda padrão (`DEFAULT_LOSS_REASONS`, packages/shared). Plano gratuito nasce `active`; pago, `trialing` |
-| PATCH | `/tenants/:id` | super_admin | `name`, `isActive`, `planId`, `subscriptionStatus` (ajuste manual sem Stripe), `currentPeriodEnd` (`AAAA-MM-DD`, vale até 23:59 de Brasília; 400 se a assinatura tem gateway), `profile` (dados cadastrais; string vazia limpa; CPF 11 / CNPJ 14 dígitos). Trocar para plano gratuito: assinatura `active`, preço 0, e a assinatura paga no Stripe (se houver) é cancelada |
+| GET | `/tenants` | super_admin | Lista clientes com plano, contagens e `companies` (cada empresa com `billingType`, `isActive` e a assinatura própria, se houver) |
+| POST | `/tenants` | super_admin | Cria cliente + assinatura + admin + motivos de perda padrão (`DEFAULT_LOSS_REASONS`, packages/shared) + perfis padrão, numa transação só. `templateId?` = modelo de perfil (ausente = o marcado como padrão; `null` = nenhum): perfis, respostas, fluxos (desligados) e motivos de não compra do modelo — ver [20](20-modelos-de-perfil.md). E-mail de admin em uso = 400. Plano gratuito nasce `active`; pago, `trialing` |
+| — | `/tenant-templates/*` | super_admin | Modelos de perfil (listar, ler, criar, editar conteúdo/padrão, exportar, importar, carregar, gerar de um cliente) — ver [20](20-modelos-de-perfil.md#api-super_admin) |
+| PATCH | `/tenants/:id` | super_admin | `name`, `isActive`, `planId`, `subscriptionStatus` (ajuste manual sem Stripe), `currentPeriodEnd` (`AAAA-MM-DD`, vale até 23:59 de Brasília; 400 se a assinatura tem gateway), `profile` (dados cadastrais; string vazia limpa; CPF 11 / CNPJ 14 dígitos), `billingType` (`INDIVIDUAL`\|`CONSOLIDATED_GROUP`; grupo com assinatura viva no Stripe = 400). Trocar para plano gratuito: assinatura `active`, preço 0, e a assinatura paga no Stripe (se houver) é cancelada |
 | GET | `/notices/active` | todos (inclusive dono) | Avisos globais ativos, mais novos primeiro (até 30) — ver [avisos.md](avisos.md) |
 | GET | `/super-admin/notices` | super_admin | Todos os avisos (ativos e desativados) |
 | POST | `/super-admin/notices` | super_admin | `{title, message, type?: INFO \| WARNING \| CRITICAL}` — grava e emite `system_notice` para todos os conectados |
@@ -38,18 +39,19 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/tenants/:id/impersonate` | super_admin | `{accessToken, tenant}` — "entrar como" (token com o tenant, papel admin, `impersonatorId`) |
 | GET | `/tenants/me/agents` | todos | Atendentes do meu tenant (todos podem listar para transferir) |
 | POST | `/tenants/me/agents` | tenant_admin, manager | Cria atendente (`role: agent`) ou gerente (`role: manager`, só admin); respeita `maxAgents` |
-| PATCH | `/tenants/me/agents/:id` | tenant_admin | Nome / ativo / `password` (redefine e revoga sessões) / `typingSpeed` (`slow`\|`normal`\|`fast`: velocidade do "digitando…" simulado; sozinho, vale também para admins da equipe) |
+| PATCH | `/auth/me` | todos (menos dono impersonando) | `{name}` — o próprio nome de exibição. O nome vai no access token: o front chama `/auth/refresh` em seguida |
+| PATCH | `/tenants/me/agents/:id` | `team.manage` | Nome (admin da conta edita de qualquer pessoa, inclusive outro admin; gerente só de atendentes) / `email` (login, único; admin edita atendentes e gerentes, gerente só atendentes; `400` se já em uso) / `role` (`agent`\|`manager`, só admin da conta) — `email`/`role` revogam as sessões da pessoa / ativo / `password` (redefine e revoga sessões) / `typingSpeed` (`slow`\|`normal`\|`fast`: velocidade do "digitando…" simulado; sozinho, vale também para admins da equipe) |
 | **Números** | | | |
-| GET | `/numbers` | todos | Números do tenant. `warmup` = fase do aquecimento (`{phase, newConvPerHour, minGapMs, endsAt}` ou `null`, ver [Envio](envio.md#aquecimento)) |
+| GET | `/numbers` | todos | Números do tenant. `manageable` = quem pediu pode gerenciar a conexão daquele número (ver [Perfis de acesso](18-perfis-de-acesso.md#gestão-da-conexão-do-número)). `warmup` = fase do aquecimento (`{phase, newConvPerHour, minGapMs, endsAt}` ou `null`, ver [Envio](envio.md#aquecimento)) |
 | GET | `/numbers/:id/phonebook?q=&cursor=` | quem opera o número | Agenda do celular do número (sincronizada da Evolution), alfabética, 50 por página: `{ items: [{id, phone, name, contactId}], nextCursor, total? }` (`total` só na 1ª página). `q` filtra por nome ou telefone — [busca textual](#busca-textual-de-contatos). `contactId` preenchido = a pessoa já é contato |
-| POST | `/numbers/:id/contacts/sync` | `numbers.manage` | Relê agora a agenda de contatos do celular (só Evolution conectado; senão 400). Entra na fila do worker — devolve `{ queued: true }`. Também roda sozinho a cada 6 h ([Providers](04-providers-whatsapp.md)) |
+| POST | `/numbers/:id/contacts/sync` | `numbers.manage` + escopo | Relê agora a agenda de contatos do celular (só Evolution conectado; senão 400). Entra na fila do worker — devolve `{ queued: true }`. Também roda sozinho a cada 6 h ([Providers](04-providers-whatsapp.md)) |
 | GET | `/numbers/:id/templates?refresh=1` | quem opera o número | Templates **aprovados** (HSM) da WABA do número, normalizados em `MessageTemplate` (`@atendo/shared`): nome, idioma, categoria, cabeçalho/corpo/rodapé, botões e variáveis (`headerParams`, `bodyParams` — `1`, `2`… ou nomes). Cache de 5 min por número no processo da API; `refresh=1` busca de novo na Meta. Evolution = `[]`. O que o painel ainda não preenche (cabeçalho de mídia, botão com URL dinâmica, autenticação) vem com `unsupported` (motivo) |
-| POST | `/numbers` | tenant_admin | Cria e conecta (respeita `maxNumbers`) |
-| PUT | `/numbers/:id/provider` | tenant_admin | **Troca de provider** |
-| POST | `/numbers/:id/connect` | tenant_admin | Reconecta / QR novo. `{force?}`: durante a pausa após o WhatsApp derrubar o número responde 409 `reconnect_paused` (`until`, `removedCount`); `force: true` reconecta mesmo assim — ver [providers](04-providers-whatsapp.md#quando-o-whatsapp-derruba-o-número-401-device_removed). `GET /numbers` traz `waRemovedAt`, `waRemovedCount`, `reconnectBlockedUntil` |
-| PATCH | `/numbers/:id` | tenant_admin | Label / cor (`color`, `#rrggbb`) / ativo. `sendDelay`, `sendLimits`, `sendDailyLimit`, `endWarmup` e `infraCostMonth` só valem para o dono (super_admin ou impersonando); do cliente são descartados em silêncio |
-| POST | `/numbers/:id/disconnect` | `numbers.manage` | Encerra a sessão (logout na Evolution) sem excluir; número e conversas ficam, status `disconnected` |
-| DELETE | `/numbers/:id` | tenant_admin | Exclui = tira do provider e **arquiva** (`deletedAt`): conversas ficam guardadas, fora da lista. `POST /numbers` com o mesmo telefone na mesma conta revive o número com o histórico; telefone ativo duplicado → 409 |
+| POST | `/numbers` | `numbers.manage` | Cria e conecta (respeita `maxNumbers`). Quem é restrito a alguns números passa a operar o que criou |
+| PUT | `/numbers/:id/provider` | `numbers.manage` + escopo | **Troca de provider** |
+| POST | `/numbers/:id/connect` | `numbers.manage` + escopo | Reconecta / QR novo. `{force?}`: durante a pausa após o WhatsApp derrubar o número responde 409 `reconnect_paused` (`until`, `removedCount`); `force: true` reconecta mesmo assim — ver [providers](04-providers-whatsapp.md#quando-o-whatsapp-derruba-o-número-401-device_removed). `GET /numbers` traz `waRemovedAt`, `waRemovedCount`, `reconnectBlockedUntil` |
+| PATCH | `/numbers/:id` | `numbers.manage` + escopo | Label / cor (`color`, `#rrggbb`) / ativo. `sendDelay`, `sendLimits`, `sendDailyLimit`, `endWarmup` e `infraCostMonth` só valem para o dono (super_admin ou impersonando); do cliente são descartados em silêncio |
+| POST | `/numbers/:id/disconnect` | `numbers.manage` + escopo | Encerra a sessão (logout na Evolution) sem excluir; número e conversas ficam, status `disconnected` |
+| DELETE | `/numbers/:id` | `numbers.manage` + escopo | Exclui = tira do provider e **arquiva** (`deletedAt`): conversas ficam guardadas, fora da lista. `POST /numbers` com o mesmo telefone na mesma conta revive o número com o histórico; telefone ativo duplicado → 409 |
 | **Conversas** | | | |
 | GET | `/conversations?status=&numberId=&departmentId=&tagIds=a,b&search=&origin=&assigneeId=&sort=&cursor=` | todos | Lista por cursor. `departmentId` = id ou `none` (sem departamento), sempre interseccionado com o escopo de departamentos do usuário ([Departamentos](departamentos.md)). Em `in_progress`, atendente vê só as suas; admin vê todas ou filtra por `assigneeId`. `status=closed` ordena por `closedAt` desc (a recém-encerrada no topo, ignora `sort`). `sort=waiting` ordena por quem espera resposta há mais tempo (`awaitingSince` asc, já respondidas por último). `search` = [busca textual](#busca-textual-de-contatos) no nome/e-mail/telefone do contato |
 | GET | `/conversations/cold-quota?numberId=` | todos | Vagas de contato frio do número QR nas últimas 24 h: `{ ok, used, max, resetsAt }`; `null` no oficial ([Envio frio](envio.md#envio-frio)) |
@@ -92,6 +94,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | DELETE | `/tenants/me/global-variables/:id` | `variables.manage` | Remove |
 | PUT | `/contact-attributes/:contactId` | `contacts.edit` | `{items: {label, type, value}[]}` (até 50) **substitui** a lista. Linha toda em branco é ignorada; nome sem valor (ou o contrário), número/data inválidos e nome repetido = 400 |
 | POST | `/conversations/:id/read` | todos | Zera não-lidas. Também assina o "digitando…" do contato no provider (Evolution; no máx. 1×/2 min por contato, sem esperar a resposta) |
+| PATCH | `/conversations/:id/unread` | todos | Marcar como não lida. Body opcional `{ messageId }`: conta como não lidas as recebidas a partir dela; sem ele, no mínimo 1 (mantém as que já havia). Nunca menos de 1. Emite a conversa pelo socket. Só no painel — nada vai ao provider |
 | POST | `/conversations/:id/typing` | todos | `{state?: 'composing'\|'paused'}` (padrão `composing`). Atendente digitando → "digitando…" no WhatsApp do contato enquanto o painel renovar (a cada ~2 s; expira em 4 s sem renovação); `paused` apaga na hora. Só Evolution conectada e conversa aberta. 204, nunca falha |
 | **Departamentos** | | | |
 | GET | `/departments` | todos | Com participantes e nº de conversas abertas |
@@ -103,6 +106,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/admin/tenants/:tenantId/companies` | super_admin | Empresas do cliente (mesmo formato de `GET /companies`) |
 | GET | `/admin/tenants/:tenantId/companies/options` | super_admin | `{numbers[{id,label,phone}], users[{id,name,isActive}], maxCompanies}` para o formulário |
 | POST / PATCH / DELETE | `/admin/tenants/:tenantId/companies[/:id]` | super_admin | Mesmo corpo de `/companies`. **Sem** o limite `maxCompanies` do plano (exceção do dono) |
+| PUT | `/admin/tenants/:tenantId/companies/:id/billing` | super_admin | `{billingType: 'INDIVIDUAL'\|'CONSOLIDATED_GROUP', isActive?, planId?, priceMonth?: number\|null, currentPeriodEnd?: 'AAAA-MM-DD', status?}`. INDIVIDUAL cria/atualiza a assinatura própria (`planId` obrigatório na primeira vez). Recalcula as unidades do grupo. Ver [empresas.md#cobrança](empresas.md#cobrança) |
 | **Tags** | | | |
 | GET | `/tags` | todos | Com contagem de conversas |
 | POST / PATCH / DELETE | `/tags[/:id]` | `tags.manage` | `{name, color, isKanban?, position?}`. Lista vem na ordem do Kanban (`position`, nome). Emite `kanban` |
@@ -144,6 +148,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/billing/asaas/customer` | `billing.manage` | Dados do cliente no Asaas (CPF/CNPJ, e-mail, CEP…) para preencher o checkout; `null` se ainda não existe |
 | POST | `/billing/asaas/checkout` | `billing.manage` | `{planId, billingType: 'PIX'\|'CREDIT_CARD', customer: {cpfCnpj, name?, email?, mobilePhone?}, card?: {holderName, number, expiryMonth, expiryYear, ccv}, holder?: {name, email, cpfCnpj, postalCode, addressNumber, phone}}` → `{payment}` (cobrança em aberto, com `pix: {encodedImage, payload, expirationDate}` no PIX). Já assina pelo Asaas = troca plano/forma na mesma assinatura. Assinatura viva no Stripe = 400 |
 | GET | `/billing/asaas/pending` | `billing.manage` | `{payment}`: cobrança em aberto mais antiga (vencida primeiro), com QR PIX — botão "Pagar" da tela |
+| GET | `/billing/dues` | `billing.manage` | Painel de vencimentos: `{billingType, online, summary: {totalMonth, overdueCount, overdueAmount, nextDue}, rows[{key, kind: 'group'\|'member'\|'company', companyId, name, plan, cycle, status, state: 'ok'\|'due_soon'\|'overdue'\|'free', daysToDue, amount, dueDate, units, payable, reason, openChargeId}]}` |
+| POST | `/billing/dues/pay` | `billing.manage` | `{keys: string[], cpfCnpj?}` → `{payment}` (mesmo formato do checkout, com QR). Cobrança única no Asaas (boleto/PIX) das linhas; valores recalculados na API. 400 com `code: 'document_required'` se faltar CPF/CNPJ |
 | GET | `/billing/asaas/payments/:id?pix=1` | `billing.manage` | Situação da cobrança consultada no Asaas (polling do modal). Paga = aplica o mesmo efeito do webhook. Cobrança de outro cliente = 404 |
 | **Relatórios** | | | |
 | GET | `/reports/overview?from=&to=` | todos | Visão pronta: KPIs (conversas, fila agora, 1ª resposta média, % encerradas, msgs in/out, comprou/não comprou/taxa de conversão) + séries por dia/atendente/origem/campanha/tag/status + `sales` (tabela `sales`, pelo `closedAt`): `{total, count, avgTicket, byDay[{label,value}], byAgent[{label,value,count,avgTicket}]}` + `lostReasons[{label,value}]` (encerramentos `lost` do período por motivo, de `conversation_events.reason`; sufixo "· encerrado em massa" removido, vazio = "(sem motivo)") |
@@ -159,7 +165,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 
 ## Exemplos
 
-**Criar número não-oficial e pegar o QR:**
+**Criar número QR e pegar o QR:**
 ```bash
 curl -X POST localhost:4000/numbers -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"phone":"5511999998888","label":"Vendas","provider":"evolution","config":{}}'
