@@ -132,6 +132,10 @@ Em **/respostas** e em **/fluxos** há seleção múltipla (checkbox por item, p
 
 Em **/respostas** as pastas também abrem e fecham, mas o que fica guardado são as **fechadas**, não as abertas — o inverso do painel do chat, e de propósito: no chat o atendente procura duas respostas entre muitas, na página de gestão a pessoa veio ver o catálogo. Assim a página nasce mostrando tudo.
 
+**Fixar resposta**: a estrela na linha da resposta (em /respostas) liga `isPinned`. Fixadas aparecem num grupo **Fixadas**, sempre aberto, no topo do painel do chat (além da própria pasta; buscando, o grupo some e cada uma aparece na pasta), e primeiro no menu do raio no composer, com ★.
+
+**Respostas padrão do cliente novo**: `POST /tenants` cria a pasta *Respostas padrão* com Boas Vindas, Boas Vindas - Entregas Encerradas, Boas Vindas - Entregas após 08:30, Loja Fechada, 🔄 TENTANDO CONTATO IA, 🟡🍼 CATÁLOGO DE FRALDAS (fixada), 🟡🔥 CATÁLOGO PERFUMARIA (fixada) e 👹 OFERTAR PRODUTOS (`tenants/default-quick-replies.ts`). Nascem **só com o título** — o cliente escreve o texto ou anexa o catálogo. Resposta sem texto e sem anexo não é enviada: o clique (painel ou composer) mostra um aviso, e /respostas marca "Sem texto ainda". Respeita `maxQuickReplies` (fixadas têm prioridade). Clientes que já existiam não recebem nada.
+
 ## Seleção em massa (lista de conversas)
 
 Botão **Selecionar** acima da lista liga o modo: cada linha ganha caixa de marcação, clicar marca em vez de abrir, e a barra traz *Todos (n)*, a contagem e **Encerrar**.

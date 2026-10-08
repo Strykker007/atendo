@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose } from 'lucide-react';
+import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose, Star } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { type QuickReplyItem, useFlows, useHasFeature, useActiveRun } from '@/lib/hooks';
@@ -173,6 +173,8 @@ function RepliesTab() {
    * ver QuickReplyCountdown. Fora do modo de responder, ela só entra no campo.
    */
   const insert = (r: QuickReplyItem) => {
+    // resposta padrão ainda não escrita: o clique agendaria uma mensagem vazia para o contato
+    if (!r.body.trim() && !r.mediaKey) { toast.warn(`"${r.title}" ainda não tem texto. Escreva em Respostas rápidas antes de usar.`); return; }
     const contactName = conv?.contact.name ?? conv?.contact.phone ?? '';
     const agentName = me.data?.name ?? '';
     const text = r.body.replace(/\{\{\s*contact\.name\s*\}\}/g, contactName).replace(/\{\{\s*agent\.name\s*\}\}/g, agentName);
@@ -180,6 +182,7 @@ function RepliesTab() {
     window.dispatchEvent(new CustomEvent<QuickReplyEventDetail>(QUICK_REPLY_EVENT, { detail: { title: r.title, text, media } }));
   };
   const match = (s: string) => s.toLowerCase().includes(q.toLowerCase());
+  const fixadas = folders.data?.flatMap((f) => f.replies.filter((r) => r.isPinned)) ?? [];
 
   return (
     <>
@@ -188,6 +191,24 @@ function RepliesTab() {
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full rounded-lg bg-field px-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin py-1">
+        {/* fixadas no topo, sempre abertas; buscando, cada uma aparece na própria pasta */}
+        {!q && fixadas.length > 0 && (
+          <div className="border-b border-line pb-1 mb-1">
+            <div className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-ink">
+              <Star size={14} className="text-warn fill-current shrink-0" />
+              <span className="flex-1 truncate">Fixadas</span>
+              <span className="text-[11px] text-faint tnum">{fixadas.length}</span>
+            </div>
+            {fixadas.map((r) => (
+              <button key={r.id} onClick={() => insert(r)} title={r.body || r.mediaName || r.title} className="w-full text-left pl-8 pr-3 py-1 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent">
+                <div className="text-[12.5px] font-medium truncate flex items-center gap-1.5">
+                  {r.mediaType && <MediaIcon type={r.mediaType} />}
+                  <span className="truncate">{r.title}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
         {folders.data?.map((f) => {
           const replies = f.replies.filter((r) => !q || match(r.title) || match(r.body));
           if (q && replies.length === 0) return null;

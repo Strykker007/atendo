@@ -1,7 +1,7 @@
 'use client';
 import { useRef, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { Paperclip, X, Plus, Pencil, Trash2, Folder, FolderOpen, Zap, GripVertical, ChevronDown, ChevronRight, Copy, Download, Upload } from 'lucide-react';
+import { Paperclip, X, Plus, Pencil, Trash2, Folder, FolderOpen, Zap, GripVertical, ChevronDown, ChevronRight, Copy, Download, Upload, Star } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -220,9 +220,18 @@ export default function RespostasPage() {
                                     {podeEditar && <input type="checkbox" className="mt-1 shrink-0" aria-label={`Selecionar ${r.title}`} checked={sel.includes(r.id)} onChange={(e) => toggle([r.id], e.target.checked)} />}
                                     <div className="min-w-0 flex-1">
                                       <div className="text-sm font-medium">{r.title}</div>
-                                      <div className="text-xs text-muted whitespace-pre-wrap line-clamp-2">{r.body}</div>
+                                      {r.body || r.mediaKey
+                                        ? <div className="text-xs text-muted whitespace-pre-wrap line-clamp-2">{r.body}</div>
+                                        : <div className="text-xs text-warn-ink">Sem texto ainda — clique no lápis para escrever.</div>}
                                     </div>
                                     {podeEditar && <>
+                                      <button
+                                        title={r.isPinned ? 'Fixada no topo do chat — clique para desafixar' : 'Fixar no topo do painel do chat'}
+                                        onClick={() => updateReply.mutateAsync({ id: r.id, isPinned: !r.isPinned }).then(() => toast.ok(r.isPinned ? 'Resposta desafixada' : 'Resposta fixada no topo do chat')).catch(toast.err)}
+                                        className={cn('p-1 rounded-md', r.isPinned ? 'text-warn-ink bg-warn-soft' : 'text-faint hover:text-ink')}
+                                      >
+                                        <Star size={14} className={cn(r.isPinned && 'fill-current')} />
+                                      </button>
                                       <button title="Duplicar" onClick={() => onDuplicate([r.id])} className="text-faint hover:text-accent-ink p-1"><Copy size={14} /></button>
                                       <button title="Exportar para usar em outro cliente" onClick={() => onExport(r)} className="text-faint hover:text-accent-ink p-1"><Download size={14} /></button>
                                       <button onClick={() => setReplyModal({ id: r.id, folderId: f.id, title: r.title, body: r.body })} className="text-faint hover:text-ink p-1"><Pencil size={14} /></button>

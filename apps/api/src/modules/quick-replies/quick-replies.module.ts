@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 import { StorageService } from '../../common/storage/storage.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
@@ -22,6 +22,8 @@ class ReplyDto {
   /** com anexo, este texto vira a legenda */
   @IsString() @MaxLength(4096) body: string;
   @IsOptional() @IsInt() @Min(0) position?: number;
+  /** fixada no topo do painel do chat */
+  @IsOptional() @IsBoolean() isPinned?: boolean;
   // anexo: `null` remove o que existia
   @IsOptional() @IsString() @MaxLength(300) mediaKey?: string | null;
   @IsOptional() @IsIn(['image', 'audio', 'video', 'document']) mediaType?: string | null;

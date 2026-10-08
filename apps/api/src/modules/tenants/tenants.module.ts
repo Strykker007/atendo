@@ -17,6 +17,8 @@ import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { StripeService } from '../billing/stripe.service';
 import { freePeriod } from '../billing/plan-rules';
+import type { PlanLimits } from '@atendo/shared';
+import { seedDefaultQuickReplies } from './default-quick-replies';
 
 class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
@@ -110,6 +112,7 @@ class TenantsController {
       },
       include: { subscription: true },
     });
+    await seedDefaultQuickReplies(this.prisma, tenant.id, (plan.limits as unknown as PlanLimits | null)?.maxQuickReplies);
     if (dto.adminPassword) {
       await this.prisma.user.create({ data: { tenantId: tenant.id, email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash: await this.auth.hashPassword(dto.adminPassword), passwordSetAt: new Date() } });
     } else {
