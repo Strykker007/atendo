@@ -555,6 +555,18 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
           <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
         </span>
+        {/* Encerrar é a ação que fecha o atendimento (e alimenta o relatório de vendas): verde, com
+            texto sempre visível e a PRIMEIRA das ações — no fim da fila, ela ia para a segunda linha
+            ou ficava atrás do painel da direita e o atendente não achava */}
+        {conv.status !== 'closed' ? (
+          <Button size="sm" variant="success" className="shrink-0" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
+            Encerrar
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" className="shrink-0" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Conversa reaberta'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Reabrir">
+            Reabrir
+          </Button>
+        )}
         {sched.has && (
           <Button size="sm" variant="ghost" icon={<CalendarPlus size={14} />} onClick={() => setScheduling(true)} title="Agendar horário para este cliente"><span className="hidden sm:inline">Agendar</span></Button>
         )}
@@ -619,15 +631,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         </Button>
         {podeLimpar && (
           <Button size="sm" variant="ghost" icon={<Eraser size={14} />} onClick={() => setLimpando(true)} title="Limpar o histórico desta conversa (fica registrado quem limpou)" aria-label="Limpar histórico" />
-        )}
-        {conv.status !== 'closed' ? (
-          <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
-            <span className="hidden sm:inline">Encerrar</span>
-          </Button>
-        ) : (
-          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Conversa reaberta'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Reabrir">
-            <span className="hidden sm:inline">Reabrir</span>
-          </Button>
         )}
       </header>
 

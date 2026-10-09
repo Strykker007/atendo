@@ -39,23 +39,38 @@ export function Secao({ titulo, opcional, dica, acao, children, htmlFor }: { tit
  * (caso raro não deveria exigir passar em Configurações), mas o relatório agrupa pelo texto —
  * por isso os cadastrados ficam à vista, para a equipe escrever sempre igual.
  */
-export function LossReasonField({ value, onChange, hint, placeholder }: { value: string; onChange: (v: string) => void; hint: string; placeholder: string }) {
+export function LossReasonField({ value, onChange, hint, placeholder, invalid }: { value: string; onChange: (v: string) => void; hint: string; placeholder: string; /** tentou encerrar sem motivo */ invalid?: boolean }) {
   const settings = useTenantSettings();
   const motivos = settings.data?.lossReasons ?? MOTIVOS;
+  const cores = settings.data?.lossReasonColors ?? {};
   const cadastrado = motivos.includes(value);
   return (
-    <Secao titulo="Motivo" opcional dica={`${hint} Escolha um da lista ou escreva outro.`} htmlFor="motivo-livre">
+    <Secao titulo="Motivo" dica={`${hint} Obrigatório: escolha um da lista ou escreva outro.`} htmlFor="motivo-livre">
       {motivos.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {motivos.map((m) => (
-            <button key={m} type="button" aria-pressed={value === m} onClick={() => onChange(value === m ? '' : m)} className={`rounded-full border px-2.5 py-1 text-[12px] ${value === m ? 'border-danger text-danger bg-danger-soft font-medium' : 'border-line text-muted hover:bg-field hover:text-ink'}`}>
-              {m}
-            </button>
-          ))}
+          {motivos.map((m) => {
+            // cor do motivo (Configurações → Motivos de perda): bolinha quando solto, botão tingido quando escolhido
+            const cor = cores[m];
+            const ativo = value === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={ativo}
+                onClick={() => onChange(ativo ? '' : m)}
+                style={ativo && cor ? { borderColor: cor, color: cor, backgroundColor: `${cor}1f` } : undefined}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] ${ativo ? (cor ? 'font-medium' : 'border-danger text-danger bg-danger-soft font-medium') : 'border-line text-muted hover:bg-field hover:text-ink'}`}
+              >
+                {cor && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cor }} />}
+                {m}
+              </button>
+            );
+          })}
         </div>
       )}
       {/* escolheu um chip: o campo livre fica vazio, para não parecer que são duas respostas */}
-      <input id="motivo-livre" className={inputCls} placeholder={placeholder} value={cadastrado ? '' : value} onChange={(e) => onChange(e.target.value)} maxLength={200} />
+      <input id="motivo-livre" className={`${inputCls} ${invalid ? 'border-danger' : ''}`} placeholder={placeholder} value={cadastrado ? '' : value} onChange={(e) => onChange(e.target.value)} maxLength={200} />
+      {invalid && <p className="text-xs text-danger-ink">Escolha ou escreva o motivo para encerrar como “Não comprou”.</p>}
     </Secao>
   );
 }
@@ -95,6 +110,8 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const [observacoes, setObservacoes] = useState('');
   const [motivo, setMotivo] = useState('');
   const [flowId, setFlowId] = useState('');
+  // tentou encerrar com o desfecho incompleto: só então os campos ficam vermelhos
+  const [tentou, setTentou] = useState(false);
   // trocou o fluxo à mão: a carga atrasada das configurações não sobrescreve. Clicar num
   // desfecho volta para o padrão dele (é o que se espera ao mudar de "Comprou" para "Não comprou")
   const escolheuFluxo = useRef(false);
@@ -118,18 +135,23 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const mudarItem = (idx: number, patch: Partial<(typeof itens)[number]>) =>
     setItens((l) => l.map((i, n) => (n === idx ? { ...i, ...patch } : i)));
 
+  const lista = outcome === 'won' && modoLista;
+  const totalVenda = lista ? totalItens : valor ?? 0;
+  // "Comprou" exige valor e "Não comprou" exige motivo — a API recusa do mesmo jeito
+  const faltaValor = outcome === 'won' && !(totalVenda > 0);
+  const faltaMotivo = outcome === 'lost' && !motivo.trim();
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const lista = outcome === 'won' && modoLista;
-    // nada é obrigatório: sem valor, "Comprou" registra só o desfecho (não entra como venda)
-    const value = outcome === 'won' ? (lista ? totalItens : valor ?? 0) || undefined : undefined;
+    if (faltaValor || faltaMotivo) { setTentou(true); return; }
+    const value = outcome === 'won' ? totalVenda : undefined;
     try {
       await setStatus.mutateAsync({
         id: conversationId,
         status: 'closed',
         outcome,
         value,
-        reason: outcome === 'lost' ? motivo || undefined : undefined,
+        reason: outcome === 'lost' ? motivo.trim() : undefined,
         products: outcome === 'won' && !lista ? produtos.trim() || undefined : undefined,
         // em lista, a API soma os itens e monta o resumo em `products`
         items: lista && itensValidos.length ? itensValidos : undefined,
@@ -168,8 +190,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
             {modoLista ? (
               <Secao
                 titulo="Itens da venda"
-                opcional
-                dica="O total soma faturamento, ticket médio e desempenho por atendente. Item só com valor também vale."
+                dica="Obrigatório informar o valor: o total soma faturamento, ticket médio e desempenho por atendente. Item só com valor também vale."
                 acao={<button type="button" onClick={() => setModoLista(false)} className="text-[12px] text-muted underline hover:text-ink">Usar texto livre</button>}
               >
                 <div className="space-y-2">
@@ -195,17 +216,18 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
                     </button>
                     <span className="text-[13px] text-muted">Total <b className="ml-1 text-ink tnum">{fmtBRL(totalItens)}</b></span>
                   </div>
+                  {tentou && faltaValor && <p className="text-xs text-danger-ink">Informe o valor de pelo menos um item para encerrar como “Comprou”.</p>}
                 </div>
               </Secao>
             ) : (
               <div className="space-y-4">
                 <Secao
                   titulo="Valor da compra (R$)"
-                  opcional
-                  dica="Soma faturamento, ticket médio e desempenho por atendente."
+                  dica="Obrigatório. Soma faturamento, ticket médio e desempenho por atendente."
                   acao={<button type="button" onClick={() => setModoLista(true)} className="text-[12px] text-muted underline hover:text-ink">Usar lista de itens</button>}
                 >
                   <MoneyInput className="sm:w-56" nullable value={valor} onChange={setValor} autoFocus aria-label="Valor da compra" />
+                  {tentou && faltaValor && <p className="text-xs text-danger-ink">Informe o valor da compra para encerrar como “Comprou”.</p>}
                 </Secao>
                 <Secao titulo="Produtos / descrição" opcional dica="O que foi comprado, do jeito que preferir." htmlFor="produtos-livre">
                   <textarea id="produtos-livre" className={`${inputCls} resize-none`} rows={3} placeholder="Ex.: 2 pacotes de fralda G e 1 perfume" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
@@ -217,7 +239,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
 
         {outcome === 'lost' && (
           <div className="border-t border-line pt-4">
-            <LossReasonField value={motivo} onChange={setMotivo} hint="É o que mostra onde você está perdendo negócio." placeholder="Outro motivo…" />
+            <LossReasonField value={motivo} onChange={setMotivo} hint="É o que mostra onde você está perdendo negócio." placeholder="Outro motivo…" invalid={tentou && faltaMotivo} />
           </div>
         )}
 
@@ -245,9 +267,10 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
           </div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-line pt-4">
+        {/* rodapé grudado no fim do modal: com muitos itens de venda o corpo rola e o Encerrar sumia */}
+        <div className="sticky bottom-0 -mx-5 -mb-5 px-5 py-4 bg-panel flex justify-end gap-2 border-t border-line">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" loading={setStatus.isPending} loadingText="Encerrando…">Encerrar</Button>
+          <Button type="submit" variant="success" icon={<CheckCircle2 size={15} />} loading={setStatus.isPending} loadingText="Encerrando…">Encerrar</Button>
         </div>
       </form>
     </Modal>

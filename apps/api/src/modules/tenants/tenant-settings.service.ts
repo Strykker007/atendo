@@ -19,6 +19,7 @@ export interface SettingsUpdate {
   welcomeEnabled?: boolean;
   quickReplyDelaySec?: number;
   lossReasons?: string[];
+  lossReasonColors?: Record<string, string>;
 }
 
 @Injectable()
@@ -31,8 +32,12 @@ export class TenantSettingsService {
   }
 
   async update(tenantId: string, dto: SettingsUpdate) {
-    const { welcomeMessages, ...rest } = dto;
-    const data: Prisma.TenantSettingsUncheckedUpdateInput = { ...rest, ...(welcomeMessages && { welcomeMessages: welcomeMessages as unknown as Prisma.InputJsonValue }) };
+    const { welcomeMessages, lossReasonColors, ...rest } = dto;
+    const data: Prisma.TenantSettingsUncheckedUpdateInput = {
+      ...rest,
+      ...(welcomeMessages && { welcomeMessages: welcomeMessages as unknown as Prisma.InputJsonValue }),
+      ...(lossReasonColors && { lossReasonColors: lossReasonColors as Prisma.InputJsonValue }),
+    };
     if (dto.attendanceActive !== undefined) {
       // cada vez que liga/desliga é um período novo da faixa Fechado (a resposta sai de novo)
       const cur = await this.get(tenantId);

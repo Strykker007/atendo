@@ -89,7 +89,7 @@ class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;
   /** desfecho do atendimento, só no encerramento */
   @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
-  /** valor da venda — opcional: "Comprou" sem valor registra o desfecho, mas não gera venda */
+  /** valor da venda — obrigatório em "Comprou" (> 0, aqui ou somando `items`): ver `assertOutcome` */
   @IsOptional() @IsNumber() @Min(0) @Max(9_999_999)
   value?: number;
   /** venda: o que foi comprado e observações do fechamento */
@@ -104,6 +104,19 @@ class StatusDto {
    */
   @IsOptional() @IsUUID() flowId?: string | null;
 }
+/**
+ * Desfecho completo: "Comprou" sem valor e "Não comprou" sem motivo deixavam o relatório de
+ * vendas e o de motivos de perda furados (venda que não soma, perda sem explicação). A tela
+ * já obriga; aqui é para nenhum outro caminho passar sem.
+ */
+function assertOutcome(o: { outcome?: ConversationOutcome; value?: number; items?: { value: number }[]; reason?: string }) {
+  if (o.outcome === 'won') {
+    const total = o.items?.length ? o.items.reduce((a, i) => a + (i.value || 0), 0) : o.value ?? 0;
+    if (!(total > 0)) throw new BadRequestException('Informe o valor da compra para encerrar como “Comprou”.');
+  }
+  if (o.outcome === 'lost' && !o.reason?.trim()) throw new BadRequestException('Informe o motivo para encerrar como “Não comprou”.');
+}
+
 class BulkCloseDto {
   /**
    * Teto de 200 por chamada: é mais do que a tela mostra de uma vez e evita que um pedido
@@ -161,7 +174,10 @@ export class ConversationsController {
    */
   @Post('bulk/close')
   bulkClose(@CurrentUser() u: AuthUser, @Body() dto: BulkCloseDto) {
-    return this.conversations.closeMany(u.tenantId, u, dto.ids, dto.outcome ? { outcome: dto.outcome, reason: dto.reason } : undefined);
+    // valor é por atendimento: "Comprou" em massa repetiria o mesmo valor e inflaria o faturamento
+    if (dto.outcome === 'won') throw new BadRequestException('“Comprou” é encerrado um a um, com o valor de cada venda.');
+    assertOutcome(dto);
+    return this.conversations.closeMany(u.tenantId, u, dto.ids, dto.outcome ? { outcome: dto.outcome, reason: dto.reason?.trim() } : undefined);
   }
 
   /** Busca do "Nova conversa": contatos da base + agenda do aparelho (Evolution). */
@@ -343,6 +359,7 @@ export class ConversationsController {
 
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
+    if (dto.status === 'closed') assertOutcome(dto);
     const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason, products: dto.products, items: dto.items, notes: dto.notes } : undefined);
     // Fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar).
     // Sem escolha no modal, vale o fluxo padrão configurado — é o caso comum: pesquisa de
