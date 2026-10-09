@@ -15,3 +15,7 @@ apps/api/storage
 apps/web/tsconfig.tsbuildinfo
 infra/backup/rclone.conf
 apps/api/.scripts-build
+
+# Claude Code: settings.local.json é da máquina (tem host de produção); o script de consulta também
+.claude/settings.local.json
+scripts/prod-query.sh
