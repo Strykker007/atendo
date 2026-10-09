@@ -342,8 +342,6 @@ model TenantSettings {
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)
-  /// segundos entre escolher uma resposta rápida e ela sair (contagem com "Cancelar"); 0 = na hora
-  quickReplyDelaySec Int @default(3)
   /// motivos de perda sugeridos no encerramento "Não comprou" (o atendente ainda pode digitar outro)
   lossReasons String[] @default(["Preço", "Prazo", "Não respondeu", "Comprou com concorrente", "Fora da área", "Só pesquisando"])
   /// cor de cada motivo no botão do encerramento: { "Achou caro": "#dc2626" }. Motivo sem cor usa o padrão

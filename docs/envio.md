@@ -151,11 +151,11 @@ igual; a mensagem vira ✓✓ quando o aparelho do contato recebe e, se não sai
 vermelho, motivo e *Tentar novamente*). `StatusIcon` em `ChatPane.tsx`.
 
 ### Respostas rápidas
-Escolher uma resposta (painel da direita ou menu ⚡ do campo) agenda o envio: barra
-"Enviando *Título* em Ns…" com **Cancelar** e **Editar** (Editar = comportamento antigo: vai
-para o campo para revisar). Trocar de conversa cancela. Erro no envio devolve o texto ao campo.
-Fora do modo de responder (nota interna, número desconectado, conversa encerrada…) a resposta
-só entra no campo. Configuração: *Configurações → Respostas rápidas* (`TenantSettings.quickReplyDelaySec`).
+Escolher uma resposta (painel da direita ou menu ⚡ do campo) **envia na hora**, com a
+assinatura do atendente quando ligada e o "digitando…" simulado pelo tamanho do texto. Erro no
+envio devolve o texto ao campo. Fora do modo de responder (nota interna, número desconectado,
+conversa encerrada…) a resposta só entra no campo. A contagem com Cancelar/Editar e a
+configuração `quickReplyDelaySec` foram retiradas (migração `20261112000000_drop_quick_reply_delay`).
 
 ### Envio frio
 
@@ -261,7 +261,7 @@ No QR, antes de entregar:
   `messages.raw` — na **velocidade daquele atendente** (`User.typingSpeed`, escolhida em *Equipe →
   Digitação*: Devagar 2–3,5, Normal 3,5–6, Rápido 6–9 caracteres/s; `TYPING_SPEEDS` no shared), com
   o mesmo teto de 10 s. O automático usa Normal:
-  - **resposta rápida** (sai pela contagem) e **mídia pela prévia** (legenda): o painel manda o
+  - **resposta rápida** (sai na hora) e **mídia pela prévia** (legenda): o painel manda o
     tamanho do texto;
   - **campo de texto**: o painel conta os caracteres digitados de verdade (`inputType` de inserção;
     colar/arrastar não conta) e manda só a diferença — resposta rápida inserida no campo e texto
@@ -342,7 +342,7 @@ em [04 — Providers](04-providers-whatsapp.md#proteção-contra-bloqueio-e-bani
 | `apps/api/src/modules/whatsapp/outbound.processor.ts` | Worker: vez, pausa, expiração, ritmo, envio, retry |
 | `apps/api/src/modules/whatsapp/send-pacer.ts` | Reserva atômica (Lua) número + conversa |
 | `apps/api/src/modules/whatsapp/providers/provider-error.ts` | `ProviderSendError`, `isTransientSendError`, `retryDelayMs` |
-| `apps/web/src/components/chat/QuickReplyCountdown.tsx` | Barra de contagem da resposta rápida |
+| `apps/web/src/components/chat/quick-reply-event.ts` | Evento da resposta rápida escolhida (o ChatPane envia na hora ou insere no campo) |
 | `apps/api/test/send-queue.test.ts` | Ordem sob concorrência, pausa/retomada, expiração, dedup, retry |
 
 **Regra:** caminho novo de envio = gravar `Message` `pending` e chamar `enqueueOutbound`

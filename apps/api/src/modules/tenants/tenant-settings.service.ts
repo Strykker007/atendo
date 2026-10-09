@@ -17,7 +17,6 @@ export interface SettingsUpdate {
   welcomeMessages?: WelcomeMessage[];
   welcomeMode?: WelcomeMode;
   welcomeEnabled?: boolean;
-  quickReplyDelaySec?: number;
   lossReasons?: string[];
   lossReasonColors?: Record<string, string>;
 }

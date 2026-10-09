@@ -16,7 +16,6 @@ export interface TenantSettings {
   wonFlowId: string | null; lostFlowId: string | null; noneFlowId: string | null;
   welcomeMessages: WelcomeMessage[]; welcomeMode: WelcomeMode; welcomeEnabled: boolean;
   /** respostas rápidas: segundos de contagem antes de enviar (0 = na hora) */
-  quickReplyDelaySec: number;
   /** motivos de perda sugeridos no encerramento "Não comprou" */
   lossReasons: string[];
   /** cor de cada motivo no botão do encerramento (pelo texto); motivo sem cor usa o padrão */
@@ -24,7 +23,7 @@ export interface TenantSettings {
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'noneFlowId' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'quickReplyDelaySec' | 'lossReasons' | 'lossReasonColors'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'noneFlowId' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'lossReasons' | 'lossReasonColors'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 const invSettings = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['tenant-settings'] }); qc.invalidateQueries({ queryKey: ['schedules'] }); };
 export const useUpdateTenantSettings = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: SettingsPatch) => api('/settings', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invSettings(qc) }); };

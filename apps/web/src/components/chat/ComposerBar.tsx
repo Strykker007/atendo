@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
-import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './QuickReplyCountdown';
+import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
 import {
   useAgents, useActiveRun, useFlows, useHasFeature, useMe, useQuickReplies, useConversation, usePauseBot, useResumeBot, useCancelFlow, botPaused, useCan,
   type QuickReplyItem,

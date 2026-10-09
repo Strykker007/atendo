@@ -10,7 +10,6 @@ import { toast } from '@/components/ui/Toast';
 import { ScheduleSection } from '@/components/settings/ScheduleSection';
 import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
-import { QuickReplySection } from '@/components/settings/QuickReplySection';
 import { LossReasonsSection } from '@/components/settings/LossReasonsSection';
 import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
 import { CompaniesSection } from '@/components/settings/CompaniesSection';
@@ -47,7 +46,6 @@ export default function ConfiguracoesPage() {
       {!isOwner && podeConfigurar && <ScheduleSection />}
       {!isOwner && podeConfigurar && <WelcomeSection />}
       {!isOwner && podeConfigurar && <DefaultFlowsSection />}
-      {!isOwner && podeConfigurar && <QuickReplySection />}
       {!isOwner && podeConfigurar && <LossReasonsSection />}
       {!isOwner && podeVariaveis && <GlobalVariablesSection />}
       {!me.data?.impersonatorId && <SecuritySection />}

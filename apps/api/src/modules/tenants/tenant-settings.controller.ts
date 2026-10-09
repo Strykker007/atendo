@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { QUICK_REPLY_DELAY_MAX_SEC, type ScheduleConfig, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
+import { type ScheduleConfig, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -37,8 +37,6 @@ class SettingsDto {
   @IsOptional() @IsArray() @ArrayMaxSize(20) welcomeMessages?: WelcomeMessage[];
   @IsOptional() @IsIn(['random', 'sequential']) welcomeMode?: WelcomeMode;
   @IsOptional() @IsBoolean() welcomeEnabled?: boolean;
-  /** respostas rápidas: segundos entre escolher e enviar (contagem com Cancelar); 0 = na hora */
-  @IsOptional() @IsInt() @Min(0) @Max(QUICK_REPLY_DELAY_MAX_SEC) quickReplyDelaySec?: number;
   /** motivos de perda sugeridos no encerramento */
   @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(200, { each: true }) lossReasons?: string[];
   /** cor de cada motivo (`#rrggbb`), pelo texto do motivo */
