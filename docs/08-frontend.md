@@ -63,6 +63,7 @@ src/
 
 `useRealtime()` (em `hooks.ts`) abre o socket com `auth: { token }` e:
 - `message` → insere/atualiza no cache `['messages', conversationId]`. Também é por aqui que chega a mudança de status (webhook de entrega/leitura): a mensagem vem inteira e o `StatusIcon` da bolha troca sozinho — 🕒 enviando, ✓ enviada, ✓✓ entregue, ✓✓ ciano (`--tick-read`) lida, ⚠ falha (tooltip com o erro).
+  - **Som de chegada** (`lib/message-sound.ts`): `message` com `direction: 'in'` toca um "plim" curto (Web Audio, sem arquivo). Só na primeira vez que o id aparece (status/reação reenviam a mesma mensagem), só se a mensagem tem até 2 min (reimportação de histórico não toca) e no máximo um a cada 1,5 s. Como o evento vai para o tenant inteiro, toca só para quem enxerga a conversa: ela está numa lista `['conversations']` em cache (já filtrada pela API) ou o `GET /conversations/:id` responde (o `ConversationScopeGuard` dá 404 fora do escopo de número/empresa/departamento). O navegador só libera áudio após um gesto na página: o primeiro clique/tecla destrava; antes disso não toca.
 - `conversation` → invalida `['conversations']`, a conversa e `['kanban']`.
 - `kanban` → invalida `['kanban']` e `['tags']` (colunas mudaram).
 - `messages_cleared` → histórico limpo: invalida `['messages', conversationId]`. Mensagem apagada chega pelo próprio `message` (já com `deletedAt` e sem conteúdo) e vira o aviso "Mensagem apagada por…" na bolha ([Apagar mensagens](apagar-mensagens.md)).
