@@ -38,10 +38,15 @@ vai com o header.
 ## Painel
 
 - **Seletor** (`components/layout/CompanySwitcher.tsx`, abaixo da marca no menu): some quando
-  o cliente não tem empresas. "Todas as empresas" só para quem tem `conversations.view_all`
-  (admin/gerente); o atendente escolhe uma de cada vez (cai na primeira automaticamente).
+  o cliente não tem empresas. "Todas as empresas" (sem header = soma dos números das empresas que
+  a pessoa opera) aparece para quem tem `conversations.view_all` (admin/gerente) **e para quem
+  opera mais de uma empresa** — para este é o padrão, e cai conversa de todas as unidades dele
+  sem trocar. Quem opera uma empresa só fica fixo nela.
   Trocar de empresa limpa número/conversa abertos e recarrega todos os dados.
   A escolha fica no navegador (`useUI.companyId`) e vai em toda chamada (`lib/api.ts`).
+- **Equipe → coluna Números** (`NumberScope.tsx`): mostra o acesso efetivo — empresas da pessoa
+  e os números que sobram (números dela ∩ números das empresas). No modal, números de empresas
+  que ela não opera ficam desabilitados; o vínculo com empresa continua sendo editado na empresa.
 - **Cadastro** em *Configurações → Empresas e unidades* (`settings.manage`): nome, CNPJ,
   descrição, quais números e quais pessoas.
 - **Lista de conversas**: o seletor de número mostra só os números da empresa ativa.

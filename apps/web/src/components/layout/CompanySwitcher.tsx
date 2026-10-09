@@ -11,16 +11,19 @@ import { useCan, useMyCompanies } from '@/lib/hooks';
  * (`x-company-id`, ver lib/api.ts) e a API transforma em escopo de números — por isso trocar
  * aqui recarrega tudo: o que estava em cache era da outra unidade.
  *
- * "Todas as empresas" é visão de coordenação: só para quem vê os atendimentos da equipe.
- * O atendente com mais de uma unidade alterna entre elas, uma de cada vez.
+ * "Todas as empresas" junta as conversas de todas as unidades que a pessoa opera (a API soma os
+ * números delas quando não vai header). Aparece para quem coordena a equipe e para qualquer um
+ * com mais de uma unidade — e é o padrão dele, para cair conversa das duas sem ficar trocando.
+ * Quem opera uma unidade só fica fixo nela.
  * Some quando o cliente não usa empresas.
  */
 export function CompanySwitcher({ collapsed }: { collapsed: boolean }) {
   const qc = useQueryClient();
   const { companyId, setCompany, toggleSidebar } = useUI();
   const mine = useMyCompanies();
-  const podeTodas = useCan('conversations.view_all');
+  const coordena = useCan('conversations.view_all');
   const lista = mine.data ?? [];
+  const podeTodas = coordena || lista.length > 1;
 
   function trocar(id: string | null) {
     if (id === companyId) return;
@@ -34,10 +37,10 @@ export function CompanySwitcher({ collapsed }: { collapsed: boolean }) {
     if (!mine.data) return;
     const valida = companyId && mine.data.some((c) => c.id === companyId);
     if (valida) return;
-    const destino = mine.data.length && !podeTodas ? mine.data[0].id : null;
+    const destino = mine.data.length && !(coordena || mine.data.length > 1) ? mine.data[0].id : null;
     if (destino !== companyId) trocar(destino);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mine.data, companyId, podeTodas]);
+  }, [mine.data, companyId, coordena]);
 
   if (!lista.length) return null;
   const atual = lista.find((c) => c.id === companyId);
