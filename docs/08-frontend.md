@@ -37,7 +37,7 @@ src/
 │       ├── plano/          medidores de uso, excedente, explicação do limite; checkout Asaas em modal (PIX com QR + copia e cola e polling de 4 s, ou cartão) — `components/billing/AsaasCheckoutModal`
 │       ├── configuracoes/  aparência, horários de atendimento (quadros/faixas/simular), boas-vindas, fluxos padrão, segurança
 │       ├── admin/          Financeiro do dono (KPIs, série, assinaturas, faturas, margem)
-│       ├── clientes/       Clientes do dono: criar, plano/status, ativar, Entrar como
+│       ├── clientes/       Clientes do dono: busca (nome, razão social, CNPJ, e-mail do admin, empresa) + filtros (plano, assinatura, vencimento, ativos) e ordenação, no navegador; criar, plano/status, ativar, Entrar como
 │       └── relatorios/     abre com visão pronta (KPIs + 4 gráficos do período); 'Relatório personalizado' expande o construtor (métrica, agrupamento, filtros, tabela, CSV, salvos)
 ├── components/
 │   ├── layout/Sidebar.tsx | CompanySwitcher.tsx (empresa ativa, ver empresas.md) | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')
