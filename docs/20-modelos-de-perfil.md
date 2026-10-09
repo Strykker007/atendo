@@ -14,7 +14,8 @@ Na API: `templateId` ausente = modelo padrão (se houver); `null` = nenhum.
 `POST /tenants` cria, **numa única transação**:
 
 1. cliente + assinatura + configuração — motivos de não compra do modelo (`lossReasons`) ou,
-   sem lista no modelo, `DEFAULT_LOSS_REASONS` do catálogo;
+   sem lista no modelo, `DEFAULT_LOSS_REASONS` do catálogo — e as cores dos botões
+   (`lossReasonColors`), só as de motivos que o cliente recebe;
 2. perfis de acesso (`access_profiles`, ver [18](18-perfis-de-acesso.md)):
    - **Administrador** — sempre todas as permissões (o modelo não restringe o admin: sem
      `profiles.manage` o cliente ficaria sem saída);
@@ -73,10 +74,15 @@ Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido 
   ],
   "quickReplies": [ { "atendo": "quick-reply", "version": 1, "folder": "Entrega", "title": "Prazo", "body": "…" } ],
   "flows": [ { "atendo": "flow", "version": 1, "name": "Boas-vindas", "trigger": {}, "definition": {} } ],
-  "lossReasons": ["Não respondeu", "Achou caro", "Receita vencida", "Outros"]
+  "lossReasons": ["Não respondeu", "Achou caro", "Receita vencida", "Outros"],
+  "lossReasonColors": { "Achou caro": "#f59e0b", "Receita vencida": "#dc2626" }
 }
 ```
 
+- `lossReasonColors` (opcional): `{motivo: "#rrggbb"}`, a cor do botão do motivo no
+  encerramento. Só vale para motivo da lista (`lossReasons` ou, sem ela, o catálogo); cor
+  inválida recusa o arquivo, cor de motivo fora da lista é descartada. No editor do modelo,
+  bolinha de cor à esquerda de cada motivo; "Criar a partir de um cliente" leva as cores dele.
 - `quickReplies` e `flows` são exatamente os itens das exportações de Respostas e Fluxos
   (formato portável — `quick-replies/portable.ts` e `packages/shared/src/portable.ts`): sem ids,
   etiquetas por nome, sem anexos.

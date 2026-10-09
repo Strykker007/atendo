@@ -95,7 +95,7 @@ export default function TemplateEditorPage() {
         <ProfilesSection profiles={content.profiles} onChange={(profiles) => edit({ profiles })} />
         <QuickRepliesSection items={content.quickReplies} onChange={(quickReplies) => edit({ quickReplies })} />
         <FlowsSection items={content.flows} onChange={(flows) => edit({ flows })} />
-        <LossReasonsSection value={content.lossReasons} fallback={tpl.data.effectiveLossReasons} onChange={(lossReasons) => edit({ lossReasons })} />
+        <LossReasonsSection value={content.lossReasons} fallback={tpl.data.effectiveLossReasons} colors={content.lossReasonColors ?? {}} onChange={(lossReasons, lossReasonColors) => edit({ lossReasons, lossReasonColors })} />
       </div>
     </PageShell>
   );
@@ -323,17 +323,29 @@ function FlowsSection({ items, onChange }: { items: TemplateFlow[]; onChange: (i
   );
 }
 
-/** Motivos de não compra. Sem lista própria, o cliente nasce com os do catálogo. */
-function LossReasonsSection({ value, fallback, onChange }: { value?: string[]; fallback: string[]; onChange: (v: string[] | undefined) => void }) {
+/**
+ * Motivos de não compra e a cor do botão de cada um. Sem lista própria, o cliente nasce com os
+ * do catálogo — e as cores valem para eles também.
+ */
+function LossReasonsSection({ value, fallback, colors, onChange }: { value?: string[]; fallback: string[]; colors: Record<string, string>; onChange: (v: string[] | undefined, c: Record<string, string> | undefined) => void }) {
   const [novo, setNovo] = useState('');
   const list = value ?? fallback;
-  const move = (i: number, d: number) => { const l = [...list]; [l[i], l[i + d]] = [l[i + d], l[i]]; onChange(l); };
+  // cor sempre acompanha a lista: motivo que saiu não deixa cor órfã
+  const commit = (l: string[] | undefined, c: Record<string, string> = colors) => {
+    const validas = Object.fromEntries(Object.entries(c).filter(([k]) => (l ?? fallback).includes(k)));
+    onChange(l, Object.keys(validas).length ? validas : undefined);
+  };
+  const setCor = (m: string, cor: string | null) => {
+    const resto = Object.fromEntries(Object.entries(colors).filter(([k]) => k !== m));
+    commit(value, cor ? { ...resto, [m]: cor } : resto);
+  };
+  const move = (i: number, d: number) => { const l = [...list]; [l[i], l[i + d]] = [l[i + d], l[i]]; commit(l); };
   function add() {
     const m = novo.trim();
     if (!m) return;
     if (list.some((x) => x.toLowerCase() === m.toLowerCase())) return toast.err('Esse motivo já está na lista.');
     if (list.length >= 30) return toast.err('No máximo 30 motivos.');
-    onChange([...list, m]);
+    commit([...list, m]);
     setNovo('');
   }
   return (
@@ -341,17 +353,23 @@ function LossReasonsSection({ value, fallback, onChange }: { value?: string[]; f
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 className="font-display font-semibold text-ink">Motivos de não compra</h2>
-          <p className="text-[12px] text-muted">Chips do encerramento “Não comprou”, nesta ordem. {value ? 'Lista própria do modelo.' : 'Usando os do catálogo do sistema.'}</p>
+          <p className="text-[12px] text-muted">Chips do encerramento “Não comprou”, nesta ordem e com a cor escolhida. {value ? 'Lista própria do modelo.' : 'Usando os do catálogo do sistema.'}</p>
         </div>
-        {value && <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => onChange(undefined)}>Usar os do catálogo</Button>}
+        {value && <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => commit(undefined)}>Usar os do catálogo</Button>}
       </div>
       <div className="rounded-xl border border-line divide-y divide-line">
         {list.map((m, i) => (
           <div key={m} className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink">
+            {/* cor do botão deste motivo no encerramento do cliente que nascer do modelo */}
+            <label className="relative shrink-0 w-5 h-5 rounded-full border border-line cursor-pointer overflow-hidden" title={colors[m] ? 'Cor do motivo — clique para trocar' : 'Escolher a cor do motivo'} style={{ backgroundColor: colors[m] ?? 'transparent' }}>
+              {!colors[m] && <span className="absolute inset-0 grid place-items-center text-[10px] text-faint">+</span>}
+              <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={colors[m] ?? '#dc2626'} onChange={(e) => setCor(m, e.target.value)} aria-label={`Cor de ${m}`} />
+            </label>
             <span className="flex-1">{m}</span>
+            {colors[m] && <button title="Tirar a cor" className="text-[11px] text-faint hover:text-ink px-1" onClick={() => setCor(m, null)}>sem cor</button>}
             <button title="Subir" disabled={i === 0} className="text-faint hover:text-ink disabled:opacity-30 p-1" onClick={() => move(i, -1)}><ArrowUp size={13} /></button>
             <button title="Descer" disabled={i === list.length - 1} className="text-faint hover:text-ink disabled:opacity-30 p-1" onClick={() => move(i, 1)}><ArrowDown size={13} /></button>
-            <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => onChange(list.filter((_, j) => j !== i))}><X size={13} /></button>
+            <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => commit(list.filter((_, j) => j !== i))}><X size={13} /></button>
           </div>
         ))}
       </div>

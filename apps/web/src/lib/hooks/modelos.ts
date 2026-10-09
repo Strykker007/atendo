@@ -10,7 +10,7 @@ export interface TenantTemplateRow { id: string; name: string; description: stri
 export interface TemplateProfile { name: string; description?: string; permissions: Permission[] }
 export interface TemplateQuickReply { atendo: 'quick-reply'; version: number; folder: string; title: string; body: string }
 export interface TemplateFlow { atendo: 'flow'; version: number; name: string; description?: string; trigger: unknown; definition: unknown }
-export interface TemplateContent { profiles: TemplateProfile[]; quickReplies: TemplateQuickReply[]; flows: TemplateFlow[]; lossReasons?: string[] }
+export interface TemplateContent { profiles: TemplateProfile[]; quickReplies: TemplateQuickReply[]; flows: TemplateFlow[]; lossReasons?: string[]; /** cor `#rrggbb` do botão de cada motivo */ lossReasonColors?: Record<string, string> }
 export interface TenantTemplateDetail { id: string; name: string; description: string | null; isDefault: boolean; tenants: number; content: TemplateContent; effectiveLossReasons: string[] }
 
 const inv = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['tenant-templates'] });

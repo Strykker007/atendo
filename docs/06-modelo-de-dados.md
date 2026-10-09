@@ -23,7 +23,7 @@ tenant_templates (global) ── tenants.templateId
 
 **tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente. Dados cadastrais (só o dono, tela Clientes → Editar): `legalName` (razão social), `document` (CPF/CNPJ, só dígitos), `contactName`, `billingEmail` (não é o login), `phone`, endereço (`zipCode`, `street`, `addressNumber`, `complement`, `district`, `city`, `state`) e `notes` — migração `20261031000000_tenant_profile`. `templateId` = modelo de perfil usado na criação (SetNull ao excluir o modelo) — migração `20261109000000_tenant_templates`.
 
-**tenant_templates** — modelos de perfil (verticais) do dono do sistema: `name` único, `description`, `isDefault` (no máximo um, garantido na API — migração `20261110000000_tenant_template_default`), `content` (JSON: perfis, respostas rápidas, fluxos em formato portável e `lossReasons` opcional). Só lido na criação do cliente — ver [20](20-modelos-de-perfil.md).
+**tenant_templates** — modelos de perfil (verticais) do dono do sistema: `name` único, `description`, `isDefault` (no máximo um, garantido na API — migração `20261110000000_tenant_template_default`), `content` (JSON: perfis, respostas rápidas, fluxos em formato portável, `lossReasons` e `lossReasonColors` opcionais). Só lido na criação do cliente — ver [20](20-modelos-de-perfil.md).
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA. `typingSpeed` (`slow`|`normal`|`fast`, padrão `normal`) = velocidade do "digitando…" simulado das mensagens que a pessoa não digitou ([Envio](envio.md#humanização)).
 

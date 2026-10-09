@@ -26,6 +26,8 @@ export interface TemplateContent {
   flows: PortableFlow[];
   /** Motivos de não compra ("Não comprou"). Ausente = `DEFAULT_LOSS_REASONS` do catálogo. */
   lossReasons?: string[];
+  /** Cor (`#rrggbb`) do botão de cada motivo no encerramento, por nome do motivo. Ausente = sem cores. */
+  lossReasonColors?: Record<string, string>;
 }
 
 /** O arquivo `.json` de importar/exportar. */
@@ -83,13 +85,30 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
     if (lossReasons.length > LOSS_REASONS_MAX) throw new Error(`No máximo ${LOSS_REASONS_MAX} motivos de não compra.`);
   }
 
-  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }) };
+  let lossReasonColors: Record<string, string> | undefined;
+  if (o.lossReasonColors !== undefined) {
+    if (!o.lossReasonColors || typeof o.lossReasonColors !== 'object' || Array.isArray(o.lossReasonColors)) throw new Error('"lossReasonColors" deve ser um objeto.');
+    // mesma regra da Configuração do cliente: só `#rrggbb`, e só de motivo que está na lista
+    // (a do modelo ou, sem ela, a do catálogo) — cor de motivo removido não fica órfã
+    const motivos = lossReasons ?? [...DEFAULT_LOSS_REASONS];
+    const cores = Object.entries(o.lossReasonColors as Record<string, unknown>);
+    if (cores.some(([, v]) => typeof v !== 'string' || !/^#[0-9a-f]{6}$/i.test(v))) throw new Error('Cor de motivo inválida (use #rrggbb).');
+    lossReasonColors = Object.fromEntries(cores.filter(([k]) => motivos.includes(k)).map(([k, v]) => [k, (v as string).toLowerCase()]));
+  }
+
+  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }) };
 }
 
-export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.lossReasons && { lossReasons: f.lossReasons }) });
+export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) });
 
 /** Motivos de não compra com que o cliente nasce. */
 export const provisionedLossReasons = (c: TemplateContent | null) => c?.lossReasons ?? [...DEFAULT_LOSS_REASONS];
+
+/** Cores dos motivos com que o cliente nasce — só as de motivos que ele recebe. */
+export const provisionedLossReasonColors = (c: TemplateContent | null) => {
+  const motivos = provisionedLossReasons(c);
+  return Object.fromEntries(Object.entries(c?.lossReasonColors ?? {}).filter(([k]) => motivos.includes(k)));
+};
 
 /**
  * Perfis que o cliente novo recebe: os três padrão sempre (Administrador com tudo; Gerente e

@@ -86,7 +86,7 @@ export class TenantProvisioningService {
       this.prisma.quickReply.findMany({ where: { folder: { tenantId } }, include: { folder: { select: { name: true } } }, orderBy: [{ folder: { position: 'asc' } }, { position: 'asc' }] }),
       this.prisma.flow.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
       this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true } }),
-      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { lossReasons: true } }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { lossReasons: true, lossReasonColors: true } }),
     ]);
     const admin = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
     const warnings = new Set<string>();
@@ -107,6 +107,8 @@ export class TenantProvisioningService {
         quickReplies: qr.map((o) => o.portable),
         flows: portableFlows,
         ...(settings && { lossReasons: settings.lossReasons }),
+        // só leva cor que existe: modelo sem cores continua sem o campo
+        ...(settings && Object.keys((settings.lossReasonColors ?? {}) as object).length && { lossReasonColors: settings.lossReasonColors as Record<string, string> }),
       },
       warnings: [...warnings],
     };
