@@ -69,10 +69,6 @@ export function resolveSendLimits(provider: SendProvider, overrides?: Partial<Se
 /** Retry do envio: só erro transitório, backoff exponencial com variação aleatória. */
 export const SEND_RETRY = { attempts: 5, baseDelayMs: 3_000, maxDelayMs: 120_000, jitter: 0.5 };
 
-/** Respostas rápidas: segundos entre escolher a resposta e ela sair (0 = na hora). */
-export const QUICK_REPLY_DELAY_DEFAULT_SEC = 3;
-export const QUICK_REPLY_DELAY_MAX_SEC = 30;
-
 /**
  * Velocidade de digitação de cada atendente — o "digitando…" simulado das mensagens que ele não
  * digitou de verdade (resposta rápida, texto colado, encaminhada, agendada). Caracteres por

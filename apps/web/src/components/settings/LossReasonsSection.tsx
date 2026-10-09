@@ -11,6 +11,9 @@ import { cn } from '@/lib/utils';
 import { useTenantSettings, useUpdateTenantSettings } from '@/lib/hooks';
 
 const igual = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/** cor sugerida no seletor de quem ainda não tem uma (vermelho do "Não comprou") */
+const COR_PADRAO = '#dc2626';
+type Cores = Record<string, string>;
 
 /**
  * Motivos sugeridos no encerramento "Não comprou". O relatório "Motivos de perda" agrupa
@@ -27,6 +30,7 @@ export function LossReasonsSection() {
   const update = useUpdateTenantSettings();
   // espelho local: arrastar/editar aparece na hora, sem esperar a volta da API
   const [lista, setLista] = useState<string[]>([]);
+  const [cores, setCores] = useState<Cores>({});
   const [novo, setNovo] = useState('');
   const [editando, setEditando] = useState<{ i: number; texto: string } | null>(null);
   const [removendo, setRemovendo] = useState<number | null>(null);
@@ -34,19 +38,31 @@ export function LossReasonsSection() {
   const novoRef = useRef<HTMLInputElement>(null);
 
   const doServidor = settings.data?.lossReasons;
+  const coresDoServidor = settings.data?.lossReasonColors;
   useEffect(() => { if (doServidor) setLista(doServidor); }, [doServidor]);
+  useEffect(() => { setCores(coresDoServidor ?? {}); }, [coresDoServidor]);
   if (!settings.data) return null;
 
   const cheio = lista.length >= LOSS_REASONS_MAX;
 
   /** Grava a lista; se a API recusar, volta ao que estava. */
-  function salvar(proxima: string[], ok?: string) {
+  function salvar(proxima: string[], ok?: string, proximasCores: Cores = cores) {
     const antes = lista;
+    const coresAntes = cores;
+    // cor vai junto com a lista: motivo removido ou renomeado não deixa cor órfã
+    const coresValidas = Object.fromEntries(Object.entries(proximasCores).filter(([k]) => proxima.includes(k)));
     setLista(proxima);
-    return update.mutateAsync({ lossReasons: proxima })
+    setCores(coresValidas);
+    return update.mutateAsync({ lossReasons: proxima, lossReasonColors: coresValidas })
       .then(() => { if (ok) toast.ok(ok); })
-      .catch((err) => { setLista(antes); toast.err(err); throw err; });
+      .catch((err) => { setLista(antes); setCores(coresAntes); toast.err(err); throw err; });
   }
+
+  /** Muda a cor de um motivo; vazio = volta para a cor padrão do botão. */
+  const mudarCor = (m: string, cor: string | null) => {
+    const resto = Object.fromEntries(Object.entries(cores).filter(([k]) => k !== m));
+    salvar(lista, undefined, cor ? { ...resto, [m]: cor } : resto).catch(() => undefined);
+  };
 
   /** Aceita um motivo ou vários (uma linha cada — colar de uma planilha funciona). */
   function adicionar(texto: string) {
@@ -77,7 +93,10 @@ export function LossReasonsSection() {
     const texto = editando.texto.trim();
     if (!texto || texto === lista[editando.i]) return setEditando(null);
     if (lista.some((x, j) => j !== editando.i && igual(x, texto))) return toast.err(new Error('Esse motivo já existe'));
-    salvar(lista.map((x, j) => (j === editando.i ? texto : x)), 'Motivo renomeado').then(() => setEditando(null)).catch(() => undefined);
+    // renomear leva a cor junto
+    const antigo = lista[editando.i];
+    const { [antigo]: cor, ...resto } = cores;
+    salvar(lista.map((x, j) => (j === editando.i ? texto : x)), 'Motivo renomeado', cor ? { ...resto, [texto]: cor } : resto).then(() => setEditando(null)).catch(() => undefined);
   }
 
   function soltar(r: DropResult) {
@@ -93,7 +112,7 @@ export function LossReasonsSection() {
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <h3 className="font-display font-semibold text-ink flex items-center gap-2"><XCircle size={16} /> Motivos de perda</h3>
-          <p className="text-sm text-muted mt-0.5">Aparecem para um clique ao encerrar como &quot;Não comprou&quot;, nesta ordem, e formam o gráfico de Motivos de perda em Relatórios. O atendente ainda pode escrever outro.</p>
+          <p className="text-sm text-muted mt-0.5">Aparecem para um clique ao encerrar como &quot;Não comprou&quot;, nesta ordem e com a cor escolhida, e formam o gráfico de Motivos de perda em Relatórios. O motivo é obrigatório nesse encerramento; o atendente ainda pode escrever outro.</p>
         </div>
         <span className={cn('shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5 tnum', cheio ? 'bg-warn-soft text-warn-ink' : 'bg-field text-muted')}>{lista.length} de {LOSS_REASONS_MAX}</span>
       </div>
@@ -115,6 +134,11 @@ export function LossReasonsSection() {
                       <li ref={dr.innerRef} {...dr.draggableProps} className={cn('group flex items-center gap-2 px-3 h-11 bg-panel', ds.isDragging && 'shadow-lg rounded-lg ring-1 ring-line')}>
                         <span {...dr.dragHandleProps} className="text-faint hover:text-ink cursor-grab shrink-0" title="Arraste para reordenar"><GripVertical size={15} /></span>
                         <span className="w-5 text-right text-[11px] text-faint tnum shrink-0">{i + 1}</span>
+                        {/* cor do botão deste motivo no encerramento */}
+                        <label className="relative shrink-0 w-5 h-5 rounded-full border border-line cursor-pointer overflow-hidden" title={cores[m] ? 'Cor do motivo — clique para trocar' : 'Escolher a cor do motivo'} style={{ backgroundColor: cores[m] ?? 'transparent' }}>
+                          {!cores[m] && <span className="absolute inset-0 grid place-items-center text-[10px] text-faint">+</span>}
+                          <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={cores[m] ?? COR_PADRAO} onChange={(e) => setCores((c) => ({ ...c, [m]: e.target.value }))} onBlur={(e) => { if (e.target.value !== coresDoServidor?.[m]) mudarCor(m, e.target.value); }} aria-label={`Cor de ${m}`} />
+                        </label>
                         {editando?.i === i ? (
                           <>
                             <input
@@ -138,6 +162,7 @@ export function LossReasonsSection() {
                           <>
                             <button type="button" onClick={() => { setRemovendo(null); setEditando({ i, texto: m }); }} className="flex-1 min-w-0 truncate text-left text-[13px] text-ink" title="Clique para renomear">{m}</button>
                             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                              {cores[m] && <button type="button" title="Tirar a cor" onClick={() => mudarCor(m, null)} className="p-1.5 rounded-md text-faint hover:text-ink hover:bg-field text-[11px]">sem cor</button>}
                               <button type="button" title="Renomear" onClick={() => { setRemovendo(null); setEditando({ i, texto: m }); }} className="p-1.5 rounded-md text-faint hover:text-ink hover:bg-field"><Pencil size={14} /></button>
                               <button type="button" title="Remover" onClick={() => { setEditando(null); setRemovendo(i); }} className="p-1.5 rounded-md text-faint hover:text-danger hover:bg-danger-soft"><Trash2 size={14} /></button>
                             </div>

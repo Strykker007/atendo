@@ -11,7 +11,7 @@ import { useUI } from '@/lib/store';
 import { Settings2 } from 'lucide-react';
 import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
-import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './QuickReplyCountdown';
+import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
 
 /** Painel direito: sessões (pastas) com mensagens pré-configuradas. Clique insere no composer. */
 export function QuickRepliesPanel() {
@@ -169,8 +169,8 @@ function RepliesTab() {
   const conv = useConversation(conversationId).data;
 
   /**
-   * Escolheu a resposta: o chat agenda o envio com contagem regressiva (Cancelar/Editar) —
-   * ver QuickReplyCountdown. Fora do modo de responder, ela só entra no campo.
+   * Escolheu a resposta: o chat envia na hora (ChatPane). Fora do modo de responder, ela só
+   * entra no campo.
    */
   const insert = (r: QuickReplyItem) => {
     const contactName = conv?.contact.name ?? conv?.contact.phone ?? '';

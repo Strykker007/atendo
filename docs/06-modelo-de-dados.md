@@ -93,8 +93,8 @@ entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` qua
 calculada pela API e `products` é o resumo das descrições; nulo = encerrada em texto livre
 (migração `20261029000100_sale_items`). Nunca alterada nem apagada — reabrir a conversa limpa `conversations.outcome*`, mas a
 venda que já entrou no mês continua. É a base de conversão, ticket médio e faturamento por
-atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`). Encerramento em
-massa como *Comprou* não grava venda (não tem valor). Migração `20261028000000_close_flows_and_sales`.
+atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`). *Comprou* exige valor
+(> 0) e não existe no encerramento em massa (400) — toda venda tem valor. Migração `20261028000000_close_flows_and_sales`.
 
 **saved_reports** — `definition` jsonb com o `ReportDefinition` (métrica, agrupamento, filtros, tipo de gráfico).
 
@@ -132,7 +132,7 @@ Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
 relatórios), chave `attendanceActive` (feriado/férias: vale a faixa Fechado sem mexer nos
 horários) + `attendanceChangedAt`, fluxos padrão (inclusive `wonFlowId`/`lostFlowId`/`noneFlowId`,
 o fluxo de encerramento por resultado) e **boas-vindas** (`welcomeEnabled`,
-`welcomeMessages`, `welcomeMode`, `welcomeCursor`) e `quickReplyDelaySec` (contagem antes de a resposta rápida sair; 0 = na hora — [Envio](envio.md#respostas-rápidas)) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; o `@default` é Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`; cliente criado por `POST /tenants` nasce com `DEFAULT_LOSS_REASONS` de `packages/shared/src/loss-reasons.ts`: Não respondeu, Achou caro, Falta de estoque, Desistiu, Só pesquisando, Comprou em outro lugar, Vai vir na loja, Fora da área de entrega, Produto não comercializado, Outros).
+`welcomeMessages`, `welcomeMode`, `welcomeCursor`); `quickReplyDelaySec` foi removido (a resposta rápida sai na hora — [Envio](envio.md#respostas-rápidas)), `lossReasonColors` (`JSONB`, `{motivo: "#rrggbb"}` — cor do botão de cada motivo no encerramento; motivo sem cor usa o vermelho padrão; migração `20261111000000_loss_reason_colors`) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; o `@default` é Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`; cliente criado por `POST /tenants` nasce com `DEFAULT_LOSS_REASONS` de `packages/shared/src/loss-reasons.ts`: Não respondeu, Achou caro, Falta de estoque, Desistiu, Só pesquisando, Comprou em outro lugar, Vai vir na loja, Fora da área de entrega, Produto não comercializado, Outros).
 
 **business_schedules** — quadros de horários ([Horários](horarios.md)): `name`, `timezone`,
 `isDefault` (um por cliente) e `config` (JSON `ScheduleConfig`: faixas, Fechado, grade semanal,

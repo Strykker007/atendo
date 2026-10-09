@@ -10,8 +10,8 @@ import { LossReasonField, OUTCOMES, Secao } from './CloseModal';
  * Encerrar vários atendimentos selecionados.
  *
  * Difere do encerramento de um só em duas coisas, e as duas são de propósito:
- *  - **não pede valor de venda**: valor é por conversa, e repetir o mesmo número em trinta
- *    atendimentos inflaria o faturamento do relatório;
+ *  - **não tem "Comprou"**: venda exige valor, e o valor é por conversa — repetir o mesmo
+ *    número em trinta atendimentos inflaria o faturamento do relatório (a API recusa);
  *  - **não dispara fluxo**: fluxo de encerramento em trinta contatos é envio em massa, que
  *    tem tela própria, com limite diário e opt-out.
  */
@@ -19,11 +19,14 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
   const bulk = useBulkClose();
   const [outcome, setOutcome] = useState<ConversationOutcome>('none');
   const [motivo, setMotivo] = useState('');
+  const [tentou, setTentou] = useState(false);
+  const faltaMotivo = outcome === 'lost' && !motivo.trim();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (faltaMotivo) { setTentou(true); return; }
     try {
-      const r = await bulk.mutateAsync({ ids, outcome, reason: outcome === 'lost' ? motivo || undefined : undefined });
+      const r = await bulk.mutateAsync({ ids, outcome, reason: outcome === 'lost' ? motivo.trim() : undefined });
       // "ignorados" acontece de verdade: alguém da equipe pode ter encerrado no meio do caminho,
       // ou a conversa saiu do que este usuário opera. Dizer o número evita achar que falhou.
       toast.ok(r.ignored > 0 ? `${r.closed} encerrados · ${r.ignored} já estavam fechados ou fora do seu acesso` : `${r.closed} atendimento(s) encerrados`);
@@ -37,9 +40,9 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
   return (
     <Modal open onClose={onClose} title={`Encerrar ${ids.length} atendimento(s)`}>
       <form onSubmit={submit} className="space-y-4">
-        <Secao titulo="Resultado" dica="Vale para todos os selecionados. O valor da venda não entra aqui — esse é por atendimento.">
-          <div className="grid grid-cols-3 gap-2">
-            {OUTCOMES.map((o) => (
+        <Secao titulo="Resultado" dica="Vale para todos os selecionados. Venda (“Comprou”) é encerrada uma a uma, com o valor de cada atendimento.">
+          <div className="grid grid-cols-2 gap-2">
+            {OUTCOMES.filter((o) => o.id !== 'won').map((o) => (
               <button
                 key={o.id}
                 type="button"
@@ -55,13 +58,13 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
 
         {outcome === 'lost' && (
           <div className="border-t border-line pt-4">
-            <LossReasonField value={motivo} onChange={setMotivo} hint="O mais comum aqui é “não respondeu”, que é justamente o que entope a fila." placeholder="Outro motivo…" />
+            <LossReasonField value={motivo} onChange={setMotivo} hint="O mais comum aqui é “não respondeu”, que é justamente o que entope a fila." placeholder="Outro motivo…" invalid={tentou && faltaMotivo} />
           </div>
         )}
 
         <div className="flex justify-end gap-2 border-t border-line pt-4">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" loading={bulk.isPending} loadingText="Encerrando…">Encerrar {ids.length}</Button>
+          <Button type="submit" variant="success" loading={bulk.isPending} loadingText="Encerrando…">Encerrar {ids.length}</Button>
         </div>
       </form>
     </Modal>

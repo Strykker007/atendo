@@ -82,7 +82,7 @@ export default function EquipePage() {
       {agents.data?.length === 0 && <Empty icon={<Users size={36} />} title="Nenhum usuário" text="Adicione atendentes para dividir o atendimento." />}
 
       {!!agents.data?.length && (
-        <div className="rounded-2xl bg-panel border border-line overflow-hidden">
+        <div className="rounded-2xl bg-panel border border-line overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide">
               <tr><th className="px-5 py-2.5">Nome</th><th className="px-5 py-2.5 hidden sm:table-cell">E-mail</th><th className="px-5 py-2.5">Perfil de acesso</th><th className="px-5 py-2.5">Números</th><th className="px-5 py-2.5 hidden lg:table-cell" title="Velocidade do &quot;digitando…&quot; que o contato vê nas mensagens que a pessoa não digitou (resposta rápida, texto colado, encaminhada, agendada). Máximo de 10 segundos por mensagem.">Digitação</th><th className="px-5 py-2.5 hidden md:table-cell">Último acesso</th><th className="px-5 py-2.5"></th></tr>

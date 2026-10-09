@@ -1,8 +1,8 @@
 'use client';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Building2, Eye, Power, Pencil, Store, Layers } from 'lucide-react';
+import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X } from 'lucide-react';
 import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDialog';
 import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
 import { cn } from '@/lib/utils';
@@ -47,6 +47,48 @@ const fmtDoc = (d: string | null) => {
   return d;
 };
 
+/** Busca sem acento e sem caixa ("farmacia" acha "Farmácia"). */
+const norm = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const diasAteVencer = (t: TenantRow) => {
+  const s = t.subscription;
+  if (!s || (s.plan.isFree && !s.plan.durationDays)) return null; // não vence
+  return Math.ceil((new Date(s.currentPeriodEnd).getTime() - Date.now()) / 86_400_000);
+};
+
+type Filtros = { busca: string; plano: string; status: string; vencimento: '' | 'vencido' | '7dias' | '30dias'; situacao: '' | 'ativos' | 'desativados'; ordem: 'nome' | 'recentes' | 'vencimento' | 'conversas' };
+const FILTROS_VAZIOS: Filtros = { busca: '', plano: '', status: '', vencimento: '', situacao: '', ordem: 'nome' };
+
+/** Filtro da listagem (no navegador: a lista inteira já vem numa chamada só). */
+function filtrarClientes(rows: TenantRow[], f: Filtros) {
+  const q = norm(f.busca.trim());
+  const qDigitos = f.busca.replace(/\D/g, '');
+  const out = rows.filter((t) => {
+    if (q) {
+      const texto = norm([t.name, t.slug, t.legalName, t.users[0]?.email, t.users[0]?.name, ...t.companies.map((c) => c.name)].filter(Boolean).join(' '));
+      // CNPJ/CPF digitado com ou sem pontuação
+      const doc = qDigitos.length >= 3 && !!t.document?.includes(qDigitos);
+      if (!texto.includes(q) && !doc) return false;
+    }
+    if (f.plano && (f.plano === 'sem' ? !!t.subscription : t.subscription?.plan.id !== f.plano)) return false;
+    if (f.status && (t.subscription?.status ?? '') !== f.status) return false;
+    if (f.situacao && t.isActive !== (f.situacao === 'ativos')) return false;
+    if (f.vencimento) {
+      const d = diasAteVencer(t);
+      if (d === null) return false;
+      if (f.vencimento === 'vencido' ? d >= 0 : d < 0 || d > (f.vencimento === '7dias' ? 7 : 30)) return false;
+    }
+    return true;
+  });
+  const vence = (t: TenantRow) => diasAteVencer(t) ?? Number.POSITIVE_INFINITY;
+  return out.sort((a, b) =>
+    f.ordem === 'recentes' ? b.createdAt.localeCompare(a.createdAt)
+    : f.ordem === 'vencimento' ? vence(a) - vence(b)
+    : f.ordem === 'conversas' ? b._count.conversations - a._count.conversations
+    : a.name.localeCompare(b.name, 'pt-BR'));
+}
+
+const selCls = 'rounded-lg bg-field px-2 h-9 text-[13px] text-ink';
+
 /** Gestão de clientes pelo dono: criar, plano/status, entrar como. */
 export default function ClientesPage() {
   const { brandName } = useBrand();
@@ -65,6 +107,10 @@ export default function ClientesPage() {
   // plano de uma empresa, aberto direto da coluna Plano
   const [planoEmpresa, setPlanoEmpresa] = useState<{ tenant: TenantRow; company: TenantRow['companies'][number] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [filtros, setFiltros] = useState<Filtros>(FILTROS_VAZIOS);
+  const set = (p: Partial<Filtros>) => setFiltros((f) => ({ ...f, ...p }));
+  const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros), [tenants.data, filtros]);
+  const filtrando = JSON.stringify({ ...filtros, ordem: 'nome' }) !== JSON.stringify(FILTROS_VAZIOS);
   if (me.data && me.data.role !== 'super_admin') return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
   async function enter(t: TenantRow) {
@@ -87,11 +133,49 @@ export default function ClientesPage() {
       <PageHeader title="Clientes" subtitle={`Todos os clientes do ${brandName}. Entre em qualquer um para ver o sistema como o admin dele.`} action={<div className="flex gap-2"><Button variant="ghost" icon={<Layers size={16} />} onClick={() => setModelos(true)}>Modelos de perfil</Button><Button icon={<Plus size={16} />} onClick={() => setCreating(true)}>Novo cliente</Button></div>} />
       {tenants.isLoading && <SkeletonRows rows={3} />}
       {tenants.data && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <label className="flex items-center gap-1.5 rounded-lg bg-field px-2.5 h-9 flex-1 min-w-[14rem]">
+            <Search size={14} className="text-faint shrink-0" />
+            <input value={filtros.busca} onChange={(e) => set({ busca: e.target.value })} placeholder="Buscar por nome, razão social, CNPJ, e-mail do admin ou empresa…" className="bg-transparent text-[13px] w-full focus:outline-none" autoFocus />
+            {filtros.busca && <button onClick={() => set({ busca: '' })} title="Limpar busca" className="text-faint hover:text-ink"><X size={14} /></button>}
+          </label>
+          <select value={filtros.plano} onChange={(e) => set({ plano: e.target.value })} className={selCls} aria-label="Plano">
+            <option value="">Todos os planos</option>
+            {plans.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            <option value="sem">Sem plano</option>
+          </select>
+          <select value={filtros.status} onChange={(e) => set({ status: e.target.value })} className={selCls} aria-label="Assinatura">
+            <option value="">Toda assinatura</option>
+            {Object.entries(STATUS).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <select value={filtros.vencimento} onChange={(e) => set({ vencimento: e.target.value as Filtros['vencimento'] })} className={selCls} aria-label="Vencimento">
+            <option value="">Qualquer vencimento</option>
+            <option value="vencido">Vencidos</option>
+            <option value="7dias">Vencem em 7 dias</option>
+            <option value="30dias">Vencem em 30 dias</option>
+          </select>
+          <select value={filtros.situacao} onChange={(e) => set({ situacao: e.target.value as Filtros['situacao'] })} className={selCls} aria-label="Situação">
+            <option value="">Ativos e desativados</option>
+            <option value="ativos">Só ativos</option>
+            <option value="desativados">Só desativados</option>
+          </select>
+          <select value={filtros.ordem} onChange={(e) => set({ ordem: e.target.value as Filtros['ordem'] })} className={selCls} aria-label="Ordenar">
+            <option value="nome">Ordem: nome</option>
+            <option value="recentes">Ordem: mais recentes</option>
+            <option value="vencimento">Ordem: vencimento</option>
+            <option value="conversas">Ordem: mais conversas</option>
+          </select>
+          <span className="text-[12px] text-muted tnum ml-auto">{lista.length === tenants.data.length ? `${lista.length} clientes` : `${lista.length} de ${tenants.data.length} clientes`}</span>
+          {filtrando && <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => setFiltros({ ...FILTROS_VAZIOS, ordem: filtros.ordem })}>Limpar filtros</Button>}
+        </div>
+      )}
+      {tenants.data && (
         <div className="rounded-2xl bg-panel border border-line overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="px-4 py-2.5">Cliente</th><th className="px-3 py-2.5">Admin</th><th className="px-3 py-2.5">Plano</th><th className="px-3 py-2.5">Assinatura</th><th className="px-3 py-2.5">Vencimento</th><th className="px-3 py-2.5 text-right">Números</th><th className="px-3 py-2.5 text-right">Usuários</th><th className="px-3 py-2.5 text-right">Conversas</th><th className="px-4 py-2.5"></th></tr></thead>
             <tbody className="divide-y divide-line">
-              {tenants.data.map((t) => {
+              {lista.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-muted">Nenhum cliente com esses filtros.</td></tr>}
+              {lista.map((t) => {
                 const st = STATUS[t.subscription?.status ?? ''] ?? ['—', 'bg-field text-muted'];
                 return (
                   <tr key={t.id} className={cn(!t.isActive && 'opacity-50')}>

@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useTenantSettings, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { STATUS_META } from './ConversationList';
 import { ZoomableAvatar } from './AvatarViewer';
@@ -23,8 +23,8 @@ import { Modal, inputCls } from '@/components/ui/Modal';
 import { ComposerBar } from './ComposerBar';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
-import { QUICK_REPLY_EVENT, QuickReplyCountdown, type QuickReplyEventDetail, type QuickReplyPending } from './QuickReplyCountdown';
-import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, QUICK_REPLY_DELAY_DEFAULT_SEC } from '@atendo/shared';
+import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
+import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS } from '@atendo/shared';
 import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
@@ -167,9 +167,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   /** mensagem que está sendo respondida (citação), como no WhatsApp */
   const [respondendo, setRespondendo] = useState<Message | null>(null);
   const [encaminhando, setEncaminhando] = useState<Message | null>(null);
-  /** resposta rápida na contagem para sair; trocar de conversa cancela (não vai para o contato errado) */
-  const tenantSettings = useTenantSettings();
-  const [rapida, setRapida] = useState<QuickReplyPending | null>(null);
+  /** resposta rápida escolhida, a enviar no próximo render (com a assinatura/estado atuais) */
+  const [rapida, setRapida] = useState<(QuickReplyEventDetail & { key: string }) | null>(null);
   useEffect(() => setRapida(null), [conversationId]);
   /** o composer está no modo de responder ao contato? (senão a resposta rápida só entra no campo) */
   const podeResponderRef = useRef(false);
@@ -390,10 +389,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   }, []);
 
   /**
-   * Resposta rápida escolhida: sai depois da contagem configurada, com Cancelar/Editar.
+   * Resposta rápida escolhida: sai na hora (a contagem com Cancelar/Editar foi retirada).
    * Fora do modo de responder (nota interna, número caído…), só entra no campo como antes.
    */
-  const atrasoRapida = tenantSettings.data?.quickReplyDelaySec ?? QUICK_REPLY_DELAY_DEFAULT_SEC;
   /**
    * Assinatura do atendente (`*Nome:*` na 1ª linha) quando ligada. Um ponto só para o campo e
    * para a resposta rápida — antes a rápida saía pelo timer sem passar por aqui e ia sem nome.
@@ -407,40 +405,28 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         setText((t) => (d.media ? d.text : (t ? `${t} ` : '') + d.text));
         return;
       }
-      setRapida({ ...d, at: Date.now() + atrasoRapida * 1000, key: crypto.randomUUID() });
+      setRapida({ ...d, key: crypto.randomUUID() });
     };
     window.addEventListener(QUICK_REPLY_EVENT, h);
     return () => window.removeEventListener(QUICK_REPLY_EVENT, h);
-  }, [atrasoRapida]);
+  }, []);
 
   useEffect(() => {
     if (!rapida) return;
-    const t = setTimeout(() => {
-      setRapida(null);
-      const r = rapida;
-      const input = r.media
-        ? { type: mediaTypeOf(r.media.mimeType), mediaKey: r.media.key, text: assinar(r.text) || undefined, media: { url: r.media.url, mimeType: r.media.mimeType, fileName: r.media.fileName } } as const
-        : { type: 'text', text: assinar(r.text) } as const;
-      // resposta rápida ninguém digitou: "digitando…" simulado pelo tamanho do texto
-      send.mutateAsync({ ...input, simulateTypingChars: r.text.trim().length, idempotencyKey: r.key }).catch((err) => {
-        // não perde o texto: volta para o campo para revisar e mandar de novo
-        if (r.media) setAttachment(r.media);
-        setText(r.text);
-        toast.err(err);
-      });
-    }, Math.max(0, rapida.at - Date.now()));
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- só a resposta agendada dispara o envio
-  }, [rapida]);
-
-  /** "Editar" na contagem: volta ao comportamento antigo — vai para o campo, sai quando a pessoa enviar. */
-  function editarRapida() {
-    if (!rapida) return;
-    if (rapida.media) setAttachment(rapida.media);
-    setText(rapida.media ? rapida.text : (t) => (t ? `${t} ` : '') + rapida.text);
     setRapida(null);
-    campoRef.current?.focus();
-  }
+    const r = rapida;
+    const input = r.media
+      ? { type: mediaTypeOf(r.media.mimeType), mediaKey: r.media.key, text: assinar(r.text) || undefined, media: { url: r.media.url, mimeType: r.media.mimeType, fileName: r.media.fileName } } as const
+      : { type: 'text', text: assinar(r.text) } as const;
+    // resposta rápida ninguém digitou: "digitando…" simulado pelo tamanho do texto
+    send.mutateAsync({ ...input, simulateTypingChars: r.text.trim().length, idempotencyKey: r.key }).catch((err) => {
+      // não perde o texto: volta para o campo para revisar e mandar de novo
+      if (r.media) setAttachment(r.media);
+      setText(r.text);
+      toast.err(err);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só a resposta escolhida dispara o envio
+  }, [rapida]);
 
   if (!conv) {
     return (
@@ -555,6 +541,18 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
           <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
         </span>
+        {/* Encerrar é a ação que fecha o atendimento (e alimenta o relatório de vendas): verde, com
+            texto sempre visível e a PRIMEIRA das ações — no fim da fila, ela ia para a segunda linha
+            ou ficava atrás do painel da direita e o atendente não achava */}
+        {conv.status !== 'closed' ? (
+          <Button size="sm" variant="success" className="shrink-0" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
+            Encerrar
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" className="shrink-0" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Conversa reaberta'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Reabrir">
+            Reabrir
+          </Button>
+        )}
         {sched.has && (
           <Button size="sm" variant="ghost" icon={<CalendarPlus size={14} />} onClick={() => setScheduling(true)} title="Agendar horário para este cliente"><span className="hidden sm:inline">Agendar</span></Button>
         )}
@@ -619,15 +617,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         </Button>
         {podeLimpar && (
           <Button size="sm" variant="ghost" icon={<Eraser size={14} />} onClick={() => setLimpando(true)} title="Limpar o histórico desta conversa (fica registrado quem limpou)" aria-label="Limpar histórico" />
-        )}
-        {conv.status !== 'closed' ? (
-          <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
-            <span className="hidden sm:inline">Encerrar</span>
-          </Button>
-        ) : (
-          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Conversa reaberta'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Reabrir">
-            <span className="hidden sm:inline">Reabrir</span>
-          </Button>
         )}
       </header>
 
@@ -791,7 +780,6 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           {podeNota && <AbasDoEnvio nota={false} onNota={setModoNota} />}
           {contatoFrio && <ColdContactNotice numberId={conv.number.id} />}
-          {rapida && <QuickReplyCountdown pending={rapida} onCancel={() => setRapida(null)} onEdit={editarRapida} />}
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
               {attachment.mimeType.startsWith('image/') ? <img src={attachment.url} alt="" className="w-12 h-12 rounded object-cover" /> : <FileText size={20} className="text-muted" />}

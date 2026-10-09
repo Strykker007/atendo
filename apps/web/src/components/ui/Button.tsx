@@ -2,7 +2,7 @@
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type Variant = 'primary' | 'ghost' | 'danger' | 'subtle';
+type Variant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'success';
 type Size = 'sm' | 'md' | 'icon';
 
 const VARIANT: Record<Variant, string> = {
@@ -10,6 +10,8 @@ const VARIANT: Record<Variant, string> = {
   ghost: 'border border-line text-ink hover:bg-field bg-panel',
   danger: 'bg-danger hover:bg-danger/90 text-white border border-transparent',
   subtle: 'border border-line text-danger hover:bg-danger-soft bg-panel',
+  /** conclusão (ex.: Encerrar atendimento): verde para se destacar das ações neutras */
+  success: 'bg-ok hover:bg-ok/90 text-white border border-transparent',
 };
 const SIZE: Record<Size, string> = {
   md: 'px-4 py-2 text-sm rounded-lg',
