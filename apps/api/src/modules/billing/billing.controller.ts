@@ -13,6 +13,7 @@ import { FinanceService } from './finance.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { UsageService, periodOf } from './usage.service';
+import { quotaStatus } from './quota';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /**
@@ -255,7 +256,7 @@ export class BillingController {
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, overageAmount: 0, noTenant: true };
+      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, overageAmount: 0, quota: null, noTenant: true };
     }
     const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies, tenant] = await Promise.all([
       this.usage.current(user.tenantId),
@@ -299,6 +300,8 @@ export class BillingController {
           : null,
       currentPeriodEnd: sub?.currentPeriodEnd ?? null,
       overageAmount: counter ? Number(counter.overageAmount) : 0,
+      /** uso x limite pela unidade do plano — o front NÃO recalcula (é a mesma regra do envio) */
+      quota: quotaStatus(plan, used),
     };
   }
 }

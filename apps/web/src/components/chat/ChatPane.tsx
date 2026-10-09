@@ -454,7 +454,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     );
   }
 
-  const quotaHit = usage.data?.limits && usage.data.limits.hardLimit && usage.data.limits.includedMessagesMonth != null && usage.data.used.messages >= usage.data.limits.includedMessagesMonth;
+  // mesma decisão do envio na API (unidade do plano: mensagens ou conversas) — não recalcular aqui
+  const quotaHit = !!usage.data?.quota?.blocked;
   const numberOffline = channelOffline(conv.number);
   /** API oficial e o contato não escreve há 24h: texto livre seria recusado, só template */
   const janelaFechada = conv.number.provider === 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
@@ -774,7 +775,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         </div>
       ) : quotaHit ? (
         <div className="bg-warn-soft border-t border-warn/30 px-4 py-3 text-sm text-warn-ink flex items-center gap-2">
-          <span className="flex-1">Limite de mensagens do plano <b>{usage.data?.plan}</b> atingido neste mês. Faça upgrade para continuar respondendo.</span>
+          <span className="flex-1">{usage.data?.quota?.reason ?? 'Envio bloqueado pelo plano.'} Veja em <Link href="/plano" className="underline font-medium">Plano e uso</Link>.</span>
           {botaoNota}
         </div>
       ) : conv.status === 'closed' ? (

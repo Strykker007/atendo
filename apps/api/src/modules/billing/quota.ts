@@ -41,3 +41,41 @@ export function decideCanSend(
   if (!plan.limits.hardLimit && overage !== null) return { ok: true, overage: true };
   return { ok: false, reason: `Limite de ${LABEL[efetiva]} do plano atingido (${included}/mês)` };
 }
+
+export interface QuotaStatus {
+  /** unidade que limita o plano (o banner fala dela, não de mensagens por padrão) */
+  unit: BillingUnit;
+  /** maior uso/incluído entre a unidade do plano e os templates; null = nada com teto (ilimitado) */
+  ratio: number | null;
+  /** qual métrica deu o `ratio` */
+  metric: QuotaKind | null;
+  /** resposta comum (fora de template) recusada — mesma decisão do envio */
+  blocked: boolean;
+  /** motivo do bloqueio, o mesmo texto que o envio devolve */
+  reason: string | null;
+  /** template recusado (limite próprio) */
+  templatesBlocked: boolean;
+  /** passou do incluído e o excedente vai para a fatura */
+  overage: boolean;
+}
+
+/**
+ * Situação da quota para a tela (banner, caixa de resposta). Sai da MESMA regra do envio
+ * (`decideCanSend`/`limitsFor`): calcular no front a partir de `includedMessagesMonth`
+ * mostrava "92% do plano" para quem é cobrado por conversa (e ilimitado).
+ */
+export function quotaStatus(plan: { limits: PlanLimits; status: string } | null, used: Record<QuotaKind, number>): QuotaStatus | null {
+  if (!plan) return null;
+  const unit = unitOf(plan.limits);
+  let ratio: number | null = null;
+  let metric: QuotaKind | null = null;
+  for (const kind of [unit, 'templates'] as const) {
+    const { included } = limitsFor(plan.limits, kind);
+    if (!included) continue; // null = ilimitado; 0 = tudo é excedente/bloqueio, sem percentual
+    const r = (used[kind] ?? 0) / included;
+    if (ratio === null || r > ratio) { ratio = r; metric = kind; }
+  }
+  const msg = decideCanSend(plan, used, unit);
+  const tpl = decideCanSend(plan, used, 'templates');
+  return { unit, ratio, metric, blocked: !msg.ok, reason: msg.ok ? null : msg.reason ?? null, templatesBlocked: !tpl.ok, overage: !!msg.overage || !!tpl.overage };
+}

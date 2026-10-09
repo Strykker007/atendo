@@ -108,6 +108,22 @@ export interface Usage {
   priceChange: { priceMonth: number; at: string } | null;
   currentPeriodEnd: string | null;
   overageAmount: number;
+  /**
+   * Uso x limite já calculado pela API com a mesma regra do envio (unidade do plano: mensagens
+   * ou conversas). Não recalcular a partir de `limits`/`used` — foi assim que um plano por
+   * conversa ilimitado mostrou "92% do plano". `null` = sem assinatura.
+   */
+  quota: {
+    unit: 'messages' | 'conversations';
+    /** null = nada com teto (ilimitado) */
+    ratio: number | null;
+    metric: 'messages' | 'conversations' | 'templates' | null;
+    blocked: boolean;
+    /** motivo do bloqueio (mesmo texto do envio) */
+    reason: string | null;
+    templatesBlocked: boolean;
+    overage: boolean;
+  } | null;
 }
 export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/billing/usage'), refetchInterval: 60_000 });
 

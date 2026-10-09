@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanLimits } from '@atendo/shared';
-import { decideCanSend } from '../src/modules/billing/quota';
+import { decideCanSend, quotaStatus } from '../src/modules/billing/quota';
 
 const base: PlanLimits = {
   maxNumbers: 1,
@@ -96,5 +96,47 @@ describe('decideCanSend', () => {
 
   it('plano com zero incluído e excedente cobrado envia sempre cobrando', () => {
     expect(decideCanSend(plano({ includedMessagesMonth: 0 }), { messages: 0, templates: 0, conversations: 0 }, 'messages')).toEqual({ ok: true, overage: true });
+  });
+});
+
+describe('quotaStatus — o que a tela mostra', () => {
+  const uso = (messages: number, conversations: number, templates = 0) => ({ messages, conversations, templates });
+
+  it('plano por conversa ilimitado não acusa % por mensagens (caso Drog. mix: 1839/2000 virava 92%)', () => {
+    const p = plano({ billingUnit: 'conversations', includedConversationsMonth: null, includedMessagesMonth: 2000, includedTemplatesMonth: null, overagePricePerMessage: null, hardLimit: true });
+    const q = quotaStatus(p, uso(1839, 310))!;
+    expect(q.ratio).toBeNull();
+    expect(q.blocked).toBe(false);
+    // nem passando das 2000 mensagens: o chat não pode travar
+    expect(quotaStatus(p, uso(50_000, 310))!.blocked).toBe(false);
+  });
+
+  it('plano por conversa com teto usa as conversas', () => {
+    const p = plano({ billingUnit: 'conversations', includedConversationsMonth: 500, includedMessagesMonth: 100, hardLimit: true });
+    const q = quotaStatus(p, uso(9999, 460))!;
+    expect(q.metric).toBe('conversations');
+    expect(q.ratio).toBeCloseTo(0.92);
+  });
+
+  it('plano por mensagem segue por mensagem e bloqueia no hardLimit', () => {
+    const p = plano({ includedTemplatesMonth: null, hardLimit: true, overagePricePerMessage: null });
+    expect(quotaStatus(p, uso(920, 0))!.ratio).toBeCloseTo(0.92);
+    const q = quotaStatus(p, uso(1000, 0))!;
+    expect(q.blocked).toBe(true);
+    expect(q.reason).toContain('mensagens');
+  });
+
+  it('templates entram no percentual mas só bloqueiam template', () => {
+    const p = plano({ includedMessagesMonth: null, includedTemplatesMonth: 10, overagePricePerTemplate: null, hardLimit: true });
+    const q = quotaStatus(p, uso(0, 0, 10))!;
+    expect(q.metric).toBe('templates');
+    expect(q.blocked).toBe(false);
+    expect(q.templatesBlocked).toBe(true);
+  });
+
+  it('assinatura suspensa bloqueia com o motivo certo', () => {
+    const q = quotaStatus(plano({}, 'suspended'), uso(0, 0))!;
+    expect(q.blocked).toBe(true);
+    expect(q.reason).toContain('suspensa');
   });
 });

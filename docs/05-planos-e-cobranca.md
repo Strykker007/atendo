@@ -169,7 +169,9 @@ Limites de **quantidade** (números, atendentes, fluxos ativos, respostas rápid
 
 ## Alertas
 
-Ao passar de **80%** e **100%** de mensagens ou templates, `usage_alerts` registra (chave única por tenant/período/métrica/threshold — nunca dispara duas vezes). Hoje só loga; enviar e-mail e mostrar banner no painel está no roadmap. `GET /billing/usage` já devolve `used` e `limits` para o front calcular a porcentagem.
+Ao passar de **80%** e **100%** da unidade do plano (mensagens **ou** conversas) ou de templates, `usage_alerts` registra (chave única por tenant/período/métrica/threshold — nunca dispara duas vezes) e manda e-mail aos admins.
+
+**Banner e bloqueio da caixa de resposta na tela:** `GET /billing/usage` devolve `quota` (`quotaStatus` em `quota.ts`) — `unit`, `ratio` (maior uso/incluído entre a unidade do plano e templates; `null` = ilimitado), `metric`, `blocked` + `reason` (a **mesma** decisão de `decideCanSend` usada no envio), `templatesBlocked` e `overage`. O front (`UsageBanner`, `ChatPane`) só lê `quota`; **não recalcula** a partir de `limits`/`used`. Recalcular no front já mostrou "92% do plano" (e travaria o chat) para um plano por conversa ilimitado, porque dividia mensagens enviadas por `includedMessagesMonth`, campo que nesse plano não limita nada.
 
 ## Gateway: Stripe ou Asaas
 
