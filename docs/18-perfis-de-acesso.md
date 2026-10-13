@@ -24,7 +24,7 @@ senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 | Grupo | Permissões |
 |---|---|
-| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit` |
+| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.close_internal`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `variables.manage`, `agenda.manage`, `campaigns.manage` |
 | Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
 | Conta | `numbers.manage`, `billing.manage` |
@@ -43,6 +43,10 @@ rápidas, relatórios e números de WhatsApp. As três de apagar
 Administrador (migration `message_delete`) — regras em [Apagar mensagens](apagar-mensagens.md).
 `variables.manage` (variáveis da empresa) idem, nos perfis padrão Gerente e Administrador não
 editados (migration `global_variables`) — ver [Variáveis](variaveis.md).
+`conversations.close_internal` (encerrar como atendimento interno, fora dos relatórios) idem, nos
+perfis padrão Gerente e Administrador não editados (migration `close_internal_audit`); o atendente
+fica sem, para não "limpar" do relatório o atendimento demorado ou perdido — ver
+[Encerramento interno](06-modelo-de-dados.md#encerramento-interno).
 
 ## Como é aplicado
 
@@ -156,6 +160,7 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `conversations.edit_message` | lápis no hover de qualquer mensagem de texto enviada — própria, de colega, do celular ou do robô (na fila sempre; enviada até 15 min, só Evolution) — [Editar mensagens](editar-mensagens.md). Ligada nos três perfis padrão (migration `edit_message`) |
 | `conversations.delete_message` | lixeira no hover de qualquer mensagem (sem ela, só nas próprias com menos de 2 dias) |
 | `conversations.delete_chat` | botão "Limpar histórico" no cabeçalho do chat |
+| `conversations.close_internal` | caixa "Atendimento interno" nos modais de encerrar (individual e em massa) |
 | `conversations.view_deleted` | olho no aviso "Mensagem apagada por…" para ver o original |
 | `conversations.schedule_message` | relógio na barra do campo (agendar) e o X de cancelar na faixa de agendadas. Vendido à parte: no padrão só o Administrador tem ([Agendamento de mensagens](agendamento-de-mensagens.md)) |
 | `contacts.edit` | ficha do contato fica só de leitura, com o motivo escrito |

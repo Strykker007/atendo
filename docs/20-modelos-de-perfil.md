@@ -13,8 +13,8 @@ O formulário **Novo cliente** tem `Modelo de perfil: [ Farmácia (padrão) | Cl
 Na API: `templateId` ausente = modelo padrão (se houver); `null` = nenhum.
 `POST /tenants` cria, **numa única transação**:
 
-1. cliente + assinatura + configuração + **tags** (`provisionedTags`): as de `tags` do modelo, na
-   ordem dele (é a das colunas do Kanban), cada uma com cor, `isKanban` e `showOnClose`. Modelo
+1. cliente + assinatura + configuração + **tags** (`provisionedTags`; as marcadas Comprou/Não comprou viram **motivos de encerramento** — `close_reasons` — e só continuam tag se forem etapa do Kanban; "Gerar de um cliente" traz os motivos de volta como tags marcadas): as de `tags` do modelo, na
+   ordem dele (é a das colunas do Kanban), cada uma com cor, `isKanban`, `showOnWon` e `showOnLost`. Modelo
    sem `tags` (formato antigo): `lossReasons` — ou, sem ela, `DEFAULT_LOSS_REASONS` do catálogo —
    como tags de encerramento **fora do Kanban** com a cor de `lossReasonColors`;
 2. perfis de acesso (`access_profiles`, ver [18](18-perfis-de-acesso.md)):
@@ -48,10 +48,10 @@ Modelo com mais respostas do que o `maxQuickReplies` do plano é recusado (400) 
   departamentos reais): monte num cliente (pode ser um de testes), exporte em Fluxos e importe
   aqui; mesmo nome substitui. Remover também é por aqui.
 - **Tags** — as mesmas opções da tela de Tags do cliente: cor (bolinha → paleta ou cor livre),
-  interruptores **Kanban** e **Encerramento** por linha, subir/descer (ordem das colunas),
-  remover; selecionar todas com Mostrar/Tirar do encerramento, Pôr/Tirar do Kanban, Cor e
+  interruptores **Kanban**, **Comprou** e **Não comprou** por linha, arrastar pela alça para ordenar (ordem das colunas),
+  remover; selecionar todas com Encerramento (Mostrar/Tirar em Comprou e em Não comprou), Pôr/Tirar do Kanban, Cor e
   Remover; adicionar várias de uma vez (uma por linha ou `;`, com cores variadas para começar e
-  as duas opções para as novas). Sem lista própria, mostra as de encerramento do catálogo (ou do
+  as opções para as novas: Comprou, Não comprou, Kanban). Sem lista própria, mostra as de encerramento do catálogo (ou do
   formato antigo do modelo) e a primeira edição as copia para `tags`; "Voltar às do catálogo"
   desfaz. Máx. 200, sem repetidos (ignorando maiúsculas), nome até 40 caracteres.
 
@@ -81,19 +81,21 @@ Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido 
   "quickReplies": [ { "atendo": "quick-reply", "version": 1, "folder": "Entrega", "title": "Prazo", "body": "…" } ],
   "flows": [ { "atendo": "flow", "version": 1, "name": "Boas-vindas", "trigger": {}, "definition": {} } ],
   "tags": [
-    { "name": "Novo lead", "color": "#0ea5e9", "isKanban": true, "showOnClose": false },
-    { "name": "Achou caro", "color": "#f59e0b", "isKanban": false, "showOnClose": true },
-    { "name": "Receita vencida", "color": "#dc2626", "isKanban": false, "showOnClose": true }
+    { "name": "Novo lead", "color": "#0ea5e9", "isKanban": true },
+    { "name": "Indicação", "color": "#22c55e", "showOnWon": true },
+    { "name": "Achou caro", "color": "#f59e0b", "showOnLost": true },
+    { "name": "Receita vencida", "color": "#dc2626", "showOnLost": true }
   ]
 }
 ```
 
 - `tags`: com que o cliente nasce, na ordem. `color` opcional (`#rrggbb`; inválida recusa o
-  arquivo); `isKanban`/`showOnClose` ausentes = `false`; repetida (ignorando maiúsculas) é
+  arquivo); `isKanban`/`showOnWon`/`showOnLost` ausentes = `false` (`showOnClose: true`, de antes da separação, vale como os dois); repetida (ignorando maiúsculas) é
   descartada.
 
 - `lossReasons` / `lossReasonColors` (formato antigo, só leitura): `.json` e modelos de antes de
-  `tags` continuam valendo — viram tags de encerramento fora do Kanban com a cor de cada uma.
+  `tags` continuam valendo — viram tags fora do Kanban, com a cor de cada uma, que aparecem nos dois
+  encerramentos (Comprou e Não comprou), como era antes da separação.
   Com `tags` presente, as duas são ignoradas, e salvar pelo editor grava só `tags`.
 - `quickReplies` e `flows` são exatamente os itens das exportações de Respostas e Fluxos
   (formato portável — `quick-replies/portable.ts` e `packages/shared/src/portable.ts`): sem ids,
@@ -107,7 +109,7 @@ Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido 
 
 O jeito prático é **Gerar de um cliente**: escolhe um cliente já redondo e o sistema tira dele
 os perfis que ele ajustou (perfil padrão nunca editado fica de fora), as respostas, os fluxos e
-**todas as tags** na ordem do Kanban, com cor, Kanban e encerramento (até 200).
+**todas as tags** na ordem do Kanban, com cor, Kanban, Comprou e Não comprou (até 200).
 Depois **Exportar** baixa o `.json`, **Carregar JSON** substitui o conteúdo de um modelo
 existente e **Importar JSON** cria um modelo novo.
 

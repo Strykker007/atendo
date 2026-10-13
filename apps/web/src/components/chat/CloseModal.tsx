@@ -1,13 +1,12 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { CheckCircle2, XCircle, Plus, Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { CheckCircle2, XCircle, Plus, Trash2, Check, EyeOff } from 'lucide-react';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { TagPicker } from './TagPicker';
-import { useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings } from '@/lib/hooks';
+import { useCan, useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings, useCloseReasons, reasonsFor, useOutcomeLabels } from '@/lib/hooks';
 
 /**
  * Bloco do formulário de encerramento: rótulo, explicação logo abaixo dele e o campo. A dica
@@ -34,27 +33,126 @@ export function Secao({ titulo, opcional, dica, acao, children, htmlFor }: { tit
 
 /** Resultado do encerramento pelo atendente — um dos dois é obrigatório ("Sem resultado" saiu). */
 export type CloseOutcome = 'won' | 'lost';
-/** Exportado porque o encerramento em massa usa as mesmas. */
-export const OUTCOMES: { id: CloseOutcome; label: string; icon: React.ReactNode; cls: string }[] = [
-  { id: 'won', label: 'Comprou', icon: <CheckCircle2 size={15} />, cls: 'border-ok text-ok bg-ok-soft' },
-  { id: 'lost', label: 'Não comprou', icon: <XCircle size={15} />, cls: 'border-danger text-danger bg-danger-soft' },
+/** Exportado porque o encerramento em massa usa as mesmas. O nome vem da empresa (`useOutcomeLabels`). */
+export const OUTCOMES: { id: CloseOutcome; icon: React.ReactNode; cls: string }[] = [
+  { id: 'won', icon: <CheckCircle2 size={15} />, cls: 'border-ok text-ok bg-ok-soft' },
+  { id: 'lost', icon: <XCircle size={15} />, cls: 'border-danger text-danger bg-danger-soft' },
 ];
 
 /**
- * Tags do encerramento (o antigo "motivo"): opcionais, com busca — o cliente pode ter dezenas.
- * Só as marcadas "Exibir no encerramento" em Tags: as internas/operacionais não fazem sentido
- * na hora de qualificar a venda. Entram na conversa e ficam congeladas no histórico do
- * atendimento para o relatório.
+ * Tags do encerramento (o antigo "motivo"): opcionais, um botão por tag. Só as marcadas em Tags
+ * para o resultado escolhido — "Comprou" e "Não comprou" têm listas próprias (o que explica uma
+ * venda não é o que explica uma perda). Trocar o resultado tira as escolhidas que não valem
+ * para o novo. Entram na conversa e ficam congeladas no histórico do atendimento.
  */
-export function CloseTagsField({ value, onChange, dica }: { value: string[]; onChange: (ids: string[]) => void; dica: string }) {
+export function CloseTagsField({ outcome, value, onChange }: { outcome: CloseOutcome; value: string[]; onChange: (ids: string[]) => void }) {
   const tags = useTags();
-  const doEncerramento = (tags.data ?? []).filter((t) => t.showOnClose);
+  const labels = useOutcomeLabels();
+  const [busca, setBusca] = useState('');
+  const doResultado = (tags.data ?? []).filter((t) => (outcome === 'won' ? t.showOnWon : t.showOnLost));
+  useEffect(() => {
+    if (!tags.data) return;
+    const validas = value.filter((id) => doResultado.some((t) => t.id === id));
+    if (validas.length !== value.length) onChange(validas);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só ao trocar o resultado / carregar as tags
+  }, [outcome, tags.data]);
+  // busca só quando a lista é grande: com poucas tags, os botões já estão todos à vista
+  const comBusca = doResultado.length > 12;
+  const visiveis = comBusca && busca.trim() ? doResultado.filter((t) => t.name.toLowerCase().includes(busca.trim().toLowerCase())) : doResultado;
+  const alternar = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const rotulo = labels[outcome];
+  // sem tag marcada para o resultado, o campo some: o principal no encerramento agora é o motivo
+  if (!tags.data || doResultado.length === 0) return null;
   return (
-    <Secao titulo="Tags" opcional dica={dica}>
-      {tags.data && doEncerramento.length === 0
-        ? <p className="text-xs text-faint">Nenhuma tag marcada para o encerramento. Marque em <Link href="/tags" className="underline hover:text-ink">Tags</Link> → “Exibir no encerramento”.</p>
-        : <TagPicker tags={doEncerramento} value={value} onChange={onChange} placeholder="Buscar tag…" />}
-    </Secao>
+    <div className="space-y-1.5">
+      {comBusca && <input className={cn(inputCls, 'py-1 text-[12.5px]')} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Filtrar tags…" aria-label="Filtrar tags" />}
+      {/* um clique por tag (antes era campo com lista: abrir, buscar, escolher, fechar) */}
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Tags de ${rotulo}`}>
+        {visiveis.map((t) => {
+          const on = value.includes(t.id);
+          return (
+            <button
+              key={t.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => alternar(t.id)}
+              className={cn('inline-flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-0.5 text-[12.5px] transition', on ? 'font-semibold' : 'font-medium opacity-80 hover:opacity-100')}
+              style={{
+                color: t.color,
+                borderColor: on ? t.color : `color-mix(in srgb, ${t.color} 45%, transparent)`,
+                background: `color-mix(in srgb, ${t.color} ${on ? 22 : 8}%, transparent)`,
+                boxShadow: on ? `0 0 0 1px ${t.color}` : undefined,
+              }}
+            >
+              {/* bolinha cheia na cor da tag; escolhida, cresce e ganha o ✓ dentro */}
+              <span className={cn('rounded-full shrink-0 grid place-items-center transition-all', on ? 'w-3.5 h-3.5' : 'w-2 h-2')} style={{ background: t.color }}>
+                {on && <Check size={9} strokeWidth={4} className="text-white" />}
+              </span>
+              {t.name}
+            </button>
+          );
+        })}
+        {comBusca && visiveis.length === 0 && <span className="text-xs text-faint">Nenhuma tag com “{busca}”.</span>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Motivo do encerramento (lista da empresa, Configurações → Atendimento → Encerramento). Um só,
+ * obrigatório quando há motivo para o resultado — a API confere igual (`close_reason_required`).
+ * Trocar o resultado limpa o motivo que não vale para o novo. `internal` = motivos de atendimento
+ * interno (só no encerramento interno).
+ */
+export function CloseReasonField({ outcome, value, onChange, erro }: { outcome: CloseOutcome | 'internal'; value: string | null; onChange: (id: string | null) => void; erro?: boolean }) {
+  const reasons = useCloseReasons();
+  const lista = reasonsFor(reasons.data, outcome);
+  useEffect(() => {
+    if (reasons.data && value && !lista.some((r) => r.id === value)) onChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só ao trocar o resultado / carregar
+  }, [outcome, reasons.data]);
+  if (!reasons.data || lista.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[12px] font-medium text-ink">Motivo</div>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Motivo do encerramento">
+        {lista.map((r) => {
+          const on = value === r.id;
+          return (
+            <button key={r.id} type="button" role="radio" aria-checked={on} onClick={() => onChange(on ? null : r.id)}
+              className={cn('inline-flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-0.5 text-[12.5px] transition', on ? 'font-semibold' : 'font-medium opacity-80 hover:opacity-100')}
+              style={{ color: r.color, borderColor: on ? r.color : `color-mix(in srgb, ${r.color} 45%, transparent)`, background: `color-mix(in srgb, ${r.color} ${on ? 22 : 8}%, transparent)`, boxShadow: on ? `0 0 0 1px ${r.color}` : undefined }}>
+              <span className={cn('rounded-full shrink-0 grid place-items-center transition-all', on ? 'w-3.5 h-3.5' : 'w-2 h-2')} style={{ background: r.color }}>
+                {on && <Check size={9} strokeWidth={4} className="text-white" />}
+              </span>
+              {r.name}
+            </button>
+          );
+        })}
+      </div>
+      {erro && <p className="text-xs text-danger-ink">Escolha o motivo do encerramento.</p>}
+      {/* a API confere: vale tag da conversa ou escolhida aqui */}
+      {lista.find((r) => r.id === value)?.requiresTag && <p className="text-xs text-muted">Este motivo exige pelo menos uma tag no atendimento.</p>}
+    </div>
+  );
+}
+
+/**
+ * "Atendimento interno": tira o atendimento dos relatórios (TMR, volume, encerramentos,
+ * conversão). Só aparece com `conversations.close_internal` — a API recusa sem ela — e cada
+ * uso fica na auditoria (docs/06-modelo-de-dados.md#encerramento-interno).
+ */
+export function InternalCloseToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  const pode = useCan('conversations.close_internal');
+  if (!pode) return null;
+  return (
+    <label className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-[12.5px] cursor-pointer', value ? 'border-warn bg-warn-soft' : 'border-line hover:bg-field')}>
+      <input type="checkbox" className="mt-0.5 accent-current" checked={value} onChange={(e) => onChange(e.target.checked)} />
+      <span className="min-w-0">
+        <span className="flex items-center gap-1.5 font-medium text-ink"><EyeOff size={13} /> Atendimento interno</span>
+        <span className="block text-muted">Não contabilizar nos relatórios de desempenho. Fica registrado na auditoria.</span>
+      </span>
+    </label>
   );
 }
 
@@ -75,6 +173,7 @@ const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId' } as const;
  */
 export function CloseModal({ conversationId, onClose, onClosed }: { conversationId: string; onClose: () => void; /** encerrou de fato (a tela leva a aba junto) */ onClosed?: () => void }) {
   const setStatus = useSetStatus();
+  const labels = useOutcomeLabels();
   const flowsFeature = useHasFeature('flows');
   const flows = useFlows();
   const settings = useTenantSettings();
@@ -84,7 +183,13 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const [modoLista, setModoLista] = useState(true);
   const [itens, setItens] = useState<{ descricao: string; valor: number | null }[]>([{ descricao: '', valor: null }]);
   const [observacoes, setObservacoes] = useState('');
+  /** observação fica atrás de um link: quase nunca se usa, e o campo aberto pesava o modal */
+  const [comObs, setComObs] = useState(false);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [closeReasonId, setCloseReasonId] = useState<string | null>(null);
+  const reasons = useCloseReasons();
+  /** atendimento interno: sem resultado, sem venda, sem fluxo, fora dos relatórios */
+  const [interno, setInterno] = useState(false);
   const [flowId, setFlowId] = useState('');
   // tentou encerrar com o desfecho incompleto: só então os campos ficam vermelhos
   const [tentou, setTentou] = useState(false);
@@ -104,7 +209,6 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
     if (carregou && !escolheuFluxo.current) setFlowId(padraoDe(outcome));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [carregou, outcome]);
-  const ehPadrao = !!flowId && flowId === padraoDe(outcome);
 
   const itensValidos = itens.map((i) => ({ description: i.descricao.trim(), value: i.valor ?? 0 })).filter((i) => i.description || i.value);
   const totalItens = Math.round(itensValidos.reduce((a, i) => a + i.value * 100, 0)) / 100;
@@ -115,11 +219,36 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const totalVenda = lista ? totalItens : valor ?? 0;
   // resultado é obrigatório e "Comprou" exige valor — a API recusa do mesmo jeito
   const faltaResultado = !outcome;
-  const faltaValor = outcome === 'won' && !(totalVenda > 0);
+  // a empresa pode dispensar o valor (Configurações → Atendimento → Encerramento); a API confere igual
+  const exigeValor = settings.data?.requireSaleValue ?? true;
+  const faltaValor = outcome === 'won' && exigeValor && !(totalVenda > 0);
+  /** Comprou sem valor (permitido): conta na conversão, mas não vira venda — produtos e observação não ficam */
+  const semValor = outcome === 'won' && !exigeValor && !(totalVenda > 0);
+  // motivo obrigatório quando há motivo cadastrado para o resultado
+  const faltaMotivo = !!outcome && reasonsFor(reasons.data, outcome).length > 0 && !closeReasonId;
+  const faltaMotivoInterno = reasonsFor(reasons.data, 'internal').length > 0 && !closeReasonId;
+
+  function alternarInterno(v: boolean) {
+    setInterno(v);
+    // os motivos internos e os do resultado são listas separadas
+    setCloseReasonId(null);
+    setTentou(false);
+  }
+
+  async function submitInterno() {
+    if (faltaMotivoInterno) { setTentou(true); return; }
+    try {
+      await setStatus.mutateAsync({ id: conversationId, status: 'closed', internal: true, closeReasonId: closeReasonId ?? undefined, flowId: null });
+      toast.ok('Atendimento interno encerrado (fora dos relatórios)');
+      onClose();
+      onClosed?.();
+    } catch (err) { toast.err(err); }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!outcome || faltaValor) { setTentou(true); return; }
+    if (interno) return submitInterno();
+    if (!outcome || faltaValor || faltaMotivo) { setTentou(true); return; }
     const value = outcome === 'won' ? totalVenda : undefined;
     try {
       await setStatus.mutateAsync({
@@ -128,6 +257,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
         outcome,
         value,
         tagIds: tagIds.length ? tagIds : undefined,
+        closeReasonId: closeReasonId ?? undefined,
         products: outcome === 'won' && !lista ? produtos.trim() || undefined : undefined,
         // em lista, a API soma os itens e monta o resumo em `products`
         items: lista && itensValidos.length ? itensValidos : undefined,
@@ -142,114 +272,90 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
     } catch (err) { toast.err(err); }
   }
 
+  const link = 'text-[12px] text-muted underline hover:text-ink';
   return (
-    <Modal open onClose={onClose} title="Encerrar atendimento" width={outcome === 'won' && modoLista ? 'max-w-2xl' : undefined}>
-      <form onSubmit={submit} className="space-y-4">
-        <Secao titulo="Resultado" dica="Obrigatório. Alimenta o relatório de vendas e a taxa de conversão.">
-          <div className="grid grid-cols-2 gap-2">
-            {OUTCOMES.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                aria-pressed={outcome === o.id}
-                onClick={() => { setOutcome(o.id); escolheuFluxo.current = false; }}
-                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
-              >
-                {o.icon} {o.label}
-              </button>
-            ))}
-          </div>
-          {tentou && faltaResultado && <p className="text-xs text-danger-ink">Escolha “Comprou” ou “Não comprou” para encerrar.</p>}
-        </Secao>
-
-        {outcome === 'won' && (
-          <div className="border-t border-line pt-4">
-            {modoLista ? (
-              <Secao
-                titulo="Itens da venda"
-                dica="Obrigatório informar o valor: o total soma faturamento, ticket médio e desempenho por atendente. Item só com valor também vale."
-                acao={<button type="button" onClick={() => setModoLista(false)} className="text-[12px] text-muted underline hover:text-ink">Usar texto livre</button>}
-              >
-                <div className="space-y-2">
-                  {/* cabeçalho das colunas: sem ele não dava para saber qual campo era o quê */}
-                  <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-faint">
-                    <span className="w-36 shrink-0">Valor (R$)</span>
-                    <span className="flex-1">Produto ou serviço</span>
-                    <span className="w-9 shrink-0" />
-                  </div>
-                  {itens.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <MoneyInput className="w-36 shrink-0" nullable value={item.valor} onChange={(v) => mudarItem(idx, { valor: v })} aria-label={`Valor do item ${idx + 1}`} autoFocus={idx === 0} />
-                      {/* min-w-0: sem ele o input não encolhe abaixo da largura intrínseca e a descrição fica espremida */}
-                      <input className={`${inputCls} flex-1 min-w-0`} placeholder="Ex.: Fralda G, pacote com 40" aria-label={`Produto do item ${idx + 1}`} value={item.descricao} onChange={(e) => mudarItem(idx, { descricao: e.target.value })} maxLength={200} />
-                      <button type="button" aria-label="Remover item" title="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="w-9 h-9 shrink-0 grid place-items-center rounded-lg text-muted hover:text-danger hover:bg-field">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between border-t border-line pt-2">
-                    <button type="button" disabled={itens.length >= 50} onClick={() => setItens((l) => [...l, { descricao: '', valor: null }])} className="inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline disabled:opacity-50">
-                      <Plus size={14} /> Adicionar item
-                    </button>
-                    <span className="text-[13px] text-muted">Total <b className="ml-1 text-ink tnum">{fmtBRL(totalItens)}</b></span>
-                  </div>
-                  {tentou && faltaValor && <p className="text-xs text-danger-ink">Informe o valor de pelo menos um item para encerrar como “Comprou”.</p>}
-                </div>
-              </Secao>
-            ) : (
-              <div className="space-y-4">
-                <Secao
-                  titulo="Valor da compra (R$)"
-                  dica="Obrigatório. Soma faturamento, ticket médio e desempenho por atendente."
-                  acao={<button type="button" onClick={() => setModoLista(true)} className="text-[12px] text-muted underline hover:text-ink">Usar lista de itens</button>}
-                >
-                  <MoneyInput className="sm:w-56" nullable value={valor} onChange={setValor} autoFocus aria-label="Valor da compra" />
-                  {tentou && faltaValor && <p className="text-xs text-danger-ink">Informe o valor da compra para encerrar como “Comprou”.</p>}
-                </Secao>
-                <Secao titulo="Produtos / descrição" opcional dica="O que foi comprado, do jeito que preferir." htmlFor="produtos-livre">
-                  <textarea id="produtos-livre" className={`${inputCls} resize-none`} rows={3} placeholder="Ex.: 2 pacotes de fralda G e 1 perfume" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
-                </Secao>
-              </div>
-            )}
-          </div>
-        )}
-
-        {outcome && (
-          <div className="border-t border-line pt-4">
-            <CloseTagsField
-              value={tagIds}
-              onChange={setTagIds}
-              dica={outcome === 'won' ? 'O que foi vendido ou de onde veio a venda — vira filtro nos relatórios.' : 'Por que não comprou (ex.: “Achou caro”) — é o que mostra onde você perde negócio.'}
-            />
-          </div>
-        )}
-
-        {flowsFeature.has && (
-          <div className="border-t border-line pt-4">
-            <Secao
-              titulo="Fluxo ao encerrar"
-              dica={ehPadrao ? 'Já vem o fluxo padrão deste resultado. Pode trocar ou escolher “Nenhum” só para este atendimento.' : 'Mensagem automática enviada ao contato depois de encerrar: pesquisa de satisfação, pós-venda, recuperação.'}
-              htmlFor="fluxo-encerrar"
+    <Modal open onClose={onClose} title="Encerrar atendimento" width={lista ? 'max-w-xl' : 'max-w-md'}>
+      {/* compacto: resultado → venda → tags → fluxo/observação numa linha. As explicações longas
+          saíram (estão em docs/08-frontend.md); ficam só os avisos de erro */}
+      <form onSubmit={submit} className="space-y-3">
+        <InternalCloseToggle value={interno} onChange={alternarInterno} />
+        {interno && <CloseReasonField outcome="internal" value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivoInterno} />}
+        {!interno && <>
+        <div className="grid grid-cols-2 gap-2" role="group" aria-label="Resultado">
+          {OUTCOMES.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              aria-pressed={outcome === o.id}
+              onClick={() => { setOutcome(o.id); escolheuFluxo.current = false; }}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
             >
-              <select id="fluxo-encerrar" className={inputCls} value={flowId} onChange={(e) => { setFlowId(e.target.value); escolheuFluxo.current = true; }}>
-                <option value="">Nenhum</option>
-                {ativos.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
-            </Secao>
-          </div>
-        )}
+              {o.icon} {labels[o.id]}
+            </button>
+          ))}
+        </div>
+        {tentou && faltaResultado && <p className="text-xs text-danger-ink">Escolha “{labels.won}” ou “{labels.lost}”.</p>}
 
-        {/* por último, abaixo do fluxo: é o fecho do formulário, não parte da venda */}
-        {outcome === 'won' && (
-          <div className="border-t border-line pt-4">
-            <Secao titulo="Observação" opcional dica="Fica registrada na venda; o contato não vê." htmlFor="obs-venda">
-              <textarea id="obs-venda" className={`${inputCls} resize-none`} rows={2} placeholder="Forma de pagamento, entrega, desconto…" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
-            </Secao>
+        {outcome === 'won' && (lista ? (
+          <div className="space-y-1.5">
+            {itens.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-1.5">
+                <MoneyInput className="w-32 shrink-0" nullable value={item.valor} onChange={(v) => mudarItem(idx, { valor: v })} aria-label={`Valor do item ${idx + 1}`} autoFocus={idx === 0} />
+                {/* min-w-0: sem ele o input não encolhe abaixo da largura intrínseca */}
+                <input className={`${inputCls} flex-1 min-w-0`} placeholder={idx === 0 ? 'Produto ou serviço (opcional)' : 'Produto ou serviço'} aria-label={`Produto do item ${idx + 1}`} value={item.descricao} onChange={(e) => mudarItem(idx, { descricao: e.target.value })} maxLength={200} />
+                {itens.length > 1 && (
+                  <button type="button" aria-label="Remover item" title="Remover item" onClick={() => setItens((l) => l.filter((_, n) => n !== idx))} className="w-8 h-8 shrink-0 grid place-items-center rounded-lg text-muted hover:text-danger hover:bg-field">
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="flex items-center gap-3 text-[12px]">
+              <button type="button" disabled={itens.length >= 50} onClick={() => setItens((l) => [...l, { descricao: '', valor: null }])} className="inline-flex items-center gap-1 font-medium text-accent hover:underline disabled:opacity-50">
+                <Plus size={13} /> Item
+              </button>
+              <button type="button" onClick={() => setModoLista(false)} className={link}>Texto livre</button>
+              <span className="ml-auto text-muted">Total <b className="ml-1 text-ink tnum">{fmtBRL(totalItens)}</b></span>
+            </div>
+            {tentou && faltaValor && <p className="text-xs text-danger-ink">Informe o valor de pelo menos um item.</p>}
+            {semValor && <p className="text-xs text-muted">Sem valor, conta como “{labels.won}” mas não soma no faturamento.</p>}
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <MoneyInput className="w-32 shrink-0" nullable value={valor} onChange={setValor} autoFocus aria-label="Valor da compra" />
+              <input className={`${inputCls} flex-1 min-w-0`} placeholder="O que foi comprado (opcional)" aria-label="Produtos" value={produtos} onChange={(e) => setProdutos(e.target.value)} maxLength={500} />
+            </div>
+            <button type="button" onClick={() => setModoLista(true)} className={link}>Lista de itens</button>
+            {tentou && faltaValor && <p className="text-xs text-danger-ink">Informe o valor da compra.</p>}
+            {semValor && <p className="text-xs text-muted">Sem valor, conta como “{labels.won}” mas não soma no faturamento.</p>}
+          </div>
+        ))}
+
+        {outcome && <CloseReasonField outcome={outcome} value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivo} />}
+        {outcome && <CloseTagsField outcome={outcome} value={tagIds} onChange={setTagIds} />}
+
+        {outcome && (flowsFeature.has || outcome === 'won') && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[12.5px]">
+            {flowsFeature.has && (
+              <label className="flex items-center gap-1.5 text-muted min-w-0">
+                Fluxo
+                <select className={cn(inputCls, 'py-1 text-[12.5px] w-auto max-w-[14rem]')} value={flowId} onChange={(e) => { setFlowId(e.target.value); escolheuFluxo.current = true; }} title="Mensagem automática enviada ao contato depois de encerrar">
+                  <option value="">Nenhum</option>
+                  {ativos.map((f) => <option key={f.id} value={f.id}>{f.name}{f.id === padraoDe(outcome) ? ' (padrão)' : ''}</option>)}
+                </select>
+              </label>
+            )}
+            {outcome === 'won' && !comObs && <button type="button" onClick={() => setComObs(true)} className={link}>+ Observação</button>}
           </div>
         )}
+        {outcome === 'won' && comObs && (
+          <textarea className={`${inputCls} resize-none`} rows={2} autoFocus placeholder="Observação da venda (o contato não vê): pagamento, entrega, desconto…" aria-label="Observação" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
+        )}
+        </>}
 
         {/* rodapé grudado no fim do modal: com muitos itens de venda o corpo rola e o Encerrar sumia */}
-        <div className="sticky bottom-0 -mx-5 -mb-5 px-5 py-4 bg-panel flex justify-end gap-2 border-t border-line">
+        <div className="sticky bottom-0 -mx-5 -mb-5 px-5 py-3 bg-panel flex justify-end gap-2 border-t border-line">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button type="submit" variant="success" icon={<CheckCircle2 size={15} />} loading={setStatus.isPending} loadingText="Encerrando…">Encerrar</Button>
         </div>

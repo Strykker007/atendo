@@ -34,6 +34,14 @@ export function unlockMessageSound() {
   return () => events.forEach((e) => window.removeEventListener(e, unlock));
 }
 
+/** Toca para testar (Configurações): o clique já é o gesto que libera o áudio, e não tem intervalo mínimo. */
+export async function previewMessageSound() {
+  const c = context();
+  if (c && c.state === 'suspended') await c.resume().catch(() => undefined);
+  lastAt = 0;
+  playMessageSound();
+}
+
 export function playMessageSound() {
   const now = Date.now();
   if (now - lastAt < MIN_GAP_MS) return;

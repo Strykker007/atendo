@@ -8,6 +8,7 @@ import { InterpolationService } from '../../common/interpolation/interpolation.s
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { botPaused } from '../conversations/bot-pause';
+import { conflictMap } from '../tags/conflicts';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { choose, interpolate, jsonEscape, validAnswer, type InterpolateCtx } from './answer';
@@ -839,11 +840,19 @@ export class FlowEngineService {
   private async act(node: Extract<FlowNode, { type: 'action' }>, run: FlowRun & { flow: { name: string }; conversation: Conversation & { contact: InterpolateCtx['contact'] & { id: string } } }): Promise<'ended' | string | undefined> {
     const d = node.data;
     switch (d.kind) {
-      case 'add_tag':
+      case 'add_tag': {
         if (!d.tagId) break;
-        if (d.scope === 'contact') await this.prisma.contactTag.upsert({ where: { contactId_tagId: { contactId: run.conversation.contactId, tagId: d.tagId } }, create: { contactId: run.conversation.contactId, tagId: d.tagId }, update: {} });
-        else await this.prisma.conversationTag.upsert({ where: { conversationId_tagId: { conversationId: run.conversationId, tagId: d.tagId } }, create: { conversationId: run.conversationId, tagId: d.tagId }, update: {} });
+        // mesma troca do chat: sai só quem conflita direto com a tag marcada
+        const opostas = [...((await conflictMap(this.prisma, [d.tagId])).get(d.tagId) ?? [])];
+        if (d.scope === 'contact') {
+          if (opostas.length) await this.prisma.contactTag.deleteMany({ where: { contactId: run.conversation.contactId, tagId: { in: opostas } } });
+          await this.prisma.contactTag.upsert({ where: { contactId_tagId: { contactId: run.conversation.contactId, tagId: d.tagId } }, create: { contactId: run.conversation.contactId, tagId: d.tagId }, update: {} });
+        } else {
+          if (opostas.length) await this.prisma.conversationTag.deleteMany({ where: { conversationId: run.conversationId, tagId: { in: opostas } } });
+          await this.prisma.conversationTag.upsert({ where: { conversationId_tagId: { conversationId: run.conversationId, tagId: d.tagId } }, create: { conversationId: run.conversationId, tagId: d.tagId }, update: {} });
+        }
         break;
+      }
       case 'remove_tag':
         if (!d.tagId) break;
         if (d.scope === 'contact') await this.prisma.contactTag.deleteMany({ where: { contactId: run.conversation.contactId, tagId: d.tagId } });

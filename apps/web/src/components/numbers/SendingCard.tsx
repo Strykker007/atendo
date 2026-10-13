@@ -66,6 +66,24 @@ export function SendingCard({ number }: { number: NumberItem }) {
         />
       </label>
 
+      {/* transmissão em massa no QR: teto por 24h móveis (docs/envio.md#transmissão); a Meta tem o tier dela */}
+      {!oficial && (
+        <label className="flex items-center gap-2">
+          <span className="text-[11px] text-faint leading-tight flex-1">Teto de transmissão por 24h</span>
+          <input
+            type="number"
+            min={0}
+            max={5000}
+            className={cn(inputCls, 'h-8 py-0 w-28 text-right')}
+            defaultValue={number.campaignDailyLimit ?? 200}
+            onBlur={(e) => {
+              const v = Math.max(0, Math.min(5000, Math.round(Number(e.target.value))));
+              if (v !== (number.campaignDailyLimit ?? 200)) update.mutateAsync({ id: number.id, campaignDailyLimit: v }).then(() => toast.ok('Teto de transmissão salvo')).catch(toast.err);
+            }}
+          />
+        </label>
+      )}
+
       <QueueLimits number={number} />
     </div>
   );

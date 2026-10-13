@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { periodOf } from './usage.service';
+import { grantDiscountIn } from './discount-ledger.service';
+import { overridePrice } from './plan-override';
 
 /**
  * Relatório financeiro do dono do Atendo (super_admin).
@@ -19,14 +21,17 @@ export class FinanceService {
 
   async overview(months = 12) {
     const periods = this.periods(months);
-    const [subs, invoices, counters, tenants, companySubs] = await Promise.all([
-      this.prisma.subscription.findMany({ include: { plan: true, tenant: { select: { name: true } } } }),
+    const [subs, invoices, counters, tenants, companySubs, grantRows] = await Promise.all([
+      this.prisma.subscription.findMany({ include: { plan: true, tenant: { select: { name: true, planOverride: true } } } }),
       this.prisma.invoice.findMany({ where: { period: { in: periods } }, include: { tenant: { select: { name: true } } }, orderBy: { createdAt: 'desc' } }),
       this.prisma.usageCounter.findMany({ where: { period: { in: periods } } }),
       this.prisma.tenant.findMany({ select: { id: true, createdAt: true, numbers: { select: { infraCostMonth: true } } } }),
       // assinaturas próprias de empresas (modo INDIVIDUAL — docs/empresas.md#cobrança)
       this.prisma.companySubscription.findMany({ where: { status: { in: ['active', 'past_due'] }, company: { isActive: true, billingType: 'INDIVIDUAL' } }, include: { plan: true } }),
+      // livro de descontos inteiro: é o registro para a contabilidade (docs/05#livro-de-descontos)
+      this.prisma.discountGrant.findMany({ orderBy: { createdAt: 'desc' } }),
     ]);
+    const grants = grantRows.map((g) => ({ ...g, listPrice: Number(g.listPrice), priceMonth: Number(g.priceMonth), discountPercent: Number(g.discountPercent) }));
 
     const infraTotal = tenants.reduce((a, t) => a + t.numbers.reduce((b, n) => b + Number(n.infraCostMonth), 0), 0);
 
@@ -48,6 +53,8 @@ export class FinanceService {
         providerCost: cnt.reduce((a, c) => a + Number(c.providerCost), 0),
         infraCost: period === periodOf() ? infraTotal : infraTotal, // rateio fixo por mês (aproximação)
         messagesSent: cnt.reduce((a, c) => a + c.messagesSent, 0),
+        /** quanto deixou de entrar no mês por desconto concedido (promoção + negociado) */
+        discounts: Math.round(grants.reduce((a, g) => a + grantDiscountIn(g, period), 0) * 100) / 100,
         newTenants,
         canceled,
       };
@@ -89,6 +96,9 @@ export class FinanceService {
     /** custo fixo cadastrado nos planos, somado por cliente ativo */
     const planCost = active.reduce((a, s) => a + Number(s.plan.costMonth), 0);
     const current = series[series.length - 1];
+    // desconto vigente agora, da mesma fonte do MRR (o valor que vale hoje), não do livro
+    const comDesconto = active.filter(paying).map((s) => ({ s, negociado: overridePrice(s.tenant.planOverride, s.planId) })).filter((x) => x.negociado !== null);
+    const discountMonth = comDesconto.reduce((a, { s, negociado }) => a + (Number(s.plan.priceMonth) - negociado!) * Math.max(1, s.units), 0);
     const statusCount = subs.reduce<Record<string, number>>((acc, s) => ((acc[s.status] = (acc[s.status] ?? 0) + 1), acc), {});
 
     return {
@@ -104,10 +114,18 @@ export class FinanceService {
         monthCost: current.providerCost + current.infraCost + planCost,
         planCost,
         monthMargin: mrr + current.overage - (current.providerCost + current.infraCost + planCost),
+        /** MRR que deixa de entrar por desconto vigente (promoção + negociado) e em quantos clientes */
+        discountMonth: Math.round(discountMonth * 100) / 100,
+        discountedTenants: comDesconto.length,
       },
       byPlan,
       series,
       invoices: invoices.slice(0, 100).map((i) => ({ id: i.id, tenant: i.tenant.name, period: i.period, total: Number(i.totalAmount), overage: Number(i.overageAmount), status: i.status, dueAt: i.dueAt, paidAt: i.paidAt, hostedUrl: i.hostedUrl })),
+      discounts: grants.map((g) => ({
+        id: g.id, tenant: g.tenantName, plan: g.planName, kind: g.kind, source: g.source, promotion: g.promotionName,
+        listPrice: g.listPrice, priceMonth: g.priceMonth, discountPercent: g.discountPercent, units: g.units,
+        startsAt: g.startsAt, endsAt: g.endsAt, closedAt: g.closedAt, grantedBy: g.grantedByName, createdAt: g.createdAt,
+      })),
       subscriptions: subs.map((s) => ({ tenant: s.tenant.name, plan: s.plan.name, price: price(s), status: s.status, periodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd, graceUntil: s.graceUntil })),
     };
   }

@@ -91,7 +91,7 @@ function NumberScopeModal({ agent, open, onClose }: { agent: Agent; open: boolea
         {minhas.length > 0 && (
           <div className="rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-[13px] text-accent-ink">
             <div className="flex items-center gap-1.5 font-medium"><Building2 size={13} /> Empresas: {minhas.map((c) => c.name).join(', ')}</div>
-            <div className="text-[12px] mt-0.5">Só enxerga os números dessas empresas. Para mudar, edite a empresa em <Link href="/configuracoes" className="underline">Configurações → Empresas e unidades</Link>.</div>
+            <div className="text-[12px] mt-0.5">Só enxerga os números dessas empresas. Para mudar, edite a empresa em <Link href="/configuracoes#empresa" className="underline">Configurações → Empresas e unidades</Link>.</div>
           </div>
         )}
         <p className="text-sm text-muted">

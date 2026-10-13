@@ -1,4 +1,4 @@
-import { WebSocketGateway, WebSocketServer, OnGatewayConnection } from '@nestjs/websockets';
+import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
@@ -11,6 +11,8 @@ import type { TypingEvent } from '@atendo/shared';
 import { env, webOrigins } from '../../config/env';
 
 const GLOBAL_ROOM = 'global';
+/** Dono do sistema logado como ele mesmo: recebe o status dos números de todos os clientes (monitor). */
+const OWNERS_ROOM = 'owners';
 
 /** Dono do sistema, logado como ele mesmo ou "entrando como" um cliente. */
 export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role === 'super_admin' || !!u.impersonatorId;
@@ -24,7 +26,7 @@ export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role 
  */
 @Injectable()
 @WebSocketGateway({ cors: { origin: webOrigins, credentials: true } })
-export class ConversationsGateway implements OnGatewayConnection, OnModuleDestroy {
+export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer() server?: Server;
   private redis?: Redis;
   private emitter?: Emitter;
@@ -34,18 +36,49 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
   async handleConnection(client: Socket) {
     try {
       const token = client.handshake.auth?.token as string;
-      const payload = await this.jwt.verifyAsync<{ tenantId: string; role: string; impersonatorId?: string }>(token, { secret: env.JWT_ACCESS_SECRET });
+      const payload = await this.jwt.verifyAsync<{ sub: string; tenantId: string; role: string; impersonatorId?: string }>(token, { secret: env.JWT_ACCESS_SECRET });
+      // presença (monitor do dono): quem está com o painel aberto. O dono "entrando como" não conta
+      client.data = { userId: payload.sub, tenantId: payload.tenantId ?? null, owner: isOwner(payload) };
       if (payload.tenantId) await client.join(`tenant:${payload.tenantId}`);
+      if (payload.role === 'super_admin' && !payload.impersonatorId) await client.join(OWNERS_ROOM);
       // sala dos clientes logados: avisos globais do sistema. O dono é quem escreve o aviso —
       // não recebe de volta, nem quando está "entrando como" um cliente.
       if (!isOwner(payload)) await client.join(GLOBAL_ROOM);
+      this.presenceChanged(client);
     } catch {
       client.disconnect(true);
     }
   }
 
+  handleDisconnect(client: Socket) {
+    this.presenceChanged(client);
+  }
+
+  /** Alguém do cliente abriu/fechou o painel: o monitor do dono recarrega a presença. */
+  private presenceChanged(client: Socket) {
+    const d = client.data as { tenantId?: string | null; owner?: boolean } | undefined;
+    if (d?.tenantId && !d.owner) this.to(OWNERS_ROOM).emit('tenant_presence', { tenantId: d.tenantId });
+  }
+
   async onModuleDestroy() {
     await this.redis?.quit().catch(() => undefined);
+  }
+
+  /**
+   * Usuários com o painel aberto agora, por cliente (sockets de todas as réplicas, via adapter
+   * Redis). No worker não há servidor: volta vazio.
+   */
+  async presence(): Promise<Map<string, Set<string>>> {
+    const out = new Map<string, Set<string>>();
+    if (!this.server) return out;
+    for (const s of await this.server.fetchSockets()) {
+      const d = s.data as { userId?: string; tenantId?: string | null; owner?: boolean } | undefined;
+      if (!d?.tenantId || d.owner || !d.userId) continue;
+      const set = out.get(d.tenantId) ?? new Set<string>();
+      set.add(d.userId);
+      out.set(d.tenantId, set);
+    }
+    return out;
   }
 
   private room(tenantId: string) {
@@ -73,6 +106,8 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
   }
   emitNumber(tenantId: string, number: Pick<WhatsAppNumber, 'id' | 'status'> & { qrCode?: string }) {
     this.room(tenantId).emit('number', number);
+    // monitor do dono: só o status (o QR é do cliente)
+    this.to(OWNERS_ROOM).emit('tenant_number', { tenantId, id: number.id, status: number.status });
   }
   emitAppointment(tenantId: string, appointmentId: string) {
     this.room(tenantId).emit('appointment', { id: appointmentId });
@@ -95,5 +130,12 @@ export class ConversationsGateway implements OnGatewayConnection, OnModuleDestro
   /** Colunas do Kanban mudaram (ordem, tag virou/deixou de ser etapa, renomeada, excluída). */
   emitKanban(tenantId: string) {
     this.room(tenantId).emit('kanban', {});
+  }
+  /**
+   * Transmissão mudou (lote enviado, pausou, terminou). `alert` = parou sozinha (3 falhas
+   * seguidas…): o painel avisa quem estiver com ele aberto, em qualquer tela.
+   */
+  emitCampaign(tenantId: string, event: { id: string; status: string; name?: string; alert?: string }) {
+    this.room(tenantId).emit('campaign', event);
   }
 }

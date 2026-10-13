@@ -160,9 +160,33 @@ commitada, porque o `rsync` manda a pasta, não um commit — sem a trava, sobe 
 código que não está no git. Emergência consciente: `DEPLOY_ANY_BRANCH=1`. O CI roda nas duas.
 
 ```bash
-git checkout main && git merge --ff-only develop && bash scripts/deploy.sh ubuntu@IP_DO_SERVIDOR
-git checkout develop
+git checkout main && git merge develop && bash scripts/deploy.sh ubuntu@IP_DO_SERVIDOR recurso
+git checkout develop && git merge main   # traz o commit da versão (package.json + CHANGELOG)
 ```
+
+### Versões
+
+SemVer, **MAIOR.MENOR.CORREÇÃO**, num número só: `version` do `package.json` da raiz (os
+`package.json` de `apps/*` e `packages/*` não contam). Cada deploy da `main` publica uma versão:
+
+| Tipo (2º argumento) | Exemplo | Quando |
+|---|---|---|
+| `correcao` | 1.4.2 → 1.4.3 | conserto, ajuste de texto — nada novo para o cliente aprender |
+| `recurso` | 1.4.2 → 1.5.0 | coisa nova (tela, opção, integração) que não quebra o que existe |
+| `grande` | 1.4.2 → 2.0.0 | muda o jeito de usar ou quebra compatibilidade (migração destrutiva, API) |
+| `mesma` | 1.4.2 | redeploy sem mudança (servidor caiu, variável nova) |
+
+Sem o tipo, o `deploy.sh` mostra o menu com as quatro opções e a versão que cada uma gera, e
+pede confirmação. Com versão nova ele, **antes** de enviar: grava o número no `package.json`,
+acrescenta ao `CHANGELOG.md` os commits desde a última tag (sem merges; dá para reescrever a
+entrada depois), commita `chore(release): vX.Y.Z` e cria a tag `vX.Y.Z`. Com o deploy no ar,
+envia `main` + tag para o GitHub. Falhou no meio: rode de novo com `mesma` — a tag já existe,
+não numera outra vez, e o push sai.
+
+No servidor, `APP_VERSION=X.Y.Z+<commit>` (`/health` → `version`, release do Sentry). O painel
+mostra "Versão vX.Y.Z" no rodapé do menu (o commit no tooltip) e o `VersionWatcher` avisa quem
+está com a aba aberta que saiu versão nova. A primeira versão numerada é a **1.0.0**: no
+primeiro deploy, use `mesma` para publicá-la (cria a tag `v1.0.0`).
 
 O seed roda uma vez, com o arquivo já compilado na imagem:
 

@@ -131,6 +131,66 @@ Verificado em modo de teste com assinatura real no Stripe: agendamento mantém o
 
 **Apagar** só é permitido quando ninguém assina; com assinante, a API responde 400 e a tela desabilita o botão, porque apagar levaria junto o histórico de faturamento. O caminho é **desativar**: some do checkout e quem já assina continua. Ao apagar, o produto também é arquivado no Stripe.
 
+### Personalização por cliente
+
+Um cliente fica no plano base (ex.: *Starter I*) com **valor, limites e vigência negociados só para ele** — sem criar um plano por cliente. Tela: **Clientes → coluna Plano → "Personalizar"** (só o dono). Tabela `plan_overrides`, uma por cliente.
+
+| Campo | Regra |
+|---|---|
+| Mensalidade | Opcional (vazio = preço do plano). Por unidade no grupo consolidado (× `units`); em plano anual é o equivalente mensal (cobra × 12). Plano gratuito e assinatura viva no Stripe não aceitam (400) — no Stripe o valor é o `price` do catálogo. |
+| Limites | Só os marcados sobrescrevem: `maxNumbers`, `maxAgents`, `maxFlows`, `maxQuickReplies`, `maxCompanies`, `includedMessagesMonth`, `includedConversationsMonth`, `includedTemplatesMonth`, `includedAiInteractionsMonth` (`null` = ilimitado; IA não tem ilimitado). `features` substitui a lista inteira do plano. Excedente, `hardLimit` e carência não são personalizáveis — isso é outro plano. |
+| Vigência | `expiresAt` opcional (último dia, inclusive, horário de Brasília). Sem data = vale enquanto o cliente estiver no plano. |
+
+**Vale só no plano em que foi feita** (`plan_overrides.planId`): trocar de plano desliga (o negociado era para aquele plano), voltar a ele religa se ainda estiver na vigência.
+
+Onde é aplicada — sempre antes da regra do plano:
+
+- **Limites**: `UsageService.limits()` devolve o plano com a personalização por cima (`mergeLimits`, em `packages/shared`). É a única porta: `PlanLimitGuard`, `FeatureGuard`, `canSend`, alertas, excedente da reconciliação, IA e `/billing/usage` leem dali. A vigência vale na leitura, sem esperar job.
+- **Valor**: materializado em `subscriptions.priceMonth` (o preço contratado que vencimentos, MRR, margem e o painel do cliente já leem) e levado ao Asaas (`PUT /subscriptions/:id`, próximas cobranças) **antes** de gravar — se o Asaas recusar, nada muda. Checkout do Asaas no mesmo plano, `syncGroupUnits` e `assignPlan` (voltar ao plano personalizado) usam o valor negociado.
+- **Reajuste**: quem tem valor negociado sai do reajuste do plano (aviso, aplicação e contagem "no preço antigo").
+- **Fim**: a rotina diária (`PlanOverridesService.expireDue`) devolve o preço de tabela do plano à assinatura e ao Asaas e marca `endedAt`; falha no Asaas não marca, e tenta de novo no dia seguinte. Remover a personalização faz o mesmo na hora.
+
+O cliente vê "Condições personalizadas (até …)" em Plano e uso (`customPlan` em `/billing/usage`).
+
+Atalho de desconto: no diálogo, digitar **"% off"** preenche a mensalidade com o preço do plano menos o percentual (e digitar o valor mostra o % equivalente). O que fica gravado é o valor.
+
+### Promoções
+
+"Quem assinar até a data tal ganha x% por N meses." Tela: **Planos → Promoções** (só o dono). Tabela `promotions`: `discountPercent` (até 99%), `durationMonths`, `planIds`, janela de adesão `startsAt`–`endsAt` (último dia inclusive, horário de Brasília), `isActive` para encerrar antes.
+
+Não tem motor próprio: **ao assinar, a promoção vira uma personalização do cliente** (`plan_overrides` com `priceMonth` = preço do plano − x%, `expiresAt` = hoje + N meses, `promotionId`). Daí em diante vale tudo da seção anterior: valor no Asaas, fora do reajuste, volta ao preço de tabela quando o prazo acaba.
+
+- **Automático**: checkout do Asaas (aplica e grava a personalização só depois que o Asaas aceitou a assinatura com o desconto) e **Novo cliente** criado pelo dono (nasce com o desconto; o prazo conta da criação, inclusive o teste). Troca manual de plano na tela Clientes não aplica.
+- **Um cliente, à mão**: Clientes → Personalizar → **Aplicar promoção**. Exceção do dono: vale fora da janela de adesão e em plano que não está na promoção; o % incide sobre o preço do plano atual do cliente, por N meses a partir de hoje. Substitui a personalização que houver (valor, limites e vigência).
+- **Todos de uma vez**: Planos → Promoções → **Aplicar a todos**: vai para todo cliente ativo que assina hoje um dos planos da promoção. Ficam de fora (e a tela lista quem e por quê) os que já têm personalização valendo — não se mexe em acordo feito —, os que já têm esta promoção, os desativados e os do Stripe.
+- A promoção **não guarda lista de clientes**: quem tem o desconto é quem tem a personalização; quem ganhou e quando está no livro de descontos.
+- **Não acumula**: quem já tem personalização valendo no plano escolhido fica com ela. Duas promoções no mesmo plano: vale a maior.
+- **Uma vez por cliente**: quem já aproveitou uma promoção (`plan_overrides.promotionId`) não aproveita a mesma de novo trocando de plano.
+- **Stripe**: sem promoção (o valor é o `price` do catálogo); com o Stripe como gateway, `/billing/plans` não anuncia promoção.
+- **Plano anual**: o desconto vale sobre a cobrança anual feita dentro do prazo.
+- Editar ou apagar a promoção vale para quem assinar dali em diante; quem já ganhou mantém até o fim do prazo dele.
+
+O cliente vê a promoção no card do plano em Plano e uso (`promotion` em `/billing/plans`, já com as regras aplicadas para ele).
+
+### Livro de descontos
+
+Tabela `discount_grants`: **uma linha por concessão** de valor diferente do de tabela — promoção ou negociado —, para contabilidade. Nunca é apagada nem reescrita; só ganha `closedAt` quando termina antes do previsto. Plano, cliente e promoção são copiados por nome no momento (`planName`, `tenantName`, `promotionName`), e apagar qualquer um deles não apaga o registro (FK `SET NULL`).
+
+| Quando | `kind` / `source` |
+|---|---|
+| Checkout do Asaas com promoção | `promotion` / `checkout` |
+| Novo cliente com promoção | `promotion` / `tenant_create` |
+| Dono aplica promoção a um cliente | `promotion` / `manual` (com quem concedeu) |
+| Aplicar a todos | `promotion` / `bulk` (com quem concedeu) |
+| Dono salva valor personalizado (só quando valor ou vigência mudam) | `negotiated` / `manual` |
+| Cliente volta ao plano que tem valor negociado vigente | o da personalização / `plan_return` |
+
+Encerra (`closedAt`) a que estava correndo: nova concessão para o mesmo cliente, personalização removida ou sem valor, troca de plano (inclusive para gratuito). O fim pelo prazo não precisa de nada: `endsAt` já diz.
+
+Cada linha guarda preço de tabela, valor concedido, % (negativo = acima da tabela), unidades do grupo, início, fim previsto e quem concedeu (`null` = automático). `DiscountLedgerService` é o único que escreve, e só depende do Prisma.
+
+**Financeiro → Descontos**: desconto vigente/mês (da mesma fonte do MRR: personalizações valendo hoje), desconto do mês e do período pelo livro (`grantDiscountIn`: diferença × unidades em cada mês em que a concessão valeu), a tabela completa e **Exportar CSV** (`;`, vírgula decimal, UTF-8 com BOM — abre direto no Excel). O KPI de MRR mostra quanto deixa de entrar em descontos.
+
 ## Preços do provider
 
 Tabela `provider_pricing` — `(provider, country, category, unitPrice, validFrom)`. `PricingService.unitCost` pega a linha mais recente com `validFrom <= agora`. Quando a Meta reajustar, **insira** uma linha nova (não edite a antiga: o histórico do ledger continua correto).

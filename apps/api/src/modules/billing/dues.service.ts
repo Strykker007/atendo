@@ -5,6 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AsaasService, BULK_REF, chargeOf, type AsaasPayment } from './asaas.service';
 import { amountOf, daysUntil, dueState, endOfMonthBrt, groupUnits, payableUntil, round2, type ConsolidatedItem, type DueCycle, type DueState } from './dues';
 import { periodOf } from './usage.service';
+import { cycleValue, overridePrice } from './plan-override';
 
 /** Uma linha do painel de vencimentos: a assinatura do grupo, uma empresa do grupo ou uma empresa com assinatura própria. */
 export interface DueRow {
@@ -58,7 +59,7 @@ export class DuesService {
   async syncGroupUnits(tenantId: string) {
     const t = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { billingType: true, subscription: { include: { plan: true } }, companies: { select: { billingType: true, isActive: true } } },
+      select: { billingType: true, subscription: { include: { plan: true } }, planOverride: true, companies: { select: { billingType: true, isActive: true } } },
     });
     const sub = t?.subscription;
     if (!t || !sub) return;
@@ -67,7 +68,9 @@ export class DuesService {
     if (sub.gateway === 'asaas' && sub.externalId && LIVE.includes(sub.status)) {
       const unit = sub.priceMonth !== null && Number(sub.priceMonth) > 0 ? { ...sub.plan, priceMonth: sub.priceMonth } : sub.plan;
       try {
-        await this.asaas.updateSubscriptionValue(sub.externalId, chargeOf(unit, units).value);
+        // valor negociado vale por unidade, inclusive no anual (× 12) — docs/05#personalização-por-cliente
+        const negociado = overridePrice(t.planOverride, sub.planId);
+        await this.asaas.updateSubscriptionValue(sub.externalId, negociado !== null ? cycleValue(negociado, sub.plan.billingCycle, units) : chargeOf(unit, units).value);
       } catch (err) {
         this.log.error(`tenant ${tenantId}: unidades ${sub.units} → ${units} não chegaram ao Asaas: ${(err as Error)?.message ?? err}`);
         return;

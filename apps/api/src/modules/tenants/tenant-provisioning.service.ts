@@ -81,11 +81,12 @@ export class TenantProvisioningService {
    * modelo congelaria a matriz de hoje.
    */
   async capture(tenantId: string): Promise<{ content: TemplateContent; warnings: string[] }> {
-    const [profiles, replies, flows, tags] = await Promise.all([
+    const [profiles, replies, flows, tags, motivos] = await Promise.all([
       this.prisma.accessProfile.findMany({ where: { tenantId }, orderBy: [{ isSystem: 'desc' }, { name: 'asc' }] }),
       this.prisma.quickReply.findMany({ where: { folder: { tenantId } }, include: { folder: { select: { name: true } } }, orderBy: [{ folder: { position: 'asc' } }, { position: 'asc' }] }),
       this.prisma.flow.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
-      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnClose: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
+      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnWon: true, showOnLost: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
+      this.prisma.closeReason.findMany({ where: { tenantId, isActive: true }, select: { name: true, color: true, outcome: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
     ]);
     const admin = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
     const warnings = new Set<string>();
@@ -105,8 +106,12 @@ export class TenantProvisioningService {
           .map((p) => ({ name: p.name, ...(p.description && { description: p.description }), permissions: p.permissions as TemplateContent['profiles'][number]['permissions'] })),
         quickReplies: qr.map((o) => o.portable),
         flows: portableFlows,
-        // todas as tags, com cor, Kanban e encerramento, na ordem das colunas
-        tags: tags.slice(0, TEMPLATE_TAGS_MAX).map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), isKanban: t.isKanban, showOnClose: t.showOnClose })),
+        // todas as tags, com cor, Kanban e encerramento (Comprou / Não comprou), na ordem das colunas
+        // + motivos de encerramento como tags marcadas Comprou/Não comprou (no cliente novo voltam a ser motivo)
+        tags: [
+          ...tags.map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), isKanban: t.isKanban, showOnWon: t.showOnWon, showOnLost: t.showOnLost })),
+          ...motivos.filter((m) => !tags.some((t) => t.name.toLowerCase() === m.name.toLowerCase())).map((m) => ({ name: m.name, ...(/^#[0-9a-f]{6}$/i.test(m.color) && { color: m.color.toLowerCase() }), isKanban: false, showOnWon: m.outcome !== 'lost', showOnLost: m.outcome !== 'won' })),
+        ].slice(0, TEMPLATE_TAGS_MAX),
       },
       warnings: [...warnings],
     };

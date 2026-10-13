@@ -4,7 +4,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Package, DollarSign, Receipt, S
 import { cn } from '@/lib/utils';
 import { inputCls } from '@/components/ui/Modal';
 import { fmtBRL } from '@/components/reports/ReportChart';
-import { useSaleDetails } from '@/lib/hooks';
+import { useOutcomeLabels, useSaleDetails } from '@/lib/hooks';
 
 const PAGE_SIZE = 25;
 
@@ -15,6 +15,7 @@ const PAGE_SIZE = 25;
  * `from`/`to` são instantes ISO, `to` exclusivo.
  */
 export function SalesDetails({ from, to, userId, tagIds }: { from: string; to: string; userId?: string; tagIds?: string[] }) {
+  const labels = useOutcomeLabels();
   const [busca, setBusca] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -37,7 +38,7 @@ export function SalesDetails({ from, to, userId, tagIds }: { from: string; to: s
     <section className="space-y-3">
       <div>
         <h2 className="font-display font-semibold text-ink">Detalhamento de vendas</h2>
-        <p className="text-[12px] text-muted">Cada venda encerrada como Comprou, com cliente, atendente e itens.</p>
+        <p className="text-[12px] text-muted">Cada venda encerrada como {labels.won}, com cliente, atendente e itens.</p>
       </div>
 
       {/* filtros */}

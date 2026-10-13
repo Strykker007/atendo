@@ -1,14 +1,15 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useMarkRead, useMarkUnread, useConversation, useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
+import { LastCloseInline } from './LastClose';
 import { OriginBadge, ORIGIN_META } from './OriginBadge';
 import { ChannelBadge, channelColor } from './ChannelBadge';
 import type { ConversationOrigin } from '@/lib/hooks';
@@ -45,7 +46,11 @@ export function useMinuto() {
 }
 
 export function ConversationList() {
-  const { companyId, numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation, groupByAssignee, toggleGroupByAssignee } = useUI();
+  const { companyId, numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation, groupByAssignee, toggleGroupByAssignee, soundMuted, setSoundMuted, closeFilter, setCloseFilter } = useUI();
+  const motivos = useCloseReasons();
+  const labels = useOutcomeLabels();
+  // motivo filtrado: aparece como etiqueta em cada conversa (todas foram encerradas por ele)
+  const motivoFiltrado = closeFilter.reasonId ? motivos.data?.find((r) => r.id === closeFilter.reasonId) ?? null : null;
   const me = useMe();
   // quem vê a fila da equipe é decidido pela PERMISSÃO, não pelo papel: é isso que permite um
   // "atendente líder" enxergar a equipe, e um gerente com o acesso retirado deixar de ver
@@ -73,13 +78,13 @@ export function ConversationList() {
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
   const [iniciando, setIniciando] = useState(false);
-  const conversations = useConversations({ status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined });
+  const conversations = useConversations({ status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome });
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
   // com uma empresa escolhida no menu, o seletor oferece só os números dela (docs/empresas.md)
   const numerosDaEmpresa = (numbers.data ?? []).filter((n) => !companyId || n.companyId === companyId);
   // seções do modo agrupado que a pessoa recolheu (chave = id do atendente ou FILA)
   const [recolhidos, setRecolhidos] = usePersistedState<string[]>('grupos-recolhidos', []);
-  const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0);
+  const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0) + (closeFilter.outcome || closeFilter.reasonId ? 1 : 0);
 
   const visiveis = conversations.data ?? [];
 
@@ -160,8 +165,9 @@ export function ConversationList() {
       </div>
 
       {/* Filtro principal com contadores; ao lado, o agrupamento por atendente */}
-      <div className="px-2.5 pt-2 flex items-center gap-1.5">
-        <div className="flex-1 min-w-0 grid grid-cols-3 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
+      <div className="px-2.5 pt-2 flex items-center gap-2">
+        {/* gap entre as abas e altura maior: coladas, as três pareciam um bloco só */}
+        <div className="flex-1 min-w-0 grid grid-cols-3 gap-1 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
           {ORDER.map((s) => {
             const m = STATUS_META[s];
             const n = counts.data?.[s];
@@ -169,7 +175,7 @@ export function ConversationList() {
             // mesmo rótulo para todos os perfis (atendente comum continua vendo só as dele)
             const label = m.short;
             return (
-              <button key={s} onClick={() => setStatus(s)} className={cn('rounded-md py-1 transition-colors flex items-center justify-center gap-1', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink')}>
+              <button key={s} onClick={() => setStatus(s)} className={cn('rounded-md py-1.5 px-1 transition-colors flex items-center justify-center gap-1.5', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink hover:bg-panel/60')}>
                 {label}
                 {n !== undefined && <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px]', on ? 'bg-white/20 text-white' : cn(m.soft, m.color))}>{n}</span>}
               </button>
@@ -183,6 +189,16 @@ export function ConversationList() {
           className={cn('shrink-0 w-8 h-8 rounded-lg grid place-items-center', groupByAssignee ? 'bg-accent-soft text-accent-ink ring-1 ring-accent' : 'text-faint hover:text-ink hover:bg-field')}
         >
           <Users size={15} />
+        </button>
+        {/* atalho do som de mensagem nova (o mesmo de Configurações → Notificações) */}
+        <button
+          onClick={() => setSoundMuted(!soundMuted)}
+          title={soundMuted ? 'Som de mensagem nova desligado — clique para ligar' : 'Desligar o som de mensagem nova'}
+          aria-label={soundMuted ? 'Ligar o som de mensagem nova' : 'Desligar o som de mensagem nova'}
+          aria-pressed={soundMuted}
+          className={cn('shrink-0 w-8 h-8 rounded-lg grid place-items-center', soundMuted ? 'bg-warn-soft text-warn-ink ring-1 ring-warn' : 'text-faint hover:text-ink hover:bg-field')}
+        >
+          {soundMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
         </button>
       </div>
 
@@ -241,6 +257,23 @@ export function ConversationList() {
           </div>
         )}
 
+        {/* último encerramento (vale em todas as abas): resultado e motivo. Com motivo escolhido,
+            cada conversa da lista mostra a etiqueta dele */}
+        <div className="space-y-1">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-faint">Último encerramento</div>
+          <div className="flex flex-wrap gap-1">
+            {([[null, 'Qualquer'], ['won', labels.won], ['lost', labels.lost]] as const).map(([o, l]) => (
+              <button key={l} onClick={() => setCloseFilter({ outcome: o, reasonId: closeFilter.reasonId && o && !motivos.data?.some((r) => r.id === closeFilter.reasonId && (r.outcome === o || r.outcome === 'both')) ? null : closeFilter.reasonId })}
+                className={cn('text-[10.5px] font-semibold px-2 py-0.5 rounded-md border transition-colors', closeFilter.outcome === o ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>{l}</button>
+            ))}
+          </div>
+          <select value={closeFilter.reasonId ?? ''} onChange={(e) => setCloseFilter({ ...closeFilter, reasonId: e.target.value || null })} aria-label="Motivo do último encerramento"
+            className={cn('w-full rounded-lg bg-field text-ink px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40', closeFilter.reasonId && 'ring-1 ring-accent')}>
+            <option value="">Qualquer motivo</option>
+            {(motivos.data ?? []).filter((r) => r.isActive && (!closeFilter.outcome || r.outcome === closeFilter.outcome || r.outcome === 'both')).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </div>
+
         {/* origem do lead — chips pequenos, um clique liga/desliga */}
         <div className="flex flex-wrap gap-1">
           {(['ad', 'link', 'post', 'organic'] as ConversationOrigin[]).map((o) => (
@@ -250,7 +283,7 @@ export function ConversationList() {
           ))}
         </div>
         {filtrosAtivos > 0 && (
-          <button onClick={() => { setTags([]); setOrigin(null); setAssignee(null); setOrdem('recent'); }} className="text-[11px] text-accent-ink hover:underline">
+          <button onClick={() => { setTags([]); setOrigin(null); setAssignee(null); setOrdem('recent'); setCloseFilter({ outcome: null, reasonId: null }); }} className="text-[11px] text-accent-ink hover:underline">
             Limpar filtros
           </button>
         )}
@@ -319,6 +352,7 @@ export function ConversationList() {
                 <ConversationRow
                   key={c.id}
                   c={c}
+                  encerramento={status === 'closed' ? 'lugar' : closeFilter.outcome || motivoFiltrado ? 'extra' : null}
                   active={c.id === conversationId}
                   onClick={() => (selecionando ? alternar(c.id) : setConversation(c.id))}
                   agora={agora}
@@ -359,7 +393,12 @@ function agruparPorAtendente(lista: Conversation[]) {
   return [...grupos.values()].sort((a, b) => Number(a.key === FILA) - Number(b.key === FILA) || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean }) {
+/**
+ * `encerramento`: na aba Encerrado o resultado + motivo do último encerramento vai NO LUGAR das
+ * tags (`lugar`); filtrando por resultado/motivo nas outras abas, vai junto delas (`extra`) — é o
+ * que mostra que todas aquelas foram, por exemplo, "Não comprou · Achou caro".
+ */
+function ConversationRow({ c, active, onClick, agora, selecionando, marcado, encerramento }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean; encerramento: 'lugar' | 'extra' | null }) {
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   const m = STATUS_META[c.status];
@@ -397,7 +436,8 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado }: {
         <div className="flex flex-nowrap items-center gap-1 mt-1 h-5 min-w-0">
           <DepartmentBadge department={c.department} className="max-w-[110px] shrink-0" />
           <OriginBadge origin={c.origin} data={c.originData} />
-          <TagsDoCard c={c} />
+          {encerramento && c.lastClosedAt && <span className="min-w-0 shrink"><LastCloseInline conv={c} small /></span>}
+          {encerramento !== 'lugar' && <TagsDoCard c={c} />}
           {/* responsável em qualquer status: em "Encerrado" diz quem atendeu, em "Aguardando" quem vai pegar */}
           {c.assignee && <span className="ml-auto text-[10px] text-faint truncate min-w-0">↳ {c.assignee.name}</span>}
         </div>

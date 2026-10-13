@@ -189,8 +189,9 @@ do número QR (`components/numbers/ProtectionRules.tsx`).
 Vale para responder no chat, encaminhar, agendadas, "Iniciar conversa" (checado **antes** de
 criar/reabrir a conversa) e envio do sistema (fluxo que retoma dias depois, por exemplo).
 **Exceção:** lembretes e aviso ao profissional da Agenda (`allowCold`) — o cliente pediu o
-contato ao agendar, o texto é esperado e o volume é baixo. **Transmissão em massa** só inicia em
-número oficial (é envio frio por definição). A tela *Nova conversa* explica a regra antes do erro.
+contato ao agendar, o texto é esperado e o volume é baixo. **Transmissão em massa** também libera
+(`sendCampaign` → `allowCold`), com as travas próprias de [Transmissão](#transmissão). A tela
+*Nova conversa* explica a regra antes do erro.
 
 ### Envio automático
 
@@ -333,6 +334,49 @@ em [04 — Providers](04-providers-whatsapp.md#proteção-contra-bloqueio-e-bani
 `PATCH /numbers/:id` descarta `sendDelay`, `sendLimits`, `sendDailyLimit`, `endWarmup` e
 `infraCostMonth` vindos de quem não é o dono — o cliente acelerando o ritmo queimava a própria linha.
 
+## Transmissão
+
+Tela **Transmissões** (`/transmissoes`, recurso `campaigns` do plano, permissão `campaigns.manage`).
+Abordagem **híbrida**: QR Code com travas, API oficial com template.
+
+**Público** (`campaigns/segmentation.service.ts`, `POST /campaigns/preview` conta antes de criar).
+Filtros combinados com E; seleção manual (`contactIds`) e telefones colados (`phones`, DDI 55 quando
+falta; viram contato ao criar) **somam**. Sem critério, só com "Todos os contatos" (`all`).
+Descadastrados e números sem WhatsApp nunca entram. Máximo 20.000 por transmissão.
+
+| Filtro | Casa o contato que… |
+|---|---|
+| `tagIds` | tem a tag fixa (📌) ou numa conversa dele |
+| `closingTagIds` + período | teve a tag escolhida num encerramento no período (padrão 30 dias) |
+| `lastOutcome` (+ período) | o **último** atendimento encerrado foi Comprou / Não comprou, e caiu no período |
+| `agentId` | tem conversa com o atendente ou o último encerramento foi dele |
+
+A lista é **materializada na criação** (`campaign_targets`): quem entrar no filtro depois não
+recebe um disparo já começado. A campanha nasce **rascunho**; iniciar é outro passo.
+
+**QR Code (Evolution)** — `campaign.processor.ts` + `dispatch.ts`:
+- **aceite obrigatório**: modal com o aviso de risco e checkbox; a API recusa iniciar sem ele
+  (`qr_risk_not_accepted`) e grava quem/quando (`riskAcceptedAt/ById`);
+- **uma mensagem por job**, a próxima daqui a **20–60 s** sorteados (`qrDelay`), além do ritmo da
+  fila de saída;
+- **horário de funcionamento obrigatório** (`businessHoursOnly` forçado): fora dele espera e
+  retoma sozinha;
+- **teto por 24h móveis** do número (`whatsapp_numbers.campaignDailyLimit`, padrão **200**; o dono
+  do sistema ajusta em Números → Proteção do número), somado ao teto geral do número;
+- **3 falhas seguidas** (falhou aqui ou o WhatsApp recusou depois) → pausa na hora com
+  `pauseReason` e evento `campaign` com `alert` (aviso em qualquer tela); retomar limpa o motivo.
+
+**API oficial (Meta)**: **template aprovado obrigatório** (conferido ao criar e a cada lote; se
+deixar de estar aprovado, pausa com motivo); lotes de 25, sem teto nosso — vale o tier da Meta.
+Mídia só no QR.
+
+Envio por `ConversationsService.sendCampaign`: sempre pelo número da campanha, na conversa do
+contato com ele **sem reabrir** (fica encerrada até ele responder), passando pela fila de saída
+(ledger de cobrança, ritmo, descadastro). Progresso: `GET /campaigns` traz `stats` (total,
+pendentes, enviados, **entregues** e **lidos** pelo status da mensagem, falhas, ignorados); o
+socket `campaign` atualiza a tela a cada lote. Status na tela: Rascunho, Pendente (agendada), Em
+andamento, Pausado, Concluído, Cancelado.
+
 ## Arquivos
 
 | Arquivo | Papel |
@@ -344,6 +388,8 @@ em [04 — Providers](04-providers-whatsapp.md#proteção-contra-bloqueio-e-bani
 | `apps/api/src/modules/whatsapp/providers/provider-error.ts` | `ProviderSendError`, `isTransientSendError`, `retryDelayMs` |
 | `apps/web/src/components/chat/quick-reply-event.ts` | Evento da resposta rápida escolhida (o ChatPane envia na hora ou insere no campo) |
 | `apps/api/test/send-queue.test.ts` | Ordem sob concorrência, pausa/retomada, expiração, dedup, retry |
+| `apps/api/src/modules/campaigns/` | Transmissão: público (`segmentation.service.ts`), regras puras (`dispatch.ts`), despachante (`campaign.processor.ts`) |
+| `apps/api/test/campaign-qr.test.ts` | Travas do QR: 1 por vez, 20–60 s, 3 falhas seguidas, telefones importados |
 
 **Regra:** caminho novo de envio = gravar `Message` `pending` e chamar `enqueueOutbound`
 (na prática, usar `ConversationsService.send`/`sendAsSystem`). Nunca chamar `provider.send` fora

@@ -39,6 +39,8 @@ class UpdateNumberDto {
   /** proteção contra bloqueio: ritmo de envio e teto diário */
   @IsOptional() @IsEnum(SendDelayProfile) sendDelay?: SendDelayProfile;
   @IsOptional() @IsInt() @Min(0) @Max(100_000) sendDailyLimit?: number;
+  /** teto de transmissão por 24h (QR Code) — dono do sistema */
+  @IsOptional() @IsInt() @Min(0) @Max(5_000) campaignDailyLimit?: number;
   /** `true` encerra o aquecimento (chip antigo que só é novo no Atendo). Não dá para religar. */
   @IsOptional() @IsBoolean() endWarmup?: boolean;
   /** limites da fila de envio (`Partial<SendLimits>`); campo ausente/null = padrão do provider. null limpa tudo */
@@ -74,7 +76,7 @@ export class NumbersController {
   async list(@CurrentUser() user: AuthUser) {
     const rows = await this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId, deletedAt: null },
-      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });
     // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts).
@@ -140,7 +142,7 @@ export class NumbersController {
   @RequirePermission('numbers.manage')
   async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
     await this.manageable(user, id);
-    const { infraCostMonth, sendLimits, endWarmup, sendDelay, sendDailyLimit, ...resto } = dto;
+    const { infraCostMonth, sendLimits, endWarmup, sendDelay, sendDailyLimit, campaignDailyLimit, ...resto } = dto;
     // Custo da linha e ritmo de envio (intervalo, limites da fila, teto diário, aquecimento) são
     // do dono do sistema. Chegam no corpo mas são descartados para o cliente: devolver 403
     // vazaria que o campo existe. O ritmo é o que protege o número de bloqueio — o cliente
@@ -154,6 +156,7 @@ export class NumbersController {
           ...(infraCostMonth !== undefined && { infraCostMonth }),
           ...(sendDelay !== undefined && { sendDelay }),
           ...(sendDailyLimit !== undefined && { sendDailyLimit }),
+          ...(campaignDailyLimit !== undefined && { campaignDailyLimit }),
           ...(sendLimits !== undefined && { sendLimits: sendLimits === null ? Prisma.DbNull : (cleanSendLimits(sendLimits) as Prisma.InputJsonValue) }),
           ...(endWarmup && { warmupStartedAt: null }),
         }
@@ -161,7 +164,7 @@ export class NumbersController {
     return this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId, deletedAt: null },
       data: { ...resto, ...doDono },
-      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
+      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
     });
   }
 

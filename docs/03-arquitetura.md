@@ -113,7 +113,7 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 
 ## Tempo real
 
-`ConversationsGateway` (Socket.IO). O cliente conecta com `auth.token` = access token; o gateway valida o JWT e coloca o socket na sala `tenant:<id>` e na sala `global` (todo usuário logado, inclusive o dono). Eventos:
+`ConversationsGateway` (Socket.IO). O cliente conecta com `auth.token` = access token; o gateway valida o JWT e coloca o socket na sala `tenant:<id>` e na sala `global` (todo usuário logado, exceto o dono). O dono logado como ele mesmo (sem "entrar como") entra na sala `owners`, do monitor de clientes. Cada socket guarda `{userId, tenantId, owner}` em `socket.data` — é a presença que `GET /monitor/tenants` lê (`fetchSockets`, todas as réplicas via adapter Redis). Eventos:
 
 | Evento | Payload | Quando |
 |---|---|---|
@@ -122,6 +122,8 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 | `number` | `{id, status, qrCode?}` | QR novo, conectou, caiu |
 | `appointment` | `{id}` | agendamento criado/alterado |
 | `kanban` | `{}` | colunas do Kanban mudaram (ordem, tag virou/deixou de ser etapa, criada, excluída) |
+| `tenant_number` | `{tenantId, id, status}` | sala `owners`: espelho do `number` de qualquer cliente (sem QR) — o monitor recarrega |
+| `tenant_presence` | `{tenantId}` | sala `owners`: alguém do cliente abriu/fechou o painel (o dono "entrando como" não conta) |
 | `system_notice` | `SystemNotice` | aviso global publicado pelo dono (sala `global`) — ver [avisos.md](avisos.md) |
 | `typing` | `TypingEvent` `{conversationId, state}` | contato digitando (`composing`), gravando (`recording`) ou parou (`paused`). Efêmero, só Evolution |
 

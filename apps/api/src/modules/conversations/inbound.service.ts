@@ -11,7 +11,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { ConversationsGateway } from './conversations.gateway';
 import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './conversations.service';
-import { decidirEntrada, voltandoDepoisDeEncerrado } from './reopen';
+import { decidirEntrada, ehConfirmacao, naCarencia, voltandoDepoisDeEncerrado } from './reopen';
 import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
@@ -72,7 +72,7 @@ export class InboundService {
 
   // ---------- inbound (worker) ----------
 
-  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null; fromMe?: boolean } | null> {
+  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null; fromMe?: boolean; /** confirmação na carência do encerramento: não reabriu e não aciona automação */ quiet?: boolean } | null> {
     // idempotência: o mesmo webhook pode chegar duas vezes. É também o que descarta o eco do
     // que o PAINEL enviou: aquela mensagem já está no banco com este externalId.
     const exists = await this.prisma.message.findUnique({ where: { externalId: msg.externalId } });
@@ -110,7 +110,12 @@ export class InboundService {
     const hoursSinceLastMessage = anterior?.lastMessageAt
       ? (msg.timestamp.getTime() - anterior.lastMessageAt.getTime()) / 3_600_000
       : null;
-    if (decisao.acao === 'reabrir') {
+    // "ok"/"obrigada"/figurinha logo depois de encerrar: entra no histórico e a conversa
+    // continua encerrada (reopen.ts → CLOSE_GRACE_MS). Fluxo esperando resposta (pesquisa de
+    // satisfação do encerramento) fica de fora: aquela resposta é dele.
+    const quieta = decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
+      && !(await this.prisma.flowRun.findFirst({ where: { conversationId: conversation!.id, status: { in: ['running', 'waiting'] } }, select: { id: true } }));
+    if (decisao.acao === 'reabrir' && !quieta) {
       // atendimento novo na mesma conversa: volta para a fila, sem dono e sem o desfecho do
       // atendimento anterior — aquele já está congelado no histórico (conversation_events)
       conversation = await this.conversations.setStatusSystem(conversation!.id, 'waiting');
@@ -153,7 +158,8 @@ export class InboundService {
       data: {
         lastInboundAt: msg.timestamp,
         lastMessageAt: msg.timestamp,
-        awaitingSince: inicioDaEspera(conversation.awaitingSince, msg.timestamp),
+        // encerrada (confirmação na carência): ninguém está esperando resposta
+        ...(!quieta && { awaitingSince: inicioDaEspera(conversation.awaitingSince, msg.timestamp) }),
         lastMessagePreview: this.previa(msg),
         unreadCount: { increment: 1 },
       },
@@ -171,7 +177,8 @@ export class InboundService {
 
     this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
     this.gateway.emitConversation(number.tenantId, conversation);
-    return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed, hoursSinceLastMessage };
+    // quieta: nada de fluxo, boas-vindas nem agenda — é só o "ok" de quem já foi atendido
+    return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed: returningAfterClosed && !quieta, hoursSinceLastMessage, quiet: quieta };
   }
 
   /**
@@ -199,9 +206,25 @@ export class InboundService {
     // conversa iniciada do celular: precisa existir no painel, senão a resposta do contato
     // abriria outra e o histórico nasceria partido
     const isNew = !conversation;
+    // Eco do que o PAINEL acabou de enviar, chegando antes de a fila gravar o id do provider
+    // (a mensagem sai depois do "digitando…" simulado, e o WhatsApp devolve o eco na hora):
+    // sem isto ela entrava de novo como "do celular" — duplicada — e reabria a conversa.
+    if (conversation) {
+      const ecoDoPainel = await this.prisma.message.findFirst({
+        where: { conversationId: conversation.id, direction: 'out', externalId: null, type: msg.type, createdAt: { gte: new Date(msg.timestamp.getTime() - 5 * 60_000) }, ...(msg.text ? { text: msg.text } : {}) },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+      if (ecoDoPainel) {
+        await this.prisma.message.update({ where: { id: ecoDoPainel.id }, data: { externalId: msg.externalId } }).catch(() => undefined);
+        return null;
+      }
+    }
     // falar com alguém cujo atendimento estava encerrado começa outro atendimento — e quem
-    // está atendendo é quem escreveu do celular, então vai direto para "em atendimento"
-    if (conversation?.status === 'closed') conversation = await this.conversations.setStatusSystem(conversation.id, 'in_progress');
+    // está atendendo é quem escreveu do celular, então vai direto para "em atendimento".
+    // Exceção: a despedida pelo celular logo depois de encerrar ("eu que agradeço",
+    // "atendimento finalizado ✅") entra no histórico sem reabrir (carência, reopen.ts).
+    if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, 'in_progress');
     conversation ??= await this.prisma.conversation.create({
       data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'in_progress' },
     });

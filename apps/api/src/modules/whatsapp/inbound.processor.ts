@@ -69,7 +69,8 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       // automação: avança fluxo ativo ou avalia gatilhos (nunca derruba a ingestão)
       // o que o cliente digitou no celular dele entra no histórico, mas não aciona nada:
       // responder com um fluxo ao dono do número seria o robô conversando com o chefe
-      if (result && !result.fromMe) {
+      // `quiet`: "ok"/"obrigada" logo depois de encerrar — fica no histórico, sem automação
+      if (result && !result.fromMe && !result.quiet) {
         // "sair"/"parar": descadastra de TODO envio automático (campanha, fluxo, boas-vindas,
         // lembrete). Vem antes da automação porque responder com um fluxo a quem pediu para sair
         // é o caminho curto para a denúncia. Não encerra o atendimento: a pessoa pode voltar a

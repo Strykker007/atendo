@@ -11,12 +11,17 @@ export interface SettingsUpdate {
   onCloseFlowId?: string | null;
   wonFlowId?: string | null;
   lostFlowId?: string | null;
+  requireSaleValue?: boolean;
+  wonLabel?: string;
+  lostLabel?: string;
   defaultFlowId?: string | null;
   defaultFlowInactivityHours?: number;
   welcomeMessages?: WelcomeMessage[];
   welcomeMode?: WelcomeMode;
   welcomeEnabled?: boolean;
 }
+
+export const OUTCOME_LABELS_DEFAULT = { won: 'Comprou', lost: 'Não comprou' } as const;
 
 @Injectable()
 export class TenantSettingsService {
@@ -28,10 +33,13 @@ export class TenantSettingsService {
   }
 
   async update(tenantId: string, dto: SettingsUpdate) {
-    const { welcomeMessages, ...rest } = dto;
+    const { welcomeMessages, wonLabel, lostLabel, ...rest } = dto;
     const data: Prisma.TenantSettingsUncheckedUpdateInput = {
       ...rest,
       ...(welcomeMessages && { welcomeMessages: welcomeMessages as unknown as Prisma.InputJsonValue }),
+      // apagar o nome volta ao padrão: resultado sem nome deixaria o botão do encerramento vazio
+      ...(wonLabel !== undefined && { wonLabel: wonLabel.trim() || OUTCOME_LABELS_DEFAULT.won }),
+      ...(lostLabel !== undefined && { lostLabel: lostLabel.trim() || OUTCOME_LABELS_DEFAULT.lost }),
     };
     if (dto.attendanceActive !== undefined) {
       // cada vez que liga/desliga é um período novo da faixa Fechado (a resposta sai de novo)
@@ -40,6 +48,12 @@ export class TenantSettingsService {
     }
     await this.prisma.tenantSettings.upsert({ where: { tenantId }, create: { ...(data as Prisma.TenantSettingsUncheckedCreateInput), tenantId }, update: data });
     return this.get(tenantId);
+  }
+
+  /** Nome dos resultados do encerramento na empresa (mensagens de erro da API). */
+  async outcomeLabels(tenantId: string) {
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { wonLabel: true, lostLabel: true } });
+    return { won: s?.wonLabel || OUTCOME_LABELS_DEFAULT.won, lost: s?.lostLabel || OUTCOME_LABELS_DEFAULT.lost };
   }
 
   /** Fuso do cliente. Usado pela agenda, pelos fluxos e pelos relatórios. */

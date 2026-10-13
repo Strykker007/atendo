@@ -1,5 +1,5 @@
-import { BadRequestException, NotFoundException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { BadRequestException, ForbiddenException, NotFoundException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS } from './conversations.service';
@@ -13,6 +13,7 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { ConversationScopeGuard } from './conversation-scope.guard';
 import { BOT_PAUSE_MINUTES } from './bot-pause';
 import { pixMessage } from '../pix-keys/pix-keys.module';
+import { OUTCOME_LABELS_DEFAULT } from '../tenants/tenant-settings.service';
 import { env } from '../../config/env';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import type { SetPrimaryTagInput } from '@atendo/shared';
@@ -30,6 +31,10 @@ class ListDto {
   /** `waiting` = quem espera resposta há mais tempo primeiro */
   @IsOptional() @IsIn(['recent', 'waiting']) sort?: 'recent' | 'waiting';
   @IsOptional() @IsUUID() cursor?: string;
+  /** motivo do ÚLTIMO encerramento da conversa (todas as abas) */
+  @IsOptional() @IsUUID() closeReasonId?: string;
+  /** resultado do último encerramento */
+  @IsOptional() @IsIn(['won', 'lost']) lastOutcome?: 'won' | 'lost';
 }
 class TransferDto {
   @IsUUID() agentId: string;
@@ -93,7 +98,7 @@ class StatusDto {
   @IsEnum(ConversationStatus) status: ConversationStatus;
   /** desfecho do atendimento, só no encerramento */
   @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
-  /** valor da venda — obrigatório em "Comprou" (> 0, aqui ou somando `items`): ver `assertOutcome` */
+  /** valor da venda — em "Comprou" obrigatório (> 0, aqui ou somando `items`) se `requireSaleValue`: ver `assertOutcome` */
   @IsOptional() @IsNumber() @Min(0) @Max(9_999_999)
   value?: number;
   /** venda: o que foi comprado e observações do fechamento */
@@ -103,6 +108,10 @@ class StatusDto {
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
   /** tags do encerramento (o antigo "motivo"): opcionais, entram na conversa e ficam congeladas no evento */
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID('4', { each: true }) tagIds?: string[];
+  /** motivo do encerramento (lista da empresa) — obrigatório quando há motivo ativo para o resultado */
+  @IsOptional() @IsUUID() closeReasonId?: string;
+  /** atendimento interno: fora dos relatórios, sem resultado — exige `conversations.close_internal` (`assertCanCloseInternal`) */
+  @IsOptional() @IsBoolean() internal?: boolean;
   /**
    * Fluxo disparado ao encerrar (pesquisa de satisfação, pós-venda…). Ausente = padrão do
    * desfecho (ou o geral); `null` = o atendente escolheu "Nenhum" e nada dispara.
@@ -111,14 +120,27 @@ class StatusDto {
 }
 /**
  * Encerramento pelo atendente sempre diz se comprou ou não: "Sem resultado" virava a resposta
- * preguiçosa e esvaziava a taxa de conversão. "Comprou" sem valor deixaria a venda sem somar.
- * Tags são opcionais. A tela já obriga; aqui é para nenhum outro caminho passar sem.
+ * preguiçosa e esvaziava a taxa de conversão. "Comprou" sem valor deixaria a venda sem somar —
+ * por isso o valor é exigido, a menos que a empresa desligue (`requireSaleValue`, Configurações
+ * → Atendimento → Encerramento). Tags são opcionais. A tela já obriga; aqui é para nenhum outro
+ * caminho passar sem.
  */
-function assertOutcome(o: { outcome?: ConversationOutcome; value?: number; items?: { value: number }[] }) {
-  if (o.outcome !== 'won' && o.outcome !== 'lost') throw new BadRequestException('Escolha o resultado: “Comprou” ou “Não comprou”.');
-  if (o.outcome === 'won') {
+function assertOutcome(o: { outcome?: ConversationOutcome; value?: number; items?: { value: number }[] }, requireSaleValue = true, labels: { won: string; lost: string } = OUTCOME_LABELS_DEFAULT) {
+  if (o.outcome !== 'won' && o.outcome !== 'lost') throw new BadRequestException(`Escolha o resultado: “${labels.won}” ou “${labels.lost}”.`);
+  if (o.outcome === 'won' && requireSaleValue) {
     const total = o.items?.length ? o.items.reduce((a, i) => a + (i.value || 0), 0) : o.value ?? 0;
-    if (!(total > 0)) throw new BadRequestException('Informe o valor da compra para encerrar como “Comprou”.');
+    if (!(total > 0)) throw new BadRequestException(`Informe o valor da compra para encerrar como “${labels.won}”.`);
+  }
+}
+
+/**
+ * Atendimento interno sai do TMR, do volume e da conversão: liberado para qualquer um, viraria o
+ * jeito de o atendente apagar o atendimento demorado ou perdido. Só com a permissão — e cada uso
+ * vai para `audit_logs` (docs/06-modelo-de-dados.md#encerramento-interno).
+ */
+function assertCanCloseInternal(u: AuthUser) {
+  if (u.role !== 'super_admin' && !u.permissions?.includes('conversations.close_internal')) {
+    throw new ForbiddenException('Seu perfil não pode encerrar como atendimento interno.');
   }
 }
 
@@ -130,6 +152,8 @@ class BulkCloseDto {
   @IsArray() @ArrayNotEmpty() @ArrayMaxSize(200) @IsUUID('4', { each: true }) ids: string[];
   @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID('4', { each: true }) tagIds?: string[];
+  @IsOptional() @IsUUID() closeReasonId?: string;
+  @IsOptional() @IsBoolean() internal?: boolean;
 }
 class ContactDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
@@ -166,6 +190,12 @@ class TypingDto {
 export class ConversationsController {
   constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService, private readonly numbers: NumbersService) {}
 
+  /** nome dos resultados na empresa (Configurações → Encerramento), para as mensagens de erro */
+  private async outcomeLabels(tenantId: string) {
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { wonLabel: true, lostLabel: true } });
+    return s ? { won: s.wonLabel, lost: s.lostLabel } : OUTCOME_LABELS_DEFAULT;
+  }
+
   @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: ListDto) {
     return this.conversations.list(u.tenantId, u, q);
@@ -178,11 +208,15 @@ export class ConversationsController {
    * corpo. Quem recorta é o service, e isso está dito lá.
    */
   @Post('bulk/close')
-  bulkClose(@CurrentUser() u: AuthUser, @Body() dto: BulkCloseDto) {
+  async bulkClose(@CurrentUser() u: AuthUser, @Body() dto: BulkCloseDto) {
     // valor é por atendimento: "Comprou" em massa repetiria o mesmo valor e inflaria o faturamento
-    if (dto.outcome === 'won') throw new BadRequestException('“Comprou” é encerrado um a um, com o valor de cada venda.');
-    assertOutcome(dto);
-    return this.conversations.closeMany(u.tenantId, u, dto.ids, { outcome: dto.outcome!, tagIds: dto.tagIds });
+    if (dto.internal) assertCanCloseInternal(u);
+    else {
+      const labels = await this.outcomeLabels(u.tenantId);
+      if (dto.outcome === 'won') throw new BadRequestException(`“${labels.won}” é encerrado um a um, com o valor de cada venda.`);
+      assertOutcome(dto, true, labels);
+    }
+    return this.conversations.closeMany(u.tenantId, u, dto.ids, { outcome: dto.outcome ?? 'none', tagIds: dto.tagIds, closeReasonId: dto.closeReasonId, internal: dto.internal });
   }
 
   /** Busca do "Nova conversa": contatos da base + agenda do aparelho (Evolution). */
@@ -256,7 +290,14 @@ export class ConversationsController {
   }
 
   @Get(':id/messages')
-  messages(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
+  messages(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('cursor') cursor?: string, @Query('after') after?: string, @Query('until') until?: string) {
+    // `until` (e `after`): um atendimento só — auditoria a partir do relatório
+    if (until) {
+      const fim = new Date(until);
+      const ini = after ? new Date(after) : null;
+      if (Number.isNaN(fim.getTime()) || (ini && Number.isNaN(ini.getTime()))) throw new BadRequestException('Período inválido');
+      return this.conversations.messagesInWindow(u.tenantId, id, ini, fim);
+    }
     return this.conversations.messages(u.tenantId, id, cursor);
   }
 
@@ -373,8 +414,13 @@ export class ConversationsController {
 
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
-    if (dto.status === 'closed') assertOutcome(dto);
-    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.status === 'closed' ? { outcome: dto.outcome!, value: dto.value, tagIds: dto.tagIds, products: dto.products, items: dto.items, notes: dto.notes } : undefined);
+    const interno = dto.status === 'closed' && !!dto.internal;
+    if (interno) assertCanCloseInternal(u);
+    else if (dto.status === 'closed') {
+      const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { requireSaleValue: true, wonLabel: true, lostLabel: true } });
+      assertOutcome(dto, s?.requireSaleValue ?? true, s ? { won: s.wonLabel, lost: s.lostLabel } : undefined);
+    }
+    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.status === 'closed' ? { outcome: dto.outcome ?? 'none', value: dto.value, tagIds: dto.tagIds, products: dto.products, items: dto.items, notes: dto.notes, closeReasonId: dto.closeReasonId, internal: interno } : undefined);
     // Fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar).
     // Sem escolha no modal, vale o fluxo padrão configurado — é o caso comum: pesquisa de
     // satisfação que precisa sair em TODO encerramento, e depender de alguém lembrar de
@@ -383,6 +429,8 @@ export class ConversationsController {
     // é "Nenhum" escolhido no modal — não cai no padrão.
     if (dto.status === 'closed') {
       let fluxo = dto.flowId;
+      // interno não tem resultado nem pesquisa padrão: só dispara o fluxo escolhido explicitamente
+      if (fluxo === undefined && interno) fluxo = null;
       if (fluxo === undefined) {
         const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { onCloseFlowId: true, wonFlowId: true, lostFlowId: true } });
         const porDesfecho = dto.outcome === 'won' ? s?.wonFlowId : s?.lostFlowId;

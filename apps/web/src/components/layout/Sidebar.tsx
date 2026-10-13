@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -11,7 +11,7 @@ import { CompanySwitcher } from './CompanySwitcher';
 import { NoticeBell } from './SystemNotices';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
 import { useTheme, applyTheme } from '@/lib/theme';
-import { useConversationCounts, useMe, usePermissions } from '@/lib/hooks';
+import { useAppVersion, useConversationCounts, useMe, usePermissions } from '@/lib/hooks';
 import type { Permission } from '@atendo/shared';
 
 const OWNER_ITEMS = [
@@ -34,6 +34,7 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: 'flows.manage' },
   { href: '/respostas', label: 'Respostas', icon: Zap },
   { href: '/tags', label: 'Tags', icon: Tags, need: 'tags.manage' },
+  { href: '/transmissoes', label: 'Transmissões', icon: Send, need: 'campaigns.manage' },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: 'reports.view' },
   { href: '/equipe', label: 'Equipe', icon: Users, need: 'team.manage' },
   { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: 'billing.manage' },
@@ -45,6 +46,7 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
 export function Sidebar() {
   const path = usePathname();
   const { sidebarCollapsed: collapsed, toggleSidebar, numberId } = useUI();
+  const versao = useAppVersion();
   const pending = useNav((s) => s.pending);
   const mode = useTheme((s) => s.mode);
   const me = useMe();
@@ -138,6 +140,12 @@ export function Sidebar() {
         <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white disabled:opacity-60', collapsed && 'justify-center px-0')}>
           {leaving ? <Loader2 size={17} className="animate-spin" /> : <LogOut size={17} />} {!collapsed && (leaving ? 'Saindo…' : 'Sair')}
         </button>
+        {/* versão no ar: quando alguém relata um problema, é a primeira coisa a perguntar */}
+        {versao.data && (
+          <div title={versao.data.full} className={cn('px-3 pt-1 text-[10px] text-side-ink/50 tnum select-all', collapsed && 'px-0 text-center')}>
+            {collapsed ? versao.data.short : `Versão ${versao.data.short}`}
+          </div>
+        )}
       </div>
     </aside>
   );

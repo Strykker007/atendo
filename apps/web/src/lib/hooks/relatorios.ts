@@ -7,11 +7,11 @@ import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
-import { ConversationOrigin } from './core';
+import { ConversationOrigin, type Message } from './core';
 
 // ---- Relatórios ----
-export type ReportMetric = 'conversations' | 'messages_in' | 'messages_out' | 'avg_first_response_min' | 'revenue' | 'won' | 'lost' | 'win_rate';
-export type ReportGroup = 'day' | 'week' | 'month' | 'tag' | 'status' | 'number' | 'agent' | 'origin' | 'campaign';
+export type ReportMetric = 'conversations' | 'messages_in' | 'messages_out' | 'avg_first_response_min' | 'closed' | 'revenue' | 'won' | 'lost' | 'win_rate';
+export type ReportGroup = 'day' | 'week' | 'month' | 'tag' | 'status' | 'number' | 'agent' | 'origin' | 'campaign' | 'reason';
 export interface ReportDefinition {
   metric: ReportMetric;
   groupBy: ReportGroup;
@@ -32,6 +32,27 @@ export const useSaveReport = () => {
 export const useDeleteSavedReport = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/reports/saved/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }) });
+};
+
+// ---- Relatórios: ranking de consultores ----
+export interface ConsultantRankingRow {
+  position: number;
+  userId: string;
+  name: string;
+  /** atendimentos encerrados por ele no período */
+  closed: number;
+  /** encerrados como "Comprou" */
+  won: number;
+  revenue: number;
+  /** 0–100 */
+  conversionRate: number;
+  /** tempo médio de atendimento, em minutos */
+  avgHandleMin: number | null;
+}
+export interface ConsultantRanking { totals: { closed: number; won: number; conversionRate: number }; ranking: ConsultantRankingRow[] }
+export const useConsultantRanking = (f: { from: string; to: string; tagIds?: string[] }) => {
+  const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }) });
+  return useQuery({ queryKey: ['consultant-ranking', qs.toString()], queryFn: () => api<ConsultantRanking>(`/reports/ranking-consultants?${qs}`), placeholderData: keepPreviousData });
 };
 
 // ---- Relatórios: detalhamento de vendas ----
@@ -59,3 +80,48 @@ export const useSaleDetails = (f: SaleDetailsFilters) => {
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
   return useQuery({ queryKey: ['sale-details', qs.toString()], queryFn: () => api<SaleDetails>(`/reports/sales/details?${qs}`), placeholderData: keepPreviousData });
 };
+
+// ---- Auditoria de atendimentos (cada encerramento do período) ----
+export interface AttendanceFilters { startDate: string; endDate: string; outcome?: 'won' | 'lost' | 'none'; tagIds?: string; closeReasonId?: string; reason?: string; userId?: string; search?: string; page: number; pageSize?: number }
+export interface AttendanceRow {
+  id: string;
+  closedAt: string;
+  /** encerramento anterior da conversa (null = desde o começo): a janela das mensagens */
+  startedAt: string | null;
+  conversationId: string;
+  outcome: 'won' | 'lost' | 'none' | null;
+  value: number | null;
+  /** tags do atendimento (congeladas no encerramento) */
+  tags: { id: string; name: string; color: string }[];
+  /** motivo do encerramento (lista da empresa) */
+  closeReason: { id: string; name: string; color: string } | null;
+  /** motivo em texto de encerramento antigo, sem cadastro */
+  reason: string | null;
+  /** etapa do Kanban em que o atendimento estava */
+  stage: { id: string; name: string; color: string } | null;
+  messages: number;
+  contact: { id: string; name: string | null; phone: string; phoneFormatted: string };
+  user: { id: string; name: string } | null;
+}
+export interface Attendances {
+  page: number;
+  pageSize: number;
+  total: number;
+  summary: { count: number; won: number; lost: number };
+  agents: { id: string; name: string }[];
+  rows: AttendanceRow[];
+}
+export const useAttendances = (f: AttendanceFilters) => {
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
+  return useQuery({ queryKey: ['attendances', qs.toString()], queryFn: () => api<Attendances>(`/reports/attendances?${qs}`), placeholderData: keepPreviousData });
+};
+/** mensagens de UM atendimento: depois do encerramento anterior até este */
+export const useAttendanceMessages = (a: { conversationId: string; startedAt: string | null; closedAt: string } | null) =>
+  useQuery({
+    queryKey: ['attendance-messages', a?.conversationId, a?.startedAt, a?.closedAt],
+    enabled: !!a,
+    queryFn: () => {
+      const qs = new URLSearchParams({ until: a!.closedAt, ...(a!.startedAt && { after: a!.startedAt }) });
+      return api<Message[]>(`/conversations/${a!.conversationId}/messages?${qs}`);
+    },
+  });

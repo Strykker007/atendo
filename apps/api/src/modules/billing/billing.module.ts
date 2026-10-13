@@ -13,13 +13,18 @@ import { AsaasService } from './asaas.service';
 import { AsaasController, AsaasWebhookController } from './asaas.controller';
 import { DuesService } from './dues.service';
 import { DuesController } from './dues.controller';
+import { PlanOverridesService } from './plan-overrides.service';
+import { PlanOverridesController } from './plan-overrides.controller';
+import { PromotionsService } from './promotions.service';
+import { DiscountLedgerService } from './discount-ledger.service';
+import { PromotionsController } from './promotions.controller';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUE_BILLING } from '../whatsapp/queues';
 
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_BILLING }), AuthModule],
-  controllers: [BillingController, StripeWebhookController, AsaasController, AsaasWebhookController, DuesController],
-  providers: [PricingService, UsageService, PlanLimitGuard, BillingProcessor, BillingScheduler, StripeService, AsaasService, FinanceService, FeatureGuard, DuesService],
-  exports: [PricingService, UsageService, PlanLimitGuard, StripeService, AsaasService, FeatureGuard, DuesService],
+  controllers: [BillingController, StripeWebhookController, AsaasController, AsaasWebhookController, DuesController, PlanOverridesController, PromotionsController],
+  providers: [PricingService, UsageService, PlanLimitGuard, BillingProcessor, BillingScheduler, StripeService, AsaasService, FinanceService, FeatureGuard, DuesService, PlanOverridesService, PromotionsService, DiscountLedgerService],
+  exports: [PricingService, UsageService, PlanLimitGuard, StripeService, AsaasService, FeatureGuard, DuesService, PlanOverridesService, PromotionsService, DiscountLedgerService],
 })
 export class BillingModule {}

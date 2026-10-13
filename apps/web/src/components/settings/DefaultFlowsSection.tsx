@@ -3,7 +3,7 @@ import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles, Send, XCircle 
 import { Button } from '@/components/ui/Button';
 import { inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
-import { useFlows, useHasFeature, useTenantSettings, useUpdateTenantSettings } from '@/lib/hooks';
+import { useFlows, useHasFeature, useOutcomeLabels, useTenantSettings, useUpdateTenantSettings } from '@/lib/hooks';
 
 /**
  * Fluxos que o cliente configura uma vez e valem para todos os números, sem precisar
@@ -14,6 +14,7 @@ export function DefaultFlowsSection() {
   const settings = useTenantSettings();
   const flows = useFlows();
   const update = useUpdateTenantSettings();
+  const labels = useOutcomeLabels();
 
   if (!feature.has || !settings.data) return null;
   const s = settings.data;
@@ -72,14 +73,14 @@ export function DefaultFlowsSection() {
         <Select
           field="wonFlowId"
           icon={<CheckCircle2 size={14} className="text-ok" />}
-          label="Comprou"
+          label={labels.won}
           hint="Pós-venda, pedido de avaliação, instruções de entrega."
           value={s.wonFlowId}
         />
         <Select
           field="lostFlowId"
           icon={<XCircle size={14} className="text-danger" />}
-          label="Não comprou"
+          label={labels.lost}
           hint="Recuperação: cupom, pesquisa do motivo, nova oferta."
           value={s.lostFlowId}
         />

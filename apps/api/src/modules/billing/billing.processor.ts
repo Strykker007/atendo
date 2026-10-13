@@ -4,6 +4,7 @@ import { Job, Queue } from 'bullmq';
 import { UsageService } from './usage.service';
 import { StripeService } from './stripe.service';
 import { DuesService } from './dues.service';
+import { PlanOverridesService } from './plan-overrides.service';
 import { QUEUE_BILLING } from '../whatsapp/queues';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 
@@ -13,6 +14,7 @@ export class BillingProcessor extends TrackedWorkerHost {
     private readonly usage: UsageService,
     private readonly stripe: StripeService,
     private readonly dues: DuesService,
+    private readonly overrides: PlanOverridesService,
   ) {
     super(QUEUE_BILLING);
   }
@@ -23,6 +25,8 @@ export class BillingProcessor extends TrackedWorkerHost {
       await this.stripe.suspendOverdue();
       // degustação gratuita vencida → suspende; gratuito permanente só rola a data
       await this.stripe.expireFreePlans();
+      // personalização de plano vencida → valor do plano volta à assinatura (limites já voltaram na leitura)
+      await this.overrides.expireDue();
       // reajustes cuja data de aviso prévio venceu
       await this.stripe.applyDuePriceChanges();
       // grupos consolidados cuja contagem de empresas não chegou ao Asaas

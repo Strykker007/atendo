@@ -91,3 +91,42 @@ export const countLimit = (limits: PlanLimits, key: CountLimit): number | null =
 };
 
 export const USAGE_ALERT_THRESHOLDS = [0.8, 1.0] as const;
+
+/**
+ * Limites que o dono pode personalizar por cliente, por cima do plano base
+ * (docs/05-planos-e-cobranca.md#personalização-por-cliente). Regras de cobrança (excedente,
+ * hardLimit, carência) ficam de fora de propósito: mexer nelas por cliente é criar outro plano.
+ */
+export const OVERRIDABLE_LIMITS = [
+  'maxNumbers', 'maxAgents', 'maxFlows', 'maxQuickReplies', 'maxCompanies',
+  'includedMessagesMonth', 'includedConversationsMonth', 'includedTemplatesMonth', 'includedAiInteractionsMonth',
+] as const;
+export type OverridableLimit = (typeof OVERRIDABLE_LIMITS)[number];
+export const OVERRIDABLE_LIMIT_LABEL: Record<OverridableLimit, string> = {
+  maxNumbers: 'Números de WhatsApp',
+  maxAgents: 'Usuários (atendentes/gerentes)',
+  maxFlows: 'Fluxos ativos',
+  maxQuickReplies: 'Respostas rápidas',
+  maxCompanies: 'Empresas',
+  includedMessagesMonth: 'Mensagens enviadas/mês',
+  includedConversationsMonth: 'Conversas/mês',
+  includedTemplatesMonth: 'Templates/mês',
+  includedAiInteractionsMonth: 'Interações de IA/mês',
+};
+/** Só as chaves presentes sobrescrevem o plano; `null` = ilimitado. `features` substitui a lista inteira. */
+export type PlanLimitsOverride = { [K in OverridableLimit]?: number | null } & { features?: PlanFeature[] };
+
+/** Limites efetivos: plano base com a personalização por cima. Puro (API e tela usam o mesmo). */
+export function mergeLimits(base: PlanLimits, override: PlanLimitsOverride | null | undefined): PlanLimits {
+  if (!override) return base;
+  const out: PlanLimits = { ...base };
+  for (const k of OVERRIDABLE_LIMITS) {
+    if (!(k in override)) continue;
+    const v = override[k];
+    // IA não tem "ilimitado" (o teto de custo é que protege); null vira 0 = sem IA
+    if (k === 'includedAiInteractionsMonth') out[k] = v ?? 0;
+    else (out as unknown as Record<string, number | null>)[k] = v ?? null;
+  }
+  if (override.features) out.features = [...override.features];
+  return out;
+}

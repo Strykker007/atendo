@@ -6,6 +6,9 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailService } from '../../common/mail/mail.service';
 import { UsageService, periodOf } from './usage.service';
 import { nextPeriodEnd, type ConsolidatedItem } from './dues';
+import { cycleValue, overridePrice } from './plan-override';
+import { PromotionsService } from './promotions.service';
+import { DiscountLedgerService } from './discount-ledger.service';
 
 // ---------- Tipos da API v3 do Asaas (só o que usamos) ----------
 
@@ -110,6 +113,8 @@ export class AsaasService {
     private readonly prisma: PrismaService,
     private readonly usage: UsageService,
     private readonly mail: MailService,
+    private readonly promotions: PromotionsService,
+    private readonly ledger: DiscountLedgerService,
   ) {}
 
   // ---------- HTTP ----------
@@ -224,9 +229,16 @@ export class AsaasService {
     if (!isStripeBillable(plan.billingCycle)) throw new BadRequestException('Este plano não é assinado online. Fale com a equipe para ativá-lo.');
     if (input.billingType === 'CREDIT_CARD' && (!input.card || !input.holder)) throw new BadRequestException('Informe os dados do cartão e do titular');
 
-    const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { tenant: { select: { planOverride: true } } } });
+    // valor negociado pelo dono para ESTE plano (trocar de plano volta ao de tabela) — docs/05#personalização-por-cliente
+    // sem valor negociado: promoção de entrada aberta para este plano (docs/05#promoções)
+    const promo = sub && overridePrice(sub.tenant.planOverride, plan.id) === null ? await this.promotions.quote(plan, sub.tenant.planOverride) : null;
+    const negociado = promo?.priceMonth ?? (sub ? overridePrice(sub.tenant.planOverride, plan.id) : null);
+    const priceMonth = negociado ?? plan.priceMonth;
     // grupo consolidado: a assinatura cobra o plano por empresa ativa (`units`, mantido pelo DuesService)
-    const { value, cycle } = chargeOf(plan, sub?.units ?? 1);
+    const { value, cycle } = negociado !== null
+      ? { value: cycleValue(negociado, plan.billingCycle, sub?.units ?? 1), cycle: plan.billingCycle === 'yearly' ? 'YEARLY' as const : 'MONTHLY' as const }
+      : chargeOf(plan, sub?.units ?? 1);
     if (value <= 0) throw new BadRequestException('Plano sem valor definido');
     // assinatura viva no Stripe: criar outra no Asaas cobraria o cliente duas vezes
     if (sub?.externalId && sub.gateway !== 'asaas' && LIVE.includes(sub.status)) {
@@ -244,7 +256,7 @@ export class AsaasService {
       subscriptionId = sub.externalId;
       await this.request('PUT', `/subscriptions/${subscriptionId}`, { billingType: input.billingType, value, cycle, description, updatePendingPayments: true });
       if (token) await this.request('PUT', `/subscriptions/${subscriptionId}/creditCard`, { creditCardToken: token, remoteIp: input.remoteIp });
-      await this.prisma.subscription.update({ where: { tenantId }, data: { planId: plan.id, priceMonth: plan.priceMonth } });
+      await this.prisma.subscription.update({ where: { tenantId }, data: { planId: plan.id, priceMonth } });
     } else {
       const remote = await this.createSubscription({ customer, billingType: input.billingType, value, cycle, description, externalReference: tenantId, creditCardToken: token, remoteIp: input.remoteIp });
       subscriptionId = remote.id;
@@ -255,11 +267,22 @@ export class AsaasService {
       // estava suspenso segue suspenso até o PIX cair
       await this.prisma.subscription.upsert({
         where: { tenantId },
-        create: { tenantId, planId: plan.id, status: 'trialing', gateway: 'asaas', externalId: subscriptionId, currentPeriodStart: now, currentPeriodEnd: end, priceMonth: plan.priceMonth },
-        update: { planId: plan.id, gateway: 'asaas', externalId: subscriptionId, priceMonth: plan.priceMonth, cancelAtPeriodEnd: false, canceledAt: null },
+        create: { tenantId, planId: plan.id, status: 'trialing', gateway: 'asaas', externalId: subscriptionId, currentPeriodStart: now, currentPeriodEnd: end, priceMonth },
+        update: { planId: plan.id, gateway: 'asaas', externalId: subscriptionId, priceMonth, cancelAtPeriodEnd: false, canceledAt: null },
       });
     }
-    this.log.log(`checkout Asaas tenant ${tenantId}: ${plan.name} via ${input.billingType} (${subscriptionId})`);
+    // a promoção só vira personalização depois que o Asaas aceitou a assinatura com o desconto
+    if (promo) {
+      const data = this.promotions.overrideData(plan.id, promo);
+      await this.prisma.planOverride.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
+      await this.ledger.open({ tenantId, plan, priceMonth: promo.priceMonth, kind: 'promotion', source: 'checkout', promotion: promo.promotion, endsAt: promo.expiresAt });
+    } else if (sub && sub.planId !== plan.id) {
+      // trocou de plano: o desconto do plano anterior acabou; voltar a um plano com valor negociado reabre
+      const o = sub.tenant.planOverride;
+      if (negociado !== null && o) await this.ledger.open({ tenantId, plan, priceMonth: negociado, kind: o.promotionId ? 'promotion' : 'negotiated', source: 'plan_return', endsAt: o.expiresAt });
+      else await this.ledger.close(tenantId);
+    }
+    this.log.log(`checkout Asaas tenant ${tenantId}: ${plan.name} via ${input.billingType} (${subscriptionId})${promo ? ` com promoção ${promo.promotion.name}` : ''}`);
 
     const list = await this.request<AsaasList<AsaasPayment>>('GET', `/subscriptions/${subscriptionId}/payments?limit=10`);
     const open = list.data.filter((p) => !p.deleted).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).find((p) => !PAID.includes(p.status)) ?? list.data[0];

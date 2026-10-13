@@ -13,6 +13,8 @@ import { ContactAttributesModule } from './modules/contact-attributes/contact-at
 import { GlobalVariablesModule } from './modules/global-variables/global-variables.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
 import { PixKeysModule } from './modules/pix-keys/pix-keys.module';
+import { CloseReasonsModule } from './modules/close-reasons/close-reasons.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { MediaModule } from './modules/media/media.module';
@@ -27,6 +29,7 @@ import { DepartmentsModule } from './modules/departments/departments.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
 import { NoticesModule } from './modules/notices/notices.module';
+import { MonitorModule } from './modules/monitor/monitor.module';
 
 @Module({
   imports: [
@@ -46,6 +49,8 @@ import { NoticesModule } from './modules/notices/notices.module';
     KanbanModule,
     QuickRepliesModule,
     PixKeysModule,
+    CloseReasonsModule,
+    AuditModule,
     BillingModule,
     ReportsModule,
     CampaignsModule,
@@ -55,6 +60,7 @@ import { NoticesModule } from './modules/notices/notices.module';
     ScheduledMessagesModule,
     AiModule,
     NoticesModule,
+    MonitorModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

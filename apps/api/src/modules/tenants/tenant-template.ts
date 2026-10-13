@@ -26,8 +26,10 @@ export interface TemplateTag {
   color?: string;
   /** vira coluna do Kanban (etapa do funil) */
   isKanban?: boolean;
-  /** aparece para escolha no encerramento (Comprou / Não comprou) */
-  showOnClose?: boolean;
+  /** aparece para escolha ao encerrar como "Comprou" */
+  showOnWon?: boolean;
+  /** aparece para escolha ao encerrar como "Não comprou" */
+  showOnLost?: boolean;
 }
 
 /** teto de tags num modelo */
@@ -48,7 +50,7 @@ export interface TemplateContent {
    * Formato antigo (só leitura):
    * tags de encerramento fora do Kanban ("Não respondeu", "Achou caro"…), do tempo
    * em que motivo de perda era lista à parte. Arquivos e modelos antigos continuam valendo:
-   * viram `tags` com `showOnClose` (`provisionedTags`).
+   * viram `tags` que aparecem nos dois encerramentos (`provisionedTags`), como era antes.
    */
   lossReasons?: string[];
   /** Cor (`#rrggbb`) de cada uma dessas tags, pelo nome. Ausente = cor padrão. */
@@ -130,7 +132,9 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
       // sem vazio e sem repetido (ignorando maiúsculas): o cliente não pode ter duas iguais
       if (!name || tags.some((x) => x.name.toLowerCase() === name.toLowerCase())) continue;
       if (t.color !== undefined && (typeof t.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(t.color))) throw new Error(`Cor da tag "${name}" inválida (use #rrggbb).`);
-      tags.push({ name, ...(t.color && { color: t.color.toLowerCase() }), isKanban: t.isKanban === true, showOnClose: t.showOnClose === true });
+      // `showOnClose` (formato de antes de separar Comprou / Não comprou) valia para os dois
+      const legado = (t as { showOnClose?: unknown }).showOnClose === true;
+      tags.push({ name, ...(t.color && { color: t.color.toLowerCase() }), isKanban: t.isKanban === true, showOnWon: t.showOnWon === true || legado, showOnLost: t.showOnLost === true || legado });
     }
     if (tags.length > TEMPLATE_TAGS_MAX) throw new Error(`No máximo ${TEMPLATE_TAGS_MAX} tags no modelo.`);
   }
@@ -149,7 +153,7 @@ export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles
 export function provisionedTags(c: TemplateContent | null): TemplateTag[] {
   if (c?.tags) return c.tags;
   const cores = provisionedLossReasonColors(c);
-  return provisionedLossReasons(c).map((name) => ({ name, ...(cores[name] && { color: cores[name] }), isKanban: false, showOnClose: true }));
+  return provisionedLossReasons(c).map((name) => ({ name, ...(cores[name] && { color: cores[name] }), isKanban: false, showOnWon: true, showOnLost: true }));
 }
 
 /** Tags de encerramento com que o cliente nasce. */

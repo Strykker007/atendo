@@ -1,7 +1,7 @@
 'use client';
 import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Eraser, Hand, Pencil, Play, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { useConversationEvents, type ConversationEvent } from '@/lib/hooks';
+import { useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 
 /**
  * Histórico do atendimento.
@@ -61,10 +61,10 @@ const META: Record<ConversationEvent['type'], { icon: React.ReactNode; texto: st
   message_edited: { icon: <Pencil size={14} />, texto: 'editou uma mensagem', cor: 'text-accent' },
 };
 
-const RESULTADO: Record<string, string> = { won: 'comprou', lost: 'não comprou', none: 'sem resultado' };
-
 function Linha({ e }: { e: ConversationEvent }) {
   const m = META[e.type];
+  const labels = useOutcomeLabels();
+  const resultado: Record<string, string> = { won: labels.won.toLowerCase(), lost: labels.lost.toLowerCase(), none: 'sem resultado' };
   // ator nulo = foi a automação. Dizer "sistema" é melhor que deixar em branco: em auditoria,
   // campo vazio é interpretado como falha de registro
   const quem = e.actor?.name ?? 'Automação';
@@ -79,7 +79,7 @@ function Linha({ e }: { e: ConversationEvent }) {
         <div className="text-ink">
           {automatico ? <>Fluxo retomado automaticamente</> : <><b>{quem}</b> {m.texto}</>}
           {e.type === 'transferred' && e.target && <> para <b>{e.target.name}</b></>}
-          {e.type === 'closed' && e.outcome && <> · {RESULTADO[e.outcome] ?? e.outcome}</>}
+          {e.type === 'closed' && e.outcome && <> · {resultado[e.outcome] ?? e.outcome}</>}
           {valor != null && valor > 0 && <> · <span className="tnum">{valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></>}
         </div>
         {e.reason && <div className="text-xs text-muted">{e.reason}</div>}

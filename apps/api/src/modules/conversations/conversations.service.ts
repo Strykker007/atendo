@@ -3,6 +3,8 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
+import { CloseReasonsService } from '../close-reasons/close-reasons.module';
+import { AuditService } from '../audit/audit.module';
 import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, messagePreview } from '@atendo/shared';
 import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -24,6 +26,7 @@ import { interpolate } from '../flows/answer';
 import { spin } from './spin';
 import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, hasColdSlot, isWarm } from './cold-send';
 import { RedisService } from '../../common/redis/redis.service';
+import { conflictMap, resolveConflicts } from '../tags/conflicts';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -102,6 +105,8 @@ export class ConversationsService {
     private readonly storage: StorageService,
     private readonly interpolation: InterpolationService,
     private readonly redis: RedisService,
+    private readonly closeReasons: CloseReasonsService,
+    private readonly audit: AuditService,
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {}
 
@@ -168,7 +173,7 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number },
+    q: { status?: ConversationStatus; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
@@ -194,10 +199,13 @@ export class ConversationsService {
       ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
       // nome/e-mail/telefone do contato, sem acento e por palavras (common/text-search.ts)
       ...(q.search && { contact: textSearch(q.search) }),
+      // último encerramento (vale em todas as abas: quem voltou depois de "Não comprou · Achou caro")
+      ...(q.lastOutcome && { lastCloseOutcome: q.lastOutcome }),
+      ...(q.closeReasonId && { lastCloseReasonId: q.closeReasonId }),
     };
     const rows = await this.prisma.conversation.findMany({
       where,
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } } },
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
       // "Encerradas": quem acabou de encerrar primeiro (`closedAt`). Pela última mensagem, a recém-
@@ -323,9 +331,24 @@ export class ConversationsService {
   async one(tenantId: string, id: string) {
     const row = await this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } } },
+      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } } },
     });
     return this.presentContact(row);
+  }
+
+  /**
+   * Mensagens de UM atendimento, em ordem: depois de `after` (o encerramento anterior; null =
+   * desde o começo) até `until` (este encerramento). Teto de 1000 — atendimento maior que isso
+   * a auditoria mostra o início e avisa.
+   */
+  async messagesInWindow(tenantId: string, conversationId: string, after: Date | null, until: Date) {
+    const rows = await this.prisma.message.findMany({
+      where: { conversationId, conversation: { tenantId }, createdAt: { ...(after && { gt: after }), lte: until } },
+      orderBy: [{ createdAt: 'asc' }, { queueSeq: 'asc' }],
+      take: 1000,
+      include: MESSAGE_INCLUDE,
+    });
+    return rows.map((m) => this.present(m));
   }
 
   async messages(tenantId: string, conversationId: string, cursor?: string, take = 50) {
@@ -499,6 +522,21 @@ export class ConversationsService {
     return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, send);
   }
 
+  /**
+   * Envio de TRANSMISSÃO: sempre pelo número da campanha (na conversa do contato com ele, sem
+   * reabrir — fica encerrada até o contato responder), com a mídia e o template da campanha.
+   * Contato frio liberado: a campanha já passou pelo aceite de risco (QR) ou é template (Meta),
+   * e o ritmo/teto ficam no despachante (docs/envio.md#transmissão). Descadastro e "sem
+   * WhatsApp" continuam valendo (`sendAsSystem`).
+   */
+  async sendCampaign(tenantId: string, contactId: string, numberId: string, p: { text?: string; media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string }; template?: NonNullable<OutboundMessage['template']>; idempotencyKey: string }) {
+    const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
+    const conv = (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId }, orderBy: { lastMessageAt: 'desc' } }))
+      ?? (await this.prisma.conversation.create({ data: { tenantId, numberId, contactId, status: 'closed', closedAt: new Date() } }));
+    await this.assertHasWhatsApp(contact.id, numberId, contact.phone);
+    return this.sendAsSystem(conv.id, p.text, p.media, undefined, { idempotencyKey: p.idempotencyKey, template: p.template, allowClosed: true, allowCold: true });
+  }
+
   /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */
   async sendToPhone(tenantId: string, phone: string, text: string, opts?: { closeAfter?: boolean; contactName?: string; preferredNumberId?: string | null; idempotencyKey?: string; allowCold?: boolean; checkPhone?: PhoneCheck }) {
     const clean = phone.replace(/\D/g, '');
@@ -531,10 +569,14 @@ export class ConversationsService {
         // sair de encerrado começa outro atendimento: o desfecho do anterior fica congelado no
         // histórico, e deixá-lo aqui marcaria o atendimento novo como se já tivesse resultado
         ...(status !== 'closed' && { outcome: 'none' as const, outcomeValue: null, outcomeReason: null, outcomeAt: null, outcomeById: null }),
+        // encerrado pela automação: último encerramento sem resultado nem motivo
+        ...(status === 'closed' && { lastClosedAt: new Date(), lastCloseOutcome: 'none' as const, lastCloseReasonId: null }),
       },
     });
+    const transitorias = status === 'closed' ? await this.tagsDoAtendimento([conversationId]) : null;
     // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria
-    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação' });
+    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação', ...(transitorias && { stageTagId: transitorias.get(conversationId)?.stage ?? null, tagSnapshot: transitorias.get(conversationId)?.ids ?? [] }) });
+    if (status === 'closed') await this.limparTransitorias([conversationId]);
     if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId: conv.tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     if (status === 'closed') await this.encerrarFluxosPausados([conversationId]);
     this.gateway.emitConversation(conv.tenantId, conv);
@@ -1179,10 +1221,18 @@ export class ConversationsService {
     id: string,
     status: ConversationStatus,
     userId: string,
-    outcome?: { outcome: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description?: string; value: number }[]; notes?: string },
+    /**
+     * `internal`: atendimento interno, fora dos relatórios — resultado `none`, sem venda, e vai
+     * para a auditoria. Quem chama já conferiu `conversations.close_internal`.
+     */
+    outcome?: { outcome: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description?: string; value: number }[]; notes?: string; closeReasonId?: string | null; internal?: boolean },
   ) {
+    const interno = status === 'closed' && !!outcome?.internal;
+    if (interno) outcome = { outcome: 'none', tagIds: outcome!.tagIds, closeReasonId: outcome!.closeReasonId, internal: true };
     // tags do encerramento: só as do tenant valem (id de outro cliente é ignorado em silêncio)
     const tagsFim = status === 'closed' ? await this.closingTags(tenantId, outcome?.tagIds) : [];
+    // motivo: obrigatório quando há motivo ativo para o resultado (close-reasons.module.ts)
+    const motivo = status === 'closed' ? await this.closeReasons.resolve(tenantId, outcome?.outcome, outcome?.closeReasonId, interno) : null;
     const nomesTags = tagsFim.map((t) => t.name).join(', ').slice(0, 500) || null;
     // venda em lista: o total é a soma dos itens, calculada aqui — não confia na conta do front
     // item só com valor (sem descrição) vale; linha vazia é descartada
@@ -1200,13 +1250,18 @@ export class ConversationsService {
           ? {
               outcome: outcome.outcome,
               outcomeValue: outcome.outcome === 'won' && outcome.value ? new Prisma.Decimal(outcome.value) : null,
-              outcomeReason: nomesTags,
+              outcomeReason: motivo?.name ?? nomesTags,
               outcomeAt: new Date(),
               outcomeById: userId,
             }
           : {};
 
     const antes = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true, botPausedAt: true } });
+    // tags da conversa = do atendimento (transitórias): congeladas no evento e retiradas ao encerrar
+    const transitorias = status === 'closed' ? await this.tagsDoAtendimento([id]) : new Map<string, { ids: string[]; stage: string | null }>();
+    if (motivo?.requiresTag && !tagsFim.length && !transitorias.get(id)?.ids.length) {
+      throw new BadRequestException({ code: 'close_reason_requires_tag', message: `O motivo “${motivo.name}” exige pelo menos uma tag no atendimento.` });
+    }
     const conv = await this.prisma.conversation.update({
       where: { id, tenantId },
       data: {
@@ -1218,6 +1273,8 @@ export class ConversationsService {
         ...(status === 'in_progress' && { assigneeId: userId }),
         ...(status === 'waiting' && { assigneeId: null }),
         ...desfecho,
+        // último encerramento: sobrevive à reabertura (topo da conversa, aba Encerrado, filtro)
+        ...(status === 'closed' && { lastClosedAt: new Date(), lastCloseOutcome: outcome?.outcome ?? 'none', lastCloseReasonId: motivo?.id ?? null }),
       },
     });
     // o desfecho vai copiado para o evento: reabrir limpa o da conversa, e o fechamento que
@@ -1231,10 +1288,17 @@ export class ConversationsService {
       toStatus: status,
       outcome: status === 'closed' ? (outcome?.outcome ?? 'none') : null,
       outcomeValue: conv.outcomeValue,
-      reason: status === 'closed' ? nomesTags : null,
+      reason: status === 'closed' ? (motivo?.name ?? nomesTags) : null,
       tagIds: tagsFim.map((t) => t.id),
+      ...(status === 'closed' && {
+        closeReasonId: motivo?.id ?? null,
+        stageTagId: transitorias.get(id)?.stage ?? null,
+        tagSnapshot: [...new Set([...(transitorias.get(id)?.ids ?? []), ...tagsFim.map((t) => t.id)])],
+        ignoreInReports: interno,
+      }),
     });
-    if (tagsFim.length) await this.addClosingTags([id], tagsFim.map((t) => t.id));
+    if (interno) await this.audit.record(tenantId, 'conversation.closed_internal', userId, [{ conversationId: id, data: { closeReasonId: motivo?.id ?? null, reason: motivo?.name ?? null } }]);
+    if (status === 'closed') await this.limparTransitorias([id]);
     // venda: linha própria e imutável — é a base de conversão, ticket médio e desempenho por atendente
     if (status === 'closed' && outcome?.outcome === 'won' && conv.outcomeValue) {
       const vendedor = (await this.prisma.user.findFirst({ where: { id: userId, tenantId }, select: { id: true } }))?.id ?? null;
@@ -1274,7 +1338,9 @@ export class ConversationsService {
    * Sem disparo de fluxo de propósito: um fluxo de encerramento aplicado a cinquenta conversas
    * é envio em massa, e isso tem (ou terá) tela própria, com limite diário e opt-out.
    */
-  async closeMany(tenantId: string, viewer: Viewer, ids: string[], desfecho: { outcome: ConversationOutcome; tagIds?: string[] }) {
+  async closeMany(tenantId: string, viewer: Viewer, ids: string[], desfecho: { outcome: ConversationOutcome; tagIds?: string[]; closeReasonId?: string | null; internal?: boolean }) {
+    const interno = !!desfecho.internal;
+    if (interno) desfecho = { ...desfecho, outcome: 'none' };
     const pedidos = [...new Set(ids)];
     const escopo = numberFilter(viewer);
     const alvos = await this.prisma.conversation.findMany({
@@ -1295,6 +1361,10 @@ export class ConversationsService {
     const idsAlvo = alvos.map((a) => a.id);
     const tagsFim = await this.closingTags(tenantId, desfecho.tagIds);
     const nomesTags = tagsFim.map((t) => t.name).join(', ').slice(0, 500) || null;
+    const motivo = await this.closeReasons.resolve(tenantId, desfecho.outcome, desfecho.closeReasonId, interno);
+    const transitorias = await this.tagsDoAtendimento(idsAlvo);
+    const semTag = motivo?.requiresTag && !tagsFim.length ? idsAlvo.filter((id) => !transitorias.get(id)?.ids.length).length : 0;
+    if (semTag) throw new BadRequestException({ code: 'close_reason_requires_tag', message: `O motivo “${motivo!.name}” exige tag: ${semTag} atendimento(s) selecionado(s) estão sem nenhuma. Escolha uma tag para aplicar a todos.` });
     // mesma razão do `registrar`: dono do sistema não tem linha em `users` deste tenant
     const ator = (await this.prisma.user.findFirst({ where: { id: viewer.id, tenantId }, select: { id: true } }))?.id ?? null;
     await this.prisma.conversation.updateMany({
@@ -1306,9 +1376,12 @@ export class ConversationsService {
         // valor de venda não entra em massa: ele é por conversa, e um número repetido em
         // cinquenta atendimentos inflaria o faturamento do relatório
         outcome: desfecho.outcome,
-        outcomeReason: nomesTags,
+        outcomeReason: motivo?.name ?? nomesTags,
         outcomeAt: new Date(),
         outcomeById: viewer.id,
+        lastClosedAt: new Date(),
+        lastCloseOutcome: desfecho.outcome,
+        lastCloseReasonId: motivo?.id ?? null,
       },
     });
 
@@ -1323,11 +1396,16 @@ export class ConversationsService {
         fromStatus: a.status,
         toStatus: 'closed' as const,
         outcome: desfecho.outcome,
-        reason: [nomesTags, 'encerrado em massa'].filter(Boolean).join(' · '),
+        reason: [motivo?.name ?? nomesTags, 'encerrado em massa'].filter(Boolean).join(' · '),
         tagIds: tagsFim.map((t) => t.id),
+        closeReasonId: motivo?.id ?? null,
+        stageTagId: transitorias.get(a.id)?.stage ?? null,
+        tagSnapshot: [...new Set([...(transitorias.get(a.id)?.ids ?? []), ...tagsFim.map((t) => t.id)])],
+        ignoreInReports: interno,
       })),
     });
-    if (tagsFim.length) await this.addClosingTags(idsAlvo, tagsFim.map((t) => t.id));
+    if (interno) await this.audit.record(tenantId, 'conversation.closed_internal', ator, idsAlvo.map((conversationId) => ({ conversationId, data: { closeReasonId: motivo?.id ?? null, reason: motivo?.name ?? null, bulk: true } })));
+    await this.limparTransitorias(idsAlvo);
     const pausadas = alvos.filter((a) => a.botPausedAt);
     if (pausadas.length) {
       await this.prisma.conversationEvent.createMany({
@@ -1356,8 +1434,32 @@ export class ConversationsService {
    * relatório filtram. Soma às que já existem, sem mexer na principal (etapa do Kanban).
    * Quem chama emite a conversa pelo socket depois.
    */
-  private async addClosingTags(conversationIds: string[], tagIds: string[]) {
-    await this.prisma.conversationTag.createMany({ data: conversationIds.flatMap((conversationId) => tagIds.map((tagId) => ({ conversationId, tagId }))), skipDuplicates: true });
+  /**
+   * Tags da conversa por conversa (ids) e a etapa do Kanban (principal) — o que o atendimento
+   * tinha ao encerrar. Vai para o evento `closed` (`tagSnapshot`, `stageTagId`).
+   */
+  private async tagsDoAtendimento(conversationIds: string[]) {
+    const rows = await this.prisma.conversationTag.findMany({ where: { conversationId: { in: conversationIds } }, select: { conversationId: true, tagId: true, isPrimary: true } });
+    const out = new Map<string, { ids: string[]; stage: string | null }>();
+    for (const r of rows) {
+      const e = out.get(r.conversationId) ?? { ids: [], stage: null };
+      e.ids.push(r.tagId);
+      if (r.isPrimary) e.stage = r.tagId;
+      out.set(r.conversationId, e);
+    }
+    return out;
+  }
+
+  /**
+   * Tags TRANSITÓRIAS: as da conversa são do atendimento — inclusive a etapa do Kanban. Encerrou,
+   * saem (já congeladas no evento): não faz sentido continuar "Em negociação" depois de concluído,
+   * nem o atendimento seguinte herdar as do anterior. As permanentes são as do contato (📌).
+   */
+  private async limparTransitorias(conversationIds: string[]) {
+    await this.prisma.conversationTag.deleteMany({ where: { conversationId: { in: conversationIds } } });
+    // o card some do quadro (encerrado não fica em etapa)
+    const t = await this.prisma.conversation.findFirst({ where: { id: { in: conversationIds } }, select: { tenantId: true } });
+    if (t) this.gateway.emitKanban(t.tenantId);
   }
 
   // ---------- robô pausado na conversa ----------
@@ -1437,6 +1539,10 @@ export class ConversationsService {
     outcomeValue?: Prisma.Decimal | null;
     reason?: string | null;
     tagIds?: string[];
+    closeReasonId?: string | null;
+    stageTagId?: string | null;
+    tagSnapshot?: string[];
+    ignoreInReports?: boolean;
   }, db: Prisma.TransactionClient = this.prisma) {
     // super_admin não tem linha em `users` deste tenant: entra como sistema, senão a FK quebra
     const actorId = e.actorId && (await db.user.findFirst({ where: { id: e.actorId, tenantId: e.tenantId }, select: { id: true } })) ? e.actorId : null;
@@ -1458,17 +1564,24 @@ export class ConversationsService {
    * Tags do atendimento. A principal (coluna no Kanban) sobrevive à troca enquanto continuar
    * na lista; se saiu — ou se ainda não havia — a primeira tag de coluna, na ordem do quadro,
    * assume. Sem isso, marcar uma etapa pelo chat não moveria o card.
+   * Tag nova tira as opostas diretas dela (`tags/conflicts.ts`) — vale para quem chamar a API
+   * sem passar pela tela.
    */
   async setTags(tenantId: string, id: string, tagIds: string[]) {
     await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId } });
     // só tags deste tenant: o id vem do corpo da requisição
-    const validas = await this.prisma.tag.findMany({
+    const pedidas = await this.prisma.tag.findMany({
       where: { id: { in: [...new Set(tagIds)] }, tenantId },
       select: { id: true, isKanban: true },
       orderBy: [{ position: 'asc' }, { name: 'asc' }],
     });
     await this.prisma.$transaction(async (tx) => {
       await this.lockConversation(tx, id);
+      const antes = (await tx.conversationTag.findMany({ where: { conversationId: id }, select: { tagId: true } })).map((t) => t.tagId);
+      // ordem do pedido (a última marcada vence), não a do Kanban
+      const ordem = [...new Set(tagIds)].filter((t) => pedidas.some((p) => p.id === t));
+      const ficam = new Set(resolveConflicts(antes, ordem, await conflictMap(tx, ordem)));
+      const validas = pedidas.filter((t) => ficam.has(t.id));
       const atual = await tx.conversationTag.findFirst({ where: { conversationId: id, isPrimary: true }, select: { tagId: true } });
       const principal = atual && validas.some((t) => t.id === atual.tagId) ? atual.tagId : validas.find((t) => t.isKanban)?.id ?? null;
       await tx.conversationTag.deleteMany({ where: { conversationId: id } });
@@ -1496,6 +1609,10 @@ export class ConversationsService {
       await this.lockConversation(tx, id);
       await tx.conversationTag.updateMany({ where: { conversationId: id, isPrimary: true }, data: { isPrimary: false } });
       if (tagId) {
+        // mover o card para uma etapa que ainda não estava tira as opostas diretas dela
+        const jaTinha = await tx.conversationTag.count({ where: { conversationId: id, tagId } });
+        const opostas = jaTinha ? [] : [...((await conflictMap(tx, [tagId])).get(tagId) ?? [])];
+        if (opostas.length) await tx.conversationTag.deleteMany({ where: { conversationId: id, tagId: { in: opostas } } });
         await tx.conversationTag.upsert({
           where: { conversationId_tagId: { conversationId: id, tagId } },
           create: { conversationId: id, tagId, isPrimary: true },
@@ -1519,10 +1636,15 @@ export class ConversationsService {
   /** Tags da pessoa (valem para todas as conversas dela). */
   async setContactTags(tenantId: string, contactId: string, tagIds: string[]) {
     await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
-    await this.prisma.$transaction([
-      this.prisma.contactTag.deleteMany({ where: { contactId } }),
-      this.prisma.contactTag.createMany({ data: tagIds.map((tagId) => ({ contactId, tagId })) }),
-    ]);
+    // só tags deste tenant, na ordem do pedido; tag nova tira as opostas diretas dela
+    const doTenant = new Set((await this.prisma.tag.findMany({ where: { id: { in: [...new Set(tagIds)] }, tenantId }, select: { id: true } })).map((t) => t.id));
+    const pedidas = [...new Set(tagIds)].filter((t) => doTenant.has(t));
+    await this.prisma.$transaction(async (tx) => {
+      const antes = (await tx.contactTag.findMany({ where: { contactId }, select: { tagId: true } })).map((t) => t.tagId);
+      const ficam = resolveConflicts(antes, pedidas, await conflictMap(tx, pedidas));
+      await tx.contactTag.deleteMany({ where: { contactId } });
+      await tx.contactTag.createMany({ data: ficam.map((tagId) => ({ contactId, tagId })) });
+    });
     const convs = await this.prisma.conversation.findMany({ where: { contactId } });
     for (const c of convs) this.gateway.emitConversation(tenantId, c);
     return this.prisma.contact.findUnique({ where: { id: contactId }, include: { tags: { include: { tag: true } } } });
