@@ -108,3 +108,18 @@ describe('o que conta para o teto do dia', () => {
     expect(countsTowardDailyLimit(new Date(now - REPLY_WINDOW_MS), now)).toBe(true);
   });
 });
+
+describe('intervalo mínimo no QR', () => {
+  it('padrão do QR é o moderado (3–5s); Rápido (1–2s) não é mais oferecido', async () => {
+    const { defaultSendDelay, sendDelayAllowed } = await import('../src/modules/whatsapp/sending-policy');
+    expect(defaultSendDelay('evolution')).toBe('moderate');
+    expect(defaultSendDelay('meta')).toBe('instant');
+    expect(sendDelayAllowed('fast', 'evolution')).toBe(false);
+    expect(sendDelayAllowed('fast', 'meta')).toBe(false);
+    expect(sendDelayAllowed('instant', 'evolution')).toBe(false);
+    expect(sendDelayAllowed('moderate', 'evolution')).toBe(true);
+  });
+  it('linha antiga em `fast` já anda no mínimo de 3s', () => {
+    expect(delayMs('fast', () => 0)).toBe(3000);
+  });
+});

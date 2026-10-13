@@ -82,8 +82,8 @@ Uma reserva atômica no Redis cumpre ao mesmo tempo:
 envio sai depois de um sorteio do perfil (ex.: `moderate` 3–5 s), venha de fluxo, campanha,
 resposta rápida, automação ou do atendente digitando — mensagem que sai no mesmo instante do
 gatilho é padrão de robô. Em sequência, a espera é só o intervalo desde a entrega anterior (as
-duas não somam). `instant` (Meta) continua sem espera; no `fast` (padrão da Evolution) a 1ª
-mensagem leva 1–2 s.
+duas não somam). `instant` (Meta) continua sem espera; no `moderate` (padrão da Evolution) a 1ª
+mensagem leva 3–5 s. O mínimo no QR é 3 s: o `fast` (1–2 s) saiu por risco de banimento.
 
 **O intervalo conta da entrega, não da reserva.** Depois que o provider aceita a mensagem,
 `SendPacer.delivered` empurra `wa:next` para *agora + novo sorteio do perfil* (ex.: `moderate`

@@ -7,9 +7,9 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useMe, useUpdateNumber, type NumberItem, type SendDelayProfile } from '@/lib/hooks';
 
-const DELAY_LABEL: Record<SendDelayProfile, string> = {
+/** `fast` (1–2s) saiu: o mínimo no QR é 3s, para não arriscar banimento */
+const DELAY_LABEL: Record<Exclude<SendDelayProfile, 'fast'>, string> = {
   instant: 'Imediato — só Meta Cloud API',
-  fast: 'Rápido — 1 a 2s',
   short: 'Curto — 3 a 4s',
   moderate: 'Moderado — 3 a 5s',
   medium: 'Médio — 25 a 60s',
@@ -40,10 +40,10 @@ export function SendingCard({ number }: { number: NumberItem }) {
         <span className="text-[11px] text-faint leading-tight">Intervalo entre envios</span>
         <select
           className={cn(inputCls, 'h-9 py-0')}
-          value={number.sendDelay}
+          value={number.sendDelay === 'fast' ? 'moderate' : number.sendDelay}
           onChange={(e) => update.mutateAsync({ id: number.id, sendDelay: e.target.value as SendDelayProfile }).catch(toast.err)}
         >
-          {(Object.keys(DELAY_LABEL) as SendDelayProfile[])
+          {(Object.keys(DELAY_LABEL) as (keyof typeof DELAY_LABEL)[])
             .filter((k) => k !== 'instant' || oficial)
             .map((k) => <option key={k} value={k}>{DELAY_LABEL[k]}</option>)}
         </select>

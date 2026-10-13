@@ -3,7 +3,7 @@ import { ProviderRegistry } from './providers/provider.registry';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
-import { defaultSendDelay } from './sending-policy';
+import { defaultSendDelay, sendDelayAllowed } from './sending-policy';
 import { warmupPhase } from './number-warmup';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -151,6 +151,10 @@ export class NumbersController {
     // impersonação carrega papel de admin do cliente, então checar só o papel trancaria o
     // próprio dono para fora do único lugar onde os campos aparecem.
     const ehDono = user.role === 'super_admin' || !!user.impersonatorId;
+    if (ehDono && sendDelay !== undefined) {
+      const n = await this.prisma.whatsAppNumber.findFirst({ where: { id, tenantId: user.tenantId }, select: { provider: true } });
+      if (n && !sendDelayAllowed(sendDelay, n.provider)) throw new BadRequestException(sendDelay === 'fast' ? 'O intervalo Rápido (1–2s) não está mais disponível: o mínimo no QR Code é 3 segundos.' : 'Imediato só existe na API oficial (Meta).');
+    }
     const doDono = ehDono
       ? {
           ...(infraCostMonth !== undefined && { infraCostMonth }),

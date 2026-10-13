@@ -395,6 +395,7 @@ enum WhatsAppProvider {
 /// Faixas de atraso entre envios. Rajada é o padrão que o WhatsApp pune no QR.
 enum SendDelayProfile {
   instant
+  /// legado (1–2s): não é mais oferecido, migrado para `moderate`
   fast
   short
   /// 3–5s sorteado a cada envio
@@ -428,7 +429,7 @@ model WhatsAppNumber {
   infraCostMonth Decimal      @default(0) @db.Decimal(10, 2)
   // ---- proteção contra bloqueio/banimento (só faz sentido no QR) ----
   /// intervalo entre envios deste número; `instant` só para a API oficial
-  sendDelay      SendDelayProfile @default(fast)
+  sendDelay      SendDelayProfile @default(moderate)
   /// teto de envios PROATIVOS por dia (resposta dentro de 24h não conta). 0 = sem teto (padrão)
   sendDailyLimit Int          @default(0)
   /// teto de mensagens de TRANSMISSÃO por 24h neste número (só pesa no QR Code; a Meta tem o tier dela). Dono do sistema ajusta
