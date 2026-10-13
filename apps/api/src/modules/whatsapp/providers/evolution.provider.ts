@@ -93,6 +93,8 @@ export class EvolutionProvider implements WhatsAppProvider {
   /**
    * Socket zumbi: a Evolution diz "open" mas o WebSocket com o WhatsApp morreu (comum depois
    * de o host dormir) e todo envio dá "Connection Closed". Restart reconecta com as credenciais salvas.
+   * Não faz logout — as chaves continuam as mesmas: não conserta chave de recebimento
+   * corrompida (receive-stall.ts); para essa, só ler o QR de novo.
    */
   async restart(ctx: NumberContext) {
     await this.api(`/instance/restart/${this.instance(ctx)}`, { method: 'POST' }, this.shard(ctx)).catch(() => undefined);

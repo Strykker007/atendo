@@ -6,6 +6,7 @@ import { api, getAccessToken, setAccessToken } from '@/lib/api';
 import { useRealtime } from '@/lib/hooks';
 import { UsageBanner } from '@/components/layout/UsageBanner';
 import { WaRemovedBanner } from '@/components/numbers/WaRemovedNotice';
+import { ReceiveStalledBanner } from '@/components/numbers/ReceiveStalledNotice';
 import { Toaster } from '@/components/ui/Toast';
 import { NavigationProgress } from '@/components/layout/NavigationProgress';
 import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
@@ -60,6 +61,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <ImpersonationBanner />
         <UsageBanner />
         <WaRemovedBanner />
+        <ReceiveStalledBanner />
         <div key={pathname} className="flex-1 min-h-0 flex animate-fade-in">{children}</div>
       </div>
       <Toaster />

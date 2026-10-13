@@ -1,4 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Logger, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { ProviderRegistry } from './providers/provider.registry';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
@@ -66,13 +67,14 @@ export class NumbersController {
     private readonly pacer: SendPacer,
     private readonly contactsSync: ContactsSyncScheduler,
     private readonly permissions: PermissionsService,
+    private readonly registry: ProviderRegistry,
   ) {}
 
   @Get()
   async list(@CurrentUser() user: AuthUser) {
     const rows = await this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId, deletedAt: null },
-      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });
     // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts).
@@ -248,6 +250,22 @@ export class NumbersController {
   async disconnect(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     await this.manageable(user, id);
     await this.numbers.disconnect(id);
+    return { ok: true };
+  }
+
+  /**
+   * Reinicia a conexão sem pedir QR (Evolution). Primeiro passo quando o número envia mas não
+   * recebe; se não voltar a receber, o health check mantém o aviso e o caminho é ler o QR.
+   */
+  @Post(':id/restart')
+  @RequirePermission('numbers.manage')
+  async restart(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const n = await this.manageable(user, id);
+    const provider = this.registry.get(n.provider);
+    if (!provider.restart) throw new BadRequestException('Este tipo de conexão não tem reinício.');
+    if (n.status !== 'connected') throw new BadRequestException('O número não está conectado — use Conectar (QR).');
+    await provider.restart(await this.numbers.context(n.id));
+    this.log.log(`Número ${n.label} (${n.phone}) reiniciado por ${user.id}`);
     return { ok: true };
   }
 

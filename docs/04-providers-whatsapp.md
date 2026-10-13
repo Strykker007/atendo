@@ -98,6 +98,29 @@ O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineSer
 
 A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (típico depois de o host dormir). Todo envio devolve `428 Connection Closed`. Tratamento automático: o `OutboundProcessor` detecta a mensagem, chama `provider.restart()` (`POST /instance/restart/:name`) e deixa o retry do BullMQ reenviar. Além disso, um job a cada 5 min (`NumbersHealthProcessor`) confere o status real de cada número no provider e corrige o banco (a UI mostra "desconectado" e o botão de reconectar). Se nem o restart resolver, reinicie o container (`docker compose restart evolution`) — as sessões ficam no banco da Evolution e reconectam sem QR.
 
+### Parou de receber (envia, mas nada chega)
+
+As chaves que decifram o que **chega** podem corromper sem derrubar a sessão: o envio segue, a tela
+mostra "Conectado", e a Evolution descarta cada mensagem recebida (`Message ignored with
+messageStubParameters` no log) — junto somem as confirmações de entrega. Nenhum evento avisa.
+Caso real: Drog. Kelly I, 12/10/2026, um dia sem receber até o cliente notar.
+
+**Detecção** (`whatsapp/receive-stall.ts`, rodando no health check a cada 5 min): depois do último
+sinal de vida do número (mensagem recebida ou entrega/leitura confirmada) e do último QR lido
+(`sessionStartedAt`), saíram **≥ 3 mensagens para ≥ 2 contatos** há mais de 15 min, e nenhuma foi
+confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`; limpa sozinho quando volta a
+chegar mensagem/confirmação ou quando o QR é lido de novo. Um contato só com o celular desligado não
+marca.
+
+**Na tela:** faixa vermelha no topo para todos ("parou de receber mensagens") e, em Números, o card
+com o passo a passo:
+1. **Reiniciar conexão** (`POST /numbers/:id/restart` → `POST /instance/restart` da Evolution): fecha e
+   reabre a sessão com as mesmas credenciais, sem QR. Resolve conexão travada.
+2. Se continuar sem receber, **Desconectar + Conectar (QR)**: pareamento novo gera chaves novas — é o
+   que resolve chave corrompida, porque o reinício reaproveita as mesmas.
+
+O que chegou enquanto estava parado não volta: a Evolution já descartou.
+
 ### Autenticação do webhook
 
 A Evolution **não** manda header de autenticação no webhook global; ela manda `apikey` **no corpo**, e esse valor é o token da instância. Então:

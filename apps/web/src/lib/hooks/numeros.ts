@@ -60,6 +60,11 @@ export const useDisconnectNumber = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/numbers/${id}/disconnect`, { method: 'POST' }), onSuccess: invalidateNumbers(qc) });
 };
+/** Reinicia a conexão sem QR (Evolution): fecha e reabre a sessão com as mesmas credenciais. */
+export const useRestartNumber = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api(`/numbers/${id}/restart`, { method: 'POST' }), onSuccess: invalidateNumbers(qc) });
+};
 /** QR code mais recente por número, alimentado pelo socket (evento `number`). */
 export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-qr', id], enabled: false, queryFn: () => null as string | null });
 

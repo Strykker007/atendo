@@ -1,9 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone, BookUser, Unplug } from 'lucide-react';
+import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone, BookUser, Unplug, RotateCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
-import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useDisconnectNumber, useUsage, useSyncPhonebook, type NumberItem } from '@/lib/hooks';
+import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useDisconnectNumber, useRestartNumber, useUsage, useSyncPhonebook, type NumberItem } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { NUMBER_PALETTE } from '@/components/chat/ChannelBadge';
 import { Modal } from '@/components/ui/Modal';
 import { WaRemovedCard, WaRemovedExplanation } from '@/components/numbers/WaRemovedNotice';
+import { ReceiveStalledCard } from '@/components/numbers/ReceiveStalledNotice';
 import { ApiError } from '@/lib/api';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -33,6 +34,7 @@ export default function NumerosPage() {
   const update = useUpdateNumber();
   const remove = useDeleteNumber();
   const disconnect = useDisconnectNumber();
+  const restart = useRestartNumber();
   const [creating, setCreating] = useState(false);
   const [switching, setSwitching] = useState<NumberItem | null>(null);
   const [qr, setQr] = useState<{ id: string; initial?: string } | null>(null);
@@ -162,6 +164,7 @@ export default function NumerosPage() {
                 )}
 
                 <WaRemovedCard number={n} />
+                <ReceiveStalledCard number={n} />
 
                 {/* aquecimento (docs/envio.md#aquecimento): o cliente precisa saber por que a resposta demora */}
                 {n.warmup && n.status === 'connected' && (
@@ -187,6 +190,10 @@ export default function NumerosPage() {
                     {/* agenda do celular: roda sozinha a cada 6 h; o botão é para não esperar */}
                     {n.provider === 'evolution' && n.status === 'connected' && (
                       <Button size="sm" variant="ghost" icon={<BookUser size={14} />} title="Atualiza o nome dos contatos com a agenda do celular" onClick={() => syncAgenda.mutateAsync(n.id).then(() => toast.ok('Sincronizando a agenda do celular. Os nomes atualizam em alguns instantes.')).catch(toast.err)} loading={syncAgenda.isPending && syncAgenda.variables === n.id}>Sincronizar agenda</Button>
+                    )}
+                    {/* sem QR: resolve conexão travada; chave corrompida só com Desconectar + QR (ReceiveStalledCard) */}
+                    {n.provider === 'evolution' && n.status === 'connected' && (
+                      <Button size="sm" variant="ghost" icon={<RotateCw size={14} />} title="Fecha e reabre a conexão com o WhatsApp, sem ler QR de novo" onClick={() => { setBusyId(n.id); restart.mutateAsync(n.id).then(() => toast.ok('Conexão reiniciada. Mande uma mensagem de teste para o número em 1 minuto.')).catch(toast.err).finally(() => setBusyId(null)); }} loading={busyId === n.id && restart.isPending} loadingText="Reiniciando…">Reiniciar conexão</Button>
                     )}
                     {n.provider === 'evolution' && n.status === 'connected' && (
                       <Button size="sm" variant="ghost" icon={<Unplug size={14} />} title="Encerra a sessão do WhatsApp; o número e as conversas ficam" onClick={() => setDisconnecting(n)} disabled={busyId === n.id}>Desconectar</Button>

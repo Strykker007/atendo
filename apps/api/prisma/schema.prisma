@@ -434,6 +434,9 @@ model WhatsAppNumber {
   reconnectBlockedUntil DateTime?
   /// QR lido (sessão nova): base do aquecimento por hora das primeiras 72h (whatsapp/number-warmup.ts)
   sessionStartedAt DateTime?
+  /// conectado, mas parou de receber: envia e nada volta (nem confirmação de entrega) — chaves de
+  /// recebimento corrompidas na Evolution. Marcado/limpo pelo health check (whatsapp/receive-stall.ts)
+  receiveStalledAt DateTime?
   isActive       Boolean      @default(true)
   /// Excluído pelo cliente. O registro fica (e com ele conversas, mensagens e agenda): recadastrar
   /// o MESMO telefone na MESMA conta revive este número com o histórico. `externalId` vira
