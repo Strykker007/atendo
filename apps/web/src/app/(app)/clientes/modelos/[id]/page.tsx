@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, ArrowDown, ArrowUp, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
-import { DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
+import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -10,12 +10,15 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useUnsavedGuard } from '@/lib/unsaved-guard';
-import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateFlow, type TemplateProfile, type TemplateQuickReply } from '@/lib/hooks';
+import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateFlow, type TemplateProfile, type TemplateQuickReply, type TemplateTag } from '@/lib/hooks';
+import { PALETTE, ColorPopover } from '@/components/ui/ColorSwatches';
 
 const ADMIN = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
 /** Gerente e Atendente: sempre listados. Fora do conteúdo = seguem o catálogo. */
 const FIXED = SYSTEM_PROFILES.filter((p) => p.role !== 'tenant_admin');
 const section = 'rounded-2xl bg-panel border border-line p-4 space-y-3';
+/** sem lista própria (nem do formato antigo): as tags de encerramento do catálogo */
+const CATALOGO_TAGS: TemplateTag[] = DEFAULT_LOSS_REASONS.map((name) => ({ name, isKanban: false, showOnClose: true }));
 
 /** Itens de um arquivo exportado: individual, lote ou o envelope `{portable}`. */
 function itemsOf<T>(raw: unknown, kind: string): T[] {
@@ -27,7 +30,7 @@ function itemsOf<T>(raw: unknown, kind: string): T[] {
 
 /**
  * Editor do modelo de perfil: tudo com que um cliente novo nasce — permissões padrão de cada
- * perfil, respostas rápidas, fluxos e motivos de não compra. Salva de uma vez; vale para os
+ * perfil, respostas rápidas, fluxos e tags (cor, Kanban, encerramento). Salva de uma vez; vale para os
  * próximos clientes criados com o modelo (os já criados não mudam).
  */
 export default function TemplateEditorPage() {
@@ -95,7 +98,8 @@ export default function TemplateEditorPage() {
         <ProfilesSection profiles={content.profiles} onChange={(profiles) => edit({ profiles })} />
         <QuickRepliesSection items={content.quickReplies} onChange={(quickReplies) => edit({ quickReplies })} />
         <FlowsSection items={content.flows} onChange={(flows) => edit({ flows })} />
-        <LossReasonsSection value={content.lossReasons} fallback={tpl.data.effectiveLossReasons} onChange={(lossReasons) => edit({ lossReasons })} />
+        {/* editar grava `tags` e aposenta o formato antigo (lossReasons); "Voltar ao catálogo" tira as duas */}
+        <TagsSection value={content.tags} fallback={content.lossReasons || content.lossReasonColors ? tpl.data.effectiveTags : CATALOGO_TAGS} onChange={(tags) => edit({ tags, lossReasons: undefined, lossReasonColors: undefined })} />
       </div>
     </PageShell>
   );
@@ -323,41 +327,108 @@ function FlowsSection({ items, onChange }: { items: TemplateFlow[]; onChange: (i
   );
 }
 
-/** Motivos de não compra. Sem lista própria, o cliente nasce com os do catálogo. */
-function LossReasonsSection({ value, fallback, onChange }: { value?: string[]; fallback: string[]; onChange: (v: string[] | undefined) => void }) {
-  const [novo, setNovo] = useState('');
+/**
+ * Tags com que o cliente nasce — as mesmas opções da tela de Tags: cor, etapa do Kanban e
+ * "aparece no encerramento". A ordem é a das colunas do Kanban. Sem lista própria, o cliente
+ * recebe as tags de encerramento do catálogo (ou as do formato antigo do modelo); a primeira
+ * edição copia essa lista para o modelo.
+ */
+function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fallback: TemplateTag[]; onChange: (t: TemplateTag[] | undefined) => void }) {
   const list = value ?? fallback;
-  const move = (i: number, d: number) => { const l = [...list]; [l[i], l[i + d]] = [l[i + d], l[i]]; onChange(l); };
+  const [nomes, setNomes] = useState('');
+  const [novaEncerramento, setNovaEncerramento] = useState(true);
+  const [novaKanban, setNovaKanban] = useState(false);
+  const [sel, setSel] = useState<string[]>([]);
+  const [corDe, setCorDe] = useState<string | null>(null);
+  const [corLote, setCorLote] = useState(false);
+  const commit = (l: TemplateTag[]) => { onChange(l); setSel((s) => s.filter((n) => l.some((t) => t.name === n))); };
+  const patch = (names: string[], p: Partial<TemplateTag>) => commit(list.map((t) => (names.includes(t.name) ? { ...t, ...p } : t)));
+  const move = (i: number, d: number) => { const l = [...list]; [l[i], l[i + d]] = [l[i + d], l[i]]; commit(l); };
+  const todas = list.length > 0 && sel.length === list.length;
+
   function add() {
-    const m = novo.trim();
-    if (!m) return;
-    if (list.some((x) => x.toLowerCase() === m.toLowerCase())) return toast.err('Esse motivo já está na lista.');
-    if (list.length >= 30) return toast.err('No máximo 30 motivos.');
-    onChange([...list, m]);
-    setNovo('');
+    const existentes = new Set(list.map((t) => t.name.toLowerCase()));
+    const novas = [...new Set(nomes.split(/\r?\n|;/).map((n) => n.trim().slice(0, 40)).filter(Boolean))].filter((n) => !existentes.has(n.toLowerCase()));
+    if (!novas.length) return toast.err(nomes.trim() ? 'Essas tags já estão na lista.' : 'Digite o nome da tag.');
+    if (list.length + novas.length > 200) return toast.err('No máximo 200 tags no modelo.');
+    // cores variadas para começar; cada uma se ajusta clicando na bolinha
+    commit([...list, ...novas.map((name, i) => ({ name, color: PALETTE[(list.length + i) % PALETTE.length], isKanban: novaKanban, showOnClose: novaEncerramento }))]);
+    setNomes('');
   }
+
+  const sw = (on: boolean, onClick: () => void, label: string) => (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={onClick} className={cn('relative w-9 h-5 rounded-full transition-colors', on ? 'bg-ok' : 'bg-line')}>
+      <span className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', on ? 'left-[18px]' : 'left-0.5')} />
+    </button>
+  );
+
   return (
     <div className={section}>
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="font-display font-semibold text-ink">Motivos de não compra</h2>
-          <p className="text-[12px] text-muted">Chips do encerramento “Não comprou”, nesta ordem. {value ? 'Lista própria do modelo.' : 'Usando os do catálogo do sistema.'}</p>
+          <h2 className="font-display font-semibold text-ink">Tags</h2>
+          <p className="text-[12px] text-muted">Tags com que o cliente nasce, com cor, etapa do Kanban e se aparecem no encerramento. A ordem é a das colunas do Kanban. {value ? 'Lista própria do modelo.' : 'Usando as tags de encerramento do catálogo — editar copia a lista para o modelo.'}</p>
         </div>
-        {value && <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => onChange(undefined)}>Usar os do catálogo</Button>}
+        {value && <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => { setSel([]); onChange(undefined); }}>Voltar às do catálogo</Button>}
       </div>
-      <div className="rounded-xl border border-line divide-y divide-line">
-        {list.map((m, i) => (
-          <div key={m} className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink">
-            <span className="flex-1">{m}</span>
-            <button title="Subir" disabled={i === 0} className="text-faint hover:text-ink disabled:opacity-30 p-1" onClick={() => move(i, -1)}><ArrowUp size={13} /></button>
-            <button title="Descer" disabled={i === list.length - 1} className="text-faint hover:text-ink disabled:opacity-30 p-1" onClick={() => move(i, 1)}><ArrowDown size={13} /></button>
-            <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => onChange(list.filter((_, j) => j !== i))}><X size={13} /></button>
+
+      {list.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line px-3 py-2 text-xs">
+          <input type="checkbox" aria-label="Selecionar todas" checked={todas} ref={(el) => { if (el) el.indeterminate = sel.length > 0 && !todas; }} onChange={() => setSel(todas ? [] : list.map((t) => t.name))} />
+          <span className="text-muted flex-1 min-w-[8rem]">{sel.length ? `${sel.length} selecionada(s)` : `Selecionar todas (${list.length})`}</span>
+          {sel.length > 0 && (
+            <>
+              <Button size="sm" variant="ghost" onClick={() => patch(sel, { showOnClose: true })}>Mostrar no encerramento</Button>
+              <Button size="sm" variant="ghost" onClick={() => patch(sel, { showOnClose: false })}>Tirar do encerramento</Button>
+              <Button size="sm" variant="ghost" onClick={() => patch(sel, { isKanban: true })}>Pôr no Kanban</Button>
+              <Button size="sm" variant="ghost" onClick={() => patch(sel, { isKanban: false })}>Tirar do Kanban</Button>
+              <div className="relative">
+                <Button size="sm" variant="ghost" onClick={() => setCorLote((v) => !v)}>Cor</Button>
+                {corLote && <ColorPopover align="right" onClose={() => setCorLote(false)} onPick={(c) => { setCorLote(false); patch(sel, { color: c }); }} />}
+              </div>
+              <Button size="sm" variant="ghost" className="text-danger" icon={<Trash2 size={13} />} onClick={() => commit(list.filter((t) => !sel.includes(t.name)))}>Remover</Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {list.length > 0 && (
+        <div className="rounded-xl border border-line divide-y divide-line">
+          <div className="flex items-end gap-2 px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-wide text-faint">
+            <span className="w-4 shrink-0" />
+            <span className="w-5 shrink-0" />
+            <span className="flex-1">Tag</span>
+            <span className="w-16 text-center">Kanban</span>
+            <span className="w-24 text-center leading-tight">Encerramento</span>
+            <span className="w-[84px] shrink-0" />
           </div>
-        ))}
-      </div>
-      <div className="flex gap-2 items-center">
-        <input className={cn(inputCls, 'max-w-xs')} value={novo} maxLength={200} onChange={(e) => setNovo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} placeholder="Receita vencida" />
-        <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={add}>Adicionar</Button>
+          {list.map((t, i) => (
+            <div key={t.name} className={cn('flex items-center gap-2 px-3 py-1.5 text-sm text-ink', sel.includes(t.name) && 'bg-accent-soft/40')}>
+              <input type="checkbox" className="w-4 shrink-0" aria-label={`Selecionar ${t.name}`} checked={sel.includes(t.name)} onChange={() => setSel((s) => (s.includes(t.name) ? s.filter((x) => x !== t.name) : [...s, t.name]))} />
+              <div className="relative w-5 shrink-0">
+                <button type="button" onClick={() => setCorDe(corDe === t.name ? null : t.name)} title="Trocar a cor" aria-label={`Cor de ${t.name}`} className="w-4 h-4 rounded-full block border border-line hover:ring-2 hover:ring-line" style={{ background: t.color ?? '#6366f1' }} />
+                {corDe === t.name && <ColorPopover value={t.color} onClose={() => setCorDe(null)} onPick={(c) => { setCorDe(null); patch([t.name], { color: c }); }} />}
+              </div>
+              <span className="flex-1 min-w-0 truncate"><span className="text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: t.color ?? '#6366f1' }}>{t.name}</span></span>
+              <span className="w-16 flex justify-center">{sw(!!t.isKanban, () => patch([t.name], { isKanban: !t.isKanban }), `${t.name} no Kanban`)}</span>
+              <span className="w-24 flex justify-center">{sw(!!t.showOnClose, () => patch([t.name], { showOnClose: !t.showOnClose }), `${t.name} no encerramento`)}</span>
+              <span className="w-[84px] shrink-0 flex justify-end">
+                <button title="Subir" disabled={i === 0} className="text-faint hover:text-ink disabled:opacity-30 p-1" onClick={() => move(i, -1)}><ArrowUp size={13} /></button>
+                <button title="Descer" disabled={i === list.length - 1} className="text-faint hover:text-ink disabled:opacity-30 p-1" onClick={() => move(i, 1)}><ArrowDown size={13} /></button>
+                <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => commit(list.filter((_, j) => j !== i))}><X size={13} /></button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <textarea className={cn(inputCls, 'resize-none font-mono text-[13px]')} rows={3} value={nomes} onChange={(e) => setNomes(e.target.value)} placeholder={'Adicionar tags — uma por linha (ou separadas por ;)\nReceita vencida\nAchou caro'} aria-label="Nomes das tags a adicionar" />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={novaEncerramento} onChange={(e) => setNovaEncerramento(e.target.checked)} /> Aparecem no encerramento</label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={novaKanban} onChange={(e) => setNovaKanban(e.target.checked)} /> Viram etapas do Kanban</label>
+          <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={add}>Adicionar</Button>
+        </div>
       </div>
     </div>
   );

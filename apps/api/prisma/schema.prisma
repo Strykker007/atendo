@@ -82,6 +82,7 @@ model Tenant {
 
   scheduledMessages ScheduledMessage[]
   globalVariables GlobalVariable[]
+  pixKeys         PixKey[]
   @@map("tenants")
 }
 
@@ -338,14 +339,9 @@ model TenantSettings {
   /// fluxo padrão por desfecho do encerramento — vem pré-selecionado no modal; sem ele vale `onCloseFlowId`
   wonFlowId  String?
   lostFlowId String?
-  noneFlowId String?
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)
-  /// motivos de perda sugeridos no encerramento "Não comprou" (o atendente ainda pode digitar outro)
-  lossReasons String[] @default(["Preço", "Prazo", "Não respondeu", "Comprou com concorrente", "Fora da área", "Só pesquisando"])
-  /// cor de cada motivo no botão do encerramento: { "Achou caro": "#dc2626" }. Motivo sem cor usa o padrão
-  lossReasonColors Json @default("{}")
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -434,6 +430,9 @@ model WhatsAppNumber {
   reconnectBlockedUntil DateTime?
   /// QR lido (sessão nova): base do aquecimento por hora das primeiras 72h (whatsapp/number-warmup.ts)
   sessionStartedAt DateTime?
+  /// conectado, mas parou de receber: envia e nada volta (nem confirmação de entrega) — chaves de
+  /// recebimento corrompidas na Evolution. Marcado/limpo pelo health check (whatsapp/receive-stall.ts)
+  receiveStalledAt DateTime?
   isActive       Boolean      @default(true)
   /// Excluído pelo cliente. O registro fica (e com ele conversas, mensagens e agenda): recadastrar
   /// o MESMO telefone na MESMA conta revive este número com o histórico. `externalId` vira
@@ -598,6 +597,26 @@ model GlobalVariable {
   @@map("global_variables")
 }
 
+/// Chave Pix da empresa: o atendente envia pelo painel do chat como cartão com "Copiar chave Pix"
+model PixKey {
+  id        String   @id @default(uuid())
+  tenantId  String
+  /// como a equipe reconhece a chave ("Pix Matriz - CNPJ")
+  title     String
+  /// cpf | cnpj | email | phone | random (`PIX_KEY_TYPES` no shared)
+  keyType   String
+  key       String
+  /// nome do recebedor que aparece no cartão do WhatsApp
+  holderName String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("pix_keys")
+}
+
 /// Tag "colada" na pessoa: vale para todas as conversas dela (ex.: comprador recorrente).
 model ContactTag {
   contactId String
@@ -619,6 +638,8 @@ enum ConversationStatus {
 }
 
 /// Desfecho do atendimento, registrado no encerramento. Base do relatório de vendas.
+/// Encerramento pelo atendente exige `won` ou `lost`; `none` sobra para o que o sistema fecha
+/// (fluxo, inatividade), para conversa aberta e para o histórico anterior à regra.
 enum ConversationOutcome {
   none
   won
@@ -662,7 +683,7 @@ model Conversation {
   outcome        ConversationOutcome @default(none)
   /// valor da venda quando `won`
   outcomeValue   Decimal?  @db.Decimal(12, 2)
-  /// motivo quando `lost` — é o que mostra onde se perde negócio
+  /// nomes das tags escolhidas no encerramento (texto congelado, para exibição)
   outcomeReason  String?
   outcomeAt      DateTime?
   outcomeById    String?
@@ -706,6 +727,8 @@ model Conversation {
   /// fila por tempo de espera
   @@index([tenantId, status, awaitingSince])
   @@index([tenantId, origin])
+  /// relatórios: conversas do cliente abertas no período
+  @@index([tenantId, createdAt])
   @@index([tenantId, departmentId, status])
   @@index([numberId, contactId])
   aiUsage   AiUsage[]
@@ -790,8 +813,11 @@ model ConversationEvent {
   /// desfecho no encerramento, congelado neste evento
   outcome        ConversationOutcome?
   outcomeValue   Decimal?              @db.Decimal(12, 2)
-  /// motivo da perda, ou nota do sistema ("encerrado em massa")
+  /// tags escolhidas no encerramento (nomes, congelados), ou nota do sistema ("encerrado em massa")
   reason         String?
+  /// tags escolhidas no encerramento (opcionais). Ficam aqui além de na conversa: o relatório
+  /// "por tag" do mês fechado não pode mudar se alguém tirar a tag da conversa depois
+  tagIds         String[]              @default([])
   createdAt      DateTime              @default(now())
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -937,6 +963,8 @@ model Tag {
   isKanban  Boolean  @default(true)
   /// ordem da coluna no Kanban
   position  Int      @default(0)
+  /// aparece para escolha no encerramento (Comprou / Não comprou); as outras ficam de fora
+  showOnClose Boolean @default(false)
   createdAt DateTime @default(now())
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)

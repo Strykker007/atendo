@@ -1,15 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, XCircle, MinusCircle, Plus, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { CheckCircle2, XCircle, Plus, Trash2 } from 'lucide-react';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { useFlows, useHasFeature, useSetStatus, useTenantSettings, type ConversationOutcome } from '@/lib/hooks';
-import { DEFAULT_LOSS_REASONS } from '@atendo/shared';
-
-/** padrão enquanto as configurações carregam — a lista do cliente vem de Configurações → Motivos de perda */
-export const MOTIVOS = DEFAULT_LOSS_REASONS;
+import { TagPicker } from './TagPicker';
+import { useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings } from '@/lib/hooks';
 
 /**
  * Bloco do formulário de encerramento: rótulo, explicação logo abaixo dele e o campo. A dica
@@ -34,62 +32,40 @@ export function Secao({ titulo, opcional, dica, acao, children, htmlFor }: { tit
   );
 }
 
+/** Resultado do encerramento pelo atendente — um dos dois é obrigatório ("Sem resultado" saiu). */
+export type CloseOutcome = 'won' | 'lost';
+/** Exportado porque o encerramento em massa usa as mesmas. */
+export const OUTCOMES: { id: CloseOutcome; label: string; icon: React.ReactNode; cls: string }[] = [
+  { id: 'won', label: 'Comprou', icon: <CheckCircle2 size={15} />, cls: 'border-ok text-ok bg-ok-soft' },
+  { id: 'lost', label: 'Não comprou', icon: <XCircle size={15} />, cls: 'border-danger text-danger bg-danger-soft' },
+];
+
 /**
- * Motivo de perda: um clique nos cadastrados ou texto livre. Texto livre continua valendo
- * (caso raro não deveria exigir passar em Configurações), mas o relatório agrupa pelo texto —
- * por isso os cadastrados ficam à vista, para a equipe escrever sempre igual.
+ * Tags do encerramento (o antigo "motivo"): opcionais, com busca — o cliente pode ter dezenas.
+ * Só as marcadas "Exibir no encerramento" em Tags: as internas/operacionais não fazem sentido
+ * na hora de qualificar a venda. Entram na conversa e ficam congeladas no histórico do
+ * atendimento para o relatório.
  */
-export function LossReasonField({ value, onChange, hint, placeholder, invalid }: { value: string; onChange: (v: string) => void; hint: string; placeholder: string; /** tentou encerrar sem motivo */ invalid?: boolean }) {
-  const settings = useTenantSettings();
-  const motivos = settings.data?.lossReasons ?? MOTIVOS;
-  const cores = settings.data?.lossReasonColors ?? {};
-  const cadastrado = motivos.includes(value);
+export function CloseTagsField({ value, onChange, dica }: { value: string[]; onChange: (ids: string[]) => void; dica: string }) {
+  const tags = useTags();
+  const doEncerramento = (tags.data ?? []).filter((t) => t.showOnClose);
   return (
-    <Secao titulo="Motivo" dica={`${hint} Obrigatório: escolha um da lista ou escreva outro.`} htmlFor="motivo-livre">
-      {motivos.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {motivos.map((m) => {
-            // cor do motivo (Configurações → Motivos de perda): bolinha quando solto, botão tingido quando escolhido
-            const cor = cores[m];
-            const ativo = value === m;
-            return (
-              <button
-                key={m}
-                type="button"
-                aria-pressed={ativo}
-                onClick={() => onChange(ativo ? '' : m)}
-                style={ativo && cor ? { borderColor: cor, color: cor, backgroundColor: `${cor}1f` } : undefined}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] ${ativo ? (cor ? 'font-medium' : 'border-danger text-danger bg-danger-soft font-medium') : 'border-line text-muted hover:bg-field hover:text-ink'}`}
-              >
-                {cor && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cor }} />}
-                {m}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {/* escolheu um chip: o campo livre fica vazio, para não parecer que são duas respostas */}
-      <input id="motivo-livre" className={`${inputCls} ${invalid ? 'border-danger' : ''}`} placeholder={placeholder} value={cadastrado ? '' : value} onChange={(e) => onChange(e.target.value)} maxLength={200} />
-      {invalid && <p className="text-xs text-danger-ink">Escolha ou escreva o motivo para encerrar como “Não comprou”.</p>}
+    <Secao titulo="Tags" opcional dica={dica}>
+      {tags.data && doEncerramento.length === 0
+        ? <p className="text-xs text-faint">Nenhuma tag marcada para o encerramento. Marque em <Link href="/tags" className="underline hover:text-ink">Tags</Link> → “Exibir no encerramento”.</p>
+        : <TagPicker tags={doEncerramento} value={value} onChange={onChange} placeholder="Buscar tag…" />}
     </Secao>
   );
 }
 
-/** As três saídas possíveis. Exportado porque o encerramento em massa usa as mesmas. */
-export const OUTCOMES: { id: ConversationOutcome; label: string; icon: React.ReactNode; cls: string }[] = [
-  { id: 'won', label: 'Comprou', icon: <CheckCircle2 size={15} />, cls: 'border-ok text-ok bg-ok-soft' },
-  { id: 'lost', label: 'Não comprou', icon: <XCircle size={15} />, cls: 'border-danger text-danger bg-danger-soft' },
-  { id: 'none', label: 'Sem resultado', icon: <MinusCircle size={15} />, cls: 'border-line text-muted bg-field' },
-];
-
 const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /** campo de configuração com o fluxo padrão de cada desfecho */
-const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId', none: 'noneFlowId' } as const;
+const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId' } as const;
 
 /**
  * Encerramento com resultado. É o que transforma o relatório de conversas em relatório de
- * vendas — e o motivo da perda é o que mostra onde o negócio escapa.
+ * vendas. "Comprou" ou "Não comprou" é obrigatório; as tags (o antigo motivo) são opcionais.
  *
  * Cada desfecho pode ter um fluxo padrão (Configurações → Fluxos padrão): escolher o desfecho
  * já pré-seleciona o fluxo dele, então o caso comum é um clique. Trocar ou pôr "Nenhum" vale
@@ -102,13 +78,13 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const flowsFeature = useHasFeature('flows');
   const flows = useFlows();
   const settings = useTenantSettings();
-  const [outcome, setOutcome] = useState<ConversationOutcome>('none');
+  const [outcome, setOutcome] = useState<CloseOutcome | null>(null);
   const [valor, setValor] = useState<number | null>(null);
   const [produtos, setProdutos] = useState('');
   const [modoLista, setModoLista] = useState(true);
   const [itens, setItens] = useState<{ descricao: string; valor: number | null }[]>([{ descricao: '', valor: null }]);
   const [observacoes, setObservacoes] = useState('');
-  const [motivo, setMotivo] = useState('');
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [flowId, setFlowId] = useState('');
   // tentou encerrar com o desfecho incompleto: só então os campos ficam vermelhos
   const [tentou, setTentou] = useState(false);
@@ -118,9 +94,9 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
 
   const ativos = (flows.data ?? []).filter((f) => f.isActive);
   /** padrão do desfecho, senão o geral "ao encerrar" — só se o fluxo ainda existe e está ativo */
-  const padraoDe = (o: ConversationOutcome) => {
+  const padraoDe = (o: CloseOutcome | null) => {
     const s = settings.data;
-    const id = s ? s[FLUXO_DO_DESFECHO[o]] ?? s.onCloseFlowId : null;
+    const id = s ? (o && s[FLUXO_DO_DESFECHO[o]]) || s.onCloseFlowId : null;
     return id && ativos.some((f) => f.id === id) ? id : '';
   };
   const carregou = !!settings.data && !!flows.data;
@@ -137,13 +113,13 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
 
   const lista = outcome === 'won' && modoLista;
   const totalVenda = lista ? totalItens : valor ?? 0;
-  // "Comprou" exige valor e "Não comprou" exige motivo — a API recusa do mesmo jeito
+  // resultado é obrigatório e "Comprou" exige valor — a API recusa do mesmo jeito
+  const faltaResultado = !outcome;
   const faltaValor = outcome === 'won' && !(totalVenda > 0);
-  const faltaMotivo = outcome === 'lost' && !motivo.trim();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (faltaValor || faltaMotivo) { setTentou(true); return; }
+    if (!outcome || faltaValor) { setTentou(true); return; }
     const value = outcome === 'won' ? totalVenda : undefined;
     try {
       await setStatus.mutateAsync({
@@ -151,7 +127,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
         status: 'closed',
         outcome,
         value,
-        reason: outcome === 'lost' ? motivo.trim() : undefined,
+        tagIds: tagIds.length ? tagIds : undefined,
         products: outcome === 'won' && !lista ? produtos.trim() || undefined : undefined,
         // em lista, a API soma os itens e monta o resumo em `products`
         items: lista && itensValidos.length ? itensValidos : undefined,
@@ -169,8 +145,8 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   return (
     <Modal open onClose={onClose} title="Encerrar atendimento" width={outcome === 'won' && modoLista ? 'max-w-2xl' : undefined}>
       <form onSubmit={submit} className="space-y-4">
-        <Secao titulo="Resultado" dica="Alimenta o relatório de vendas. Se a conversa não teve venda em jogo, deixe “Sem resultado”.">
-          <div className="grid grid-cols-3 gap-2">
+        <Secao titulo="Resultado" dica="Obrigatório. Alimenta o relatório de vendas e a taxa de conversão.">
+          <div className="grid grid-cols-2 gap-2">
             {OUTCOMES.map((o) => (
               <button
                 key={o.id}
@@ -183,6 +159,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
               </button>
             ))}
           </div>
+          {tentou && faltaResultado && <p className="text-xs text-danger-ink">Escolha “Comprou” ou “Não comprou” para encerrar.</p>}
         </Secao>
 
         {outcome === 'won' && (
@@ -237,9 +214,13 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
           </div>
         )}
 
-        {outcome === 'lost' && (
+        {outcome && (
           <div className="border-t border-line pt-4">
-            <LossReasonField value={motivo} onChange={setMotivo} hint="É o que mostra onde você está perdendo negócio." placeholder="Outro motivo…" invalid={tentou && faltaMotivo} />
+            <CloseTagsField
+              value={tagIds}
+              onChange={setTagIds}
+              dica={outcome === 'won' ? 'O que foi vendido ou de onde veio a venda — vira filtro nos relatórios.' : 'Por que não comprou (ex.: “Achou caro”) — é o que mostra onde você perde negócio.'}
+            />
           </div>
         )}
 

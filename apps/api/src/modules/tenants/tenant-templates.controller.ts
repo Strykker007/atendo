@@ -7,7 +7,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { TenantProvisioningService } from './tenant-provisioning.service';
-import { parseTemplateContent, parseTemplateFile, provisionedLossReasons, templateContent, templateSummary, toTemplateFile, type TemplateContent, type TemplateFile } from './tenant-template';
+import { parseTemplateContent, parseTemplateFile, provisionedTags, templateContent, templateSummary, toTemplateFile, type TemplateContent, type TemplateFile } from './tenant-template';
 
 class CreateDto {
   @IsString() @MaxLength(60) name: string;
@@ -47,14 +47,14 @@ export class TenantTemplatesController {
     return rows.map((t) => ({ id: t.id, name: t.name, description: t.description, isDefault: t.isDefault, updatedAt: t.updatedAt, tenants: t._count.tenants, ...templateSummary(t.content as unknown as TemplateContent) }));
   }
 
-  /** Para o editor: conteúdo completo + os motivos efetivos (os do catálogo quando o modelo não define). */
+  /** Para o editor: conteúdo completo + as tags efetivas (modelo antigo: os motivos de encerramento, ou os do catálogo). */
   @Get(':id')
   @NoTenantOk()
   @Roles('super_admin')
   async get(@Param('id') id: string) {
     const t = await this.prisma.tenantTemplate.findUniqueOrThrow({ where: { id }, include: { _count: { select: { tenants: true } } } });
     const content = t.content as unknown as TemplateContent;
-    return { id: t.id, name: t.name, description: t.description, isDefault: t.isDefault, tenants: t._count.tenants, content, effectiveLossReasons: provisionedLossReasons(content) };
+    return { id: t.id, name: t.name, description: t.description, isDefault: t.isDefault, tenants: t._count.tenants, content, effectiveTags: provisionedTags(content) };
   }
 
   /** Modelo vazio, para montar pelo editor. */

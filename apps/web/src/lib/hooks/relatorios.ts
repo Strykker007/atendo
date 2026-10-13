@@ -17,7 +17,7 @@ export interface ReportDefinition {
   groupBy: ReportGroup;
   from: string; // YYYY-MM-DD
   to: string;   // exclusivo
-  filters: { tagIds?: string[]; status?: ConversationStatus; numberId?: string; origin?: ConversationOrigin };
+  filters: { tagIds?: string[]; status?: ConversationStatus; numberId?: string; origin?: ConversationOrigin; /** consultor */ agentId?: string };
   chart: 'bar' | 'line' | 'pie';
 }
 export interface ReportResult { definition: ReportDefinition; series: { label: string; value: number }[] }
@@ -35,7 +35,7 @@ export const useDeleteSavedReport = () => {
 };
 
 // ---- Relatórios: detalhamento de vendas ----
-export interface SaleDetailsFilters { startDate: string; endDate: string; userId?: string; search?: string; page: number; pageSize?: number }
+export interface SaleDetailsFilters { startDate: string; endDate: string; userId?: string; tagIds?: string; search?: string; page: number; pageSize?: number }
 export interface SaleDetailsRow {
   id: string;
   closedAt: string;

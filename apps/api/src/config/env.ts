@@ -40,6 +40,12 @@ const schema = z.object({
   ENCRYPTION_KEY: z.string().min(1, 'ENCRYPTION_KEY (32 bytes base64) é obrigatória'),
   EVOLUTION_BASE_URL: z.string().url(),
   EVOLUTION_API_KEY: z.string().min(1),
+  /**
+   * Pix como cartão nativo ("Copiar chave Pix") na Evolution. Exige a imagem com o patch do nó
+   * <biz> (infra/evolution): sem ele o WhatsApp entrega (`delivered`) e o celular não exibe nada.
+   * Desligado = sai como texto (docs/04-providers-whatsapp.md#chave-pix-copiar-chave-pix).
+   */
+  EVOLUTION_PIX_BUTTON: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   META_GRAPH_VERSION: z.string().default('v21.0'),
   META_APP_SECRET: z.string().optional().default(''),
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(1),

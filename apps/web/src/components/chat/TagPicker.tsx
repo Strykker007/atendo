@@ -48,7 +48,8 @@ export function TagPicker({ tags, value, onChange, placeholder, compact, primary
           onChange={(e) => { setQ(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && options[0]) { toggle(options[0].id); setQ(''); }
+            // dentro de formulário (encerramento), Enter escolhe a tag em vez de enviar
+            if (e.key === 'Enter') { e.preventDefault(); if (options[0]) { toggle(options[0].id); setQ(''); } }
             if (e.key === 'Backspace' && !q && selected.length) toggle(selected[selected.length - 1].id);
           }}
           placeholder={selected.length ? '' : placeholder}
@@ -59,7 +60,7 @@ export function TagPicker({ tags, value, onChange, placeholder, compact, primary
         <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg bg-panel border border-line shadow-lg py-1">
           {options.length === 0 && <p className="px-3 py-2 text-xs text-faint">Nenhuma tag</p>}
           {options.map((t) => (
-            <button key={t.id} onClick={() => { toggle(t.id); setQ(''); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-field flex items-center gap-2">
+            <button key={t.id} type="button" onClick={() => { toggle(t.id); setQ(''); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-field flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full" style={{ background: t.color }} />
               {t.name}
             </button>

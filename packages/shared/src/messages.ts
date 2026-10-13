@@ -197,6 +197,22 @@ export interface OutboundMessage {
    * texto numerado; a resposta do contato pode vir como id da opção ou como número/texto.
    */
   interactive?: InteractiveMenu;
+  /**
+   * Chave Pix com botão "Copiar chave Pix". Evolution manda o cartão nativo; quem não suporta
+   * (Meta) envia só `text`, que já traz título, tipo e chave.
+   */
+  pix?: PixPayment;
+}
+
+export const PIX_KEY_TYPES = ['cpf', 'cnpj', 'email', 'phone', 'random'] as const;
+export type PixKeyType = (typeof PIX_KEY_TYPES)[number];
+export const PIX_KEY_TYPE_LABEL: Record<PixKeyType, string> = { cpf: 'CPF', cnpj: 'CNPJ', email: 'E-mail', phone: 'Telefone', random: 'Chave aleatória' };
+
+export interface PixPayment {
+  /** nome do recebedor mostrado no cartão */
+  holderName: string;
+  keyType: PixKeyType;
+  key: string;
 }
 
 export interface InteractiveMenu {

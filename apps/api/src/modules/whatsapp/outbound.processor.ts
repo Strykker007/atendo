@@ -163,7 +163,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
 
     const ctx = await this.numbers.context(numberId);
     const provider = this.registry.get(ctx.provider);
-    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; body?: string; voice?: boolean; simulateTypingChars?: number };
+    const raw = (message.raw ?? {}) as { template?: OutboundMessage['template']; interactive?: OutboundMessage['interactive']; pix?: OutboundMessage['pix']; body?: string; voice?: boolean; simulateTypingChars?: number };
     // envio do atendente que ninguém digitou (resposta rápida, encaminhada, agendada, só mídia):
     // "digitando…" pelo tempo de escrever o texto, sem a reação (ele já está na conversa)
     // na velocidade de digitação daquele atendente (Equipe → editar)
@@ -175,6 +175,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       // interativo: o provider recebe o corpo original + opções (o texto numerado é só para o histórico)
       text: raw.interactive ? raw.body : (message.text ?? undefined),
       interactive: raw.interactive,
+      pix: raw.pix,
       media: message.mediaUrl ? { url: message.mediaUrl, mimeType: message.mediaMime ?? undefined, fileName: message.mediaName ?? undefined, caption: message.text ?? undefined, voice: raw.voice } : undefined,
       quotedExternalId: message.quotedId ?? undefined,
       template: raw.template,
@@ -200,7 +201,8 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       // Sessão caiu por baixo ("Connection Closed"): reinicia a instância e deixa o retry tentar de novo
-      if (/connection closed/i.test(error) && provider.restart) {
+      // uma vez por número a cada 2 min (claimRestart), não uma por envio que falhou
+      if (/connection closed/i.test(error) && provider.restart && await this.numbers.claimRestart(ctx.numberId)) {
         this.log.warn(`Número ${ctx.numberId}: sessão zumbi, reiniciando instância`);
         await provider.restart(ctx).catch(() => undefined);
       }

@@ -10,6 +10,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache } from './core';
 import type { MessageTemplate, TemplateValues } from '@atendo/shared';
 import { receiveSystemNotice, type SystemNotice } from './avisos';
+import { playMessageSound, unlockMessageSound } from '../message-sound';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -59,6 +60,11 @@ export const useDisconnectNumber = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/numbers/${id}/disconnect`, { method: 'POST' }), onSuccess: invalidateNumbers(qc) });
 };
+/** Reinicia a conexão sem QR (Evolution): fecha e reabre a sessão com as mesmas credenciais. */
+export const useRestartNumber = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api(`/numbers/${id}/restart`, { method: 'POST' }), onSuccess: invalidateNumbers(qc) });
+};
 /** QR code mais recente por número, alimentado pelo socket (evento `number`). */
 export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-qr', id], enabled: false, queryFn: () => null as string | null });
 
@@ -71,8 +77,26 @@ export function useRealtime() {
   // entregue, lido) não chegavam. Renovação do mesmo cliente não reconecta.
   const [sala, setSala] = useState(() => salaDoToken(getAccessToken()));
   useEffect(() => { const fora = onAccessToken((t) => setSala(salaDoToken(t))); return () => { fora(); }; }, []);
+  useEffect(() => unlockMessageSound(), []);
   useEffect(() => {
     if (!getAccessToken()) return;
+    // som de mensagem nova. O mesmo id volta no socket a cada mudança (status, reação, mídia
+    // baixada) — toca só na primeira vez.
+    const tocadas = new Set<string>();
+    async function avisarChegada(m: Message) {
+      tocadas.add(m.id);
+      if (tocadas.size > 500) tocadas.delete(tocadas.values().next().value as string);
+      // reconexão do número reimporta histórico: mensagem velha não é chegada
+      if (Date.now() - new Date(m.createdAt).getTime() > 2 * 60_000) return;
+      // o evento vai para o tenant inteiro; só toca para quem enxerga a conversa (número,
+      // empresa e departamento). Na lista em cache ela já passou pelo filtro da API; fora dela,
+      // o GET da conversa aplica o mesmo escopo (404 para quem não pode ver).
+      const naLista = qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] }).some(([, l]) => Array.isArray(l) && l.some((c) => c.id === m.conversationId));
+      if (!naLista && !qc.getQueryData(['conversation', m.conversationId])) {
+        try { await api(`/conversations/${m.conversationId}`); } catch { return; }
+      }
+      playMessageSound();
+    }
     // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
     const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: (cb) => cb({ token: getAccessToken() }), withCredentials: true, reconnectionDelayMax: 5000 });
     // token vencido na reconexão (aba parada, notebook que dormiu): o servidor derruba o socket e o
@@ -81,7 +105,9 @@ export function useRealtime() {
       if (reason === 'io server disconnect' && (await refresh())) socket.connect();
     });
     socket.on('message', (m: Message) => {
+      const nova = m.direction === 'in' && !tocadas.has(m.id);
       upsertMessageInCache(qc, m);
+      if (nova) avisarChegada(m);
       // a mensagem chegou: quem estava digitando terminou (o "parou" pode vir depois ou nunca)
       if (m.direction === 'in') qc.setQueryData<Typing>(['typing', m.conversationId], null);
     });

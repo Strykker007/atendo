@@ -7,6 +7,14 @@
 # ============================================================
 name: atendo-prod
 
+# ---- CPU: quem atende primeiro ----
+# Sem limite, qualquer serviço que disparasse (backup compactando, Evolution, consulta pesada)
+# tirava processador de todos — e a tela do cliente ficava vazia esperando a API.
+#  - `cpu_shares` só pesa na disputa: com CPU sobrando, todos usam o que quiserem. Na disputa,
+#    api e postgres (o que o cliente vê agora) ganham de worker, evolution e backup.
+#  - `cpus` é teto rígido, só onde esperar não prejudica ninguém. Valores ≤ 1 de propósito: o
+#    Docker recusa `cpus` maior que o nº de núcleos da máquina.
+
 x-api-image: &api-image
   build: { context: .., dockerfile: apps/api/Dockerfile }
   image: atendo/api:latest
@@ -26,12 +34,16 @@ services:
     <<: *api-image
     deploy: { replicas: 2 }
     expose: ["4000"]
+    cpu_shares: 2048
 
   worker:
     <<: *api-image
     command: ["node", "dist/src/worker"]
     deploy: { replicas: 2 }
     healthcheck: { disable: true }
+    # filas (envio, fluxos, campanhas) aguentam segundos de atraso; a tela do atendente não
+    cpu_shares: 512
+    cpus: 1.0
 
   web:
     build:
@@ -44,6 +56,7 @@ services:
     image: atendo/web:latest
     restart: unless-stopped
     expose: ["3000"]
+    cpu_shares: 1024
 
   # Proxy reverso com HTTPS automático (Let's Encrypt). Domínios vêm do .env.production.
   caddy:
@@ -67,6 +80,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
       POSTGRES_DB: atendo
     command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB"]
+    cpu_shares: 2048
     volumes: ["./volumes/postgres:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-atendo}"], interval: 5s, retries: 10 }
 
@@ -81,8 +95,14 @@ services:
     # versão FIXA (docs/04-providers-whatsapp.md#versão-da-evolution): `:latest` atualizava sozinha
     # a cada deploy — mudança de comportamento do cliente WhatsApp Web sem ninguém testar. Trocar
     # só depois de testar a nova em homologação.
-    image: evoapicloud/evolution-api:v2.3.7
+    # v2.3.7 + patch do nó <biz> no Baileys (infra/evolution): sem ele os botões nativos (Pix
+    # "Copiar chave Pix") são entregues mas o celular não mostra. A versão base fica no Dockerfile.
+    build: ./evolution
+    image: atendo/evolution-api:v2.3.7-biz
     restart: unless-stopped
+    # só prioridade, sem teto: ela recebe as mensagens de todos os números, e um teto atrasaria
+    # mensagem chegando
+    cpu_shares: 512
     depends_on:
       evolution-db: { condition: service_healthy }
       redis: { condition: service_started }
@@ -92,7 +112,10 @@ services:
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY}
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD}@evolution-db:5432/evolution
+      # pool do Prisma: o padrão (núcleos×2+1 = 9) esgotava com dezenas de instâncias — QR lido sincroniza
+      # centenas de contatos, a reconexão (stream 515) não achava conexão e o socket nascia zumbi
+      # (docs/04-providers-whatsapp.md#socket-zumbi). O Postgres dela aceita 100.
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD}@evolution-db:5432/evolution?connection_limit=40&pool_timeout=30
       DATABASE_CONNECTION_CLIENT_NAME: evolution
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://redis:6379/6
@@ -126,6 +149,10 @@ services:
   backup:
     build: ./backup
     restart: unless-stopped
+    # roda a cada 24h desde que o container subiu — pode cair em horário comercial. Compactar
+    # banco + mídia é o serviço que mais pode esperar: teto baixo e última na fila
+    cpu_shares: 128
+    cpus: 0.5
     depends_on:
       postgres: { condition: service_healthy }
       evolution-db: { condition: service_healthy }

@@ -8,6 +8,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { TextWithVars, type FlowVar } from '@/components/flows/TextWithVars';
 import { ConfirmDialog } from '@/components/ui/Confirm';
+import { PixKeysSection } from '@/components/settings/PixKeysSection';
 import { usePersistedState } from '@/lib/persisted';
 import { cn, downloadJson, safeFileName } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
@@ -313,6 +314,8 @@ export default function RespostasPage() {
         text={confirm?.kind === 'folder' ? `A pasta "${confirm.name}" e suas ${confirm.count} resposta(s) serão removidas.` : `A resposta "${confirm?.name}" será removida.`}
         onConfirm={async () => { if (!confirm) return; try { await (confirm.kind === 'folder' ? deleteFolder : deleteReply).mutateAsync(confirm.id); toast.ok('Excluído'); } catch (err) { toast.err(err); throw err; } }}
       />
+
+      <PixKeysSection podeEditar={podeEditar} />
     </PageShell>
   );
 }

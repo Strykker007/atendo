@@ -23,7 +23,7 @@ tenant_templates (global) ── tenants.templateId
 
 **tenants** — o cliente. `slug` único para URLs/identificação. `stripeCustomerId` / `asaasCustomerId` criados no primeiro checkout do gateway correspondente. Dados cadastrais (só o dono, tela Clientes → Editar): `legalName` (razão social), `document` (CPF/CNPJ, só dígitos), `contactName`, `billingEmail` (não é o login), `phone`, endereço (`zipCode`, `street`, `addressNumber`, `complement`, `district`, `city`, `state`) e `notes` — migração `20261031000000_tenant_profile`. `templateId` = modelo de perfil usado na criação (SetNull ao excluir o modelo) — migração `20261109000000_tenant_templates`.
 
-**tenant_templates** — modelos de perfil (verticais) do dono do sistema: `name` único, `description`, `isDefault` (no máximo um, garantido na API — migração `20261110000000_tenant_template_default`), `content` (JSON: perfis, respostas rápidas, fluxos em formato portável e `lossReasons` opcional). Só lido na criação do cliente — ver [20](20-modelos-de-perfil.md).
+**tenant_templates** — modelos de perfil (verticais) do dono do sistema: `name` único, `description`, `isDefault` (no máximo um, garantido na API — migração `20261110000000_tenant_template_default`), `content` (JSON: perfis, respostas rápidas, fluxos em formato portável, `lossReasons` e `lossReasonColors` opcionais). Só lido na criação do cliente — ver [20](20-modelos-de-perfil.md).
 
 **users** — `tenantId` null só para `super_admin`. `passwordHash` argon2id. `totpSecret` reservado para 2FA. `typingSpeed` (`slow`|`normal`|`fast`, padrão `normal`) = velocidade do "digitando…" simulado das mensagens que a pessoa não digitou ([Envio](envio.md#humanização)).
 
@@ -53,7 +53,7 @@ tenant_templates (global) ── tenants.templateId
 
 **conversation_events** — histórico do atendimento (auditoria). A conversa guarda só a foto do momento: dono atual, data do fechamento, último resultado. Isso não responde "quantos atendimentos a Ana fechou em março", e reabrir **limpa** o desfecho da conversa, então o resultado anterior deixava de existir.
 
-Cada linha é um fato: `claimed`, `transferred`, `released`, `closed`, `reopened`, `bot_paused` (`reason` = duração), `bot_resumed` (ator nulo = fim do tempo ou encerramento, dito em `reason`), `message_deleted` / `history_cleared` (`reason` diz o que e onde foi apagado, nunca o conteúdo — [Apagar mensagens](apagar-mensagens.md)), com `actorId` (nulo = automação), `targetId` (transferência), status de/para e o desfecho **copiado** — congelado ali, para que reabrir não mude o número de um mês já fechado. Linha gravada nunca é alterada nem apagada.
+Cada linha é um fato: `claimed`, `transferred`, `released`, `closed`, `reopened`, `bot_paused` (`reason` = duração), `bot_resumed` (ator nulo = fim do tempo ou encerramento, dito em `reason`), `message_deleted` / `history_cleared` (`reason` diz o que e onde foi apagado, nunca o conteúdo — [Apagar mensagens](apagar-mensagens.md)), com `actorId` (nulo = automação), `targetId` (transferência), status de/para e o desfecho **copiado** — congelado ali, para que reabrir não mude o número de um mês já fechado. No `closed`, `tagIds` = tags escolhidas no encerramento (opcionais; também somadas às tags da conversa) e `reason` = os nomes delas, congelados. Encerramento pelo atendente é sempre `won` ou `lost`; `none` sobra para o sistema (fluxo) e o histórico anterior. A migração `20261114000000_close_reasons_to_tags` preencheu `tagIds` dos "Não comprou" antigos cujo motivo bate com o nome de uma tag. Linha gravada nunca é alterada nem apagada.
 
 Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mesma conversa, e aquilo é outro atendimento, com outro dono e outro resultado. Índices por `(tenantId, type, createdAt)` e `(tenantId, actorId, createdAt)` = a base do relatório por atendente e período. Começa a valer da estreia em diante; o que aconteceu antes não foi gravado.
 
@@ -61,6 +61,7 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 **tags** / **conversation_tags** — N:N. Índice em `tagId` para o filtro por tag.
 - `tags.isKanban` (default `true`) faz da tag uma coluna do Kanban; `tags.position` é a ordem da coluna (tag nova entra no fim).
+- `tags.showOnClose` (default `false`) põe a tag na escolha do encerramento (Comprou / Não comprou). A migração marcou as fora do Kanban (os antigos motivos) e as já usadas em algum encerramento; o cliente novo nasce com as tags do modelo de perfil, cada uma com `isKanban`/`showOnClose` e cor ([20](20-modelos-de-perfil.md)); modelo sem `tags` = as de encerramento, marcadas.
 - `conversation_tags.isPrimary` marca a **tag principal** = etapa do atendimento no Kanban. No máximo uma por conversa, garantido em `ConversationsService.setPrimaryTag`/`setTags` com `SELECT … FOR UPDATE` na conversa (sem índice parcial: o Prisma 6 não o modela e o `migrate dev` seguinte o apagaria). Só tag com `isKanban` pode ser principal; desmarcar `isKanban` rebaixa as principais dela.
 
 **quick_reply_folders** / **quick_replies** — painel direito. `position` para ordenação manual (arrastar na tela `/respostas`); item novo entra no fim (`max + 1`). A listagem ordena por `position` e o chat (painel e menu `/`) herda essa ordem.
@@ -130,9 +131,9 @@ Em produção: `pnpm --filter @atendo/api prisma migrate deploy`.
 
 **tenant_settings** — fuso horário do cliente (usado pela agenda, pelos fluxos e pelos
 relatórios), chave `attendanceActive` (feriado/férias: vale a faixa Fechado sem mexer nos
-horários) + `attendanceChangedAt`, fluxos padrão (inclusive `wonFlowId`/`lostFlowId`/`noneFlowId`,
+horários) + `attendanceChangedAt`, fluxos padrão (inclusive `wonFlowId`/`lostFlowId`,
 o fluxo de encerramento por resultado) e **boas-vindas** (`welcomeEnabled`,
-`welcomeMessages`, `welcomeMode`, `welcomeCursor`); `quickReplyDelaySec` foi removido (a resposta rápida sai na hora — [Envio](envio.md#respostas-rápidas)), `lossReasonColors` (`JSONB`, `{motivo: "#rrggbb"}` — cor do botão de cada motivo no encerramento; motivo sem cor usa o vermelho padrão; migração `20261111000000_loss_reason_colors`) e `lossReasons` (`TEXT[]`, motivos de perda sugeridos no "Não comprou"; o `@default` é Preço, Prazo, Não respondeu, Comprou com concorrente, Fora da área, Só pesquisando — migração `20261029000500_loss_reasons`; cliente criado por `POST /tenants` nasce com `DEFAULT_LOSS_REASONS` de `packages/shared/src/loss-reasons.ts`: Não respondeu, Achou caro, Falta de estoque, Desistiu, Só pesquisando, Comprou em outro lugar, Vai vir na loja, Fora da área de entrega, Produto não comercializado, Outros).
+`welcomeMessages`, `welcomeMode`, `welcomeCursor`); `quickReplyDelaySec` foi removido (a resposta rápida sai na hora — [Envio](envio.md#respostas-rápidas)). `lossReasons`, `lossReasonColors` e `noneFlowId` saíram na migração `20261114000000_close_reasons_to_tags`: motivo de perda virou **tag** (cada motivo de cada cliente virou uma tag fora do Kanban, com a cor que tinha) e "Sem resultado" deixou de ser escolha no encerramento. Cliente criado por `POST /tenants` nasce com as tags de `DEFAULT_LOSS_REASONS` (`packages/shared/src/loss-reasons.ts`) ou as do modelo de perfil.
 
 **business_schedules** — quadros de horários ([Horários](horarios.md)): `name`, `timezone`,
 `isDefault` (um por cliente) e `config` (JSON `ScheduleConfig`: faixas, Fechado, grade semanal,
@@ -150,6 +151,8 @@ resposta já foi enviada (uma vez por conversa a cada período). Substituiu `bus
 **contact_attributes** — campos livres da ficha de **um** contato (`label`, `type`
 `ContactAttributeType`: text, number, date, `value` em texto, `position`). Cada cliente tem os
 seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos-personalizados.md).
+
+**pix_keys** — chaves Pix da empresa (`title`, `keyType` em `PIX_KEY_TYPES`, `key` normalizada pelo tipo, `holderName`, `position`). Enviadas pelo painel do chat como cartão "Copiar chave Pix" (até 30 por empresa).
 
 **global_variables** — variáveis da empresa (`key` única por tenant, minúsculas/números/`_`; `label`; `value`). Entram no envio como `{{global.<key>}}` e `{{<key>}}`. Ver [Variáveis](variaveis.md).
 

@@ -27,7 +27,10 @@ services:
     # versão FIXA (docs/04-providers-whatsapp.md#versão-da-evolution): `:latest` atualizava sozinha
     # a cada deploy — mudança de comportamento do cliente WhatsApp Web sem ninguém testar. Trocar
     # só depois de testar a nova em homologação.
-    image: evoapicloud/evolution-api:v2.3.7
+    # v2.3.7 + patch do nó <biz> no Baileys (infra/evolution): sem ele os botões nativos (Pix
+    # "Copiar chave Pix") são entregues mas o celular não mostra. A versão base fica no Dockerfile.
+    build: ./evolution
+    image: atendo/evolution-api:v2.3.7-biz
     restart: unless-stopped
     depends_on:
       evolution-db: { condition: service_healthy }
@@ -38,7 +41,10 @@ services:
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-change-me-evolution-key}
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://evolution:evolution@evolution-db:5432/evolution
+      # pool do Prisma: o padrão (núcleos×2+1 = 9) esgotava com dezenas de instâncias — QR lido sincroniza
+      # centenas de contatos, a reconexão (stream 515) não achava conexão e o socket nascia zumbi
+      # (docs/04-providers-whatsapp.md#socket-zumbi). O Postgres dela aceita 100.
+      DATABASE_CONNECTION_URI: postgresql://evolution:evolution@evolution-db:5432/evolution?connection_limit=40&pool_timeout=30
       DATABASE_CONNECTION_CLIENT_NAME: evolution
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://redis:6379/6

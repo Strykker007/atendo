@@ -19,13 +19,40 @@ export interface TemplateProfile {
   permissions: Permission[];
 }
 
+/** Tag com que o cliente nasce: as mesmas opções da tela de Tags. */
+export interface TemplateTag {
+  name: string;
+  /** `#rrggbb`; sem ela, a cor padrão de tag */
+  color?: string;
+  /** vira coluna do Kanban (etapa do funil) */
+  isKanban?: boolean;
+  /** aparece para escolha no encerramento (Comprou / Não comprou) */
+  showOnClose?: boolean;
+}
+
+/** teto de tags num modelo */
+export const TEMPLATE_TAGS_MAX = 200;
+
 export interface TemplateContent {
   /** "Gerente" e "Atendente" ajustam os perfis padrão; outros nomes viram perfis extras. "Administrador" é sempre tudo. */
   profiles: TemplateProfile[];
   quickReplies: PortableQuickReply[];
   flows: PortableFlow[];
-  /** Motivos de não compra ("Não comprou"). Ausente = `DEFAULT_LOSS_REASONS` do catálogo. */
+  /**
+   * Tags com que o cliente nasce, na ordem (é a ordem das colunas do Kanban). Ausente = as do
+   * formato antigo abaixo (`lossReasons`) ou, sem elas, `DEFAULT_LOSS_REASONS` como tags de
+   * encerramento. Presente, as duas abaixo são ignoradas (e o editor não as grava mais).
+   */
+  tags?: TemplateTag[];
+  /**
+   * Formato antigo (só leitura):
+   * tags de encerramento fora do Kanban ("Não respondeu", "Achou caro"…), do tempo
+   * em que motivo de perda era lista à parte. Arquivos e modelos antigos continuam valendo:
+   * viram `tags` com `showOnClose` (`provisionedTags`).
+   */
   lossReasons?: string[];
+  /** Cor (`#rrggbb`) de cada uma dessas tags, pelo nome. Ausente = cor padrão. */
+  lossReasonColors?: Record<string, string>;
 }
 
 /** O arquivo `.json` de importar/exportar. */
@@ -78,18 +105,61 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
   let lossReasons: string[] | undefined;
   if (o.lossReasons !== undefined) {
     if (!Array.isArray(o.lossReasons)) throw new Error('"lossReasons" deve ser uma lista.');
-    // mesma limpeza da Configuração do cliente: sem vazio, sem repetido (ignorando maiúsculas)
-    lossReasons = o.lossReasons.map((m) => str(m, 200)).filter((m, i, l) => m && l.findIndex((x) => x.toLowerCase() === m.toLowerCase()) === i);
-    if (lossReasons.length > LOSS_REASONS_MAX) throw new Error(`No máximo ${LOSS_REASONS_MAX} motivos de não compra.`);
+    // viram tags: nome de tag tem 40 caracteres; sem vazio, sem repetido (ignorando maiúsculas)
+    lossReasons = o.lossReasons.map((m) => str(m, 40)).filter((m, i, l) => m && l.findIndex((x) => x.toLowerCase() === m.toLowerCase()) === i);
+    if (lossReasons.length > LOSS_REASONS_MAX) throw new Error(`No máximo ${LOSS_REASONS_MAX} tags de encerramento.`);
   }
 
-  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }) };
+  let lossReasonColors: Record<string, string> | undefined;
+  if (o.lossReasonColors !== undefined) {
+    if (!o.lossReasonColors || typeof o.lossReasonColors !== 'object' || Array.isArray(o.lossReasonColors)) throw new Error('"lossReasonColors" deve ser um objeto.');
+    // só `#rrggbb`, e só de tag que está na lista (a do modelo ou, sem ela, a do catálogo) —
+    // cor de tag removida não fica órfã
+    const motivos = lossReasons ?? [...DEFAULT_LOSS_REASONS];
+    const cores = Object.entries(o.lossReasonColors as Record<string, unknown>);
+    if (cores.some(([, v]) => typeof v !== 'string' || !/^#[0-9a-f]{6}$/i.test(v))) throw new Error('Cor de tag inválida (use #rrggbb).');
+    lossReasonColors = Object.fromEntries(cores.filter(([k]) => motivos.includes(k)).map(([k, v]) => [k, (v as string).toLowerCase()]));
+  }
+
+  let tags: TemplateTag[] | undefined;
+  if (o.tags !== undefined) {
+    if (!Array.isArray(o.tags)) throw new Error('"tags" deve ser uma lista.');
+    tags = [];
+    for (const t of o.tags as Partial<TemplateTag>[]) {
+      const name = str(t?.name, 40);
+      // sem vazio e sem repetido (ignorando maiúsculas): o cliente não pode ter duas iguais
+      if (!name || tags.some((x) => x.name.toLowerCase() === name.toLowerCase())) continue;
+      if (t.color !== undefined && (typeof t.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(t.color))) throw new Error(`Cor da tag "${name}" inválida (use #rrggbb).`);
+      tags.push({ name, ...(t.color && { color: t.color.toLowerCase() }), isKanban: t.isKanban === true, showOnClose: t.showOnClose === true });
+    }
+    if (tags.length > TEMPLATE_TAGS_MAX) throw new Error(`No máximo ${TEMPLATE_TAGS_MAX} tags no modelo.`);
+  }
+
+  // com `tags`, o formato antigo sai: uma fonte só do que o cliente recebe
+  if (tags) return { profiles, quickReplies, flows, tags };
+  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }) };
 }
 
-export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.lossReasons && { lossReasons: f.lossReasons }) });
+export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }) });
 
-/** Motivos de não compra com que o cliente nasce. */
+/**
+ * Tags com que o cliente nasce, na ordem: as do modelo; em modelo antigo, a lista de motivos
+ * (ou a do catálogo) como tags de encerramento fora do Kanban, com as cores que tinham.
+ */
+export function provisionedTags(c: TemplateContent | null): TemplateTag[] {
+  if (c?.tags) return c.tags;
+  const cores = provisionedLossReasonColors(c);
+  return provisionedLossReasons(c).map((name) => ({ name, ...(cores[name] && { color: cores[name] }), isKanban: false, showOnClose: true }));
+}
+
+/** Tags de encerramento com que o cliente nasce. */
 export const provisionedLossReasons = (c: TemplateContent | null) => c?.lossReasons ?? [...DEFAULT_LOSS_REASONS];
+
+/** Cores dessas tags — só as de tags que ele recebe. */
+export const provisionedLossReasonColors = (c: TemplateContent | null) => {
+  const motivos = provisionedLossReasons(c);
+  return Object.fromEntries(Object.entries(c?.lossReasonColors ?? {}).filter(([k]) => motivos.includes(k)));
+};
 
 /**
  * Perfis que o cliente novo recebe: os três padrão sempre (Administrador com tudo; Gerente e
@@ -111,4 +181,4 @@ export function provisionedProfiles(content: TemplateContent | null): { name: st
 }
 
 /** Resumo para a listagem do Super Admin. */
-export const templateSummary = (c: TemplateContent) => ({ profiles: c.profiles.length, quickReplies: c.quickReplies.length, flows: c.flows.length, lossReasons: c.lossReasons?.length ?? null });
+export const templateSummary = (c: TemplateContent) => ({ profiles: c.profiles.length, quickReplies: c.quickReplies.length, flows: c.flows.length, tags: provisionedTags(c).length });

@@ -61,6 +61,20 @@ export class NumbersService {
   private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
+   * Vaga para o reinício automático da sessão (socket zumbi): no máximo um por número a cada
+   * 2 min, entre todos os workers. Cada envio que falha com "Connection Closed" pedia o seu, e
+   * dezenas em paralelo — com o restart que de fato recria o socket (infra/evolution), isso
+   * abriria vários sockets para a mesma sessão, e o WhatsApp derruba os duplicados.
+   */
+  async claimRestart(numberId: string): Promise<boolean> {
+    try {
+      return (await this.redis.set(`wa:restart:${numberId}`, '1', 'PX', 120_000, 'NX')) === 'OK';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Conta online enquanto há atividade (envio, "digitando"), offline ~45 s depois da última —
    * como alguém com o WhatsApp Web aberto. Sem isto o WhatsApp não mostra "digitando" (a instância
    * conecta offline), e o oposto — `alwaysOnline` — deixaria o número online 24 h, padrão de robô.

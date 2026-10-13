@@ -1,7 +1,7 @@
 'use client';
 /** Fluxos de automação. */
 'use client';
-import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
@@ -69,7 +69,12 @@ export interface ReportOverview {
   series: Record<'byDay' | 'byAgent' | 'byOrigin' | 'byCampaign' | 'byTag' | 'byStatus', { label: string; value: number }[]>;
   /** vendas do período (tabela `sales`): total em R$, quantidade, ticket médio e por dia/atendente */
   sales: { total: number; count: number; avgTicket: number | null; byDay: { label: string; value: number }[]; byAgent: { label: string; value: number; count: number; avgTicket: number }[] };
-  /** "Não comprou" por motivo, no período do encerramento */
+  /** "Não comprou" por tag do encerramento, no período */
   lostReasons: { label: string; value: number }[];
 }
-export const useReportOverview = (from: string, to: string) => useQuery({ queryKey: ['report-overview', from, to], queryFn: () => api<ReportOverview>(`/reports/overview?from=${from}&to=${to}`) });
+/** Filtros globais da tela de Relatórios. `from`/`to` são instantes ISO (início do dia local; `to` exclusivo). */
+export interface ReportOverviewFilters { from: string; to: string; tagIds?: string[]; agentId?: string }
+export const useReportOverview = (f: ReportOverviewFilters) => {
+  const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }), ...(f.agentId && { agentId: f.agentId }) });
+  return useQuery({ queryKey: ['report-overview', qs.toString()], queryFn: () => api<ReportOverview>(`/reports/overview?${qs}`), placeholderData: keepPreviousData });
+};

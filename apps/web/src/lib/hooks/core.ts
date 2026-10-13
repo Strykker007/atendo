@@ -9,9 +9,9 @@ import { api, ApiError, onAccessToken } from '../api';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
-export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number }
+export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number; /** aparece para escolha no encerramento */ showOnClose?: boolean }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** conectado, mas parou de receber (chaves corrompidas) — ler o QR de novo */ receiveStalledAt?: string | null; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -62,7 +62,7 @@ export interface Message {
   editedAt?: string | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
-export type SendInput = ({ type: 'text'; text: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
+export type SendInput = ({ type: 'text'; text: string } | { type: 'text'; /** chave Pix cadastrada: a API monta o cartão */ pixKeyId: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
   /** responder citando uma mensagem (o id dela no provider) */
   quotedExternalId?: string;
   /**
@@ -461,7 +461,7 @@ export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'docume
 export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; reason?: string; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: (_, v) => {
       // sai na hora das listas de outro status (sem esperar o refetch) e a aberta já vê o novo status
       for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
@@ -478,7 +478,7 @@ export const useSetStatus = () => {
 export const useBulkClose = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { ids: string[]; outcome?: ConversationOutcome; reason?: string }) =>
+    mutationFn: (b: { ids: string[]; outcome: ConversationOutcome; tagIds?: string[] }) =>
       api<{ closed: number; ignored: number }>('/conversations/bulk/close', { method: 'POST', body: JSON.stringify(b) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conversations'] });

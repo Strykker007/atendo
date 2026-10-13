@@ -1,7 +1,7 @@
 # 20 — Modelos de perfil (verticais)
 
 Um **modelo de perfil** (Farmácia, Clínica…) é o pacote com que um cliente novo já nasce:
-permissões padrão dos perfis, respostas rápidas, fluxos e motivos de não compra. Só o dono do
+permissões padrão dos perfis, respostas rápidas, fluxos e tags (cor, Kanban, encerramento). Só o dono do
 sistema mexe (tela **Clientes → Modelos de perfil → Editar**, rota `/clientes/modelos/:id`).
 
 Um modelo pode ser marcado como **padrão** (`isDefault`, no máximo um): ele já vem escolhido no
@@ -13,8 +13,10 @@ O formulário **Novo cliente** tem `Modelo de perfil: [ Farmácia (padrão) | Cl
 Na API: `templateId` ausente = modelo padrão (se houver); `null` = nenhum.
 `POST /tenants` cria, **numa única transação**:
 
-1. cliente + assinatura + configuração — motivos de não compra do modelo (`lossReasons`) ou,
-   sem lista no modelo, `DEFAULT_LOSS_REASONS` do catálogo;
+1. cliente + assinatura + configuração + **tags** (`provisionedTags`): as de `tags` do modelo, na
+   ordem dele (é a das colunas do Kanban), cada uma com cor, `isKanban` e `showOnClose`. Modelo
+   sem `tags` (formato antigo): `lossReasons` — ou, sem ela, `DEFAULT_LOSS_REASONS` do catálogo —
+   como tags de encerramento **fora do Kanban** com a cor de `lossReasonColors`;
 2. perfis de acesso (`access_profiles`, ver [18](18-perfis-de-acesso.md)):
    - **Administrador** — sempre todas as permissões (o modelo não restringe o admin: sem
      `profiles.manage` o cliente ficaria sem saída);
@@ -45,8 +47,13 @@ Modelo com mais respostas do que o `maxQuickReplies` do plano é recusado (400) 
 - **Fluxos** — não são editados no modelo (o editor de fluxos depende de etiquetas, números e
   departamentos reais): monte num cliente (pode ser um de testes), exporte em Fluxos e importe
   aqui; mesmo nome substitui. Remover também é por aqui.
-- **Motivos de não compra** — adicionar, reordenar, remover; "Usar os do catálogo" volta a
-  seguir `DEFAULT_LOSS_REASONS` (máx. 30, sem repetidos).
+- **Tags** — as mesmas opções da tela de Tags do cliente: cor (bolinha → paleta ou cor livre),
+  interruptores **Kanban** e **Encerramento** por linha, subir/descer (ordem das colunas),
+  remover; selecionar todas com Mostrar/Tirar do encerramento, Pôr/Tirar do Kanban, Cor e
+  Remover; adicionar várias de uma vez (uma por linha ou `;`, com cores variadas para começar e
+  as duas opções para as novas). Sem lista própria, mostra as de encerramento do catálogo (ou do
+  formato antigo do modelo) e a primeira edição as copia para `tags`; "Voltar às do catálogo"
+  desfaz. Máx. 200, sem repetidos (ignorando maiúsculas), nome até 40 caracteres.
 
 Salva tudo de uma vez (`PATCH /tenant-templates/:id` com `content`); vale para os próximos
 clientes.
@@ -73,10 +80,21 @@ Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido 
   ],
   "quickReplies": [ { "atendo": "quick-reply", "version": 1, "folder": "Entrega", "title": "Prazo", "body": "…" } ],
   "flows": [ { "atendo": "flow", "version": 1, "name": "Boas-vindas", "trigger": {}, "definition": {} } ],
-  "lossReasons": ["Não respondeu", "Achou caro", "Receita vencida", "Outros"]
+  "tags": [
+    { "name": "Novo lead", "color": "#0ea5e9", "isKanban": true, "showOnClose": false },
+    { "name": "Achou caro", "color": "#f59e0b", "isKanban": false, "showOnClose": true },
+    { "name": "Receita vencida", "color": "#dc2626", "isKanban": false, "showOnClose": true }
+  ]
 }
 ```
 
+- `tags`: com que o cliente nasce, na ordem. `color` opcional (`#rrggbb`; inválida recusa o
+  arquivo); `isKanban`/`showOnClose` ausentes = `false`; repetida (ignorando maiúsculas) é
+  descartada.
+
+- `lossReasons` / `lossReasonColors` (formato antigo, só leitura): `.json` e modelos de antes de
+  `tags` continuam valendo — viram tags de encerramento fora do Kanban com a cor de cada uma.
+  Com `tags` presente, as duas são ignoradas, e salvar pelo editor grava só `tags`.
 - `quickReplies` e `flows` são exatamente os itens das exportações de Respostas e Fluxos
   (formato portável — `quick-replies/portable.ts` e `packages/shared/src/portable.ts`): sem ids,
   etiquetas por nome, sem anexos.
@@ -89,7 +107,7 @@ Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido 
 
 O jeito prático é **Gerar de um cliente**: escolhe um cliente já redondo e o sistema tira dele
 os perfis que ele ajustou (perfil padrão nunca editado fica de fora), as respostas, os fluxos e
-os motivos de não compra.
+**todas as tags** na ordem do Kanban, com cor, Kanban e encerramento (até 200).
 Depois **Exportar** baixa o `.json`, **Carregar JSON** substitui o conteúdo de um modelo
 existente e **Importar JSON** cria um modelo novo.
 
@@ -97,8 +115,8 @@ existente e **Importar JSON** cria um modelo novo.
 
 | Método | Rota | O quê |
 |---|---|---|
-| GET | `/tenant-templates` | Lista: `{id, name, description, isDefault, updatedAt, tenants, profiles, quickReplies, flows, lossReasons}` (contagens; `lossReasons` null = catálogo) |
-| GET | `/tenant-templates/:id` | Para o editor: `{id, name, description, isDefault, tenants, content, effectiveLossReasons}` |
+| GET | `/tenant-templates` | Lista: `{id, name, description, isDefault, updatedAt, tenants, profiles, quickReplies, flows, tags}` (contagens; `tags` = quantas o cliente recebe) |
+| GET | `/tenant-templates/:id` | Para o editor: `{id, name, description, isDefault, tenants, content, effectiveTags}` (`effectiveTags` = o que o cliente recebe hoje, inclusive em modelo sem `tags`) |
 | POST | `/tenant-templates` | `{name, description?}` — modelo vazio |
 | GET | `/tenant-templates/:id/export` | O arquivo `.json` |
 | POST | `/tenant-templates/import` | Novo modelo do arquivo (`{portable}` ou o arquivo cru). Nome repetido vira "(cópia)" |

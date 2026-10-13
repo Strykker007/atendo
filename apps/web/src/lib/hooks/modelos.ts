@@ -4,14 +4,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Permission } from '@atendo/shared';
 import { api } from '../api';
 
-export interface TenantTemplateRow { id: string; name: string; description: string | null; isDefault: boolean; updatedAt: string; tenants: number; profiles: number; quickReplies: number; flows: number; lossReasons: number | null }
+export interface TenantTemplateRow { id: string; name: string; description: string | null; isDefault: boolean; updatedAt: string; tenants: number; profiles: number; quickReplies: number; flows: number; tags: number }
 
 /** Conteúdo do modelo (apps/api → tenants/tenant-template.ts). Fluxos vão no formato portável, sem edição aqui. */
 export interface TemplateProfile { name: string; description?: string; permissions: Permission[] }
 export interface TemplateQuickReply { atendo: 'quick-reply'; version: number; folder: string; title: string; body: string }
 export interface TemplateFlow { atendo: 'flow'; version: number; name: string; description?: string; trigger: unknown; definition: unknown }
-export interface TemplateContent { profiles: TemplateProfile[]; quickReplies: TemplateQuickReply[]; flows: TemplateFlow[]; lossReasons?: string[] }
-export interface TenantTemplateDetail { id: string; name: string; description: string | null; isDefault: boolean; tenants: number; content: TemplateContent; effectiveLossReasons: string[] }
+/** tag com que o cliente nasce — as mesmas opções da tela de Tags */
+export interface TemplateTag { name: string; color?: string; isKanban?: boolean; showOnClose?: boolean }
+export interface TemplateContent { profiles: TemplateProfile[]; quickReplies: TemplateQuickReply[]; flows: TemplateFlow[]; /** ausente = as de encerramento do formato antigo / catálogo (`effectiveTags`) */ tags?: TemplateTag[]; /** formato antigo, só leitura */ lossReasons?: string[]; /** cor `#rrggbb` do botão de cada motivo */ lossReasonColors?: Record<string, string> }
+export interface TenantTemplateDetail { id: string; name: string; description: string | null; isDefault: boolean; tenants: number; content: TemplateContent; /** o que o cliente recebe hoje (com `tags` ausente, vem do formato antigo ou do catálogo) */ effectiveTags: TemplateTag[] }
 
 const inv = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['tenant-templates'] });
 

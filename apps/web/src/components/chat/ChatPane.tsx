@@ -415,7 +415,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     if (!rapida) return;
     setRapida(null);
     const r = rapida;
-    const input = r.media
+    const input = r.pixKeyId
+      ? { type: 'text', pixKeyId: r.pixKeyId } as const
+      : r.media
       ? { type: mediaTypeOf(r.media.mimeType), mediaKey: r.media.key, text: assinar(r.text) || undefined, media: { url: r.media.url, mimeType: r.media.mimeType, fileName: r.media.fileName } } as const
       : { type: 'text', text: assinar(r.text) } as const;
     // resposta rápida ninguém digitou: "digitando…" simulado pelo tamanho do texto

@@ -30,17 +30,12 @@ class SettingsDto {
   /** padrão por desfecho do encerramento; pré-seleciona no modal e ganha de `onCloseFlowId` */
   @IsOptional() @IsUUID() wonFlowId?: string | null;
   @IsOptional() @IsUUID() lostFlowId?: string | null;
-  @IsOptional() @IsUUID() noneFlowId?: string | null;
   @IsOptional() @IsUUID() defaultFlowId?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(720) defaultFlowInactivityHours?: number;
   /** boas-vindas: cada uma é uma lista de mensagens no formato do Conteúdo */
   @IsOptional() @IsArray() @ArrayMaxSize(20) welcomeMessages?: WelcomeMessage[];
   @IsOptional() @IsIn(['random', 'sequential']) welcomeMode?: WelcomeMode;
   @IsOptional() @IsBoolean() welcomeEnabled?: boolean;
-  /** motivos de perda sugeridos no encerramento */
-  @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(200, { each: true }) lossReasons?: string[];
-  /** cor de cada motivo (`#rrggbb`), pelo texto do motivo */
-  @IsOptional() @IsObject() lossReasonColors?: Record<string, string>;
 }
 class ScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(60) name?: string;
@@ -79,16 +74,6 @@ export class TenantSettingsController {
   @RequirePermission('settings.manage')
   update(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     if (dto.timezone && !isTimezone(dto.timezone)) throw new BadRequestException('Fuso horário inválido.');
-    // sem vazio e sem repetido (ignorando maiúsculas): repetido viraria duas barras iguais no relatório
-    if (dto.lossReasons) dto.lossReasons = dto.lossReasons.map((m) => m.trim()).filter((m, i, l) => m && l.findIndex((x) => x.toLowerCase() === m.toLowerCase()) === i);
-    if (dto.lossReasonColors) {
-      const cores = Object.entries(dto.lossReasonColors);
-      if (cores.length > 30 || cores.some(([k, v]) => typeof k !== 'string' || k.length > 200 || typeof v !== 'string' || !/^#[0-9a-f]{6}$/i.test(v))) {
-        throw new BadRequestException('Cor de motivo inválida (use #rrggbb).');
-      }
-      // indo junto com a lista: cor de motivo que saiu (removido/renomeado) não fica sobrando
-      if (dto.lossReasons) dto.lossReasonColors = Object.fromEntries(cores.filter(([k]) => dto.lossReasons!.includes(k)));
-    }
     if (dto.welcomeMessages) {
       const errors = dto.welcomeMessages.flatMap((w, i) => {
         if (!w || typeof w.id !== 'string' || !Array.isArray(w.items) || !w.items.length) return [`Boas-vindas ${i + 1}: adicione ao menos uma mensagem.`];

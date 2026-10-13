@@ -1,9 +1,10 @@
 'use client';
 import { useState } from 'react';
-import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose } from 'lucide-react';
+import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose, QrCode } from 'lucide-react';
+import { PIX_KEY_TYPE_LABEL } from '@atendo/shared';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { type QuickReplyItem, useFlows, useHasFeature, useActiveRun } from '@/lib/hooks';
+import { type QuickReplyItem, type PixKey, useFlows, useHasFeature, useActiveRun, usePixKeys } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { useQuickReplies, useConversation, useMe, useContactAttributes } from '@/lib/hooks';
@@ -148,6 +149,34 @@ function FlowsTab() {
   );
 }
 
+/** id da pasta de Pix no estado das pastas fechadas */
+const PIX_FOLDER = 'pix';
+
+/**
+ * Chaves Pix da empresa: clique envia o cartão com o botão "Copiar chave Pix" (a API monta;
+ * na API oficial sai como texto). Cadastro em Respostas rápidas.
+ */
+function PixFolder({ keys, aberta, alternar }: { keys: PixKey[]; aberta: boolean; alternar: () => void }) {
+  if (keys.length === 0) return null;
+  const enviar = (k: PixKey) => window.dispatchEvent(new CustomEvent<QuickReplyEventDetail>(QUICK_REPLY_EVENT, {
+    detail: { title: k.title, text: `*${k.title}*\nTipo: ${PIX_KEY_TYPE_LABEL[k.keyType]}\nChave Pix:\n${k.key}`, pixKeyId: k.id },
+  }));
+  return (
+    <div>
+      <button onClick={alternar} className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-field">
+        <QrCode size={14} className="text-ok shrink-0" />
+        <span className="flex-1 text-left truncate">Pix</span>
+        <span className="text-[11px] text-faint tnum">{keys.length}</span>
+      </button>
+      {aberta && keys.map((k) => (
+        <button key={k.id} onClick={() => enviar(k)} title={`${PIX_KEY_TYPE_LABEL[k.keyType]}: ${k.key}`} className="w-full text-left pl-8 pr-3 py-1 hover:bg-accent-soft border-l-2 border-transparent hover:border-accent">
+          <div className="text-[12.5px] font-medium truncate">{k.title}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Ícone do tipo de anexo, para o atendente saber o que vai mandar antes de clicar. */
 function MediaIcon({ type }: { type: NonNullable<QuickReplyItem['mediaType']> }) {
   const props = { size: 12, className: 'text-accent shrink-0' };
@@ -159,9 +188,10 @@ function MediaIcon({ type }: { type: NonNullable<QuickReplyItem['mediaType']> })
 
 function RepliesTab() {
   const folders = useQuickReplies();
-  // quais pastas ficaram abertas. Antes era estado local: sair da aba e voltar fechava tudo,
-  // e quem estava procurando uma resposta perdia o lugar
-  const [abertas, setAbertas] = usePersistedState<string[]>('pastas-respostas', []);
+  // pastas começam abertas; guarda só as que o atendente fechou (pasta nova também nasce aberta).
+  // Persistido: sair da aba e voltar não pode mudar o que ele deixou
+  const [fechadas, setFechadas] = usePersistedState<string[]>('pastas-respostas-fechadas', []);
+  const pix = usePixKeys();
   const [q, setQ] = useState('');
 
   const me = useMe();
@@ -192,11 +222,11 @@ function RepliesTab() {
           const replies = f.replies.filter((r) => !q || match(r.title) || match(r.body));
           if (q && replies.length === 0) return null;
           // buscando, tudo abre: esconder resultado atrás de pasta fechada não ajuda ninguém
-          const isOpen = q ? true : abertas.includes(f.id);
+          const isOpen = q ? true : !fechadas.includes(f.id);
           return (
             <div key={f.id}>
               <button
-                onClick={() => setAbertas((a) => (a.includes(f.id) ? a.filter((x) => x !== f.id) : [...a, f.id]))}
+                onClick={() => setFechadas((a) => (a.includes(f.id) ? a.filter((x) => x !== f.id) : [...a, f.id]))}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-field"
               >
                 {isOpen ? <FolderOpen size={14} className="text-warn shrink-0" /> : <Folder size={14} className="text-warn shrink-0" />}
@@ -220,7 +250,8 @@ function RepliesTab() {
             </div>
           );
         })}
-        {folders.data?.length === 0 && <p className="p-6 text-sm text-faint text-center">Nenhuma resposta ainda. <Link href="/respostas" className="text-accent underline">Criar</Link></p>}
+        <PixFolder keys={(pix.data ?? []).filter((k) => !q || match(k.title) || match(k.key))} aberta={!!q || !fechadas.includes(PIX_FOLDER)} alternar={() => setFechadas((a) => (a.includes(PIX_FOLDER) ? a.filter((x) => x !== PIX_FOLDER) : [...a, PIX_FOLDER]))} />
+        {folders.data?.length === 0 && !pix.data?.length && <p className="p-6 text-sm text-faint text-center">Nenhuma resposta ainda. <Link href="/respostas" className="text-accent underline">Criar</Link></p>}
       </div>
     </>
   );

@@ -9,20 +9,28 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
+// datas no fuso do navegador: `toISOString` dava o dia UTC, e depois das 21h "hoje" já era amanhã
+const pad = (n: number) => String(n).padStart(2, '0');
+const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const shift = (dia: string, n: number) => { const d = new Date(`${dia}T00:00:00`); d.setDate(d.getDate() + n); return iso(d); };
+/** "AAAA-MM-DD" → instante do início desse dia no fuso local. É o que vai para a API. */
+const inicioDoDia = (dia: string) => new Date(`${dia}T00:00:00`).toISOString();
+const hoje = () => iso(new Date());
+/** [início, fim exclusivo] em "AAAA-MM-DD" */
 const PRESETS: { label: string; range: () => [string, string] }[] = [
-  { label: '7 dias', range: () => [iso(addDays(new Date(), -6)), iso(addDays(new Date(), 1))] },
-  { label: '30 dias', range: () => [iso(addDays(new Date(), -29)), iso(addDays(new Date(), 1))] },
+  { label: 'Hoje', range: () => [hoje(), shift(hoje(), 1)] },
+  { label: 'Ontem', range: () => [shift(hoje(), -1), hoje()] },
+  { label: '7 dias', range: () => [shift(hoje(), -6), shift(hoje(), 1)] },
+  { label: '30 dias', range: () => [shift(hoje(), -29), shift(hoje(), 1)] },
   { label: 'Este mês', range: () => { const n = new Date(); return [iso(new Date(n.getFullYear(), n.getMonth(), 1)), iso(new Date(n.getFullYear(), n.getMonth() + 1, 1))]; } },
   { label: 'Mês passado', range: () => { const n = new Date(); return [iso(new Date(n.getFullYear(), n.getMonth() - 1, 1)), iso(new Date(n.getFullYear(), n.getMonth(), 1))]; } },
 ];
-const DEFAULT: ReportDefinition = { metric: 'conversations', groupBy: 'day', from: PRESETS[1].range()[0], to: PRESETS[1].range()[1], filters: {}, chart: 'line' };
+const DEFAULT: ReportDefinition = { metric: 'conversations', groupBy: 'day', from: PRESETS[3].range()[0], to: PRESETS[3].range()[1], filters: {}, chart: 'line' };
 const TIME_GROUPS = ['day', 'week', 'month'];
 
 export default function RelatoriosPage() {
@@ -30,9 +38,15 @@ export default function RelatoriosPage() {
   const podeVer = useCan('reports.view');
   const [def, setDef] = useState<ReportDefinition>(DEFAULT);
   const [result, setResult] = useState<ReportResult | null>(null);
-  const [range, setRange] = useState<[string, string]>(PRESETS[1].range());
+  // abre no dia de hoje; o calendário cobre qualquer período
+  const [range, setRange] = useState<[string, string]>(PRESETS[0].range());
+  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [agentId, setAgentId] = useState('');
   const [showBuilder, setShowBuilder] = useState(false);
-  const overview = useReportOverview(range[0], range[1]);
+  const periodo = { from: inicioDoDia(range[0]), to: inicioDoDia(range[1]) };
+  const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined };
+  const overview = useReportOverview({ ...periodo, ...filtros });
+  const agents = useAgents();
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<SavedReport | null>(null);
@@ -82,12 +96,32 @@ export default function RelatoriosPage() {
       <PageHeader
         title="Relatórios"
         subtitle="Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais."
-        action={
-          <div className="flex flex-wrap gap-1">
-            {PRESETS.map((p) => { const r = p.range(); const on = r[0] === range[0] && r[1] === range[1]; return <button key={p.label} onClick={() => setRange(r)} className={cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>{p.label}</button>; })}
-          </div>
-        }
       />
+
+      {/* ---------- Filtros da tela inteira ---------- */}
+      <section className="rounded-2xl bg-panel border border-line p-3 space-y-3">
+        <div className="flex flex-wrap gap-1">
+          {PRESETS.map((p) => { const r = p.range(); const on = r[0] === range[0] && r[1] === range[1]; return <button key={p.label} type="button" onClick={() => setRange(r)} className={cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>{p.label}</button>; })}
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="Data inicial">
+            <input type="date" className={inputCls} value={range[0]} max={shift(range[1], -1)} onChange={(e) => e.target.value && setRange([e.target.value, range[1]])} />
+          </Field>
+          {/* a final é inclusiva na tela; a API recebe o dia seguinte (fim exclusivo) */}
+          <Field label="Data final">
+            <input type="date" className={inputCls} value={shift(range[1], -1)} min={range[0]} onChange={(e) => e.target.value && setRange([range[0], shift(e.target.value, 1)])} />
+          </Field>
+          <Field label="Tag">
+            <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
+          </Field>
+          <Field label="Consultor">
+            <select className={inputCls} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
+              <option value="">Todos os consultores</option>
+              {agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
+            </select>
+          </Field>
+        </div>
+      </section>
 
       {/* ---------- Visão pronta ---------- */}
       {overview.isLoading && <SkeletonCards count={4} />}
@@ -110,7 +144,7 @@ export default function RelatoriosPage() {
           </div>
 
           <Vendas overview={overview.data} range={range} />
-          <SalesDetails />
+          <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} />
         </>
       )}
 
@@ -169,6 +203,11 @@ export default function RelatoriosPage() {
               </select>
             </Field>
             <Field label="Tags"><TagPicker tags={tags.data ?? []} value={def.filters.tagIds ?? []} onChange={(ids) => setFilter('tagIds', ids.length ? ids : undefined)} placeholder="Qualquer tag" /></Field>
+            <Field label="Consultor">
+              <select className={inputCls} value={def.filters.agentId ?? ''} onChange={(e) => setFilter('agentId', e.target.value || undefined)}>
+                <option value="">Todos</option>{agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
+              </select>
+            </Field>
           </section>
 
           <Button className="w-full" icon={<Play size={15} />} loading={run.isPending} loadingText="Calculando…" onClick={() => execute()}>Gerar relatório</Button>
@@ -238,7 +277,8 @@ export default function RelatoriosPage() {
 
 /**
  * Vendas do período, da tabela `sales` (encerramentos "Comprou" com valor). Taxa de conversão
- * vem do histórico de encerramentos: comprou ÷ (comprou + não comprou) — "sem resultado" fica de fora.
+ * vem do histórico de encerramentos: comprou ÷ (comprou + não comprou) — "sem resultado" (fechado
+ * pelo sistema, ou anterior à regra que obriga o resultado) fica de fora.
  */
 function Vendas({ overview, range }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string] }) {
   const v = overview.sales;
@@ -273,7 +313,7 @@ function Vendas({ overview, range }: { overview: NonNullable<ReturnType<typeof u
             </table>
           )}
         </Card>
-        <Card title="Motivos de perda" hint='Encerramentos "Não comprou" por motivo — onde o negócio escapa'>
+        <Card title="Não comprou, por tag" hint='Tags marcadas nos encerramentos "Não comprou" — onde o negócio escapa'>
           {overview.lostReasons.length ? (
             <ReportChart def={{ metric: 'lost', groupBy: 'tag', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.lostReasons} height={220} />
           ) : <p className="py-10 text-center text-[13px] text-muted">Nenhum &quot;Não comprou&quot; no período.</p>}
