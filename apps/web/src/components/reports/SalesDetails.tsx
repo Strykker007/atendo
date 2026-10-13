@@ -6,33 +6,20 @@ import { inputCls } from '@/components/ui/Modal';
 import { fmtBRL } from '@/components/reports/ReportChart';
 import { useSaleDetails } from '@/lib/hooks';
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
-type Periodo = 'hoje' | '7' | '30' | 'custom';
-const PERIODOS: { id: Periodo; label: string }[] = [
-  { id: 'hoje', label: 'Hoje' },
-  { id: '7', label: '7 dias' },
-  { id: '30', label: '30 dias' },
-  { id: 'custom', label: 'Personalizado' },
-];
-const rangeDe = (p: Exclude<Periodo, 'custom'>): [string, string] => {
-  const amanha = iso(addDays(new Date(), 1));
-  return [iso(addDays(new Date(), p === 'hoje' ? 0 : -(Number(p) - 1))), amanha];
-};
 const PAGE_SIZE = 25;
 
 /**
- * Detalhamento de vendas: lista da tabela `sales` com filtro por período, atendente e busca
- * (cliente, número ou produto). O resumo do topo vale para o filtro inteiro, não só a página.
+ * Detalhamento de vendas: lista da tabela `sales`. Período, tag e consultor vêm dos filtros do
+ * topo da tela de Relatórios (um filtro só para a tela toda); aqui fica só a busca (cliente,
+ * número ou produto). O resumo do topo vale para o filtro inteiro, não só a página.
+ * `from`/`to` são instantes ISO, `to` exclusivo.
  */
-export function SalesDetails() {
-  const [periodo, setPeriodo] = useState<Periodo>('30');
-  const [range, setRange] = useState<[string, string]>(rangeDe('30'));
-  const [userId, setUserId] = useState('');
+export function SalesDetails({ from, to, userId, tagIds }: { from: string; to: string; userId?: string; tagIds?: string[] }) {
   const [busca, setBusca] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [aberta, setAberta] = useState<string | null>(null);
+  const tagsQs = tagIds?.join(',') || undefined;
 
   // espera o usuário parar de digitar antes de consultar
   useEffect(() => {
@@ -40,9 +27,9 @@ export function SalesDetails() {
     return () => clearTimeout(t);
   }, [busca]);
   // filtro novo = volta para a primeira página
-  useEffect(() => setPage(1), [range, userId, search]);
+  useEffect(() => setPage(1), [from, to, userId, tagsQs, search]);
 
-  const q = useSaleDetails({ startDate: range[0], endDate: range[1], userId: userId || undefined, search: search || undefined, page, pageSize: PAGE_SIZE });
+  const q = useSaleDetails({ startDate: from, endDate: to, userId, tagIds: tagsQs, search: search || undefined, page, pageSize: PAGE_SIZE });
   const d = q.data;
   const paginas = d ? Math.max(1, Math.ceil(d.total / d.pageSize)) : 1;
 
@@ -60,30 +47,7 @@ export function SalesDetails() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input className={cn(inputCls, 'pl-9')} placeholder="Buscar por cliente, número ou produto" value={busca} onChange={(e) => setBusca(e.target.value)} maxLength={120} />
           </div>
-          <select className={cn(inputCls, '!w-48')} value={userId} onChange={(e) => setUserId(e.target.value)}>
-            <option value="">Todos os atendentes</option>
-            {d?.agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-          <div className="flex flex-wrap gap-1">
-            {PERIODOS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => { setPeriodo(p.id); if (p.id !== 'custom') setRange(rangeDe(p.id)); }}
-                className={cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', periodo === p.id ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
         </div>
-        {periodo === 'custom' && (
-          <div className="flex flex-wrap items-center gap-2">
-            <input type="date" className={cn(inputCls, '!w-40')} value={range[0]} onChange={(e) => e.target.value && setRange([e.target.value, range[1]])} />
-            <span className="text-xs text-muted">até</span>
-            <input type="date" className={cn(inputCls, '!w-40')} value={iso(addDays(new Date(range[1]), -1))} onChange={(e) => e.target.value && setRange([range[0], iso(addDays(new Date(e.target.value), 1))])} />
-          </div>
-        )}
       </div>
 
       {/* resumo do filtro ativo */}

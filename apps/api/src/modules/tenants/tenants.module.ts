@@ -23,7 +23,7 @@ import { freePeriod } from '../billing/plan-rules';
 import { SYSTEM_PROFILES, TYPING_SPEED_KEYS, countLimit, type PlanLimits, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
 import { TenantTemplatesController } from './tenant-templates.controller';
-import { provisionedLossReasonColors, provisionedLossReasons, type TemplateContent } from './tenant-template';
+import { provisionedTags, type TemplateContent } from './tenant-template';
 
 class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
@@ -211,9 +211,9 @@ class TenantsController {
         },
         include: { subscription: true },
       });
-      // gravado aqui e não no `@default` do schema: a configuração nasce no primeiro acesso, e mudar
-      // o default trocaria a lista de clientes antigos que ainda não abriram a configuração
-      await tx.tenantSettings.create({ data: { tenantId: tenant.id, lossReasons: provisionedLossReasons(content), lossReasonColors: provisionedLossReasonColors(content) } });
+      await tx.tenantSettings.create({ data: { tenantId: tenant.id } });
+      // tags do modelo, na ordem dele (é a das colunas do Kanban); modelo antigo = as de encerramento
+      await tx.tag.createMany({ data: provisionedTags(content).map((t, position) => ({ tenantId: tenant.id, name: t.name, position, isKanban: !!t.isKanban, showOnClose: !!t.showOnClose, ...(t.color && { color: t.color }) })), skipDuplicates: true });
       await this.provisioning.provision(tx, tenant.id, content);
       const adminProfile = await tx.accessProfile.findFirstOrThrow({ where: { tenantId: tenant.id, isSystem: true, name: SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name }, select: { id: true } });
       const admin = await tx.user.create({

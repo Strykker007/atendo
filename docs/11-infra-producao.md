@@ -78,6 +78,34 @@ Depois: `pnpm stripe:sync` com as chaves de produção; webhook do Stripe em `ht
 - CI (`.github/workflows/ci.yml`): typecheck + build + imagens a cada push em `main`.
 - Variáveis validadas na subida (`config/env.ts`): falta de segredo derruba o processo cedo, com mensagem clara.
 
+## CPU: quem atende primeiro
+
+Num host só, todos os containers disputam o mesmo processador. Antes não havia limite: um pico
+de qualquer serviço deixava a API sem CPU e a tela do cliente vazia até a carga baixar. CPU
+cheia deixa tudo lento, mas não derruba a máquina; o que derruba é falta de memória (o kernel
+mata o processo).
+
+No `infra/docker-compose.prod.yml`:
+
+| Serviço | `cpu_shares` | `cpus` (teto) | Por quê |
+|---|---|---|---|
+| api, postgres | 2048 | — | é o que o cliente está vendo agora |
+| web | 1024 | — | padrão |
+| worker | 512 | 1.0 | filas aguentam segundos de atraso |
+| evolution | 512 | — | recebe as mensagens de todos os números; teto atrasaria mensagem chegando |
+| backup | 128 | 0.5 | roda a cada 24h desde que o container subiu (pode cair em horário comercial) e compacta banco + mídia |
+
+`cpu_shares` só pesa quando há disputa; com CPU sobrando, todos usam o que quiserem. `cpus` fica
+≤ 1 porque o Docker recusa teto maior que o número de núcleos da máquina.
+
+Para achar o culpado de um pico: `sudo docker stats --no-stream` no momento em que acontece.
+
+**Consultas de relatório.** A consulta genérica de `reports.module.ts` (`query()`) fazia join de
+mensagens, tags, números, usuários e da 1ª resposta em toda chamada, e a visão pronta roda sete
+de uma vez: uma conversa com 300 mensagens e 3 tags virava 900 linhas no Postgres. Agora cada
+join entra só quando a métrica ou o agrupamento precisa. Também foi criado o índice
+`conversations(tenantId, createdAt)` (migração `20261115000000_conversation_tenant_created_idx`).
+
 ## O que ainda falta para "dormir tranquilo"
 
 - **Backups automatizados e testados** (Postgres + volume da Evolution). É o maior buraco

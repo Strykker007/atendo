@@ -1,4 +1,4 @@
-import { BadRequestException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
@@ -12,6 +12,8 @@ import { TemplateChoiceDto } from '../whatsapp/template.dto';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { ConversationScopeGuard } from './conversation-scope.guard';
 import { BOT_PAUSE_MINUTES } from './bot-pause';
+import { pixMessage } from '../pix-keys/pix-keys.module';
+import { env } from '../../config/env';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import type { SetPrimaryTagInput } from '@atendo/shared';
 
@@ -23,8 +25,8 @@ class ListDto {
   @IsOptional() @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean))) @IsArray() tagIds?: string[];
   @IsOptional() @IsString() @MaxLength(100) search?: string;
   @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
-  /** admin: filtrar por atendente */
-  @IsOptional() @IsUUID() assigneeId?: string;
+  /** admin: filtrar por atendente; `none` = só as sem atendente */
+  @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() assigneeId?: string;
   /** `waiting` = quem espera resposta há mais tempo primeiro */
   @IsOptional() @IsIn(['recent', 'waiting']) sort?: 'recent' | 'waiting';
   @IsOptional() @IsUUID() cursor?: string;
@@ -52,6 +54,8 @@ class SendDto {
   @IsOptional() @IsString() @MaxLength(100) idempotencyKey?: string;
   /** caracteres que o atendente não digitou (resposta rápida, colado, só mídia): "digitando…" simulado */
   @IsOptional() @IsInt() @Min(0) @Max(4096) simulateTypingChars?: number;
+  /** chave Pix cadastrada: a API monta o cartão com "Copiar chave Pix" (ignora `text`/mídia) */
+  @IsOptional() @IsUUID() pixKeyId?: string;
 }
 class StartDto {
   @IsUUID() numberId: string;
@@ -97,7 +101,8 @@ class StatusDto {
   /** venda em lista: o total passa a ser a soma dos itens (o `value` enviado é ignorado) */
   @IsOptional() @IsArray() @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => SaleItemDto) items?: SaleItemDto[];
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
-  @IsOptional() @IsString() @MaxLength(200) reason?: string;
+  /** tags do encerramento (o antigo "motivo"): opcionais, entram na conversa e ficam congeladas no evento */
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID('4', { each: true }) tagIds?: string[];
   /**
    * Fluxo disparado ao encerrar (pesquisa de satisfação, pós-venda…). Ausente = padrão do
    * desfecho (ou o geral); `null` = o atendente escolheu "Nenhum" e nada dispara.
@@ -105,16 +110,16 @@ class StatusDto {
   @IsOptional() @IsUUID() flowId?: string | null;
 }
 /**
- * Desfecho completo: "Comprou" sem valor e "Não comprou" sem motivo deixavam o relatório de
- * vendas e o de motivos de perda furados (venda que não soma, perda sem explicação). A tela
- * já obriga; aqui é para nenhum outro caminho passar sem.
+ * Encerramento pelo atendente sempre diz se comprou ou não: "Sem resultado" virava a resposta
+ * preguiçosa e esvaziava a taxa de conversão. "Comprou" sem valor deixaria a venda sem somar.
+ * Tags são opcionais. A tela já obriga; aqui é para nenhum outro caminho passar sem.
  */
-function assertOutcome(o: { outcome?: ConversationOutcome; value?: number; items?: { value: number }[]; reason?: string }) {
+function assertOutcome(o: { outcome?: ConversationOutcome; value?: number; items?: { value: number }[] }) {
+  if (o.outcome !== 'won' && o.outcome !== 'lost') throw new BadRequestException('Escolha o resultado: “Comprou” ou “Não comprou”.');
   if (o.outcome === 'won') {
     const total = o.items?.length ? o.items.reduce((a, i) => a + (i.value || 0), 0) : o.value ?? 0;
     if (!(total > 0)) throw new BadRequestException('Informe o valor da compra para encerrar como “Comprou”.');
   }
-  if (o.outcome === 'lost' && !o.reason?.trim()) throw new BadRequestException('Informe o motivo para encerrar como “Não comprou”.');
 }
 
 class BulkCloseDto {
@@ -124,7 +129,7 @@ class BulkCloseDto {
    */
   @IsArray() @ArrayNotEmpty() @ArrayMaxSize(200) @IsUUID('4', { each: true }) ids: string[];
   @IsOptional() @IsEnum(ConversationOutcome) outcome?: ConversationOutcome;
-  @IsOptional() @IsString() @MaxLength(200) reason?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsUUID('4', { each: true }) tagIds?: string[];
 }
 class ContactDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
@@ -177,7 +182,7 @@ export class ConversationsController {
     // valor é por atendimento: "Comprou" em massa repetiria o mesmo valor e inflaria o faturamento
     if (dto.outcome === 'won') throw new BadRequestException('“Comprou” é encerrado um a um, com o valor de cada venda.');
     assertOutcome(dto);
-    return this.conversations.closeMany(u.tenantId, u, dto.ids, dto.outcome ? { outcome: dto.outcome, reason: dto.reason?.trim() } : undefined);
+    return this.conversations.closeMany(u.tenantId, u, dto.ids, { outcome: dto.outcome!, tagIds: dto.tagIds });
   }
 
   /** Busca do "Nova conversa": contatos da base + agenda do aparelho (Evolution). */
@@ -273,7 +278,16 @@ export class ConversationsController {
       const msg = await this.conversations.templateMessage(u.tenantId, conv.contactId, definition, dto.template, { agentName: u.name });
       return this.conversations.send(u.tenantId, u, id, { ...msg, expectedNumberId: dto.expectedNumberId, idempotencyKey: dto.idempotencyKey });
     }
-    return this.conversations.send(u.tenantId, u, id, { ...dto, template: undefined });
+    if (dto.pixKeyId) {
+      const k = await this.prisma.pixKey.findFirst({ where: { id: dto.pixKeyId, tenantId: u.tenantId } });
+      if (!k) throw new NotFoundException('Chave Pix não encontrada');
+      // cartão no painel só quando ele sai de fato como cartão — senão o atendente via um botão
+      // "Copiar chave Pix" que o contato não tem
+      const { content, ...pix } = pixMessage(k);
+      return this.conversations.send(u.tenantId, u, id, { type: 'text', ...pix, ...(env.EVOLUTION_PIX_BUTTON && { content }), simulateTypingChars: pix.text.length, expectedNumberId: dto.expectedNumberId, idempotencyKey: dto.idempotencyKey });
+    }
+    const { pixKeyId: _pix, ...rest } = dto;
+    return this.conversations.send(u.tenantId, u, id, { ...rest, template: undefined });
   }
 
   @Post(':id/messages/:messageId/resend')
@@ -360,18 +374,18 @@ export class ConversationsController {
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
     if (dto.status === 'closed') assertOutcome(dto);
-    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.outcome ? { outcome: dto.outcome, value: dto.value, reason: dto.reason, products: dto.products, items: dto.items, notes: dto.notes } : undefined);
+    const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.status === 'closed' ? { outcome: dto.outcome!, value: dto.value, tagIds: dto.tagIds, products: dto.products, items: dto.items, notes: dto.notes } : undefined);
     // Fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar).
     // Sem escolha no modal, vale o fluxo padrão configurado — é o caso comum: pesquisa de
     // satisfação que precisa sair em TODO encerramento, e depender de alguém lembrar de
     // escolher na hora é o mesmo que não existir.
-    // O padrão do desfecho (Comprou/Não comprou/Sem resultado) ganha do geral. `null` explícito
+    // O padrão do desfecho (Comprou/Não comprou) ganha do geral. `null` explícito
     // é "Nenhum" escolhido no modal — não cai no padrão.
     if (dto.status === 'closed') {
       let fluxo = dto.flowId;
       if (fluxo === undefined) {
-        const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { onCloseFlowId: true, wonFlowId: true, lostFlowId: true, noneFlowId: true } });
-        const porDesfecho = { won: s?.wonFlowId, lost: s?.lostFlowId, none: s?.noneFlowId }[dto.outcome ?? 'none'];
+        const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { onCloseFlowId: true, wonFlowId: true, lostFlowId: true } });
+        const porDesfecho = dto.outcome === 'won' ? s?.wonFlowId : s?.lostFlowId;
         fluxo = porDesfecho ?? s?.onCloseFlowId ?? null;
       }
       if (fluxo) await this.flows.startOnClose(u.tenantId, id, fluxo).catch(() => undefined);

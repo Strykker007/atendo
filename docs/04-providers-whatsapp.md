@@ -94,9 +94,23 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 
 O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineService.choose`). Assim o mesmo fluxo funciona nos dois providers e ganha botões de verdade quando o cliente migra para a Meta. No histórico do painel a mensagem interativa aparece como texto + opções numeradas.
 
+### Chave Pix ("Copiar chave Pix")
+
+`OutboundMessage.pix` = `{ holderName, keyType, key }` (chave cadastrada em `pix_keys`, enviada pelo atendente com `pixKeyId`). `text` sempre traz título, tipo e a chave sozinha na última linha (é o que o contato segura para copiar) — é o histórico e o que sai onde não há cartão. O cartão com botão no painel (`content`) só é gravado com o cartão ligado.
+
+| Provider | Como sai |
+|---|---|
+| **Evolution** | Padrão: o `text` pelo `sendText`. Com `EVOLUTION_PIX_BUTTON=true` (exige a imagem com o [patch do `<biz>`](#versão-da-evolution)): `POST /message/sendButtons` com botão `{type:'pix', currency:'BRL', name, keyType, key}` → cartão nativo com **Copiar chave Pix** (versão sem o botão `pix` recusa com 400/404 e cai no texto). Desligado porque, na 2.3.7 em conta QR, o WhatsApp devolve `delivered` e o aparelho **não exibe nada** — sem erro, não há como cair no texto sozinho. Só ligar depois de ver o cartão chegar num aparelho real |
+| **Meta** | só o `text` — a Cloud API não tem botão de copiar fora de template/`order_details` |
+
 ### Sessão zumbi ("Connection Closed")
 
 A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (típico depois de o host dormir). Todo envio devolve `428 Connection Closed`. Tratamento automático: o `OutboundProcessor` detecta a mensagem, chama `provider.restart()` (`POST /instance/restart/:name`) e deixa o retry do BullMQ reenviar. Além disso, um job a cada 5 min (`NumbersHealthProcessor`) confere o status real de cada número no provider e corrige o banco (a UI mostra "desconectado" e o botão de reconectar). Se nem o restart resolver, reinicie o container (`docker compose restart evolution`) — as sessões ficam no banco da Evolution e reconectam sem QR.
+
+**Por que o restart não resolvia** (Drogaria Pontual, 13/10/2026: ~1h20 sem enviar nem receber, 6 envios falhos): logo depois de ler o QR, a instância sincronizava ~1.000 contatos; o pool do Prisma da Evolution (padrão 9 conexões para 34 instâncias) esgotou (`P2024` / `deadlock detected`) e a reconexão pedida pelo WhatsApp (`stream:error 515`) nasceu morta com o estado `open`. O restart da 2.3.7 fecha o socket (já fechado: o `end()` do Baileys sai em `if (closed) return`, sem evento de close) e chama o connect, que vê `open` e não faz nada — dezenas de restarts sem efeito. Correções:
+- `infra/evolution/patch-evolution-restart.mjs`: depois de fechar, se em 3 s nenhum socket novo apareceu, o restart cria um com as credenciais salvas (sem QR);
+- `DATABASE_CONNECTION_URI` da Evolution com `connection_limit=40&pool_timeout=30` (o Postgres dela aceita 100);
+- `NumbersService.claimRestart`: no máximo um restart automático por número a cada 2 min entre todos os workers — antes era um por envio falho, e com o restart que recria o socket isso abriria sockets duplicados.
 
 ### Parou de receber (envia, mas nada chega)
 
@@ -287,10 +301,17 @@ enviadas quanto recebidas, sem campanha).
 
 ### Versão da Evolution
 
-A imagem é **fixa** (`evoapicloud/evolution-api:v2.3.7` nos dois `infra/docker-compose*.yml`,
-amd64 e arm64). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web sem teste — e é ele
-que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número de teste, depois
-trocar a tag e fazer o deploy.
+A imagem é **fixa**: `infra/evolution/Dockerfile` parte de `evoapicloud/evolution-api:v2.3.7`
+(amd64 e arm64) e os dois `infra/docker-compose*.yml` fazem `build: ./evolution`
+(`atendo/evolution-api:v2.3.7-biz`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
+sem teste — e é ele que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número
+de teste, depois trocar o `FROM` e fazer o deploy (`docker compose … up -d --build evolution`).
+
+**Patch do nó `<biz>`** (`infra/evolution/patch-baileys-biz.mjs`): o Baileys da imagem (7.0.0-rc.9)
+manda `interactiveMessage` sem o nó `<biz>` que o WhatsApp exige para botões nativos — a mensagem
+volta `delivered` e o aparelho não mostra nada. O patch acrescenta o nó no `relayMessage`
+(`native_flow_name="payment_info"` para Pix; `native_flow v=9 mixed` para copiar/link/ligar).
+Se a âncora mudar numa versão nova, o build falha de propósito.
 
 ## Mensagem enviada pelo celular do cliente
 

@@ -5,7 +5,7 @@ import { SYSTEM_PROFILES, copyName, flowFromPortable, flowTagNames, flowToPortab
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { assertOwnFlowMedia, validateDefinition } from '../flows/flow-validation';
 import { toPortableReply } from '../quick-replies/portable';
-import { provisionedProfiles, type TemplateContent } from './tenant-template';
+import { TEMPLATE_TAGS_MAX, provisionedProfiles, type TemplateContent } from './tenant-template';
 
 const newId = (type: FlowNodeType) => `${type}-${randomUUID().slice(0, 6)}`;
 
@@ -81,12 +81,11 @@ export class TenantProvisioningService {
    * modelo congelaria a matriz de hoje.
    */
   async capture(tenantId: string): Promise<{ content: TemplateContent; warnings: string[] }> {
-    const [profiles, replies, flows, tags, settings] = await Promise.all([
+    const [profiles, replies, flows, tags] = await Promise.all([
       this.prisma.accessProfile.findMany({ where: { tenantId }, orderBy: [{ isSystem: 'desc' }, { name: 'asc' }] }),
       this.prisma.quickReply.findMany({ where: { folder: { tenantId } }, include: { folder: { select: { name: true } } }, orderBy: [{ folder: { position: 'asc' } }, { position: 'asc' }] }),
       this.prisma.flow.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
-      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true } }),
-      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { lossReasons: true, lossReasonColors: true } }),
+      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnClose: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
     ]);
     const admin = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
     const warnings = new Set<string>();
@@ -106,9 +105,8 @@ export class TenantProvisioningService {
           .map((p) => ({ name: p.name, ...(p.description && { description: p.description }), permissions: p.permissions as TemplateContent['profiles'][number]['permissions'] })),
         quickReplies: qr.map((o) => o.portable),
         flows: portableFlows,
-        ...(settings && { lossReasons: settings.lossReasons }),
-        // só leva cor que existe: modelo sem cores continua sem o campo
-        ...(settings && Object.keys((settings.lossReasonColors ?? {}) as object).length && { lossReasonColors: settings.lossReasonColors as Record<string, string> }),
+        // todas as tags, com cor, Kanban e encerramento, na ordem das colunas
+        tags: tags.slice(0, TEMPLATE_TAGS_MAX).map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), isKanban: t.isKanban, showOnClose: t.showOnClose })),
       },
       warnings: [...warnings],
     };

@@ -50,7 +50,7 @@ aviso de fora do expediente (hoje: mensagem da faixa Fechado em [Horários](hora
 
 ### 5. Encerramento com resultado — **FEITO** (2026-09-28)
 
-Ao encerrar, o atendente registra comprou (com valor) ou não comprou (com motivo), e pode
+Ao encerrar, o atendente registra (obrigatório) comprou (com valor) ou não comprou, com tags opcionais (o antigo motivo virou tag), e pode
 disparar um fluxo de finalização. Relatórios ganharam faturamento, taxa de conversão e as
 métricas `revenue`/`won`/`lost`/`win_rate`.
 

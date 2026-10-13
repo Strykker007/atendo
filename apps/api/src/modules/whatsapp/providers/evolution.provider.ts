@@ -117,7 +117,28 @@ export class EvolutionProvider implements WhatsAppProvider {
     const quoted = m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined;
     // `delay`: a Evolution mostra "digitando…" (no áudio, "gravando…") por esse tempo e só então entrega
     const delay = m.typingMs && m.typingMs > 0 ? Math.round(m.typingMs) : undefined;
-    if (m.type === MessageType.TEXT || m.interactive) {
+    // cartão nativo do Pix ("Copiar chave Pix"), só com EVOLUTION_PIX_BUTTON: em conta QR o
+    // WhatsApp aceita e confirma a entrega, mas o aparelho não mostra — e não há erro para cair
+    // no texto. Desligado (padrão), vai o texto, que já traz título, tipo e chave. Evolution sem
+    // o botão `pix` recusa com 400/404 e também cai no texto — nada saiu ainda
+    const cartaoPix = m.pix && env.EVOLUTION_PIX_BUTTON ? await this.api<any>(`/message/sendButtons/${name}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        number: m.to,
+        title: m.text?.split('\n')[0].replace(/\*/g, '') || 'Pix',
+        description: `Chave Pix: ${m.pix.key}`,
+        footer: m.pix.holderName,
+        buttons: [{ type: 'pix', currency: 'BRL', name: m.pix.holderName, keyType: m.pix.keyType, key: m.pix.key }],
+        quoted,
+        delay,
+      }),
+    }, this.shard(ctx)).catch((err) => {
+      if (err instanceof ProviderSendError && (err.providerStatus === 400 || err.providerStatus === 404)) return null;
+      throw err;
+    }) : null;
+    if (cartaoPix) {
+      r = cartaoPix;
+    } else if (m.type === MessageType.TEXT || m.interactive) {
       // Botões/listas não funcionam de forma confiável em contas QR: vira lista numerada
       const text = m.interactive?.options.length ? `${m.text ?? ''}\n\n${m.interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : (m.text ?? '');
       r = await this.api(`/message/sendText/${name}`, {

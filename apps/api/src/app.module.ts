@@ -12,6 +12,7 @@ import { TagsModule } from './modules/tags/tags.module';
 import { ContactAttributesModule } from './modules/contact-attributes/contact-attributes.module';
 import { GlobalVariablesModule } from './modules/global-variables/global-variables.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
+import { PixKeysModule } from './modules/pix-keys/pix-keys.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { MediaModule } from './modules/media/media.module';
@@ -44,6 +45,7 @@ import { NoticesModule } from './modules/notices/notices.module';
     CompaniesModule,
     KanbanModule,
     QuickRepliesModule,
+    PixKeysModule,
     BillingModule,
     ReportsModule,
     CampaignsModule,

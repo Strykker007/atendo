@@ -1,7 +1,7 @@
 /**
- * Motivos de perda com que todo cliente novo nasce (Configurações → Motivos de perda). A ordem é
- * a dos chips no encerramento "Não comprou". "Outros" fica por último de propósito: é a saída
- * de quem não achou o motivo, e no topo viraria a resposta preguiçosa que esvazia o relatório.
+ * Tags de encerramento com que todo cliente novo nasce (fora do Kanban). Eram a lista de
+ * "motivos de perda", que virou tag (docs/06-modelo-de-dados.md). "Outros" fica por último de
+ * propósito: é a saída de quem não achou a tag certa.
  */
 export const DEFAULT_LOSS_REASONS = [
   'Não respondeu',
@@ -16,5 +16,5 @@ export const DEFAULT_LOSS_REASONS = [
   'Outros',
 ];
 
-/** limite da API (`SettingsDto.lossReasons`) */
+/** limite de tags de encerramento num modelo de perfil */
 export const LOSS_REASONS_MAX = 30;

@@ -178,7 +178,7 @@ export class ConversationsService {
     // abaixo também usa OR, e dois OR no mesmo nível se sobrescreveriam
     const dept = departmentWhere(viewer, q.departmentId);
     const ownership: Prisma.ConversationWhereInput =
-      q.assigneeId && isAdmin ? { assigneeId: q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
+      q.assigneeId && isAdmin ? { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
@@ -546,7 +546,7 @@ export class ConversationsService {
    * o número, e não há fallback para outro: se o canal não pode enviar, a mensagem não sai.
    * `expectedNumberId` é o canal que a tela mostrava; se a conversa não está mais nele, 409 sem enviar.
    */
-  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string; idempotencyKey?: string; simulateTypingChars?: number }) {
+  async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string; idempotencyKey?: string; simulateTypingChars?: number; /** cartão no nosso chat (ex.: Pix com "Copiar chave Pix") */ content?: MessageContent }) {
     const authorId = author.id;
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
@@ -623,9 +623,10 @@ export class ConversationsService {
         authorId,
         // `simulateTypingChars`: envio do atendente que ninguém digitou (resposta rápida, encaminhada,
         // agendada, só mídia) — o envio mostra "digitando…" por esse tamanho (docs/envio.md#humanização)
-        raw: input.template || input.simulateTypingChars !== undefined
-          ? ({ ...(input.template && { template: input.template }), ...(input.simulateTypingChars !== undefined && { simulateTypingChars: input.simulateTypingChars }) } as Prisma.InputJsonValue)
+        raw: input.template || input.pix || input.simulateTypingChars !== undefined
+          ? ({ ...(input.template && { template: input.template }), ...(input.pix && { pix: input.pix }), ...(input.simulateTypingChars !== undefined && { simulateTypingChars: input.simulateTypingChars }) } as Prisma.InputJsonValue)
           : undefined,
+        content: input.content ? (input.content as unknown as Prisma.InputJsonValue) : undefined,
       },
       include: MESSAGE_INCLUDE,
     }));
@@ -1178,8 +1179,11 @@ export class ConversationsService {
     id: string,
     status: ConversationStatus,
     userId: string,
-    outcome?: { outcome: ConversationOutcome; value?: number; reason?: string; products?: string; items?: { description?: string; value: number }[]; notes?: string },
+    outcome?: { outcome: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description?: string; value: number }[]; notes?: string },
   ) {
+    // tags do encerramento: só as do tenant valem (id de outro cliente é ignorado em silêncio)
+    const tagsFim = status === 'closed' ? await this.closingTags(tenantId, outcome?.tagIds) : [];
+    const nomesTags = tagsFim.map((t) => t.name).join(', ').slice(0, 500) || null;
     // venda em lista: o total é a soma dos itens, calculada aqui — não confia na conta do front
     // item só com valor (sem descrição) vale; linha vazia é descartada
     const itens = outcome?.outcome === 'won' ? outcome.items?.map((i) => ({ description: i.description?.trim() ?? '', value: Math.round(i.value * 100) / 100 })).filter((i) => i.description || i.value > 0) : undefined;
@@ -1196,7 +1200,7 @@ export class ConversationsService {
           ? {
               outcome: outcome.outcome,
               outcomeValue: outcome.outcome === 'won' && outcome.value ? new Prisma.Decimal(outcome.value) : null,
-              outcomeReason: outcome.outcome === 'lost' ? (outcome.reason?.trim() || null) : null,
+              outcomeReason: nomesTags,
               outcomeAt: new Date(),
               outcomeById: userId,
             }
@@ -1227,8 +1231,10 @@ export class ConversationsService {
       toStatus: status,
       outcome: status === 'closed' ? (outcome?.outcome ?? 'none') : null,
       outcomeValue: conv.outcomeValue,
-      reason: status === 'closed' ? outcome?.reason?.trim() || null : null,
+      reason: status === 'closed' ? nomesTags : null,
+      tagIds: tagsFim.map((t) => t.id),
     });
+    if (tagsFim.length) await this.addClosingTags([id], tagsFim.map((t) => t.id));
     // venda: linha própria e imutável — é a base de conversão, ticket médio e desempenho por atendente
     if (status === 'closed' && outcome?.outcome === 'won' && conv.outcomeValue) {
       const vendedor = (await this.prisma.user.findFirst({ where: { id: userId, tenantId }, select: { id: true } }))?.id ?? null;
@@ -1268,7 +1274,7 @@ export class ConversationsService {
    * Sem disparo de fluxo de propósito: um fluxo de encerramento aplicado a cinquenta conversas
    * é envio em massa, e isso tem (ou terá) tela própria, com limite diário e opt-out.
    */
-  async closeMany(tenantId: string, viewer: Viewer, ids: string[], desfecho?: { outcome: ConversationOutcome; reason?: string }) {
+  async closeMany(tenantId: string, viewer: Viewer, ids: string[], desfecho: { outcome: ConversationOutcome; tagIds?: string[] }) {
     const pedidos = [...new Set(ids)];
     const escopo = numberFilter(viewer);
     const alvos = await this.prisma.conversation.findMany({
@@ -1287,6 +1293,8 @@ export class ConversationsService {
     if (!alvos.length) return { closed: 0, ignored: pedidos.length };
 
     const idsAlvo = alvos.map((a) => a.id);
+    const tagsFim = await this.closingTags(tenantId, desfecho.tagIds);
+    const nomesTags = tagsFim.map((t) => t.name).join(', ').slice(0, 500) || null;
     // mesma razão do `registrar`: dono do sistema não tem linha em `users` deste tenant
     const ator = (await this.prisma.user.findFirst({ where: { id: viewer.id, tenantId }, select: { id: true } }))?.id ?? null;
     await this.prisma.conversation.updateMany({
@@ -1297,14 +1305,10 @@ export class ConversationsService {
         ...BOT_PAUSE_CLEAR,
         // valor de venda não entra em massa: ele é por conversa, e um número repetido em
         // cinquenta atendimentos inflaria o faturamento do relatório
-        ...(desfecho && desfecho.outcome !== 'none'
-          ? {
-              outcome: desfecho.outcome,
-              outcomeReason: desfecho.outcome === 'lost' ? desfecho.reason?.trim() || null : null,
-              outcomeAt: new Date(),
-              outcomeById: viewer.id,
-            }
-          : {}),
+        outcome: desfecho.outcome,
+        outcomeReason: nomesTags,
+        outcomeAt: new Date(),
+        outcomeById: viewer.id,
       },
     });
 
@@ -1318,10 +1322,12 @@ export class ConversationsService {
         actorId: ator,
         fromStatus: a.status,
         toStatus: 'closed' as const,
-        outcome: desfecho?.outcome ?? 'none',
-        reason: [desfecho?.outcome === 'lost' ? desfecho.reason?.trim() : null, 'encerrado em massa'].filter(Boolean).join(' · '),
+        outcome: desfecho.outcome,
+        reason: [nomesTags, 'encerrado em massa'].filter(Boolean).join(' · '),
+        tagIds: tagsFim.map((t) => t.id),
       })),
     });
+    if (tagsFim.length) await this.addClosingTags(idsAlvo, tagsFim.map((t) => t.id));
     const pausadas = alvos.filter((a) => a.botPausedAt);
     if (pausadas.length) {
       await this.prisma.conversationEvent.createMany({
@@ -1335,6 +1341,23 @@ export class ConversationsService {
     for (const c of fechadas) this.gateway.emitConversation(tenantId, c);
     this.log.log(`${fechadas.length} atendimento(s) encerrados em massa por ${viewer.id}`);
     return { closed: fechadas.length, ignored: pedidos.length - fechadas.length };
+  }
+
+  /** Tags escolhidas no encerramento, recortadas pelo tenant e na ordem do pedido. */
+  private async closingTags(tenantId: string, ids?: string[]) {
+    const pedidos = [...new Set(ids ?? [])];
+    if (!pedidos.length) return [];
+    const tags = await this.prisma.tag.findMany({ where: { tenantId, id: { in: pedidos } }, select: { id: true, name: true } });
+    return pedidos.map((id) => tags.find((t) => t.id === id)).filter((t): t is { id: string; name: string } => !!t);
+  }
+
+  /**
+   * Tags do encerramento também entram na conversa: é por elas que a lista de "Encerradas" e o
+   * relatório filtram. Soma às que já existem, sem mexer na principal (etapa do Kanban).
+   * Quem chama emite a conversa pelo socket depois.
+   */
+  private async addClosingTags(conversationIds: string[], tagIds: string[]) {
+    await this.prisma.conversationTag.createMany({ data: conversationIds.flatMap((conversationId) => tagIds.map((tagId) => ({ conversationId, tagId }))), skipDuplicates: true });
   }
 
   // ---------- robô pausado na conversa ----------
@@ -1413,6 +1436,7 @@ export class ConversationsService {
     outcome?: ConversationOutcome | null;
     outcomeValue?: Prisma.Decimal | null;
     reason?: string | null;
+    tagIds?: string[];
   }, db: Prisma.TransactionClient = this.prisma) {
     // super_admin não tem linha em `users` deste tenant: entra como sistema, senão a FK quebra
     const actorId = e.actorId && (await db.user.findFirst({ where: { id: e.actorId, tenantId: e.tenantId }, select: { id: true } })) ? e.actorId : null;

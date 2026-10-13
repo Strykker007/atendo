@@ -1,5 +1,5 @@
 'use client';
-import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles, Send, XCircle, MinusCircle } from 'lucide-react';
+import { Workflow, MessageCircleQuestion, CheckCircle2, Sparkles, Send, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
@@ -22,7 +22,7 @@ export function DefaultFlowsSection() {
   const salvar = (patch: Parameters<typeof update.mutateAsync>[0], msg = 'Configuração salva') =>
     update.mutateAsync(patch).then(() => toast.ok(msg)).catch(toast.err);
 
-  const Select = ({ label, hint, icon, value, field }: { label: string; hint: string; icon: React.ReactNode; value: string | null; field: 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'noneFlowId' | 'defaultFlowId' }) => (
+  const Select = ({ label, hint, icon, value, field }: { label: string; hint: string; icon: React.ReactNode; value: string | null; field: 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'defaultFlowId' }) => (
     <div className="space-y-1 py-2.5 border-b border-line last:border-0">
       <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink">{icon} {label}</div>
       <p className="text-[11.5px] text-muted">{hint}</p>
@@ -82,13 +82,6 @@ export function DefaultFlowsSection() {
           label="Não comprou"
           hint="Recuperação: cupom, pesquisa do motivo, nova oferta."
           value={s.lostFlowId}
-        />
-        <Select
-          field="noneFlowId"
-          icon={<MinusCircle size={14} className="text-muted" />}
-          label="Sem resultado"
-          hint="Atendimento sem venda em jogo (dúvida, suporte) ou contato que parou de responder."
-          value={s.noneFlowId}
         />
       </div>
       <Select

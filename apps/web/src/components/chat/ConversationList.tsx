@@ -104,6 +104,8 @@ export function ConversationList() {
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
   useEffect(() => { setMarcados([]); setSelecionando(false); }, [status, numberId, departmentId, origin, assigneeId]);
+  // "Sem consultor" só existe em Encerradas: em "Atendendo" toda conversa tem dono
+  useEffect(() => { if (assigneeId === 'none' && status !== 'closed') setAssignee(null); }, [assigneeId, status, setAssignee]);
   // filtro guardado de um departamento que foi excluído: volta para "todos" em vez de lista vazia
   useEffect(() => {
     if (departmentId && departmentId !== 'none' && departments.data && !departments.data.some((d) => d.id === departmentId)) setDepartment(null);
@@ -206,6 +208,16 @@ export function ConversationList() {
         {filtrosAbertos && (
         <>
         <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTags} placeholder="Filtrar por tag…" />
+        {/* admin em "Encerradas": auditar o histórico por consultor — inclui quem saiu da equipe,
+            porque o atendimento dele continua no histórico */}
+        {isAdmin && status === 'closed' && (
+          <select value={assigneeId ?? ''} onChange={(e) => setAssignee(e.target.value || null)} className="w-full rounded-lg bg-field text-ink px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40">
+            <option value="">Todos os consultores</option>
+            <option value="me">Só as minhas</option>
+            <option value="none">Sem consultor</option>
+            {agents.data?.filter((a) => a.id !== me.data?.id).map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
+          </select>
+        )}
         {/* admin em "Atendendo": escolher de quem ver */}
         {isAdmin && status === 'in_progress' && (
           <select value={assigneeId ?? ''} onChange={(e) => setAssignee(e.target.value || null)} className="w-full rounded-lg bg-field text-ink px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40">
