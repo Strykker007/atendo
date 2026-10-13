@@ -469,7 +469,7 @@ export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'docume
 export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null; closeReasonId?: string; internal?: boolean }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null; surveyId?: string | null; closeReasonId?: string; internal?: boolean }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: (_, v) => {
       // sai na hora das listas de outro status (sem esperar o refetch) e a aberta já vê o novo status
       for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {

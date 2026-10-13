@@ -1,12 +1,12 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { CheckCircle2, XCircle, Plus, Trash2, Check, EyeOff } from 'lucide-react';
+import { CheckCircle2, XCircle, Plus, Trash2, Check, EyeOff, Star } from 'lucide-react';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { useCan, useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings, useCloseReasons, reasonsFor, useOutcomeLabels } from '@/lib/hooks';
+import { useCan, useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings, useCloseReasons, reasonsFor, useOutcomeLabels, useSurveys } from '@/lib/hooks';
 
 /**
  * Bloco do formulário de encerramento: rótulo, explicação logo abaixo dele e o campo. A dica
@@ -196,6 +196,20 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   // trocou o fluxo à mão: a carga atrasada das configurações não sobrescreve. Clicar num
   // desfecho volta para o padrão dele (é o que se espera ao mudar de "Comprou" para "Não comprou")
   const escolheuFluxo = useRef(false);
+  // pesquisa de satisfação: vem marcada quando a empresa tem uma padrão (docs/pesquisa-de-satisfacao.md)
+  const surveys = useSurveys();
+  const pesquisas = (surveys.data ?? []).filter((s) => s.isActive);
+  const [enviarPesquisa, setEnviarPesquisa] = useState(false);
+  const [surveyId, setSurveyId] = useState('');
+  useEffect(() => {
+    if (!surveys.data) return;
+    const padrao = pesquisas.find((s) => s.isDefault);
+    setSurveyId((padrao ?? pesquisas[0])?.id ?? '');
+    setEnviarPesquisa(!!padrao);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só ao carregar
+  }, [surveys.data]);
+  /** com pesquisa, o fluxo de encerramento não roda (a API ignora) */
+  const comPesquisa = enviarPesquisa && !!surveyId;
 
   const ativos = (flows.data ?? []).filter((f) => f.isActive);
   /** padrão do desfecho, senão o geral "ao encerrar" — só se o fluxo ainda existe e está ativo */
@@ -265,6 +279,8 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
         // sem o recurso o servidor decide; com ele, o que está na tela é o que vale ("Nenhum" = null).
         // Antes de carregar as configurações, deixa o servidor aplicar o padrão.
         flowId: flowsFeature.has && carregou ? flowId || null : undefined,
+        // antes de carregar a lista, o servidor aplica a padrão
+        surveyId: surveys.data ? (comPesquisa ? surveyId : null) : undefined,
       });
       toast.ok('Atendimento encerrado');
       onClose();
@@ -335,12 +351,26 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
         {outcome && <CloseReasonField outcome={outcome} value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivo} />}
         {outcome && <CloseTagsField outcome={outcome} value={tagIds} onChange={setTagIds} />}
 
+        {outcome && pesquisas.length > 0 && (
+          <div className={cn('flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border px-3 py-2 text-[12.5px]', comPesquisa ? 'border-accent/50 bg-accent-soft/40' : 'border-line')}>
+            <label className="flex items-center gap-2 cursor-pointer font-medium text-ink">
+              <input type="checkbox" className="accent-current" checked={enviarPesquisa} onChange={(e) => setEnviarPesquisa(e.target.checked)} />
+              <Star size={13} className="text-accent" /> Enviar pesquisa de satisfação ao encerrar
+            </label>
+            {enviarPesquisa && pesquisas.length > 1 && (
+              <select className={cn(inputCls, 'py-1 text-[12.5px] w-auto max-w-[14rem]')} value={surveyId} onChange={(e) => setSurveyId(e.target.value)} aria-label="Pesquisa">
+                {pesquisas.map((s) => <option key={s.id} value={s.id}>{s.name}{s.isDefault ? ' (padrão)' : ''}</option>)}
+              </select>
+            )}
+          </div>
+        )}
+
         {outcome && (flowsFeature.has || outcome === 'won') && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[12.5px]">
             {flowsFeature.has && (
               <label className="flex items-center gap-1.5 text-muted min-w-0">
                 Fluxo
-                <select className={cn(inputCls, 'py-1 text-[12.5px] w-auto max-w-[14rem]')} value={flowId} onChange={(e) => { setFlowId(e.target.value); escolheuFluxo.current = true; }} title="Mensagem automática enviada ao contato depois de encerrar">
+                <select className={cn(inputCls, 'py-1 text-[12.5px] w-auto max-w-[14rem]')} value={comPesquisa ? '' : flowId} disabled={comPesquisa} onChange={(e) => { setFlowId(e.target.value); escolheuFluxo.current = true; }} title={comPesquisa ? 'Com a pesquisa de satisfação, o fluxo de encerramento não é disparado' : 'Mensagem automática enviada ao contato depois de encerrar'}>
                   <option value="">Nenhum</option>
                   {ativos.map((f) => <option key={f.id} value={f.id}>{f.name}{f.id === padraoDe(outcome) ? ' (padrão)' : ''}</option>)}
                 </select>

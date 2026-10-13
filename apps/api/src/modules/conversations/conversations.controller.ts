@@ -16,6 +16,7 @@ import { pixMessage } from '../pix-keys/pix-keys.module';
 import { OUTCOME_LABELS_DEFAULT } from '../tenants/tenant-settings.service';
 import { env } from '../../config/env';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
 import type { SetPrimaryTagInput } from '@atendo/shared';
 
 class ListDto {
@@ -117,6 +118,11 @@ class StatusDto {
    * desfecho (ou o geral); `null` = o atendente escolheu "Nenhum" e nada dispara.
    */
   @IsOptional() @IsUUID() flowId?: string | null;
+  /**
+   * Pesquisa de satisfação enviada ao encerrar (docs/pesquisa-de-satisfacao.md). Ausente = a
+   * padrão da empresa, se houver; `null` = não enviar. Com pesquisa, o fluxo de encerramento não roda.
+   */
+  @IsOptional() @IsUUID() surveyId?: string | null;
 }
 /**
  * Encerramento pelo atendente sempre diz se comprou ou não: "Sem resultado" virava a resposta
@@ -188,7 +194,7 @@ class TypingDto {
 @Controller('conversations')
 @UseGuards(JwtAuthGuard, PermissionsGuard, ConversationScopeGuard)
 export class ConversationsController {
-  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService, private readonly numbers: NumbersService) {}
+  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService, private readonly numbers: NumbersService, private readonly surveys: SurveyRunnerService) {}
 
   /** nome dos resultados na empresa (Configurações → Encerramento), para as mensagens de erro */
   private async outcomeLabels(tenantId: string) {
@@ -420,6 +426,10 @@ export class ConversationsController {
       const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { requireSaleValue: true, wonLabel: true, lostLabel: true } });
       assertOutcome(dto, s?.requireSaleValue ?? true, s ? { won: s.wonLabel, lost: s.lostLabel } : undefined);
     }
+    // pesquisa: conferida ANTES de encerrar (id inválido não pode fechar sem ela). Interno não tem
+    const pesquisa = dto.status === 'closed' && !interno ? await this.surveys.resolve(u.tenantId, dto.surveyId) : null;
+    // consultor do atendimento: o dono antes de encerrar (gerente encerrando pelo time não leva a nota)
+    const dono = pesquisa ? await this.prisma.conversation.findFirst({ where: { id, tenantId: u.tenantId }, select: { assigneeId: true } }) : null;
     const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.status === 'closed' ? { outcome: dto.outcome ?? 'none', value: dto.value, tagIds: dto.tagIds, products: dto.products, items: dto.items, notes: dto.notes, closeReasonId: dto.closeReasonId, internal: interno } : undefined);
     // Fluxo de encerramento roda depois de fechar (a conversa reabre sozinha se ele falar).
     // Sem escolha no modal, vale o fluxo padrão configurado — é o caso comum: pesquisa de
@@ -436,7 +446,10 @@ export class ConversationsController {
         const porDesfecho = dto.outcome === 'won' ? s?.wonFlowId : s?.lostFlowId;
         fluxo = porDesfecho ?? s?.onCloseFlowId ?? null;
       }
-      if (fluxo) await this.flows.startOnClose(u.tenantId, id, fluxo).catch(() => undefined);
+      // a pesquisa substitui o fluxo: o fluxo reabre a conversa para falar, e duas automações
+      // perguntando ao mesmo tempo confundem o cliente (docs/pesquisa-de-satisfacao.md)
+      if (pesquisa) await this.surveys.sendOnClose(u.tenantId, id, pesquisa, dono?.assigneeId ?? u.id).catch(() => undefined);
+      else if (fluxo) await this.flows.startOnClose(u.tenantId, id, fluxo).catch(() => undefined);
     }
     return conv;
   }

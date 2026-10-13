@@ -14,6 +14,7 @@ import { enrichContext } from '../../common/observability/request-context';
 import { isAmbiguousOptOut, isOptOut } from '../campaigns/dispatch';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { shouldRefreshAvatar } from './avatar-refresh';
+import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
 export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
@@ -26,6 +27,7 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     private readonly flows: FlowEngineService,
     private readonly scheduling: SchedulingService,
     private readonly prisma: PrismaService,
+    private readonly surveys: SurveyRunnerService,
   ) {
     super(QUEUE_INBOUND);
   }
@@ -66,6 +68,8 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       enrichContext({ tenantId: number.tenantId }); // daqui para a frente o log sai com o tenant
       const result = await this.inbound.ingestInbound(number, msg);
       const saved = result?.message;
+      // resposta da pesquisa de satisfação: pede o comentário, agradece ou se despede (sem automação)
+      if (result?.survey) await this.surveys.followUp(result.survey).catch((err) => this.log.error(`pesquisa: ${err instanceof Error ? err.message : err}`));
       // automação: avança fluxo ativo ou avalia gatilhos (nunca derruba a ingestão)
       // o que o cliente digitou no celular dele entra no histórico, mas não aciona nada:
       // responder com um fluxo ao dono do número seria o robô conversando com o chefe

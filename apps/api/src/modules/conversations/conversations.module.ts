@@ -12,11 +12,12 @@ import { FlowsModule } from '../flows/flows.module';
 import { ConversationScopeGuard } from './conversation-scope.guard';
 import { CloseReasonsModule } from '../close-reasons/close-reasons.module';
 import { AuditModule } from '../audit/audit.module';
+import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
 
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_OUTBOUND }), AuthModule, BillingModule, CloseReasonsModule, AuditModule, forwardRef(() => WhatsAppModule), forwardRef(() => FlowsModule)],
   controllers: [ConversationsController],
-  providers: [ConversationsService, InboundService, ConversationsGateway, ConversationScopeGuard],
-  exports: [ConversationsService, InboundService, ConversationsGateway],
+  providers: [ConversationsService, InboundService, ConversationsGateway, ConversationScopeGuard, SurveyRunnerService],
+  exports: [ConversationsService, InboundService, ConversationsGateway, SurveyRunnerService],
 })
 export class ConversationsModule {}

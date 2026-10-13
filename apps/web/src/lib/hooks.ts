@@ -29,3 +29,4 @@ export * from './hooks/pix';
 export * from './hooks/transmissoes';
 export * from './hooks/motivos';
 export * from './hooks/modelos';
+export * from './hooks/pesquisas';

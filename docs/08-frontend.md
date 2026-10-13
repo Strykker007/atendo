@@ -33,6 +33,7 @@ src/
 │       ├── layout.tsx      restaura sessão via /auth/refresh, monta Sidebar, liga o socket
 │       ├── conversas/      3 colunas
 │       ├── numeros/        cards de números, modais de criar/trocar/QR
+│       ├── pesquisas/      pesquisas de satisfação: lista (padrão, desativar), editor com escala, recusa, comentário, agradecimento, prazo e prévia do WhatsApp ([pesquisa-de-satisfacao.md](pesquisa-de-satisfacao.md)). Modal de encerrar: 'Enviar pesquisa de satisfação ao encerrar' (marcada com a padrão; desabilita o fluxo)
 │       ├── tags/           CRUD com paleta de cores; "Conflita com" no modal (badge ⇄ N na linha)
 │       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha
 │       ├── plano/          medidores de uso, excedente, explicação do limite; checkout Asaas em modal (PIX com QR + copia e cola e polling de 4 s, ou cartão) — `components/billing/AsaasCheckoutModal`
@@ -40,6 +41,7 @@ src/
 │       ├── admin/          Financeiro do dono (KPIs, série, assinaturas, faturas, margem)
 │       ├── clientes/       Clientes do dono: busca (nome, razão social, CNPJ, e-mail do admin, empresa) + filtros (plano, assinatura, vencimento, ativos) e ordenação, no navegador; criar, plano/status, ativar, Entrar como. Monitor ao vivo (`useTenantsLive`, `GET /monitor/tenants`): coluna Atividade (Online · N com o painel aberto agora, senão "Visto há…"/"Nunca acessou"), coluna Números com cada número e a saúde (Conectado, QR pendente, Desconectado, Erro, Sem receber, Desativado) e resumo no topo (clientes online, números conectados, com problema). Recarrega nos eventos `tenant_presence`/`tenant_number` e a cada 60 s
 │       └── relatorios/     abre com visão pronta do dia (KPIs + gráficos); filtros no topo (atalhos, data inicial/final, tag, consultor) valem para a tela inteira; 'Relatório personalizado' expande o construtor (métrica, agrupamento, filtros, tabela, CSV, salvos)
+│           ├── satisfacao/ Relatório de satisfação (`GET /reports/satisfaction`): período, pesquisa, consultor, escala; KPIs (nota média/NPS, satisfeitos, taxa de resposta, recusas), distribuição, tabela por consultor (clique filtra) e feedbacks com filtro por nota. Link no cabeçalho de /relatorios
 │           └── ranking/    Ranking de consultores (`GET /reports/ranking-consultants`): atalhos Hoje / Últimos 7 dias / Mês atual (padrão) / Personalizado + tag; pódio 1º-2º-3º por vendas e tabela ordenável (nome, concluídos, vendas, conversão, TMA). Link no cabeçalho de /relatorios
 ├── components/
 │   ├── layout/Sidebar.tsx | CompanySwitcher.tsx (empresa ativa, ver empresas.md) | UsageBanner.tsx | ImpersonationBanner.tsx (faixa 'Você está vendo X como dono')

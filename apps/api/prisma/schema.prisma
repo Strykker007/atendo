@@ -87,6 +87,8 @@ model Tenant {
   closeReasons    CloseReason[]
   pixKeys         PixKey[]
   auditLogs       AuditLog[]
+  satisfactionSurveys SatisfactionSurvey[]
+  surveyResponses     SurveyResponse[]
   @@map("tenants")
 }
 
@@ -636,6 +638,84 @@ model CloseReason {
   @@map("close_reasons")
 }
 
+/// Pesquisa de satisfação enviada ao encerrar o atendimento (docs/pesquisa-de-satisfacao.md).
+/// Excluir = desativar: as respostas guardam o id e o relatório do mês fechado não perde a linha.
+model SatisfactionSurvey {
+  id              String   @id @default(uuid())
+  tenantId        String
+  name            String
+  /// scale_5 | scale_10 | csat_3 (`SURVEY_SCALES` no shared)
+  scale           String   @default("scale_5")
+  /// pergunta (aceita `{{variáveis}}`); a instrução de como responder é acrescentada pelo sistema
+  question        String
+  /// cliente pode recusar ("0" ou botão): a pesquisa termina na hora, sem insistir
+  allowDecline    Boolean  @default(true)
+  declineLabel    String   @default("Não responder")
+  /// depois da nota, pergunta se quer deixar um comentário
+  askComment      Boolean  @default(true)
+  commentPrompt   String?
+  thanksMessage   String?
+  /// enviada quando o cliente recusa; vazio = não manda nada
+  declinedMessage String?
+  /// horas esperando a resposta; depois disso a mensagem do cliente reabre o atendimento normalmente
+  expiresHours    Int      @default(24)
+  /// pré-marcada no encerramento (e usada quando a API não diz qual) — no máximo uma por empresa
+  isDefault       Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  responses SurveyResponse[]
+
+  @@index([tenantId])
+  @@map("satisfaction_surveys")
+}
+
+enum SurveyResponseStatus {
+  /// enviada, esperando a nota
+  pending
+  /// nota dada, esperando o comentário (opcional)
+  commenting
+  answered
+  declined
+  /// o prazo venceu ou o cliente mandou outra coisa (não insistimos)
+  expired
+  /// não saiu (número desconectado, fora da janela da Meta, descadastrado…)
+  failed
+}
+
+/// Uma pesquisa enviada num encerramento. Escala e consultor ficam congelados aqui: trocar a
+/// pesquisa depois não reescreve as notas que já entraram.
+model SurveyResponse {
+  id             String               @id @default(uuid())
+  tenantId       String
+  surveyId       String
+  conversationId String
+  contactId      String
+  /// consultor do atendimento (dono da conversa ao encerrar, senão quem encerrou)
+  agentId        String?
+  agentName      String?
+  scale          String
+  status         SurveyResponseStatus @default(pending)
+  /// 1..máximo da escala; nulo = não respondeu ou recusou
+  score          Int?
+  comment        String?
+  error          String?
+  sentAt         DateTime             @default(now())
+  expiresAt      DateTime
+  answeredAt     DateTime?
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  survey       SatisfactionSurvey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, sentAt])
+  @@index([tenantId, agentId, sentAt])
+  @@index([conversationId, status])
+  @@map("survey_responses")
+}
+
 /// Chave Pix da empresa: o atendente envia pelo painel do chat como cartão com "Copiar chave Pix"
 model PixKey {
   id        String   @id @default(uuid())
@@ -767,6 +847,7 @@ model Conversation {
   /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
   scheduledMessages ScheduledMessage[]
+  surveyResponses   SurveyResponse[]
   @@unique([numberId, contactId])
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
   /// fila por tempo de espera

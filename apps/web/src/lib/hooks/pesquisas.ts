@@ -1,0 +1,80 @@
+'use client';
+/** Pesquisa de satisfação no encerramento — docs/pesquisa-de-satisfacao.md. */
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { SurveyScale } from '@atendo/shared';
+import { api } from '../api';
+
+export interface SatisfactionSurvey {
+  id: string;
+  name: string;
+  scale: SurveyScale;
+  question: string;
+  allowDecline: boolean;
+  declineLabel: string;
+  askComment: boolean;
+  commentPrompt: string | null;
+  thanksMessage: string | null;
+  declinedMessage: string | null;
+  expiresHours: number;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: string;
+}
+export type SurveyInput = Partial<Omit<SatisfactionSurvey, 'id' | 'createdAt'>>;
+
+const KEY = ['satisfaction-surveys'];
+export const useSurveys = () => useQuery({ queryKey: KEY, queryFn: () => api<SatisfactionSurvey[]>('/satisfaction-surveys'), staleTime: 60_000 });
+
+const inv = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: KEY });
+export const useCreateSurvey = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (b: SurveyInput) => api<SatisfactionSurvey>('/satisfaction-surveys', { method: 'POST', body: JSON.stringify(b) }), onSuccess: inv(qc) });
+};
+export const useUpdateSurvey = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, ...b }: SurveyInput & { id: string }) => api<SatisfactionSurvey>(`/satisfaction-surveys/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: inv(qc) });
+};
+export const useDeleteSurvey = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api(`/satisfaction-surveys/${id}`, { method: 'DELETE' }), onSuccess: inv(qc) });
+};
+
+// ---- Relatório ----
+export interface SatisfactionIndicators {
+  sent: number;
+  answered: number;
+  declined: number;
+  waiting: number;
+  noResponse: number;
+  /** 0–100 */
+  responseRate: number;
+  declineRate: number;
+  avg: number | null;
+  satisfiedPct: number | null;
+  /** só na escala de 10 */
+  nps: number | null;
+}
+export interface SatisfactionReport {
+  scale: SurveyScale;
+  scales: { scale: SurveyScale; count: number }[];
+  totals: SatisfactionIndicators & { failed: number; distribution: { score: number; count: number }[] };
+  byAgent: (SatisfactionIndicators & { agentId: string | null; name: string })[];
+  comments: {
+    total: number;
+    page: number;
+    pageSize: number;
+    rows: { id: string; score: number; comment: string | null; answeredAt: string | null; sentAt: string; surveyName: string; agent: { id: string | null; name: string | null } | null; conversationId: string; contact: { id: string; name: string | null; phone: string } }[];
+  };
+}
+export interface SatisfactionFilters { from: string; to: string; scale?: SurveyScale; surveyId?: string; agentId?: string; scoreMin?: number; scoreMax?: number; onlyComments?: boolean; page?: number }
+export const useSatisfactionReport = (f: SatisfactionFilters) => {
+  const qs = new URLSearchParams({ from: f.from, to: f.to });
+  if (f.scale) qs.set('scale', f.scale);
+  if (f.surveyId) qs.set('surveyId', f.surveyId);
+  if (f.agentId) qs.set('agentId', f.agentId);
+  if (f.scoreMin) qs.set('scoreMin', String(f.scoreMin));
+  if (f.scoreMax) qs.set('scoreMax', String(f.scoreMax));
+  if (f.onlyComments === false) qs.set('onlyComments', '0');
+  if (f.page) qs.set('page', String(f.page));
+  return useQuery({ queryKey: ['satisfaction-report', qs.toString()], queryFn: () => api<SatisfactionReport>(`/reports/satisfaction?${qs}`), placeholderData: keepPreviousData });
+};

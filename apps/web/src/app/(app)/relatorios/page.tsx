@@ -11,7 +11,7 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
 import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useOutcomeLabels, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
-import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy } from 'lucide-react';
+import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
 import { Attendances, type AttendanceFocus } from '@/components/reports/Attendances';
@@ -103,7 +103,12 @@ export default function RelatoriosPage() {
       <PageHeader
         title="Relatórios"
         subtitle="Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais."
-        action={<Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking de consultores</Link>}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>
+            <Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking de consultores</Link>
+          </div>
+        }
       />
 
       {/* ---------- Filtros da tela inteira ---------- */}

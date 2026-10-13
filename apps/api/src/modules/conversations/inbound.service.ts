@@ -11,6 +11,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { ConversationsGateway } from './conversations.gateway';
 import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './conversations.service';
+import { SurveyRunnerService, type SurveyClaim } from '../satisfaction/survey-runner.service';
 import { decidirEntrada, ehConfirmacao, naCarencia, voltandoDepoisDeEncerrado } from './reopen';
 import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
@@ -43,6 +44,7 @@ export class InboundService {
     private readonly usage: UsageService,
     private readonly gateway: ConversationsGateway,
     private readonly conversations: ConversationsService,
+    private readonly surveys: SurveyRunnerService,
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
   ) {}
 
@@ -72,7 +74,7 @@ export class InboundService {
 
   // ---------- inbound (worker) ----------
 
-  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null; fromMe?: boolean; /** confirmação na carência do encerramento: não reabriu e não aciona automação */ quiet?: boolean } | null> {
+  async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null; fromMe?: boolean; /** confirmação na carência do encerramento: não reabriu e não aciona automação */ quiet?: boolean; /** resposta da pesquisa de satisfação: o processor manda o próximo passo */ survey?: SurveyClaim } | null> {
     // idempotência: o mesmo webhook pode chegar duas vezes. É também o que descarta o eco do
     // que o PAINEL enviou: aquela mensagem já está no banco com este externalId.
     const exists = await this.prisma.message.findUnique({ where: { externalId: msg.externalId } });
@@ -113,8 +115,11 @@ export class InboundService {
     // "ok"/"obrigada"/figurinha logo depois de encerrar: entra no histórico e a conversa
     // continua encerrada (reopen.ts → CLOSE_GRACE_MS). Fluxo esperando resposta (pesquisa de
     // satisfação do encerramento) fica de fora: aquela resposta é dele.
-    const quieta = decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
-      && !(await this.prisma.flowRun.findFirst({ where: { conversationId: conversation!.id, status: { in: ['running', 'waiting'] } }, select: { id: true } }));
+    // resposta da pesquisa de satisfação do encerramento: entra no histórico sem reabrir
+    // (docs/pesquisa-de-satisfacao.md). Não sendo resposta, a pesquisa sai do caminho e segue normal.
+    const pesquisa = decisao.acao === 'reabrir' ? await this.surveys.claim(conversation!.id, { type: msg.type, text: msg.text, interactiveReplyId: msg.interactiveReplyId }, msg.timestamp) : null;
+    const quieta = !!pesquisa || (decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
+      && !(await this.prisma.flowRun.findFirst({ where: { conversationId: conversation!.id, status: { in: ['running', 'waiting'] } }, select: { id: true } })));
     if (decisao.acao === 'reabrir' && !quieta) {
       // atendimento novo na mesma conversa: volta para a fila, sem dono e sem o desfecho do
       // atendimento anterior — aquele já está congelado no histórico (conversation_events)
@@ -178,7 +183,7 @@ export class InboundService {
     this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
     this.gateway.emitConversation(number.tenantId, conversation);
     // quieta: nada de fluxo, boas-vindas nem agenda — é só o "ok" de quem já foi atendido
-    return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed: returningAfterClosed && !quieta, hoursSinceLastMessage, quiet: quieta };
+    return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed: returningAfterClosed && !quieta, hoursSinceLastMessage, quiet: quieta, ...(pesquisa && { survey: pesquisa }) };
   }
 
   /**
