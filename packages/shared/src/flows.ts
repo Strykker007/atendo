@@ -235,11 +235,31 @@ function legacyRule(d: LegacyConditionData): ConditionRule | undefined {
 export type ActionNode = FlowNodeBase<'action', {
   kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook' | 'set_department';
   tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed';
+  /**
+   * set_status + closed: resultado do encerramento. Ausente = sem resultado (como antes, fora de
+   * venda/conversão). `won`/`lost` contam nos relatórios em nome do dono da conversa.
+   */ outcome?: 'won' | 'lost';
+  /** set_status + closed: motivo de encerramento (lista `close_reasons`) */ closeReasonId?: string;
+  /** set_status + closed + won: valor da venda; aceita {{variáveis}} ("R$ 1.234,56", "1234.56") */ saleValue?: string;
   /** set_department: id do departamento ou `DEPARTMENT_NONE` (tirar de departamento) */ departmentId?: string;
   /** set_var */ varName?: string; value?: string;
   /** webhook */ url?: string; method?: WebhookMethod; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;
   /** webhook: guarda o corpo da resposta nesta variável */ responseVar?: string;
 }>;
+/**
+ * Valor em reais vindo de texto livre (variável do fluxo): "R$ 1.234,56", "1234,5", "1234.56",
+ * "1.500". Inválido, zero ou negativo = null.
+ */
+export function parseMoneyText(raw: string | undefined | null): number | null {
+  let s = (raw ?? '').replace(/[^\d.,-]/g, '');
+  if (!s || s.startsWith('-')) return null;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  // só pontos: "1.500" e "1.234.567" são milhar; "1234.56" é decimal
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const v = Math.round(Number(s) * 100) / 100;
+  return Number.isFinite(v) && v > 0 && v <= 999_999_999 ? v : null;
+}
 export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export const WEBHOOK_METHODS: WebhookMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 export interface WebhookHeader { id: string; key: string; value: string }

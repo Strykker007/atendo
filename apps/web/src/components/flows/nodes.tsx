@@ -9,7 +9,7 @@ import {
   type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
-import { useDepartments, useSchedules } from '@/lib/hooks';
+import { useDepartments, useOutcomeLabels, useSchedules } from '@/lib/hooks';
 
 /**
  * Categorias da paleta. A cor é da categoria (roxo = estrutura, amarelo/laranja = lógica,
@@ -316,10 +316,11 @@ export function ConditionNodeView({ data, selected }: P) {
 }
 const STATUS_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado' };
 export function ActionNodeView({ data, selected }: P) {
-  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string };
+  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string; outcome?: 'won' | 'lost'; saleValue?: string };
   const departments = useDepartments();
+  const outcomeLabels = useOutcomeLabels();
   const dept = d.departmentId === DEPARTMENT_NONE ? 'Sem departamento' : departments.data?.find((x) => x.id === d.departmentId)?.name ?? (d.departmentId && departments.data ? 'departamento excluído' : '?');
-  const label = d.kind === 'set_status' && d.status === 'closed' ? 'Encerrar conversa'
+  const label = d.kind === 'set_status' && d.status === 'closed' ? `Encerrar conversa${d.outcome ? ` · ${outcomeLabels[d.outcome]}${d.outcome === 'won' && d.saleValue ? ` ${d.saleValue}` : ''}` : ''}`
     : ({ add_tag: 'Aplicar etiqueta', remove_tag: 'Remover etiqueta', assign: 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook', set_department: `Departamento → ${dept}` } as Record<string, string>)[d.kind ?? ''] ?? '';
   const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : d.kind === 'webhook' ? `${label}${d.url ? `\n${d.method ?? 'POST'} ${d.url}` : ''}` : label + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
   return (

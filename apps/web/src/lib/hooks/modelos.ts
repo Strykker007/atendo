@@ -11,7 +11,8 @@ export interface TemplateProfile { name: string; description?: string; permissio
 export interface TemplateQuickReply { atendo: 'quick-reply'; version: number; folder: string; title: string; body: string }
 export interface TemplateFlow { atendo: 'flow'; version: number; name: string; description?: string; trigger: unknown; definition: unknown }
 /** tag com que o cliente nasce — as mesmas opções da tela de Tags */
-export interface TemplateTag { name: string; color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean }
+/** `conflictsWith`: nomes de tags do modelo que não convivem com esta (simétrico — basta um lado) */
+export interface TemplateTag { name: string; color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean; conflictsWith?: string[] }
 export interface TemplateContent { profiles: TemplateProfile[]; quickReplies: TemplateQuickReply[]; flows: TemplateFlow[]; /** ausente = as de encerramento do formato antigo / catálogo (`effectiveTags`) */ tags?: TemplateTag[]; /** formato antigo, só leitura */ lossReasons?: string[]; /** cor `#rrggbb` do botão de cada motivo */ lossReasonColors?: Record<string, string> }
 export interface TenantTemplateDetail { id: string; name: string; description: string | null; isDefault: boolean; tenants: number; content: TemplateContent; /** o que o cliente recebe hoje (com `tags` ausente, vem do formato antigo ou do catálogo) */ effectiveTags: TemplateTag[] }
 

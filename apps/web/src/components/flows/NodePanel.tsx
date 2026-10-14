@@ -4,7 +4,7 @@ import { Trash2, Plus, X, ExternalLink, Lock, LockOpen } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META, DELAY_UNIT, FlowEditorRefs } from './nodes';
-import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments } from '@/lib/hooks';
+import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, reasonsFor } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
 import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
@@ -58,6 +58,8 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
   const tags = useTags();
   const agents = useAgents();
   const departments = useDepartments();
+  const closeReasons = useCloseReasons();
+  const outcomeLabels = useOutcomeLabels();
   // desativado só aparece se já for o escolhido (para não sumir do select sem aviso)
   const deptOptions = (current?: string) => (departments.data ?? []).filter((d) => d.isActive || d.id === current);
   const sched = useHasFeature('scheduling');
@@ -261,7 +263,44 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
             {node.data.kind === 'set_status' && node.data.status !== 'closed' && (
               <Field label="Status"><select className={inputCls} value={node.data.status ?? 'waiting'} onChange={(e) => set({ status: e.target.value })}><option value="waiting">Aguardando</option><option value="in_progress">Em atendimento</option></select></Field>
             )}
-            {node.data.kind === 'set_status' && node.data.status === 'closed' && <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Encerra o atendimento (dispara o fluxo de encerramento, se houver). Depois disso, Atraso e tempo limite deste fluxo param — a conversa está encerrada.</p>}
+            {node.data.kind === 'set_status' && node.data.status === 'closed' && (() => {
+              const d = node.data as Extract<FlowNode, { type: 'action' }>['data'];
+              const oc = d.outcome;
+              const motivos = reasonsFor(closeReasons.data, oc ?? null);
+              const atual = closeReasons.data?.find((r) => r.id === d.closeReasonId);
+              return (
+                <>
+                  <Field label="Resultado">
+                    {/* trocar o resultado limpa o motivo (as listas são diferentes) e o valor (só Comprou tem) */}
+                    <select className={inputCls} value={oc ?? ''} onChange={(e) => set({ outcome: e.target.value || undefined, closeReasonId: undefined, ...(e.target.value !== 'won' && { saleValue: undefined }) })}>
+                      <option value="">Sem resultado (não conta em vendas)</option>
+                      <option value="won">{outcomeLabels.won}</option>
+                      <option value="lost">{outcomeLabels.lost}</option>
+                    </select>
+                  </Field>
+                  {oc === 'won' && (
+                    <Field label="Valor da venda (opcional)" hint="Número ou variável do fluxo, ex.: {{valor_pedido}}. Vazio ou inválido = venda sem valor (não soma no faturamento).">
+                      <TextWithVars multiline={false} value={d.saleValue ?? ''} onChange={(v) => set({ saleValue: v || undefined })} vars={vars} placeholder="R$ 0,00 ou {{valor}}" />
+                    </Field>
+                  )}
+                  {oc && (motivos.length > 0 || d.closeReasonId) && (
+                    <Field label="Motivo" hint={motivos.length ? 'A empresa usa motivos: sem um, o fluxo encerra sem motivo e avisa a equipe.' : undefined}>
+                      <select className={inputCls} value={d.closeReasonId ?? ''} onChange={(e) => set({ closeReasonId: e.target.value || undefined })}>
+                        <option value="">Escolha…</option>
+                        {motivos.map((r) => <option key={r.id} value={r.id}>{r.name}{r.requiresTag ? ' (exige tag)' : ''}</option>)}
+                        {d.closeReasonId && !motivos.some((r) => r.id === d.closeReasonId) && <option value={d.closeReasonId}>{atual ? `${atual.name} (não vale mais)` : 'Motivo removido'}</option>}
+                      </select>
+                    </Field>
+                  )}
+                  <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">
+                    {oc
+                      ? <>Conta nos relatórios, no ranking e nas metas em nome do <b>dono da conversa</b> (sem dono, só no total da empresa). Para registrar tags, use <b>Aplicar etiqueta</b> antes deste bloco.</>
+                      : <>Encerra sem resultado: não entra em vendas, conversão nem ranking.</>}
+                    {' '}Não dispara fluxo de encerramento nem pesquisa. Depois disso, Atraso e tempo limite deste fluxo param — a conversa está encerrada.
+                  </p>
+                </>
+              );
+            })()}
           </>
         )}
 

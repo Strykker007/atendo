@@ -25,7 +25,8 @@ import { freePeriod } from '../billing/plan-rules';
 import { SYSTEM_PROFILES, TYPING_SPEED_KEYS, countLimit, type PlanLimits, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
 import { TenantTemplatesController } from './tenant-templates.controller';
-import { provisionedTags, type TemplateContent } from './tenant-template';
+import { provisionedTags, templateTagConflictPairs, type TemplateContent } from './tenant-template';
+import { conflictPair } from '../tags/conflicts';
 
 class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
@@ -230,6 +231,13 @@ class TenantsController {
       const modelo = provisionedTags(content);
       const deEncerramento = modelo.filter((t) => t.showOnWon || t.showOnLost);
       await tx.tag.createMany({ data: modelo.filter((t) => t.isKanban || !(t.showOnWon || t.showOnLost)).map((t, position) => ({ tenantId: tenant.id, name: t.name, position, isKanban: !!t.isKanban, ...(t.color && { color: t.color }) })), skipDuplicates: true });
+      // "conflita com" do modelo: só entre as que ficaram tag (as que viraram motivo não são tag aqui)
+      const pares = templateTagConflictPairs(modelo);
+      if (pares.length) {
+        const idPorNome = new Map((await tx.tag.findMany({ where: { tenantId: tenant.id }, select: { id: true, name: true } })).map((t) => [t.name.toLowerCase(), t.id]));
+        const data = pares.map(([a, b]) => [idPorNome.get(a), idPorNome.get(b)] as const).filter((p): p is readonly [string, string] => !!p[0] && !!p[1]).map(([a, b]) => conflictPair(a, b));
+        if (data.length) await tx.tagConflict.createMany({ data, skipDuplicates: true });
+      }
       await tx.closeReason.createMany({
         data: deEncerramento.map((t, position) => ({ tenantId: tenant.id, name: t.name, position, outcome: t.showOnWon && t.showOnLost ? 'both' : t.showOnWon ? 'won' : 'lost', ...(t.color && { color: t.color }) })),
         skipDuplicates: true,

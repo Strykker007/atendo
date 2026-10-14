@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -861,9 +861,23 @@ export class FlowEngineService {
       case 'assign':
         if (d.agentId) await this.prisma.conversation.update({ where: { id: run.conversationId }, data: { assigneeId: d.agentId, status: 'in_progress' } });
         break;
-      case 'set_status':
-        if (d.status) await this.conversations.setStatusSystem(run.conversationId, d.status);
+      case 'set_status': {
+        if (!d.status) break;
+        if (d.status !== 'closed' || !d.outcome) {
+          await this.conversations.setStatusSystem(run.conversationId, d.status);
+          break;
+        }
+        // encerrar com resultado: conta nos relatórios em nome do dono da conversa
+        let value: number | null = null;
+        if (d.outcome === 'won' && d.saleValue?.trim()) {
+          const texto = interpolate(d.saleValue, await this.interpolation.context(run.tenantId, run.conversation.contact, run.vars as Record<string, string>));
+          value = parseMoneyText(texto);
+          if (value == null) await this.warnTeam(run, `Encerrar conversa: o valor da venda (“${texto.slice(0, 60)}”) não é um valor válido. Encerrou como venda sem valor (não soma no faturamento).`);
+        }
+        const avisos = await this.conversations.closeByFlow(run.conversationId, { outcome: d.outcome, value, closeReasonId: d.closeReasonId ?? null, flowName: run.flow.name });
+        for (const a of avisos) await this.warnTeam(run, a);
         break;
+      }
       case 'handoff':
         await this.handoff(run.id, 'transferido para humano pelo fluxo', d.agentId);
         return 'ended';

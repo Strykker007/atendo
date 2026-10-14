@@ -211,6 +211,12 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
     }
 
     if (node.type === 'action') {
+      // motivo de encerramento é do cliente de origem (id); o resultado (Comprou/Não comprou) viaja
+      if (typeof d.closeReasonId === 'string') {
+        delete d.closeReasonId;
+        warnings.push('O motivo de um "Encerrar conversa" foi removido — escolha o motivo no destino.');
+        flagReconfig(d, 'motivo do encerramento');
+      }
       // a URL do webhook costuma levar token na query: não sai do cliente
       if (typeof d.url === 'string' && d.url) {
         delete d.url;

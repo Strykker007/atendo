@@ -584,6 +584,77 @@ export class ConversationsService {
   }
 
   /**
+   * "Encerrar conversa" do fluxo com resultado (Comprou/Não comprou) — docs/fluxos.md#ação.
+   * Conta nos relatórios como o encerramento do atendente: o evento e a venda vão em nome do
+   * **dono da conversa** (ranking, metas, conversão); sem dono, ator nulo — entra no total da
+   * empresa e fica fora do ranking. `viaFlow` marca no histórico que foi o robô.
+   *
+   * O robô não tem a quem perguntar: motivo inválido ou faltando, ou motivo que exige tag sem
+   * tag, não trava — encerra assim mesmo e devolve avisos para o fluxo mandar à equipe. Não
+   * dispara fluxo de encerramento nem pesquisa (o fluxo que encerrou já é a automação).
+   */
+  async closeByFlow(conversationId: string, d: { outcome: 'won' | 'lost'; value?: number | null; closeReasonId?: string | null; flowName: string }): Promise<string[]> {
+    const avisos: string[] = [];
+    const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { tenantId: true, status: true, assigneeId: true, botPausedAt: true } });
+    if (!antes || antes.status === 'closed') return avisos;
+    const tenantId = antes.tenantId;
+    let motivo: { id: string; name: string; requiresTag: boolean } | null = null;
+    try {
+      motivo = await this.closeReasons.resolve(tenantId, d.outcome, d.closeReasonId);
+    } catch {
+      avisos.push(d.closeReasonId
+        ? 'Encerrar conversa: o motivo escolhido não existe mais ou não vale para esse resultado. A conversa foi encerrada sem motivo.'
+        : 'Encerrar conversa: a empresa exige motivo de encerramento e o card não tem um. A conversa foi encerrada sem motivo.');
+    }
+    const transitorias = await this.tagsDoAtendimento([conversationId]);
+    if (motivo?.requiresTag && !transitorias.get(conversationId)?.ids.length) {
+      avisos.push(`Encerrar conversa: o motivo “${motivo.name}” exige tag e o atendimento não tinha nenhuma. Use "Aplicar etiqueta" antes de encerrar.`);
+    }
+    const dono = antes.assigneeId ? (await this.prisma.user.findFirst({ where: { id: antes.assigneeId, tenantId }, select: { id: true } }))?.id ?? null : null;
+    const valor = d.outcome === 'won' && d.value ? new Prisma.Decimal(d.value) : null;
+    const agora = new Date();
+    const conv = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        status: 'closed',
+        closedAt: agora,
+        ...BOT_PAUSE_CLEAR,
+        outcome: d.outcome,
+        outcomeValue: valor,
+        outcomeReason: motivo?.name ?? null,
+        outcomeAt: agora,
+        outcomeById: dono,
+        lastClosedAt: agora,
+        lastCloseOutcome: d.outcome,
+        lastCloseReasonId: motivo?.id ?? null,
+      },
+    });
+    await this.registrar({
+      tenantId,
+      conversationId,
+      type: tipoDaTransicao(antes.status, 'closed'),
+      actorId: dono,
+      fromStatus: antes.status,
+      toStatus: 'closed',
+      outcome: d.outcome,
+      outcomeValue: valor,
+      reason: motivo?.name ?? null,
+      closeReasonId: motivo?.id ?? null,
+      stageTagId: transitorias.get(conversationId)?.stage ?? null,
+      tagSnapshot: transitorias.get(conversationId)?.ids ?? [],
+      viaFlow: d.flowName.slice(0, 120),
+    });
+    await this.limparTransitorias([conversationId]);
+    if (valor) {
+      await this.prisma.sale.create({ data: { tenantId, conversationId, contactId: conv.contactId, userId: dono, amount: valor, notes: `Venda registrada pelo fluxo “${d.flowName}”`.slice(0, 500), closedAt: agora } });
+    }
+    if (antes.botPausedAt) await this.registrar({ tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
+    await this.encerrarFluxosPausados([conversationId]);
+    this.gateway.emitConversation(tenantId, conv);
+    return avisos;
+  }
+
+  /**
    * Envio do atendente. Sai SEMPRE pelo número da conversa, lido do banco — nada no payload escolhe
    * o número, e não há fallback para outro: se o canal não pode enviar, a mensagem não sai.
    * `expectedNumberId` é o canal que a tela mostrava; se a conversa não está mais nele, 409 sem enviar.
@@ -1543,6 +1614,7 @@ export class ConversationsService {
     stageTagId?: string | null;
     tagSnapshot?: string[];
     ignoreInReports?: boolean;
+    viaFlow?: string | null;
   }, db: Prisma.TransactionClient = this.prisma) {
     // super_admin não tem linha em `users` deste tenant: entra como sistema, senão a FK quebra
     const actorId = e.actorId && (await db.user.findFirst({ where: { id: e.actorId, tenantId: e.tenantId }, select: { id: true } })) ? e.actorId : null;

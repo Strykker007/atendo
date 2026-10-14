@@ -1,6 +1,7 @@
 import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, LOSS_REASONS_MAX, SYSTEM_PROFILES, parsePortableFlowFile, type Permission, type PortableFlow } from '@atendo/shared';
 import { sanitize } from '../auth/permissions';
 import { parsePortableReplyFile, type PortableQuickReply } from '../quick-replies/portable';
+import { MAX_CONFLICTS_PER_TAG } from '../tags/conflicts';
 
 /**
  * Modelo de perfil (vertical): o pacote que um cliente novo recebe ao nascer. Puro (sem
@@ -30,6 +31,12 @@ export interface TemplateTag {
   showOnWon?: boolean;
   /** aparece para escolha ao encerrar como "Não comprou" */
   showOnLost?: boolean;
+  /**
+   * "Conflita com": nomes de outras tags do modelo (simétrico — basta um dos lados). Marcar uma
+   * tira as opostas diretas (`tags/conflicts.ts`). Tag que vira motivo de encerramento não é tag
+   * no cliente, então o par com ela é ignorado ao criar.
+   */
+  conflictsWith?: string[];
 }
 
 /** teto de tags num modelo */
@@ -137,11 +144,49 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
       tags.push({ name, ...(t.color && { color: t.color.toLowerCase() }), isKanban: t.isKanban === true, showOnWon: t.showOnWon === true || legado, showOnLost: t.showOnLost === true || legado });
     }
     if (tags.length > TEMPLATE_TAGS_MAX) throw new Error(`No máximo ${TEMPLATE_TAGS_MAX} tags no modelo.`);
+    tagConflicts(tags, o.tags as Partial<TemplateTag>[]);
   }
 
   // com `tags`, o formato antigo sai: uma fonte só do que o cliente recebe
   if (tags) return { profiles, quickReplies, flows, tags };
   return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }) };
+}
+
+/**
+ * Lê o "Conflita com" de cada tag: só nomes de tags da lista (ignorando maiúsculas; grava o nome
+ * como está na lista), sem ela mesma e sem repetir. Nome que não está na lista some em silêncio
+ * (como a cor de tag removida). Contando os dois lados, cada tag tem no máximo
+ * `MAX_CONFLICTS_PER_TAG` opostas — o mesmo teto da tela de Tags.
+ */
+function tagConflicts(tags: TemplateTag[], raw: Partial<TemplateTag>[]) {
+  const canon = new Map(tags.map((t) => [t.name.toLowerCase(), t.name]));
+  const byName = new Map(raw.map((r) => [str(r?.name, 40)?.toLowerCase(), r]));
+  const grau = new Map<string, Set<string>>();
+  for (const t of tags) {
+    const lista = byName.get(t.name.toLowerCase())?.conflictsWith;
+    if (lista === undefined) continue;
+    if (!Array.isArray(lista)) throw new Error(`"conflictsWith" da tag "${t.name}" deve ser uma lista de nomes.`);
+    const nomes = [...new Set(lista.map((n) => (typeof n === 'string' ? canon.get(n.trim().toLowerCase()) : undefined)).filter((n): n is string => !!n && n !== t.name))];
+    if (nomes.length) t.conflictsWith = nomes;
+    for (const n of nomes) {
+      grau.set(t.name, (grau.get(t.name) ?? new Set()).add(n));
+      grau.set(n, (grau.get(n) ?? new Set()).add(t.name));
+    }
+  }
+  for (const [nome, opostas] of grau) if (opostas.size > MAX_CONFLICTS_PER_TAG) throw new Error(`A tag "${nome}" conflita com mais de ${MAX_CONFLICTS_PER_TAG} tags.`);
+}
+
+/** Pares "conflita com" do modelo (um por par, nomes em minúsculas para casar com o cliente). */
+export function templateTagConflictPairs(tags: TemplateTag[]): [string, string][] {
+  const vistos = new Set<string>();
+  const out: [string, string][] = [];
+  for (const t of tags) for (const o of t.conflictsWith ?? []) {
+    const [a, b] = [t.name.toLowerCase(), o.toLowerCase()].sort();
+    if (a === b || vistos.has(`${a}\u0000${b}`)) continue;
+    vistos.add(`${a}\u0000${b}`);
+    out.push([a, b]);
+  }
+  return out;
 }
 
 export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }) });

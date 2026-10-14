@@ -989,6 +989,9 @@ model ConversationEvent {
   /// encerramento interno: o atendimento (início, TMR, encerramento, conversão) sai dos relatórios.
   /// Congelado aqui — mudar o motivo depois não reescreve o mês que já fechou
   ignoreInReports Boolean              @default(false)
+  /// encerramento com resultado feito por um fluxo: nome do fluxo (congelado). O ator é o dono da
+  /// conversa, que leva o crédito no ranking e nas metas; nulo = feito por uma pessoa ou sem resultado
+  viaFlow        String?
   createdAt      DateTime              @default(now())
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
