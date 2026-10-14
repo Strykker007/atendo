@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.2.0 — 2026-10-14
+
+- feat(orçamentos): orçamento no chat com link seguro /o/:hash, página pública com Pix, pagar agora e envio de comprovante
+- feat(modelos): Aplicar aos clientes — replica perfis, motivos Comprou/Não comprou e tags do modelo em clientes existentes, com prévia
+- feat(fluxos): bloco API externa (campos do JSON em variáveis, botão Testar), lixeira no card, seleção múltipla com barra de ações e novos atalhos
+- feat(fluxos): Encerrar conversa com Comprou/Não comprou, motivo e valor (crédito do dono); conflitos de tag nos modelos de perfil
+
 ## 1.1.0 — 2026-10-14
 
 - feat(relatórios): metas mensais por consultor, satisfação no ranking, ranking e pesquisa como recursos de plano e proteção dos relatórios contra pico
