@@ -84,7 +84,7 @@ export interface ReportOverview {
   kpis: { conversations: number; closed: number; closeRate: number; waitingNow: number; inProgressNow: number; messagesIn: number; messagesOut: number; avgFirstResponseMin: number | null; won: number; lost: number; revenue: number; winRate: number | null };
   series: Record<'byDay' | 'byAgent' | 'byOrigin' | 'byCampaign' | 'byTag' | 'byStatus', { label: string; value: number }[]>;
   /** vendas do período (tabela `sales`): total em R$, quantidade, ticket médio e por dia/atendente */
-  sales: { total: number; count: number; avgTicket: number | null; byDay: { label: string; value: number }[]; byAgent: { label: string; value: number; count: number; avgTicket: number }[] };
+  sales: { total: number; count: number; avgTicket: number | null; byDay: { label: string; value: number }[]; byAgent: { label: string; value: number; count: number; avgTicket: number }[]; /** origem: Pix automático × orçamento pago por fora × no encerramento */ bySource: { source: 'asaas' | 'manual' | 'close'; value: number; count: number }[]; /** estornados no período (fora do faturado) */ refunds: { count: number; value: number } };
   /** "Não comprou" por tag do encerramento, no período */
   /** `tagId` null = motivo em texto (antes das tags) ou tag excluída */
   lostReasons: { label: string; value: number; closeReasonId: string | null; color: string | null; tagId: string | null }[];

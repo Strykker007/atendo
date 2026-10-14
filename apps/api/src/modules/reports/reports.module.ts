@@ -469,7 +469,10 @@ class ReportsController {
     if (filtro.agentId) conds.push(Prisma.sql`s."userId" = ${filtro.agentId}`);
     if (filtro.tagIds) conds.push(this.vendaTemTag(filtro.tagIds));
     const where = Prisma.join(conds, ' and ');
-    const [totais, byDay, byAgent] = await this.load.all([
+    // estornos do período (pela data do estorno): a venda saiu do faturamento acima, mas a gestão precisa ver
+    const condsEstorno = [Prisma.sql`s."tenantId" = ${tenantId}`, Prisma.sql`s."refundedAt" >= ${from}`, Prisma.sql`s."refundedAt" < ${to}`];
+    if (filtro.agentId) condsEstorno.push(Prisma.sql`s."userId" = ${filtro.agentId}`);
+    const [totais, byDay, byAgent, bySource, estornos] = await this.load.all([
       () => this.prisma.$queryRaw<{ total: number | null; count: number }[]>(Prisma.sql`
         select sum(s.amount)::float as total, count(*)::int as count from sales s where ${where}
       `),
@@ -482,6 +485,17 @@ class ReportsController {
         from sales s left join users u on u.id = s."userId"
         where ${where} group by 1 order by 2 desc
       `),
+      // origem do dinheiro (docs/orcamentos.md#venda): Pix automático (Asaas) × orçamento pago por
+      // fora × venda digitada no encerramento (sem orçamento, ou o adicional além dele)
+      () => this.prisma.$queryRaw<{ source: 'asaas' | 'manual' | 'close'; value: number; count: number }[]>(Prisma.sql`
+        select case when s."budgetId" is null then 'close' when b."paidVia" = 'asaas' then 'asaas' else 'manual' end as source,
+               sum(s.amount)::float as value, count(*)::int as count
+        from sales s left join budgets b on b.id = s."budgetId"
+        where ${where} group by 1
+      `),
+      () => this.prisma.$queryRaw<{ count: number; value: number | null }[]>(Prisma.sql`
+        select count(*)::int as count, sum(s.amount)::float as value from sales s where ${Prisma.join(condsEstorno, ' and ')}
+      `),
     ]);
     const total = Number(totais[0]?.total ?? 0);
     const count = Number(totais[0]?.count ?? 0);
@@ -491,6 +505,8 @@ class ReportsController {
       avgTicket: count ? total / count : null,
       byDay: byDay.map((r) => ({ label: r.label, value: Number(r.value) })),
       byAgent: byAgent.map((r) => ({ label: r.label, value: Number(r.value), count: Number(r.count), avgTicket: Number(r.value) / Number(r.count) })),
+      bySource: (['asaas', 'manual', 'close'] as const).map((k) => { const r = bySource.find((x) => x.source === k); return { source: k, value: Number(r?.value ?? 0), count: Number(r?.count ?? 0) }; }),
+      refunds: { count: Number(estornos[0]?.count ?? 0), value: Number(estornos[0]?.value ?? 0) },
     };
   }
 

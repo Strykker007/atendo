@@ -17,6 +17,10 @@ Barra do campo de mensagem → ícone de recibo (**Gerar orçamento / pedido**).
 
 Não há permissão nem recurso de plano próprio: quem pode abrir a conversa pode gerar orçamento (o `ConversationScopeGuard` barra número/departamento de fora).
 
+## Relatórios
+
+Em **Relatórios → Vendas**: o card **Faturamento por origem** divide o faturado do período em *Pix automático (Asaas)*, *Orçamento pago por fora* e *Informada no encerramento* (venda sem orçamento, ou o adicional além dele), com o % de cada; abaixo, **Estornos no período** (quantidade e valor, já fora do faturado). Faturado, ticket médio, conversão, meta e ranking usam a mesma régua de vendas ([Venda](#venda)).
+
 ## Tela Orçamentos
 
 Menu **Orçamentos** (`/orcamentos`), para todos: quem tem `conversations.view_all` vê a equipe e filtra por atendente; os demais veem só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas.

@@ -296,6 +296,9 @@ export default function RelatoriosPage() {
  * vem do histórico de encerramentos: comprou ÷ (comprou + não comprou) — "sem resultado" (fechado
  * pelo sistema, ou anterior à regra que obriga o resultado) fica de fora.
  */
+/** origem da venda (`sales`): orçamento pago no Asaas, orçamento marcado como pago, ou digitada no encerramento */
+const ORIGEM_VENDA = { asaas: 'Pix automático (Asaas)', manual: 'Orçamento pago por fora', close: 'Informada no encerramento' } as const;
+
 function Vendas({ overview, range, onAuditar }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string]; onAuditar: (f: Omit<AttendanceFocus, 'seq'>) => void }) {
   const v = overview.sales;
   const { won, lost, winRate } = overview.kpis;
@@ -329,6 +332,24 @@ function Vendas({ overview, range, onAuditar }: { overview: NonNullable<ReturnTy
               </tbody>
             </table>
           )}
+        </Card>
+        <Card title="Faturamento por origem" hint="De onde veio o dinheiro do período">
+          <table className="w-full text-[12.5px]">
+            <thead><tr className="text-left text-muted border-b border-line"><th className="py-1.5 font-medium">Origem</th><th className="py-1.5 font-medium text-right">Vendas</th><th className="py-1.5 font-medium text-right">Faturado</th><th className="py-1.5 font-medium text-right">%</th></tr></thead>
+            <tbody>
+              {v.bySource.map((o) => (
+                <tr key={o.source} className="border-b border-line last:border-0">
+                  <td className="py-1.5 text-ink">{ORIGEM_VENDA[o.source]}</td>
+                  <td className="py-1.5 text-right tnum">{o.count}</td>
+                  <td className="py-1.5 text-right tnum">{fmtBRL(o.value)}</td>
+                  <td className="py-1.5 text-right tnum text-muted">{v.total ? `${Math.round((o.value / v.total) * 100)}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className={cn('mt-3 rounded-lg px-3 py-2 text-[12.5px]', v.refunds.count ? 'bg-danger-soft text-danger-ink' : 'bg-field text-muted')}>
+            Estornos no período: <b className="tnum">{v.refunds.count}</b> · <b className="tnum">{fmtBRL(v.refunds.value)}</b> — já fora do faturado.
+          </p>
         </Card>
         <Card title={`${labels.lost}, por motivo`} hint='Onde o negócio escapa. Clique num motivo para ver os atendimentos'>
           {overview.lostReasons.length ? (
