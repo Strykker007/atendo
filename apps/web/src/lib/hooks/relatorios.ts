@@ -5,7 +5,7 @@ import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClie
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, SurveyScale } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, SurveyScale, RankingParts, RankingWeights } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { ConversationOrigin, type Message } from './core';
 
@@ -50,8 +50,12 @@ export interface ConsultantRankingRow {
   avgHandleMin: number | null;
   /** pesquisa de satisfação (pergunta principal) na escala `satisfactionScale`; null = sem respostas */
   satisfaction: { answered: number; avg: number | null; nps: number | null } | null;
+  /** nota 0–100 que define a posição (packages/shared/ranking.ts) */
+  score: number;
+  /** cada métrica de 0 a 100; null = sem dado (peso redistribuído) */
+  scoreParts: RankingParts | null;
 }
-export interface ConsultantRanking { satisfactionScale: SurveyScale | null; totals: { closed: number; won: number; conversionRate: number }; ranking: ConsultantRankingRow[] }
+export interface ConsultantRanking { satisfactionScale: SurveyScale | null; weights: RankingWeights; totals: { closed: number; won: number; revenue: number; conversionRate: number }; ranking: ConsultantRankingRow[] }
 export const useConsultantRanking = (f: { from: string; to: string; tagIds?: string[]; enabled?: boolean }) => {
   const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }) });
   return useQuery({ queryKey: ['consultant-ranking', qs.toString()], queryFn: () => api<ConsultantRanking>(`/reports/ranking-consultants?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false, enabled: f.enabled !== false });

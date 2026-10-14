@@ -35,6 +35,8 @@ class SettingsDto {
   /** motivo de encerramento obrigatório em "Comprou" / "Não comprou" (cada um separado) */
   @IsOptional() @IsBoolean() requireReasonOnWon?: boolean;
   @IsOptional() @IsBoolean() requireReasonOnLost?: boolean;
+  /** pesos da pontuação do ranking (0–100 cada); normalizados no serviço. `null` = padrão */
+  @IsOptional() @IsObject() rankingWeights?: Record<string, number> | null;
   /** nome dos resultados do encerramento ("Fechou venda", "Perdido"…) — vazio volta ao padrão */
   @IsOptional() @IsString() @MaxLength(30) wonLabel?: string;
   @IsOptional() @IsString() @MaxLength(30) lostLabel?: string;

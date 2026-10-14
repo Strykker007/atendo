@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import type { WelcomeMessage, WelcomeMode } from '@atendo/shared';
+import { normalizeRankingWeights, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
+import { Prisma as PrismaNS } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 export interface SettingsUpdate {
@@ -14,6 +15,7 @@ export interface SettingsUpdate {
   requireSaleValue?: boolean;
   requireReasonOnWon?: boolean;
   requireReasonOnLost?: boolean;
+  rankingWeights?: Record<string, number> | null;
   wonLabel?: string;
   lostLabel?: string;
   defaultFlowId?: string | null;
@@ -35,10 +37,12 @@ export class TenantSettingsService {
   }
 
   async update(tenantId: string, dto: SettingsUpdate) {
-    const { welcomeMessages, wonLabel, lostLabel, ...rest } = dto;
+    const { welcomeMessages, wonLabel, lostLabel, rankingWeights, ...rest } = dto;
     const data: Prisma.TenantSettingsUncheckedUpdateInput = {
       ...rest,
       ...(welcomeMessages && { welcomeMessages: welcomeMessages as unknown as Prisma.InputJsonValue }),
+      // pesos fora de 0–100 viram o limite; todos zero = padrão (normalizeRankingWeights)
+      ...(rankingWeights !== undefined && { rankingWeights: rankingWeights === null ? PrismaNS.DbNull : (normalizeRankingWeights(rankingWeights) as unknown as Prisma.InputJsonValue) }),
       // apagar o nome volta ao padrão: resultado sem nome deixaria o botão do encerramento vazio
       ...(wonLabel !== undefined && { wonLabel: wonLabel.trim() || OUTCOME_LABELS_DEFAULT.won }),
       ...(lostLabel !== undefined && { lostLabel: lostLabel.trim() || OUTCOME_LABELS_DEFAULT.lost }),

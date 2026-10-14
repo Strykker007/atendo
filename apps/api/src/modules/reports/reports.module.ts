@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { vendasPorConsultorSql } from '../../common/reports/sales-base';
+import { SURVEY_SCALE_MAX, normalizeRankingWeights, rankingScores, type SurveyScale } from '@atendo/shared';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -381,10 +382,13 @@ class ReportsController {
     const to = f.to ?? new Date(Date.now() + 86_400_000);
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
     assertReportRange(from, to);
-    return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(',') }), () => this.rankingData(u.tenantId, from, to, f.tagIds));
+    // pesos entram na chave do cache: mudou o peso, a próxima leitura já reordena
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { rankingWeights: true } });
+    const weights = normalizeRankingWeights(s?.rankingWeights);
+    return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(','), w: JSON.stringify(weights) }), () => this.rankingData(u.tenantId, from, to, f.tagIds, weights));
   }
 
-  private async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[]) {
+  private async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[], weights = normalizeRankingWeights(null)) {
     const f = { tagIds };
     const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."actorId" is not null`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (f.tagIds?.length) conds.push(this.eventoTemTag(f.tagIds));
@@ -435,12 +439,21 @@ class ReportsController {
         const won = Number(v?.won ?? 0);
         const name = r?.name ?? nomes.find((n) => n.id === id)?.name ?? '(usuário removido)';
         return { userId: id, name, closed, won, revenue: Number(v?.revenue ?? 0), conversionRate: closed ? (won / closed) * 100 : 0, avgHandleMin: r?.tmaMin != null ? Number(r.tmaMin) : null, satisfaction: notaDe(id) };
-      })
-      // pódio: mais vendas; empate → mais concluídos → maior conversão
-      .sort((a, b) => b.won - a.won || b.closed - a.closed || b.conversionRate - a.conversionRate || a.name.localeCompare(b.name));
-    const closed = ranking.reduce((a, r) => a + r.closed, 0);
-    const won = ranking.reduce((a, r) => a + r.won, 0);
-    return { period: { from, to }, satisfactionScale, totals: { closed, won, conversionRate: closed ? (won / closed) * 100 : 0 }, ranking: ranking.map((r, i) => ({ position: i + 1, ...r })) };
+      });
+    // pontuação composta (packages/shared/ranking.ts): faturamento, vendas, conversão, satisfação e
+    // tempo de atendimento com os pesos da empresa. Empate → faturamento → vendas → nome
+    const notas_ = rankingScores(
+      ranking.map((r) => ({ userId: r.userId, revenue: r.revenue, won: r.won, closed: r.closed, avgHandleMin: r.avgHandleMin, satisfactionAvg: r.satisfaction?.avg ?? null })),
+      weights,
+      satisfactionScale ? SURVEY_SCALE_MAX[satisfactionScale as SurveyScale] : null,
+    );
+    const pontuado = ranking
+      .map((r) => ({ ...r, score: notas_.get(r.userId)?.score ?? 0, scoreParts: notas_.get(r.userId)?.parts ?? null }))
+      .sort((a, b) => b.score - a.score || b.revenue - a.revenue || b.won - a.won || a.name.localeCompare(b.name));
+    const closed = pontuado.reduce((a, r) => a + r.closed, 0);
+    const won = pontuado.reduce((a, r) => a + r.won, 0);
+    const revenue = Math.round(pontuado.reduce((a, r) => a + r.revenue * 100, 0)) / 100;
+    return { period: { from, to }, satisfactionScale, weights, totals: { closed, won, revenue, conversionRate: closed ? (won / closed) * 100 : 0 }, ranking: pontuado.map((r, i) => ({ position: i + 1, ...r })) };
   }
 
   @Get('saved')

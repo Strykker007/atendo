@@ -356,6 +356,9 @@ model TenantSettings {
   /// resultado). Cada um independente — desligado, o motivo fica opcional naquele resultado
   requireReasonOnWon  Boolean @default(true)
   requireReasonOnLost Boolean @default(true)
+  /// pesos da pontuação do ranking (`RankingWeights` no shared). Nulo = padrão
+  /// (`RANKING_WEIGHTS_DEFAULT`) — ver docs/metas.md › Ranking
+  rankingWeights Json?
   /// nome dos dois resultados do encerramento na empresa ("Fechou venda", "Matriculado"…). Só o
   /// rótulo muda: por baixo continuam `won`/`lost` (relatórios, vendas, fluxos e filtros)
   wonLabel  String @default("Comprou")
