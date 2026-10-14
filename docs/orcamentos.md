@@ -46,6 +46,19 @@ Trocar a chave recria o webhook; desconectar remove o webhook da conta (se a cha
 
 **Baixa:** o webhook confere o `asaas-access-token` com o segredo da conexão, acha o orçamento pelo id da cobrança e marca `PAID` com `paidVia = asaas` (vale mesmo depois de vencido). O painel recebe o socket `budgets` com `paid` e mostra "Pix recebido: R$ … — contato" em qualquer tela; na lista, *Baixa automática*. Responde sempre 200 (o Asaas pausa a fila depois de falhas seguidas); token errado é só registrado no log.
 
+## Venda
+
+Pagamento confirmado — webhook do Asaas (Pix automático) ou **Marcar como pago** (por fora) — **vira venda na hora**: linha em `sales` (`budgetId`) para o **atendente que gerou o orçamento**, na data do pagamento, com os itens. Conta na meta, no ranking e no faturamento mesmo que ninguém encerre a conversa. Uma nota interna aparece na conversa ("💰 Pagamento confirmado…") e o painel avisa.
+
+Para não haver furo nem duplicidade, o encerramento **absorve** o pagamento (`budgets.closeEventId`):
+
+- **Comprou** com orçamento pago no atendimento (pago depois do encerramento anterior): o modal já abre em "Comprou" mostrando o valor pago; o que o atendente digita é o que vendeu **a mais** (opcional). O encerramento grava o total (pago + adicional) e só o adicional vira venda nova. Meta e ranking contam o encerramento, não os dois.
+- **Não comprou** com pagamento confirmado: recusado (`400 budget_paid`) — o botão fica desabilitado. Fluxo que encerra como perda vira venda, com aviso para a equipe.
+- **Em massa**: conversas com pagamento ficam abertas (`withPayment` na resposta) — encerrar uma a uma.
+- **Sem encerramento** (ou encerrada pela automação): o pagamento segue contando sozinho.
+
+**Estorno**: botão **Estornar** na lista do orçamento (gestão — `settings.manage`). Pix automático pede a devolução ao Asaas (`POST /payments/:id/refund`); por fora, só registra. Também chega pelo webhook (`PAYMENT_REFUNDED`). O orçamento vira `REFUNDED`, a venda ganha `refundedAt` e sai do faturamento, da meta e do ranking (se já estava num encerramento, desconta do valor dele). Estorno parcial ou em andamento só gera nota na conversa — conferir no Asaas. **Desfazer pago** existe só para corrigir clique errado no pago por fora ainda não encerrado; o resto é estorno. Os webhooks já cadastrados são alinhados à lista de eventos (pagamento + estorno) quando a API sobe.
+
 ## Status e expiração
 
 `PENDING` → `PAID` (atendente marca) ou `EXPIRED` (passou do `expiresAt`). Não há job: o vencimento é aplicado na leitura — a página pública grava `EXPIRED` ao abrir, e o painel mostra como expirado mesmo antes disso. Pago vale mesmo depois de vencido; desfazer o pago de um vencido volta a `EXPIRED`.
@@ -58,7 +71,8 @@ A chave Pix é **copiada** para o orçamento na geração: editar ou apagar a ch
 |---|---|---|---|
 | GET | `/conversations/:id/budgets` | todos (escopo da conversa) | Últimos 30 orçamentos da conversa, com `receipt.url` assinada |
 | POST | `/conversations/:id/budgets` | todos (escopo da conversa) | `{items: {name, dosage?, quantity, unitPrice}[] (1–50), pixKeyId?, paymentUrl? (https), note?, validHours? (1–720, padrão 48), autoPix?, cpfCnpj?}`. Sem Pix e sem link = 400 (exceto `autoPix`). `autoPix` gera a cobrança no Asaas na hora; sem CPF/CNPJ (do body ou da ficha) = 400; `cpfCnpj` informado vai para a ficha |
-| PATCH | `/conversations/:id/budgets/:budgetId` | todos (escopo da conversa) | `{status: 'PAID' \| 'PENDING'}`. Socket `budgets` |
+| PATCH | `/conversations/:id/budgets/:budgetId` | todos (escopo da conversa) | `{status: 'PAID' \| 'PENDING'}` — PAID cria a venda; PENDING desfaz só o pago por fora ainda não encerrado. Socket `budgets` |
+| POST | `/conversations/:id/budgets/:budgetId/refund` | `settings.manage` | Estorno (Asaas devolve no Pix automático) — ver [Venda](#venda) |
 | GET | `/budgets/public/:hash` | público (30/min por IP) | `PublicBudget` (packages/shared) |
 | POST | `/budgets/public/:hash/receipt` | público (5/min por IP) | multipart `file`. Socket `budgets` |
 | POST | `/webhooks/pix/asaas/:gatewayId` | Asaas (header `asaas-access-token`) | Baixa automática. Sempre 200 |

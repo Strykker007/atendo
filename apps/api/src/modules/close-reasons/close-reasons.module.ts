@@ -38,7 +38,8 @@ const select = { id: true, name: true, color: true, outcome: true, ignoreInRepor
 /**
  * Regras do motivo no encerramento — usado pelo `ConversationsService` (individual e em massa).
  * Obrigatório quando há motivo ATIVO para o resultado: empresa sem lista (ou só com motivos do
- * outro resultado) encerra sem motivo, em vez de travar o atendimento.
+ * outro resultado) encerra sem motivo, em vez de travar o atendimento. A empresa ainda pode
+ * dispensar por resultado (`requireReasonOnWon` / `requireReasonOnLost`): aí o motivo é opcional.
  *
  * Encerramento interno (`internal`) só aceita motivo `ignoreInReports`, e o normal só aceita os
  * outros: é isso que impede quem não tem `conversations.close_internal` de tirar um atendimento
@@ -59,7 +60,9 @@ export class CloseReasonsService {
       return r;
     }
     if (await this.prisma.closeReason.count({ where: pool })) {
-      const s = internal ? null : await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { wonLabel: true, lostLabel: true } });
+      const s = internal ? null : await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { wonLabel: true, lostLabel: true, requireReasonOnWon: true, requireReasonOnLost: true } });
+      // a empresa pode dispensar o motivo em cada resultado (Configurações → Atendimento → Encerramento)
+      if (s && ((outcome === 'won' && !s.requireReasonOnWon) || (outcome === 'lost' && !s.requireReasonOnLost))) return null;
       const rotulo = internal ? 'Atendimento interno' : outcome === 'won' ? (s?.wonLabel ?? 'Comprou') : (s?.lostLabel ?? 'Não comprou');
       throw new BadRequestException({ code: 'close_reason_required', message: `Escolha o motivo do encerramento (“${rotulo}”).` });
     }

@@ -32,6 +32,9 @@ class SettingsDto {
   @IsOptional() @IsUUID() lostFlowId?: string | null;
   /** "Comprou" exige valor */
   @IsOptional() @IsBoolean() requireSaleValue?: boolean;
+  /** motivo de encerramento obrigatório em "Comprou" / "Não comprou" (cada um separado) */
+  @IsOptional() @IsBoolean() requireReasonOnWon?: boolean;
+  @IsOptional() @IsBoolean() requireReasonOnLost?: boolean;
   /** nome dos resultados do encerramento ("Fechou venda", "Perdido"…) — vazio volta ao padrão */
   @IsOptional() @IsString() @MaxLength(30) wonLabel?: string;
   @IsOptional() @IsString() @MaxLength(30) lostLabel?: string;

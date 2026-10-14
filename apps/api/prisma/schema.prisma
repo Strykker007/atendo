@@ -352,6 +352,10 @@ model TenantSettings {
   /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na
   /// conversão, não soma faturamento (sem linha em `sales`)
   requireSaleValue Boolean @default(true)
+  /// exigir motivo de encerramento em "Comprou" / "Não comprou" (quando há motivo cadastrado para o
+  /// resultado). Cada um independente — desligado, o motivo fica opcional naquele resultado
+  requireReasonOnWon  Boolean @default(true)
+  requireReasonOnLost Boolean @default(true)
   /// nome dos dois resultados do encerramento na empresa ("Fechou venda", "Matriculado"…). Só o
   /// rótulo muda: por baixo continuam `won`/`lost` (relatórios, vendas, fluxos e filtros)
   wonLabel  String @default("Comprou")
@@ -1056,6 +1060,10 @@ model Sale {
   items          Json?
   notes          String?
   closedAt       DateTime @default(now())
+  /// venda que nasceu do pagamento de um orçamento (Pix automático ou marcado como pago)
+  budgetId       String?  @unique
+  /// estornada: sai do faturamento, do ticket e da meta (a linha fica, para auditoria)
+  refundedAt     DateTime?
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -2039,6 +2047,8 @@ enum BudgetStatus {
   PAID
   /// passou do `expiresAt` sem pagamento — marcado na leitura (sem job)
   EXPIRED
+  /// pago e depois estornado (Asaas `PAYMENT_REFUNDED` ou marcado pelo gestor): a venda sai da meta e do faturamento
+  REFUNDED
 }
 
 /// Orçamento/pedido gerado no chat e visto pelo contato numa página pública (docs/orcamentos.md).
@@ -2074,6 +2084,10 @@ model Budget {
   paidById       String?
   /// manual (atendente marcou) | asaas (webhook)
   paidVia        String?
+  refundedAt     DateTime?
+  /// encerramento "Comprou" que absorveu este pagamento (`conversation_events.id`). Nulo = pago e
+  /// ainda sem encerramento: conta sozinho como venda do atendente (docs/orcamentos.md#venda)
+  closeEventId   String?
   /// Pix automático: a cobrança é gerada no gateway da empresa quando o cliente pede na página
   autoPix          Boolean   @default(false)
   /// id da cobrança no gateway (Asaas `pay_…`) — é por ele que o webhook acha o orçamento
@@ -2090,6 +2104,7 @@ model Budget {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
+  @@index([conversationId, status])
   @@index([tenantId, status])
   @@map("budgets")
 }

@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Body, Controller, Delete, Get, Injectable, Logger, Module, NotFoundException, Put, ServiceUnavailableException, UseGuards,
+  BadRequestException, Body, Controller, Delete, Get, Injectable, Logger, Module, NotFoundException, OnModuleInit, Put, ServiceUnavailableException, UseGuards,
 } from '@nestjs/common';
 import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -19,6 +19,9 @@ import { UsageService } from '../billing/usage.service';
 const ASAAS_URL = { production: 'https://api.asaas.com/v3', sandbox: 'https://api-sandbox.asaas.com/v3' } as const;
 /** Eventos que dão baixa: RECEIVED = Pix caiu; CONFIRMED = cartão/boleto confirmado (por garantia). */
 export const ASAAS_PAID_EVENTS = ['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'] as const;
+/** Estorno: total tira a venda; parcial / em andamento só avisa a equipe. */
+export const ASAAS_REFUND_EVENTS = ['PAYMENT_REFUNDED', 'PAYMENT_PARTIALLY_REFUNDED', 'PAYMENT_REFUND_IN_PROGRESS'] as const;
+const ASAAS_WEBHOOK_EVENTS = [...ASAAS_PAID_EVENTS, ...ASAAS_REFUND_EVENTS];
 
 /**
  * Cliente HTTP do Asaas com a chave **da empresa** (não a do sistema, que é `billing/asaas.service.ts`).
@@ -27,7 +30,7 @@ export const ASAAS_PAID_EVENTS = ['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'] as co
 export class AsaasAccount {
   constructor(private readonly apiKey: string, private readonly sandbox: boolean) {}
 
-  async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  async request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.sandbox ? ASAAS_URL.sandbox : ASAAS_URL.production}${path}`, {
       method,
       headers: { access_token: this.apiKey, 'Content-Type': 'application/json', 'User-Agent': 'atendo' },
@@ -69,7 +72,7 @@ type Credentials = { apiKey: string };
  * lê o nome da conta e cadastra o webhook nela — a empresa não configura nada no painel do Asaas.
  */
 @Injectable()
-export class PaymentGatewayService {
+export class PaymentGatewayService implements OnModuleInit {
   private readonly log = new Logger(PaymentGatewayService.name);
 
   constructor(
@@ -77,6 +80,24 @@ export class PaymentGatewayService {
     private readonly crypto: CryptoService,
     private readonly usage: UsageService,
   ) {}
+
+  /**
+   * Webhooks cadastrados antes de a lista de eventos crescer (estorno) não recebiam esses eventos:
+   * ao subir, alinha cada um à lista atual. Falha de uma conta (chave revogada) não trava as outras.
+   */
+  onModuleInit() {
+    // em segundo plano: o Asaas lento não pode atrasar a API subir
+    void this.syncWebhooks();
+  }
+
+  private async syncWebhooks() {
+    const contas = await this.prisma.paymentGateway.findMany({ where: { webhookId: { not: null } } }).catch(() => []);
+    for (const g of contas) {
+      const conta = new AsaasAccount(this.crypto.decryptJson<Credentials>(g.credentials).apiKey, g.sandbox);
+      await conta.request('PUT', `/webhooks/${g.webhookId}`, { events: ASAAS_WEBHOOK_EVENTS })
+        .catch((e) => this.log.warn(`webhook do Asaas (tenant ${g.tenantId}) não atualizado: ${e instanceof Error ? e.message : e}`));
+    }
+  }
 
   /** Conta pronta para cobrar: plano com o recurso + gateway conectado. `null` = Pix automático indisponível. */
   async accountFor(tenantId: string): Promise<AsaasAccount | null> {
@@ -113,7 +134,7 @@ export class PaymentGatewayService {
       interrupted: false,
       authToken: webhookToken,
       sendType: 'SEQUENTIALLY',
-      events: [...ASAAS_PAID_EVENTS],
+      events: ASAAS_WEBHOOK_EVENTS,
     });
 
     const data = {

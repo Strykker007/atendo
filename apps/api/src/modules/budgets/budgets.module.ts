@@ -16,12 +16,15 @@ import { StorageService } from '../../common/storage/storage.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
-import { PermissionsGuard } from '../auth/permissions.guard';
+import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationScopeGuard } from '../conversations/conversation-scope.guard';
-import { ASAAS_PAID_EVENTS, PaymentGatewayService, PaymentsModule } from '../payments/payments.module';
+import { ASAAS_PAID_EVENTS, ASAAS_REFUND_EVENTS, PaymentGatewayService, PaymentsModule } from '../payments/payments.module';
+
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 class BudgetItemDto {
   @IsString() @MaxLength(120) name: string;
@@ -70,7 +73,56 @@ export class BudgetsService {
     private readonly storage: StorageService,
     private readonly gateway: ConversationsGateway,
     private readonly payments: PaymentGatewayService,
+    private readonly conversations: ConversationsService,
   ) {}
+
+  /**
+   * Pagamento confirmado (webhook do Asaas ou "Marcar como pago"): vira **venda na hora** para o
+   * atendente que gerou o orçamento — conta na meta e no faturamento mesmo sem encerramento. O
+   * encerramento "Comprou" depois absorve (não soma de novo). Nota interna na conversa para a
+   * equipe ver onde está atendendo. Idempotente: webhook repetido não cria segunda venda.
+   */
+  private async registrarPagamento(b: Budget, via: 'asaas' | 'manual', porUserId?: string) {
+    const agora = new Date();
+    const ok = await this.prisma.budget.updateMany({ where: { id: b.id, status: { in: ['PENDING', 'EXPIRED'] } }, data: { status: 'PAID', paidAt: agora, paidVia: via, paidById: porUserId ?? null } });
+    if (!ok.count) return false;
+    const itens = b.items as unknown as BudgetItem[];
+    await this.prisma.sale
+      .create({
+        data: {
+          tenantId: b.tenantId,
+          conversationId: b.conversationId,
+          contactId: b.contactId,
+          userId: b.userId,
+          amount: b.totalValue,
+          products: itens.map((i) => i.name).join('; ').slice(0, 500) || null,
+          items: itens.map((i) => ({ description: `${i.quantity}× ${i.name}${i.dosage ? ` (${i.dosage})` : ''}`.slice(0, 200), value: Math.round(i.quantity * i.unitPrice * 100) / 100 })),
+          notes: via === 'asaas' ? 'Orçamento pago via Pix automático (Asaas)' : 'Orçamento marcado como pago',
+          closedAt: agora,
+          budgetId: b.id,
+        },
+      })
+      .catch((e) => { if ((e as { code?: string }).code !== 'P2002') throw e; });
+    const [agente, contato] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: b.userId }, select: { name: true } }),
+      this.prisma.contact.findUnique({ where: { id: b.contactId }, select: { name: true, phone: true } }),
+    ]);
+    const total = Number(b.totalValue);
+    await this.conversations.systemNote(b.conversationId, `💰 Pagamento confirmado: ${brl(total)} ${via === 'asaas' ? 'via Pix automático (Asaas)' : '(marcado como pago)'} — orçamento de ${agente?.name ?? 'atendente'}. Já conta como venda; ao encerrar como venda, este valor entra sozinho.`).catch(() => undefined);
+    this.gateway.emitBudgets(b.tenantId, b.conversationId, { total, contactName: contato?.name || contato?.phone || '' });
+    return true;
+  }
+
+  /** Estorno: o orçamento vira REFUNDED e a venda sai da meta e do faturamento (a linha fica, marcada). */
+  private async registrarEstorno(b: Budget, origem: string) {
+    const agora = new Date();
+    const ok = await this.prisma.budget.updateMany({ where: { id: b.id, status: 'PAID' }, data: { status: 'REFUNDED', refundedAt: agora } });
+    if (!ok.count) return false;
+    await this.prisma.sale.updateMany({ where: { budgetId: b.id, refundedAt: null }, data: { refundedAt: agora } });
+    await this.conversations.systemNote(b.conversationId, `↩️ Estorno de ${brl(Number(b.totalValue))} ${origem}. A venda saiu da meta e do faturamento.`).catch(() => undefined);
+    this.gateway.emitBudgets(b.tenantId, b.conversationId);
+    return true;
+  }
 
   async list(tenantId: string, conversationId: string) {
     const rows = await this.prisma.budget.findMany({
@@ -150,16 +202,41 @@ export class BudgetsService {
   async update(user: AuthUser, conversationId: string, id: string, dto: UpdateBudgetDto) {
     const b = await this.prisma.budget.findFirst({ where: { id, conversationId, tenantId: user.tenantId } });
     if (!b) throw new NotFoundException('Orçamento não encontrado');
-    // pago vale mesmo depois de vencido (o cliente pagou no prazo e mandou o comprovante tarde);
-    // desfazer o pago de um vencido volta a ser expirado
-    const status = dto.status === 'PAID' ? 'PAID' : b.expiresAt.getTime() < Date.now() ? 'EXPIRED' : 'PENDING';
-    const updated = await this.prisma.budget.update({
-      where: { id: b.id },
-      data: { status, paidAt: status === 'PAID' ? new Date() : null, paidById: status === 'PAID' ? user.id : null, paidVia: status === 'PAID' ? 'manual' : null },
-      include: { user: { select: { id: true, name: true } } },
-    });
-    this.gateway.emitBudgets(user.tenantId, conversationId);
-    return this.present(updated);
+    if (dto.status === 'PAID') {
+      // pago vale mesmo depois de vencido (o cliente pagou no prazo e mandou o comprovante tarde)
+      if (b.status === 'REFUNDED') throw new BadRequestException('Orçamento estornado não volta a ser pago. Gere um novo.');
+      await this.registrarPagamento(b, 'manual', user.id);
+    } else if (b.status === 'PAID') {
+      // desfazer é corrigir um clique errado — não vale para o que o Asaas confirmou nem para o
+      // que já entrou num encerramento (aí é estorno)
+      if (b.paidVia === 'asaas') throw new BadRequestException('Pagamento confirmado pelo Asaas não se desfaz: use Estornar.');
+      if (b.closeEventId) throw new BadRequestException('Este pagamento já entrou num encerramento como venda: use Estornar.');
+      await this.prisma.$transaction([
+        this.prisma.sale.deleteMany({ where: { budgetId: b.id } }),
+        this.prisma.budget.update({ where: { id: b.id }, data: { status: b.expiresAt.getTime() < Date.now() ? 'EXPIRED' : 'PENDING', paidAt: null, paidById: null, paidVia: null } }),
+      ]);
+      this.gateway.emitBudgets(user.tenantId, conversationId);
+    }
+    const atual = await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: { user: { select: { id: true, name: true } } } });
+    return this.present(atual);
+  }
+
+  /**
+   * Estornar (gestão — `settings.manage`). Pix automático: pede o estorno ao Asaas (o dinheiro
+   * volta ao cliente) e já registra; o webhook que vier depois não repete. Pago por fora: só registra.
+   */
+  async refund(user: AuthUser, conversationId: string, id: string) {
+    const b = await this.prisma.budget.findFirst({ where: { id, conversationId, tenantId: user.tenantId } });
+    if (!b) throw new NotFoundException('Orçamento não encontrado');
+    if (b.status !== 'PAID') throw new BadRequestException('Só dá para estornar orçamento pago.');
+    if (b.paidVia === 'asaas' && b.gatewayPaymentId) {
+      const account = await this.payments.accountFor(user.tenantId);
+      if (!account) throw new BadRequestException('Conta do Asaas desconectada: estorne pelo painel do Asaas — a baixa chega pelo webhook.');
+      await account.request('POST', `/payments/${b.gatewayPaymentId}/refund`, {});
+    }
+    await this.registrarEstorno(b, b.paidVia === 'asaas' ? `pedido por ${user.name} (devolvido pelo Asaas)` : `registrado por ${user.name}`);
+    const atual = await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: { user: { select: { id: true, name: true } } } });
+    return this.present(atual);
   }
 
   // ---- público (sem login): o hash é a credencial ----
@@ -202,14 +279,19 @@ export class BudgetsService {
       return { ok: false };
     }
     const paymentId = body.payment?.id;
-    if (!paymentId || !(ASAAS_PAID_EVENTS as readonly string[]).includes(body.event ?? '')) return { ok: true };
-
+    const evento = body.event ?? '';
+    if (!paymentId) return { ok: true };
     const b = await this.prisma.budget.findFirst({ where: { tenantId: g.tenantId, gatewayPaymentId: paymentId } });
-    if (!b || b.status === 'PAID') return { ok: true };
-    await this.prisma.budget.update({ where: { id: b.id }, data: { status: 'PAID', paidAt: new Date(), paidVia: 'asaas' } });
-    const contact = await this.prisma.contact.findUnique({ where: { id: b.contactId }, select: { name: true, phone: true } });
-    this.gateway.emitBudgets(b.tenantId, b.conversationId, { total: Number(b.totalValue), contactName: contact?.name || contact?.phone || '' });
-    this.log.log(`orçamento ${b.id} pago via Asaas (${paymentId})`);
+    if (!b) return { ok: true };
+
+    if ((ASAAS_PAID_EVENTS as readonly string[]).includes(evento)) {
+      if (await this.registrarPagamento(b, 'asaas')) this.log.log(`orçamento ${b.id} pago via Asaas (${paymentId})`);
+    } else if (evento === 'PAYMENT_REFUNDED') {
+      if (await this.registrarEstorno(b, 'feito no Asaas')) this.log.log(`orçamento ${b.id} estornado no Asaas (${paymentId})`);
+    } else if ((ASAAS_REFUND_EVENTS as readonly string[]).includes(evento)) {
+      // estorno parcial / em andamento: avisa a equipe; a venda só muda no estorno total
+      await this.conversations.systemNote(b.conversationId, `⚠️ Asaas: ${evento === 'PAYMENT_PARTIALLY_REFUNDED' ? 'estorno parcial' : 'estorno em andamento'} do orçamento de ${brl(Number(b.totalValue))}. Confira no Asaas — a venda não foi alterada.`).catch(() => undefined);
+    }
     return { ok: true };
   }
 
@@ -257,6 +339,9 @@ export class BudgetsService {
       createdAt: b.createdAt,
       paidAt: b.paidAt,
       paidVia: b.paidVia,
+      refundedAt: b.refundedAt,
+      /** já entrou num encerramento como venda */
+      absorbed: !!b.closeEventId,
       autoPix: b.autoPix,
       note: b.note,
       pixKey: b.pixKey,
@@ -288,6 +373,13 @@ class BudgetsController {
   @Patch(':budgetId')
   update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('budgetId') budgetId: string, @Body() dto: UpdateBudgetDto) {
     return this.budgets.update(u, id, budgetId, dto);
+  }
+
+  /** Estorno é dinheiro voltando: gestão (`settings.manage`). */
+  @Post(':budgetId/refund')
+  @RequirePermission('settings.manage')
+  refund(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('budgetId') budgetId: string) {
+    return this.budgets.refund(u, id, budgetId);
   }
 }
 

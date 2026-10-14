@@ -12,6 +12,8 @@ export interface SettingsUpdate {
   wonFlowId?: string | null;
   lostFlowId?: string | null;
   requireSaleValue?: boolean;
+  requireReasonOnWon?: boolean;
+  requireReasonOnLost?: boolean;
   wonLabel?: string;
   lostLabel?: string;
   defaultFlowId?: string | null;

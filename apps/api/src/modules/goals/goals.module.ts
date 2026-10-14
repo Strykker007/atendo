@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { vendasPorConsultorSql } from '../../common/reports/sales-base';
 import { RedisService } from '../../common/redis/redis.service';
 import { ReportLoadService } from '../../common/reports/report-load.service';
 import { TZ_DEFAULT, localToUtc } from '../../common/time';
@@ -108,12 +109,8 @@ class GoalsController {
       const [metas, vendas, users] = await this.load.all([
         () => this.prisma.salesGoal.findMany({ where: { tenantId: t, month: mes } }),
         // mesma base do ranking: encerramentos com ator, fora os internos
-        () => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number | null }[]>(Prisma.sql`
-          select e."actorId" as "userId", count(*)::int as won, sum(e."outcomeValue")::float as revenue
-          from conversation_events e
-          where e."tenantId" = ${t} and e.type = 'closed' and e.outcome = 'won' and not e."ignoreInReports"
-            and e."actorId" is not null and e."createdAt" >= ${from} and e."createdAt" < ${to}
-          group by 1`),
+        // mesma régua do ranking: "Comprou" + orçamento pago ainda sem encerramento − estornos
+        () => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number | null }[]>(vendasPorConsultorSql(t, from, to)),
         () => this.prisma.user.findMany({ where: { tenantId: t }, select: { id: true, name: true, role: true, isActive: true } }),
       ]);
       const padrao = metas.find((m) => m.userId === DEFAULT_GOAL_USER);

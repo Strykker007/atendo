@@ -602,6 +602,12 @@ export class ConversationsService {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { tenantId: true, status: true, assigneeId: true, botPausedAt: true } });
     if (!antes || antes.status === 'closed') return avisos;
     const tenantId = antes.tenantId;
+    // pagamento confirmado: o robô não pode dar "Não comprou" — vira "Comprou" com o valor pago
+    const pagos = await this.pagosAbertos(conversationId);
+    if (pagos.ids.length && d.outcome === 'lost') {
+      avisos.push(`Encerrar conversa: o atendimento tinha pagamento confirmado (${pagos.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) e foi encerrado como venda, não como perda.`);
+      d = { ...d, outcome: 'won', value: null, closeReasonId: null };
+    }
     let motivo: { id: string; name: string; requiresTag: boolean } | null = null;
     try {
       motivo = await this.closeReasons.resolve(tenantId, d.outcome, d.closeReasonId);
@@ -615,7 +621,10 @@ export class ConversationsService {
       avisos.push(`Encerrar conversa: o motivo “${motivo.name}” exige tag e o atendimento não tinha nenhuma. Use "Aplicar etiqueta" antes de encerrar.`);
     }
     const dono = antes.assigneeId ? (await this.prisma.user.findFirst({ where: { id: antes.assigneeId, tenantId }, select: { id: true } }))?.id ?? null : null;
-    const valor = d.outcome === 'won' && d.value ? new Prisma.Decimal(d.value) : null;
+    // `value` do card = adicional; o pago entra sozinho no total
+    const adicional = d.outcome === 'won' && d.value ? d.value : 0;
+    const total = Math.round((adicional + (d.outcome === 'won' ? pagos.total : 0)) * 100) / 100;
+    const valor = total > 0 ? new Prisma.Decimal(total) : null;
     const agora = new Date();
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
@@ -633,7 +642,7 @@ export class ConversationsService {
         lastCloseReasonId: motivo?.id ?? null,
       },
     });
-    await this.registrar({
+    const evento = await this.registrar({
       tenantId,
       conversationId,
       type: tipoDaTransicao(antes.status, 'closed'),
@@ -649,8 +658,9 @@ export class ConversationsService {
       viaFlow: d.flowName.slice(0, 120),
     });
     await this.limparTransitorias([conversationId]);
-    if (valor) {
-      await this.prisma.sale.create({ data: { tenantId, conversationId, contactId: conv.contactId, userId: dono, amount: valor, notes: `Venda registrada pelo fluxo “${d.flowName}”`.slice(0, 500), closedAt: agora } });
+    if (pagos.ids.length && d.outcome === 'won') await this.prisma.budget.updateMany({ where: { id: { in: pagos.ids }, closeEventId: null }, data: { closeEventId: evento.id } });
+    if (adicional > 0) {
+      await this.prisma.sale.create({ data: { tenantId, conversationId, contactId: conv.contactId, userId: dono, amount: new Prisma.Decimal(adicional), notes: `Venda registrada pelo fluxo “${d.flowName}”`.slice(0, 500), closedAt: agora } });
     }
     if (antes.botPausedAt) await this.registrar({ tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     await this.encerrarFluxosPausados([conversationId]);
@@ -1310,6 +1320,12 @@ export class ConversationsService {
   ) {
     const interno = status === 'closed' && !!outcome?.internal;
     if (interno) outcome = { outcome: 'none', tagIds: outcome!.tagIds, closeReasonId: outcome!.closeReasonId, internal: true };
+    // pagamento confirmado neste atendimento: já é venda; o "Comprou" absorve, o "Não comprou" não vale
+    const pagos = status === 'closed' && !interno ? await this.pagosAbertos(id) : { ids: [] as string[], total: 0 };
+    if (pagos.ids.length && outcome?.outcome === 'lost') {
+      const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { wonLabel: true } });
+      throw new BadRequestException({ code: 'budget_paid', message: `Este atendimento tem pagamento confirmado (${pagos.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}). Encerre como “${s?.wonLabel ?? 'Comprou'}”.` });
+    }
     // tags do encerramento: só as do tenant valem (id de outro cliente é ignorado em silêncio)
     const tagsFim = status === 'closed' ? await this.closingTags(tenantId, outcome?.tagIds) : [];
     // motivo: obrigatório quando há motivo ativo para o resultado (close-reasons.module.ts)
@@ -1323,6 +1339,9 @@ export class ConversationsService {
       const descricoes = itens.map((i) => i.description).filter(Boolean);
       outcome = { ...outcome!, value: total > 0 ? total : undefined, products: descricoes.length ? descricoes.join('; ').slice(0, 500) : outcome!.products };
     }
+    // com orçamento pago, `value`/`items` são o que foi vendido A MAIS: o pago entra sozinho no total
+    const adicional = outcome?.outcome === 'won' && outcome.value ? outcome.value : 0;
+    const totalVenda = Math.round((adicional + (outcome?.outcome === 'won' ? pagos.total : 0)) * 100) / 100;
     // o desfecho só faz sentido ao encerrar; reabrir limpa, porque o atendimento continua
     const desfecho =
       status !== 'closed'
@@ -1330,7 +1349,7 @@ export class ConversationsService {
         : outcome && outcome.outcome !== 'none'
           ? {
               outcome: outcome.outcome,
-              outcomeValue: outcome.outcome === 'won' && outcome.value ? new Prisma.Decimal(outcome.value) : null,
+              outcomeValue: outcome.outcome === 'won' && totalVenda > 0 ? new Prisma.Decimal(totalVenda) : null,
               outcomeReason: motivo?.name ?? nomesTags,
               outcomeAt: new Date(),
               outcomeById: userId,
@@ -1360,7 +1379,7 @@ export class ConversationsService {
     });
     // o desfecho vai copiado para o evento: reabrir limpa o da conversa, e o fechamento que
     // já entrou no relatório do mês não pode mudar depois
-    await this.registrar({
+    const evento = await this.registrar({
       tenantId,
       conversationId: id,
       type: tipoDaTransicao(antes?.status, status),
@@ -1380,8 +1399,13 @@ export class ConversationsService {
     });
     if (interno) await this.audit.record(tenantId, 'conversation.closed_internal', userId, [{ conversationId: id, data: { closeReasonId: motivo?.id ?? null, reason: motivo?.name ?? null } }]);
     if (status === 'closed') await this.limparTransitorias([id]);
-    // venda: linha própria e imutável — é a base de conversão, ticket médio e desempenho por atendente
-    if (status === 'closed' && outcome?.outcome === 'won' && conv.outcomeValue) {
+    // o pagamento passa a fazer parte deste encerramento: a meta conta o encerramento, não os dois
+    if (pagos.ids.length && outcome?.outcome === 'won') {
+      await this.prisma.budget.updateMany({ where: { id: { in: pagos.ids }, closeEventId: null }, data: { closeEventId: evento.id } });
+    }
+    // venda: linha própria e imutável — é a base de conversão, ticket médio e desempenho por atendente.
+    // Só o adicional: o orçamento pago já tem a linha dele (criada quando o pagamento caiu)
+    if (status === 'closed' && outcome?.outcome === 'won' && adicional > 0) {
       const vendedor = (await this.prisma.user.findFirst({ where: { id: userId, tenantId }, select: { id: true } }))?.id ?? null;
       await this.prisma.sale.create({
         data: {
@@ -1389,7 +1413,7 @@ export class ConversationsService {
           conversationId: id,
           contactId: conv.contactId,
           userId: vendedor,
-          amount: conv.outcomeValue,
+          amount: new Prisma.Decimal(adicional),
           products: outcome.products?.trim() || null,
           items: itens?.length ? itens : undefined,
           notes: outcome.notes?.trim() || null,
@@ -1424,7 +1448,7 @@ export class ConversationsService {
     if (interno) desfecho = { ...desfecho, outcome: 'none' };
     const pedidos = [...new Set(ids)];
     const escopo = numberFilter(viewer);
-    const alvos = await this.prisma.conversation.findMany({
+    let alvos = await this.prisma.conversation.findMany({
       where: {
         id: { in: pedidos },
         tenantId,
@@ -1435,9 +1459,18 @@ export class ConversationsService {
         // departamento e posse usam OR: cada um no seu item do AND para não se sobrescreverem
         AND: [departmentWhere(viewer) ?? {}, may(viewer, 'conversations.view_all') ? {} : { OR: [{ assigneeId: viewer.id }, { assigneeId: null }] }],
       },
-      select: { id: true, status: true, botPausedAt: true },
+      select: { id: true, status: true, botPausedAt: true, lastClosedAt: true },
     });
-    if (!alvos.length) return { closed: 0, ignored: pedidos.length };
+    // com pagamento confirmado no atendimento, fica de fora: em massa não dá para absorver o
+    // pagamento (valor é por conversa) e "Não comprou" com dinheiro recebido seria furo. Uma a uma
+    let comPagamento = 0;
+    if (!interno && alvos.length) {
+      const pagos = await this.prisma.budget.findMany({ where: { conversationId: { in: alvos.map((a) => a.id) }, status: 'PAID', closeEventId: null }, select: { conversationId: true, paidAt: true } });
+      const bloqueadas = new Set(pagos.filter((b) => { const a = alvos.find((x) => x.id === b.conversationId); return !a?.lastClosedAt || (b.paidAt && b.paidAt > a.lastClosedAt); }).map((b) => b.conversationId));
+      comPagamento = bloqueadas.size;
+      alvos = alvos.filter((a) => !bloqueadas.has(a.id));
+    }
+    if (!alvos.length) return { closed: 0, ignored: pedidos.length, withPayment: comPagamento };
 
     const idsAlvo = alvos.map((a) => a.id);
     const tagsFim = await this.closingTags(tenantId, desfecho.tagIds);
@@ -1499,7 +1532,7 @@ export class ConversationsService {
     const fechadas = await this.prisma.conversation.findMany({ where: { id: { in: idsAlvo } } });
     for (const c of fechadas) this.gateway.emitConversation(tenantId, c);
     this.log.log(`${fechadas.length} atendimento(s) encerrados em massa por ${viewer.id}`);
-    return { closed: fechadas.length, ignored: pedidos.length - fechadas.length };
+    return { closed: fechadas.length, ignored: pedidos.length - fechadas.length, withPayment: comPagamento };
   }
 
   /** Tags escolhidas no encerramento, recortadas pelo tenant e na ordem do pedido. */
@@ -1645,7 +1678,24 @@ export class ConversationsService {
   }, db: Prisma.TransactionClient = this.prisma) {
     // super_admin não tem linha em `users` deste tenant: entra como sistema, senão a FK quebra
     const actorId = e.actorId && (await db.user.findFirst({ where: { id: e.actorId, tenantId: e.tenantId }, select: { id: true } })) ? e.actorId : null;
-    await db.conversationEvent.create({ data: { ...e, actorId } });
+    return db.conversationEvent.create({ data: { ...e, actorId }, select: { id: true } });
+  }
+
+  /**
+   * Orçamentos PAGOS deste atendimento que ainda não entraram num encerramento
+   * (docs/orcamentos.md#venda). O pagamento já é venda do atendente desde que caiu; o
+   * encerramento "Comprou" absorve (`closeEventId`) em vez de somar de novo, e "Não comprou" é
+   * recusado — atendimento perdido com dinheiro recebido seria furo no relatório.
+   * Só os pagos depois do encerramento anterior: pagamento antigo não entra num atendimento novo.
+   */
+  async pagosAbertos(conversationId: string) {
+    const anterior = await this.prisma.conversationEvent.findFirst({ where: { conversationId, type: 'closed' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+    const pagos = await this.prisma.budget.findMany({
+      where: { conversationId, status: 'PAID', closeEventId: null, ...(anterior && { paidAt: { gt: anterior.createdAt } }) },
+      select: { id: true, totalValue: true },
+    });
+    const total = Math.round(pagos.reduce((a, b) => a + Number(b.totalValue) * 100, 0)) / 100;
+    return { ids: pagos.map((b) => b.id), total };
   }
 
   /** Linha do tempo do atendimento, do mais recente para o mais antigo. */

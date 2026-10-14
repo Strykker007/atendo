@@ -41,6 +41,8 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
       // "ignorados" acontece de verdade: alguém da equipe pode ter encerrado no meio do caminho,
       // ou a conversa saiu do que este usuário opera. Dizer o número evita achar que falhou.
       toast.ok(r.ignored > 0 ? `${r.closed} encerrados · ${r.ignored} já estavam fechados ou fora do seu acesso` : `${r.closed} atendimento(s) encerrados`);
+      // pagamento confirmado no atendimento: em massa não absorve o valor — encerrar uma a uma
+      if (r.withPayment) toast.warn(`${r.withPayment} atendimento(s) com pagamento confirmado ficaram abertos: encerre um a um, como venda.`);
       onDone();
       onClose();
     } catch (err) {

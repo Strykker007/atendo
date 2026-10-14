@@ -23,8 +23,12 @@ export function ClosingSection() {
   const update = useUpdateTenantSettings();
   const labels = useOutcomeLabels();
   if (!settings.data) return null;
-  const on = settings.data.requireSaleValue;
-  const alternar = () => update.mutateAsync({ requireSaleValue: !on }).then(() => toast.ok(on ? `Valor agora é opcional em “${labels.won}”` : `Valor agora é obrigatório em “${labels.won}”`)).catch(toast.err);
+  const d = settings.data;
+  // cada regra é independente: valor em "Comprou", motivo em "Comprou", motivo em "Não comprou"
+  const alternar = (campo: 'requireSaleValue' | 'requireReasonOnWon' | 'requireReasonOnLost', nome: string) => {
+    const novo = !d[campo];
+    update.mutateAsync({ [campo]: novo }).then(() => toast.ok(`${nome} agora é ${novo ? 'obrigatório' : 'opcional'}`)).catch(toast.err);
+  };
   return (
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
       <div>
@@ -32,21 +36,35 @@ export function ClosingSection() {
         <p className="text-sm text-muted">Como o atendente fecha um atendimento. As tags de cada resultado ficam em Tags.</p>
       </div>
       <OutcomeLabelsFields />
-      <div className="flex items-start gap-3">
-        <button type="button" role="switch" aria-checked={on} aria-label={`Exigir valor ao encerrar como ${labels.won}`} disabled={update.isPending} onClick={() => void alternar()}
-          className={`relative mt-0.5 w-9 h-5 shrink-0 rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-accent' : 'bg-line'}`}>
-          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
-        </button>
-        <div className="text-sm">
-          <div className="font-medium text-ink">Exigir valor ao encerrar como “{labels.won}”</div>
-          <p className="text-xs text-muted">{on
-            ? 'Ligado: sem valor, não encerra. Toda venda soma faturamento e ticket médio.'
-            : 'Desligado: dá para encerrar sem valor. Conta na taxa de conversão, mas não soma no faturamento.'}</p>
-        </div>
+      <div className="space-y-2.5">
+        <Regra on={d.requireSaleValue} disabled={update.isPending} onToggle={() => alternar('requireSaleValue', `Valor em “${labels.won}”`)}
+          titulo={`Exigir valor ao encerrar como “${labels.won}”`}
+          desc={d.requireSaleValue ? 'Ligado: sem valor, não encerra. Toda venda soma faturamento e ticket médio. Orçamento pago no atendimento já conta como valor.' : 'Desligado: dá para encerrar sem valor. Conta na taxa de conversão, mas não soma no faturamento.'} />
+        <Regra on={d.requireReasonOnWon} disabled={update.isPending} onToggle={() => alternar('requireReasonOnWon', `Motivo em “${labels.won}”`)}
+          titulo={`Exigir motivo ao encerrar como “${labels.won}”`}
+          desc={d.requireReasonOnWon ? `Ligado: com motivo cadastrado para “${labels.won}”, o atendente escolhe um para encerrar.` : 'Desligado: o motivo aparece, mas é opcional.'} />
+        <Regra on={d.requireReasonOnLost} disabled={update.isPending} onToggle={() => alternar('requireReasonOnLost', `Motivo em “${labels.lost}”`)}
+          titulo={`Exigir motivo ao encerrar como “${labels.lost}”`}
+          desc={d.requireReasonOnLost ? `Ligado: com motivo cadastrado para “${labels.lost}”, o atendente escolhe um para encerrar.` : 'Desligado: o motivo aparece, mas é opcional.'} />
       </div>
       <ReasonsList />
       <InternalCloseAudit />
     </section>
+  );
+}
+
+function Regra({ on, disabled, onToggle, titulo, desc }: { on: boolean; disabled?: boolean; onToggle: () => void; titulo: string; desc: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <button type="button" role="switch" aria-checked={on} aria-label={titulo} disabled={disabled} onClick={onToggle}
+        className={`relative mt-0.5 w-9 h-5 shrink-0 rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-accent' : 'bg-line'}`}>
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      </button>
+      <div className="text-sm">
+        <div className="font-medium text-ink">{titulo}</div>
+        <p className="text-xs text-muted">{desc}</p>
+      </div>
+    </div>
   );
 }
 
@@ -131,7 +149,7 @@ function ReasonsList() {
     <div className="space-y-2 border-t border-line pt-3">
       <div>
         <div className="text-sm font-medium text-ink">Motivos de encerramento</div>
-        <p className="text-xs text-muted">O atendente escolhe um ao encerrar — obrigatório quando há motivo para o resultado. Aparece no topo da conversa, na aba Encerrado, vira filtro nas conversas e entra nos relatórios.</p>
+        <p className="text-xs text-muted">O atendente escolhe um ao encerrar — obrigatório quando há motivo para o resultado e a regra acima está ligada. Aparece no topo da conversa, na aba Encerrado, vira filtro nas conversas e entra nos relatórios.</p>
       </div>
       {ativos.length > 0 && (
         <DragDropContext onDragEnd={onDragEnd}>

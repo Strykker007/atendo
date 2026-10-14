@@ -4,9 +4,9 @@ import type { PixKeyType } from './messages.js';
  * Orçamento/pedido com link público (docs/orcamentos.md). No WhatsApp vai só um texto
  * genérico com o link — itens, valores e chave Pix ficam na página, fora da conversa.
  */
-export const BUDGET_STATUSES = ['PENDING', 'PAID', 'EXPIRED'] as const;
+export const BUDGET_STATUSES = ['PENDING', 'PAID', 'EXPIRED', 'REFUNDED'] as const;
 export type BudgetStatus = (typeof BUDGET_STATUSES)[number];
-export const BUDGET_STATUS_LABEL: Record<BudgetStatus, string> = { PENDING: 'Aguardando pagamento', PAID: 'Pago', EXPIRED: 'Expirado' };
+export const BUDGET_STATUS_LABEL: Record<BudgetStatus, string> = { PENDING: 'Aguardando pagamento', PAID: 'Pago', EXPIRED: 'Expirado', REFUNDED: 'Estornado' };
 
 /** Validade padrão do link e o teto que o atendente pode escolher. */
 export const BUDGET_DEFAULT_HOURS = 48;

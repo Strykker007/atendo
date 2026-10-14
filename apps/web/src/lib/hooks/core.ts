@@ -135,26 +135,70 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export const useConversations = (q: { status: ConversationStatus; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null }) =>
+export type ConversationsQuery = { status: ConversationStatus; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null };
+/** Tamanho da página no servidor (`take` padrão de GET /conversations). Página cheia = pode haver mais. */
+export const CONVERSATIONS_PAGE = 50;
+
+function conversationsParams(q: ConversationsQuery) {
+  const p = new URLSearchParams({ status: q.status });
+  if (q.numberId) p.set('numberId', q.numberId);
+  if (q.departmentId) p.set('departmentId', q.departmentId);
+  if (q.assigneeId) p.set('assigneeId', q.assigneeId);
+  if (q.origin) p.set('origin', q.origin);
+  if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
+  if (q.search) p.set('search', q.search);
+  if (q.sort && q.sort !== 'recent') p.set('sort', q.sort);
+  if (q.closeReasonId) p.set('closeReasonId', q.closeReasonId);
+  if (q.lastOutcome) p.set('lastOutcome', q.lastOutcome);
+  return p;
+}
+
+/** Primeira página da lista — é a que o tempo real mantém atualizada (socket, envio, assumir…). */
+export const useConversations = (q: ConversationsQuery) =>
   useQuery({
     queryKey: ['conversations', q],
-    queryFn: () => {
-      const p = new URLSearchParams({ status: q.status });
-      if (q.numberId) p.set('numberId', q.numberId);
-      if (q.departmentId) p.set('departmentId', q.departmentId);
-      if (q.assigneeId) p.set('assigneeId', q.assigneeId);
-      if (q.origin) p.set('origin', q.origin);
-      if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
-      if (q.search) p.set('search', q.search);
-      if (q.sort && q.sort !== 'recent') p.set('sort', q.sort);
-      if (q.closeReasonId) p.set('closeReasonId', q.closeReasonId);
-      if (q.lastOutcome) p.set('lastOutcome', q.lastOutcome);
-      return api<Conversation[]>(`/conversations?${p}`);
-    },
+    queryFn: () => api<Conversation[]>(`/conversations?${conversationsParams(q)}`),
     // sempre "velha": trocar de aba busca de novo (troca de chave só refaz a busca de dado velho).
     // A lista de outra aba no cache podia ser de antes de encerrar/assumir
     staleTime: 0,
   });
+
+/**
+ * Páginas seguintes da lista, ao rolar até o fim. Antes a lista parava nas 50 primeiras: "Encerradas"
+ * com 338 conversas mostrava só 50 e rolar não trazia o resto.
+ *
+ * Fica fora do cache `['conversations']` de propósito: todo o tempo real (socket, envio, assumir)
+ * mexe nesse cache como uma lista simples, e transformá-lo em páginas quebraria cada um desses
+ * pontos. O que muda costuma subir para a primeira página; por isso o que já está nela some daqui.
+ * Trocar filtro/aba recomeça do zero.
+ */
+export function useOlderConversations(q: ConversationsQuery, primeira: Conversation[] | undefined) {
+  const chave = JSON.stringify(q);
+  const [estado, setEstado] = useState<{ chave: string; itens: Conversation[]; fim: boolean }>({ chave, itens: [], fim: false });
+  const [carregando, setCarregando] = useState(false);
+  const atual = estado.chave === chave ? estado : { chave, itens: [] as Conversation[], fim: false };
+  const temMais = !!primeira && primeira.length >= CONVERSATIONS_PAGE && !atual.fim;
+
+  const carregar = useCallback(async () => {
+    if (carregando || !temMais || !primeira?.length) return;
+    const cursor = (atual.itens[atual.itens.length - 1] ?? primeira[primeira.length - 1]).id;
+    setCarregando(true);
+    try {
+      const p = conversationsParams(q);
+      p.set('cursor', cursor);
+      const pagina = await api<Conversation[]>(`/conversations?${p}`);
+      setEstado({ chave, itens: [...atual.itens, ...pagina.filter((c) => !atual.itens.some((x) => x.id === c.id))], fim: pagina.length < CONVERSATIONS_PAGE });
+    } catch {
+      // falhou (rede): para de tentar até a pessoa trocar de filtro, em vez de martelar a API a cada rolagem
+      setEstado({ ...atual, fim: true });
+    } finally {
+      setCarregando(false);
+    }
+  }, [carregando, temMais, primeira, atual, chave]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const naPrimeira = new Set((primeira ?? []).map((c) => c.id));
+  return { itens: atual.itens.filter((c) => !naPrimeira.has(c.id) && c.status === q.status), carregar, carregando, temMais };
+}
 
 export const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
   qc.invalidateQueries({ queryKey: ['conversations'] });
@@ -487,7 +531,7 @@ export const useBulkClose = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: { ids: string[]; outcome: ConversationOutcome; tagIds?: string[]; closeReasonId?: string; internal?: boolean }) =>
-      api<{ closed: number; ignored: number }>('/conversations/bulk/close', { method: 'POST', body: JSON.stringify(b) }),
+      api<{ closed: number; ignored: number; /** com pagamento confirmado: encerrar um a um */ withPayment?: number }>('/conversations/bulk/close', { method: 'POST', body: JSON.stringify(b) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation-counts'] });

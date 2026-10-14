@@ -6,7 +6,7 @@ import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { useCan, useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings, useCloseReasons, reasonsFor, useOutcomeLabels, useSurveys } from '@/lib/hooks';
+import { useCan, useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings, useCloseReasons, reasonsFor, useOutcomeLabels, useSurveys, useBudgets, useConversation } from '@/lib/hooks';
 
 /**
  * Bloco do formulário de encerramento: rótulo, explicação logo abaixo dele e o campo. A dica
@@ -104,7 +104,7 @@ export function CloseTagsField({ outcome, value, onChange }: { outcome: CloseOut
  * Trocar o resultado limpa o motivo que não vale para o novo. `internal` = motivos de atendimento
  * interno (só no encerramento interno).
  */
-export function CloseReasonField({ outcome, value, onChange, erro }: { outcome: CloseOutcome | 'internal'; value: string | null; onChange: (id: string | null) => void; erro?: boolean }) {
+export function CloseReasonField({ outcome, value, onChange, erro, opcional }: { outcome: CloseOutcome | 'internal'; value: string | null; onChange: (id: string | null) => void; erro?: boolean; /** a empresa dispensou o motivo neste resultado */ opcional?: boolean }) {
   const reasons = useCloseReasons();
   const lista = reasonsFor(reasons.data, outcome);
   useEffect(() => {
@@ -114,7 +114,7 @@ export function CloseReasonField({ outcome, value, onChange, erro }: { outcome: 
   if (!reasons.data || lista.length === 0) return null;
   return (
     <div className="space-y-1.5">
-      <div className="text-[12px] font-medium text-ink">Motivo</div>
+      <div className="text-[12px] font-medium text-ink">Motivo{opcional && <span className="font-normal text-muted"> (opcional)</span>}</div>
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Motivo do encerramento">
         {lista.map((r) => {
           const on = value === r.id;
@@ -178,6 +178,13 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const flows = useFlows();
   const settings = useTenantSettings();
   const [outcome, setOutcome] = useState<CloseOutcome | null>(null);
+  // orçamento pago neste atendimento (docs/orcamentos.md#venda): já é venda; o "Comprou" absorve
+  // e "Não comprou" não vale — a API recusa igual (`budget_paid`)
+  const budgets = useBudgets(conversationId);
+  const ultimoEncerramento = useConversation(conversationId).data?.lastClosedAt;
+  const pagos = (budgets.data ?? []).filter((b) => b.status === 'PAID' && !b.absorbed && (!ultimoEncerramento || (b.paidAt && b.paidAt > ultimoEncerramento)));
+  const jaPago = Math.round(pagos.reduce((a, b) => a + b.totalValue * 100, 0)) / 100;
+  useEffect(() => { if (jaPago > 0) setOutcome((o) => o ?? 'won'); }, [jaPago]);
   const [valor, setValor] = useState<number | null>(null);
   const [produtos, setProdutos] = useState('');
   const [modoLista, setModoLista] = useState(true);
@@ -236,11 +243,13 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const faltaResultado = !outcome;
   // a empresa pode dispensar o valor (Configurações → Atendimento → Encerramento); a API confere igual
   const exigeValor = settings.data?.requireSaleValue ?? true;
-  const faltaValor = outcome === 'won' && exigeValor && !(totalVenda > 0);
+  // com orçamento pago, o valor já está coberto: o campo é só o que foi vendido a mais
+  const faltaValor = outcome === 'won' && exigeValor && !(totalVenda + jaPago > 0);
   /** Comprou sem valor (permitido): conta na conversão, mas não vira venda — produtos e observação não ficam */
-  const semValor = outcome === 'won' && !exigeValor && !(totalVenda > 0);
-  // motivo obrigatório quando há motivo cadastrado para o resultado
-  const faltaMotivo = !!outcome && reasonsFor(reasons.data, outcome).length > 0 && !closeReasonId;
+  const semValor = outcome === 'won' && !exigeValor && !(totalVenda + jaPago > 0);
+  // motivo obrigatório quando há motivo cadastrado para o resultado e a empresa exige naquele resultado
+  const motivoObrigatorio = outcome === 'won' ? settings.data?.requireReasonOnWon ?? true : outcome === 'lost' ? settings.data?.requireReasonOnLost ?? true : false;
+  const faltaMotivo = !!outcome && motivoObrigatorio && reasonsFor(reasons.data, outcome).length > 0 && !closeReasonId;
   const faltaMotivoInterno = reasonsFor(reasons.data, 'internal').length > 0 && !closeReasonId;
 
   function alternarInterno(v: boolean) {
@@ -304,14 +313,22 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
               key={o.id}
               type="button"
               aria-pressed={outcome === o.id}
+              disabled={o.id === 'lost' && jaPago > 0}
+              title={o.id === 'lost' && jaPago > 0 ? 'Este atendimento tem pagamento confirmado: encerre como venda' : undefined}
               onClick={() => { setOutcome(o.id); escolheuFluxo.current = false; }}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed ${outcome === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}
             >
               {o.icon} {labels[o.id]}
             </button>
           ))}
         </div>
         {tentou && faltaResultado && <p className="text-xs text-danger-ink">Escolha “{labels.won}” ou “{labels.lost}”.</p>}
+        {jaPago > 0 && (
+          <p className="rounded-lg bg-ok-soft px-3 py-2 text-[12.5px] text-ink">
+            <b className="text-ok">Pagamento confirmado: {fmtBRL(jaPago)}</b> ({pagos.some((b) => b.paidVia === 'asaas') ? 'Pix automático' : 'marcado como pago'}). Já conta como venda e entra sozinho no total
+            {outcome === 'won' ? ' — informe abaixo só o que vendeu a mais (opcional).' : '.'}
+          </p>
+        )}
 
         {outcome === 'won' && (lista ? (
           <div className="space-y-1.5">
@@ -349,7 +366,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
           </div>
         ))}
 
-        {outcome && <CloseReasonField outcome={outcome} value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivo} />}
+        {outcome && <CloseReasonField outcome={outcome} value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivo} opcional={!motivoObrigatorio} />}
         {outcome && <CloseTagsField outcome={outcome} value={tagIds} onChange={setTagIds} />}
 
         {outcome && pesquisas.length > 0 && (
