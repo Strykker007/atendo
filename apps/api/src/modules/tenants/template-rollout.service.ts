@@ -26,6 +26,12 @@ export interface RolloutTenantResult {
 }
 
 const lower = (s: string) => s.trim().toLowerCase();
+/**
+ * Nome "de verdade" do motivo: sem emoji/símbolo no começo, sem acento, minúsculo. "💰 Achou caro"
+ * e "Achou caro" são o mesmo motivo — tratar como dois desativava o antigo e levava o histórico
+ * junto (o filtro e os relatórios ficavam no id velho).
+ */
+const core = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/^[^\p{L}\p{N}]+/u, '').trim().toLowerCase();
 const ADMIN = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
 
 /**
@@ -127,8 +133,10 @@ export class TemplateRolloutService {
     const usados = new Set<string>();
 
     for (const [position, m] of motivos.entries()) {
-      // ativo primeiro: com "Achou caro" ativo e "achou caro" desativado, mexe no que aparece
-      const atual = existentes.filter((e) => lower(e.name) === lower(m.name)).sort((a, b) => Number(b.isActive) - Number(a.isActive))[0];
+      // mesmo nome primeiro; senão o mesmo motivo com outro emoji/acento ("Achou caro" → "💰 Achou caro").
+      // Entre vários, o ativo; entre ativos, o que já tem histórico vem de qualquer jeito pelo id
+      const candidatos = (f: (e: (typeof existentes)[number]) => boolean) => existentes.filter((e) => !usados.has(e.id) && f(e)).sort((a, b) => Number(b.isActive) - Number(a.isActive))[0];
+      const atual = candidatos((e) => lower(e.name) === lower(m.name)) ?? candidatos((e) => core(e.name) === core(m.name));
       if (atual?.ignoreInReports) continue; // motivo interno com o mesmo nome: não vira motivo de venda
       if (!atual) {
         if (!dryRun) await tx.closeReason.create({ data: { tenantId, name: m.name, outcome: m.outcome, position, ...(m.color && { color: m.color }) } });
@@ -137,9 +145,12 @@ export class TemplateRolloutService {
       }
       usados.add(atual.id);
       const mudouCor = !!m.color && atual.color.toLowerCase() !== m.color;
-      if (!atual.isActive) r.closeReasons.reactivated.push(atual.name);
-      else if (atual.outcome !== m.outcome || mudouCor) r.closeReasons.updated.push(atual.name);
-      if (!dryRun) await tx.closeReason.update({ where: { id: atual.id }, data: { isActive: true, outcome: m.outcome, position, ...(m.color && { color: m.color }) } });
+      // renomeia mantendo o id (o histórico vai junto); só não renomeia se outro motivo já usa o nome
+      const renomear = atual.name !== m.name && !existentes.some((e) => e.id !== atual.id && lower(e.name) === lower(m.name));
+      const rotulo = renomear ? `${atual.name} → ${m.name}` : atual.name;
+      if (!atual.isActive) r.closeReasons.reactivated.push(rotulo);
+      else if (renomear || atual.outcome !== m.outcome || mudouCor) r.closeReasons.updated.push(rotulo);
+      if (!dryRun) await tx.closeReason.update({ where: { id: atual.id }, data: { isActive: true, outcome: m.outcome, position, ...(renomear && { name: m.name }), ...(m.color && { color: m.color }) } });
     }
 
     // os do cliente que não estão no padrão: desativados (substituir) ou mantidos depois dos do padrão
