@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Module, Param, Post, Query, UseGuards } 
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { vendasPorConsultorSql } from '../../common/reports/sales-base';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -147,7 +148,7 @@ class ReportsController {
       ...(filtro.tagIds && { OR: [{ tagIds: { hasSome: filtro.tagIds } }, { conversation: { tags: { some: { tagId: { in: filtro.tagIds } } } } }] }),
       ...(filtro.agentId && { AND: [{ OR: [{ actorId: filtro.agentId }, { actorId: null, targetId: filtro.agentId }] }] }),
     };
-    const [closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, won, lost] = await this.load.all([
+    const [closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, lost] = await this.load.all([
       // atendimentos ENCERRADOS no período (um encerramento = um atendimento), não conversas
       // criadas no período que por acaso estão fechadas agora
       () => this.prisma.conversationEvent.count({ where: fechou }),
@@ -164,12 +165,13 @@ class ReportsController {
       () => this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }),
       () => this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }),
       () => this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }),
-      // vendas saem do HISTÓRICO de atendimentos, não da conversa: a conversa guarda só o
-      // último desfecho, e a mesma pessoa pode comprar em março e voltar a comprar em junho —
-      // contar pela conversa somaria uma venda só
-      () => this.prisma.conversationEvent.aggregate({ where: { ...fechou, outcome: 'won' }, _count: { _all: true }, _sum: { outcomeValue: true } }),
       () => this.prisma.conversationEvent.count({ where: { ...fechou, outcome: 'lost' } }),
     ]);
+    // vendas pela régua da meta/ranking ("Comprou" + orçamento pago sem encerramento − estornos)
+    const vendas = (await this.load.run(() => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number }[]>(vendasPorConsultorSql(t, from, to, filtro.tagIds ? this.eventoTemTag(filtro.tagIds) : undefined))))
+      .filter((v) => !filtro.agentId || v.userId === filtro.agentId);
+    const wonTotal = vendas.reduce((a, v) => a + Number(v.won), 0);
+    const revenueTotal = Math.round(vendas.reduce((a, v) => a + Number(v.revenue) * 100, 0)) / 100;
     const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
     // atendimentos INICIADOS no período (conversa nova + reaberta): cada um cai em um dia só
     const total = byDay.reduce((a, r) => a + r.value, 0);
@@ -185,10 +187,10 @@ class ReportsController {
         messagesIn: msgsIn,
         messagesOut: msgsOut,
         avgFirstResponseMin: respVals.length ? respVals.reduce((a, b) => a + b, 0) / respVals.length : null,
-        won: won._count._all,
+        won: wonTotal,
         lost,
-        revenue: Number(won._sum.outcomeValue ?? 0),
-        winRate: won._count._all + lost > 0 ? won._count._all / (won._count._all + lost) : null,
+        revenue: revenueTotal,
+        winRate: wonTotal + lost > 0 ? wonTotal / (wonTotal + lost) : null,
       },
       sales,
       lostReasons,
@@ -307,7 +309,8 @@ class ReportsController {
     const itensDe = Prisma.sql`jsonb_array_elements(case when jsonb_typeof(s.items) = 'array' then s.items else '[]'::jsonb end)`;
     const produtoCasa = (t: string) => Prisma.sql`(s.products ilike ${like(t)} or exists (select 1 from ${itensDe} i where i->>'description' ilike ${like(t)}))`;
 
-    const conds: Prisma.Sql[] = [Prisma.sql`s."tenantId" = ${u.tenantId}`, Prisma.sql`s."closedAt" >= ${from}`, Prisma.sql`s."closedAt" < ${to}`];
+    // estornada sai do faturamento (a linha fica no banco, para auditoria)
+    const conds: Prisma.Sql[] = [Prisma.sql`s."tenantId" = ${u.tenantId}`, Prisma.sql`s."closedAt" >= ${from}`, Prisma.sql`s."closedAt" < ${to}`, Prisma.sql`s."refundedAt" is null`];
     if (f.userId) conds.push(Prisma.sql`s."userId" = ${f.userId}`);
     if (f.tagIds?.length) conds.push(this.vendaTemTag(f.tagIds));
     if (f.contactId) conds.push(Prisma.sql`s."contactId" = ${f.contactId}`);
@@ -417,11 +420,21 @@ class ReportsController {
       const answered = Number(n.answered);
       return { answered, avg: n.avg != null ? Math.round(Number(n.avg) * 100) / 100 : null, nps: satisfactionScale === 'scale_10' ? Math.round(((Number(n.promoters) - Number(n.detractors)) / answered) * 100) : null };
     };
-    const ranking = rows
-      .map((r) => {
-        const closed = Number(r.closed);
-        const won = Number(r.won);
-        return { userId: r.userId, name: r.name ?? '(usuário removido)', closed, won, revenue: Number(r.revenue ?? 0), conversionRate: closed ? (won / closed) * 100 : 0, avgHandleMin: r.tmaMin != null ? Number(r.tmaMin) : null, satisfaction: notaDe(r.userId) };
+    // vendas pela régua comum com a meta: "Comprou" + orçamento pago sem encerramento − estornos.
+    // Pagamento sem encerramento também é atendimento concluído (entra em `closed` e na conversão)
+    const vendas = await this.load.run(() => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number; paidOnly: number }[]>(vendasPorConsultorSql(tenantId, from, to, f.tagIds?.length ? this.eventoTemTag(f.tagIds) : undefined)));
+    const porId = new Map(rows.map((r) => [r.userId, r]));
+    const soVendas = vendas.filter((v) => v.userId && !porId.has(v.userId)).map((v) => v.userId);
+    const nomes = soVendas.length ? await this.prisma.user.findMany({ where: { id: { in: soVendas } }, select: { id: true, name: true } }) : [];
+    const ids = [...new Set([...rows.map((r) => r.userId), ...vendas.map((v) => v.userId).filter(Boolean)])];
+    const ranking = ids
+      .map((id) => {
+        const r = porId.get(id);
+        const v = vendas.find((x) => x.userId === id);
+        const closed = Number(r?.closed ?? 0) + Number(v?.paidOnly ?? 0);
+        const won = Number(v?.won ?? 0);
+        const name = r?.name ?? nomes.find((n) => n.id === id)?.name ?? '(usuário removido)';
+        return { userId: id, name, closed, won, revenue: Number(v?.revenue ?? 0), conversionRate: closed ? (won / closed) * 100 : 0, avgHandleMin: r?.tmaMin != null ? Number(r.tmaMin) : null, satisfaction: notaDe(id) };
       })
       // pódio: mais vendas; empate → mais concluídos → maior conversão
       .sort((a, b) => b.won - a.won || b.closed - a.closed || b.conversionRate - a.conversionRate || a.name.localeCompare(b.name));
@@ -452,7 +465,7 @@ class ReportsController {
    * enquanto o usuário existir; apagado vira "(sem atendente)".
    */
   private async sales(tenantId: string, from: Date, to: Date, filtro: Filtro) {
-    const conds = [Prisma.sql`s."tenantId" = ${tenantId}`, Prisma.sql`s."closedAt" >= ${from}`, Prisma.sql`s."closedAt" < ${to}`];
+    const conds = [Prisma.sql`s."tenantId" = ${tenantId}`, Prisma.sql`s."closedAt" >= ${from}`, Prisma.sql`s."closedAt" < ${to}`, Prisma.sql`s."refundedAt" is null`];
     if (filtro.agentId) conds.push(Prisma.sql`s."userId" = ${filtro.agentId}`);
     if (filtro.tagIds) conds.push(this.vendaTemTag(filtro.tagIds));
     const where = Prisma.join(conds, ' and ');

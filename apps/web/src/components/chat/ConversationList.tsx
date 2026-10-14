@@ -5,7 +5,7 @@ import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Sq
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
@@ -78,7 +78,19 @@ export function ConversationList() {
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
   const [iniciando, setIniciando] = useState(false);
-  const conversations = useConversations({ status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome });
+  const filtroLista = { status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome };
+  const conversations = useConversations(filtroLista);
+  // rolou até o fim: páginas seguintes (a primeira é a que o tempo real atualiza)
+  const anteriores = useOlderConversations(filtroLista, conversations.data);
+  const fimDaLista = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = fimDaLista.current;
+    if (!el || !anteriores.temMais) return;
+    // margem: começa a buscar antes de a pessoa bater no fim
+    const obs = new IntersectionObserver((e) => { if (e[0]?.isIntersecting) void anteriores.carregar(); }, { rootMargin: '300px' });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [anteriores.temMais, anteriores.carregar]);
   const selectedNumber = numbers.data?.find((n) => n.id === numberId);
   // com uma empresa escolhida no menu, o seletor oferece só os números dela (docs/empresas.md)
   const numerosDaEmpresa = (numbers.data ?? []).filter((n) => !companyId || n.companyId === companyId);
@@ -86,7 +98,7 @@ export function ConversationList() {
   const [recolhidos, setRecolhidos] = usePersistedState<string[]>('grupos-recolhidos', []);
   const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0) + (closeFilter.outcome || closeFilter.reasonId ? 1 : 0);
 
-  const visiveis = conversations.data ?? [];
+  const visiveis = useMemo(() => [...(conversations.data ?? []), ...anteriores.itens], [conversations.data, anteriores.itens]);
 
   // A conversa aberta não some da lista quando deixa de casar com o filtro (respondeu uma de
   // "Aguardando" e ela foi para "Em atendimento"): fica fixada no topo até trocar de conversa
@@ -369,6 +381,12 @@ export function ConversationList() {
             </div>
           );
         })}
+        {/* sentinela da rolagem: perto do fim, busca a próxima página */}
+        {anteriores.temMais && (
+          <div ref={fimDaLista} className="py-3 text-center text-[11.5px] text-faint">
+            {anteriores.carregando ? 'Carregando mais conversas…' : <button type="button" onClick={() => void anteriores.carregar()} className="hover:text-ink underline-offset-2 hover:underline">Carregar mais</button>}
+          </div>
+        )}
       </div>
 
       {encerrando && (

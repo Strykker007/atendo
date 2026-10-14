@@ -16,13 +16,15 @@ export interface TenantSettings {
   wonFlowId: string | null; lostFlowId: string | null;
   /** "Comprou" exige valor (padrão true) */
   requireSaleValue: boolean;
+  /** motivo obrigatório em "Comprou" / "Não comprou" (cada um separado; padrão true) */
+  requireReasonOnWon: boolean; requireReasonOnLost: boolean;
   /** nome dos resultados do encerramento na empresa — use `useOutcomeLabels` */
   wonLabel: string; lostLabel: string;
   welcomeMessages: WelcomeMessage[]; welcomeMode: WelcomeMode; welcomeEnabled: boolean;
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

@@ -131,10 +131,11 @@ class StatusDto {
  * → Atendimento → Encerramento). Tags são opcionais. A tela já obriga; aqui é para nenhum outro
  * caminho passar sem.
  */
-function assertOutcome(o: { outcome?: ConversationOutcome; value?: number; items?: { value: number }[] }, requireSaleValue = true, labels: { won: string; lost: string } = OUTCOME_LABELS_DEFAULT) {
+function assertOutcome(o: { outcome?: ConversationOutcome; value?: number; items?: { value: number }[] }, requireSaleValue = true, labels: { won: string; lost: string } = OUTCOME_LABELS_DEFAULT, jaPago = 0) {
   if (o.outcome !== 'won' && o.outcome !== 'lost') throw new BadRequestException(`Escolha o resultado: “${labels.won}” ou “${labels.lost}”.`);
   if (o.outcome === 'won' && requireSaleValue) {
-    const total = o.items?.length ? o.items.reduce((a, i) => a + (i.value || 0), 0) : o.value ?? 0;
+    // orçamento pago no atendimento já é o valor da venda: o atendente só informa o que vendeu a mais
+    const total = (o.items?.length ? o.items.reduce((a, i) => a + (i.value || 0), 0) : o.value ?? 0) + jaPago;
     if (!(total > 0)) throw new BadRequestException(`Informe o valor da compra para encerrar como “${labels.won}”.`);
   }
 }
@@ -426,7 +427,8 @@ export class ConversationsController {
     if (interno) assertCanCloseInternal(u);
     else if (dto.status === 'closed') {
       const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { requireSaleValue: true, wonLabel: true, lostLabel: true } });
-      assertOutcome(dto, s?.requireSaleValue ?? true, s ? { won: s.wonLabel, lost: s.lostLabel } : undefined);
+      const pago = dto.outcome === 'won' ? (await this.conversations.pagosAbertos(id)).total : 0;
+      assertOutcome(dto, s?.requireSaleValue ?? true, s ? { won: s.wonLabel, lost: s.lostLabel } : undefined, pago);
     }
     // pesquisa: conferida ANTES de encerrar (id inválido não pode fechar sem ela). Interno não tem
     const pesquisa = dto.status === 'closed' && !interno ? await this.surveys.resolve(u.tenantId, dto.surveyId) : null;

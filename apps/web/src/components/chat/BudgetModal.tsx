@@ -7,7 +7,7 @@ import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { cn, formatDoc } from '@/lib/utils';
-import { budgetLink, useBudgets, useConversation, useCreateBudget, usePaymentGateway, usePixKeys, useSetBudgetStatus, type Budget } from '@/lib/hooks';
+import { budgetLink, useBudgets, useCan, useConversation, useCreateBudget, usePaymentGateway, usePixKeys, useRefundBudget, useSetBudgetStatus, type Budget } from '@/lib/hooks';
 
 /**
  * Orçamento rápido no chat (docs/orcamentos.md).
@@ -176,10 +176,13 @@ const STATUS_CLS: Record<BudgetStatus, string> = {
   PENDING: 'bg-warn-soft text-warn-ink',
   PAID: 'bg-ok-soft text-ok',
   EXPIRED: 'bg-field text-muted',
+  REFUNDED: 'bg-danger-soft text-danger-ink',
 };
 
 function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { conversationId: string; budgets: Budget[]; carregando: boolean; onInserir: (hash: string) => void }) {
   const status = useSetBudgetStatus();
+  const estornar = useRefundBudget();
+  const podeEstornar = useCan('settings.manage');
   if (carregando) return <p className="text-sm text-faint">Carregando…</p>;
   if (!budgets.length) return <p className="text-sm text-faint">Nenhum orçamento gerado nesta conversa.</p>;
 
@@ -211,9 +214,18 @@ function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { c
                 <FileText size={13} /> Ver comprovante
               </a>
             )}
-            {b.status === 'PAID'
-              ? <Button variant="ghost" size="sm" icon={<Undo2 size={13} />} loading={status.isPending && status.variables?.id === b.id} onClick={() => marcar(b, 'PENDING')}>Desfazer pago</Button>
-              : <Button variant="success" size="sm" icon={<Check size={13} />} loading={status.isPending && status.variables?.id === b.id} onClick={() => marcar(b, 'PAID')}>Marcar como pago</Button>}
+            {b.status === 'PAID' && b.paidVia !== 'asaas' && !b.absorbed && (
+              <Button variant="ghost" size="sm" icon={<Undo2 size={13} />} loading={status.isPending && status.variables?.id === b.id} onClick={() => marcar(b, 'PENDING')}>Desfazer pago</Button>
+            )}
+            {b.status === 'PAID' && podeEstornar && (
+              <Button variant="subtle" size="sm" loading={estornar.isPending && estornar.variables?.id === b.id}
+                onClick={() => { if (confirm(b.paidVia === 'asaas' ? 'Estornar? O Asaas devolve o dinheiro ao cliente e a venda sai da meta.' : 'Registrar estorno? A venda sai da meta e do faturamento.')) estornar.mutateAsync({ conversationId, id: b.id }).then(() => toast.ok('Estorno registrado'), toast.err); }}>
+                Estornar
+              </Button>
+            )}
+            {(b.status === 'PENDING' || b.status === 'EXPIRED') && (
+              <Button variant="success" size="sm" icon={<Check size={13} />} loading={status.isPending && status.variables?.id === b.id} onClick={() => marcar(b, 'PAID')}>Marcar como pago</Button>
+            )}
           </div>
         </li>
       ))}

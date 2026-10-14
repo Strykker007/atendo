@@ -16,6 +16,9 @@ export interface Budget {
   /** manual (atendente) | asaas (webhook do Pix automático) */
   paidVia: 'manual' | 'asaas' | null;
   autoPix: boolean;
+  refundedAt: string | null;
+  /** já entrou num encerramento "Comprou" (não soma de novo) */
+  absorbed: boolean;
   note: string | null;
   pixKey: string | null;
   paymentUrl: string | null;
@@ -45,6 +48,15 @@ export const useCreateBudget = () => {
       // CPF digitado no orçamento foi para a ficha
       if (v.cpfCnpj) qc.invalidateQueries({ queryKey: ['conversation', v.conversationId] });
     },
+  });
+};
+
+/** Estorno (gestão): Pix automático pede a devolução ao Asaas; por fora, só registra. A venda sai da meta. */
+export const useRefundBudget = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, id }: { conversationId: string; id: string }) => api<Budget>(`/conversations/${conversationId}/budgets/${id}/refund`, { method: 'POST' }),
+    onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ['budgets', v.conversationId] }),
   });
 };
 

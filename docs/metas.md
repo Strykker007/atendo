@@ -16,8 +16,11 @@ Salvar substitui as metas do mês inteiro (`PUT /sales-goals/:month`).
 
 ## Como é calculado (`goal-progress.ts`)
 
-- **Realizado** = encerramentos "Comprou" do consultor no mês (`conversation_events`, com ator, fora
-  os internos) — a mesma base do ranking. Faturamento = soma de `outcomeValue`.
+- **Realizado** = vendas do consultor no mês, pela régua comum com o ranking e a visão pronta
+  (`common/reports/sales-base.ts`): encerramentos "Comprou" (`conversation_events`, com ator, fora
+  os internos) **+** orçamentos pagos que ainda não entraram num encerramento (do atendente que
+  gerou, pela data do pagamento) **−** estornos. Encerramento que absorveu o orçamento conta uma vez
+  só — ver [Orçamentos › Venda](orcamentos.md#venda).
 - **Mês** = mês no fuso do cliente (`tenant_settings.timezone`).
 - **% atingido** = realizado ÷ meta. Com meta de valor **e** de quantidade, o atingimento é a média
   das duas, e é ele que ordena o ranking.

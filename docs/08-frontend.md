@@ -84,6 +84,7 @@ Regra: **nenhuma ação fica sem resposta visual**.
 | Rota ainda compilando/carregando | Esqueleto genérico de página | `app/(app)/loading.tsx` |
 | Dados da tela carregando | Esqueleto específico (linhas, cards, conversas, bolhas) | `components/ui/Skeleton.tsx`, usado com `query.isLoading` |
 | Lista refazendo fetch em segundo plano | Linha fina pulsando acima da lista | `ConversationList` (`isFetching`) |
+| Lista com mais de 50 conversas | Rolar até o fim busca a próxima página ("Carregando mais conversas…" / "Carregar mais") | `useOlderConversations` — a 1ª página fica no cache `['conversations']` (tempo real); as seguintes vêm por `cursor` fora dele, sem repetir o que está na 1ª; trocar filtro/aba recomeça |
 | Troca de tela concluída | Conteúdo entra com fade de 180 ms | `.animate-fade-in` em `globals.css`, `key={pathname}` no layout |
 | Restaurando sessão ao abrir o app | Spinner "Entrando…" | `app/(app)/layout.tsx` |
 | Qualquer botão que chama a API | `Button` com `loading={mutation.isPending}`: spinner, desabilitado, texto opcional ("Gerando QR…") | `components/ui/Button.tsx` — **obrigatório** em ação nova |
@@ -449,7 +450,7 @@ horário ou segurança — não manter um catálogo que a equipe usa o dia intei
 | **Empresa** | Números, Empresas, Departamentos, Variáveis globais | quem tem alguma das permissões delas |
 | **Atendimento** | Horários, Boas-vindas, **Encerramento**, Fluxos padrão | `settings.manage` |
 
-Aba sem nenhuma seção para a pessoa não aparece (o dono do sistema só vê Minha conta). **Encerramento** (`components/settings/ClosingSection.tsx`): "Nome dos resultados" (`wonLabel`/`lostLabel`, salva ao sair do campo) — toda tela que mostra o resultado (modal de encerrar, em massa, último encerramento, histórico, filtros da lista, Tags, Relatórios, Transmissões, fluxos padrão) lê o nome por `useOutcomeLabels()`, nunca "Comprou"/"Não comprou" fixo; interruptor "Exigir valor ao encerrar como Comprou" (`requireSaleValue`, padrão ligado). Desligado, o `CloseModal` deixa encerrar sem valor e avisa que conta como Comprou mas não soma no faturamento (sem valor não há venda em `sales`, então produtos e observação não ficam).
+Aba sem nenhuma seção para a pessoa não aparece (o dono do sistema só vê Minha conta). **Encerramento** (`components/settings/ClosingSection.tsx`): "Nome dos resultados" (`wonLabel`/`lostLabel`, salva ao sair do campo) — toda tela que mostra o resultado (modal de encerrar, em massa, último encerramento, histórico, filtros da lista, Tags, Relatórios, Transmissões, fluxos padrão) lê o nome por `useOutcomeLabels()`, nunca "Comprou"/"Não comprou" fixo; interruptor "Exigir valor ao encerrar como Comprou" (`requireSaleValue`, padrão ligado). Mais dois, independentes: "Exigir motivo ao encerrar como Comprou" (`requireReasonOnWon`) e "…como Não comprou" (`requireReasonOnLost`); desligado, o `CloseModal` mostra o motivo como "(opcional)". Com orçamento pago no atendimento, o `CloseModal` abre em Comprou, mostra o valor pago e desabilita Não comprou ([Orçamentos › Venda](orcamentos.md#venda)). Desligado, o `CloseModal` deixa encerrar sem valor e avisa que conta como Comprou mas não soma no faturamento (sem valor não há venda em `sales`, então produtos e observação não ficam).
 
 Editar exige `quick_replies.manage`; sem a permissão a tela mostra o conteúdo e esconde as
 ações (a API checa de novo).

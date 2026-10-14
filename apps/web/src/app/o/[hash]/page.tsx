@@ -102,7 +102,7 @@ function Orcamento({ hash, b }: { hash: string; b: PublicBudget }) {
       )}
 
       {/* Pix automático dá baixa sozinho: comprovante só para quem paga por chave/link */}
-      {b.status !== 'EXPIRED' && !b.autoPix && <Comprovante hash={hash} enviado={b.receiptSent} />}
+      {b.status !== 'EXPIRED' && b.status !== 'REFUNDED' && !b.autoPix && <Comprovante hash={hash} enviado={b.receiptSent} />}
 
       <p className="text-center text-[11px] text-faint pt-2">Página segura de {b.tenantName || brand.brandName}. Não compartilhe este link.</p>
     </>
@@ -111,6 +111,7 @@ function Orcamento({ hash, b }: { hash: string; b: PublicBudget }) {
 
 function Situacao({ b, validade }: { b: PublicBudget; validade: string }) {
   if (b.status === 'PAID') return <Selo cls="bg-ok-soft text-ok" icone={<CircleCheck size={14} />}>Pagamento confirmado. Obrigado!</Selo>;
+  if (b.status === 'REFUNDED') return <Selo cls="bg-field text-muted" icone={<CircleAlert size={14} />}>Pagamento estornado. Fale com o atendimento se tiver dúvida.</Selo>;
   if (b.status === 'EXPIRED') return <Selo cls="bg-field text-muted" icone={<CircleAlert size={14} />}>Este orçamento expirou em {validade}. Peça um novo ao atendimento.</Selo>;
   return <Selo cls="bg-warn-soft text-warn-ink" icone={<Clock size={14} />}>Válido até {validade}</Selo>;
 }
