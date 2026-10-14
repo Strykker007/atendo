@@ -2092,6 +2092,8 @@ model Budget {
   autoPix          Boolean   @default(false)
   /// id da cobrança no gateway (Asaas `pay_…`) — é por ele que o webhook acha o orçamento
   gatewayPaymentId String?   @unique
+  /// cobrança cancelada no Asaas (vencimento + tolerância) — o QR antigo deixa de valer
+  gatewayCancelledAt DateTime?
   /// Pix copia e cola e QR (PNG em base64) da cobrança
   pixPayload       String?
   pixQrImage       String?
@@ -2106,6 +2108,7 @@ model Budget {
   @@index([conversationId, createdAt])
   @@index([conversationId, status])
   @@index([tenantId, status])
+  @@index([autoPix, status, expiresAt])
   @@map("budgets")
 }
 

@@ -1,7 +1,7 @@
 'use client';
 /** Orçamentos com link público, gerados no chat (docs/orcamentos.md). */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { BudgetItem, BudgetStatus } from '@atendo/shared';
+import type { BudgetItem, BudgetStatus, BudgetValidity } from '@atendo/shared';
 import { api } from '../api';
 
 export interface Budget {
@@ -25,7 +25,7 @@ export interface Budget {
   user: { id: string; name: string };
   receipt: { url: string; mimeType: string; fileName: string; at: string } | null;
 }
-type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validHours?: number; autoPix?: boolean; cpfCnpj?: string };
+type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validity?: BudgetValidity; autoPix?: boolean; cpfCnpj?: string };
 
 /** Link público do orçamento — no domínio aberto agora, para sair com a marca certa. */
 export const budgetLink = (hash: string) => `${typeof window === 'undefined' ? '' : window.location.origin}/o/${hash}`;
