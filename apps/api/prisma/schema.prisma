@@ -89,6 +89,7 @@ model Tenant {
   auditLogs       AuditLog[]
   satisfactionSurveys SatisfactionSurvey[]
   surveyResponses     SurveyResponse[]
+  salesGoals          SalesGoal[]
   @@map("tenants")
 }
 
@@ -637,6 +638,30 @@ model CloseReason {
 
   @@unique([tenantId, name])
   @@map("close_reasons")
+}
+
+/// Meta mensal do consultor (docs/metas.md). `userId = '*'` é a meta padrão: vale para quem não
+/// tem meta própria no mês. Sem FK no usuário de propósito: o '*' não é usuário, e meta de quem
+/// saiu continua no histórico do mês.
+model SalesGoal {
+  id            String   @id @default(uuid())
+  tenantId      String
+  /// "AAAA-MM", no fuso do cliente
+  month         String
+  /// id do consultor ou '*' (padrão do mês)
+  userId        String
+  /// meta de faturamento (soma das vendas encerradas como "Comprou"); nulo = sem meta de valor
+  revenueTarget Decimal? @db.Decimal(12, 2)
+  /// meta de quantidade de vendas; nulo = sem meta de quantidade
+  wonTarget     Int?
+  updatedById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, month, userId])
+  @@map("sales_goals")
 }
 
 /// Pesquisa de satisfação enviada ao encerrar o atendimento (docs/pesquisa-de-satisfacao.md).

@@ -66,7 +66,7 @@ export interface PlanLimits {
   aiMonthlyCostCap?: number;
 }
 
-export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot', CAMPAIGNS: 'campaigns', PROACTIVE_MESSAGING: 'proactive_messaging' } as const;
+export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot', CAMPAIGNS: 'campaigns', PROACTIVE_MESSAGING: 'proactive_messaging', CONSULTANT_RANKING: 'consultant_ranking', SATISFACTION_SURVEYS: 'satisfaction_surveys' } as const;
 export type PlanFeature = (typeof PlanFeature)[keyof typeof PlanFeature];
 /** Lista fechada, para validar o que vem do formulário de planos. */
 export const PLAN_FEATURES = Object.values(PlanFeature);
@@ -79,6 +79,10 @@ export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
   campaigns: 'Transmissão em massa',
   /** falar com quem não escreveu nas últimas 24h — só pelo número oficial (docs/envio.md#envio-frio) */
   proactive_messaging: 'Mensagem ativa (número oficial)',
+  /** ranking de consultores + metas mensais (docs/metas.md) */
+  consultant_ranking: 'Ranking e metas de consultores',
+  /** pesquisa no encerramento + relatório (docs/pesquisa-de-satisfacao.md) */
+  satisfaction_surveys: 'Pesquisa de satisfação (CSAT/NPS)',
 };
 
 /** Limites de quantidade checados na criação/ativação (ver `PlanLimitGuard` na API). */

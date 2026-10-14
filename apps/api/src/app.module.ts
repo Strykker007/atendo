@@ -15,6 +15,7 @@ import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module
 import { PixKeysModule } from './modules/pix-keys/pix-keys.module';
 import { CloseReasonsModule } from './modules/close-reasons/close-reasons.module';
 import { SatisfactionModule } from './modules/satisfaction/satisfaction.module';
+import { GoalsModule } from './modules/goals/goals.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -52,6 +53,7 @@ import { MonitorModule } from './modules/monitor/monitor.module';
     PixKeysModule,
     CloseReasonsModule,
     SatisfactionModule,
+    GoalsModule,
     AuditModule,
     BillingModule,
     ReportsModule,

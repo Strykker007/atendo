@@ -11,8 +11,8 @@ import { CompanySwitcher } from './CompanySwitcher';
 import { NoticeBell } from './SystemNotices';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
 import { useTheme, applyTheme } from '@/lib/theme';
-import { useAppVersion, useConversationCounts, useMe, usePermissions } from '@/lib/hooks';
-import type { Permission } from '@atendo/shared';
+import { useAppVersion, useConversationCounts, useMe, usePermissions, useUsage } from '@/lib/hooks';
+import type { Permission, PlanFeature } from '@atendo/shared';
 
 const OWNER_ITEMS = [
   { href: '/admin', label: 'Financeiro', icon: ShieldCheck },
@@ -27,7 +27,8 @@ const OWNER_ITEMS = [
  * pior, numa tela vazia que parecia defeito. Itens sem `need` são de todo mundo: conversas,
  * respostas (consultar) e configurações (onde fica a troca da própria senha).
  */
-const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission }[] = [
+/** `feature`: recurso de plano sem o qual o item some (a tela também mostra o bloqueio) */
+const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission; feature?: PlanFeature }[] = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
   { href: '/kanban', label: 'Kanban', icon: Columns3 },
   { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: 'agenda.manage' },
@@ -35,7 +36,7 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   { href: '/respostas', label: 'Respostas', icon: Zap },
   { href: '/tags', label: 'Tags', icon: Tags, need: 'tags.manage' },
   { href: '/transmissoes', label: 'Transmissões', icon: Send, need: 'campaigns.manage' },
-  { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: 'settings.manage' },
+  { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: 'settings.manage', feature: 'satisfaction_surveys' },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: 'reports.view' },
   { href: '/equipe', label: 'Equipe', icon: Users, need: 'team.manage' },
   { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: 'billing.manage' },
@@ -54,6 +55,9 @@ export function Sidebar() {
   const counts = useConversationCounts(numberId);
   const minhas = usePermissions();
   const permitido = (p: Permission) => minhas.includes(p);
+  const usage = useUsage();
+  // enquanto o plano carrega, o item aparece (sumir e voltar pisca o menu)
+  const noPlano = (f: PlanFeature) => !usage.data || !!usage.data.limits?.features?.includes(f);
   const [target, setTarget] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   useEffect(() => { if (!pending) setTarget(null); }, [pending]);
@@ -105,7 +109,7 @@ export function Sidebar() {
       {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}
 
       <nav className="flex-1 py-2">
-        {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items.filter((i) => !i.need || permitido(i.need))).map(({ href, label, icon: Icon }) => {
+        {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items.filter((i) => (!i.need || permitido(i.need)) && (!i.feature || noPlano(i.feature)))).map(({ href, label, icon: Icon }) => {
           const active = target ? target === href : path.startsWith(href);
           const badge = href === '/conversas' && waiting > 0 ? waiting : null;
           return (

@@ -7,7 +7,9 @@ import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { SkeletonCards } from '@/components/ui/Skeleton';
-import { useCan, useConsultantRanking, useOutcomeLabels, useTags, type ConsultantRankingRow } from '@/lib/hooks';
+import { useCan, useConsultantRanking, useHasFeature, useOutcomeLabels, useTags, type ConsultantRankingRow } from '@/lib/hooks';
+import { FeatureLocked } from '@/components/billing/FeatureLocked';
+import { GoalsBoard } from '@/components/reports/GoalsBoard';
 
 // mesmas regras de data da tela de Relatórios: fuso do navegador, fim exclusivo
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -21,25 +23,29 @@ const PRESETS: { key: string; label: string; range: () => [string, string] }[] =
   { key: 'mes', label: 'Mês atual', range: () => { const n = new Date(); return [iso(new Date(n.getFullYear(), n.getMonth(), 1)), iso(new Date(n.getFullYear(), n.getMonth() + 1, 1))]; } },
 ];
 
-type SortKey = 'name' | 'closed' | 'won' | 'conversionRate' | 'avgHandleMin';
+type SortKey = 'name' | 'closed' | 'won' | 'conversionRate' | 'avgHandleMin' | 'satisfaction';
 const fmtMin = (m: number | null) => (m == null ? '—' : m < 60 ? `${m.toFixed(0)} min` : m < 1440 ? `${(m / 60).toFixed(1)} h` : `${(m / 1440).toFixed(1)} d`);
 const fmtPct = (v: number) => `${v.toFixed(v % 1 ? 1 : 0)}%`;
 
 export default function RankingPage() {
   const podeVer = useCan('reports.view');
+  const feature = useHasFeature('consultant_ranking');
+  const satisfacao = useHasFeature('satisfaction_surveys');
+  const [aba, setAba] = useState<'ranking' | 'metas'>('ranking');
   const labels = useOutcomeLabels();
   const tags = useTags();
   const [preset, setPreset] = useState('mes');
   const [range, setRange] = useState<[string, string]>(PRESETS[2].range());
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'won', desc: true });
-  const q = useConsultantRanking({ from: inicioDoDia(range[0]), to: inicioDoDia(range[1]), tagIds });
+  const q = useConsultantRanking({ from: inicioDoDia(range[0]), to: inicioDoDia(range[1]), tagIds, enabled: feature.has && aba === 'ranking' });
 
   const rows = useMemo(() => {
     const list = [...(q.data?.ranking ?? [])];
     const dir = sort.desc ? -1 : 1;
     return list.sort((a, b) => {
       if (sort.key === 'name') return dir * a.name.localeCompare(b.name, 'pt-BR');
+      if (sort.key === 'satisfaction') return dir * ((a.satisfaction?.avg ?? (sort.desc ? -Infinity : Infinity)) - (b.satisfaction?.avg ?? (sort.desc ? -Infinity : Infinity))) || a.position - b.position;
       // sem TMA vai sempre para o fim
       const va = a[sort.key] ?? (sort.desc ? -Infinity : Infinity);
       const vb = b[sort.key] ?? (sort.desc ? -Infinity : Infinity);
@@ -48,9 +54,14 @@ export default function RankingPage() {
   }, [q.data, sort]);
 
   if (!podeVer) return <PageShell><p className="text-sm text-muted">Seu perfil de acesso não inclui relatórios.</p></PageShell>;
+  if (!feature.loading && !feature.has) return <FeatureLocked title="Ranking de consultores" text="Pódio de vendas, conversão e TMA de cada consultor, com metas mensais e quanto falta para batê-las." />;
 
   const podio = q.data?.ranking.slice(0, 3) ?? [];
   const toggle = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'name' && key !== 'avgHandleMin' }));
+
+  const escala = q.data?.satisfactionScale;
+  const comNota = satisfacao.has && !!escala;
+  const fmtNota = (r: ConsultantRankingRow) => !r.satisfaction ? '—' : escala === 'scale_10' && r.satisfaction.nps != null ? `${r.satisfaction.avg?.toFixed(1) ?? '—'} · NPS ${r.satisfaction.nps}` : escala === 'csat_3' ? `${r.satisfaction.avg?.toFixed(1) ?? '—'}/3` : `${r.satisfaction.avg?.toFixed(1) ?? '—'}/5`;
 
   return (
     <PageShell width="max-w-6xl">
@@ -60,6 +71,13 @@ export default function RankingPage() {
         action={<Link href="/relatorios" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink"><ArrowLeft size={15} /> Relatórios</Link>}
       />
 
+      <div className="flex gap-1 border-b border-line">
+        {([['ranking', 'Ranking do período'], ['metas', 'Metas do mês']] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setAba(k)} className={cn('px-3 py-2 text-sm font-medium border-b-2 -mb-px', aba === k ? 'border-accent text-ink' : 'border-transparent text-muted hover:text-ink')}>{l}</button>
+        ))}
+      </div>
+
+      {aba === 'metas' ? <GoalsBoard /> : <>
       <section className="rounded-2xl bg-panel border border-line p-3 space-y-3">
         <div className="flex flex-wrap gap-1">
           {PRESETS.map((p) => (
@@ -108,6 +126,7 @@ export default function RankingPage() {
                     <Th label="Vendas" k="won" sort={sort} onClick={toggle} right />
                     <Th label="Conversão" k="conversionRate" sort={sort} onClick={toggle} right />
                     <Th label="TMA" k="avgHandleMin" sort={sort} onClick={toggle} right />
+                    {comNota && <Th label={escala === 'scale_10' ? 'Satisfação / NPS' : 'Satisfação'} k="satisfaction" sort={sort} onClick={toggle} right />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -124,6 +143,7 @@ export default function RankingPage() {
                         </div>
                       </td>
                       <td className="py-2.5 px-2 pr-4 text-right tnum text-muted">{fmtMin(r.avgHandleMin)}</td>
+                      {comNota && <td className="py-2.5 px-2 pr-4 text-right tnum" title={r.satisfaction ? `${r.satisfaction.answered} respostas` : 'Sem respostas da pesquisa no período'}>{fmtNota(r)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -134,14 +154,16 @@ export default function RankingPage() {
                     <td className="py-2 px-2 text-right tnum">{q.data.totals.won}</td>
                     <td className="py-2 px-2 text-right tnum">{fmtPct(q.data.totals.conversionRate)}</td>
                     <td className="py-2 px-2 pr-4" />
+                    {comNota && <td className="py-2 px-2 pr-4" />}
                   </tr>
                 </tfoot>
               </table>
             </section>
           )}
-          <p className="text-[11px] text-faint">Concluídos = atendimentos encerrados pelo consultor (encerramento automático e interno não contam). Conversão = vendas ÷ concluídos. TMA = do início do atendimento (ou da reabertura) até o encerramento.</p>
+          <p className="text-[11px] text-faint">Concluídos = atendimentos encerrados pelo consultor (encerramento automático e interno não contam). Conversão = vendas ÷ concluídos. TMA = do início do atendimento (ou da reabertura) até o encerramento.{comNota && ' Satisfação = média da pergunta principal da pesquisa de satisfação (escala mais usada no período); NPS só na escala de 1 a 10.'}</p>
         </>
       )}
+      </>}
     </PageShell>
   );
 }

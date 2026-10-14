@@ -21,6 +21,8 @@
 | [Variáveis `{{...}}`](variaveis.md) | Dev / Cliente | Variáveis comuns a fluxos, respostas rápidas, campanhas e chat: empresa, saudação, primeiro nome, campos da ficha |
 | [Agendamento de mensagens](agendamento-de-mensagens.md) | Dev / Cliente | Atendente agenda uma mensagem para sair depois; job de 1 minuto, regras de envio, cancelamento |
 | [Avisos do sistema](avisos.md) | Dev / Dono | Avisos globais do super_admin: popup ao vivo, sino no menu e tela de publicação |
+| [Metas de consultores](metas.md) | Dev / Cliente | Meta mensal por consultor (padrão + individual), atingimento, ritmo esperado, projeção e ranking |
+| [Relatórios sem pico](relatorios-desempenho.md) | Dev / Ops | Limite de consultas simultâneas, cache curto, teto de período e regras para relatório novo |
 | [Pesquisa de satisfação](pesquisa-de-satisfacao.md) | Dev / Cliente | CSAT/NPS no encerramento: escalas, recusa sem insistência, interceptação da resposta, relatório por consultor |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |

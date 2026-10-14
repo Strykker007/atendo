@@ -3,6 +3,7 @@
 Pergunta enviada ao cliente pelo WhatsApp **quando o atendente encerra o atendimento**. A nota
 fica ligada ao consultor que atendeu e alimenta o relatório de satisfação.
 
+- Recurso de plano **`satisfaction_surveys`** (*Pesquisa de satisfação (CSAT/NPS)*): sem ele o menu some, as telas mostram o bloqueio, a API responde 403 e o encerramento não envia a pesquisa padrão (pedir uma explícita = 400).
 - Tela de cadastro: menu **Pesquisas** (`/pesquisas`, permissão `settings.manage`).
 - Relatório: **Relatórios → Satisfação** (`/relatorios/satisfacao`, permissão `reports.view`).
 - Código: `apps/api/src/modules/satisfaction/` (`survey-runner.service.ts` = envio e leitura da

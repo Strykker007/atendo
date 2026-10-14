@@ -9,7 +9,8 @@ import { Field, Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { SkeletonRows } from '@/components/ui/Skeleton';
-import { useCan, useCreateSurvey, useSurveys, useUpdateSurvey, type SatisfactionSurvey, type SurveyInput } from '@/lib/hooks';
+import { FeatureLocked } from '@/components/billing/FeatureLocked';
+import { useCan, useHasFeature, useCreateSurvey, useSurveys, useUpdateSurvey, type SatisfactionSurvey, type SurveyInput } from '@/lib/hooks';
 
 const ESCALA_DICA: Record<SurveyScale, string> = {
   scale_5: 'O cliente digita uma nota de 1 a 5.',
@@ -24,12 +25,15 @@ const ESCALA_DICA: Record<SurveyScale, string> = {
  */
 export default function SurveysPage() {
   const pode = useCan('settings.manage');
-  const surveys = useSurveys();
+  const feature = useHasFeature('satisfaction_surveys');
+  const surveys = useSurveys(feature.has);
   const update = useUpdateSurvey();
   const [editando, setEditando] = useState<SatisfactionSurvey | 'nova' | null>(null);
 
   const alternar = (s: SatisfactionSurvey, patch: SurveyInput, msg: string) =>
     update.mutateAsync({ id: s.id, ...patch }).then(() => toast.ok(msg), toast.err);
+
+  if (!feature.loading && !feature.has) return <FeatureLocked title="Pesquisas de satisfação" text="Pergunte ao cliente como foi o atendimento logo depois de encerrar e acompanhe a nota de cada consultor (CSAT/NPS)." />;
 
   return (
     <PageShell>

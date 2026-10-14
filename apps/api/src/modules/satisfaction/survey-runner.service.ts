@@ -5,6 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { interpolate } from '../flows/answer';
+import { UsageService } from '../billing/usage.service';
 
 /** O que a resposta do cliente pede de volta (`followUp`). */
 export interface SurveyClaim {
@@ -36,6 +37,7 @@ export class SurveyRunnerService {
     private readonly prisma: PrismaService,
     private readonly conversations: ConversationsService,
     private readonly interpolation: InterpolationService,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -44,6 +46,12 @@ export class SurveyRunnerService {
    */
   async resolve(tenantId: string, surveyId: string | null | undefined): Promise<SatisfactionSurvey | null> {
     if (surveyId === null) return null;
+    // fora do plano: a padrão simplesmente não sai; pedir uma explicitamente é erro (antes de encerrar)
+    const plano = await this.usage.limits(tenantId);
+    if (!plano?.limits.features?.includes('satisfaction_surveys')) {
+      if (surveyId === undefined) return null;
+      throw new BadRequestException('"Pesquisa de satisfação" não está incluída no seu plano. Faça upgrade em Plano e uso.');
+    }
     if (surveyId === undefined) return this.prisma.satisfactionSurvey.findFirst({ where: { tenantId, isActive: true, isDefault: true } });
     const s = await this.prisma.satisfactionSurvey.findFirst({ where: { id: surveyId, tenantId, isActive: true } });
     if (!s) throw new BadRequestException('Pesquisa de satisfação inválida ou desativada.');

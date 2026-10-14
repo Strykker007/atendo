@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useOutcomeLabels, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useOutcomeLabels, useHasFeature, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
@@ -51,6 +51,8 @@ export default function RelatoriosPage() {
   const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined };
   const overview = useReportOverview({ ...periodo, ...filtros });
   const agents = useAgents();
+  const temRanking = useHasFeature('consultant_ranking').has;
+  const temSatisfacao = useHasFeature('satisfaction_surveys').has;
   const labels = useOutcomeLabels();
   // "Não comprou" leva o nome que a empresa deu ao resultado
   const metricLabel = { ...METRIC_LABEL, lost: labels.lost };
@@ -105,8 +107,8 @@ export default function RelatoriosPage() {
         subtitle="Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais."
         action={
           <div className="flex flex-wrap gap-2">
-            <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>
-            <Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking de consultores</Link>
+            {temSatisfacao && <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>}
+            {temRanking && <Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking e metas</Link>}
           </div>
         }
       />

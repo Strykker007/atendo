@@ -118,6 +118,8 @@ venda que já entrou no mês continua. É a base de conversão, ticket médio e 
 atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`). *Comprou* exige valor
 (> 0) e não existe no encerramento em massa (400) — toda venda tem valor. Migração `20261028000000_close_flows_and_sales`.
 
+**sales_goals** — meta mensal de vendas por consultor (`month` "AAAA-MM", `userId` ou `'*'` = padrão, `revenueTarget`, `wonTarget`). Ver [metas.md](metas.md). Migração `20261130000000_sales_goals`.
+
 **satisfaction_surveys** / **survey_responses** — pesquisa de satisfação no encerramento: a configuração (escala, pergunta, recusa, comentário, prazo, `isDefault`) e uma resposta por envio, com status (`pending → commenting → answered`, `declined`, `expired`, `failed`), nota, comentário e consultor/escala congelados. Detalhes em [pesquisa-de-satisfacao.md](pesquisa-de-satisfacao.md). Migração `20261127000000_satisfaction_surveys`.
 
 **saved_reports** — `definition` jsonb com o `ReportDefinition` (métrica, agrupamento, filtros, tipo de gráfico).

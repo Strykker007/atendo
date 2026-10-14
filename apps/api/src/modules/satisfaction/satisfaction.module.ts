@@ -11,6 +11,9 @@ import { TenantGuard } from '../auth/tenant.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { ReportLoadService, assertReportRange } from '../../common/reports/report-load.service';
+import { BillingModule } from '../billing/billing.module';
+import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 
 export const SURVEYS_MAX = 20;
 
@@ -68,7 +71,8 @@ const vazioViraNulo = (v: string | null | undefined) => (v === undefined ? undef
  * o id e o relatório do mês fechado não pode perder a linha.
  */
 @Controller('satisfaction-surveys')
-@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature('satisfaction_surveys')
 class SatisfactionSurveysController {
   constructor(private readonly prisma: PrismaService) {}
 
@@ -207,24 +211,30 @@ function indicadores(linhas: Linha[], scale: SurveyScale, aguardando = 0) {
  * congelado na resposta, não o dono atual da conversa.
  */
 @Controller('reports/satisfaction')
-@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature('satisfaction_surveys')
 @RequirePermission('reports.view')
 class SatisfactionReportController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly load: ReportLoadService) {}
 
   @Get()
   async report(@CurrentUser() u: AuthUser, @Query() q: Record<string, string | undefined>) {
     const f = ReportQuery.parse(q);
-    const t = u.tenantId;
     const to = f.to ?? new Date(Date.now() + 86_400_000);
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
+    assertReportRange(from, to);
+    // cache curto: 30 s, porque a lista de feedbacks é o que a pessoa fica olhando chegar
+    return this.load.cached(ReportLoadService.key(u.tenantId, 'satisfaction', { ...f, from, to }), () => this.data(u.tenantId, f, from, to), 30);
+  }
+
+  private async data(t: string, f: z.infer<typeof ReportQuery>, from: Date, to: Date) {
     const periodo: Prisma.SurveyResponseWhereInput = { tenantId: t, sentAt: { gte: from, lt: to }, status: { not: 'failed' }, ...(f.surveyId && { surveyId: f.surveyId }) };
 
-    const porEscala = await this.prisma.surveyResponse.groupBy({ by: ['scale'], where: periodo, _count: { _all: true } });
+    const porEscala = await this.load.run(() => this.prisma.surveyResponse.groupBy({ by: ['scale'], where: periodo, _count: { _all: true } }));
     let scale = f.scale;
     if (!scale) {
       const mais = [...porEscala].sort((a, b) => b._count._all - a._count._all)[0]?.scale;
-      const padrao = mais ? null : await this.prisma.satisfactionSurvey.findFirst({ where: { tenantId: t, isDefault: true }, select: { scale: true } });
+      const padrao = mais ? null : await this.load.run(() => this.prisma.satisfactionSurvey.findFirst({ where: { tenantId: t, isDefault: true }, select: { scale: true } }));
       scale = ((mais ?? padrao?.scale ?? 'scale_5') as SurveyScale);
     }
     const base: Prisma.SurveyResponseWhereInput = { ...periodo, scale };
@@ -236,31 +246,31 @@ class SatisfactionReportController {
       score: { not: null, ...(f.scoreMin && { gte: f.scoreMin }), ...(f.scoreMax && { lte: f.scoreMax }) },
       ...(f.onlyComments && { comment: { not: null } }),
     };
-    const [totais, aguardando, porConsultor, aguardandoPorConsultor, total, rows, failed] = await Promise.all([
-      this.prisma.surveyResponse.groupBy({ by: ['status', 'score'], where: doFiltro, _count: { _all: true } }),
-      this.prisma.surveyResponse.count({ where: { ...doFiltro, ...aguardandoWhere } }),
-      this.prisma.surveyResponse.groupBy({ by: ['agentId', 'status', 'score'], where: base, _count: { _all: true } }),
-      this.prisma.surveyResponse.groupBy({ by: ['agentId'], where: { ...base, ...aguardandoWhere }, _count: { _all: true } }),
-      this.prisma.surveyResponse.count({ where: lista }),
-      this.prisma.surveyResponse.findMany({
+    const [totais, aguardando, porConsultor, aguardandoPorConsultor, total, rows, failed] = await this.load.all([
+      () => this.prisma.surveyResponse.groupBy({ by: ['status', 'score'], where: doFiltro, _count: { _all: true } }),
+      () => this.prisma.surveyResponse.count({ where: { ...doFiltro, ...aguardandoWhere } }),
+      () => this.prisma.surveyResponse.groupBy({ by: ['agentId', 'status', 'score'], where: base, _count: { _all: true } }),
+      () => this.prisma.surveyResponse.groupBy({ by: ['agentId'], where: { ...base, ...aguardandoWhere }, _count: { _all: true } }),
+      () => this.prisma.surveyResponse.count({ where: lista }),
+      () => this.prisma.surveyResponse.findMany({
         where: lista,
         orderBy: { answeredAt: 'desc' },
         skip: (f.page - 1) * f.pageSize,
         take: f.pageSize,
         select: { id: true, score: true, comment: true, answeredAt: true, sentAt: true, agentId: true, agentName: true, conversationId: true, survey: { select: { name: true } }, conversation: { select: { contact: { select: { id: true, name: true, phone: true } } } } },
       }),
-      this.prisma.surveyResponse.count({ where: { tenantId: t, sentAt: { gte: from, lt: to }, status: 'failed', scale, ...(f.surveyId && { surveyId: f.surveyId }), ...(f.agentId && { agentId: f.agentId }) } }),
+      () => this.prisma.surveyResponse.count({ where: { tenantId: t, sentAt: { gte: from, lt: to }, status: 'failed', scale, ...(f.surveyId && { surveyId: f.surveyId }), ...(f.agentId && { agentId: f.agentId }) } }),
     ]);
 
     // perguntas adicionais: cada uma com a escala dela (texto e escala congelados na resposta).
     // SQL parametrizado — o JSON é desdobrado no banco em vez de trazer todas as respostas
-    const extrasRaw = await this.prisma.$queryRaw<{ qid: string; question: string; scale: string; score: number; n: number }[]>(Prisma.sql`
+    const extrasRaw = await this.load.run(() => this.prisma.$queryRaw<{ qid: string; question: string; scale: string; score: number; n: number }[]>(Prisma.sql`
       select a->>'questionId' as qid, max(a->>'question') as question, a->>'scale' as scale, (a->>'score')::int as score, count(*)::int as n
       from survey_responses r, jsonb_array_elements(r.answers) a
       where r."tenantId" = ${t} and r."sentAt" >= ${from} and r."sentAt" < ${to} and r.status <> 'failed'
         ${f.surveyId ? Prisma.sql`and r."surveyId" = ${f.surveyId}` : Prisma.empty}
         ${f.agentId ? Prisma.sql`and r."agentId" = ${f.agentId}` : Prisma.empty}
-      group by 1, 3, 4`);
+      group by 1, 3, 4`));
     const extras = new Map<string, { questionId: string; question: string; scale: SurveyScale; linhas: Linha[] }>();
     for (const e of extrasRaw) {
       if (!(SURVEY_SCALES as readonly string[]).includes(e.scale)) continue;
@@ -319,5 +329,5 @@ class SatisfactionReportController {
   }
 }
 
-@Module({ imports: [AuthModule], controllers: [SatisfactionSurveysController, SatisfactionReportController] })
+@Module({ imports: [AuthModule, BillingModule], controllers: [SatisfactionSurveysController, SatisfactionReportController] })
 export class SatisfactionModule {}

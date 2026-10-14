@@ -25,7 +25,8 @@ export interface SatisfactionSurvey {
 export type SurveyInput = Partial<Omit<SatisfactionSurvey, 'id' | 'createdAt'>>;
 
 const KEY = ['satisfaction-surveys'];
-export const useSurveys = () => useQuery({ queryKey: KEY, queryFn: () => api<SatisfactionSurvey[]>('/satisfaction-surveys'), staleTime: 60_000 });
+/** `enabled` = o plano tem `satisfaction_surveys` (sem ele a API responde 403) */
+export const useSurveys = (enabled = true) => useQuery({ queryKey: KEY, queryFn: () => api<SatisfactionSurvey[]>('/satisfaction-surveys'), staleTime: 60_000, enabled });
 
 const inv = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: KEY });
 export const useCreateSurvey = () => {
@@ -70,7 +71,7 @@ export interface SatisfactionReport {
     rows: { id: string; score: number; comment: string | null; answeredAt: string | null; sentAt: string; surveyName: string; agent: { id: string | null; name: string | null } | null; conversationId: string; contact: { id: string; name: string | null; phone: string } }[];
   };
 }
-export interface SatisfactionFilters { from: string; to: string; scale?: SurveyScale; surveyId?: string; agentId?: string; scoreMin?: number; scoreMax?: number; onlyComments?: boolean; page?: number }
+export interface SatisfactionFilters { enabled?: boolean; from: string; to: string; scale?: SurveyScale; surveyId?: string; agentId?: string; scoreMin?: number; scoreMax?: number; onlyComments?: boolean; page?: number }
 export const useSatisfactionReport = (f: SatisfactionFilters) => {
   const qs = new URLSearchParams({ from: f.from, to: f.to });
   if (f.scale) qs.set('scale', f.scale);
@@ -80,5 +81,6 @@ export const useSatisfactionReport = (f: SatisfactionFilters) => {
   if (f.scoreMax) qs.set('scoreMax', String(f.scoreMax));
   if (f.onlyComments === false) qs.set('onlyComments', '0');
   if (f.page) qs.set('page', String(f.page));
-  return useQuery({ queryKey: ['satisfaction-report', qs.toString()], queryFn: () => api<SatisfactionReport>(`/reports/satisfaction?${qs}`), placeholderData: keepPreviousData });
+  // staleTime: a API guarda 30 s; voltar à aba não dispara outra consulta
+  return useQuery({ queryKey: ['satisfaction-report', qs.toString()], queryFn: () => api<SatisfactionReport>(`/reports/satisfaction?${qs}`), placeholderData: keepPreviousData, staleTime: 30_000, refetchOnWindowFocus: false, enabled: f.enabled !== false });
 };

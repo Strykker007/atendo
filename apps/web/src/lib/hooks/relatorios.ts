@@ -5,7 +5,7 @@ import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClie
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, SurveyScale } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { ConversationOrigin, type Message } from './core';
 
@@ -48,11 +48,46 @@ export interface ConsultantRankingRow {
   conversionRate: number;
   /** tempo médio de atendimento, em minutos */
   avgHandleMin: number | null;
+  /** pesquisa de satisfação (pergunta principal) na escala `satisfactionScale`; null = sem respostas */
+  satisfaction: { answered: number; avg: number | null; nps: number | null } | null;
 }
-export interface ConsultantRanking { totals: { closed: number; won: number; conversionRate: number }; ranking: ConsultantRankingRow[] }
-export const useConsultantRanking = (f: { from: string; to: string; tagIds?: string[] }) => {
+export interface ConsultantRanking { satisfactionScale: SurveyScale | null; totals: { closed: number; won: number; conversionRate: number }; ranking: ConsultantRankingRow[] }
+export const useConsultantRanking = (f: { from: string; to: string; tagIds?: string[]; enabled?: boolean }) => {
   const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }) });
-  return useQuery({ queryKey: ['consultant-ranking', qs.toString()], queryFn: () => api<ConsultantRanking>(`/reports/ranking-consultants?${qs}`), placeholderData: keepPreviousData });
+  return useQuery({ queryKey: ['consultant-ranking', qs.toString()], queryFn: () => api<ConsultantRanking>(`/reports/ranking-consultants?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false, enabled: f.enabled !== false });
+};
+
+// ---- Metas mensais (docs/metas.md) ----
+export interface GoalTarget { revenueTarget: number | null; wonTarget: number | null }
+export interface MonthGoals { month: string; default: GoalTarget | null; goals: (GoalTarget & { userId: string })[] }
+export type GoalStatus = 'done' | 'on_track' | 'close' | 'behind';
+export interface GoalRow extends GoalTarget {
+  position: number | null;
+  userId: string;
+  name: string;
+  isActive: boolean;
+  /** de onde veio a meta: própria, padrão do mês ou nenhuma */
+  goalSource: 'own' | 'default' | null;
+  revenue: number;
+  won: number;
+  revenuePct: number | null;
+  wonPct: number | null;
+  revenueExpected: number | null;
+  revenueProjection: number | null;
+  wonProjection: number | null;
+  attainment: number | null;
+  status: GoalStatus | null;
+}
+export interface GoalsProgress { month: string; elapsedPct: number; team: { revenue: number; revenueTarget: number | null; revenuePct: number | null; won: number }; ranking: GoalRow[] }
+export const useMonthGoals = (month: string, enabled = true) => useQuery({ queryKey: ['sales-goals', month], queryFn: () => api<MonthGoals>(`/sales-goals/${month}`), enabled });
+export const useGoalsProgress = (month: string, enabled = true) =>
+  useQuery({ queryKey: ['goals-progress', month], queryFn: () => api<GoalsProgress>(`/reports/goals?month=${month}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false, enabled });
+export const useSaveGoals = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ month, ...b }: { month: string; default: GoalTarget | null; goals: (GoalTarget & { userId: string })[] }) => api<MonthGoals>(`/sales-goals/${month}`, { method: 'PUT', body: JSON.stringify(b) }),
+    onSuccess: (_, v) => { qc.invalidateQueries({ queryKey: ['sales-goals', v.month] }); qc.invalidateQueries({ queryKey: ['goals-progress', v.month] }); },
+  });
 };
 
 // ---- Relatórios: detalhamento de vendas ----
@@ -78,7 +113,7 @@ export interface SaleDetails {
 }
 export const useSaleDetails = (f: SaleDetailsFilters) => {
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
-  return useQuery({ queryKey: ['sale-details', qs.toString()], queryFn: () => api<SaleDetails>(`/reports/sales/details?${qs}`), placeholderData: keepPreviousData });
+  return useQuery({ queryKey: ['sale-details', qs.toString()], queryFn: () => api<SaleDetails>(`/reports/sales/details?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false });
 };
 
 // ---- Auditoria de atendimentos (cada encerramento do período) ----
@@ -113,7 +148,7 @@ export interface Attendances {
 }
 export const useAttendances = (f: AttendanceFilters) => {
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
-  return useQuery({ queryKey: ['attendances', qs.toString()], queryFn: () => api<Attendances>(`/reports/attendances?${qs}`), placeholderData: keepPreviousData });
+  return useQuery({ queryKey: ['attendances', qs.toString()], queryFn: () => api<Attendances>(`/reports/attendances?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false });
 };
 /** mensagens de UM atendimento: depois do encerramento anterior até este */
 export const useAttendanceMessages = (a: { conversationId: string; startedAt: string | null; closedAt: string } | null) =>

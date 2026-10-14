@@ -6,6 +6,9 @@ import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { ReportLoadService, assertReportRange } from '../../common/reports/report-load.service';
+import { BillingModule } from '../billing/billing.module';
+import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 
 /**
  * DSL de relatório: parâmetros escolhidos na UI -> query controlada -> série para gráfico.
@@ -90,12 +93,14 @@ function formatPhone(phone: string) {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermission('reports.view')
 class ReportsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly load: ReportLoadService) {}
 
   @Post('run')
   async run(@CurrentUser() u: AuthUser, @Body() body: unknown) {
     const def = ReportDefinition.parse(body);
-    return { definition: def, series: await this.query(u.tenantId, def) };
+    assertReportRange(def.from, def.to);
+    const series = await this.load.cached(ReportLoadService.key(u.tenantId, 'run', { d: JSON.stringify(def) }), () => this.load.run(() => this.query(u.tenantId, def)));
+    return { definition: def, series };
   }
 
   /**
@@ -112,8 +117,13 @@ class ReportsController {
     const to = f.to ?? new Date(Date.now() + 86_400_000);
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
     const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId };
+    assertReportRange(from, to);
+    return this.load.cached(ReportLoadService.key(u.tenantId, 'overview', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId }), () => this.overviewData(u.tenantId, from, to, filtro));
+  }
+
+  /** Corpo da visão pronta: ~20 consultas, todas pelo limite de concorrência (`ReportLoadService`). */
+  private async overviewData(t: string, from: Date, to: Date, filtro: Filtro) {
     const base = { from, to, filters: filtro, chart: 'bar' as const };
-    const t = u.tenantId;
     // conversa: tem a tag / está com o consultor
     const conv: Prisma.ConversationWhereInput = {
       tenantId: t,
@@ -130,33 +140,33 @@ class ReportsController {
       ...(filtro.tagIds && { OR: [{ tagIds: { hasSome: filtro.tagIds } }, { conversation: { tags: { some: { tagId: { in: filtro.tagIds } } } } }] }),
       ...(filtro.agentId && { actorId: filtro.agentId }),
     };
-    const [closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, won, lost] = await Promise.all([
+    const [closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, won, lost] = await this.load.all([
       // atendimentos ENCERRADOS no período (um encerramento = um atendimento), não conversas
       // criadas no período que por acaso estão fechadas agora
-      this.prisma.conversationEvent.count({ where: fechou }),
-      this.prisma.conversation.count({ where: { ...conv, status: 'waiting' } }),
-      this.prisma.conversation.count({ where: { ...conv, status: 'in_progress' } }),
-      this.prisma.message.count({ where: { direction: 'in', createdAt: { gte: from, lt: to }, conversation: conv } }),
-      this.prisma.message.count({ where: { direction: 'out', internal: false, createdAt: { gte: from, lt: to }, conversation: conv } }),
-      this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }),
-      this.query(t, { ...base, metric: 'conversations', groupBy: 'day' }),
+      () => this.prisma.conversationEvent.count({ where: fechou }),
+      () => this.prisma.conversation.count({ where: { ...conv, status: 'waiting' } }),
+      () => this.prisma.conversation.count({ where: { ...conv, status: 'in_progress' } }),
+      () => this.prisma.message.count({ where: { direction: 'in', createdAt: { gte: from, lt: to }, conversation: conv } }),
+      () => this.prisma.message.count({ where: { direction: 'out', internal: false, createdAt: { gte: from, lt: to }, conversation: conv } }),
+      () => this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'day' }),
       // quem encerrou no período (um encerramento = um atendimento); pelo dono ATUAL da conversa
       // ficavam de fora os atendimentos já fechados e os de quem saiu da fila
-      this.query(t, { ...base, metric: 'closed', groupBy: 'agent' }),
-      this.query(t, { ...base, metric: 'conversations', groupBy: 'origin' }),
-      this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }),
-      this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }),
-      this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }),
+      () => this.query(t, { ...base, metric: 'closed', groupBy: 'agent' }),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'origin' }),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }),
       // vendas saem do HISTÓRICO de atendimentos, não da conversa: a conversa guarda só o
       // último desfecho, e a mesma pessoa pode comprar em março e voltar a comprar em junho —
       // contar pela conversa somaria uma venda só
-      this.prisma.conversationEvent.aggregate({ where: { ...fechou, outcome: 'won' }, _count: { _all: true }, _sum: { outcomeValue: true } }),
-      this.prisma.conversationEvent.count({ where: { ...fechou, outcome: 'lost' } }),
+      () => this.prisma.conversationEvent.aggregate({ where: { ...fechou, outcome: 'won' }, _count: { _all: true }, _sum: { outcomeValue: true } }),
+      () => this.prisma.conversationEvent.count({ where: { ...fechou, outcome: 'lost' } }),
     ]);
     const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
     // atendimentos INICIADOS no período (conversa nova + reaberta): cada um cai em um dia só
     const total = byDay.reduce((a, r) => a + r.value, 0);
-    const [sales, lostReasons] = await Promise.all([this.sales(t, from, to, filtro), this.lostReasons(t, from, to, filtro)]);
+    const [sales, lostReasons] = await Promise.all([this.sales(t, from, to, filtro), this.load.run(() => this.lostReasons(t, from, to, filtro))]);
     return {
       period: { from, to },
       kpis: {
@@ -191,6 +201,7 @@ class ReportsController {
     const f = AttendancesQuery.parse(q);
     const to = f.endDate ?? new Date(Date.now() + 86_400_000);
     const from = f.startDate ?? new Date(to.getTime() - 30 * 86_400_000);
+    assertReportRange(from, to);
     const like = (v: string) => `%${v.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     const digits = (v: string) => v.replace(/\D/g, '');
     const conds: Prisma.Sql[] = [Prisma.sql`e."tenantId" = ${u.tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
@@ -207,25 +218,32 @@ class ReportsController {
     const where = Prisma.join(conds, ' and ');
     const from_ = Prisma.sql`from conversation_events e join conversations cv on cv.id = e."conversationId" join contacts c on c.id = cv."contactId" left join users usr on usr.id = e."actorId"`;
 
-    const [rows, resumo, agents] = await Promise.all([
-      this.prisma.$queryRaw<{ id: string; closedAt: Date; conversationId: string; outcome: string | null; value: number | null; reason: string | null; tagIds: string[] | null; tagSnapshot: string[] | null; closeReasonId: string | null; reasonName: string | null; reasonColor: string | null; stageTagId: string | null; contactId: string; contactName: string | null; phone: string; userId: string | null; userName: string | null; startedAt: Date | null; messages: number }[]>(Prisma.sql`
+    // a página primeiro (só ids, pelo índice de tenant/tipo/data) e os laterais caros — início do
+    // atendimento e contagem de mensagens — só para as linhas da página, não para o período inteiro
+    const [rows, resumo, agents] = await this.load.all([
+      () => this.prisma.$queryRaw<{ id: string; closedAt: Date; conversationId: string; outcome: string | null; value: number | null; reason: string | null; tagIds: string[] | null; tagSnapshot: string[] | null; closeReasonId: string | null; reasonName: string | null; reasonColor: string | null; stageTagId: string | null; contactId: string; contactName: string | null; phone: string; userId: string | null; userName: string | null; startedAt: Date | null; messages: number }[]>(Prisma.sql`
+        with pg as (
+          select e.id ${from_} where ${where}
+          order by e."createdAt" desc
+          limit ${f.pageSize} offset ${(f.page - 1) * f.pageSize}
+        )
         select e.id, e."createdAt" as "closedAt", e."conversationId", e.outcome::text as outcome, e."outcomeValue"::float as value, e.reason, e."tagIds", e."tagSnapshot",
                e."closeReasonId", cr.name as "reasonName", cr.color as "reasonColor", e."stageTagId",
                c.id as "contactId", c.name as "contactName", c.phone, e."actorId" as "userId", usr.name as "userName",
                ini."startedAt",
                (select count(*)::int from messages m where m."conversationId" = e."conversationId" and m."createdAt" <= e."createdAt" and (ini."startedAt" is null or m."createdAt" > ini."startedAt")) as messages
-        ${from_}
+        from pg
+        join conversation_events e on e.id = pg.id
+        join conversations cv on cv.id = e."conversationId" join contacts c on c.id = cv."contactId" left join users usr on usr.id = e."actorId"
         left join close_reasons cr on cr.id = e."closeReasonId"
         left join lateral (select max(p."createdAt") as "startedAt" from conversation_events p where p."conversationId" = e."conversationId" and p.type = 'closed' and p."createdAt" < e."createdAt") ini on true
-        where ${where}
         order by e."createdAt" desc
-        limit ${f.pageSize} offset ${(f.page - 1) * f.pageSize}
       `),
-      this.prisma.$queryRaw<{ count: number; won: number; lost: number }[]>(Prisma.sql`
+      () => this.prisma.$queryRaw<{ count: number; won: number; lost: number }[]>(Prisma.sql`
         select count(*)::int as count, count(*) filter (where e.outcome = 'won')::int as won, count(*) filter (where e.outcome = 'lost')::int as lost
         ${from_} where ${where}
       `),
-      this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      () => this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     ]);
     // tags dos encerramentos da página (excluída depois some do nome, mas o evento continua)
     const ids = [...new Set(rows.flatMap((r) => [...(r.tagIds ?? []), ...(r.tagSnapshot ?? []), ...(r.stageTagId ? [r.stageTagId] : [])]))];
@@ -270,6 +288,7 @@ class ReportsController {
     const f = SalesDetailsQuery.parse(q);
     const to = f.endDate ?? new Date(Date.now() + 86_400_000);
     const from = f.startDate ?? new Date(to.getTime() - 30 * 86_400_000);
+    assertReportRange(from, to);
     // escapa curingas do ILIKE: o termo continua parametrizado, isto só evita "%" casar tudo
     const like = (v: string) => `%${v.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     const digits = (v: string) => v.replace(/\D/g, '');
@@ -291,22 +310,22 @@ class ReportsController {
     const where = Prisma.join(conds, ' and ');
     const from_ = Prisma.sql`from sales s join contacts c on c.id = s."contactId" left join users usr on usr.id = s."userId"`;
 
-    const [rows, resumo, agents] = await Promise.all([
-      this.prisma.$queryRaw<{ id: string; closedAt: Date; amount: number; products: string | null; items: unknown; notes: string | null; conversationId: string; contactId: string; contactName: string | null; phone: string; userId: string | null; userName: string | null }[]>(Prisma.sql`
+    const [rows, resumo, agents] = await this.load.all([
+      () => this.prisma.$queryRaw<{ id: string; closedAt: Date; amount: number; products: string | null; items: unknown; notes: string | null; conversationId: string; contactId: string; contactName: string | null; phone: string; userId: string | null; userName: string | null }[]>(Prisma.sql`
         select s.id, s."closedAt", s.amount::float as amount, s.products, s.items, s.notes, s."conversationId",
                c.id as "contactId", c.name as "contactName", c.phone, s."userId", usr.name as "userName"
         ${from_} where ${where}
         order by s."closedAt" desc
         limit ${f.pageSize} offset ${(f.page - 1) * f.pageSize}
       `),
-      this.prisma.$queryRaw<{ count: number; revenue: number | null; items: number | null }[]>(Prisma.sql`
+      () => this.prisma.$queryRaw<{ count: number; revenue: number | null; items: number | null }[]>(Prisma.sql`
         select count(*)::int as count, sum(s.amount)::float as revenue,
                -- venda em texto livre conta como 1 produto
                sum(case when jsonb_typeof(s.items) = 'array' then jsonb_array_length(s.items) else 1 end)::int as items
         ${from_} where ${where}
       `),
       // atendentes do tenant para o filtro (inclui quem não vendeu, para o dropdown não "sumir" gente)
-      this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      () => this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     ]);
     const count = Number(resumo[0]?.count ?? 0);
     const revenue = Number(resumo[0]?.revenue ?? 0);
@@ -341,13 +360,21 @@ class ReportsController {
    * `tagIds` = tag do atendimento (escolhida no encerramento, retrato dele ou atual da conversa).
    */
   @Get('ranking-consultants')
+  @UseGuards(FeatureGuard)
+  @RequireFeature('consultant_ranking')
   async rankingConsultants(@CurrentUser() u: AuthUser, @Query() q: Record<string, string | undefined>) {
     const f = OverviewQuery.parse(q);
     const to = f.to ?? new Date(Date.now() + 86_400_000);
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
-    const conds = [Prisma.sql`e."tenantId" = ${u.tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."actorId" is not null`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
+    assertReportRange(from, to);
+    return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(',') }), () => this.rankingData(u.tenantId, from, to, f.tagIds));
+  }
+
+  private async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[]) {
+    const f = { tagIds };
+    const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."actorId" is not null`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (f.tagIds?.length) conds.push(this.eventoTemTag(f.tagIds));
-    const rows = await this.prisma.$queryRaw<{ userId: string; name: string | null; closed: number; won: number; revenue: number | null; tmaMin: number | null }[]>(Prisma.sql`
+    const rows = await this.load.run(() => this.prisma.$queryRaw<{ userId: string; name: string | null; closed: number; won: number; revenue: number | null; tmaMin: number | null }[]>(Prisma.sql`
       select e."actorId" as "userId", usr.name,
              count(*)::int as closed,
              count(*) filter (where e.outcome = 'won')::int as won,
@@ -360,18 +387,36 @@ class ReportsController {
         where p."conversationId" = e."conversationId" and p.type in ('closed', 'reopened') and p."createdAt" < e."createdAt") ini on true
       where ${Prisma.join(conds, ' and ')}
       group by 1, 2
-    `);
+    `));
+    // satisfação (pergunta principal da pesquisa) por consultor no período. Escalas não se
+    // misturam numa média: vale a mais respondida no período (docs/pesquisa-de-satisfacao.md)
+    const notas = await this.load.run(() => this.prisma.$queryRaw<{ agentId: string; scale: string; answered: number; avg: number | null; promoters: number; detractors: number }[]>(Prisma.sql`
+      select "agentId", scale, count(*)::int as answered, avg(score)::float as avg,
+             count(*) filter (where score >= 9)::int as promoters, count(*) filter (where score <= 6)::int as detractors
+      from survey_responses
+      where "tenantId" = ${tenantId} and "sentAt" >= ${from} and "sentAt" < ${to} and score is not null and "agentId" is not null
+      group by 1, 2
+    `));
+    const porEscala = new Map<string, number>();
+    for (const n of notas) porEscala.set(n.scale, (porEscala.get(n.scale) ?? 0) + Number(n.answered));
+    const satisfactionScale = [...porEscala.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const notaDe = (userId: string) => {
+      const n = notas.find((x) => x.agentId === userId && x.scale === satisfactionScale);
+      if (!n) return null;
+      const answered = Number(n.answered);
+      return { answered, avg: n.avg != null ? Math.round(Number(n.avg) * 100) / 100 : null, nps: satisfactionScale === 'scale_10' ? Math.round(((Number(n.promoters) - Number(n.detractors)) / answered) * 100) : null };
+    };
     const ranking = rows
       .map((r) => {
         const closed = Number(r.closed);
         const won = Number(r.won);
-        return { userId: r.userId, name: r.name ?? '(usuário removido)', closed, won, revenue: Number(r.revenue ?? 0), conversionRate: closed ? (won / closed) * 100 : 0, avgHandleMin: r.tmaMin != null ? Number(r.tmaMin) : null };
+        return { userId: r.userId, name: r.name ?? '(usuário removido)', closed, won, revenue: Number(r.revenue ?? 0), conversionRate: closed ? (won / closed) * 100 : 0, avgHandleMin: r.tmaMin != null ? Number(r.tmaMin) : null, satisfaction: notaDe(r.userId) };
       })
       // pódio: mais vendas; empate → mais concluídos → maior conversão
       .sort((a, b) => b.won - a.won || b.closed - a.closed || b.conversionRate - a.conversionRate || a.name.localeCompare(b.name));
     const closed = ranking.reduce((a, r) => a + r.closed, 0);
     const won = ranking.reduce((a, r) => a + r.won, 0);
-    return { period: { from, to }, totals: { closed, won, conversionRate: closed ? (won / closed) * 100 : 0 }, ranking: ranking.map((r, i) => ({ position: i + 1, ...r })) };
+    return { period: { from, to }, satisfactionScale, totals: { closed, won, conversionRate: closed ? (won / closed) * 100 : 0 }, ranking: ranking.map((r, i) => ({ position: i + 1, ...r })) };
   }
 
   @Get('saved')
@@ -400,15 +445,15 @@ class ReportsController {
     if (filtro.agentId) conds.push(Prisma.sql`s."userId" = ${filtro.agentId}`);
     if (filtro.tagIds) conds.push(this.vendaTemTag(filtro.tagIds));
     const where = Prisma.join(conds, ' and ');
-    const [totais, byDay, byAgent] = await Promise.all([
-      this.prisma.$queryRaw<{ total: number | null; count: number }[]>(Prisma.sql`
+    const [totais, byDay, byAgent] = await this.load.all([
+      () => this.prisma.$queryRaw<{ total: number | null; count: number }[]>(Prisma.sql`
         select sum(s.amount)::float as total, count(*)::int as count from sales s where ${where}
       `),
-      this.prisma.$queryRaw<{ label: string; value: number }[]>(Prisma.sql`
+      () => this.prisma.$queryRaw<{ label: string; value: number }[]>(Prisma.sql`
         select to_char(s."closedAt", 'YYYY-MM-DD') as label, sum(s.amount)::float as value
         from sales s where ${where} group by 1 order by 1
       `),
-      this.prisma.$queryRaw<{ label: string; value: number; count: number }[]>(Prisma.sql`
+      () => this.prisma.$queryRaw<{ label: string; value: number; count: number }[]>(Prisma.sql`
         select coalesce(u.name, '(sem atendente)') as label, sum(s.amount)::float as value, count(*)::int as count
         from sales s left join users u on u.id = s."userId"
         where ${where} group by 1 order by 2 desc
@@ -579,5 +624,5 @@ class ReportsController {
   }
 }
 
-@Module({ imports: [AuthModule], controllers: [ReportsController] })
+@Module({ imports: [AuthModule, BillingModule], controllers: [ReportsController] })
 export class ReportsModule {}

@@ -5,10 +5,11 @@ import { RedisService } from './redis/redis.service';
 import { StorageService } from './storage/storage.service';
 import { MailService } from './mail/mail.service';
 import { InterpolationService } from './interpolation/interpolation.service';
+import { ReportLoadService } from './reports/report-load.service';
 
 @Global()
 @Module({
-  providers: [PrismaService, CryptoService, RedisService, StorageService, MailService, InterpolationService],
-  exports: [PrismaService, CryptoService, RedisService, StorageService, MailService, InterpolationService],
+  providers: [PrismaService, CryptoService, RedisService, StorageService, MailService, InterpolationService, ReportLoadService],
+  exports: [PrismaService, CryptoService, RedisService, StorageService, MailService, InterpolationService, ReportLoadService],
 })
 export class CoreModule {}

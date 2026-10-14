@@ -57,6 +57,8 @@ const schema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional().default(''),
   S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
   MEDIA_MAX_MB: z.coerce.number().default(25),
+  /** consultas de relatório ao mesmo tempo por processo (o resto espera): protege o pool do chat */
+  REPORT_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(3),
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
   STRIPE_CURRENCY: z.string().default('brl'),

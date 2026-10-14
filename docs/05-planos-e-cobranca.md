@@ -34,6 +34,9 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
   graceDays: 7,                   // tolerância após falha de pagamento
   features: ['flows', 'scheduling'] // funcionalidades plugáveis (docs/10 e 13); ausente = nenhuma
   // 'proactive_messaging' = falar primeiro com quem não escreveu em 24h, só pelo número oficial (envio.md#envio-frio)
+  // 'consultant_ranking' = ranking de consultores + metas mensais (metas.md)
+  // 'satisfaction_surveys' = pesquisa de satisfação no encerramento + relatório (pesquisa-de-satisfacao.md)
+  //   Os dois entraram em TODOS os planos existentes (migração 20261130000100) para ninguém perder o ranking que já usava
 }
 ```
 

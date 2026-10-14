@@ -197,7 +197,8 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   // desfecho volta para o padrão dele (é o que se espera ao mudar de "Comprou" para "Não comprou")
   const escolheuFluxo = useRef(false);
   // pesquisa de satisfação: vem marcada quando a empresa tem uma padrão (docs/pesquisa-de-satisfacao.md)
-  const surveys = useSurveys();
+  const surveysFeature = useHasFeature('satisfaction_surveys');
+  const surveys = useSurveys(surveysFeature.has);
   const pesquisas = (surveys.data ?? []).filter((s) => s.isActive);
   const [enviarPesquisa, setEnviarPesquisa] = useState(false);
   const [surveyId, setSurveyId] = useState('');
@@ -280,7 +281,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
         // Antes de carregar as configurações, deixa o servidor aplicar o padrão.
         flowId: flowsFeature.has && carregou ? flowId || null : undefined,
         // antes de carregar a lista, o servidor aplica a padrão
-        surveyId: surveys.data ? (comPesquisa ? surveyId : null) : undefined,
+        surveyId: surveysFeature.has && surveys.data ? (comPesquisa ? surveyId : null) : undefined,
       });
       toast.ok('Atendimento encerrado');
       onClose();

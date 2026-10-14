@@ -8,7 +8,8 @@ import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonCards } from '@/components/ui/Skeleton';
-import { useAgents, useCan, useSatisfactionReport, useSurveys } from '@/lib/hooks';
+import { useAgents, useCan, useHasFeature, useSatisfactionReport, useSurveys } from '@/lib/hooks';
+import { FeatureLocked } from '@/components/billing/FeatureLocked';
 import { useUI } from '@/lib/store';
 
 // mesmas regras de data da tela de Relatórios: fuso do navegador, fim exclusivo
@@ -41,7 +42,8 @@ export default function SatisfactionReportPage() {
   const router = useRouter();
   const { setConversation } = useUI();
   const agents = useAgents();
-  const surveys = useSurveys();
+  const feature = useHasFeature('satisfaction_surveys');
+  const surveys = useSurveys(feature.has);
   const [preset, setPreset] = useState('30d');
   const [range, setRange] = useState<[string, string]>(PRESETS[1].range());
   const [scale, setScale] = useState<SurveyScale | undefined>();
@@ -52,12 +54,13 @@ export default function SatisfactionReportPage() {
   const [page, setPage] = useState(1);
   useEffect(() => setPage(1), [range, scale, surveyId, agentId, nota, soComentarios]);
 
-  const q = useSatisfactionReport({ from: inicioDoDia(range[0]), to: inicioDoDia(range[1]), scale, surveyId: surveyId || undefined, agentId: agentId || undefined, scoreMin: nota[0], scoreMax: nota[1], onlyComments: soComentarios, page });
+  const q = useSatisfactionReport({ enabled: feature.has, from: inicioDoDia(range[0]), to: inicioDoDia(range[1]), scale, surveyId: surveyId || undefined, agentId: agentId || undefined, scoreMin: nota[0], scoreMax: nota[1], onlyComments: soComentarios, page });
   const d = q.data;
   const escala = d?.scale ?? scale ?? 'scale_5';
   const max = SURVEY_SCALE_MAX[escala];
 
   if (!podeVer) return <PageShell><p className="text-sm text-muted">Seu perfil de acesso não inclui relatórios.</p></PageShell>;
+  if (!feature.loading && !feature.has) return <FeatureLocked title="Satisfação dos clientes" text="Nota média, NPS e feedbacks dos clientes por consultor, a partir da pesquisa enviada no encerramento." />;
 
   const totalDist = d ? Math.max(1, ...d.totals.distribution.map((x) => x.count)) : 1;
   const chip = (on: boolean) => cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field');

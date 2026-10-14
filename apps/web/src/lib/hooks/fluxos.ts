@@ -81,5 +81,5 @@ export interface ReportOverview {
 export interface ReportOverviewFilters { from: string; to: string; tagIds?: string[]; agentId?: string }
 export const useReportOverview = (f: ReportOverviewFilters) => {
   const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }), ...(f.agentId && { agentId: f.agentId }) });
-  return useQuery({ queryKey: ['report-overview', qs.toString()], queryFn: () => api<ReportOverview>(`/reports/overview?${qs}`), placeholderData: keepPreviousData });
+  return useQuery({ queryKey: ['report-overview', qs.toString()], queryFn: () => api<ReportOverview>(`/reports/overview?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false });
 };
