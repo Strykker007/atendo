@@ -63,7 +63,34 @@ clientes.
 num perfil padrão troca o perfil junto — senão a matriz do modelo só valeria para quem alguém
 vinculasse à mão. Perfil sob medida não é tocado.
 
-Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido na criação.
+Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido na criação. Para levar
+uma mudança a quem já existe, use [Aplicar aos clientes](#aplicar-aos-clientes).
+
+## Aplicar aos clientes
+
+Botão **Aplicar aos clientes** no editor do modelo (desabilitado com alteração não salva — vale o
+modelo **salvo**). O dono escolhe **o que** e **para quem**, vê a **prévia** cliente por cliente e só
+então grava. Partes, todas opcionais:
+
+- **Perfis** (um a um, os que o modelo ajusta): as permissões do modelo substituem as do perfil de
+  mesmo nome no cliente; perfil que não existir é criado (Gerente/Atendente como perfil padrão).
+  Perfil padrão alterado passa a `customized` (o alinhamento ao catálogo não desfaz). Administrador
+  nunca muda. O cache de permissões é invalidado na hora.
+- **Motivos de encerramento**: as tags do modelo marcadas Comprou / Não comprou (Comprou e Não
+  comprou = `both`). Mesmo nome, ignorando maiúsculas → atualiza resultado e cor e reativa; o que
+  faltar é criado; ordem = a do modelo. Motivos de atendimento interno (`ignoreInReports`) não são
+  tocados. **Deixar idêntico ao modelo** desativa os motivos do cliente que não estão no modelo
+  (desativar, não apagar: histórico e relatórios mantêm o nome); sem isso, eles continuam ativos
+  depois dos do modelo.
+- **Tags que faltam**: cria as tags do modelo (as que continuam tag na criação do cliente) que o
+  cliente não tem, no fim da lista. Não altera nem remove as dele; conflitos não são replicados.
+
+Para quem: todos os clientes ativos ou uma seleção. Cada cliente roda numa transação própria.
+Respostas rápidas e fluxos não entram (ainda).
+
+Fluxo típico para padronizar Comprou / Não comprou: montar a lista num cliente →
+**Gerar de um cliente** (ou editar as tags do modelo com os interruptores Comprou / Não comprou) →
+Salvar → Aplicar aos clientes → Motivos de encerramento + Deixar idêntico → prévia → Aplicar.
 
 ## Arquivo `.json`
 
@@ -131,4 +158,5 @@ existente e **Importar JSON** cria um modelo novo.
 | PUT | `/tenant-templates/:id` | Substitui o conteúdo pelo arquivo (mantém nome/descrição) |
 | POST | `/tenant-templates/capture` | `{tenantId, name}` — modelo tirado de um cliente; devolve `{template, warnings}` (anexos que não vão) |
 | PATCH | `/tenant-templates/:id` | `{name?, description?, isDefault?, content?}` — `isDefault: true` desmarca o anterior; `content` inteiro, mesma validação do arquivo (nome repetido = 409) |
+| POST | `/tenant-templates/:id/rollout` | `{tenantIds? (ausente = todos os ativos), profiles?: string[], closeReasons?, replaceCloseReasons?, tags?, dryRun?}` — aplica o modelo salvo em clientes existentes; devolve por cliente `{tenantId, name, profiles: {created, updated}, closeReasons: {created, updated, reactivated, deactivated}, tags: {created}}`. `dryRun` = prévia sem gravar |
 | DELETE | `/tenant-templates/:id` | Exclui; clientes criados com ele ficam como estão (`templateId` vira null) |

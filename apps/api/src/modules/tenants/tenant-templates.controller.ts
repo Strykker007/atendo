@@ -1,5 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { uniqueName } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { TenantProvisioningService } from './tenant-provisioning.service';
+import { TemplateRolloutService } from './template-rollout.service';
 import { parseTemplateContent, parseTemplateFile, provisionedTags, templateContent, templateSummary, toTemplateFile, type TemplateContent, type TemplateFile } from './tenant-template';
 
 class CreateDto {
@@ -21,6 +22,17 @@ class UpdateDto {
   /** conteúdo inteiro (perfis, respostas, fluxos, motivos) — o editor salva tudo de uma vez */
   @IsOptional() @IsObject() content?: Record<string, unknown>;
 }
+class RolloutDto {
+  /** clientes que recebem; ausente = todos os ativos */
+  @IsOptional() @IsArray() @ArrayMaxSize(5000) @IsUUID('4', { each: true }) tenantIds?: string[];
+  /** perfis do modelo a aplicar, pelo nome */
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) profiles?: string[];
+  @IsOptional() @IsBoolean() closeReasons?: boolean;
+  @IsOptional() @IsBoolean() replaceCloseReasons?: boolean;
+  @IsOptional() @IsBoolean() tags?: boolean;
+  /** só calcula (prévia), sem gravar */
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+}
 class CaptureDto {
   @IsUUID() tenantId: string;
   @IsString() @MaxLength(60) name: string;
@@ -29,7 +41,8 @@ class CaptureDto {
 /**
  * Modelos de perfil (Farmácia, Clínica…) — só o dono do sistema. O conteúdo entra e sai como
  * arquivo `.json` (ver `tenant-template.ts`); clientes criados com o modelo recebem tudo na
- * criação. Mudar o modelo depois não mexe em quem já foi criado.
+ * criação. Mudar o modelo depois não mexe em quem já foi criado — para isso
+ * existe o "Aplicar aos clientes" (`POST :id/rollout`).
  */
 @Controller('tenant-templates')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -37,6 +50,7 @@ export class TenantTemplatesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly provisioning: TenantProvisioningService,
+    private readonly rollout: TemplateRolloutService,
   ) {}
 
   @Get()
@@ -103,6 +117,19 @@ export class TenantTemplatesController {
     const taken = (await this.prisma.tenantTemplate.findMany({ select: { name: true } })).map((t) => t.name);
     const template = await this.prisma.tenantTemplate.create({ data: { name: uniqueName(dto.name.trim(), taken, 60), content: content as unknown as Prisma.InputJsonValue } });
     return { template, warnings };
+  }
+
+  /**
+   * Aplica partes do modelo em clientes que já existem (perfis, motivos de encerramento, tags).
+   * `dryRun: true` devolve a prévia por cliente sem gravar — docs/20-modelos-de-perfil.md.
+   */
+  @Post(':id/rollout')
+  @NoTenantOk()
+  @Roles('super_admin')
+  async applyToTenants(@Param('id') id: string, @Body() dto: RolloutDto) {
+    const t = await this.prisma.tenantTemplate.findUniqueOrThrow({ where: { id } });
+    const { tenantIds, dryRun, ...parts } = dto;
+    return this.rollout.run(t.content as unknown as TemplateContent, parts, tenantIds, !!dryRun);
   }
 
   @Patch(':id')

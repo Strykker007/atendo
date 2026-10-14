@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { ArrowLeft, GripVertical, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
+import { ArrowLeft, Send, GripVertical, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
 import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -13,6 +13,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUnsavedGuard } from '@/lib/unsaved-guard';
 import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateFlow, type TemplateProfile, type TemplateQuickReply, type TemplateTag } from '@/lib/hooks';
 import { PALETTE, ColorPopover } from '@/components/ui/ColorSwatches';
+import { ApplyToTenantsModal } from './ApplyToTenants';
 
 const ADMIN = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
 /** Gerente e Atendente: sempre listados. Fora do conteúdo = seguem o catálogo. */
@@ -44,6 +45,7 @@ export default function TemplateEditorPage() {
   const [isDefault, setIsDefault] = useState(false);
   const [content, setContent] = useState<TemplateContent | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [aplicando, setAplicando] = useState(false);
   const { modal, leaveTo } = useUnsavedGuard(dirty);
 
   // carrega o rascunho uma vez por modelo (refetch em segundo plano não apaga o que está sendo editado)
@@ -73,12 +75,15 @@ export default function TemplateEditorPage() {
   return (
     <PageShell width="max-w-6xl">
       {modal}
+      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} />
       <PageHeader
         title={tpl.data.name}
-        subtitle={<>Tudo com que um cliente novo nasce ao ser criado com este modelo. {tpl.data.tenants ? `${tpl.data.tenants} cliente(s) já foram criados com ele — eles não mudam.` : ''}</>}
+        subtitle={<>Tudo com que um cliente novo nasce ao ser criado com este modelo. Clientes que já existem só mudam pelo “Aplicar aos clientes”.</>}
         action={
           <div className="flex gap-2">
             <Button variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => leaveTo('/clientes')}>Clientes</Button>
+            {/* lê o modelo salvo: com alteração pendente, aplicaria a versão anterior */}
+            <Button variant="ghost" icon={<Send size={15} />} disabled={dirty} title={dirty ? 'Salve o modelo antes de aplicar' : 'Replicar perfis, motivos de encerramento ou tags em clientes que já existem'} onClick={() => setAplicando(true)}>Aplicar aos clientes</Button>
             <Button onClick={onSave} loading={save.isPending} disabled={!dirty} loadingText="Salvando…">Salvar</Button>
           </div>
         }

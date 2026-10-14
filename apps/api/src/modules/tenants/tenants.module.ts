@@ -26,6 +26,7 @@ import { SYSTEM_PROFILES, TYPING_SPEED_KEYS, countLimit, type PlanLimits, type T
 import { TenantProvisioningService } from './tenant-provisioning.service';
 import { TenantTemplatesController } from './tenant-templates.controller';
 import { provisionedTags, templateTagConflictPairs, type TemplateContent } from './tenant-template';
+import { TemplateRolloutService } from './template-rollout.service';
 import { conflictPair } from '../tags/conflicts';
 
 class CreateTenantDto {
@@ -374,7 +375,7 @@ class TenantsController {
 @Module({
   imports: [AuthModule, BillingModule],
   controllers: [TenantsController, TenantSettingsController, ProfilesController, TenantTemplatesController],
-  providers: [TenantSettingsService, SchedulesService, TenantProvisioningService],
+  providers: [TenantSettingsService, SchedulesService, TenantProvisioningService, TemplateRolloutService],
   exports: [TenantSettingsService, SchedulesService],
 })
 export class TenantsModule {}
