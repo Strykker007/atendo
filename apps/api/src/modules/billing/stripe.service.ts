@@ -9,6 +9,8 @@ import { MailService } from '../../common/mail/mail.service';
 import { aReajustar, porExtenso } from './reprice';
 import { freePeriod, rollMonthly } from './plan-rules';
 import { AsaasService } from './asaas.service';
+import { overridePrice } from './plan-override';
+import { DiscountLedgerService } from './discount-ledger.service';
 
 /** Price do Stripe de um plano: anual cobra `priceYear` por ano; o resto, a mensalidade. */
 const stripePriceOf = (p: Plan) =>
@@ -17,6 +19,12 @@ const stripePriceOf = (p: Plan) =>
     : { unit_amount: Math.round(Number(p.priceMonth) * 100), recurring: { interval: 'month' as const } };
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+/**
+ * Cliente com valor personalizado pelo dono não entra no reajuste do plano: o valor dele foi
+ * negociado à parte e muda pela personalização (docs/05-planos-e-cobranca.md#personalização-por-cliente).
+ */
+const semValorNegociado = (s: { planId: string; tenant: { planOverride: Parameters<typeof overridePrice>[0] } }) => overridePrice(s.tenant.planOverride, s.planId) === null;
 
 /**
  * Integração com o Stripe.
@@ -39,6 +47,7 @@ export class StripeService {
     private readonly usage: UsageService,
     private readonly mail: MailService,
     private readonly asaas: AsaasService,
+    private readonly ledger: DiscountLedgerService,
   ) {}
 
   private get client(): Stripe {
@@ -296,18 +305,28 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
       const { start, end } = freePeriod(plan.durationDays);
       // sempre `active`: o status que vinha do formulário era o do plano anterior (ex.: past_due)
       const data = { planId, status: 'active' as const, currentPeriodStart: start, currentPeriodEnd: end, priceMonth: 0, externalId: null, gateway: null, cancelAtPeriodEnd: false, graceUntil: null, canceledAt: null };
-      return this.prisma.subscription.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
+      const saved = await this.prisma.subscription.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
+      await this.ledger.close(tenantId); // gratuito não tem desconto: o do plano anterior acabou
+      return saved;
     }
     const now = new Date();
     const end = new Date(now);
     end.setMonth(end.getMonth() + 1);
     // mudou de plano = preço contratado passa a ser o do plano novo. Sem isto o cliente
-    // ficaria com o preço do plano anterior registrado e o painel dele mostraria outro valor
-    return this.prisma.subscription.upsert({
+    // ficaria com o preço do plano anterior registrado e o painel dele mostraria outro valor.
+    // Exceção: voltar ao plano que tem valor negociado (personalização ainda vigente) volta a ele
+    const o = await this.prisma.planOverride.findUnique({ where: { tenantId } });
+    const negociado = overridePrice(o, planId);
+    const priceMonth = negociado ?? plan.priceMonth;
+    const saved = await this.prisma.subscription.upsert({
       where: { tenantId },
-      create: { tenantId, planId, status: status ?? 'active', currentPeriodStart: now, currentPeriodEnd: end, priceMonth: plan.priceMonth },
-      update: { planId, priceMonth: plan.priceMonth, ...(status && { status, graceUntil: null }) },
+      create: { tenantId, planId, status: status ?? 'active', currentPeriodStart: now, currentPeriodEnd: end, priceMonth },
+      update: { planId, priceMonth, ...(status && { status, graceUntil: null }) },
     });
+    // livro de descontos: o do plano anterior acabou; voltar ao plano com valor negociado reabre
+    if (negociado !== null && o) await this.ledger.open({ tenantId, plan, priceMonth: negociado, kind: o.promotionId ? 'promotion' : 'negotiated', source: 'plan_return', endsAt: o.expiresAt });
+    else await this.ledger.close(tenantId);
+    return saved;
   }
 
   /**
@@ -387,7 +406,8 @@ ${env.WEB_ORIGIN}/plano`,
    * tempo de decidir, inclusive de sair. Avisar no dia da cobrança é comunicado, não aviso.
    */
   async notifyPriceChange(planId: string, quando: Date) {
-    const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: planId }, include: { subscriptions: true } });
+    const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: planId }, include: { subscriptions: { include: { tenant: { select: { planOverride: true } } } } } });
+    plan.subscriptions = plan.subscriptions.filter(semValorNegociado);
     const novo = Number(plan.priceMonth);
     for (const s of aReajustar(plan.subscriptions.map((x) => ({ id: x.id, status: x.status, priceMonth: x.priceMonth === null ? null : Number(x.priceMonth) })), novo)) {
       const sub = plan.subscriptions.find((x) => x.id === s.id)!;
@@ -415,8 +435,9 @@ Seu plano e seu uso: ${env.WEB_ORIGIN}/plano`,
    * gerar uma cobrança quebrada no meio do mês que ninguém entende.
    */
   async applyDuePriceChanges() {
-    const plans = await this.prisma.plan.findMany({ where: { priceAppliesToExistingAt: { lte: new Date() } }, include: { subscriptions: true } });
+    const plans = await this.prisma.plan.findMany({ where: { priceAppliesToExistingAt: { lte: new Date() } }, include: { subscriptions: { include: { tenant: { select: { planOverride: true } } } } } });
     for (const plan of plans) {
+      plan.subscriptions = plan.subscriptions.filter(semValorNegociado);
       const novo = Number(plan.priceMonth);
       const alvos = aReajustar(plan.subscriptions.map((x) => ({ id: x.id, status: x.status, priceMonth: x.priceMonth === null ? null : Number(x.priceMonth) })), novo);
       for (const alvo of alvos) {

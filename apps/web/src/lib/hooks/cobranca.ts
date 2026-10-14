@@ -5,11 +5,11 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import type { BillingCycle, ConversationStatus, PlanLimits, PlanLimitsOverride, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 // ---- Cobrança (Stripe) ----
-export interface Plan { id: string; name: string; priceMonth: string; priceYear: string | null; isFree: boolean; billingCycle: BillingCycle; durationDays: number | null; billingModel: string; limits: PlanLimits; stripePriceId: string | null }
+export interface Plan { id: string; name: string; priceMonth: string; priceYear: string | null; isFree: boolean; billingCycle: BillingCycle; durationDays: number | null; billingModel: string; limits: PlanLimits; stripePriceId: string | null; /** promoção que este cliente ganha ao assinar (docs/05#promoções) */ promotion: { name: string; discountPercent: number; durationMonths: number; endsAt: string; priceMonth: number } | null }
 export interface Invoice { id: string; period: string; baseAmount: string; overageAmount: string; totalAmount: string; currency: string; status: 'draft' | 'open' | 'paid' | 'failed' | 'void'; hostedUrl: string | null; dueAt: string | null; paidAt: string | null; createdAt: string }
 export const usePlans = () => useQuery({ queryKey: ['plans'], queryFn: () => api<Plan[]>('/billing/plans') });
 export const useInvoices = () => useQuery({ queryKey: ['invoices'], queryFn: () => api<Invoice[]>('/billing/invoices') });
@@ -69,10 +69,76 @@ export const useMargin = (period?: string) => useQuery({ queryKey: ['margin', pe
 
 // ---- Financeiro (dono) ----
 export interface FinanceOverview {
-  now: { mrr: number; arr: number; activeTenants: number; trialing: number; pastDue: number; suspended: number; canceled: number; overdueAmount: number; monthCost: number; monthMargin: number };
+  now: { mrr: number; arr: number; activeTenants: number; trialing: number; pastDue: number; suspended: number; canceled: number; overdueAmount: number; monthCost: number; monthMargin: number; /** MRR que deixa de entrar por desconto vigente */ discountMonth: number; discountedTenants: number };
   byPlan: { plan: string; count: number; trialing: number; mrr: number; cost: number; margin: number }[];
-  series: { period: string; invoiced: number; received: number; overdue: number; overage: number; providerCost: number; infraCost: number; messagesSent: number; newTenants: number; canceled: number }[];
+  series: { period: string; invoiced: number; received: number; overdue: number; overage: number; providerCost: number; infraCost: number; messagesSent: number; newTenants: number; canceled: number; /** desconto concedido no mês (livro de descontos) */ discounts: number }[];
   invoices: { id: string; tenant: string; period: string; total: number; overage: number; status: string; dueAt: string | null; paidAt: string | null; hostedUrl: string | null }[];
   subscriptions: { tenant: string; plan: string; price: number; status: string; periodEnd: string; cancelAtPeriodEnd: boolean; graceUntil: string | null }[];
+  /** livro de descontos inteiro, mais recente primeiro (docs/05#livro-de-descontos) */
+  discounts: DiscountGrant[];
 }
+export type DiscountSource = 'checkout' | 'tenant_create' | 'manual' | 'bulk' | 'plan_return';
+export interface DiscountGrant { id: string; tenant: string; plan: string; kind: 'promotion' | 'negotiated'; source: DiscountSource; promotion: string | null; listPrice: number; priceMonth: number; discountPercent: number; units: number; startsAt: string; endsAt: string | null; closedAt: string | null; grantedBy: string | null; createdAt: string }
 export const useFinance = (months = 12) => useQuery({ queryKey: ['finance', months], queryFn: () => api<FinanceOverview>(`/billing/finance?months=${months}`) });
+
+// ---- Personalização do plano por cliente (dono) — docs/05-planos-e-cobranca.md#personalização-por-cliente ----
+export interface PlanOverrideView {
+  subscription: { planId: string; status: string; gateway: 'stripe' | 'asaas' | null; units: number; priceMonth: number | null; plan: { id: string; name: string; priceMonth: number; billingCycle: BillingCycle; isFree: boolean; limits: PlanLimits } } | null;
+  override: { planId: string; priceMonth: number | null; limits: PlanLimitsOverride; expiresAt: string | null; endedAt: string | null; notes: string | null; updatedAt: string; /** nasceu de uma promoção */ promotionId: string | null; promotion: { name: string } | null } | null;
+  active: boolean;
+  /** existe e não vale: o cliente trocou de plano, ou a data limite passou */
+  inactiveReason: 'other_plan' | 'expired' | null;
+  effectiveLimits: PlanLimits | null;
+}
+export interface PlanOverrideInput { priceMonth: number | null; limits: PlanLimitsOverride; /** AAAA-MM-DD */ expiresAt: string | null; notes: string | null }
+export const usePlanOverride = (tenantId: string) => useQuery({ queryKey: ['plan-override', tenantId], queryFn: () => api<PlanOverrideView>(`/billing/overrides/${tenantId}`) });
+export const useSavePlanOverride = (tenantId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: PlanOverrideInput) => api<PlanOverrideView>(`/billing/overrides/${tenantId}`, { method: 'PUT', body: JSON.stringify(b) }),
+    onSuccess: (v) => { qc.setQueryData(['plan-override', tenantId], v); qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); },
+  });
+};
+export const useDeletePlanOverride = (tenantId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api(`/billing/overrides/${tenantId}`, { method: 'DELETE' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-override', tenantId] }); qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); },
+  });
+};
+
+// ---- Promoções de entrada (dono) — docs/05-planos-e-cobranca.md#promoções ----
+export interface Promotion { id: string; name: string; discountPercent: number; durationMonths: number; planIds: string[]; startsAt: string; endsAt: string; isActive: boolean; redemptions: number }
+/** datas em `AAAA-MM-DD`; `startsAt` vazio = a partir de agora; `endsAt` = último dia para assinar */
+export interface PromotionInput { name: string; discountPercent: number; durationMonths: number; planIds: string[]; startsAt?: string | null; endsAt: string; isActive?: boolean }
+export const usePromotions = () => useQuery({ queryKey: ['promotions'], queryFn: () => api<Promotion[]>('/billing/promotions') });
+export const useSavePromotion = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...b }: PromotionInput & { id?: string }) => api<Promotion>(id ? `/billing/promotions/${id}` : '/billing/promotions', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(b) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['promotions'] }); qc.invalidateQueries({ queryKey: ['plans'] }); },
+  });
+};
+export const useDeletePromotion = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/billing/promotions/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['promotions'] }); qc.invalidateQueries({ queryKey: ['plans'] }); },
+  });
+};
+/** Aplica uma promoção só a este cliente (exceção do dono). */
+export const useApplyPromotion = (tenantId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (promotionId: string) => api<PlanOverrideView>(`/billing/overrides/${tenantId}/promotion`, { method: 'POST', body: JSON.stringify({ promotionId }) }),
+    onSuccess: (v) => { qc.setQueryData(['plan-override', tenantId], v); qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); qc.invalidateQueries({ queryKey: ['promotions'] }); },
+  });
+};
+/** Aplica a promoção a todos os clientes dos planos dela; devolve quem ficou de fora e por quê. */
+export const useApplyPromotionToAll = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<{ applied: number; skipped: { tenant: string; reason: string }[] }>(`/billing/promotions/${id}/apply-all`, { method: 'POST' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['promotions'] }); qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); },
+  });
+};

@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Module, Param, Post, UseGuards } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import { IsArray, IsBoolean, IsIn, IsISO8601, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsISO8601, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { TemplateChoiceDto } from '../whatsapp/template.dto';
+import { AUDIENCE_MAX, SegmentationService } from './segmentation.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -16,22 +19,36 @@ import { CampaignsService, type Audience } from './campaigns.service';
 import { CampaignProcessor } from './campaign.processor';
 import { QUEUE_CAMPAIGN } from './queues';
 
-class AudienceDto {
-  @IsIn(['all', 'tags', 'contacts']) kind: Audience['kind'];
-  @IsOptional() @IsArray() @IsUUID('4', { each: true }) tagIds?: string[];
-  @IsOptional() @IsArray() @IsUUID('4', { each: true }) contactIds?: string[];
+class AudienceDto implements Audience {
+  @IsOptional() @IsBoolean() all?: boolean;
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('4', { each: true }) tagIds?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('4', { each: true }) closingTagIds?: string[];
+  @IsOptional() @IsISO8601() closingFrom?: string;
+  @IsOptional() @IsISO8601() closingTo?: string;
+  @IsOptional() @IsIn(['won', 'lost']) lastOutcome?: 'won' | 'lost';
+  @IsOptional() @IsUUID() agentId?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(AUDIENCE_MAX) @IsUUID('4', { each: true }) contactIds?: string[];
+  /** telefones colados/importados (um por item) */
+  @IsOptional() @IsArray() @ArrayMaxSize(AUDIENCE_MAX) @IsString({ each: true }) @MaxLength(40, { each: true }) phones?: string[];
 }
 class CreateCampaignDto {
   @IsString() @MaxLength(80) name: string;
   @IsUUID() numberId: string;
-  @IsString() @MaxLength(4000) text: string;
+  /** QR: texto (com {{contact.first_name}}, {{saudacao}}, variáveis da empresa…) e/ou anexo. Meta: ignorado (vai o template) */
+  @IsOptional() @IsString() @MaxLength(4000) text?: string;
+  /** chave devolvida por POST /uploads */
   @IsOptional() @IsString() mediaKey?: string;
-  @IsOptional() @IsString() mediaType?: string;
-  @IsOptional() @IsString() mediaName?: string;
-  @IsOptional() @IsObject() template?: Record<string, unknown>;
+  @IsOptional() @IsIn(['image', 'document', 'audio', 'video']) mediaType?: string;
+  @IsOptional() @IsString() @MaxLength(200) mediaName?: string;
+  /** API oficial: template aprovado (obrigatório) */
+  @IsOptional() @ValidateNested() @Type(() => TemplateChoiceDto) template?: TemplateChoiceDto;
   @IsOptional() @IsISO8601() startAt?: string;
   @IsOptional() @IsBoolean() businessHoursOnly?: boolean;
-  @IsObject() audience: AudienceDto;
+  @ValidateNested() @Type(() => AudienceDto) audience: AudienceDto;
+}
+class StartDto {
+  /** QR Code: aceite do aviso de risco de bloqueio (obrigatório na 1ª vez) */
+  @IsOptional() @IsBoolean() acceptRisk?: boolean;
 }
 class StatusDto {
   @IsIn(['paused', 'running', 'canceled']) status: 'paused' | 'running' | 'canceled';
@@ -61,6 +78,7 @@ class CampaignsController {
   /** Quantos contatos a seleção atinge — mostrado antes de criar, para não haver surpresa. */
   @Post('preview')
   preview(@CurrentUser() u: AuthUser, @Body() body: AudienceDto) {
+    // contagem para a tela: sem critério, zero (não "todos")
     return this.campaigns.preview(u.tenantId, body);
   }
 
@@ -70,8 +88,8 @@ class CampaignsController {
   }
 
   @Post(':id/start')
-  start(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    return this.campaigns.start(u.tenantId, id);
+  start(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StartDto) {
+    return this.campaigns.start(u.tenantId, u.id, id, dto.acceptRisk);
   }
 
   @Post(':id/status')
@@ -83,7 +101,7 @@ class CampaignsController {
 @Module({
   imports: [AuthModule, BillingModule, TenantsModule, WhatsAppModule, ConversationsModule, BullModule.registerQueue({ name: QUEUE_CAMPAIGN })],
   controllers: [CampaignsController],
-  providers: [CampaignsService, CampaignProcessor],
+  providers: [CampaignsService, SegmentationService, CampaignProcessor],
   exports: [CampaignsService],
 })
 export class CampaignsModule {}

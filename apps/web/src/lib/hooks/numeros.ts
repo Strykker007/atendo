@@ -11,6 +11,8 @@ import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, Se
 import type { MessageTemplate, TemplateValues } from '@atendo/shared';
 import { receiveSystemNotice, type SystemNotice } from './avisos';
 import { playMessageSound, unlockMessageSound } from '../message-sound';
+import { useUI } from '../store';
+import { toast } from '@/components/ui/Toast';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -45,7 +47,7 @@ export const useConnectNumber = () => {
 export const useUpdateNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; label?: string; color?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; endWarmup?: boolean; sendLimits?: Partial<SendLimits> | null; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; label?: string; color?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; campaignDailyLimit?: number; endWarmup?: boolean; sendLimits?: Partial<SendLimits> | null; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };
@@ -88,6 +90,8 @@ export function useRealtime() {
       if (tocadas.size > 500) tocadas.delete(tocadas.values().next().value as string);
       // reconexão do número reimporta histórico: mensagem velha não é chegada
       if (Date.now() - new Date(m.createdAt).getTime() > 2 * 60_000) return;
+      // som desligado (atalho na lista de conversas / Configurações): nem confere o escopo
+      if (useUI.getState().soundMuted) return;
       // o evento vai para o tenant inteiro; só toca para quem enxerga a conversa (número,
       // empresa e departamento). Na lista em cache ela já passou pelo filtro da API; fora dela,
       // o GET da conversa aplica o mesmo escopo (404 para quem não pode ver).
@@ -139,6 +143,12 @@ export function useRealtime() {
     // aviso global do dono do sistema: popup no topo + sino
     socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
+    // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
+    socket.on('campaign', (e: { id: string; status: string; name?: string; alert?: string }) => {
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: ['campaign', e.id] });
+      if (e.alert) toast.warn(`Transmissão "${e.name ?? ''}" pausada: ${e.alert}`);
+    });
     socket.on('scheduled_messages', (e: { conversationId: string }) => qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }));
     socket.on('appointment', () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['contact-card'] }); });
     socket.on('number', (n: { id: string; status: string; qrCode?: string }) => {
@@ -146,6 +156,9 @@ export function useRealtime() {
       if (n.status === 'connected') qc.setQueryData(['number-qr', n.id], null);
       qc.invalidateQueries({ queryKey: ['numbers'] });
     });
+    // monitor do dono (sala `owners`): número de algum cliente mudou / alguém abriu ou fechou o painel
+    socket.on('tenant_number', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
+    socket.on('tenant_presence', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
     return () => {
       socket.disconnect();
     };

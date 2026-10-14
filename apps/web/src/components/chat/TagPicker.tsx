@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Star, Tag as TagIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui/Toast';
 import type { Tag } from '@/lib/hooks';
 
 /**
@@ -10,8 +11,11 @@ import type { Tag } from '@/lib/hooks';
  *
  * Com `onPrimary`, a tag principal (etapa no Kanban) ganha estrela e anel, e clicar numa
  * selecionada que seja coluna do Kanban a promove a principal.
+ *
+ * Com `exclusive` (marcar tags num atendimento — não em filtros, onde "A ou B" faz sentido),
+ * marcar uma tag tira só as opostas DIRETAS dela (`conflictIds`), nunca em cadeia, e avisa.
  */
-export function TagPicker({ tags, value, onChange, placeholder, compact, primaryId, onPrimary }: { tags: Tag[]; value: string[]; onChange: (ids: string[]) => void; placeholder?: string; compact?: boolean; primaryId?: string | null; onPrimary?: (id: string) => void }) {
+export function TagPicker({ tags, value, onChange, placeholder, compact, primaryId, onPrimary, exclusive }: { tags: Tag[]; value: string[]; onChange: (ids: string[]) => void; placeholder?: string; compact?: boolean; primaryId?: string | null; onPrimary?: (id: string) => void; exclusive?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -24,7 +28,14 @@ export function TagPicker({ tags, value, onChange, placeholder, compact, primary
 
   const selected = tags.filter((t) => value.includes(t.id));
   const options = tags.filter((t) => !value.includes(t.id) && t.name.toLowerCase().includes(q.toLowerCase()));
-  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
+  const toggle = (id: string) => {
+    if (value.includes(id)) return onChange(value.filter((v) => v !== id));
+    const nova = tags.find((t) => t.id === id);
+    // o par vale nos dois sentidos; olhar os dois lados cobre lista desatualizada
+    const opostas = exclusive && nova ? value.filter((v) => v !== id && (nova.conflictIds?.includes(v) || tags.find((t) => t.id === v)?.conflictIds?.includes(id))) : [];
+    onChange([...value.filter((v) => !opostas.includes(v)), id]);
+    if (opostas.length) toast.warn(`${opostas.map((o) => `“${tags.find((t) => t.id === o)?.name}”`).join(', ')} saiu — conflita com “${nova!.name}”`);
+  };
 
   return (
     <div ref={ref} className="relative">

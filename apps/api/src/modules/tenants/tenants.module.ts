@@ -19,6 +19,8 @@ import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { StripeService } from '../billing/stripe.service';
 import { DuesService } from '../billing/dues.service';
+import { PromotionsService } from '../billing/promotions.service';
+import { DiscountLedgerService } from '../billing/discount-ledger.service';
 import { freePeriod } from '../billing/plan-rules';
 import { SYSTEM_PROFILES, TYPING_SPEED_KEYS, countLimit, type PlanLimits, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
@@ -120,6 +122,8 @@ class TenantsController {
     private readonly stripe: StripeService,
     private readonly dues: DuesService,
     private readonly provisioning: TenantProvisioningService,
+    private readonly promotions: PromotionsService,
+    private readonly ledger: DiscountLedgerService,
   ) {}
 
   @Get()
@@ -128,7 +132,10 @@ class TenantsController {
   list() {
     return this.prisma.tenant.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true, isFree: true, billingCycle: true, durationDays: true } } } }, users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 },
+      include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true, isFree: true, billingCycle: true, durationDays: true } } } },
+        // personalização do plano (valor/limites negociados) — a coluna Plano mostra o selo
+        planOverride: { select: { planId: true, priceMonth: true, expiresAt: true } },
+        users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 },
         // plano de cada empresa na própria listagem: com assinatura própria, o plano do cliente não diz tudo
         companies: { orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { select: { planId: true, status: true, currentPeriodEnd: true, priceMonth: true, plan: { select: { name: true } } } } } },
         _count: { select: { numbers: true, users: true, conversations: true } } },
@@ -199,6 +206,8 @@ class TenantsController {
     // gratuito nasce ativo, sem cartão, e com o fim da degustação (se houver) como fim do período;
     // pago segue como antes: `trialing` até o primeiro checkout
     const { start, end } = freePeriod(plan.isFree ? plan.durationDays : null);
+    // promoção de entrada aberta para o plano: o cliente já nasce com o desconto (docs/05#promoções)
+    const promo = await this.promotions.quote(plan, null);
     // hash fora da transação: é lento de propósito, e a transação segura locks enquanto espera
     const passwordHash = await this.auth.hashPassword(dto.adminPassword ?? randomBytes(24).toString('base64url'));
     const { tenant, admin } = await this.prisma.$transaction(async (tx) => {
@@ -207,13 +216,24 @@ class TenantsController {
           name: dto.name,
           slug: dto.slug,
           templateId: template?.id ?? null,
-          subscription: { create: { planId: dto.planId, status: plan.isFree ? 'active' : 'trialing', currentPeriodStart: start, currentPeriodEnd: end, ...(plan.isFree && { priceMonth: 0 }) } },
+          subscription: { create: { planId: dto.planId, status: plan.isFree ? 'active' : 'trialing', currentPeriodStart: start, currentPeriodEnd: end, ...(plan.isFree && { priceMonth: 0 }), ...(promo && { priceMonth: promo.priceMonth }) } },
+          ...(promo && { planOverride: { create: this.promotions.overrideData(dto.planId, promo) } }),
         },
         include: { subscription: true },
       });
       await tx.tenantSettings.create({ data: { tenantId: tenant.id } });
-      // tags do modelo, na ordem dele (é a das colunas do Kanban); modelo antigo = as de encerramento
-      await tx.tag.createMany({ data: provisionedTags(content).map((t, position) => ({ tenantId: tenant.id, name: t.name, position, isKanban: !!t.isKanban, showOnClose: !!t.showOnClose, ...(t.color && { color: t.color }) })), skipDuplicates: true });
+      // livro de descontos: nasceu com promoção (docs/05#livro-de-descontos)
+      if (promo) await this.ledger.open({ tenantId: tenant.id, plan, priceMonth: promo.priceMonth, kind: 'promotion', source: 'tenant_create', promotion: promo.promotion, endsAt: promo.expiresAt }, tx);
+      // tags do modelo, na ordem dele (é a das colunas do Kanban). As marcadas para o encerramento
+      // (Comprou / Não comprou) viram MOTIVOS de encerramento — a lista própria, separada das tags
+      // (docs/06-modelo-de-dados.md#encerramento); continuam tag só se também forem etapa do Kanban
+      const modelo = provisionedTags(content);
+      const deEncerramento = modelo.filter((t) => t.showOnWon || t.showOnLost);
+      await tx.tag.createMany({ data: modelo.filter((t) => t.isKanban || !(t.showOnWon || t.showOnLost)).map((t, position) => ({ tenantId: tenant.id, name: t.name, position, isKanban: !!t.isKanban, ...(t.color && { color: t.color }) })), skipDuplicates: true });
+      await tx.closeReason.createMany({
+        data: deEncerramento.map((t, position) => ({ tenantId: tenant.id, name: t.name, position, outcome: t.showOnWon && t.showOnLost ? 'both' : t.showOnWon ? 'won' : 'lost', ...(t.color && { color: t.color }) })),
+        skipDuplicates: true,
+      });
       await this.provisioning.provision(tx, tenant.id, content);
       const adminProfile = await tx.accessProfile.findFirstOrThrow({ where: { tenantId: tenant.id, isSystem: true, name: SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name }, select: { id: true } });
       const admin = await tx.user.create({

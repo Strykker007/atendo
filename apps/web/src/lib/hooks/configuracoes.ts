@@ -14,12 +14,26 @@ export interface TenantSettings {
   welcomeFlowId: string | null; closedFlowId: string | null; onCloseFlowId: string | null; defaultFlowId: string | null; defaultFlowInactivityHours: number;
   /** fluxo padrão por desfecho do encerramento (pré-selecionado no modal; ganha de `onCloseFlowId`) */
   wonFlowId: string | null; lostFlowId: string | null;
+  /** "Comprou" exige valor (padrão true) */
+  requireSaleValue: boolean;
+  /** nome dos resultados do encerramento na empresa — use `useOutcomeLabels` */
+  wonLabel: string; lostLabel: string;
   welcomeMessages: WelcomeMessage[]; welcomeMode: WelcomeMode; welcomeEnabled: boolean;
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
+/**
+ * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;
+ * Configurações → Encerramento). Por baixo seguem `won`/`lost` — só o rótulo muda.
+ */
+export const OUTCOME_LABELS_DEFAULT = { won: 'Comprou', lost: 'Não comprou' } as const;
+export type OutcomeLabels = { won: string; lost: string };
+export function useOutcomeLabels(): OutcomeLabels {
+  const s = useTenantSettings().data;
+  return { won: s?.wonLabel || OUTCOME_LABELS_DEFAULT.won, lost: s?.lostLabel || OUTCOME_LABELS_DEFAULT.lost };
+}
 const invSettings = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['tenant-settings'] }); qc.invalidateQueries({ queryKey: ['schedules'] }); };
 export const useUpdateTenantSettings = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: SettingsPatch) => api('/settings', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invSettings(qc) }); };
 

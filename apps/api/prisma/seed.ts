@@ -16,13 +16,13 @@ async function main() {
       name: 'Pro',
       priceMonth: 247,
       billingModel: 'hybrid' as const,
-      limits: { maxNumbers: 3, maxAgents: 6, includedMessagesMonth: 10000, includedTemplatesMonth: 500, overagePricePerMessage: 0.02, overagePricePerTemplate: 0.6, hardLimit: false, graceDays: 7, billingUnit: 'conversations' as const, includedConversationsMonth: 2000, overagePricePerConversation: 0.35, features: ['flows', 'scheduling', 'ai_copilot'], includedAiInteractionsMonth: 500, overagePricePerAiInteraction: 0.1, aiMonthlyCostCap: 60 },
+      limits: { maxNumbers: 3, maxAgents: 6, includedMessagesMonth: 10000, includedTemplatesMonth: 500, overagePricePerMessage: 0.02, overagePricePerTemplate: 0.6, hardLimit: false, graceDays: 7, billingUnit: 'conversations' as const, includedConversationsMonth: 2000, overagePricePerConversation: 0.35, features: ['flows', 'scheduling', 'ai_copilot', 'consultant_ranking', 'satisfaction_surveys'], includedAiInteractionsMonth: 500, overagePricePerAiInteraction: 0.1, aiMonthlyCostCap: 60 },
     },
     {
       name: 'Business',
       priceMonth: 597,
       billingModel: 'hybrid' as const,
-      limits: { maxNumbers: 10, maxAgents: 20, includedMessagesMonth: 50000, includedTemplatesMonth: 2000, overagePricePerMessage: 0.015, overagePricePerTemplate: 0.5, hardLimit: false, graceDays: 10, billingUnit: 'conversations' as const, includedConversationsMonth: 10000, overagePricePerConversation: 0.25, features: ['flows', 'scheduling', 'ai_copilot', 'ai_flows'], includedAiInteractionsMonth: 3000, overagePricePerAiInteraction: 0.08, aiMonthlyCostCap: 300 },
+      limits: { maxNumbers: 10, maxAgents: 20, includedMessagesMonth: 50000, includedTemplatesMonth: 2000, overagePricePerMessage: 0.015, overagePricePerTemplate: 0.5, hardLimit: false, graceDays: 10, billingUnit: 'conversations' as const, includedConversationsMonth: 10000, overagePricePerConversation: 0.25, features: ['flows', 'scheduling', 'ai_copilot', 'ai_flows', 'consultant_ranking', 'satisfaction_surveys'], includedAiInteractionsMonth: 3000, overagePricePerAiInteraction: 0.08, aiMonthlyCostCap: 300 },
     },
   ];
   for (const p of plans) await prisma.plan.upsert({ where: { name: p.name }, create: p, update: { priceMonth: p.priceMonth, limits: p.limits, billingModel: p.billingModel } });

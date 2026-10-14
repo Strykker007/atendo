@@ -20,6 +20,27 @@ export const IDLE_RETRY_MS = 15 * 60_000;
 
 export type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'paused' | 'done' | 'canceled';
 
+// ---- QR Code (Conexão Web): travas antiban da transmissão (docs/envio.md#transmissão) ----
+
+/** janela do teto de transmissão por número: 24h móveis */
+export const QR_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** intervalo entre UMA mensagem e a próxima no QR: aleatório nesta faixa */
+export const QR_DELAY_MIN_MS = 20_000;
+export const QR_DELAY_MAX_MS = 60_000;
+/** falhas seguidas que param a campanha (sessão caiu ou o número está sendo bloqueado) */
+export const FAILURE_STREAK = 3;
+
+/** Próximo envio no QR: entre 20 e 60 s, sorteado (intervalo fixo é padrão de robô). */
+export const qrDelay = (rand: () => number = Math.random) => Math.round(QR_DELAY_MIN_MS + rand() * (QR_DELAY_MAX_MS - QR_DELAY_MIN_MS));
+
+/**
+ * Os últimos envios processados (mais recente primeiro) indicam bloqueio? `true` quando os
+ * `FAILURE_STREAK` mais recentes falharam todos — um sucesso no meio zera a contagem.
+ */
+export function failureStreak(ultimos: ('ok' | 'failed')[]): boolean {
+  return ultimos.length >= FAILURE_STREAK && ultimos.slice(0, FAILURE_STREAK).every((r) => r === 'failed');
+}
+
 export interface DispatchInput {
   now: number;
   status: CampaignStatus;
@@ -31,6 +52,8 @@ export interface DispatchInput {
   dailyRemaining: number;
   /** alvos ainda não processados */
   pending: number;
+  /** número QR Code: uma mensagem por vez, com intervalo aleatório (a Meta vai em lotes) */
+  qr?: boolean;
 }
 
 export type Decision =
@@ -60,7 +83,7 @@ export function decideDispatch(i: DispatchInput): Decision {
     return { action: 'wait', retryInMs: IDLE_RETRY_MS, reason: 'Teto diário do número atingido' };
   }
 
-  return { action: 'send', take: Math.min(i.pending, i.dailyRemaining, BATCH_SIZE) };
+  return { action: 'send', take: i.qr ? 1 : Math.min(i.pending, i.dailyRemaining, BATCH_SIZE) };
 }
 
 /** Sobrou fila depois do lote? Tipo estreito: quem chama só precisa tratar dois casos. */

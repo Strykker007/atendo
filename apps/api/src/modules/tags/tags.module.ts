@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsHexColor, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -9,14 +9,17 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { MAX_CONFLICTS_PER_TAG, conflictPair } from './conflicts';
 
 class TagDto {
   @IsString() @MaxLength(40) name: string;
   @IsOptional() @IsHexColor() color?: string;
   /** vira coluna no Kanban */
   @IsOptional() @IsBoolean() isKanban?: boolean;
-  /** aparece para escolha no encerramento (Comprou / Não comprou) */
-  @IsOptional() @IsBoolean() showOnClose?: boolean;
+  /** aparece para escolha ao encerrar como "Comprou" */
+  @IsOptional() @IsBoolean() showOnWon?: boolean;
+  /** aparece para escolha ao encerrar como "Não comprou" */
+  @IsOptional() @IsBoolean() showOnLost?: boolean;
   /** ordem da coluna; para reordenar várias de uma vez use PATCH /kanban/columns */
   @IsOptional() @IsInt() @Min(0) position?: number;
 }
@@ -30,7 +33,16 @@ class BulkIdsDto {
 class BulkUpdateDto extends BulkIdsDto {
   @IsOptional() @IsHexColor() color?: string;
   @IsOptional() @IsBoolean() isKanban?: boolean;
-  @IsOptional() @IsBoolean() showOnClose?: boolean;
+  @IsOptional() @IsBoolean() showOnWon?: boolean;
+  @IsOptional() @IsBoolean() showOnLost?: boolean;
+}
+class OrderDto {
+  /** todas as tags na ordem nova (a lista inteira, arrastada na tela de Tags) */
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(1000) @IsUUID('4', { each: true }) ids: string[];
+}
+class ConflictsDto {
+  /** a lista inteira de opostas desta tag (substitui); vazia = sem conflito */
+  @IsArray() @ArrayMaxSize(MAX_CONFLICTS_PER_TAG) @IsUUID('4', { each: true }) ids: string[];
 }
 class BulkCreateItemDto {
   @IsString() @MaxLength(40) name: string;
@@ -42,7 +54,8 @@ class BulkCreateDto {
   @IsArray() @ArrayNotEmpty() @ArrayMaxSize(BULK_MAX) @ValidateNested({ each: true }) @Type(() => BulkCreateItemDto) items: BulkCreateItemDto[];
   @IsOptional() @IsHexColor() color?: string;
   @IsOptional() @IsBoolean() isKanban?: boolean;
-  @IsOptional() @IsBoolean() showOnClose?: boolean;
+  @IsOptional() @IsBoolean() showOnWon?: boolean;
+  @IsOptional() @IsBoolean() showOnLost?: boolean;
 }
 
 /** Tags são criadas dinamicamente em configurações e viram filtros/relatórios. */
@@ -53,8 +66,31 @@ class TagsController {
 
   // na ordem do Kanban: é a mesma lista que monta as colunas
   @Get()
-  list(@CurrentUser() u: AuthUser) {
-    return this.prisma.tag.findMany({ where: { tenantId: u.tenantId }, orderBy: [{ position: 'asc' }, { name: 'asc' }], include: { _count: { select: { conversations: true, contacts: true } } } });
+  async list(@CurrentUser() u: AuthUser) {
+    const tags = await this.prisma.tag.findMany({
+      where: { tenantId: u.tenantId },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
+      include: { _count: { select: { conversations: true, contacts: true } }, conflictsA: { select: { otherId: true } }, conflictsB: { select: { tagId: true } } },
+    });
+    // o par é guardado uma vez só; a tela recebe as opostas de cada tag, dos dois lados
+    return tags.map(({ conflictsA, conflictsB, ...t }) => ({ ...t, conflictIds: [...conflictsA.map((c) => c.otherId), ...conflictsB.map((c) => c.tagId)] }));
+  }
+
+  /**
+   * Opostas desta tag ("Comprou" × "Não comprou"): marcar uma tira as outras do atendimento.
+   * Substitui a lista inteira; o par vale nos dois sentidos. Só tags do tenant, sem ela mesma.
+   */
+  @Put(':id/conflicts')
+  @RequirePermission('tags.manage')
+  async setConflicts(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: ConflictsDto) {
+    const tag = await this.prisma.tag.findFirst({ where: { id, tenantId: u.tenantId }, select: { id: true } });
+    if (!tag) throw new NotFoundException('Tag não encontrada');
+    const outras = await this.prisma.tag.findMany({ where: { tenantId: u.tenantId, id: { in: [...new Set(dto.ids)].filter((x) => x !== id) } }, select: { id: true } });
+    await this.prisma.$transaction([
+      this.prisma.tagConflict.deleteMany({ where: { OR: [{ tagId: id }, { otherId: id }] } }),
+      this.prisma.tagConflict.createMany({ data: outras.map((o) => conflictPair(id, o.id)), skipDuplicates: true }),
+    ]);
+    return { conflictIds: outras.map((o) => o.id) };
   }
 
   @Post()
@@ -85,7 +121,7 @@ class TagsController {
     const last = await this.prisma.tag.aggregate({ where: { tenantId: u.tenantId }, _max: { position: true } });
     const start = (last._max.position ?? -1) + 1;
     const r = await this.prisma.tag.createMany({
-      data: names.map((name, i) => ({ tenantId: u.tenantId, name, position: start + i, isKanban: dto.isKanban ?? false, showOnClose: dto.showOnClose ?? false, ...(porNome.get(name) && { color: porNome.get(name) }) })),
+      data: names.map((name, i) => ({ tenantId: u.tenantId, name, position: start + i, isKanban: dto.isKanban ?? false, showOnWon: dto.showOnWon ?? false, showOnLost: dto.showOnLost ?? false, ...(porNome.get(name) && { color: porNome.get(name) }) })),
       skipDuplicates: true,
     });
     this.gateway.emitKanban(u.tenantId);
@@ -104,6 +140,15 @@ class TagsController {
     });
     this.gateway.emitKanban(u.tenantId);
     return { updated: r.count };
+  }
+
+  /** Reordenar arrastando: `position` = índice na lista. Também é a ordem das colunas do Kanban. */
+  @Patch('order')
+  @RequirePermission('tags.manage')
+  async order(@CurrentUser() u: AuthUser, @Body() dto: OrderDto) {
+    await this.prisma.$transaction(dto.ids.map((id, position) => this.prisma.tag.updateMany({ where: { id, tenantId: u.tenantId }, data: { position } })));
+    this.gateway.emitKanban(u.tenantId);
+    return { ok: true };
   }
 
   @Post('bulk-delete')

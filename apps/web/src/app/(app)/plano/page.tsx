@@ -113,6 +113,11 @@ function PlanoInner() {
           <div className="font-medium">{u.freePlan ? 'Gratuito' : u.priceMonth != null ? brl(u.priceMonth) : '—'}{u.billingCycle === 'yearly' && <span className="text-[11px] text-muted font-normal"> (plano anual)</span>}{u.units > 1 && <span className="text-[11px] text-muted font-normal"> · {u.units} empresas</span>}</div>
           {/* reajuste já avisado: aparece aqui também, não só no e-mail, porque e-mail se perde
               e a conta do mês que vem não pode ser surpresa */}
+          {u.customPlan && (
+            <div className="text-[11px] text-accent-ink mt-0.5">
+              Condições personalizadas{u.customPlan.expiresAt ? ` até ${new Date(u.customPlan.expiresAt).toLocaleDateString('pt-BR')}` : ''}
+            </div>
+          )}
           {u.priceChange && (
             <div className="text-[11px] text-warn-ink mt-0.5" title={`A partir de ${new Date(u.priceChange.at).toLocaleDateString('pt-BR')}`}>
               {brl(u.priceChange.priceMonth)} a partir de {new Date(u.priceChange.at).toLocaleDateString('pt-BR')}
@@ -221,6 +226,12 @@ function PlanoInner() {
                     <div className="text-2xl font-semibold text-ink tnum">{brl(Number(p.priceYear))}<span className="text-sm text-muted font-normal">/ano</span><div className="text-xs text-muted font-normal">equivale a {brl(Number(p.priceMonth))}/mês</div></div>
                   ) : (
                     <div className="text-2xl font-semibold text-ink tnum">{brl(Number(p.priceMonth))}<span className="text-sm text-muted font-normal">/mês</span></div>
+                  )}
+                  {/* promoção de entrada que ele ganha ao assinar (a API já aplicou as regras: plano, janela, não acumula) */}
+                  {p.promotion && (
+                    <div className="rounded-lg bg-ok-soft text-ok px-2.5 py-1.5 text-[12px]">
+                      <b>{p.promotion.name}: {p.promotion.discountPercent.toLocaleString('pt-BR')}% off</b> — {brl(p.promotion.priceMonth)}/mês por {p.promotion.durationMonths} {p.promotion.durationMonths === 1 ? 'mês' : 'meses'}. Assine até {new Date(p.promotion.endsAt).toLocaleDateString('pt-BR')}.
+                    </div>
                   )}
                   <ul className="text-sm text-muted space-y-1">
                     <li className="flex gap-2"><Check size={14} className="text-ok mt-0.5 shrink-0" />{qtd(L.maxNumbers, 'número', 'números')} · {qtd(L.maxAgents, 'atendente', 'atendentes')}</li>

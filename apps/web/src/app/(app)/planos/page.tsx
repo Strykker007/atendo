@@ -10,6 +10,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
+import { PromotionsSection } from '@/components/billing/PromotionsSection';
 import { useAllPlans, useCreatePlan, useUpdatePlan, useDeletePlan, useMe, type PlanInput, type PlanRow } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -204,6 +205,8 @@ export default function PlanosPage() {
           assinantes={plans.data?.find((p) => p.id === form.id)?.subscribers ?? 0}
         />
       )}
+
+      {plans.data && <PromotionsSection plans={plans.data} />}
 
       <ConfirmDialog
         open={!!confirmar}

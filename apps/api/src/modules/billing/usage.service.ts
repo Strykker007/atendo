@@ -7,6 +7,7 @@ import { PricingService } from './pricing.service';
 import { MailService } from '../../common/mail/mail.service';
 import { env } from '../../config/env';
 import { decideCanSend, unitOf, type QuotaDecision, type QuotaKind } from './quota';
+import { effectiveLimits } from './plan-override';
 
 export const periodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: string) => `usage:${tenantId}:${period}:${metric}`;
@@ -108,10 +109,15 @@ export class UsageService {
     return { messages: Number(messages ?? 0), templates: Number(templates ?? 0), conversations: Number(conversations ?? 0) };
   }
 
+  /**
+   * Limites que valem para o tenant: os do plano, com a personalização do dono por cima quando
+   * ela vale (docs/05-planos-e-cobranca.md#personalização-por-cliente). Guards, quota, IA e
+   * excedente leem daqui — nunca de `plan.limits` direto.
+   */
   async limits(tenantId: string): Promise<{ limits: PlanLimits; status: string } | null> {
-    const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true } });
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true, tenant: { select: { planOverride: true } } } });
     if (!sub) return null;
-    return { limits: sub.plan.limits as unknown as PlanLimits, status: sub.status };
+    return { limits: effectiveLimits(sub.plan.limits as unknown as PlanLimits, sub.tenant.planOverride, sub.planId), status: sub.status };
   }
 
   /** Quanto o tenant já usa de um limite de quantidade (o que conta para `CountLimit`). */

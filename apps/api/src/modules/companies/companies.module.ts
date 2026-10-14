@@ -11,7 +11,7 @@ import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { NoTenantOk } from '../auth/tenant.guard';
-import type { PlanLimits } from '@atendo/shared';
+import { UsageService } from '../billing/usage.service';
 import { DuesService } from '../billing/dues.service';
 import { nextPeriodEnd } from '../billing/dues';
 
@@ -194,7 +194,7 @@ class CompaniesController {
 @NoTenantOk()
 @Roles('super_admin')
 class AdminCompaniesController {
-  constructor(private readonly prisma: PrismaService, private readonly companies: CompaniesService) {}
+  constructor(private readonly prisma: PrismaService, private readonly companies: CompaniesService, private readonly usage: UsageService) {}
 
   @Get()
   async list(@Param('tenantId', ParseUUIDPipe) tenantId: string) {
@@ -205,12 +205,13 @@ class AdminCompaniesController {
   /** O que o formulário precisa do cliente: números, equipe e o limite do plano. */
   @Get('options')
   async options(@Param('tenantId', ParseUUIDPipe) tenantId: string) {
-    const [numbers, users, sub] = await Promise.all([
+    const [numbers, users, plan] = await Promise.all([
       this.prisma.whatsAppNumber.findMany({ where: { tenantId, deletedAt: null }, orderBy: { createdAt: 'asc' }, select: { id: true, label: true, phone: true } }),
       this.prisma.user.findMany({ where: { tenantId, role: { not: 'super_admin' } }, orderBy: { name: 'asc' }, select: { id: true, name: true, isActive: true } }),
-      this.prisma.subscription.findUnique({ where: { tenantId }, select: { plan: { select: { limits: true } } } }),
+      // limite efetivo: com a personalização do dono por cima do plano
+      this.usage.limits(tenantId),
     ]);
-    return { numbers, users, maxCompanies: (sub?.plan.limits as PlanLimits | undefined)?.maxCompanies ?? null };
+    return { numbers, users, maxCompanies: plan?.limits.maxCompanies ?? null };
   }
 
   @Post()

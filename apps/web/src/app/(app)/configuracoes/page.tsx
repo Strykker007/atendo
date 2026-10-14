@@ -1,6 +1,8 @@
 'use client';
-import { useState } from 'react';
-import { Sun, Moon, Monitor } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Sun, Moon, Monitor, Volume2, VolumeX, UserRound, Building2, Headset } from 'lucide-react';
+import { useUI } from '@/lib/store';
+import { previewMessageSound } from '@/lib/message-sound';
 import { cn } from '@/lib/utils';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -13,12 +15,25 @@ import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
 import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
+import { ClosingSection } from '@/components/settings/ClosingSection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe } from '@/lib/hooks';
 
-/** Configurações do cliente: aparência, horário, fluxos padrão e segurança. As respostas
- *  rápidas saíram daqui e viraram módulo próprio (/respostas). */
+type Aba = 'conta' | 'empresa' | 'atendimento';
+const ABAS: { id: Aba; label: string; icon: React.ReactNode; desc: string }[] = [
+  { id: 'conta', label: 'Minha conta', icon: <UserRound size={15} />, desc: 'Seu nome, aparência, notificações e senha — só para você.' },
+  { id: 'empresa', label: 'Empresa', icon: <Building2 size={15} />, desc: 'Números, empresas/unidades, departamentos e variáveis usadas nas mensagens.' },
+  { id: 'atendimento', label: 'Atendimento', icon: <Headset size={15} />, desc: 'Horários, boas-vindas, fluxos padrão e regras do encerramento.' },
+];
+
+/**
+ * Configurações em abas. Era uma página só com tudo empilhado — perfil, tema, horários,
+ * boas-vindas, fluxos, variáveis… — e cada configuração nova a deixava mais comprida. Agora:
+ * o que é da pessoa (Minha conta), o que é da empresa (Empresa) e como a empresa atende
+ * (Atendimento). Aba sem nada para a pessoa (permissão) não aparece. A aba fica no endereço
+ * (`#atendimento`) para dar para mandar o link direto. Respostas rápidas viraram módulo próprio.
+ */
 export default function ConfiguracoesPage() {
   const me = useMe();
   const isOwner = me.data?.role === 'super_admin';
@@ -31,23 +46,60 @@ export default function ConfiguracoesPage() {
   // a lista é de todos (aparece nos menus de variável); criar/editar/excluir é de quem tem a permissão
   const podeVariaveis = useCan('variables.manage');
 
+  const temEmpresa = !isOwner && (podeNumeros || podeConfigurar || podeEquipe || podeVariaveis);
+  const temAtendimento = !isOwner && podeConfigurar;
+  const visiveis = ABAS.filter((a) => a.id === 'conta' || (a.id === 'empresa' && temEmpresa) || (a.id === 'atendimento' && temAtendimento));
 
+  const [aba, setAba] = useState<Aba>('conta');
+  // lê a aba do endereço depois de montar (no servidor não há `location`)
+  useEffect(() => {
+    const h = window.location.hash.slice(1) as Aba;
+    if (ABAS.some((a) => a.id === h)) setAba(h);
+  }, []);
+  const escolher = (a: Aba) => { setAba(a); history.replaceState(null, '', `#${a}`); };
+  const atual = visiveis.some((a) => a.id === aba) ? aba : 'conta';
 
   return (
     <PageShell width="max-w-4xl">
-      <PageHeader title="Configurações" subtitle="Seu perfil, aparência do painel, empresas, departamentos, horários de atendimento, boas-vindas, variáveis globais e segurança." />
+      <PageHeader title="Configurações" subtitle={ABAS.find((a) => a.id === atual)?.desc} />
 
-      {!me.data?.impersonatorId && me.data && <ProfileSection name={me.data.name} />}
-      {!isOwner && podeNumeros && <NumbersSection />}
-      <AppearanceSection />
-      {!isOwner && podeConfigurar && <CompaniesSection />}
-      {!isOwner && podeEquipe && <DepartmentsSection />}
-      {!isOwner && podeConfigurar && <ScheduleSection />}
-      {!isOwner && podeConfigurar && <WelcomeSection />}
-      {!isOwner && podeConfigurar && <DefaultFlowsSection />}
-      {!isOwner && podeVariaveis && <GlobalVariablesSection />}
-      {!me.data?.impersonatorId && <SecuritySection />}
+      {visiveis.length > 1 && (
+        <div role="tablist" aria-label="Seções das configurações" className="sticky top-0 z-10 -mt-1 mb-4 flex gap-1 rounded-xl border border-line bg-panel p-1">
+          {visiveis.map((a) => (
+            <button key={a.id} role="tab" aria-selected={atual === a.id} onClick={() => escolher(a.id)}
+              className={cn('flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors', atual === a.id ? 'bg-accent-soft text-accent-ink' : 'text-muted hover:text-ink hover:bg-field')}>
+              {a.icon}{a.label}
+            </button>
+          ))}
+        </div>
+      )}
 
+      <div className="space-y-4">
+        {atual === 'conta' && (
+          <>
+            {!me.data?.impersonatorId && me.data && <ProfileSection name={me.data.name} />}
+            <AppearanceSection />
+            <NotificationsSection />
+            {!me.data?.impersonatorId && <SecuritySection />}
+          </>
+        )}
+        {atual === 'empresa' && (
+          <>
+            {podeNumeros && <NumbersSection />}
+            {podeConfigurar && <CompaniesSection />}
+            {podeEquipe && <DepartmentsSection />}
+            {podeVariaveis && <GlobalVariablesSection />}
+          </>
+        )}
+        {atual === 'atendimento' && (
+          <>
+            <ScheduleSection />
+            <WelcomeSection />
+            <ClosingSection />
+            <DefaultFlowsSection />
+          </>
+        )}
+      </div>
     </PageShell>
   );
 }
@@ -76,6 +128,39 @@ function AppearanceSection() {
             <div className="text-xs text-muted mt-0.5">{t.desc}</div>
           </button>
         ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Som de mensagem nova. Preferência do navegador, como a aparência: cada atendente decide o seu
+ * (o mesmo liga/desliga tem atalho no alto da lista de conversas).
+ */
+function NotificationsSection() {
+  const { soundMuted, setSoundMuted } = useUI();
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
+      <div>
+        <h2 className="font-display font-semibold text-ink">Notificações</h2>
+        <p className="text-sm text-muted">Vale só para este navegador. Também dá para ligar e desligar pelo ícone de som no alto da lista de conversas.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={!soundMuted}
+          onClick={() => setSoundMuted(!soundMuted)}
+          className={cn('relative w-9 h-5 rounded-full transition-colors shrink-0', !soundMuted ? 'bg-accent' : 'bg-line')}
+          aria-label="Som de mensagem nova"
+        >
+          <span className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', !soundMuted ? 'left-[18px]' : 'left-0.5')} />
+        </button>
+        <span className="text-sm text-ink flex items-center gap-1.5 flex-1">
+          {soundMuted ? <VolumeX size={15} className="text-muted" /> : <Volume2 size={15} className="text-accent-ink" />}
+          Som ao chegar mensagem {soundMuted ? <span className="text-muted">(desligado)</span> : null}
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => void previewMessageSound()} disabled={soundMuted}>Testar som</Button>
       </div>
     </section>
   );

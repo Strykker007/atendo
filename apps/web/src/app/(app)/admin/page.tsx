@@ -1,11 +1,12 @@
 'use client';
 import { useState } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt } from 'lucide-react';
+import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { SkeletonCards, SkeletonRows } from '@/components/ui/Skeleton';
-import { useFinance, useMargin, useMe } from '@/lib/hooks';
+import { useFinance, useMargin, useMe, type DiscountGrant, type DiscountSource } from '@/lib/hooks';
+import { Button } from '@/components/ui/Button';
 import { useBrand } from '@/lib/brand-context';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -21,7 +22,29 @@ const Tip = ({ active, payload, label }: { active?: boolean; payload?: { name: s
   </div>
 ) : null;
 
-type Tab = 'visao' | 'clientes' | 'faturas' | 'margem';
+type Tab = 'visao' | 'clientes' | 'faturas' | 'descontos' | 'margem';
+
+const ORIGEM: Record<DiscountSource, string> = { checkout: 'Checkout', tenant_create: 'Novo cliente', manual: 'Dono, no cliente', bulk: 'Dono, aplicar a todos', plan_return: 'Voltou ao plano' };
+const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '');
+/** Fim efetivo: o que vier primeiro entre o previsto e o encerramento. */
+const fimDe = (g: DiscountGrant) => (g.endsAt && g.closedAt ? (g.endsAt < g.closedAt ? g.endsAt : g.closedAt) : g.closedAt ?? g.endsAt);
+
+/** CSV do livro de descontos para a contabilidade (`;` e vírgula decimal: abre direto no Excel em pt-BR). */
+function exportarDescontos(rows: DiscountGrant[]) {
+  const num = (v: number) => v.toFixed(2).replace('.', ',');
+  const cel = (v: string) => (/[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const head = ['Concedido em', 'Cliente', 'Plano', 'Tipo', 'Promoção', 'Origem', 'Concedido por', 'Preço de tabela', 'Valor concedido', 'Desconto %', 'Unidades', 'Desconto/mês', 'Início', 'Fim previsto', 'Encerrado em'];
+  const linhas = rows.map((g) => [
+    dia(g.createdAt), g.tenant, g.plan, g.kind === 'promotion' ? 'Promoção' : 'Negociado', g.promotion ?? '', ORIGEM[g.source], g.grantedBy ?? 'Automático',
+    num(g.listPrice), num(g.priceMonth), num(g.discountPercent), String(g.units), num((g.listPrice - g.priceMonth) * g.units), dia(g.startsAt), dia(g.endsAt), dia(g.closedAt),
+  ].map(cel).join(';'));
+  const blob = new Blob(['\ufeff' + [head.join(';'), ...linhas].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `descontos-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 /** Financeiro do dono do Atendo. Só super_admin (a API também bloqueia). */
 export default function AdminPage() {
@@ -41,7 +64,7 @@ export default function AdminPage() {
     <PageShell width="max-w-6xl">
       <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso.`} action={
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
-          {([['visao', 'Visão geral'], ['clientes', 'Assinaturas'], ['faturas', 'Faturas'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
+          {([['visao', 'Visão geral'], ['clientes', 'Assinaturas'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>
           ))}
         </div>
@@ -52,7 +75,7 @@ export default function AdminPage() {
       {d && tab === 'visao' && (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Kpi icon={<Wallet size={16} />} label="MRR (receita recorrente/mês)" value={brl(d.now.mrr)} sub={`ARR ${brl(d.now.arr)}`} />
+            <Kpi icon={<Wallet size={16} />} label="MRR (receita recorrente/mês)" value={brl(d.now.mrr)} sub={`ARR ${brl(d.now.arr)}${d.now.discountMonth ? ` · ${brl(d.now.discountMonth)} em descontos` : ''}`} />
             <Kpi icon={<Users size={16} />} label="Clientes ativos" value={String(d.now.activeTenants)} sub={`${d.now.trialing} em teste · ${d.now.canceled} cancelados`} />
             <Kpi icon={<AlertTriangle size={16} />} label="Em atraso" value={brl(d.now.overdueAmount)} sub={`${d.now.pastDue} pendentes · ${d.now.suspended} suspensos`} tone={d.now.overdueAmount > 0 ? 'warn' : undefined} />
             <Kpi icon={<TrendingUp size={16} />} label="Margem estimada do mês" value={brl(d.now.monthMargin)} sub={`custo ${brl(d.now.monthCost)}`} tone={d.now.monthMargin < 0 ? 'danger' : 'ok'} />
@@ -119,6 +142,32 @@ export default function AdminPage() {
           i.tenant, i.period, brl(i.total), brl(i.overage), <Pill key="s" status={i.status} />, i.dueAt ? new Date(i.dueAt).toLocaleDateString('pt-BR') : '—',
           i.hostedUrl ? <a key="l" href={i.hostedUrl} target="_blank" rel="noreferrer" className="text-accent-ink underline text-xs">Stripe</a> : '',
         ])} empty="Nenhuma fatura ainda — aparecem quando o Stripe gerar a primeira cobrança." />
+      )}
+
+      {d && tab === 'descontos' && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-3 mb-4">
+            <Kpi icon={<Receipt size={16} />} label="Desconto vigente/mês" value={brl(d.now.discountMonth)} sub={`${d.now.discountedTenants} cliente(s) com desconto hoje`} tone={d.now.discountMonth > 0 ? 'warn' : undefined} />
+            <Kpi icon={<Receipt size={16} />} label="Desconto este mês" value={brl(d.series[d.series.length - 1]?.discounts ?? 0)} sub="pelo livro de descontos" />
+            <Kpi icon={<Receipt size={16} />} label={`Desconto em ${months} meses`} value={brl(d.series.reduce((a, x) => a + x.discounts, 0))} sub={`${d.discounts.length} concessão(ões) registradas`} />
+          </div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[12px] text-muted">Toda concessão de valor diferente do de tabela, permanente. Encerrada antes do previsto mostra a data.</p>
+            <Button size="sm" variant="ghost" icon={<Download size={14} />} disabled={!d.discounts.length} onClick={() => exportarDescontos(d.discounts)}>Exportar CSV</Button>
+          </div>
+          <Table head={['Concedido em', 'Cliente', 'Plano', 'Tipo', 'De → por', '%', 'Vigência', 'Origem / por']} rows={d.discounts.map((g) => {
+            const fim = fimDe(g);
+            const correndo = !fim || new Date(fim) > new Date();
+            return [
+              dia(g.createdAt), g.tenant, g.plan,
+              g.kind === 'promotion' ? <span key="k" className="text-accent-ink">{g.promotion ?? 'Promoção'}</span> : 'Negociado',
+              <span key="v">{brl(g.listPrice)} → <b className="text-ink">{brl(g.priceMonth)}</b>{g.units > 1 && <span className="text-faint"> × {g.units}</span>}</span>,
+              `${g.discountPercent.toLocaleString('pt-BR')}%`,
+              <span key="p" className={correndo ? 'text-ok' : 'text-muted'}>{dia(g.startsAt)} – {fim ? dia(fim) : 'sem data'}{g.closedAt && (!g.endsAt || g.closedAt < g.endsAt) ? ' (encerrado)' : ''}</span>,
+              <span key="o" className="text-muted">{ORIGEM[g.source]}{g.grantedBy ? ` · ${g.grantedBy}` : ''}</span>,
+            ];
+          })} empty="Nenhum desconto concedido ainda." />
+        </>
       )}
 
       {tab === 'margem' && (

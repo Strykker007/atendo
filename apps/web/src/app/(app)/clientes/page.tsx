@@ -2,9 +2,10 @@
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X } from 'lucide-react';
+import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal } from 'lucide-react';
 import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDialog';
 import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
+import { PlanOverrideDialog } from '@/components/billing/PlanOverrideDialog';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -13,7 +14,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useBrand } from '@/lib/brand-context';
 import { impersonation, setAccessToken } from '@/lib/api';
-import { useTenants, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, useTenantTemplates, type Plan, type TenantRow, type TenantProfile } from '@/lib/hooks';
+import { useTenants, useTenantsLive, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, useTenantTemplates, type Plan, type TenantRow, type TenantProfile, type TenantLive, type TenantLiveNumber } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 /** Rótulo do plano nos seletores: gratuito aparece como tal (e com o prazo), não como "R$ 0,00". */
@@ -90,10 +91,71 @@ function filtrarClientes(rows: TenantRow[], f: Filtros) {
 const selCls = 'rounded-lg bg-field px-2 h-9 text-[13px] text-ink';
 
 /** Gestão de clientes pelo dono: criar, plano/status, entrar como. */
+/** "há 5 min", "há 3 h", "há 2 dias" — atividade no painel. */
+const haQuanto = (iso: string) => {
+  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (min < 1) return 'agora há pouco';
+  if (min < 60) return `há ${min} min`;
+  if (min < 24 * 60) return `há ${Math.floor(min / 60)} h`;
+  const d = Math.floor(min / (24 * 60));
+  return `há ${d} dia${d === 1 ? '' : 's'}`;
+};
+
+/** Online = alguém do cliente com o painel aberto agora (socket conectado). Senão, a última atividade. */
+function Presenca({ live }: { live?: TenantLive }) {
+  if (!live) return <span className="text-faint text-[12px]">—</span>;
+  if (live.onlineUsers > 0) return (
+    <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-ok whitespace-nowrap" title="Painel aberto agora">
+      <span className="relative flex size-2"><span className="absolute inline-flex size-full rounded-full bg-ok opacity-60 animate-ping" /><span className="relative inline-flex size-2 rounded-full bg-ok" /></span>
+      Online · {live.onlineUsers}
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[12px] text-muted whitespace-nowrap" title={live.lastActivityAt ? new Date(live.lastActivityAt).toLocaleString('pt-BR') : undefined}>
+      <span className="size-2 rounded-full bg-line" />
+      {live.lastActivityAt ? `Visto ${haQuanto(live.lastActivityAt)}` : 'Nunca acessou'}
+    </span>
+  );
+}
+
+/** Saúde do número: [rótulo, classe do ponto, classe do texto]. "Sem receber" = conectado mas nada volta (receive-stall). */
+function saudeNumero(n: TenantLiveNumber): [string, string, string] {
+  if (!n.isActive) return ['Desativado', 'bg-line', 'text-faint'];
+  if (n.status === 'connected') return n.receiveStalledAt ? ['Sem receber', 'bg-warn', 'text-warn-ink'] : ['Conectado', 'bg-ok', 'text-ok'];
+  if (n.status === 'pending_qr') return ['QR pendente', 'bg-warn', 'text-warn-ink'];
+  if (n.status === 'error') return ['Erro', 'bg-danger', 'text-danger-ink'];
+  return ['Desconectado', 'bg-danger', 'text-danger-ink'];
+}
+
+function NumerosDoCliente({ live, total }: { live?: TenantLive; total: number }) {
+  if (!live || live.numbers.length === 0) return <span className="text-faint text-[12px] tnum">{total || '—'}</span>;
+  return (
+    <ul className="space-y-0.5 min-w-[11rem]">
+      {live.numbers.map((n) => {
+        const [rotulo, ponto, texto] = saudeNumero(n);
+        return (
+          <li key={n.id} className="flex items-center gap-1.5 text-[11.5px]" title={`${n.phone} · ${n.provider === 'meta' ? 'API oficial' : 'QR Code'} · status desde ${new Date(n.updatedAt).toLocaleString('pt-BR')}`}>
+            <span className={cn('size-2 rounded-full shrink-0', ponto)} />
+            <span className="truncate max-w-[8rem] text-ink">{n.label}</span>
+            <span className={cn('ml-auto shrink-0 font-medium', texto)}>{rotulo}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function ClientesPage() {
   const { brandName } = useBrand();
   const me = useMe();
   const tenants = useTenants();
+  const live = useTenantsLive(me.data?.role === 'super_admin');
+  const liveDe = useMemo(() => new Map((live.data ?? []).map((l) => [l.tenantId, l])), [live.data]);
+  const resumo = useMemo(() => {
+    const l = live.data ?? [];
+    const nums = l.flatMap((x) => x.numbers).filter((n) => n.isActive);
+    return { online: l.filter((x) => x.onlineUsers > 0).length, conectados: nums.filter((n) => n.status === 'connected' && !n.receiveStalledAt).length, problema: nums.filter((n) => n.status !== 'connected' || n.receiveStalledAt).length, total: nums.length };
+  }, [live.data]);
   const plans = usePlans();
   const update = useUpdateTenant();
   const impersonate = useImpersonate();
@@ -107,6 +169,8 @@ export default function ClientesPage() {
   // plano de uma empresa, aberto direto da coluna Plano
   const [planoEmpresa, setPlanoEmpresa] = useState<{ tenant: TenantRow; company: TenantRow['companies'][number] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // valor/limites/vigência negociados para um cliente (docs/05-planos-e-cobranca.md#personalização-por-cliente)
+  const [personalizando, setPersonalizando] = useState<TenantRow | null>(null);
   const [filtros, setFiltros] = useState<Filtros>(FILTROS_VAZIOS);
   const set = (p: Partial<Filtros>) => setFiltros((f) => ({ ...f, ...p }));
   const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros), [tenants.data, filtros]);
@@ -169,17 +233,26 @@ export default function ClientesPage() {
           {filtrando && <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => setFiltros({ ...FILTROS_VAZIOS, ordem: filtros.ordem })}>Limpar filtros</Button>}
         </div>
       )}
+      {live.data && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-[12.5px] text-muted">
+          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-ok" /><b className="text-ink tnum">{resumo.online}</b> cliente{resumo.online === 1 ? '' : 's'} online agora</span>
+          <span><b className="text-ink tnum">{resumo.conectados}</b> de <span className="tnum">{resumo.total}</span> números conectados</span>
+          {resumo.problema > 0 && <span className="text-danger-ink font-medium"><span className="tnum">{resumo.problema}</span> com problema (desconectado, QR pendente, erro ou sem receber)</span>}
+          <span className="ml-auto text-[11px] text-faint">ao vivo</span>
+        </div>
+      )}
       {tenants.data && (
         <div className="rounded-2xl bg-panel border border-line overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="px-4 py-2.5">Cliente</th><th className="px-3 py-2.5">Admin</th><th className="px-3 py-2.5">Plano</th><th className="px-3 py-2.5">Assinatura</th><th className="px-3 py-2.5">Vencimento</th><th className="px-3 py-2.5 text-right">Números</th><th className="px-3 py-2.5 text-right">Usuários</th><th className="px-3 py-2.5 text-right">Conversas</th><th className="px-4 py-2.5"></th></tr></thead>
+            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="px-4 py-2.5">Cliente</th><th className="px-3 py-2.5">Atividade</th><th className="px-3 py-2.5">Admin</th><th className="px-3 py-2.5">Plano</th><th className="px-3 py-2.5">Assinatura</th><th className="px-3 py-2.5">Vencimento</th><th className="px-3 py-2.5">Números</th><th className="px-3 py-2.5 text-right">Usuários</th><th className="px-3 py-2.5 text-right">Conversas</th><th className="px-4 py-2.5"></th></tr></thead>
             <tbody className="divide-y divide-line">
-              {lista.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-muted">Nenhum cliente com esses filtros.</td></tr>}
+              {lista.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-muted">Nenhum cliente com esses filtros.</td></tr>}
               {lista.map((t) => {
                 const st = STATUS[t.subscription?.status ?? ''] ?? ['—', 'bg-field text-muted'];
                 return (
                   <tr key={t.id} className={cn(!t.isActive && 'opacity-50')}>
                     <td className="px-4 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}</div>{(t.legalName || t.document) && <div className="text-[11px] text-muted truncate max-w-[16rem]">{[t.legalName, fmtDoc(t.document)].filter(Boolean).join(' · ')}</div>}</td>
+                    <td className="px-3 py-2.5"><Presenca live={liveDe.get(t.id)} /></td>
                     <td className="px-3 py-2.5 text-muted">{t.users[0]?.email ?? '—'}</td>
                     <td className="px-3 py-2.5">
                       {t.companies.length > 0 && <div className="text-[10px] font-semibold uppercase tracking-wide text-faint mb-0.5">Plano do grupo{t.subscription && t.subscription.units > 1 ? ` × ${t.subscription.units}` : ''}</div>}
@@ -187,6 +260,15 @@ export default function ClientesPage() {
                         {!t.subscription && <option value="">Sem plano</option>}
                         {plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p)}</option>)}
                       </select>
+                      {t.subscription && (() => {
+                        const o = personalizacao(t);
+                        return (
+                          <button onClick={() => setPersonalizando(t)} className={cn('mt-0.5 flex items-center gap-1 text-[10px] font-semibold rounded px-1 -mx-1 hover:bg-field', o ? 'text-accent-ink' : 'text-faint')} title="Valor, limites e vigência só para este cliente">
+                            <SlidersHorizontal size={10} />
+                            {o ? `Personalizado${o.priceMonth != null ? ` · ${brl(Number(o.priceMonth))}` : ''}${o.expiresAt ? ` até ${new Date(o.expiresAt).toLocaleDateString('pt-BR')}` : ''}` : 'Personalizar'}
+                          </button>
+                        );
+                      })()}
                       {t.subscription?.plan.isFree && (
                         <div className="text-[10px] font-semibold text-ok mt-0.5">
                           Gratuito{t.subscription.plan.durationDays ? ` até ${new Date(t.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')}` : ' permanente'}
@@ -212,7 +294,7 @@ export default function ClientesPage() {
                       </select>
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">{t.subscription ? <Vencimento sub={t.subscription} /> : <span className="text-faint">—</span>}</td>
-                    <td className="px-3 py-2.5 text-right tnum">{t._count.numbers}</td>
+                    <td className="px-3 py-2.5"><NumerosDoCliente live={liveDe.get(t.id)} total={t._count.numbers} /></td>
                     <td className="px-3 py-2.5 text-right tnum">{t._count.users}</td>
                     <td className="px-3 py-2.5 text-right tnum">{t._count.conversations}</td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
@@ -234,9 +316,17 @@ export default function ClientesPage() {
         {empresasDe && <CompaniesSection tenantId={empresasDe.id} />}
       </Modal>
       <TenantTemplatesDialog open={modelos} onClose={() => setModelos(false)} />
+      {personalizando && <PlanOverrideDialog tenantId={personalizando.id} tenantName={personalizando.name} onClose={() => setPersonalizando(null)} />}
       {planoEmpresa && <CompanyBillingDialog tenantId={planoEmpresa.tenant.id} company={planoEmpresa.company} groupPlan={planoEmpresa.tenant.subscription?.plan.name} onClose={() => setPlanoEmpresa(null)} />}
     </PageShell>
   );
+}
+
+/** Personalização do plano que vale agora (mesma regra da API: só no plano em que foi feita e antes da data). */
+function personalizacao(t: TenantRow) {
+  const o = t.planOverride;
+  if (!o || !t.subscription || o.planId !== t.subscription.plan.id) return null;
+  return !o.expiresAt || new Date(o.expiresAt) > new Date() ? o : null;
 }
 
 /** Rótulo curto do plano de uma empresa na coluna Plano: [texto, classe]. */

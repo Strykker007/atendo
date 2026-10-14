@@ -21,6 +21,10 @@ interface UIState {
   /** admin: ver conversas de um atendente específico ('me' = as minhas); null = todas */
   assigneeId: string | null;
   conversationId: string | null;
+  /** filtro "último encerramento" das conversas (todas as abas): resultado e/ou motivo */
+  closeFilter: { outcome: 'won' | 'lost' | null; reasonId: string | null };
+  /** som de mensagem nova desligado neste navegador (preferência de quem atende) */
+  soundMuted: boolean;
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
   /** troca de unidade: o número e a conversa abertos eram da outra, então saem junto */
@@ -34,6 +38,8 @@ interface UIState {
   setOrigin: (o: ConversationOrigin | null) => void;
   setAssignee: (id: string | null) => void;
   setConversation: (id: string | null) => void;
+  setSoundMuted: (muted: boolean) => void;
+  setCloseFilter: (f: { outcome: 'won' | 'lost' | null; reasonId: string | null }) => void;
 }
 
 export const useUI = create<UIState>()(
@@ -50,6 +56,8 @@ export const useUI = create<UIState>()(
       origin: null,
       assigneeId: null,
       conversationId: null,
+      soundMuted: false,
+      closeFilter: { outcome: null, reasonId: null },
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
       setCompany: (companyId) => set({ companyId, numberId: null, conversationId: null }),
@@ -61,8 +69,10 @@ export const useUI = create<UIState>()(
       setOrigin: (origin) => set({ origin }),
       setAssignee: (assigneeId) => set({ assigneeId }),
       setConversation: (conversationId) => set({ conversationId }),
+      setSoundMuted: (soundMuted) => set({ soundMuted }),
+      setCloseFilter: (closeFilter) => set({ closeFilter }),
     }),
     // `status` não é lembrado: a tela de conversas abre sempre em 'Aguardando' (a fila nova)
-    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId }) },
+    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, soundMuted: s.soundMuted }) },
   ),
 );

@@ -30,6 +30,11 @@ class SettingsDto {
   /** padrão por desfecho do encerramento; pré-seleciona no modal e ganha de `onCloseFlowId` */
   @IsOptional() @IsUUID() wonFlowId?: string | null;
   @IsOptional() @IsUUID() lostFlowId?: string | null;
+  /** "Comprou" exige valor */
+  @IsOptional() @IsBoolean() requireSaleValue?: boolean;
+  /** nome dos resultados do encerramento ("Fechou venda", "Perdido"…) — vazio volta ao padrão */
+  @IsOptional() @IsString() @MaxLength(30) wonLabel?: string;
+  @IsOptional() @IsString() @MaxLength(30) lostLabel?: string;
   @IsOptional() @IsUUID() defaultFlowId?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(720) defaultFlowInactivityHours?: number;
   /** boas-vindas: cada uma é uma lista de mensagens no formato do Conteúdo */

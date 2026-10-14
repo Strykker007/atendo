@@ -42,3 +42,67 @@ export function voltandoDepoisDeEncerrado(decisao: DecisaoEntrada, statusAnterio
   if (decisao.acao === 'reabrir') return true;
   return decisao.acao === 'criar' && statusAnterior === 'closed';
 }
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Carência depois de encerrar. Na prática o encerramento vem junto com a despedida ("qualquer
+ * coisa estamos à disposição") e o cliente responde "ok", "obrigada", uma figurinha — e isso
+ * reabria a conversa como atendimento novo na fila: o atendente encerrava e ela "voltava para
+ * aguardando". Em produção (out/2026) eram ~1 em 20 encerramentos reabrindo em menos de 1 min.
+ *
+ * Dentro da carência, CONFIRMAÇÃO do cliente e mensagem da loja pelo celular entram no
+ * histórico da conversa encerrada sem reabri-la. Pergunta de verdade ("quanto tempo pra
+ * entrega?"), áudio, foto e documento reabrem como sempre — engolir um pedido é pior que
+ * reabrir um "ok".
+ */
+export const CLOSE_GRACE_MS = 2 * 60 * 60_000;
+
+/** Ainda está na carência do encerramento? */
+export function naCarencia(closedAt: Date | null | undefined, at: Date): boolean {
+  return !!closedAt && at.getTime() - closedAt.getTime() >= -5_000 && at.getTime() - closedAt.getTime() < CLOSE_GRACE_MS;
+}
+
+/**
+ * Palavras de confirmação/agradecimento. Deliberadamente sem "oi", "bom dia" (abrem conversa)
+ * e sem "sim"/"não" (respondem pergunta — inclusive a pesquisa do fluxo de encerramento).
+ */
+const CONFIRMACOES = new Set([
+  'ok', 'okay', 'okk', 'oks', 'blz', 'beleza', 'certo', 'certinho', 'ta', 'tabom', 'ta bom', 'tudo bem', 'tudo certo', 'combinado', 'perfeito', 'show', 'top', 'otimo', 'entendi', 'entendido', 'joia', 'valeu', 'vlw', 'falou', 'fechado',
+  'obrigado', 'obrigada', 'obrigadu', 'obg', 'obgd', 'obgda', 'brigado', 'brigada', 'agradeco', 'grato', 'grata', 'muito obrigado', 'muito obrigada', 'mt obrigado', 'mt obrigada', 'obrigado viu', 'obrigada viu',
+  'de nada', 'por nada', 'eu que agradeco', 'eu quem agradeco', 'nos que agradecemos', 'igualmente', 'pra voce tambem', 'para voce tambem', 'vc tambem', 'voce tambem', 'amem', 'deus abencoe',
+]);
+
+/**
+ * A mensagem é só uma confirmação ("ok", "obrigada 😊", "ok, obrigado!", 👍, figurinha)?
+ * Estrita: até 6 palavras, e todas as partes têm que ser confirmação — "ok, e a entrega?" não é.
+ */
+export function ehConfirmacao(m: { type: string; text?: string | null }): boolean {
+  if (m.type === 'sticker' || m.type === 'reaction') return true;
+  if (m.type !== 'text') return false;
+  const limpo = (m.text ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    // emoji e pontuação viram separador
+    .replace(/[\p{Extended_Pictographic}‍️]/gu, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // só emoji ("👍", "🙏🏼"); número ou pontuação solta ("1", "?") não — responde pergunta/pesquisa
+  if (!limpo) return /^[\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\ufe0f\s]+$/u.test(m.text?.trim() ?? '') && !!m.text?.trim();
+  if (limpo.split(' ').length > 6) return false;
+  if (CONFIRMACOES.has(limpo)) return true;
+  // "ok obrigada", "certo muito obrigado", "obrigada pra voce tambem": cada pedaço é confirmação
+  const palavras = limpo.split(' ');
+  let i = 0;
+  while (i < palavras.length) {
+    let casou = 0;
+    for (let n = Math.min(4, palavras.length - i); n >= 1; n--) {
+      if (CONFIRMACOES.has(palavras.slice(i, i + n).join(' '))) { casou = n; break; }
+    }
+    if (!casou) return false;
+    i += casou;
+  }
+  return true;
+}

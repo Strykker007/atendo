@@ -6,17 +6,18 @@ const COLORS = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c5)',
 const MAX_SLICES = 6; // além disso vira "Outros" — cores categóricas nunca são cicladas
 
 export const METRIC_LABEL: Record<ReportDefinition['metric'], string> = {
-  conversations: 'Conversas',
+  conversations: 'Atendimentos iniciados',
   messages_in: 'Mensagens recebidas',
   messages_out: 'Mensagens enviadas',
   avg_first_response_min: 'Tempo médio da 1ª resposta (min)',
+  closed: 'Atendimentos encerrados',
   revenue: 'Faturamento (R$)',
   won: 'Vendas',
   lost: 'Não comprou',
   win_rate: 'Taxa de conversão',
 };
 export const GROUP_LABEL: Record<ReportDefinition['groupBy'], string> = {
-  day: 'Dia', week: 'Semana', month: 'Mês', tag: 'Tag', status: 'Status', number: 'Número', agent: 'Atendente', origin: 'Origem', campaign: 'Campanha (anúncio)',
+  day: 'Dia', week: 'Semana', month: 'Mês', tag: 'Tag', status: 'Status', number: 'Número', agent: 'Atendente', origin: 'Origem', campaign: 'Campanha (anúncio)', reason: 'Motivo do encerramento',
 };
 const ENUM_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado', organic: 'Orgânico', ad: 'Anúncio', post: 'Publicação', link: 'Link' };
 

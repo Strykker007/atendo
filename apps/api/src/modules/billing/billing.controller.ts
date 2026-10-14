@@ -10,10 +10,12 @@ import { NoTenantOk } from '../auth/tenant.guard';
 import { StripeService } from './stripe.service';
 import { AsaasService } from './asaas.service';
 import { FinanceService } from './finance.service';
+import { PromotionsService } from './promotions.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { UsageService, periodOf } from './usage.service';
 import { quotaStatus } from './quota';
+import { overrideActive, overridePrice } from './plan-override';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /**
@@ -84,6 +86,7 @@ export class BillingController {
     private readonly stripe: StripeService,
     private readonly asaas: AsaasService,
     private readonly finance: FinanceService,
+    private readonly promotions: PromotionsService,
   ) {}
 
   /** Financeiro completo do dono: MRR, faturado/recebido/atrasado, custos, margem, por plano, série mensal. */
@@ -101,12 +104,21 @@ export class BillingController {
    */
   @Get('plans')
   @NoTenantOk()
-  plans(@CurrentUser() user: AuthUser) {
-    return this.prisma.plan.findMany({
-      where: { isActive: true, ...(user.role !== 'super_admin' && { billingCycle: { in: ['monthly', 'yearly'] } }) },
-      orderBy: { priceMonth: 'asc' },
-      select: { id: true, name: true, priceMonth: true, priceYear: true, isFree: true, billingCycle: true, durationDays: true, billingModel: true, limits: true, stripePriceId: true },
-    });
+  async plans(@CurrentUser() user: AuthUser) {
+    const [plans, abertas, atual] = await Promise.all([
+      this.prisma.plan.findMany({ where: { isActive: true, ...(user.role !== 'super_admin' && { billingCycle: { in: ['monthly', 'yearly'] } }) }, orderBy: { priceMonth: 'asc' } }),
+      // no Stripe o valor é o price do catálogo: a promoção só existe com Asaas (ou sem gateway, atribuída pelo dono)
+      this.gateway() === 'stripe' ? [] : this.promotions.open(),
+      user.tenantId ? this.prisma.planOverride.findUnique({ where: { tenantId: user.tenantId } }) : null,
+    ]);
+    // promoção que ESTE cliente ganharia ao assinar cada plano (mesma regra do checkout) — docs/05#promoções
+    return Promise.all(plans.map(async (p) => {
+      const q = await this.promotions.quote(p, atual, new Date(), abertas);
+      return {
+        id: p.id, name: p.name, priceMonth: p.priceMonth, priceYear: p.priceYear, isFree: p.isFree, billingCycle: p.billingCycle, durationDays: p.durationDays, billingModel: p.billingModel, limits: p.limits, stripePriceId: p.stripePriceId,
+        promotion: q && { name: q.promotion.name, discountPercent: Number(q.promotion.discountPercent), durationMonths: q.promotion.durationMonths, endsAt: q.promotion.endsAt, priceMonth: q.priceMonth },
+      };
+    }));
   }
 
   /**
@@ -117,15 +129,17 @@ export class BillingController {
   @NoTenantOk()
   @Roles('super_admin')
   async allPlans() {
-    const plans = await this.prisma.plan.findMany({ orderBy: [{ isActive: 'desc' }, { priceMonth: 'asc' }], include: { subscriptions: { select: { status: true, priceMonth: true } } } });
-    return plans.map(({ subscriptions, ...p }) => {
+    const plans = await this.prisma.plan.findMany({ orderBy: [{ isActive: 'desc' }, { priceMonth: 'asc' }], include: { subscriptions: { select: { status: true, priceMonth: true, planId: true, tenant: { select: { planOverride: true } } } } } });
+    return plans.map(({ subscriptions: todas, ...p }) => {
       const preco = Number(p.priceMonth);
+      // valor negociado por cliente não é "preço antigo": não entra no reajuste
+      const subscriptions = todas.filter((s) => overridePrice(s.tenant.planOverride, s.planId) === null);
       return {
         ...p,
         priceMonth: preco,
         priceYear: p.priceYear === null ? null : Number(p.priceYear),
         costMonth: Number(p.costMonth),
-        subscribers: subscriptions.length,
+        subscribers: todas.length,
         // quantos pagam valor diferente do atual: é o número que mostra quanto está parado no
         // passado, e some sozinho quando o reajuste roda
         onOldPrice: aReajustar(subscriptions.map((s, i) => ({ id: String(i), status: s.status, priceMonth: s.priceMonth === null ? null : Number(s.priceMonth) })), preco).length,
@@ -256,12 +270,12 @@ export class BillingController {
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, overageAmount: 0, quota: null, noTenant: true };
+      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, customPlan: null, overageAmount: 0, quota: null, noTenant: true };
     }
     const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies, tenant] = await Promise.all([
       this.usage.current(user.tenantId),
       this.usage.limits(user.tenantId),
-      this.prisma.subscription.findUnique({ where: { tenantId: user.tenantId }, include: { plan: true } }),
+      this.prisma.subscription.findUnique({ where: { tenantId: user.tenantId }, include: { plan: true, tenant: { select: { planOverride: true } } } }),
       this.prisma.whatsAppNumber.count({ where: { tenantId: user.tenantId, isActive: true } }),
       this.prisma.user.count({ where: { tenantId: user.tenantId, isActive: true, role: { in: ['agent', 'manager'] } } }),
       this.prisma.usageCounter.findUnique({ where: { tenantId_period: { tenantId: user.tenantId, period: periodOf() } } }),
@@ -295,10 +309,12 @@ export class BillingController {
       billingType: tenant?.billingType ?? 'INDIVIDUAL',
       /** reajuste já avisado e ainda não aplicado — a tela do cliente mostra antes de chegar */
       priceChange:
-        sub && sub.plan.priceAppliesToExistingAt && Number(sub.priceMonth ?? sub.plan.priceMonth) !== Number(sub.plan.priceMonth)
+        sub && sub.plan.priceAppliesToExistingAt && overridePrice(sub.tenant.planOverride, sub.planId) === null && Number(sub.priceMonth ?? sub.plan.priceMonth) !== Number(sub.plan.priceMonth)
           ? { priceMonth: Number(sub.plan.priceMonth), at: sub.plan.priceAppliesToExistingAt }
           : null,
       currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+      /** plano com condições negociadas pelo dono (valor e/ou limites); `expiresAt` null = sem data */
+      customPlan: sub && overrideActive(sub.tenant.planOverride, sub.planId) ? { expiresAt: sub.tenant.planOverride.expiresAt } : null,
       overageAmount: counter ? Number(counter.overageAmount) : 0,
       /** uso x limite pela unidade do plano — o front NÃO recalcula (é a mesma regra do envio) */
       quota: quotaStatus(plan, used),

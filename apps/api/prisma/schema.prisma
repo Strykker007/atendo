@@ -60,6 +60,8 @@ model Tenant {
   tags          Tag[]
   folders       QuickReplyFolder[]
   subscription  Subscription?
+  planOverride  PlanOverride?
+  discountGrants DiscountGrant[]
   flows         Flow[]
   professionals Professional[]
   services      Service[]
@@ -82,7 +84,12 @@ model Tenant {
 
   scheduledMessages ScheduledMessage[]
   globalVariables GlobalVariable[]
+  closeReasons    CloseReason[]
   pixKeys         PixKey[]
+  auditLogs       AuditLog[]
+  satisfactionSurveys SatisfactionSurvey[]
+  surveyResponses     SurveyResponse[]
+  salesGoals          SalesGoal[]
   @@map("tenants")
 }
 
@@ -339,6 +346,13 @@ model TenantSettings {
   /// fluxo padrão por desfecho do encerramento — vem pré-selecionado no modal; sem ele vale `onCloseFlowId`
   wonFlowId  String?
   lostFlowId String?
+  /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na
+  /// conversão, não soma faturamento (sem linha em `sales`)
+  requireSaleValue Boolean @default(true)
+  /// nome dos dois resultados do encerramento na empresa ("Fechou venda", "Matriculado"…). Só o
+  /// rótulo muda: por baixo continuam `won`/`lost` (relatórios, vendas, fluxos e filtros)
+  wonLabel  String @default("Comprou")
+  lostLabel String @default("Não comprou")
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)
@@ -382,6 +396,7 @@ enum WhatsAppProvider {
 /// Faixas de atraso entre envios. Rajada é o padrão que o WhatsApp pune no QR.
 enum SendDelayProfile {
   instant
+  /// legado (1–2s): não é mais oferecido, migrado para `moderate`
   fast
   short
   /// 3–5s sorteado a cada envio
@@ -415,9 +430,11 @@ model WhatsAppNumber {
   infraCostMonth Decimal      @default(0) @db.Decimal(10, 2)
   // ---- proteção contra bloqueio/banimento (só faz sentido no QR) ----
   /// intervalo entre envios deste número; `instant` só para a API oficial
-  sendDelay      SendDelayProfile @default(fast)
+  sendDelay      SendDelayProfile @default(moderate)
   /// teto de envios PROATIVOS por dia (resposta dentro de 24h não conta). 0 = sem teto (padrão)
   sendDailyLimit Int          @default(0)
+  /// teto de mensagens de TRANSMISSÃO por 24h neste número (só pesa no QR Code; a Meta tem o tier dela). Dono do sistema ajusta
+  campaignDailyLimit Int      @default(200)
   /// quando o número conectou pela primeira vez — número novo sobe o volume aos poucos
   warmupStartedAt DateTime?
   /// Limites da fila de envio (`Partial<SendLimits>` do shared); o que faltar = padrão do provider
@@ -597,6 +614,142 @@ model GlobalVariable {
   @@map("global_variables")
 }
 
+/// Motivo de encerramento (lista da empresa), separado das tags. Obrigatório ao encerrar quando
+/// há motivo ativo para o resultado escolhido. Excluir = desativar: o histórico guarda o id e o nome.
+model CloseReason {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  color     String   @default("#94a3b8")
+  /// em qual resultado aparece: won | lost | both (ignorado quando `ignoreInReports`)
+  outcome   String   @default("both")
+  /// motivo de atendimento interno (diretoria, teste, erro de envio): só aparece no encerramento
+  /// "Atendimento interno" (permissão `conversations.close_internal`) e o atendimento sai dos
+  /// relatórios. Ver docs/06-modelo-de-dados.md#encerramento-interno
+  ignoreInReports Boolean @default(false)
+  /// exige pelo menos uma tag no atendimento (da conversa ou escolhida no encerramento)
+  requiresTag     Boolean @default(false)
+  position  Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([tenantId, name])
+  @@map("close_reasons")
+}
+
+/// Meta mensal do consultor (docs/metas.md). `userId = '*'` é a meta padrão: vale para quem não
+/// tem meta própria no mês. Sem FK no usuário de propósito: o '*' não é usuário, e meta de quem
+/// saiu continua no histórico do mês.
+model SalesGoal {
+  id            String   @id @default(uuid())
+  tenantId      String
+  /// "AAAA-MM", no fuso do cliente
+  month         String
+  /// id do consultor ou '*' (padrão do mês)
+  userId        String
+  /// meta de faturamento (soma das vendas encerradas como "Comprou"); nulo = sem meta de valor
+  revenueTarget Decimal? @db.Decimal(12, 2)
+  /// meta de quantidade de vendas; nulo = sem meta de quantidade
+  wonTarget     Int?
+  updatedById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, month, userId])
+  @@map("sales_goals")
+}
+
+/// Pesquisa de satisfação enviada ao encerrar o atendimento (docs/pesquisa-de-satisfacao.md).
+/// Excluir = desativar: as respostas guardam o id e o relatório do mês fechado não perde a linha.
+model SatisfactionSurvey {
+  id              String   @id @default(uuid())
+  tenantId        String
+  name            String
+  /// scale_5 | scale_10 | csat_3 (`SURVEY_SCALES` no shared)
+  scale           String   @default("scale_5")
+  /// pergunta (aceita `{{variáveis}}`); a instrução de como responder é acrescentada pelo sistema
+  question        String
+  /// cliente pode recusar ("0" ou botão): a pesquisa termina na hora, sem insistir
+  allowDecline    Boolean  @default(true)
+  declineLabel    String   @default("Não responder")
+  /// depois da nota, pergunta se quer deixar um comentário
+  askComment      Boolean  @default(true)
+  /// perguntas além da principal (`SurveyExtraQuestion[]`, até 2): uma por vez, só depois da resposta anterior
+  extraQuestions  Json     @default("[]")
+  commentPrompt   String?
+  thanksMessage   String?
+  /// enviada quando o cliente recusa; vazio = não manda nada
+  declinedMessage String?
+  /// horas esperando a resposta; depois disso a mensagem do cliente reabre o atendimento normalmente
+  expiresHours    Int      @default(24)
+  /// pré-marcada no encerramento (e usada quando a API não diz qual) — no máximo uma por empresa
+  isDefault       Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  responses SurveyResponse[]
+
+  @@index([tenantId])
+  @@map("satisfaction_surveys")
+}
+
+enum SurveyResponseStatus {
+  /// enviada, esperando a nota
+  pending
+  /// nota dada, esperando o comentário (opcional)
+  commenting
+  answered
+  declined
+  /// o prazo venceu ou o cliente mandou outra coisa (não insistimos)
+  expired
+  /// não saiu (número desconectado, fora da janela da Meta, descadastrado…)
+  failed
+}
+
+/// Uma pesquisa enviada num encerramento. Escala e consultor ficam congelados aqui: trocar a
+/// pesquisa depois não reescreve as notas que já entraram.
+model SurveyResponse {
+  id             String               @id @default(uuid())
+  tenantId       String
+  surveyId       String
+  conversationId String
+  contactId      String
+  /// consultor do atendimento (dono da conversa ao encerrar, senão quem encerrou)
+  agentId        String?
+  agentName      String?
+  scale          String
+  status         SurveyResponseStatus @default(pending)
+  /// 1..máximo da escala; nulo = não respondeu ou recusou
+  score          Int?
+  /// pergunta atual: 0 = a principal, 1.. = as adicionais (congeladas em `questions`)
+  step           Int                  @default(0)
+  /// perguntas adicionais no momento do envio (`SurveyExtraQuestion[]`): editar a pesquisa não muda a que está em andamento
+  questions      Json                 @default("[]")
+  /// respostas das adicionais (`SurveyExtraAnswer[]`)
+  answers        Json                 @default("[]")
+  comment        String?
+  error          String?
+  sentAt         DateTime             @default(now())
+  expiresAt      DateTime
+  answeredAt     DateTime?
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  survey       SatisfactionSurvey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, sentAt])
+  @@index([tenantId, agentId, sentAt])
+  @@index([conversationId, status])
+  @@map("survey_responses")
+}
+
 /// Chave Pix da empresa: o atendente envia pelo painel do chat como cartão com "Copiar chave Pix"
 model PixKey {
   id        String   @id @default(uuid())
@@ -687,6 +840,12 @@ model Conversation {
   outcomeReason  String?
   outcomeAt      DateTime?
   outcomeById    String?
+  // ---- último encerramento: sobrevive à reabertura (mostrado no topo da conversa, na aba
+  // Encerrado e usado como filtro em todas as abas — docs/06-modelo-de-dados.md) ----
+  lastClosedAt      DateTime?
+  lastCloseOutcome  ConversationOutcome?
+  lastCloseReasonId String?
+  lastCloseReason   CloseReason? @relation(fields: [lastCloseReasonId], references: [id], onDelete: SetNull)
   // ---- cache do resumo por IA ----
   /// Último resumo gerado. Vale enquanto `summaryLastMessageId` for a última mensagem da
   /// conversa — pedir de novo sem mensagem nova devolve isto sem chamar (nem cobrar) a IA.
@@ -722,11 +881,14 @@ model Conversation {
   /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
   scheduledMessages ScheduledMessage[]
+  surveyResponses   SurveyResponse[]
   @@unique([numberId, contactId])
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
   /// fila por tempo de espera
   @@index([tenantId, status, awaitingSince])
   @@index([tenantId, origin])
+  /// filtro "motivo do último encerramento"
+  @@index([tenantId, lastCloseReasonId])
   /// relatórios: conversas do cliente abertas no período
   @@index([tenantId, createdAt])
   @@index([tenantId, departmentId, status])
@@ -818,6 +980,15 @@ model ConversationEvent {
   /// tags escolhidas no encerramento (opcionais). Ficam aqui além de na conversa: o relatório
   /// "por tag" do mês fechado não pode mudar se alguém tirar a tag da conversa depois
   tagIds         String[]              @default([])
+  /// motivo do encerramento (lista `close_reasons`); o nome também fica em `reason` (texto congelado)
+  closeReasonId  String?
+  /// etapa do Kanban (tag principal) em que o atendimento estava ao encerrar
+  stageTagId     String?
+  /// TODAS as tags da conversa no encerramento (transitórias: saem da conversa ao encerrar e ficam aqui)
+  tagSnapshot    String[]              @default([])
+  /// encerramento interno: o atendimento (início, TMR, encerramento, conversão) sai dos relatórios.
+  /// Congelado aqui — mudar o motivo depois não reescreve o mês que já fechou
+  ignoreInReports Boolean              @default(false)
   createdAt      DateTime              @default(now())
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -830,6 +1001,29 @@ model ConversationEvent {
   @@index([tenantId, type, createdAt])
   @@index([tenantId, actorId, createdAt])
   @@map("conversation_events")
+}
+
+/// Registro de auditoria imutável (só INSERT — nenhuma rota altera ou apaga). Nome do ator e do
+/// contato ficam copiados: excluir o usuário ou renomear o contato não apaga o rastro.
+/// `action`: `conversation.closed_internal` (docs/06-modelo-de-dados.md#encerramento-interno)
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  action     String
+  actorId    String?
+  actorName  String?
+  entityType String
+  entityId   String
+  contactId  String?
+  contactName String?
+  /// detalhes da ação (motivo, em massa…)
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, action, createdAt(sort: Desc)])
+  @@map("audit_logs")
 }
 
 /// Venda registrada ao encerrar um atendimento como "Comprou" (docs/06-modelo-de-dados.md).
@@ -963,16 +1157,37 @@ model Tag {
   isKanban  Boolean  @default(true)
   /// ordem da coluna no Kanban
   position  Int      @default(0)
-  /// aparece para escolha no encerramento (Comprou / Não comprou); as outras ficam de fora
-  showOnClose Boolean @default(false)
+  /// aparece para escolha ao encerrar como "Comprou"
+  showOnWon  Boolean @default(false)
+  /// aparece para escolha ao encerrar como "Não comprou" (os antigos motivos de perda)
+  showOnLost Boolean @default(false)
   createdAt DateTime @default(now())
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations ConversationTag[]
   contacts      ContactTag[]
+  /// pares "conflita com" (ver TagConflict) — a tag pode estar em qualquer um dos lados
+  conflictsA    TagConflict[]     @relation("tagConflictA")
+  conflictsB    TagConflict[]     @relation("tagConflictB")
 
   @@unique([tenantId, name])
   @@map("tags")
+}
+
+/// Par de tags que não convivem (ex.: "Comprou" × "Não comprou"). Simétrico: UMA linha por par,
+/// com `tagId` < `otherId`. Marcar uma tira só as opostas DIRETAS dela (nunca em cadeia) —
+/// ver `tags/conflicts.ts`. O tenant vem das tags (as duas são do mesmo, validado na API).
+model TagConflict {
+  tagId     String
+  otherId   String
+  createdAt DateTime @default(now())
+
+  tag   Tag @relation("tagConflictA", fields: [tagId], references: [id], onDelete: Cascade)
+  other Tag @relation("tagConflictB", fields: [otherId], references: [id], onDelete: Cascade)
+
+  @@id([tagId, otherId])
+  @@index([otherId])
+  @@map("tag_conflicts")
 }
 
 model ConversationTag {
@@ -1276,6 +1491,8 @@ model Plan {
 
   subscriptions Subscription[]
   companySubscriptions CompanySubscription[]
+  overrides     PlanOverride[]
+  discountGrants DiscountGrant[]
 
   @@map("plans")
 }
@@ -1331,6 +1548,125 @@ model Subscription {
   plan   Plan   @relation(fields: [planId], references: [id])
 
   @@map("subscriptions")
+}
+
+/// Personalização do plano para UM cliente (docs/05-planos-e-cobranca.md#personalização-por-cliente):
+/// valor e limites negociados por cima do plano base. Vale só enquanto a assinatura estiver no
+/// `planId` em que foi feita — trocar de plano desliga a personalização (os números negociados
+/// eram para aquele plano). `expiresAt` null = vale enquanto durar a assinatura nesse plano.
+model PlanOverride {
+  id         String    @id @default(uuid())
+  tenantId   String    @unique
+  /// plano base que esta personalização ajusta
+  planId     String
+  /// mensalidade negociada (equivalente mensal em plano anual). Null = segue o preço do plano
+  priceMonth Decimal?  @db.Decimal(10, 2)
+  /// PlanLimitsOverride (packages/shared): só as chaves presentes sobrescrevem; `null` = ilimitado
+  limits     Json      @default("{}")
+  /// fim da vigência (exclusivo). Null = sem data
+  expiresAt  DateTime?
+  /// quando o job diário devolveu o valor do plano à assinatura, depois de `expiresAt`
+  endedAt    DateTime?
+  /// motivo/acordo — só o dono vê
+  notes      String?
+  /// nasceu de uma promoção (quem já aproveitou não aproveita de novo); null = negociada à mão
+  promotionId String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan      Plan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  promotion Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@map("plan_overrides")
+}
+
+/// Promoção de entrada (docs/05-planos-e-cobranca.md#promoções): quem assinar um dos `planIds`
+/// entre `startsAt` e `endsAt` ganha `discountPercent` por `durationMonths` meses. Vira uma
+/// `PlanOverride` do cliente na hora de assinar — o motor de personalização faz o resto
+/// (valor no Asaas, fora do reajuste, volta ao preço do plano no fim).
+model Promotion {
+  id              String   @id @default(uuid())
+  name            String
+  discountPercent Decimal  @db.Decimal(5, 2)
+  durationMonths  Int
+  planIds         String[]
+  startsAt        DateTime @default(now())
+  /// último instante para assinar com a promoção (exclusivo)
+  endsAt          DateTime
+  /// encerrar antes da data sem apagar o histórico
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  overrides PlanOverride[]
+  grants    DiscountGrant[]
+
+  @@map("promotions")
+}
+
+enum DiscountKind {
+  /// veio de uma promoção
+  promotion
+  /// valor negociado à mão na personalização
+  negotiated
+}
+
+enum DiscountSource {
+  /// checkout do Asaas (automático)
+  checkout
+  /// "Novo cliente" do dono (automático)
+  tenant_create
+  /// dono, num cliente
+  manual
+  /// dono, "aplicar a todos" da promoção
+  bulk
+  /// o cliente voltou ao plano que tinha valor negociado
+  plan_return
+}
+
+/// Livro de descontos (docs/05-planos-e-cobranca.md#livro-de-descontos): uma linha por
+/// concessão de valor diferente do de tabela — promoção ou negociado. Nunca é apagado nem
+/// reescrito (só `closedAt` quando termina antes do previsto): é o registro para contabilidade
+/// e o que o Financeiro soma. Nomes e preços são cópia do momento da concessão.
+model DiscountGrant {
+  id              String         @id @default(uuid())
+  /// null só se o cliente/plano for apagado — o registro fica (nomes copiados abaixo)
+  tenantId        String?
+  planId          String?
+  promotionId     String?
+  kind            DiscountKind
+  source          DiscountSource
+  /// cópias do momento: a promoção e o plano podem mudar ou sumir depois
+  tenantName      String
+  planName        String
+  promotionName   String?
+  /// preço de tabela do plano na concessão (mensal)
+  listPrice       Decimal        @db.Decimal(10, 2)
+  /// mensalidade concedida
+  priceMonth      Decimal        @db.Decimal(10, 2)
+  /// (listPrice − priceMonth) / listPrice; negativo = acima da tabela
+  discountPercent Decimal        @db.Decimal(6, 2)
+  /// empresas cobradas no grupo consolidado (desconto do ciclo = diferença × units)
+  units           Int            @default(1)
+  startsAt        DateTime
+  /// fim previsto; null = sem data
+  endsAt          DateTime?
+  /// terminou antes do previsto (removida, substituída, trocou de plano)
+  closedAt        DateTime?
+  /// quem concedeu; null = automático
+  grantedById     String?
+  grantedByName   String?
+  createdAt       DateTime       @default(now())
+
+  tenant    Tenant?    @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  plan      Plan?      @relation(fields: [planId], references: [id], onDelete: SetNull)
+  promotion Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([startsAt])
+  @@map("discount_grants")
 }
 
 /// Assinatura própria de uma empresa em modo INDIVIDUAL. Define só o preço e o vencimento da
@@ -1572,7 +1908,7 @@ model Campaign {
   tenantId   String
   numberId   String
   name       String
-  /// texto da mensagem; aceita {{nome}} e {{primeiro_nome}}
+  /// texto da mensagem (QR); aceita {{contact.first_name}}, {{saudacao}} e as variáveis da empresa
   text       String
   mediaKey   String?
   mediaType  String?
@@ -1584,6 +1920,13 @@ model Campaign {
   startAt    DateTime?
   /// só dispara dentro do horário de funcionamento do cliente
   businessHoursOnly Boolean @default(true)
+  /// filtros que montaram o público (só para mostrar; a lista em si está em `targets`)
+  audience   Json?
+  /// QR Code: quem aceitou o aviso de risco de bloqueio, e quando (obrigatório para iniciar)
+  riskAcceptedAt   DateTime?
+  riskAcceptedById String?
+  /// por que parou sozinha (3 falhas seguidas, número caiu…); limpa ao retomar
+  pauseReason String?
   createdById String?
   startedAt  DateTime?
   finishedAt DateTime?

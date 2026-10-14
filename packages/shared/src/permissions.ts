@@ -25,6 +25,9 @@ export const PERMISSIONS = {
   // é permissão para poder TIRAR de quem não deve editar
   'conversations.edit_message': 'Editar mensagens de texto enviadas (qualquer origem, até 15 min depois do envio)',
   'conversations.delete_chat': 'Limpar o histórico de uma conversa',
+  // trava contra maquiar métrica: atendimento interno sai do TMR, do volume e da conversão, então
+  // só gestão encerra assim — e cada uso fica na auditoria (docs/06-modelo-de-dados.md#encerramento-interno)
+  'conversations.close_internal': 'Encerrar como atendimento interno (fora dos relatórios de desempenho)',
   'conversations.view_deleted': 'Ver o conteúdo original de mensagens apagadas',
   // vendida à parte: o cliente só tem se o perfil dele tiver (docs/agendamento-de-mensagens.md)
   'conversations.schedule_message': 'Agendar mensagens para o cliente',
@@ -49,7 +52,7 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 /** Agrupamento só para a tela de edição do perfil não virar uma lista de 14 itens soltos. */
 export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
-  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit'] },
+  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit'] },
   { label: 'Conteúdo', items: ['tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage'] },
   { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage'] },
   { label: 'Conta', items: ['numbers.manage', 'billing.manage'] },
@@ -65,7 +68,7 @@ export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
  */
 export const DEFAULT_PERMISSIONS: Record<'tenant_admin' | 'manager' | 'agent', Permission[]> = {
   tenant_admin: [...ALL_PERMISSIONS],
-  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.view_deleted', 'contacts.edit', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'team.manage', 'settings.manage'],
+  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'contacts.edit', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'team.manage', 'settings.manage'],
   // o padrão do atendente reproduz EXATAMENTE o que ele já podia antes dos perfis: respostas
   // rápidas e relatórios nunca foram restritos, e tirá-los agora seria perder acesso numa
   // migração. Quem quiser restringir, cria um perfil sem eles. Nota interna entrou depois

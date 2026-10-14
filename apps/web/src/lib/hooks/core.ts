@@ -9,9 +9,9 @@ import { api, ApiError, onAccessToken } from '../api';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
-export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number; /** aparece para escolha no encerramento */ showOnClose?: boolean }
+export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number; /** aparece ao encerrar como "Comprou" */ showOnWon?: boolean; /** aparece ao encerrar como "Não comprou" */ showOnLost?: boolean; /** opostas diretas: marcar esta tira estas (nos dois sentidos) */ conflictIds?: string[] }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** conectado, mas parou de receber (chaves corrompidas) — ler o QR de novo */ receiveStalledAt?: string | null; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; /** teto de transmissão por 24h (QR Code) */ campaignDailyLimit?: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** conectado, mas parou de receber (chaves corrompidas) — ler o QR de novo */ receiveStalledAt?: string | null; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -27,8 +27,12 @@ export interface Conversation {
   /** desde quando o contato espera resposta; null = já respondemos */
   awaitingSince: string | null;
   contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[]; /** pediu para não receber automáticas ("sair") */ optOutAt?: string | null; /** a checagem disse que o telefone não tem WhatsApp */ waInvalidAt?: string | null };
-  /** `isPrimary` = etapa do atendimento no Kanban (no máximo uma) */
+  /** `isPrimary` = etapa do atendimento no Kanban (no máximo uma). Transitórias: saem ao encerrar */
   tags: { tag: Tag; isPrimary?: boolean }[];
+  /** último encerramento (sobrevive à reabertura): topo da conversa, aba Encerrado, filtro */
+  lastClosedAt?: string | null;
+  lastCloseOutcome?: ConversationOutcome | null;
+  lastCloseReason?: { id: string; name: string; color: string } | null;
   assignee: { id: string; name: string } | null;
   /** departamento da conversa; null = sem departamento */
   departmentId?: string | null;
@@ -106,6 +110,8 @@ export interface Usage {
   billingType: BillingType;
   /** reajuste já avisado e ainda não aplicado */
   priceChange: { priceMonth: number; at: string } | null;
+  /** condições negociadas com o dono (valor e/ou limites) — `expiresAt` null = sem data */
+  customPlan: { expiresAt: string | null } | null;
   currentPeriodEnd: string | null;
   overageAmount: number;
   /**
@@ -129,7 +135,7 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export const useConversations = (q: { status: ConversationStatus; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas }) =>
+export const useConversations = (q: { status: ConversationStatus; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null }) =>
   useQuery({
     queryKey: ['conversations', q],
     queryFn: () => {
@@ -141,6 +147,8 @@ export const useConversations = (q: { status: ConversationStatus; numberId: stri
       if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
       if (q.search) p.set('search', q.search);
       if (q.sort && q.sort !== 'recent') p.set('sort', q.sort);
+      if (q.closeReasonId) p.set('closeReasonId', q.closeReasonId);
+      if (q.lastOutcome) p.set('lastOutcome', q.lastOutcome);
       return api<Conversation[]>(`/conversations?${p}`);
     },
     // sempre "velha": trocar de aba busca de novo (troca de chave só refaz a busca de dado velho).
@@ -461,7 +469,7 @@ export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'docume
 export const useSetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; status: ConversationStatus; outcome?: ConversationOutcome; value?: number; tagIds?: string[]; products?: string; items?: { description: string; value: number }[]; notes?: string; flowId?: string | null; surveyId?: string | null; closeReasonId?: string; internal?: boolean }) => api(`/conversations/${id}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: (_, v) => {
       // sai na hora das listas de outro status (sem esperar o refetch) e a aberta já vê o novo status
       for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
@@ -478,7 +486,7 @@ export const useSetStatus = () => {
 export const useBulkClose = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { ids: string[]; outcome: ConversationOutcome; tagIds?: string[] }) =>
+    mutationFn: (b: { ids: string[]; outcome: ConversationOutcome; tagIds?: string[]; closeReasonId?: string; internal?: boolean }) =>
       api<{ closed: number; ignored: number }>('/conversations/bulk/close', { method: 'POST', body: JSON.stringify(b) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
@@ -587,3 +595,19 @@ export const useSetTags = () => {
     onSuccess: (_, v) => invConv(qc, v.id),
   });
 };
+
+/**
+ * Versão no ar, do `GET /health` (`1.4.2+abc1234`; `dev` no ambiente local). `short` é o
+ * número ("v1.4.2"), `full` traz o commit. O aviso de versão nova é o `VersionWatcher`.
+ */
+export const useAppVersion = () =>
+  useQuery({
+    queryKey: ['app-version'],
+    staleTime: Infinity,
+    queryFn: async () => {
+      const r = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/health`, { cache: 'no-store' });
+      const { version } = (await r.json()) as { version?: string };
+      const v = version || 'dev';
+      return { full: v, short: v === 'dev' ? 'dev' : `v${v.split('+')[0]}` };
+    },
+  });

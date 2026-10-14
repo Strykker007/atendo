@@ -3,7 +3,7 @@ import { ProviderRegistry } from './providers/provider.registry';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
-import { defaultSendDelay } from './sending-policy';
+import { defaultSendDelay, sendDelayAllowed } from './sending-policy';
 import { warmupPhase } from './number-warmup';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -39,6 +39,8 @@ class UpdateNumberDto {
   /** proteção contra bloqueio: ritmo de envio e teto diário */
   @IsOptional() @IsEnum(SendDelayProfile) sendDelay?: SendDelayProfile;
   @IsOptional() @IsInt() @Min(0) @Max(100_000) sendDailyLimit?: number;
+  /** teto de transmissão por 24h (QR Code) — dono do sistema */
+  @IsOptional() @IsInt() @Min(0) @Max(5_000) campaignDailyLimit?: number;
   /** `true` encerra o aquecimento (chip antigo que só é novo no Atendo). Não dá para religar. */
   @IsOptional() @IsBoolean() endWarmup?: boolean;
   /** limites da fila de envio (`Partial<SendLimits>`); campo ausente/null = padrão do provider. null limpa tudo */
@@ -74,7 +76,7 @@ export class NumbersController {
   async list(@CurrentUser() user: AuthUser) {
     const rows = await this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId, deletedAt: null },
-      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });
     // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts).
@@ -140,7 +142,7 @@ export class NumbersController {
   @RequirePermission('numbers.manage')
   async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
     await this.manageable(user, id);
-    const { infraCostMonth, sendLimits, endWarmup, sendDelay, sendDailyLimit, ...resto } = dto;
+    const { infraCostMonth, sendLimits, endWarmup, sendDelay, sendDailyLimit, campaignDailyLimit, ...resto } = dto;
     // Custo da linha e ritmo de envio (intervalo, limites da fila, teto diário, aquecimento) são
     // do dono do sistema. Chegam no corpo mas são descartados para o cliente: devolver 403
     // vazaria que o campo existe. O ritmo é o que protege o número de bloqueio — o cliente
@@ -149,11 +151,16 @@ export class NumbersController {
     // impersonação carrega papel de admin do cliente, então checar só o papel trancaria o
     // próprio dono para fora do único lugar onde os campos aparecem.
     const ehDono = user.role === 'super_admin' || !!user.impersonatorId;
+    if (ehDono && sendDelay !== undefined) {
+      const n = await this.prisma.whatsAppNumber.findFirst({ where: { id, tenantId: user.tenantId }, select: { provider: true } });
+      if (n && !sendDelayAllowed(sendDelay, n.provider)) throw new BadRequestException(sendDelay === 'fast' ? 'O intervalo Rápido (1–2s) não está mais disponível: o mínimo no QR Code é 3 segundos.' : 'Imediato só existe na API oficial (Meta).');
+    }
     const doDono = ehDono
       ? {
           ...(infraCostMonth !== undefined && { infraCostMonth }),
           ...(sendDelay !== undefined && { sendDelay }),
           ...(sendDailyLimit !== undefined && { sendDailyLimit }),
+          ...(campaignDailyLimit !== undefined && { campaignDailyLimit }),
           ...(sendLimits !== undefined && { sendLimits: sendLimits === null ? Prisma.DbNull : (cleanSendLimits(sendLimits) as Prisma.InputJsonValue) }),
           ...(endWarmup && { warmupStartedAt: null }),
         }
@@ -161,7 +168,7 @@ export class NumbersController {
     return this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId, deletedAt: null },
       data: { ...resto, ...doDono },
-      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
+      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
     });
   }
 

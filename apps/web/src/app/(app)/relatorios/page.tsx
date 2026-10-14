@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Play, Save, Download, BarChart3, LineChart as LineIcon, PieChart as PieIcon, Bookmark, Trash2, Table2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -9,10 +10,11 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
-import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target } from 'lucide-react';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useOutcomeLabels, useHasFeature, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
+import { Attendances, type AttendanceFocus } from '@/components/reports/Attendances';
 
 // datas no fuso do navegador: `toISOString` dava o dia UTC, e depois das 21h "hoje" já era amanhã
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -43,10 +45,17 @@ export default function RelatoriosPage() {
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [agentId, setAgentId] = useState('');
   const [showBuilder, setShowBuilder] = useState(false);
+  /** clique numa tag do "Não comprou, por tag" → auditoria filtrada */
+  const [foco, setFoco] = useState<AttendanceFocus | null>(null);
   const periodo = { from: inicioDoDia(range[0]), to: inicioDoDia(range[1]) };
   const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined };
   const overview = useReportOverview({ ...periodo, ...filtros });
   const agents = useAgents();
+  const temRanking = useHasFeature('consultant_ranking').has;
+  const temSatisfacao = useHasFeature('satisfaction_surveys').has;
+  const labels = useOutcomeLabels();
+  // "Não comprou" leva o nome que a empresa deu ao resultado
+  const metricLabel = { ...METRIC_LABEL, lost: labels.lost };
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<SavedReport | null>(null);
@@ -81,7 +90,7 @@ export default function RelatoriosPage() {
 
   function exportCsv() {
     if (!result) return;
-    const rows = [[GROUP_LABEL[result.definition.groupBy], METRIC_LABEL[result.definition.metric]], ...result.series.map((s) => [fmtLabel(result.definition.groupBy, s.label), String(s.value)])];
+    const rows = [[GROUP_LABEL[result.definition.groupBy], metricLabel[result.definition.metric]], ...result.series.map((s) => [fmtLabel(result.definition.groupBy, s.label), String(s.value)])];
     const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(';')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
@@ -96,6 +105,12 @@ export default function RelatoriosPage() {
       <PageHeader
         title="Relatórios"
         subtitle="Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais."
+        action={
+          <div className="flex flex-wrap gap-2">
+            {temSatisfacao && <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>}
+            {temRanking && <Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking e metas</Link>}
+          </div>
+        }
       />
 
       {/* ---------- Filtros da tela inteira ---------- */}
@@ -128,23 +143,24 @@ export default function RelatoriosPage() {
       {overview.data && (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Kpi icon={<MessageSquare size={15} />} label="Conversas no período" value={overview.data.kpis.conversations.toLocaleString('pt-BR')} sub={`${overview.data.kpis.messagesIn.toLocaleString('pt-BR')} recebidas · ${overview.data.kpis.messagesOut.toLocaleString('pt-BR')} enviadas`} />
+            <Kpi icon={<MessageSquare size={15} />} label="Atendimentos no período" value={overview.data.kpis.conversations.toLocaleString('pt-BR')} sub={`${overview.data.kpis.messagesIn.toLocaleString('pt-BR')} recebidas · ${overview.data.kpis.messagesOut.toLocaleString('pt-BR')} enviadas`} />
             <Kpi icon={<Inbox size={15} />} label="Na fila agora" value={String(overview.data.kpis.waitingNow)} sub={`${overview.data.kpis.inProgressNow} em atendimento`} tone={overview.data.kpis.waitingNow > 5 ? 'warn' : undefined} />
             <Kpi icon={<Clock size={15} />} label="1ª resposta (média)" value={overview.data.kpis.avgFirstResponseMin != null ? fmtMin(overview.data.kpis.avgFirstResponseMin) : '—'} sub="do contato escrever até a equipe responder" tone={overview.data.kpis.avgFirstResponseMin != null && overview.data.kpis.avgFirstResponseMin > 30 ? 'warn' : undefined} />
             <Kpi icon={<CheckCircle2 size={15} />} label="Encerradas" value={`${Math.round(overview.data.kpis.closeRate * 100)}%`} sub={`${overview.data.kpis.closed} de ${overview.data.kpis.conversations}`} />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card title="Conversas por dia" hint="Quando a demanda chega"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
-            <Card title="Atendimentos por atendente" hint="Quem está absorvendo a fila"><ReportChart def={{ metric: 'conversations', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byAgent} height={220} /></Card>
+            <Card title="Atendimentos por dia" hint="Conversas novas + clientes que voltaram"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
+            <Card title="Atendimentos por atendente" hint="Encerrados no período, por quem encerrou"><ReportChart def={{ metric: 'closed', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byAgent} height={220} /></Card>
             <Card title="De onde vêm os leads" hint="Orgânico × anúncio × link"><ReportChart def={{ metric: 'conversations', groupBy: 'origin', from: range[0], to: range[1], filters: {}, chart: 'pie' }} series={overview.data.series.byOrigin} height={220} /></Card>
             <Card title={overview.data.series.byCampaign.length ? 'Leads por campanha (anúncio)' : 'Tags mais usadas'} hint={overview.data.series.byCampaign.length ? 'Qual anúncio está trazendo conversa' : 'Como a equipe está classificando'}>
               <ReportChart def={{ metric: 'conversations', groupBy: overview.data.series.byCampaign.length ? 'campaign' : 'tag', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byCampaign.length ? overview.data.series.byCampaign : overview.data.series.byTag} height={220} />
             </Card>
           </div>
 
-          <Vendas overview={overview.data} range={range} />
+          <Vendas overview={overview.data} range={range} onAuditar={(f) => setFoco({ ...f, seq: Date.now() })} />
           <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} />
+          <Attendances from={periodo.from} to={periodo.to} userId={filtros.agentId} focus={foco} />
         </>
       )}
 
@@ -162,7 +178,7 @@ export default function RelatoriosPage() {
           <section className="rounded-2xl bg-panel border border-line p-4 space-y-4">
             <Field label="Medir">
               <select className={inputCls} value={def.metric} onChange={(e) => set('metric', e.target.value as ReportDefinition['metric'])}>
-                {Object.entries(METRIC_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                {Object.entries(metricLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </Field>
             <Field label="Agrupar por">
@@ -219,7 +235,7 @@ export default function RelatoriosPage() {
             <div className="flex flex-wrap items-center gap-3 px-5 py-3 border-b border-line">
               <div className="min-w-[200px] flex-1">
                 <div className="font-display font-semibold text-ink">
-                  {result ? `${METRIC_LABEL[result.definition.metric]} por ${GROUP_LABEL[result.definition.groupBy].toLowerCase()}` : 'Relatório'}
+                  {result ? `${metricLabel[result.definition.metric]} por ${GROUP_LABEL[result.definition.groupBy].toLowerCase()}` : 'Relatório'}
                 </div>
                 {result && (
                   <div className="text-xs text-muted tnum">
@@ -243,7 +259,7 @@ export default function RelatoriosPage() {
               {result && view === 'table' && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="text-left text-xs uppercase tracking-wide text-muted"><tr><th className="py-2 pr-4">{GROUP_LABEL[result.definition.groupBy]}</th><th className="py-2 text-right">{METRIC_LABEL[result.definition.metric]}</th></tr></thead>
+                    <thead className="text-left text-xs uppercase tracking-wide text-muted"><tr><th className="py-2 pr-4">{GROUP_LABEL[result.definition.groupBy]}</th><th className="py-2 text-right">{metricLabel[result.definition.metric]}</th></tr></thead>
                     <tbody className="divide-y divide-line">
                       {result.series.map((s) => <tr key={s.label}><td className="py-2 pr-4 text-ink">{fmtLabel(result.definition.groupBy, s.label)}</td><td className="py-2 text-right tnum font-mono text-ink">{fmtCelula(s.value)}</td></tr>)}
                     </tbody>
@@ -280,22 +296,23 @@ export default function RelatoriosPage() {
  * vem do histórico de encerramentos: comprou ÷ (comprou + não comprou) — "sem resultado" (fechado
  * pelo sistema, ou anterior à regra que obriga o resultado) fica de fora.
  */
-function Vendas({ overview, range }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string] }) {
+function Vendas({ overview, range, onAuditar }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string]; onAuditar: (f: Omit<AttendanceFocus, 'seq'>) => void }) {
   const v = overview.sales;
   const { won, lost, winRate } = overview.kpis;
+  const labels = useOutcomeLabels();
   return (
     <section className="space-y-3">
       <h2 className="font-display font-semibold text-ink">Vendas</h2>
       <div className="grid gap-3 sm:grid-cols-3">
         <Kpi icon={<DollarSign size={15} />} label="Faturado no período" value={fmtBRL(v.total)} sub={`${v.count} venda${v.count === 1 ? '' : 's'}`} />
         <Kpi icon={<Receipt size={15} />} label="Ticket médio" value={v.avgTicket != null ? fmtBRL(v.avgTicket) : '—'} sub="faturado ÷ vendas" />
-        <Kpi icon={<Target size={15} />} label="Taxa de conversão" value={winRate != null ? `${Math.round(winRate * 100)}%` : '—'} sub={`${won} comprou · ${lost} não comprou`} />
+        <Kpi icon={<Target size={15} />} label="Taxa de conversão" value={winRate != null ? `${Math.round(winRate * 100)}%` : '—'} sub={`${won} ${labels.won.toLowerCase()} · ${lost} ${labels.lost.toLowerCase()}`} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Faturamento por dia" hint="Pelo dia do fechamento da venda">
           <ReportChart def={{ metric: 'revenue', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={v.byDay} height={220} />
         </Card>
-        <Card title="Vendas por atendente" hint="Faturado por quem encerrou como Comprou">
+        <Card title="Vendas por atendente" hint={`Faturado por quem encerrou como ${labels.won}`}>
           <ReportChart def={{ metric: 'revenue', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={v.byAgent} height={220} />
           {v.byAgent.length > 0 && (
             <table className="w-full mt-3 text-[12.5px]">
@@ -313,10 +330,23 @@ function Vendas({ overview, range }: { overview: NonNullable<ReturnType<typeof u
             </table>
           )}
         </Card>
-        <Card title="Não comprou, por tag" hint='Tags marcadas nos encerramentos "Não comprou" — onde o negócio escapa'>
+        <Card title={`${labels.lost}, por motivo`} hint='Onde o negócio escapa. Clique num motivo para ver os atendimentos'>
           {overview.lostReasons.length ? (
-            <ReportChart def={{ metric: 'lost', groupBy: 'tag', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.lostReasons} height={220} />
-          ) : <p className="py-10 text-center text-[13px] text-muted">Nenhum &quot;Não comprou&quot; no período.</p>}
+            <>
+              <ReportChart def={{ metric: 'lost', groupBy: 'reason', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.lostReasons} height={220} />
+              {/* auditar: do número ao atendimento — lista de "Não comprou" daquela tag, mais abaixo */}
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {overview.lostReasons.map((r) => {
+                  const auditavel = !!r.closeReasonId || r.label !== '(sem motivo)';
+                  return (
+                    <button key={`${r.closeReasonId ?? ''}-${r.label}`} type="button" disabled={!auditavel} onClick={() => onAuditar({ outcome: 'lost', ...(r.closeReasonId ? { closeReasonId: r.closeReasonId } : { reason: r.label }), label: r.label })} title={auditavel ? 'Ver esses atendimentos' : undefined} className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[12px] text-ink hover:bg-field disabled:opacity-50 disabled:cursor-default">
+                      {r.color && <span className="w-2 h-2 rounded-full" style={{ background: r.color }} />}{r.label} <b className="tnum">{r.value}</b>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : <p className="py-10 text-center text-[13px] text-muted">Nenhum “{labels.lost}” no período.</p>}
         </Card>
       </div>
     </section>

@@ -2,22 +2,29 @@ import { Processor } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
+import { NumbersService } from '../whatsapp/numbers.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { enrichContext } from '../../common/observability/request-context';
 import { interpolate } from '../flows/answer';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
-import { CampaignsService } from './campaigns.service';
-import { afterBatch, decideDispatch, eligible, type CampaignStatus } from './dispatch';
+import { CampaignsService, type CampaignTemplate } from './campaigns.service';
+import { afterBatch, decideDispatch, eligible, failureStreak, FAILURE_STREAK, qrDelay, type CampaignStatus } from './dispatch';
 import { QUEUE_CAMPAIGN, type CampaignJob } from './queues';
 
+type MediaType = 'image' | 'document' | 'audio' | 'video';
+
 /**
- * Despachante da transmissão. **Não envia**: cria as mensagens e as entrega à fila de saída,
- * que já tem intervalo aleatório entre envios, teto diário e aquecimento do número. Um
- * caminho de envio próprio perderia essa proteção, que é o que impede o banimento.
+ * Despachante da transmissão (docs/envio.md#transmissão). **Não envia direto**: cria as
+ * mensagens e as entrega à fila de saída, que já tem ritmo, teto diário e aquecimento.
  *
- * Trabalha em lotes pequenos e se reagenda. Cada lote reconsulta status, horário e teto do
- * dia, então pausar uma campanha a interrompe em segundos — e nada é pré-agendado para
- * horas à frente, que seria impossível de parar.
+ * Duas velocidades:
+ *  - **QR Code**: UMA mensagem por job, o próximo daqui a 20–60 s (sorteado). Horário
+ *    comercial obrigatório, teto de transmissão por 24h do número (`campaignDailyLimit`) e
+ *    pausa automática com 3 falhas seguidas (sessão caiu / número sendo bloqueado).
+ *  - **API oficial**: lotes de 25 com template aprovado; o limite é o tier da Meta.
+ *
+ * Cada job reconsulta status, horário e teto, então pausar interrompe na hora — nada é
+ * pré-agendado para horas à frente.
  */
 @Processor(QUEUE_CAMPAIGN, { concurrency: 5 })
 export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
@@ -25,6 +32,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     private readonly prisma: PrismaService,
     private readonly campaigns: CampaignsService,
     private readonly conversations: ConversationsService,
+    private readonly numbers: NumbersService,
     private readonly interpolation: InterpolationService,
   ) {
     super(QUEUE_CAMPAIGN);
@@ -37,6 +45,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     });
     if (!campaign) return;
     enrichContext({ tenantId: campaign.tenantId });
+    const qr = campaign.number.provider !== 'meta';
 
     const pending = await this.prisma.campaignTarget.count({ where: { campaignId: campaign.id, status: 'pending' } });
     const [isOpen, dailyRemaining] = await Promise.all([
@@ -52,13 +61,13 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
       isOpen,
       dailyRemaining,
       pending,
+      qr,
     });
 
     if (decision.action === 'stop') return this.log.log(`Campanha ${campaign.id}: ${decision.reason}`);
-    if (decision.action === 'done') return this.finish(campaign.id);
+    if (decision.action === 'done') return this.finish(campaign.tenantId, campaign.id);
     if (decision.action === 'wait') {
       this.log.debug(`Campanha ${campaign.id}: ${decision.reason} — novo lote em ${Math.round(decision.retryInMs / 1000)}s`);
-      // o número desconectar no meio não cancela: a campanha espera ele voltar
       if (campaign.status === 'scheduled') await this.prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'running' } }).catch(() => undefined);
       return this.campaigns.enqueue(campaign.id, decision.retryInMs);
     }
@@ -69,6 +78,19 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
       return this.campaigns.enqueue(campaign.id, 5 * 60_000);
     }
 
+    // 3 falhas seguidas (inclusive as que o WhatsApp recusou depois de enfileiradas): para tudo
+    if (qr && failureStreak(await this.ultimosResultados(campaign.id))) {
+      return this.campaigns.autoPause(campaign.tenantId, campaign.id, campaign.name, `${FAILURE_STREAK} envios seguidos falharam — a sessão pode ter caído ou o número estar sendo bloqueado. Confira o número antes de retomar.`);
+    }
+    if (campaign.status === 'scheduled') await this.prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'running' } }).catch(() => undefined);
+
+    const tpl = campaign.template as unknown as CampaignTemplate | null;
+    // definição aprovada do template, uma vez por lote (os valores por contato saem dela)
+    const definition = tpl ? await this.numbers.template(campaign.numberId, tpl.name, tpl.language).catch(() => null) : null;
+    if (tpl && !definition) {
+      return this.campaigns.autoPause(campaign.tenantId, campaign.id, campaign.name, `O template "${tpl.name}" não está mais aprovado neste número. Escolha outro e crie a transmissão de novo.`);
+    }
+
     const targets = await this.prisma.campaignTarget.findMany({
       where: { campaignId: campaign.id, status: 'pending' },
       take: decision.take,
@@ -76,39 +98,63 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     });
 
     for (const target of targets) {
-      const last = await this.lastInboundAt(campaign.numberId, target.contactId);
       const check = eligible({
         provider: campaign.number.provider as 'meta' | 'evolution',
-        hasTemplate: !!campaign.template,
-        lastInboundAt: last,
+        hasTemplate: !!tpl,
+        lastInboundAt: await this.lastInboundAt(campaign.numberId, target.contactId),
         optedOut: !!target.contact.optOutAt,
         now: Date.now(),
       });
-
       if (!check.ok) {
         await this.prisma.campaignTarget.update({ where: { id: target.id }, data: { status: 'skipped', error: check.reason } });
         continue;
       }
 
       try {
-        const text = interpolate(campaign.text, await this.interpolation.context(campaign.tenantId, target.contact));
-        const message = await this.conversations.sendToContact(campaign.tenantId, target.contactId, text, { preferredNumberId: campaign.numberId, idempotencyKey: `campaign-${campaign.id}-${target.id}` });
+        const idempotencyKey = `campaign-${campaign.id}-${target.id}`;
+        let message;
+        if (tpl && definition) {
+          const built = await this.conversations.templateMessage(campaign.tenantId, target.contactId, definition, { header: tpl.header, body: tpl.body });
+          message = await this.conversations.sendCampaign(campaign.tenantId, target.contactId, campaign.numberId, { text: built.text, template: built.template!, idempotencyKey });
+        } else {
+          const text = campaign.text ? interpolate(campaign.text, await this.interpolation.context(campaign.tenantId, target.contact)) : undefined;
+          const media = campaign.mediaKey ? { key: campaign.mediaKey, type: (campaign.mediaType ?? 'document') as MediaType, name: campaign.mediaName ?? undefined } : undefined;
+          message = await this.conversations.sendCampaign(campaign.tenantId, target.contactId, campaign.numberId, { text, media, idempotencyKey });
+        }
         await this.prisma.campaignTarget.update({
           where: { id: target.id },
           data: { status: 'sent', messageId: (message as { id?: string })?.id ?? null, sentAt: new Date(), error: null },
         });
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        // falha de um contato não derruba o lote: o relatório mostra quem ficou de fora
-        await this.prisma.campaignTarget.update({ where: { id: target.id }, data: { status: 'failed', error } });
+        // falha de um contato não derruba o lote; `sentAt` marca quando foi processado (conta no teto e na sequência de falhas)
+        await this.prisma.campaignTarget.update({ where: { id: target.id }, data: { status: 'failed', error, sentAt: new Date() } });
         this.log.warn(`Campanha ${campaign.id}: falha em ${target.contactId} — ${error}`);
       }
     }
 
+    this.campaigns.emitProgress(campaign.tenantId, campaign.id);
     const restante = await this.prisma.campaignTarget.count({ where: { campaignId: campaign.id, status: 'pending' } });
     const next = afterBatch(restante);
-    if (next.action === 'done') return this.finish(campaign.id);
-    return this.campaigns.enqueue(campaign.id, next.retryInMs);
+    if (next.action === 'done') return this.finish(campaign.tenantId, campaign.id);
+    // QR: o próximo daqui a 20–60 s; Meta: próximo lote no intervalo normal
+    return this.campaigns.enqueue(campaign.id, qr ? qrDelay() : next.retryInMs);
+  }
+
+  /**
+   * Resultado dos últimos envios processados, mais recente primeiro: falhou aqui (alvo `failed`)
+   * ou o WhatsApp recusou depois (mensagem `failed`). Ignorados (descadastro, janela) não contam.
+   */
+  private async ultimosResultados(campaignId: string): Promise<('ok' | 'failed')[]> {
+    const ultimos = await this.prisma.campaignTarget.findMany({
+      where: { campaignId, status: { in: ['sent', 'failed'] }, sentAt: { not: null } },
+      orderBy: { sentAt: 'desc' },
+      take: FAILURE_STREAK,
+      select: { status: true, messageId: true },
+    });
+    const ids = ultimos.map((t) => t.messageId).filter((x): x is string => !!x);
+    const falhas = new Set((await this.prisma.message.findMany({ where: { id: { in: ids }, status: 'failed' }, select: { id: true } })).map((m) => m.id));
+    return ultimos.map((t) => (t.status === 'failed' || (t.messageId && falhas.has(t.messageId)) ? 'failed' : 'ok'));
   }
 
   /** Última mensagem recebida deste contato neste número — base da janela de 24h da Meta. */
@@ -121,8 +167,9 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     return conv?.lastInboundAt?.getTime() ?? null;
   }
 
-  private async finish(id: string) {
+  private async finish(tenantId: string, id: string) {
     await this.prisma.campaign.update({ where: { id }, data: { status: 'done', finishedAt: new Date() } }).catch(() => undefined);
+    this.campaigns.emitProgress(tenantId, id, 'done');
     this.log.log(`Campanha ${id} concluída`);
   }
 }
