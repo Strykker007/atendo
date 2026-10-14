@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { CONTENT_MAX_DELAY_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, randomizerTotal, type ContentItem, type FlowDefinition, type FlowNode } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, HTTP_MAX_MAPPINGS, WEBHOOK_MAX_TIMEOUT_SEC, parseJsonPath, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, randomizerTotal, type ContentItem, type FlowDefinition, type FlowNode } from '@atendo/shared';
 
 /** Tempo limite de resposta: até 30 dias (o job fica na fila esse tempo). */
 const MAX_REPLY_TIMEOUT_MIN = 30 * 1440;
@@ -41,6 +41,7 @@ export function validateDefinition(def: FlowDefinition, { strict = false }: { st
       else if (strict && (randomizerTotal(branches) !== 100 || branches.some((b) => !Number.isInteger(Number(b.weight)) || Number(b.weight) < 0 || Number(b.weight) > 100))) errors.push(`"Randomizador" (${n.id}): a soma dos ramos deve ser igual a 100% (percentuais inteiros de 0 a 100).`);
     }
     if (n.type === 'action' && n.data.kind === 'webhook') errors.push(...webhookErrors(n));
+    if (n.type === 'http') errors.push(...httpErrors(n));
     // departamento que saiu na importação: o card já mostra "Reconfigurar"; não trava o salvar
     if (n.type === 'action' && n.data.kind === 'set_department' && !n.data.departmentId && !(n.data as { _reconfig?: unknown })._reconfig) errors.push(`"Ação" (${n.id}): escolha o departamento.`);
     if ((n.type === 'question' || n.type === 'menu') && n.data.timeoutMinutes !== undefined) {
@@ -62,10 +63,9 @@ export function validateDefinition(def: FlowDefinition, { strict = false }: { st
 }
 
 /** Webhook: URL http(s) (salvo o card marcado "Reconfigurar"), método, tempo limite e nomes de header. */
-function webhookErrors(n: Extract<FlowNode, { type: 'action' }>): string[] {
+function webhookErrors(n: Extract<FlowNode, { type: 'action' | 'http' }>, name = `"Ação" (${n.id}) de webhook`): string[] {
   const d = n.data;
   const out: string[] = [];
-  const name = `"Ação" (${n.id}) de webhook`;
   if (!(d as { _reconfig?: unknown })._reconfig && !/^https?:\/\//i.test(d.url ?? '')) out.push(`${name} precisa de uma URL http(s).`);
   if (d.method && !WEBHOOK_METHODS.includes(d.method)) out.push(`${name}: método inválido.`);
   const t = d.timeoutSec === undefined ? 1 : Number(d.timeoutSec);
@@ -73,6 +73,24 @@ function webhookErrors(n: Extract<FlowNode, { type: 'action' }>): string[] {
   for (const h of d.headers ?? []) {
     if (h.key && !/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(h.key.trim())) out.push(`${name}: o header "${h.key}" tem caracteres inválidos.`);
   }
+  return out;
+}
+
+/** API externa: as regras do webhook + mapeamentos com caminho válido e variável, sem repetir variável. */
+function httpErrors(n: Extract<FlowNode, { type: 'http' }>): string[] {
+  const name = `"API externa" (${n.id})`;
+  const out = webhookErrors(n, name);
+  const maps = n.data.mappings ?? [];
+  if (maps.length > HTTP_MAX_MAPPINGS) out.push(`${name}: no máximo ${HTTP_MAX_MAPPINGS} campos da resposta.`);
+  const usadas = new Set<string>();
+  for (const m of maps) {
+    if (!m.path?.trim() && !m.varName) continue;
+    if (!m.path?.trim() || parseJsonPath(m.path) === null) out.push(`${name}: o caminho "${m.path ?? ''}" não é válido (ex.: cliente.nome, itens[0].preco).`);
+    if (!m.varName || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(m.varName)) out.push(`${name}: dê um nome de variável (letras, números e _) para "${m.path}".`);
+    if (m.varName && usadas.has(m.varName)) out.push(`${name}: a variável "${m.varName}" aparece duas vezes.`);
+    usadas.add(m.varName);
+  }
+  for (const v of [n.data.statusVar, n.data.responseVar]) if (v && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v)) out.push(`${name}: nome de variável inválido "${v}".`);
   return out;
 }
 

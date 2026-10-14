@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useContext } from 'react';
 import { Handle, Position, useNodeId, type NodeProps } from '@xyflow/react';
-import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip } from 'lucide-react';
+import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip, Globe, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   CLOSED_BAND_ID, DEPARTMENT_NONE, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent, randomizerTotal,
@@ -9,7 +9,7 @@ import {
   type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
-import { useDepartments, useSchedules } from '@/lib/hooks';
+import { useDepartments, useOutcomeLabels, useSchedules } from '@/lib/hooks';
 
 /**
  * Categorias da paleta. A cor é da categoria (roxo = estrutura, amarelo/laranja = lógica,
@@ -18,7 +18,7 @@ import { useDepartments, useSchedules } from '@/lib/hooks';
  */
 export const PALETTE_GROUPS: { label: string; types: FlowNodeType[] }[] = [
   { label: 'Estrutura e Conteúdo', types: ['message', 'menu', 'variable', 'connect_flow', 'end'] },
-  { label: 'Lógica e Decisão', types: ['action', 'randomizer', 'condition', 'wait', 'ai'] },
+  { label: 'Lógica e Decisão', types: ['action', 'http', 'randomizer', 'condition', 'wait', 'ai'] },
   { label: 'Distribuição e Envio', types: ['question', 'distributor', 'schedule'] },
 ];
 
@@ -31,6 +31,7 @@ const BLUE = 'bg-c1 text-white';
 export const NODE_META: Record<FlowNodeType, { icon: React.ReactNode; color: string; label: string; hint: string }> = {
   start: { icon: <Play size={13} />, color: 'bg-ok text-white', label: 'Início', hint: 'Onde o fluxo começa' },
   message: { icon: <MessageSquare size={13} />, color: PURPLE, label: 'Conteúdo', hint: 'Texto, imagem, vídeo, documento ou áudio — várias mensagens em sequência' },
+  http: { icon: <Globe size={13} />, color: YELLOW, label: 'API externa', hint: 'Chama uma API, lê a resposta (JSON) e guarda os campos em variáveis' },
   connect_flow: { icon: <Workflow size={13} />, color: PURPLE, label: 'Conectar com outro fluxo', hint: 'Termina este fluxo e começa outro do início, levando as variáveis' },
   menu: { icon: <ListOrdered size={13} />, color: PURPLE, label: 'Menu', hint: 'Opções numeradas, cada uma com uma saída; tentativas e tempo limite' },
   variable: { icon: <Variable size={13} />, color: PURPLE, label: 'Manipulador', hint: 'Define, soma, concatena, limpa ou copia variáveis do fluxo' },
@@ -46,7 +47,7 @@ export const NODE_META: Record<FlowNodeType, { icon: React.ReactNode; color: str
 };
 
 /** Ações do editor que o próprio card dispara (ele só conhece o id dele). */
-export const FlowNodeActions = createContext<{ duplicate: (id: string) => void } | null>(null);
+export const FlowNodeActions = createContext<{ duplicate: (id: string) => void; remove: (id: string) => void } | null>(null);
 
 export type ProviderKind = 'meta' | 'evolution';
 /**
@@ -141,14 +142,14 @@ function Shell({ type, selected, children, summary, data }: { type: FlowNodeType
         <span className={cn('w-5 h-5 rounded-md grid place-items-center', m.color)}>{m.icon}</span>
         <span className="text-[12px] font-semibold text-ink">{m.label}</span>
         {type !== 'start' && id && actions && (
-          <button
-            type="button"
-            title="Duplicar bloco (Ctrl+D)"
-            onClick={(e) => { e.stopPropagation(); actions.duplicate(id); }}
-            className={cn('nodrag ml-auto p-0.5 rounded text-faint hover:text-ink hover:bg-field', selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-          >
-            <Copy size={12} />
-          </button>
+          <span className={cn('nodrag ml-auto flex items-center gap-0.5', selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
+            <button type="button" title="Duplicar bloco (Ctrl+D)" aria-label="Duplicar bloco" onClick={(e) => { e.stopPropagation(); actions.duplicate(id); }} className="p-0.5 rounded text-faint hover:text-ink hover:bg-field">
+              <Copy size={12} />
+            </button>
+            <button type="button" title="Excluir bloco (Delete) — Ctrl+Z desfaz" aria-label="Excluir bloco" onClick={(e) => { e.stopPropagation(); actions.remove(id); }} className="p-0.5 rounded text-faint hover:text-danger hover:bg-danger-soft">
+              <Trash2 size={12} />
+            </button>
+          </span>
         )}
       </div>
       {reconfig.length > 0 && (
@@ -316,10 +317,11 @@ export function ConditionNodeView({ data, selected }: P) {
 }
 const STATUS_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado' };
 export function ActionNodeView({ data, selected }: P) {
-  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string };
+  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string; outcome?: 'won' | 'lost'; saleValue?: string };
   const departments = useDepartments();
+  const outcomeLabels = useOutcomeLabels();
   const dept = d.departmentId === DEPARTMENT_NONE ? 'Sem departamento' : departments.data?.find((x) => x.id === d.departmentId)?.name ?? (d.departmentId && departments.data ? 'departamento excluído' : '?');
-  const label = d.kind === 'set_status' && d.status === 'closed' ? 'Encerrar conversa'
+  const label = d.kind === 'set_status' && d.status === 'closed' ? `Encerrar conversa${d.outcome ? ` · ${outcomeLabels[d.outcome]}${d.outcome === 'won' && d.saleValue ? ` ${d.saleValue}` : ''}` : ''}`
     : ({ add_tag: 'Aplicar etiqueta', remove_tag: 'Remover etiqueta', assign: 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook', set_department: `Departamento → ${dept}` } as Record<string, string>)[d.kind ?? ''] ?? '';
   const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : d.kind === 'webhook' ? `${label}${d.url ? `\n${d.method ?? 'POST'} ${d.url}` : ''}` : label + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
   return (
@@ -328,6 +330,17 @@ export function ActionNodeView({ data, selected }: P) {
       {d.kind === 'webhook'
         ? <Rows><OutRow tone="ok">Sucesso</OutRow><OutRow id={WEBHOOK_ERROR_HANDLE} tone="danger">Erro</OutRow></Rows>
         : d.kind !== 'handoff' && <Out />}
+    </Shell>
+  );
+}
+export function HttpNodeView({ data, selected }: P) {
+  const d = data as { method?: string; url?: string; mappings?: { path?: string; varName?: string }[] };
+  const maps = (d.mappings ?? []).filter((m) => m.path && m.varName);
+  const summary = d.url ? `${d.method ?? 'GET'} ${d.url}${maps.length ? `\n→ ${maps.map((m) => `{{${m.varName}}}`).join(', ')}` : ''}` : '';
+  return (
+    <Shell type="http" data={data} selected={selected} summary={summary}>
+      <In />
+      <Rows><OutRow tone="ok">Sucesso</OutRow><OutRow id={WEBHOOK_ERROR_HANDLE} tone="danger">Erro</OutRow></Rows>
     </Shell>
   );
 }
@@ -441,6 +454,7 @@ export const nodeTypes = {
   ai: AiNodeView, schedule: ScheduleNodeView, start: StartNodeView, message: MessageNodeView, question: QuestionNodeView, menu: MenuNodeView,
   condition: ConditionNodeView, action: ActionNodeView, wait: WaitNodeView, end: EndNodeView, variable: VariableNodeView, randomizer: RandomizerNodeView, distributor: DistributorNodeView,
   connect_flow: ConnectFlowNodeView,
+  http: HttpNodeView,
 };
 
 export const DELAY_UNIT: Record<DelayUnit, { label: string; factor: number }> = {
@@ -476,5 +490,6 @@ export function defaultData(type: FlowNodeType): FlowNode['data'] {
     case 'randomizer': return { branches: [{ id: shortId(), label: 'A', weight: 50 }, { id: shortId(), label: 'B', weight: 50 }] };
     case 'distributor': return { mode: 'round_robin', agentIds: [] };
     case 'connect_flow': return {};
+    case 'http': return { method: 'GET', url: '', headers: [], mappings: [] };
   }
 }

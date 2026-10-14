@@ -561,6 +561,8 @@ export interface ConversationEvent {
   outcome: ConversationOutcome | null;
   outcomeValue: string | null;
   reason: string | null;
+  /** encerramento com resultado feito por fluxo: nome do fluxo; o `actor` é o dono que levou o crédito */
+  viaFlow?: string | null;
   createdAt: string;
 }
 

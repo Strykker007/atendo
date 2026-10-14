@@ -124,6 +124,10 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   emitScheduledMessages(tenantId: string, conversationId: string) {
     this.room(tenantId).emit('scheduled_messages', { conversationId });
   }
+  /** Orçamentos da conversa mudaram (comprovante chegou pela página pública, pago): o painel recarrega. */
+  emitBudgets(tenantId: string, conversationId: string) {
+    this.room(tenantId).emit('budgets', { conversationId });
+  }
   emitMessagesCleared(tenantId: string, conversationId: string) {
     this.room(tenantId).emit('messages_cleared', { conversationId });
   }

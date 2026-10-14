@@ -77,11 +77,12 @@ function Linha({ e }: { e: ConversationEvent }) {
       <span className={`mt-0.5 shrink-0 ${m.cor}`}>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-ink">
-          {automatico ? <>Fluxo retomado automaticamente</> : <><b>{quem}</b> {m.texto}</>}
+          {automatico ? <>Fluxo retomado automaticamente</> : e.viaFlow ? <>Fluxo <b>“{e.viaFlow}”</b> {m.texto}</> : <><b>{quem}</b> {m.texto}</>}
           {e.type === 'transferred' && e.target && <> para <b>{e.target.name}</b></>}
           {e.type === 'closed' && e.outcome && <> · {resultado[e.outcome] ?? e.outcome}</>}
           {valor != null && valor > 0 && <> · <span className="tnum">{valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></>}
         </div>
+        {e.viaFlow && <div className="text-xs text-muted">{e.actor ? <>Conta para <b>{e.actor.name}</b> (dono da conversa)</> : 'Sem dono: conta só no total da empresa'}</div>}
         {e.reason && <div className="text-xs text-muted">{e.reason}</div>}
         <div className="text-[11px] text-faint tnum">{new Date(e.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
       </div>

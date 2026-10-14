@@ -48,7 +48,7 @@ Modelo com mais respostas do que o `maxQuickReplies` do plano é recusado (400) 
   departamentos reais): monte num cliente (pode ser um de testes), exporte em Fluxos e importe
   aqui; mesmo nome substitui. Remover também é por aqui.
 - **Tags** — as mesmas opções da tela de Tags do cliente: cor (bolinha → paleta ou cor livre),
-  interruptores **Kanban**, **Comprou** e **Não comprou** por linha, arrastar pela alça para ordenar (ordem das colunas),
+  interruptores **Kanban**, **Comprou** e **Não comprou** por linha, **Conflita com** (botão ⇄ N: escolhe as tags que saem quando esta é marcada — simétrico, até 20; tag que vira motivo de encerramento não tem conflito no cliente novo), arrastar pela alça para ordenar (ordem das colunas),
   remover; selecionar todas com Encerramento (Mostrar/Tirar em Comprou e em Não comprou), Pôr/Tirar do Kanban, Cor e
   Remover; adicionar várias de uma vez (uma por linha ou `;`, com cores variadas para começar e
   as opções para as novas: Comprou, Não comprou, Kanban). Sem lista própria, mostra as de encerramento do catálogo (ou do
@@ -63,7 +63,34 @@ clientes.
 num perfil padrão troca o perfil junto — senão a matriz do modelo só valeria para quem alguém
 vinculasse à mão. Perfil sob medida não é tocado.
 
-Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido na criação.
+Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido na criação. Para levar
+uma mudança a quem já existe, use [Aplicar aos clientes](#aplicar-aos-clientes).
+
+## Aplicar aos clientes
+
+Botão **Aplicar aos clientes** no editor do modelo (desabilitado com alteração não salva — vale o
+modelo **salvo**). O dono escolhe **o que** e **para quem**, vê a **prévia** cliente por cliente e só
+então grava. Partes, todas opcionais:
+
+- **Perfis** (um a um, os que o modelo ajusta): as permissões do modelo substituem as do perfil de
+  mesmo nome no cliente; perfil que não existir é criado (Gerente/Atendente como perfil padrão).
+  Perfil padrão alterado passa a `customized` (o alinhamento ao catálogo não desfaz). Administrador
+  nunca muda. O cache de permissões é invalidado na hora.
+- **Motivos de encerramento**: as tags do modelo marcadas Comprou / Não comprou (Comprou e Não
+  comprou = `both`). Mesmo nome, ignorando maiúsculas → atualiza resultado e cor e reativa; o que
+  faltar é criado; ordem = a do modelo. Motivos de atendimento interno (`ignoreInReports`) não são
+  tocados. **Deixar idêntico ao modelo** desativa os motivos do cliente que não estão no modelo
+  (desativar, não apagar: histórico e relatórios mantêm o nome); sem isso, eles continuam ativos
+  depois dos do modelo.
+- **Tags que faltam**: cria as tags do modelo (as que continuam tag na criação do cliente) que o
+  cliente não tem, no fim da lista. Não altera nem remove as dele; conflitos não são replicados.
+
+Para quem: todos os clientes ativos ou uma seleção. Cada cliente roda numa transação própria.
+Respostas rápidas e fluxos não entram (ainda).
+
+Fluxo típico para padronizar Comprou / Não comprou: montar a lista num cliente →
+**Gerar de um cliente** (ou editar as tags do modelo com os interruptores Comprou / Não comprou) →
+Salvar → Aplicar aos clientes → Motivos de encerramento + Deixar idêntico → prévia → Aplicar.
 
 ## Arquivo `.json`
 
@@ -81,7 +108,8 @@ Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido 
   "quickReplies": [ { "atendo": "quick-reply", "version": 1, "folder": "Entrega", "title": "Prazo", "body": "…" } ],
   "flows": [ { "atendo": "flow", "version": 1, "name": "Boas-vindas", "trigger": {}, "definition": {} } ],
   "tags": [
-    { "name": "Novo lead", "color": "#0ea5e9", "isKanban": true },
+    { "name": "Novo lead", "color": "#0ea5e9", "isKanban": true, "conflictsWith": ["Cliente"] },
+    { "name": "Cliente", "color": "#16a34a", "isKanban": true },
     { "name": "Indicação", "color": "#22c55e", "showOnWon": true },
     { "name": "Achou caro", "color": "#f59e0b", "showOnLost": true },
     { "name": "Receita vencida", "color": "#dc2626", "showOnLost": true }
@@ -92,6 +120,11 @@ Mudar ou excluir o modelo **não altera** clientes já criados: ele só é lido 
 - `tags`: com que o cliente nasce, na ordem. `color` opcional (`#rrggbb`; inválida recusa o
   arquivo); `isKanban`/`showOnWon`/`showOnLost` ausentes = `false` (`showOnClose: true`, de antes da separação, vale como os dois); repetida (ignorando maiúsculas) é
   descartada.
+- `conflictsWith` (opcional, por tag): nomes de outras tags do modelo que não convivem com ela
+  (`tag_conflicts` no cliente novo). Simétrico — basta um lado. Nome fora da lista ou a própria
+  tag somem em silêncio; mais de 20 opostas para uma tag (contando os dois lados) recusa o
+  arquivo. Na criação do cliente só valem os pares entre tags que continuam tag (as que viram
+  motivo de encerramento ficam de fora). "Gerar de um cliente" traz os conflitos dele.
 
 - `lossReasons` / `lossReasonColors` (formato antigo, só leitura): `.json` e modelos de antes de
   `tags` continuam valendo — viram tags fora do Kanban, com a cor de cada uma, que aparecem nos dois
@@ -125,4 +158,5 @@ existente e **Importar JSON** cria um modelo novo.
 | PUT | `/tenant-templates/:id` | Substitui o conteúdo pelo arquivo (mantém nome/descrição) |
 | POST | `/tenant-templates/capture` | `{tenantId, name}` — modelo tirado de um cliente; devolve `{template, warnings}` (anexos que não vão) |
 | PATCH | `/tenant-templates/:id` | `{name?, description?, isDefault?, content?}` — `isDefault: true` desmarca o anterior; `content` inteiro, mesma validação do arquivo (nome repetido = 409) |
+| POST | `/tenant-templates/:id/rollout` | `{tenantIds? (ausente = todos os ativos), profiles?: string[], closeReasons?, replaceCloseReasons?, tags?, dryRun?}` — aplica o modelo salvo em clientes existentes; devolve por cliente `{tenantId, name, profiles: {created, updated}, closeReasons: {created, updated, reactivated, deactivated}, tags: {created}}`. `dryRun` = prévia sem gravar |
 | DELETE | `/tenant-templates/:id` | Exclui; clientes criados com ele ficam como estão (`templateId` vira null) |

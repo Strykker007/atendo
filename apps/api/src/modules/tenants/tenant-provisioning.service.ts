@@ -85,7 +85,7 @@ export class TenantProvisioningService {
       this.prisma.accessProfile.findMany({ where: { tenantId }, orderBy: [{ isSystem: 'desc' }, { name: 'asc' }] }),
       this.prisma.quickReply.findMany({ where: { folder: { tenantId } }, include: { folder: { select: { name: true } } }, orderBy: [{ folder: { position: 'asc' } }, { position: 'asc' }] }),
       this.prisma.flow.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
-      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnWon: true, showOnLost: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
+      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnWon: true, showOnLost: true, conflictsA: { select: { otherId: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
       this.prisma.closeReason.findMany({ where: { tenantId, isActive: true }, select: { name: true, color: true, outcome: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
     ]);
     const admin = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
@@ -109,7 +109,8 @@ export class TenantProvisioningService {
         // todas as tags, com cor, Kanban e encerramento (Comprou / Não comprou), na ordem das colunas
         // + motivos de encerramento como tags marcadas Comprou/Não comprou (no cliente novo voltam a ser motivo)
         tags: [
-          ...tags.map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), isKanban: t.isKanban, showOnWon: t.showOnWon, showOnLost: t.showOnLost })),
+          // "conflita com": um lado só basta (o par é simétrico); `tagId` < `otherId` na linha guardada
+          ...tags.map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), isKanban: t.isKanban, showOnWon: t.showOnWon, showOnLost: t.showOnLost, ...(t.conflictsA.length && { conflictsWith: t.conflictsA.map((c) => tagNameById[c.otherId]).filter(Boolean) }) })),
           ...motivos.filter((m) => !tags.some((t) => t.name.toLowerCase() === m.name.toLowerCase())).map((m) => ({ name: m.name, ...(/^#[0-9a-f]{6}$/i.test(m.color) && { color: m.color.toLowerCase() }), isKanban: false, showOnWon: m.outcome !== 'lost', showOnLost: m.outcome !== 'won' })),
         ].slice(0, TEMPLATE_TAGS_MAX),
       },

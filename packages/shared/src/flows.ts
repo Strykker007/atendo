@@ -2,7 +2,7 @@
  * Definição de um fluxo de automação (o que o editor salva e o motor executa).
  * Um fluxo é um grafo: nós + arestas. Cada nó tem um tipo e dados próprios.
  */
-export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end' | 'schedule' | 'ai' | 'variable' | 'randomizer' | 'distributor' | 'connect_flow';
+export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end' | 'schedule' | 'ai' | 'variable' | 'randomizer' | 'distributor' | 'connect_flow' | 'http';
 
 export interface FlowNodeBase<T extends FlowNodeType, D> {
   id: string;
@@ -235,11 +235,31 @@ function legacyRule(d: LegacyConditionData): ConditionRule | undefined {
 export type ActionNode = FlowNodeBase<'action', {
   kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook' | 'set_department';
   tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed';
+  /**
+   * set_status + closed: resultado do encerramento. Ausente = sem resultado (como antes, fora de
+   * venda/conversão). `won`/`lost` contam nos relatórios em nome do dono da conversa.
+   */ outcome?: 'won' | 'lost';
+  /** set_status + closed: motivo de encerramento (lista `close_reasons`) */ closeReasonId?: string;
+  /** set_status + closed + won: valor da venda; aceita {{variáveis}} ("R$ 1.234,56", "1234.56") */ saleValue?: string;
   /** set_department: id do departamento ou `DEPARTMENT_NONE` (tirar de departamento) */ departmentId?: string;
   /** set_var */ varName?: string; value?: string;
   /** webhook */ url?: string; method?: WebhookMethod; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;
   /** webhook: guarda o corpo da resposta nesta variável */ responseVar?: string;
 }>;
+/**
+ * Valor em reais vindo de texto livre (variável do fluxo): "R$ 1.234,56", "1234,5", "1234.56",
+ * "1.500". Inválido, zero ou negativo = null.
+ */
+export function parseMoneyText(raw: string | undefined | null): number | null {
+  let s = (raw ?? '').replace(/[^\d.,-]/g, '');
+  if (!s || s.startsWith('-')) return null;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  // só pontos: "1.500" e "1.234.567" são milhar; "1234.56" é decimal
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const v = Math.round(Number(s) * 100) / 100;
+  return Number.isFinite(v) && v > 0 && v <= 999_999_999 ? v : null;
+}
 export type WebhookMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export const WEBHOOK_METHODS: WebhookMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 export interface WebhookHeader { id: string; key: string; value: string }
@@ -389,7 +409,28 @@ export type ConnectFlowNode = FlowNodeBase<'connect_flow', { flowId?: string; fl
 /** Saltos entre fluxos seguidos, sem resposta do contato no meio, antes de entregar para humano. */
 export const MAX_FLOW_HOPS = 5;
 
-export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode | AiNode | VariableNode | RandomizerNode | DistributorNode | ConnectFlowNode;
+/** Resposta da API externa → variável: `path` no JSON (`cliente.nome`, `itens[0].preco`, `$.total`). */
+export interface HttpMapping { id: string; path: string; varName: string }
+/**
+ * API externa (docs/fluxos.md#api-externa): chama uma URL (mesma proteção do webhook — só
+ * http/https público, sem redirecionamento), lê a resposta JSON e grava os campos escolhidos em
+ * variáveis. Saídas: padrão = Sucesso (2xx); `WEBHOOK_ERROR_HANDLE` = Erro (rede, tempo limite,
+ * status fora de 2xx, JSON inválido quando há mapeamentos). Sem a saída Erro ligada, segue pela
+ * Sucesso com as variáveis mapeadas vazias.
+ */
+export type HttpNode = FlowNodeBase<'http', {
+  method?: WebhookMethod; url?: string; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;
+  mappings?: HttpMapping[];
+  /** status HTTP da resposta (0 = não respondeu) */ statusVar?: string;
+  /** corpo inteiro (até `HTTP_VAR_MAX` caracteres) */ responseVar?: string;
+}>;
+export const HTTP_MAX_MAPPINGS = 30;
+/** teto do valor de cada variável vinda da API (objeto/lista vira JSON e é cortado aqui) */
+export const HTTP_VAR_MAX = 2_000;
+/** teto lido da resposta (o resto é descartado sem ler) */
+export const HTTP_MAX_RESPONSE_BYTES = 512_000;
+
+export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode | AiNode | VariableNode | RandomizerNode | DistributorNode | ConnectFlowNode | HttpNode;
 
 /**
  * sourceHandle: menu → id da opção, 'fallback' (tentativas esgotadas) ou 'timeout'; question → null ou 'timeout';
@@ -430,6 +471,7 @@ export const FLOW_NODE_LABEL: Record<FlowNodeType, string> = {
   randomizer: 'Randomizador',
   distributor: 'Distribuidor',
   connect_flow: 'Conectar com outro fluxo',
+  http: 'API externa',
 };
 
 /** Prefixos de variáveis que carregam o id do nó que as criou (`menu_<id>`). */

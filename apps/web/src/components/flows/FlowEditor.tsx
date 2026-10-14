@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState, useReactFlow, MarkerType, type Connection, type Edge, type Node, BackgroundVariant } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Save, ArrowLeft, Settings2, Activity, LayoutGrid, Copy, CopyPlus, ClipboardPaste, Trash2 } from 'lucide-react';
+import { Save, ArrowLeft, Settings2, Activity, LayoutGrid, Copy, CopyPlus, ClipboardPaste, Trash2, X, Unlink, SquareDashed, AlignStartHorizontal, AlignStartVertical, AlignHorizontalSpaceAround } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Field, inputCls } from '@/components/ui/Modal';
@@ -242,24 +242,72 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
     if (frag.nodes.length === 1) { setSelectedId(frag.nodes[0].id); setSide('node'); }
     else { setSelectedId(null); setSide('settings'); }
   };
-  const nodeActions = useMemo(() => ({ duplicate: (id: string) => keys.current.duplicate([id]) }), []);
+  const nodeActions = useMemo(() => ({ duplicate: (id: string) => keys.current.duplicate([id]), remove: (id: string) => keys.current.removeIds([id]) }), []);
 
-  const removeSelection = () => {
-    const ids = new Set(selectedNodes().map((n) => n.id));
+  /** Exclui os cards (nunca o Início) e as ligações deles. Ctrl+Z desfaz. */
+  const removeIds = (list: string[]) => {
+    const ids = new Set(nodes.filter((n) => list.includes(n.id) && n.type !== 'start').map((n) => n.id));
     if (!ids.size) return;
     setNodes((ns) => ns.filter((n) => !ids.has(n.id)));
     setEdges((es) => es.filter((e) => !ids.has(e.source) && !ids.has(e.target)));
+    if (!selectedId || ids.has(selectedId)) { setSelectedId(null); setSide('settings'); }
+    if (ids.size > 1) toast.ok(`${ids.size} cards excluídos — Ctrl+Z desfaz.`);
+  };
+  const removeSelection = () => removeIds(selectedNodes().map((n) => n.id));
+
+  // ---------- seleção múltipla ----------
+
+  /** Cards marcados no canvas (Shift + clique, Shift + arrastar ou Ctrl+A), sem o Início. */
+  const multi = nodes.filter((n) => n.selected && n.type !== 'start');
+  const selectAll = () => {
+    setNodes((ns) => ns.map((n) => ({ ...n, selected: n.type !== 'start' })));
+    setEdges((es) => es.map((e) => ({ ...e, selected: false })));
     setSelectedId(null);
     setSide('settings');
+  };
+  const clearSelection = () => {
+    setNodes((ns) => ns.map((n) => (n.selected ? { ...n, selected: false } : n)));
+    setEdges((es) => es.map((e) => (e.selected ? { ...e, selected: false } : e)));
+    setSelectedId(null);
+    setMenu(null);
+    if (side === 'node') setSide('settings');
+  };
+  /**
+   * Alinha os selecionados: `row` = mesma altura (topo do mais alto), `column` = mesma coluna
+   * (esquerda do mais à esquerda). `spread` = espaça por igual na horizontal, na ordem em que estão.
+   */
+  const arrange = (how: 'row' | 'column' | 'spread') => {
+    const sel = nodes.filter((n) => n.selected && n.type !== 'start');
+    if (sel.length < 2) return;
+    const pos = new Map<string, { x: number; y: number }>();
+    if (how === 'row') { const y = Math.min(...sel.map((n) => n.position.y)); for (const n of sel) pos.set(n.id, { x: n.position.x, y }); }
+    if (how === 'column') { const x = Math.min(...sel.map((n) => n.position.x)); for (const n of sel) pos.set(n.id, { x, y: n.position.y }); }
+    if (how === 'spread') {
+      const ord = [...sel].sort((a, b) => a.position.x - b.position.x);
+      const w = (n: Node) => n.measured?.width ?? 220;
+      const total = ord[ord.length - 1].position.x + w(ord[ord.length - 1]) - ord[0].position.x;
+      const gap = Math.max(40, (total - ord.reduce((a, n) => a + w(n), 0)) / (ord.length - 1));
+      let x = ord[0].position.x;
+      for (const n of ord) { pos.set(n.id, { x, y: n.position.y }); x += w(n) + gap; }
+    }
+    setNodes((ns) => ns.map((n) => (pos.has(n.id) ? { ...n, position: pos.get(n.id)! } : n)));
+  };
+  /** Tira as ligações que entram e saem dos selecionados (os cards ficam). */
+  const disconnect = () => {
+    const ids = new Set(nodes.filter((n) => n.selected).map((n) => n.id));
+    if (!ids.size) return;
+    setEdges((es) => es.filter((e) => !ids.has(e.source) && !ids.has(e.target)));
   };
 
   // Ctrl/Cmd + C / V / D / Z / Y no canvas. Digitando num campo, a tecla é do texto (copiar,
   // desfazer a digitação…). Sem card selecionado / nada copiado, segue o normal do navegador.
   // Ctrl/Cmd + S salva em qualquer lugar do editor, inclusive digitando.
-  const keys = useRef({ copy, paste, duplicate, save: () => {}, selectedIds: [] as string[] });
-  keys.current = { copy, paste, duplicate, save: () => { if (!saving) save(); }, selectedIds: selectedNodes().map((n) => n.id) };
+  const keys = useRef({ copy, paste, duplicate, removeIds, selectAll, clearSelection, arrange, save: () => {}, selectedIds: [] as string[] });
+  keys.current = { copy, paste, duplicate, removeIds, selectAll, clearSelection, arrange, save: () => { if (!saving) save(); }, selectedIds: selectedNodes().map((n) => n.id) };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Esc: limpa a seleção (com modal/menu aberto, o Esc é dele)
+      if (e.key === 'Escape' && !document.querySelector('[data-overlay]') && !isTyping(e.target)) { keys.current.clearSelection(); return; }
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       // modal, menu ou lista aberta por cima (`data-overlay`): nenhum atalho do editor age por trás
       // (Ctrl+S só não deixa abrir o "salvar página" do navegador)
@@ -277,7 +325,12 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
       if (e.key.toLowerCase() === 'c' && keys.current.selectedIds.length && !window.getSelection()?.toString()) { e.preventDefault(); keys.current.copy(); }
       // Ctrl+D é "favoritar" no navegador: só toma a tecla com card selecionado
       if (e.key.toLowerCase() === 'd' && keys.current.selectedIds.length) { e.preventDefault(); keys.current.duplicate(keys.current.selectedIds); }
-      if (e.key.toLowerCase() === 'v' && readClip()?.nodes.length) { e.preventDefault(); keys.current.paste(); }
+      if (!e.shiftKey && e.key.toLowerCase() === 'v' && readClip()?.nodes.length) { e.preventDefault(); keys.current.paste(); }
+      // Ctrl+A: todos os cards (no canvas; num campo, seleciona o texto)
+      if (e.key.toLowerCase() === 'a') { e.preventDefault(); keys.current.selectAll(); }
+      // Ctrl+Shift+H / V: alinhar os selecionados em linha / coluna
+      if (e.shiftKey && e.key.toLowerCase() === 'h' && keys.current.selectedIds.length > 1) { e.preventDefault(); keys.current.arrange('row'); }
+      if (e.shiftKey && e.key.toLowerCase() === 'v' && keys.current.selectedIds.length > 1) { e.preventDefault(); keys.current.arrange('column'); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -354,7 +407,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
             </div>
           ))}
           <p className="text-[10.5px] text-faint px-1 pt-2">Clique ou <b>arraste</b> um bloco para o canvas; ligue a bolinha da direita de um card à da esquerda de outro. Delete remove o card ou a ligação selecionada.</p>
-          <p className="text-[10.5px] text-faint px-1">Shift + clique ou Shift + arrastar seleciona vários; <b>Ctrl+C / Ctrl+V</b> copia e cola, inclusive em outro fluxo; <b>Ctrl+D</b> duplica; <b>Ctrl+Z</b> desfaz e <b>Ctrl+Shift+Z</b> (ou Ctrl+Y) refaz; <b>Ctrl+S</b> salva. No Mac, Cmd no lugar de Ctrl. A tesoura no meio de uma ligação a corta. Botão direito abre o menu.</p>
+          <p className="text-[10.5px] text-faint px-1">Shift + clique ou Shift + arrastar seleciona vários (<b>Ctrl+A</b> todos, <b>Esc</b> limpa) — com 2 ou mais aparece a barra embaixo: duplicar, copiar, alinhar, desligar e excluir; <b>Ctrl+Shift+H / V</b> alinha em linha / coluna. A lixeira no topo do card o exclui; <b>Ctrl+C / Ctrl+V</b> copia e cola, inclusive em outro fluxo; <b>Ctrl+D</b> duplica; <b>Ctrl+Z</b> desfaz e <b>Ctrl+Shift+Z</b> (ou Ctrl+Y) refaz; <b>Ctrl+S</b> salva. No Mac, Cmd no lugar de Ctrl. A tesoura no meio de uma ligação a corta. Botão direito abre o menu.</p>
         </aside>
 
         {/* Canvas */}
@@ -395,6 +448,20 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
           </ReactFlow>
           </FlowNodeActions.Provider>
           </FlowEditorRefs.Provider>
+          {multi.length > 1 && (
+            <div className="absolute z-10 bottom-4 left-1/2 -translate-x-1/2 flex flex-wrap items-center justify-center gap-1 rounded-xl border border-line bg-panel shadow-lg px-2 py-1.5 text-[12px] max-w-[calc(100%-2rem)]" role="toolbar" aria-label="Cards selecionados">
+              <span className="px-2 font-semibold text-ink tnum">{multi.length} selecionados</span>
+              <span className="w-px h-5 bg-line" />
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-field text-ink" onClick={() => duplicate(multi.map((n) => n.id))} title="Ctrl+D"><CopyPlus size={13} /> Duplicar</button>
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-field text-ink" onClick={copy} title="Ctrl+C — cola com Ctrl+V, inclusive em outro fluxo"><Copy size={13} /> Copiar</button>
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-field text-ink" onClick={() => arrange('row')} title="Mesma altura (Ctrl+Shift+H)"><AlignStartHorizontal size={13} /> Linha</button>
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-field text-ink" onClick={() => arrange('column')} title="Mesma coluna (Ctrl+Shift+V)"><AlignStartVertical size={13} /> Coluna</button>
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-field text-ink" onClick={() => arrange('spread')} title="Espaça por igual na horizontal"><AlignHorizontalSpaceAround size={13} /> Espaçar</button>
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-field text-ink" onClick={disconnect} title="Tira as ligações que entram e saem destes cards"><Unlink size={13} /> Desligar</button>
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-danger-soft text-danger" onClick={removeSelection} title="Delete — Ctrl+Z desfaz"><Trash2 size={13} /> Excluir</button>
+              <button className="rounded-md p-1 text-faint hover:text-ink hover:bg-field" onClick={clearSelection} title="Limpar seleção (Esc)" aria-label="Limpar seleção"><X size={14} /></button>
+            </div>
+          )}
           {menu && (
             <div data-overlay className="absolute z-20 min-w-44 rounded-lg border border-line bg-panel shadow-lg py-1 text-[13px]" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)}>
               {selectedNodes().length > 0 && (
@@ -404,8 +471,15 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
                 </>
               )}
               <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-field text-ink disabled:text-faint" disabled={!readClip()?.nodes.length} onClick={() => { paste(menu.flow); setMenu(null); }}><ClipboardPaste size={13} /> Colar aqui <span className="ml-auto text-[11px] text-faint">Ctrl+V</span></button>
+              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-field text-ink" onClick={() => { selectAll(); setMenu(null); }}><SquareDashed size={13} /> Selecionar tudo <span className="ml-auto text-[11px] text-faint">Ctrl+A</span></button>
+              {multi.length > 1 && (
+                <>
+                  <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-field text-ink" onClick={() => { arrange('row'); setMenu(null); }}><AlignStartHorizontal size={13} /> Alinhar em linha <span className="ml-auto text-[11px] text-faint">Ctrl+Shift+H</span></button>
+                  <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-field text-ink" onClick={() => { arrange('column'); setMenu(null); }}><AlignStartVertical size={13} /> Alinhar em coluna <span className="ml-auto text-[11px] text-faint">Ctrl+Shift+V</span></button>
+                </>
+              )}
               {selectedNodes().length > 0 && (
-                <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-field text-danger" onClick={() => { removeSelection(); setMenu(null); }}><Trash2 size={13} /> Excluir <span className="ml-auto text-[11px] text-faint">Delete</span></button>
+                <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-field text-danger" onClick={() => { removeSelection(); setMenu(null); }}><Trash2 size={13} /> Excluir{selectedNodes().length > 1 ? ` (${selectedNodes().length})` : ''} <span className="ml-auto text-[11px] text-faint">Delete</span></button>
               )}
             </div>
           )}

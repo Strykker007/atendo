@@ -13,6 +13,7 @@ import { ContactAttributesModule } from './modules/contact-attributes/contact-at
 import { GlobalVariablesModule } from './modules/global-variables/global-variables.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
 import { PixKeysModule } from './modules/pix-keys/pix-keys.module';
+import { BudgetsModule } from './modules/budgets/budgets.module';
 import { CloseReasonsModule } from './modules/close-reasons/close-reasons.module';
 import { SatisfactionModule } from './modules/satisfaction/satisfaction.module';
 import { GoalsModule } from './modules/goals/goals.module';
@@ -51,6 +52,7 @@ import { MonitorModule } from './modules/monitor/monitor.module';
     KanbanModule,
     QuickRepliesModule,
     PixKeysModule,
+    BudgetsModule,
     CloseReasonsModule,
     SatisfactionModule,
     GoalsModule,

@@ -210,7 +210,13 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
       flagReconfig(d, 'fluxo de destino');
     }
 
-    if (node.type === 'action') {
+    if (node.type === 'action' || node.type === 'http') {
+      // motivo de encerramento é do cliente de origem (id); o resultado (Comprou/Não comprou) viaja
+      if (typeof d.closeReasonId === 'string') {
+        delete d.closeReasonId;
+        warnings.push('O motivo de um "Encerrar conversa" foi removido — escolha o motivo no destino.');
+        flagReconfig(d, 'motivo do encerramento');
+      }
       // a URL do webhook costuma levar token na query: não sai do cliente
       if (typeof d.url === 'string' && d.url) {
         delete d.url;
@@ -251,7 +257,7 @@ export function restoreFlowDefinition(def: FlowDefinition, tagIdByName: Record<s
   const warnings: string[] = [];
   const definition = clone(def);
   for (const node of definition.nodes as unknown as AnyNode[]) {
-    if (node.type === 'action' && node.data.kind === 'webhook') flagReconfig(node.data, WEBHOOK_REVIEW_FLAG);
+    if ((node.type === 'action' && node.data.kind === 'webhook') || node.type === 'http') flagReconfig(node.data, WEBHOOK_REVIEW_FLAG);
     for (const holder of tagHolders(node)) {
       if (typeof holder.tagName !== 'string') continue;
       const name = holder.tagName; // guardar antes de apagar: o aviso precisa dizer QUAL etiqueta

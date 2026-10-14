@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock, Braces } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock, Braces, ReceiptText } from 'lucide-react';
 import { SHORTCUT_VARS, VarSyntaxHint } from '@/components/flows/TextWithVars';
 import { GlobalVarsMenuSection } from '@/components/variables/GlobalVariables';
 import { ScheduleMessageModal } from './ScheduledMessages';
+import { BudgetModal } from './BudgetModal';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { usePersistedState } from '@/lib/persisted';
@@ -50,6 +51,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
   const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'mencao' | 'variavel' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
   const [agendando, setAgendando] = useState(false);
+  const [orcando, setOrcando] = useState(false);
   // vendido à parte: só aparece para quem tem no perfil
   const podeAgendar = useCan('conversations.schedule_message');
   const activeRun = useActiveRun(conversationId);
@@ -90,6 +92,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
         />
       )}
       {podeAgendar && <Atalho icone={<AlarmClock size={16} />} titulo="Agendar mensagem" ativo={agendando} onClick={() => { setAberto(null); setAgendando(true); }} />}
+      <Atalho icone={<ReceiptText size={16} />} titulo="Gerar orçamento / pedido (link seguro)" ativo={orcando} onClick={() => { setAberto(null); setOrcando(true); }} />
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
       <Atalho icone={<Braces size={16} />} titulo="Inserir variável (trocada pelo valor no envio)" ativo={aberto === 'variavel'} onClick={() => setAberto(aberto === 'variavel' ? null : 'variavel')} />
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
@@ -138,6 +141,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
           <VarSyntaxHint />
         </Menu>
       )}
+      <BudgetModal open={orcando} onClose={() => setOrcando(false)} conversationId={conversationId} onInserir={onInserir} />
       <ScheduleMessageModal open={agendando} onClose={() => setAgendando(false)} conversationId={conversationId} textoInicial={texto} onAgendado={onAgendado} />
     </div>
   );

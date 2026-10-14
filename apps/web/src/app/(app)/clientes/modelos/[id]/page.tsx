@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { ArrowLeft, GripVertical, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
+import { ArrowLeft, Send, GripVertical, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
 import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -13,6 +13,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUnsavedGuard } from '@/lib/unsaved-guard';
 import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateFlow, type TemplateProfile, type TemplateQuickReply, type TemplateTag } from '@/lib/hooks';
 import { PALETTE, ColorPopover } from '@/components/ui/ColorSwatches';
+import { ApplyToTenantsModal } from './ApplyToTenants';
 
 const ADMIN = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
 /** Gerente e Atendente: sempre listados. Fora do conteúdo = seguem o catálogo. */
@@ -44,6 +45,7 @@ export default function TemplateEditorPage() {
   const [isDefault, setIsDefault] = useState(false);
   const [content, setContent] = useState<TemplateContent | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [aplicando, setAplicando] = useState(false);
   const { modal, leaveTo } = useUnsavedGuard(dirty);
 
   // carrega o rascunho uma vez por modelo (refetch em segundo plano não apaga o que está sendo editado)
@@ -73,12 +75,15 @@ export default function TemplateEditorPage() {
   return (
     <PageShell width="max-w-6xl">
       {modal}
+      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} />
       <PageHeader
         title={tpl.data.name}
-        subtitle={<>Tudo com que um cliente novo nasce ao ser criado com este modelo. {tpl.data.tenants ? `${tpl.data.tenants} cliente(s) já foram criados com ele — eles não mudam.` : ''}</>}
+        subtitle={<>Tudo com que um cliente novo nasce ao ser criado com este modelo. Clientes que já existem só mudam pelo “Aplicar aos clientes”.</>}
         action={
           <div className="flex gap-2">
             <Button variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => leaveTo('/clientes')}>Clientes</Button>
+            {/* lê o modelo salvo: com alteração pendente, aplicaria a versão anterior */}
+            <Button variant="ghost" icon={<Send size={15} />} disabled={dirty} title={dirty ? 'Salve o modelo antes de aplicar' : 'Replicar perfis, motivos de encerramento ou tags em clientes que já existem'} onClick={() => setAplicando(true)}>Aplicar aos clientes</Button>
             <Button onClick={onSave} loading={save.isPending} disabled={!dirty} loadingText="Salvando…">Salvar</Button>
           </div>
         }
@@ -344,7 +349,25 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
   const [sel, setSel] = useState<string[]>([]);
   const [corDe, setCorDe] = useState<string | null>(null);
   const [corLote, setCorLote] = useState(false);
-  const commit = (l: TemplateTag[]) => { onChange(l); setSel((s) => s.filter((n) => l.some((t) => t.name === n))); };
+  const [conflitoDe, setConflitoDe] = useState<string | null>(null);
+  // tag removida sai também do "Conflita com" das outras
+  const commit = (l: TemplateTag[]) => {
+    const nomes = new Set(l.map((t) => t.name));
+    onChange(l.map((t) => (t.conflictsWith?.some((n) => !nomes.has(n)) ? { ...t, conflictsWith: t.conflictsWith.filter((n) => nomes.has(n)) } : t)));
+    setSel((s) => s.filter((n) => l.some((t) => t.name === n)));
+  };
+  // o par é simétrico: vale estar na lista de qualquer um dos dois lados
+  const opostas = (nome: string) => new Set([...(list.find((t) => t.name === nome)?.conflictsWith ?? []), ...list.filter((t) => t.conflictsWith?.includes(nome)).map((t) => t.name)]);
+  function alternarConflito(a: string, b: string, on: boolean) {
+    commit(list.map((t) => {
+      const outra = t.name === a ? b : t.name === b ? a : null;
+      if (!outra) return t;
+      const l = (t.conflictsWith ?? []).filter((n) => n !== outra);
+      // grava num lado só (o da tag aberta); desligar tira dos dois
+      if (on && t.name === a) l.push(b);
+      return { ...t, conflictsWith: l.length ? l : undefined };
+    }));
+  }
   const patch = (names: string[], p: Partial<TemplateTag>) => commit(list.map((t) => (names.includes(t.name) ? { ...t, ...p } : t)));
   // arrastar = ordem das colunas do Kanban do cliente que nascer do modelo
   function onDragEnd(r: DropResult) {
@@ -426,6 +449,7 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
             <span className="w-16 text-center">Kanban</span>
             <span className="w-20 text-center leading-tight">Comprou</span>
             <span className="w-20 text-center leading-tight">Não comprou</span>
+            <span className="w-16 text-center leading-tight">Conflita com</span>
             <span className="w-7 shrink-0" />
           </div>
           <DragDropContext onDragEnd={onDragEnd}>
@@ -448,6 +472,16 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
                           <span className="w-16 flex justify-center">{sw(!!t.isKanban, () => patch([t.name], { isKanban: !t.isKanban }), `${t.name} no Kanban`)}</span>
                           <span className="w-20 flex justify-center">{sw(!!t.showOnWon, () => patch([t.name], { showOnWon: !t.showOnWon }), `${t.name} ao encerrar como Comprou`)}</span>
                           <span className="w-20 flex justify-center">{sw(!!t.showOnLost, () => patch([t.name], { showOnLost: !t.showOnLost }), `${t.name} ao encerrar como Não comprou`)}</span>
+                          <span className="w-16 flex justify-center">
+                            {(() => {
+                              const n = opostas(t.name).size;
+                              return (
+                                <button type="button" onClick={() => setConflitoDe(t.name)} title="Tags que saem quando esta é marcada" aria-label={`Conflitos de ${t.name}`} className={cn('rounded px-1.5 h-6 text-[11.5px] tnum', n ? 'text-accent bg-accent-soft font-medium' : 'text-faint hover:text-ink hover:bg-field')}>
+                                  ⇄ {n || '—'}
+                                </button>
+                              );
+                            })()}
+                          </span>
                           <button title="Remover" className="w-7 shrink-0 text-faint hover:text-danger p-1" onClick={() => commit(list.filter((_, j) => j !== i))}><X size={13} /></button>
                         </div>
                       )}
@@ -460,6 +494,33 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
           </DragDropContext>
         </div>
       )}
+
+      {conflitoDe && (() => {
+        const ops = opostas(conflitoDe);
+        // tag marcada só em Comprou/Não comprou vira motivo no cliente novo, não tag: não tem conflito
+        const viraTag = (t: TemplateTag) => !!t.isKanban || !(t.showOnWon || t.showOnLost);
+        const aberta = list.find((t) => t.name === conflitoDe);
+        return (
+          <Modal open onClose={() => setConflitoDe(null)} title={`“${conflitoDe}” conflita com`} width="max-w-md">
+            <p className="text-xs text-muted mb-2">No cliente novo, marcar <b>{conflitoDe}</b> tira estas tags (e marcar uma delas tira {conflitoDe}). Só as opostas diretas — nunca em cadeia. Até 20.</p>
+            {aberta && !viraTag(aberta) && <p className="text-xs text-warn-ink bg-warn-soft rounded-lg px-3 py-2 mb-2">Esta tag vira motivo de encerramento no cliente novo (está só em Comprou/Não comprou), então os conflitos dela não valem. Ligue o Kanban para ela continuar tag.</p>}
+            <div className="max-h-80 overflow-y-auto divide-y divide-line rounded-lg border border-line">
+              {list.filter((t) => t.name !== conflitoDe).map((t) => {
+                const on = ops.has(t.name);
+                const cheio = !on && (ops.size >= 20 || opostas(t.name).size >= 20);
+                return (
+                  <label key={t.name} className={cn('flex items-center gap-2 px-3 py-1.5 text-sm', cheio ? 'opacity-50' : 'cursor-pointer hover:bg-field')}>
+                    <input type="checkbox" checked={on} disabled={cheio} onChange={(e) => alternarConflito(conflitoDe, t.name, e.target.checked)} />
+                    <span className="text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: t.color ?? '#6366f1' }}>{t.name}</span>
+                    {!viraTag(t) && <span className="text-[11px] text-faint ml-auto">vira motivo — não vale</span>}
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex justify-end mt-3"><Button size="sm" onClick={() => setConflitoDe(null)}>Pronto</Button></div>
+          </Modal>
+        );
+      })()}
 
       <div className="space-y-2">
         <textarea className={cn(inputCls, 'resize-none font-mono text-[13px]')} rows={3} value={nomes} onChange={(e) => setNomes(e.target.value)} placeholder={'Adicionar tags — uma por linha (ou separadas por ;)\nReceita vencida\nAchou caro'} aria-label="Nomes das tags a adicionar" />

@@ -48,6 +48,30 @@ export interface WebhookRequest {
   /** já pronto; ignorado em GET/DELETE */
   body?: string;
   timeoutMs: number;
+  /** quanto ler da resposta (padrão `MAX_BODY`); o resto é descartado sem ler */
+  maxBodyBytes?: number;
+  /** true = status fora de 2xx não lança (a "API externa" grava o status e decide a saída) */
+  acceptAnyStatus?: boolean;
+}
+
+/** Lê no máximo `max` bytes do corpo e cancela o resto (resposta gigante não entra na memória). */
+async function readCapped(res: Response, max: number): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+  return buf.subarray(0, max).toString('utf8');
 }
 
 /**
@@ -71,7 +95,8 @@ export async function callWebhook(raw: string, req: WebhookRequest): Promise<{ s
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) throw new Error(`webhook não respondeu em ${Math.round(req.timeoutMs / 1000)} s`);
     throw new Error(`webhook inacessível: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const body = (await res.text().catch(() => '')).slice(0, MAX_BODY);
-  if (!res.ok) throw new Error(`webhook respondeu ${res.status}`);
+  const max = req.maxBodyBytes ?? MAX_BODY;
+  const body = (await readCapped(res, max).catch(() => '')).slice(0, max);
+  if (!res.ok && !req.acceptAnyStatus) throw new Error(`webhook respondeu ${res.status}`);
   return { status: res.status, body };
 }
