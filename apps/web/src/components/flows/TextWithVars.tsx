@@ -164,6 +164,13 @@ export function collectFlowVars(nodes: { id: string; type: string; data: Record<
     if (n.type === 'action' && n.data.kind === 'webhook' && typeof n.data.responseVar === 'string' && n.data.responseVar) {
       out.push({ key: n.data.responseVar, label: 'Resposta do webhook', source: 'action' });
     }
+    if (n.type === 'http') {
+      for (const m of (Array.isArray(n.data.mappings) ? n.data.mappings : []) as { path?: string; varName?: string }[]) {
+        if (m.varName) out.push({ key: m.varName, label: `API externa: ${String(m.path ?? '').slice(0, 40)}`, source: 'action' });
+      }
+      if (typeof n.data.statusVar === 'string' && n.data.statusVar) out.push({ key: n.data.statusVar, label: 'Status HTTP da API externa', source: 'action' });
+      if (typeof n.data.responseVar === 'string' && n.data.responseVar) out.push({ key: n.data.responseVar, label: 'Resposta da API externa', source: 'action' });
+    }
     if (n.type === 'menu') out.push({ key: `menu_${n.id}`, label: `Opção escolhida em "${String(n.data.text ?? '').slice(0, 40) || 'Menu'}"`, source: 'menu' });
     if (n.type === 'schedule') out.push({ key: 'agendamento', label: 'Horário agendado (bloco Agendar)', source: 'action' }, { key: 'servico', label: 'Serviço agendado', source: 'action' }, { key: 'profissional', label: 'Profissional agendado', source: 'action' });
     if (n.type === 'action' && n.data.kind === 'set_var' && typeof n.data.varName === 'string' && n.data.varName) {

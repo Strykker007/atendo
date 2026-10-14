@@ -21,6 +21,18 @@ export const useFlows = () => useQuery({ queryKey: ['flows'], queryFn: () => api
 export const useFlow = (id: string | null) => useQuery({ queryKey: ['flow', id], enabled: !!id && id !== 'novo', queryFn: () => api<Flow>(`/flows/${id}`) });
 export const useFlowRuns = (id: string | null) => useQuery({ queryKey: ['flow-runs', id], enabled: !!id && id !== 'novo', queryFn: () => api<FlowRuns>(`/flows/${id}/runs`) });
 const invFlows = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['flows'] }); qc.invalidateQueries({ queryKey: ['flow'] }); };
+/** Resultado do "Testar" do bloco API externa (`POST /flows/test-http`). */
+export interface HttpTestResult {
+  ok: boolean;
+  status: number;
+  error: string | null;
+  body: string;
+  isJson: boolean;
+  paths: { path: string; preview: string; kind: 'text' | 'number' | 'boolean' | 'null' | 'list' | 'object' }[];
+  vars: Record<string, string>;
+  missing: string[];
+}
+export const useTestHttp = () => useMutation({ mutationFn: (b: { data: Record<string, unknown>; vars?: Record<string, string> }) => api<HttpTestResult>('/flows/test-http', { method: 'POST', body: JSON.stringify(b) }) });
 export const useCreateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: Omit<Flow, 'id' | 'updatedAt'>) => api<Flow>('/flows', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
 export const useUpdateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<Flow> & { id: string }) => api<Flow>(`/flows/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
 /** Fluxos com "Conectar com outro fluxo" apontando para este — aviso antes de excluir. */

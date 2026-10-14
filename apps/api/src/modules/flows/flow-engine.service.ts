@@ -12,6 +12,7 @@ import { conflictMap } from '../tags/conflicts';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { choose, interpolate, jsonEscape, validAnswer, type InterpolateCtx } from './answer';
+import { runHttpRequest } from './http-request';
 import { pickBranch, type RuleEnv } from './conditions';
 import { applyAssignments } from './variables';
 import { afterAiAnswer } from './ai-turns';
@@ -511,6 +512,14 @@ export class FlowEngineService {
             const branch = pickWeighted(node.data.branches ?? []);
             if (!branch) return this.finish(runId, 'failed', 'randomizador sem ramos com peso');
             await this.goNext(runId, def, node.id, branch.id);
+            continue;
+          }
+          case 'http': {
+            // API externa: grava as variáveis lidas da resposta e sai por Sucesso ou Erro
+            const out = await runHttpRequest(node.data, ctx);
+            if (!out.ok) this.log.warn(`API externa do fluxo ${run.flowId} (nó ${node.id}): ${out.error}`);
+            if (Object.keys(out.vars).length) await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, ...out.vars } } });
+            await this.goNext(runId, def, node.id, out.ok ? undefined : WEBHOOK_ERROR_HANDLE);
             continue;
           }
           case 'distributor': {

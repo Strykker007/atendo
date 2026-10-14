@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, IsInt, MaxLength, Min } from 'class-validator';
 import { randomUUID } from 'node:crypto';
-import { copyName, flowFromPortable, flowTagNames, flowToPortable, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
+import { copyName, flowFromPortable, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -13,6 +13,12 @@ import { FlowEngineService } from './flow-engine.service';
 import { UsageService } from '../billing/usage.service';
 import { botPaused } from '../conversations/bot-pause';
 import { assertOwnFlowMedia, validateDefinition } from './flow-validation';
+import { runHttpRequest } from './http-request';
+import { Throttle } from '@nestjs/throttler';
+import { InterpolationService } from '../../common/interpolation/interpolation.service';
+
+/** contato que não existe: o teste da API externa não lê ficha de ninguém */
+const TEST_CONTACT_ID = '00000000-0000-0000-0000-000000000000';
 
 class FlowDto {
   @IsString() @MaxLength(80) name: string;
@@ -38,6 +44,12 @@ class IdsDto {
 class ActiveDto extends IdsDto {
   @IsBoolean() isActive: boolean;
 }
+/** Teste do bloco "API externa" no editor: o card como está (salvo ou não) e valores de exemplo. */
+class TestHttpDto {
+  @IsObject() data: HttpNode['data'];
+  @IsOptional() @IsObject() vars?: Record<string, string>;
+}
+
 class StartDto {
   @IsUUID() conversationId: string;
   /** robô pausado na conversa: true = o atendente confirmou retomar o robô e iniciar o fluxo */
@@ -54,6 +66,7 @@ export class FlowsController {
     private readonly engine: FlowEngineService,
     private readonly storage: StorageService,
     private readonly usage: UsageService,
+    private readonly interpolation: InterpolationService,
   ) {}
 
   @Get()
@@ -140,6 +153,32 @@ export class FlowsController {
    * Exclui vários (seleção na listagem; a tela pede para digitar EXCLUIR). Tudo ou nada: se algum
    * id não for deste cliente, nada é apagado. Execuções saem junto (cascade), como no individual.
    */
+  /**
+   * "Testar" do bloco API externa: faz a chamada de verdade (mesma proteção do motor — só
+   * endereço público, sem redirecionamento) com um contato de teste e as variáveis de exemplo,
+   * e devolve o status, o começo do corpo, os caminhos do JSON (para escolher os campos) e o que
+   * cada mapeamento leria. Não grava nada. Limitado por minuto: é uma requisição para fora.
+   */
+  @Post('test-http')
+  @RequirePermission('flows.manage')
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
+  async testHttp(@CurrentUser() u: AuthUser, @Body() dto: TestHttpDto) {
+    validateDefinition({ nodes: [{ id: 'teste', type: 'start', position: { x: 0, y: 0 }, data: {} }, { id: 'api', type: 'http', position: { x: 0, y: 0 }, data: dto.data }], edges: [{ id: 'e', source: 'teste', target: 'api' }] } as unknown as FlowDefinition);
+    const vars = Object.fromEntries(Object.entries(dto.vars ?? {}).filter(([k, v]) => /^[\w.]{1,60}$/.test(k) && typeof v === 'string').slice(0, 100).map(([k, v]) => [k, v.slice(0, 2000)]));
+    const ctx = await this.interpolation.context(u.tenantId, { id: TEST_CONTACT_ID, name: 'Contato de teste', phone: '5500000000000' }, vars);
+    const out = await runHttpRequest(dto.data, ctx);
+    return {
+      ok: out.ok,
+      status: out.status,
+      error: out.error ?? null,
+      body: out.body.slice(0, 4000),
+      isJson: out.json !== undefined,
+      paths: out.json !== undefined ? listJsonPaths(out.json) : [],
+      vars: out.vars,
+      missing: out.missing,
+    };
+  }
+
   @Post('delete')
   @RequirePermission('flows.manage')
   async removeBatch(@CurrentUser() u: AuthUser, @Body() dto: IdsDto) {

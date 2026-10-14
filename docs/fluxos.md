@@ -32,7 +32,7 @@ Genérico: `PORTABLE_VERSION`, `PortableBundle`/`toBundle` (lote `'<tipo>-bundle
 Persistência: estado local (`useNodesState`/`useEdgesState`) → `save()` monta o `FlowDefinition` → `onSave` (página `app/(app)/fluxos/[id]`) → `PATCH /flows/:id` com a `version` carregada. Nada é salvo sozinho; "não salvo" compara snapshot do conteúdo.
 
 ### Atalhos, histórico e alterações não salvas
-- **Atalhos** (Cmd no Mac): Ctrl+Z desfaz; Ctrl+Shift+Z ou Ctrl+Y refaz; Ctrl+S salva (sempre bloqueia o "salvar página" do navegador; ignorado enquanto já está salvando ou com a tecla segurada); Ctrl+C/V/D copiam/colam/duplicam. Com o foco num campo de texto (input de texto, textarea, select, contenteditable), Z/Y/C/V/D ficam com o campo (desfazer a digitação, copiar o texto); **Ctrl+S salva mesmo digitando**. Com algo aberto por cima — modal, menu de contexto do canvas, lista "Inserir variável" (qualquer elemento com `data-overlay`; o `Modal` de `components/ui` já tem) — **nenhum atalho do editor age** (Ctrl+S só é barrado para o navegador não salvar a página).
+- **Atalhos** (Cmd no Mac): Ctrl+Z desfaz; Ctrl+Shift+Z ou Ctrl+Y refaz; Ctrl+S salva (sempre bloqueia o "salvar página" do navegador; ignorado enquanto já está salvando ou com a tecla segurada); Ctrl+C/V/D copiam/colam/duplicam; **Ctrl+A** seleciona todos os cards; **Esc** limpa a seleção; **Ctrl+Shift+H / Ctrl+Shift+V** alinham os selecionados em linha / coluna; Delete/Backspace excluem. Com o foco num campo de texto (input de texto, textarea, select, contenteditable), Z/Y/C/V/D ficam com o campo (desfazer a digitação, copiar o texto); **Ctrl+S salva mesmo digitando**. Com algo aberto por cima — modal, menu de contexto do canvas, lista "Inserir variável" (qualquer elemento com `data-overlay`; o `Modal` de `components/ui` já tem) — **nenhum atalho do editor age** (Ctrl+S só é barrado para o navegador não salvar a página).
 - **Histórico** (`history.ts`): guarda fotos de `{ nodes, edges, meta }` — cobre criar/apagar/mover cards, ligações, conteúdo dos blocos e configurações do fluxo. A chave da foto é o mesmo snapshot do "não salvo" (seleção, medidas e zoom não viram passo). Mudanças seguidas em 400 ms viram um passo só (digitação); arrastando, só grava ao soltar. Máximo de 100 passos; fazer algo novo depois de desfazer descarta o "refazer". Recarregar o editor (conflito de versão) zera o histórico. Salvar não zera: dá para desfazer além do último salvo (volta a marcar "não salvo").
 - **Não salvo** (`dirty`): etiqueta "Alterações não salvas" na barra superior. Proteção em `apps/web/src/lib/unsaved-guard.tsx` (`useUnsavedGuard`, genérico): `beforeunload` (recarregar/fechar a aba → aviso do navegador); clique em link interno (`<a>`/`next/link`, mesma origem, sem `target`/Ctrl/Cmd) interceptado na captura → modal "Você tem alterações não salvas. Deseja realmente sair sem salvar?" (*Sair sem salvar* / *Continuar editando*); seta **Voltar** ao lado do título do fluxo (é um botão: `guard.leaveTo('/fluxos')`) → mesmo modal se houver alterações, senão vai direto para a lista; botão Voltar do navegador → com alterações, o guarda empilha uma cópia da entrada atual (`history.state.__unsavedGuard`), o Voltar cai nela e abre o mesmo modal. Navegação por código (`router.push` fora do editor) **não** é interceptada — botões que navegam devem usar `leaveTo(href)`.
 
@@ -78,6 +78,7 @@ Execução: um `FlowRun` por conversa (iniciar outro para o atual). `advance` ex
 | Atraso inteligente | Revisado (tarefa 1.7) | Atraso inteligente / `wait` | Minutos/horas/dias (job persistente), opcional respeitar expediente, ou **até o próximo horário de atendimento**. Checa pausa e conversa encerrada. Ver [Atraso inteligente](#atraso-inteligente). |
 | Salvar (aguardar resposta com tempo limite) | Existe | Salvar / `question` | Espera resposta, valida (e-mail/telefone/número), grava em variável e opcionalmente na ficha. Mesmas saídas do Menu: **Tentativas esgotadas** e **Não respondeu** (tempo limite) — implementadas na tarefa 1.7, ver [Tempo limite](#tempo-limite-de-resposta-salvar-e-menu). |
 | Distribuidor | Revisado (tarefa 5) | Distribuidor / `distributor` | Rodízio, menos ocupado, fila; saídas Distribuído / Ninguém disponível. Departamento opcional: põe a conversa nele e só distribui entre os participantes — ver [Departamentos](departamentos.md#fluxos). |
+| API externa | Novo | API externa / `http` | Chama uma API (GET/POST/PUT/PATCH/DELETE, headers e corpo com `{{variáveis}}`), lê o JSON da resposta e grava campos em variáveis; botão **Testar** no editor. Saídas Sucesso / Erro. Ver [API externa](#api-externa). |
 | Conectar com outro fluxo | Existe (tarefa 1.4) | Conectar com outro fluxo / `connect_flow` | Sem retorno; variáveis seguem; proteção contra loop. Ver [Conectar com outro fluxo](#conectar-com-outro-fluxo). |
 
 Outros tipos existentes não pedidos: Início (`start`), Fim (`end`), IA (`ai`), Agendar horário (`schedule`).
@@ -89,6 +90,8 @@ Outros tipos existentes não pedidos: Início (`start`), Fim (`end`), IA (`ai`),
 - **Ações em lote na listagem**: checkbox por fluxo + "selecionar todos" → Ativar, Desativar, Duplicar, Exportar selecionados (tarefa 1.7). Ver [Exportação, importação e cópia](#exportação-importação-e-cópia).
 - **Duplicar fluxo**: existe (`POST /flows/:id/duplicate` e em lote; cópia nasce inativa).
 - **Duplicar bloco**: existe (tarefa 1.1) — botão no card, Ctrl/Cmd+D, menu de contexto. Sem ligações.
+- **Excluir bloco**: lixeira no topo do card, ao lado de Duplicar (aparece no hover/seleção; o Início não tem); também Delete, menu de contexto e o painel. Ctrl+Z desfaz.
+- **Seleção múltipla**: Shift + clique, Shift + arrastar (área) ou Ctrl+A. Com 2 ou mais, aparece a **barra de seleção** embaixo do canvas: Duplicar, Copiar, alinhar em **Linha** (mesma altura) / **Coluna** (mesma esquerda), **Espaçar** (distância igual na horizontal), **Desligar** (tira as ligações que entram e saem dos selecionados) e **Excluir**; o X (ou Esc) limpa. O menu do botão direito ganhou *Selecionar tudo* e os alinhamentos.
 - **Desfazer/refazer, Ctrl+S e aviso de alterações não salvas**: existe — ver [Atalhos, histórico e alterações não salvas](#atalhos-histórico-e-alterações-não-salvas).
 - **Copiar/colar blocos** entre fluxos: existe (Ctrl+C/V, `localStorage`) — confirmado na tarefa 1.7: ligações internas da seleção preservadas, as que saem dela descartadas; colar vindo de **outra empresa** passa pela limpeza da importação.
 - **Conexões laterais**: entrada à esquerda, saídas à direita, uma por opção (tarefa 1.1). Ids de handle iguais aos antigos, então fluxos salvos continuam ligados.
@@ -291,6 +294,39 @@ Ações disponíveis (`ActionNode.kind`):
 - `timeoutSec`: 1–30 (padrão 8).
 - `responseVar`: guarda o corpo da resposta (até 2.000 caracteres); vazio em erro.
 - **Saídas**: normal (Sucesso — mesmo handle de antes) e **Erro** (`error`): rede/DNS, tempo esgotado, endereço interno, status ≠ 2xx (inclui 3xx). Sem *Erro* ligada, segue pela normal — comportamento antigo.
+
+## API externa
+
+Bloco próprio (`type: 'http'`, `HttpNode` em `shared/flows.ts`), na paleta em *Lógica e Decisão*.
+Serve para buscar dados de outro sistema no meio do fluxo — status do pedido, cadastro pelo CPF,
+saldo — e usar o resultado nas mensagens e condições seguintes.
+
+- **Requisição**: método (padrão GET), URL, headers e corpo aceitam `{{variáveis}}` (na URL com
+  `encodeURIComponent`; no corpo JSON com escape de JSON). Sem `Accept` informado, vai
+  `application/json`. Tempo limite de 1 a 30 s (padrão 8).
+- **Mesma proteção do webhook** (`webhook.ts → callWebhook`): só http/https público (sem IP
+  interno depois do DNS), portas 80/443, **sem seguir redirecionamento**, headers proibidos
+  descartados. A resposta é lida até **512 KB** (`HTTP_MAX_RESPONSE_BYTES`, por stream: o resto
+  é cancelado sem ler).
+- **Campos → variáveis** (`mappings: {id, path, varName}[]`, até 30): `path` simples no JSON —
+  `cliente.nome`, `itens[0].preco`, `itens.0.preco`, `$.total`, `["chave com espaço"]`
+  (`shared/json-path.ts`: `readJsonPath`, só chaves próprias, nada de `__proto__`). Texto,
+  número e sim/não entram como estão; objeto/lista vira JSON; cada valor até 2.000 caracteres
+  (`HTTP_VAR_MAX`). Caminho que não veio = variável vazia (não é erro).
+- `statusVar` = status HTTP (`0` = não respondeu); `responseVar` = corpo inteiro (até 2.000).
+- **Saídas**: Sucesso (2xx) e **Erro** (`WEBHOOK_ERROR_HANDLE`): fora do ar, tempo esgotado,
+  endereço interno, status fora de 2xx, ou resposta que não é JSON quando há campos a ler. No erro
+  as variáveis mapeadas ficam **vazias** (nunca sobra valor de uma chamada anterior). Sem a saída
+  Erro ligada, segue pela Sucesso — teste `{{api_status}}` numa Condição se precisar.
+- **Testar** (editor): `POST /flows/test-http` (`flows.manage`, 20/min) faz a chamada de verdade
+  pelo servidor com um contato de teste (telefone impossível, DDD 00) e valores de exemplo para as
+  variáveis do fluxo usadas na requisição; devolve status, começo do corpo, os caminhos do JSON
+  (`listJsonPaths`, com prévia) e o que cada campo leria. Clicar em **+ usar** num caminho cria o
+  mapeamento com nome sugerido (`suggestVarName`). Não grava nada.
+- Código: `http-request.ts → runHttpRequest` (puro em relação ao run: o motor grava as variáveis,
+  o teste usa a mesma função). Validação ao salvar em `flow-validation.ts → httpErrors`.
+- **Exportação**: URL e headers sensíveis saem como no webhook (`scrubFlowDefinition`); na
+  importação o card vem marcado "revisar configuração".
 
 ## Atraso inteligente
 

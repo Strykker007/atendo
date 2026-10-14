@@ -2,7 +2,7 @@
  * Definição de um fluxo de automação (o que o editor salva e o motor executa).
  * Um fluxo é um grafo: nós + arestas. Cada nó tem um tipo e dados próprios.
  */
-export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end' | 'schedule' | 'ai' | 'variable' | 'randomizer' | 'distributor' | 'connect_flow';
+export type FlowNodeType = 'start' | 'message' | 'question' | 'menu' | 'condition' | 'action' | 'wait' | 'end' | 'schedule' | 'ai' | 'variable' | 'randomizer' | 'distributor' | 'connect_flow' | 'http';
 
 export interface FlowNodeBase<T extends FlowNodeType, D> {
   id: string;
@@ -409,7 +409,28 @@ export type ConnectFlowNode = FlowNodeBase<'connect_flow', { flowId?: string; fl
 /** Saltos entre fluxos seguidos, sem resposta do contato no meio, antes de entregar para humano. */
 export const MAX_FLOW_HOPS = 5;
 
-export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode | AiNode | VariableNode | RandomizerNode | DistributorNode | ConnectFlowNode;
+/** Resposta da API externa → variável: `path` no JSON (`cliente.nome`, `itens[0].preco`, `$.total`). */
+export interface HttpMapping { id: string; path: string; varName: string }
+/**
+ * API externa (docs/fluxos.md#api-externa): chama uma URL (mesma proteção do webhook — só
+ * http/https público, sem redirecionamento), lê a resposta JSON e grava os campos escolhidos em
+ * variáveis. Saídas: padrão = Sucesso (2xx); `WEBHOOK_ERROR_HANDLE` = Erro (rede, tempo limite,
+ * status fora de 2xx, JSON inválido quando há mapeamentos). Sem a saída Erro ligada, segue pela
+ * Sucesso com as variáveis mapeadas vazias.
+ */
+export type HttpNode = FlowNodeBase<'http', {
+  method?: WebhookMethod; url?: string; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;
+  mappings?: HttpMapping[];
+  /** status HTTP da resposta (0 = não respondeu) */ statusVar?: string;
+  /** corpo inteiro (até `HTTP_VAR_MAX` caracteres) */ responseVar?: string;
+}>;
+export const HTTP_MAX_MAPPINGS = 30;
+/** teto do valor de cada variável vinda da API (objeto/lista vira JSON e é cortado aqui) */
+export const HTTP_VAR_MAX = 2_000;
+/** teto lido da resposta (o resto é descartado sem ler) */
+export const HTTP_MAX_RESPONSE_BYTES = 512_000;
+
+export type FlowNode = StartNode | MessageNode | QuestionNode | MenuNode | ConditionNode | ActionNode | WaitNode | EndNode | ScheduleNode | AiNode | VariableNode | RandomizerNode | DistributorNode | ConnectFlowNode | HttpNode;
 
 /**
  * sourceHandle: menu → id da opção, 'fallback' (tentativas esgotadas) ou 'timeout'; question → null ou 'timeout';
@@ -450,6 +471,7 @@ export const FLOW_NODE_LABEL: Record<FlowNodeType, string> = {
   randomizer: 'Randomizador',
   distributor: 'Distribuidor',
   connect_flow: 'Conectar com outro fluxo',
+  http: 'API externa',
 };
 
 /** Prefixos de variáveis que carregam o id do nó que as criou (`menu_<id>`). */

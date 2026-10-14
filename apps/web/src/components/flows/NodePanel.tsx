@@ -10,6 +10,7 @@ import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
 import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
 import { ContentPanel } from './ContentPanel';
+import { HttpPanel } from './HttpPanel';
 
 const varName = (v: string) => v.replace(/[^\w]/g, '_').toLowerCase();
 const shortId = () => crypto.randomUUID().slice(0, 8);
@@ -505,6 +506,8 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
             </Field>
           );
         })()}
+
+        {node.type === 'http' && <HttpPanel data={node.data} set={set} vars={vars} />}
 
         {node.type === 'distributor' && (
           <>
