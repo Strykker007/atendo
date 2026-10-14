@@ -173,6 +173,29 @@ export default function SatisfactionReportPage() {
             </section>
           </div>
 
+          {d.extraQuestions.length > 0 && (
+            <section className="rounded-2xl bg-panel border border-line p-4">
+              <h2 className="text-sm font-semibold text-ink mb-3">Outras perguntas</h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                {d.extraQuestions.map((x) => {
+                  const maior = Math.max(1, ...x.distribution.map((y) => y.count));
+                  return (
+                    <div key={`${x.questionId}-${x.scale}`} className="rounded-xl border border-line p-3">
+                      <p className="text-[13px] text-ink line-clamp-2">{x.question}</p>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="text-xl font-semibold tnum text-ink">{x.scale === 'csat_3' ? fmtPct(x.satisfiedPct) : fmtNota(x.avg)}</span>
+                        <span className="text-[11.5px] text-muted">{x.scale === 'csat_3' ? 'responderam “Bom”' : `de ${SURVEY_SCALE_MAX[x.scale]}`}{x.nps != null ? ` · NPS ${x.nps}` : ''} · {x.answered} respostas</span>
+                      </div>
+                      <div className="mt-2 flex items-end gap-1 h-10">
+                        {x.distribution.map((y) => <span key={y.score} title={`${rotuloNota(x.scale, y.score)}: ${y.count}`} className={cn('flex-1 rounded-sm', corDaNota(x.scale, y.score))} style={{ height: `${Math.max(4, (y.count / maior) * 100)}%`, opacity: y.count ? 1 : 0.2 }} />)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           <section className="rounded-2xl bg-panel border border-line">
             <div className="flex flex-wrap items-end gap-3 px-4 pt-4 pb-3 border-b border-line">
               <h2 className="text-sm font-semibold text-ink mr-auto inline-flex items-center gap-1.5"><MessageSquareQuote size={15} className="text-accent" /> Feedbacks dos clientes</h2>

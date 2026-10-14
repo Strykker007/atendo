@@ -654,6 +654,8 @@ model SatisfactionSurvey {
   declineLabel    String   @default("Não responder")
   /// depois da nota, pergunta se quer deixar um comentário
   askComment      Boolean  @default(true)
+  /// perguntas além da principal (`SurveyExtraQuestion[]`, até 2): uma por vez, só depois da resposta anterior
+  extraQuestions  Json     @default("[]")
   commentPrompt   String?
   thanksMessage   String?
   /// enviada quando o cliente recusa; vazio = não manda nada
@@ -701,6 +703,12 @@ model SurveyResponse {
   status         SurveyResponseStatus @default(pending)
   /// 1..máximo da escala; nulo = não respondeu ou recusou
   score          Int?
+  /// pergunta atual: 0 = a principal, 1.. = as adicionais (congeladas em `questions`)
+  step           Int                  @default(0)
+  /// perguntas adicionais no momento do envio (`SurveyExtraQuestion[]`): editar a pesquisa não muda a que está em andamento
+  questions      Json                 @default("[]")
+  /// respostas das adicionais (`SurveyExtraAnswer[]`)
+  answers        Json                 @default("[]")
   comment        String?
   error          String?
   sentAt         DateTime             @default(now())

@@ -1,8 +1,8 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { BarChart3, Pencil, Plus, Power, Star, ThumbsUp } from 'lucide-react';
-import { SURVEY_DEFAULTS, SURVEY_SCALE_LABEL, SURVEY_SCALES, surveyInteractive, surveyPromptText, type SurveyScale } from '@atendo/shared';
+import { BarChart3, Pencil, Plus, Power, ShieldCheck, Star, ThumbsUp, Trash2 } from 'lucide-react';
+import { SURVEY_DEFAULTS, SURVEY_EXTRA_QUESTIONS_MAX, SURVEY_SCALE_LABEL, SURVEY_SCALES, surveyInteractive, surveyPromptText, type SurveyExtraQuestion, type SurveyScale } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { Empty, PageHeader, PageShell } from '@/components/ui/Page';
 import { Field, Modal, inputCls } from '@/components/ui/Modal';
@@ -59,7 +59,7 @@ export default function SurveysPage() {
               </div>
               <p className="mt-1 text-[13px] text-muted line-clamp-2 whitespace-pre-line">{s.question}</p>
               <p className="mt-1 text-[11px] text-faint">
-                {s.allowDecline ? 'Pode recusar' : 'Sem opção de recusa'} · {s.askComment ? 'pede comentário' : 'sem comentário'} · espera {s.expiresHours} h
+                {1 + (s.extraQuestions?.length ?? 0)} pergunta{s.extraQuestions?.length ? 's' : ''} · {s.allowDecline ? 'pode recusar' : 'sem opção de recusa'} · {s.askComment ? 'pede comentário' : 'sem comentário'} · espera {s.expiresHours} h
               </p>
             </div>
             {pode && (
@@ -89,6 +89,7 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
     allowDecline: survey?.allowDecline ?? true,
     declineLabel: survey?.declineLabel ?? SURVEY_DEFAULTS.declineLabel,
     askComment: survey?.askComment ?? true,
+    extraQuestions: survey?.extraQuestions ?? ([] as SurveyExtraQuestion[]),
     commentPrompt: survey ? survey.commentPrompt ?? '' : SURVEY_DEFAULTS.commentPrompt,
     thanksMessage: survey ? survey.thanksMessage ?? '' : SURVEY_DEFAULTS.thanksMessage,
     declinedMessage: survey ? survey.declinedMessage ?? '' : SURVEY_DEFAULTS.declinedMessage,
@@ -96,10 +97,13 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
     isDefault: survey?.isDefault ?? false,
   }));
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((o) => ({ ...o, [k]: v }));
+  const mudarExtra = (i: number, patch: Partial<SurveyExtraQuestion>) => set('extraQuestions', f.extraQuestions.map((q, n) => (n === i ? { ...q, ...patch } : q)));
+  const novaExtra = () => set('extraQuestions', [...f.extraQuestions, { id: `q${Date.now().toString(36)}`, text: '', scale: 'scale_5' }]);
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     if (!f.name.trim() || !f.question.trim()) return toast.warn('Preencha o nome e a pergunta.');
+    if (f.extraQuestions.some((q) => !q.text.trim())) return toast.warn('Escreva o texto de cada pergunta adicional (ou remova a vazia).');
     try {
       if (survey) await update.mutateAsync({ id: survey.id, ...f });
       else await create.mutateAsync(f);
@@ -131,6 +135,28 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
           <Field label="Pergunta" hint="Aceita variáveis, como {{contact.first_name}} e {{agent.name}}. A instrução de como responder é acrescentada sozinha.">
             <textarea className={cn(inputCls, 'resize-none')} rows={3} value={f.question} onChange={(e) => set('question', e.target.value)} maxLength={1000} />
           </Field>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-ink">Perguntas adicionais <span className="text-[11px] font-normal text-faint">opcional, até {SURVEY_EXTRA_QUESTIONS_MAX}</span></span>
+              {f.extraQuestions.length < SURVEY_EXTRA_QUESTIONS_MAX && <button type="button" onClick={novaExtra} className="inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:underline"><Plus size={13} /> Pergunta</button>}
+            </div>
+            {f.extraQuestions.map((q, i) => (
+              <div key={q.id} className="rounded-lg border border-line p-2.5 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-muted">{i + 2}ª pergunta</span>
+                  <select className={cn(inputCls, 'py-1 text-[12px] w-auto ml-auto')} value={q.scale} onChange={(e) => mudarExtra(i, { scale: e.target.value as SurveyScale })} aria-label="Escala">
+                    {SURVEY_SCALES.map((sc) => <option key={sc} value={sc}>{SURVEY_SCALE_LABEL[sc]}</option>)}
+                  </select>
+                  <button type="button" onClick={() => set('extraQuestions', f.extraQuestions.filter((_, n) => n !== i))} className="w-7 h-7 grid place-items-center rounded-lg text-muted hover:text-danger hover:bg-field" aria-label="Remover pergunta"><Trash2 size={13} /></button>
+                </div>
+                <textarea className={cn(inputCls, 'resize-none')} rows={2} value={q.text} onChange={(e) => mudarExtra(i, { text: e.target.value })} maxLength={1000} placeholder="Ex.: E o tempo de resposta, como foi?" />
+              </div>
+            ))}
+            {f.extraQuestions.length > 0 && (
+              <p className="flex items-start gap-1.5 text-[11.5px] text-muted"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-ok" /> Uma pergunta por vez, só depois que o cliente responder a anterior. Cada mensagem passa pela fila do número, com o mesmo intervalo e limites anti-bloqueio das outras automações.</p>
+            )}
+          </div>
 
           <label className="flex items-start gap-2 text-[13px] cursor-pointer">
             <input type="checkbox" className="mt-0.5" checked={f.allowDecline} onChange={(e) => set('allowDecline', e.target.checked)} />
@@ -180,6 +206,16 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
           <div className="rounded-xl bg-field p-3 space-y-1.5">
             <div className="rounded-lg rounded-tl-none bg-panel border border-line px-3 py-2 text-[13px] text-ink whitespace-pre-line">{preview.replace(/\*([^*]+)\*/g, '$1')}</div>
             {botoes.map((b) => <div key={b.id} className="rounded-lg bg-panel border border-line px-3 py-1.5 text-center text-[13px] font-medium text-accent">{b.title}</div>)}
+            {f.extraQuestions.filter((q) => q.text.trim()).map((q, i) => {
+              const cfg = { scale: q.scale, question: q.text, allowDecline: f.allowDecline, declineLabel: f.declineLabel };
+              return (
+                <div key={q.id} className="space-y-1.5 pt-1">
+                  <div className="text-center text-[10.5px] text-faint">depois da resposta · {i + 2}ª pergunta</div>
+                  <div className="rounded-lg rounded-tl-none bg-panel border border-line px-3 py-2 text-[13px] text-ink whitespace-pre-line">{surveyPromptText(cfg).replace(/\*([^*]+)\*/g, '$1')}</div>
+                  {(surveyInteractive(cfg)?.options ?? []).map((b) => <div key={b.id} className="rounded-lg bg-panel border border-line px-3 py-1.5 text-center text-[13px] font-medium text-accent">{b.title}</div>)}
+                </div>
+              );
+            })}
           </div>
           <p className="text-[11px] text-faint">Nos números via QR Code os botões chegam como lista numerada; o número também vale como resposta.</p>
         </div>

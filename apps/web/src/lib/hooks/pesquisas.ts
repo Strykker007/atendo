@@ -1,7 +1,7 @@
 'use client';
 /** Pesquisa de satisfação no encerramento — docs/pesquisa-de-satisfacao.md. */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SurveyScale } from '@atendo/shared';
+import type { SurveyExtraQuestion, SurveyScale } from '@atendo/shared';
 import { api } from '../api';
 
 export interface SatisfactionSurvey {
@@ -12,6 +12,8 @@ export interface SatisfactionSurvey {
   allowDecline: boolean;
   declineLabel: string;
   askComment: boolean;
+  /** até 2 além da principal, uma por vez */
+  extraQuestions: SurveyExtraQuestion[];
   commentPrompt: string | null;
   thanksMessage: string | null;
   declinedMessage: string | null;
@@ -59,6 +61,8 @@ export interface SatisfactionReport {
   scales: { scale: SurveyScale; count: number }[];
   totals: SatisfactionIndicators & { failed: number; distribution: { score: number; count: number }[] };
   byAgent: (SatisfactionIndicators & { agentId: string | null; name: string })[];
+  /** perguntas adicionais, cada uma na escala dela */
+  extraQuestions: { questionId: string; question: string; scale: SurveyScale; answered: number; avg: number | null; satisfiedPct: number | null; nps: number | null; distribution: { score: number; count: number }[] }[];
   comments: {
     total: number;
     page: number;

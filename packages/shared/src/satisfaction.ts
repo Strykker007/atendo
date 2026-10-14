@@ -32,6 +32,25 @@ export const SURVEY_SATISFIED_FROM: Record<SurveyScale, number> = { scale_5: 4, 
 export const SURVEY_DECLINE_ID = 'survey:decline';
 export const surveyOptionId = (score: number) => `survey:${score}`;
 
+/**
+ * Perguntas além da principal. No máximo 2 (3 no total): cada pergunta é uma mensagem a mais
+ * no número, e pesquisa comprida é a que o cliente abandona no meio.
+ */
+export const SURVEY_EXTRA_QUESTIONS_MAX = 2;
+export interface SurveyExtraQuestion {
+  /** estável entre edições: é a chave do relatório da pergunta */
+  id: string;
+  text: string;
+  scale: SurveyScale;
+}
+/** Resposta de uma pergunta adicional, com texto e escala congelados (`SurveyResponse.answers`). */
+export interface SurveyExtraAnswer {
+  questionId: string;
+  question: string;
+  scale: SurveyScale;
+  score: number;
+}
+
 export interface SurveyPromptConfig {
   scale: SurveyScale;
   question: string;

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import type { Prisma, SatisfactionSurvey } from '@prisma/client';
-import { isSurveyCommentSkip, parseSurveyAnswer, surveyInteractive, surveyPromptText, type SurveyScale } from '@atendo/shared';
+import { Prisma, type SatisfactionSurvey } from '@prisma/client';
+import { isSurveyCommentSkip, parseSurveyAnswer, surveyInteractive, surveyPromptText, type SurveyExtraAnswer, type SurveyExtraQuestion, type SurveyScale } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -11,7 +11,9 @@ export interface SurveyClaim {
   responseId: string;
   tenantId: string;
   conversationId: string;
-  step: 'ask_comment' | 'thanks' | 'declined';
+  step: 'ask_next' | 'ask_comment' | 'thanks' | 'declined';
+  /** em `ask_next`: qual pergunta adicional (1 ou 2) */
+  question?: number;
 }
 
 /**
@@ -68,6 +70,8 @@ export class SurveyRunnerService {
         agentId: agent?.id ?? null,
         agentName: agent?.name ?? null,
         scale: survey.scale,
+        // congela as adicionais: editar a pesquisa no meio não muda a pergunta que o cliente vai receber
+        questions: (survey.extraQuestions ?? []) as Prisma.InputJsonValue,
         expiresAt: new Date(Date.now() + Math.max(1, survey.expiresHours) * 3_600_000),
       },
     });
@@ -87,21 +91,35 @@ export class SurveyRunnerService {
    * A mensagem recebida é resposta da pesquisa aberta nesta conversa? Se for, grava e devolve o
    * próximo passo — e a conversa NÃO reabre. `null` = não é (ou não há pesquisa aberta): segue o
    * caminho normal. Chamado só com a conversa encerrada.
+   *
+   * Uma resposta do cliente gera no máximo UMA mensagem de volta (a próxima pergunta, o pedido de
+   * comentário ou o agradecimento) — nunca "obrigado" + pergunta seguidos. É o que mantém a
+   * pesquisa no ritmo de uma conversa normal, e cada envio ainda passa pela fila do número.
    */
   async claim(conversationId: string, msg: { type: string; text?: string | null; interactiveReplyId?: string | null }, at: Date): Promise<SurveyClaim | null> {
     const r = await this.prisma.surveyResponse.findFirst({ where: { conversationId, status: { in: ['pending', 'commenting'] } }, orderBy: { sentAt: 'desc' }, include: { survey: { select: { allowDecline: true, askComment: true } } } });
     if (!r) return null;
     const base = { responseId: r.id, tenantId: r.tenantId, conversationId };
-    // guarda de status em todo update: duas mensagens seguidas não podem gravar duas vezes
+    const extras = (r.questions as unknown as SurveyExtraQuestion[] | null) ?? [];
+    const respondidas = (r.answers as unknown as SurveyExtraAnswer[] | null) ?? [];
+    // guarda de status e passo em todo update: duas mensagens seguidas não podem gravar duas vezes
     const mover = (data: Prisma.SurveyResponseUpdateManyMutationInput) =>
-      this.prisma.surveyResponse.updateMany({ where: { id: r.id, status: r.status }, data }).then((x) => x.count > 0);
+      this.prisma.surveyResponse.updateMany({ where: { id: r.id, status: r.status, step: r.step }, data }).then((x) => x.count > 0);
+    /** o que vem depois da pergunta `passo` (0 = principal): a próxima adicional, o comentário ou o fim */
+    const depoisDe = (passo: number): { data: Prisma.SurveyResponseUpdateManyMutationInput; claim: SurveyClaim } =>
+      passo < extras.length
+        ? { data: { status: 'pending', step: passo + 1 }, claim: { ...base, step: 'ask_next', question: passo + 1 } }
+        : r.survey.askComment
+          ? { data: { status: 'commenting' }, claim: { ...base, step: 'ask_comment' } }
+          : { data: { status: 'answered' }, claim: { ...base, step: 'thanks' } };
+
     if (r.expiresAt <= at) {
-      // passou do prazo: nota já dada continua valendo (só o comentário não veio)
-      await mover(r.status === 'commenting' ? { status: 'answered' } : { status: 'expired', error: 'sem resposta no prazo' });
+      // passou do prazo: nota já dada continua valendo (só o resto não veio)
+      await mover(r.score != null ? { status: 'answered' } : { status: 'expired', error: 'sem resposta no prazo' });
       return null;
     }
     const texto = msg.type === 'text' || msg.type === 'interactive';
-    if (r.status === 'pending') {
+    if (r.status === 'pending' && r.step === 0) {
       const ans = texto ? parseSurveyAnswer(r.scale as SurveyScale, msg, r.survey.allowDecline) : null;
       if (!ans) {
         // falou de outra coisa: não insistimos, o atendimento reabre normalmente
@@ -109,8 +127,22 @@ export class SurveyRunnerService {
         return null;
       }
       if (ans.kind === 'decline') return (await mover({ status: 'declined', answeredAt: at })) ? { ...base, step: 'declined' } : null;
-      const proximo = r.survey.askComment ? 'commenting' : 'answered';
-      return (await mover({ status: proximo, score: ans.score, answeredAt: at })) ? { ...base, step: proximo === 'commenting' ? 'ask_comment' : 'thanks' } : null;
+      const prox = depoisDe(0);
+      return (await mover({ ...prox.data, score: ans.score, answeredAt: at })) ? prox.claim : null;
+    }
+    if (r.status === 'pending') {
+      // pergunta adicional: a nota principal já está gravada, então daqui nada vira "recusa"
+      const q = extras[r.step - 1];
+      const ans = q && texto ? parseSurveyAnswer(q.scale, msg, r.survey.allowDecline) : null;
+      if (!ans) {
+        await mover({ status: 'answered' });
+        return null;
+      }
+      // "0" numa adicional = pular o resto, sem perguntar mais nada
+      if (ans.kind === 'decline') return (await mover({ status: 'answered' })) ? { ...base, step: 'thanks' } : null;
+      const answers: SurveyExtraAnswer[] = [...respondidas, { questionId: q.id, question: q.text, scale: q.scale, score: ans.score }];
+      const prox = depoisDe(r.step);
+      return (await mover({ ...prox.data, answers: answers as unknown as Prisma.InputJsonValue })) ? prox.claim : null;
     }
     // comentário: áudio/foto não viram comentário — fecha a pesquisa e a mensagem reabre o atendimento
     if (!texto) {
@@ -121,15 +153,26 @@ export class SurveyRunnerService {
     return (await mover({ status: 'answered', comment })) ? { ...base, step: 'thanks' } : null;
   }
 
-  /** Responde ao passo da pesquisa (pede comentário, agradece ou se despede da recusa). */
+  /**
+   * Responde ao passo da pesquisa: próxima pergunta, pedido de comentário, agradecimento ou
+   * resposta à recusa. Sai por `sendAsSystem` como mensagem automática (sem autor), então
+   * respeita o intervalo do número, o teto de automáticas por hora e a rajada por conversa.
+   */
   async followUp(c: SurveyClaim) {
     const r = await this.prisma.surveyResponse.findUnique({ where: { id: c.responseId }, include: { survey: true } });
     if (!r) return;
     const s = r.survey;
-    const texto = c.step === 'ask_comment' ? s.commentPrompt : c.step === 'thanks' ? s.thanksMessage : s.declinedMessage;
-    if (!texto?.trim()) return;
     try {
       const ctx = await this.interpolation.forContact(c.tenantId, r.contactId, {}, { agentName: r.agentName });
+      if (c.step === 'ask_next') {
+        const q = ((r.questions as unknown as SurveyExtraQuestion[] | null) ?? [])[(c.question ?? 1) - 1];
+        if (!q) return;
+        const cfg = { scale: q.scale, question: interpolate(q.text, ctx), allowDecline: s.allowDecline, declineLabel: s.declineLabel };
+        await this.conversations.sendAsSystem(c.conversationId, surveyPromptText(cfg), undefined, surveyInteractive(cfg), { allowClosed: true, idempotencyKey: `survey-${r.id}-q${c.question}` });
+        return;
+      }
+      const texto = c.step === 'ask_comment' ? s.commentPrompt : c.step === 'thanks' ? s.thanksMessage : s.declinedMessage;
+      if (!texto?.trim()) return;
       await this.conversations.sendAsSystem(c.conversationId, interpolate(texto, ctx), undefined, undefined, { allowClosed: true, idempotencyKey: `survey-${r.id}-${c.step}` });
     } catch (err) {
       this.log.warn(`Pesquisa ${r.id} (${c.step}) não respondida: ${err instanceof Error ? err.message : err}`);

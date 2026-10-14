@@ -37,6 +37,31 @@ número digitado no QR também vale.
 Aceito como nota (`parseSurveyAnswer`): toque no botão, `8`, `nota 8`, `8/10`, `8!`, `5 estrelas`;
 na CSAT, `bom`, `ótimo`, `regular`, `péssimo`…
 
+## Perguntas adicionais
+
+Além da principal, até **2** perguntas (`extraQuestions`, `SURVEY_EXTRA_QUESTIONS_MAX`), cada uma
+com a sua escala. Ordem: principal → 2ª → 3ª → comentário (se ligado) → agradecimento.
+
+- **Uma por vez**: a próxima só sai depois que o cliente responde a anterior. Cada resposta do
+  cliente gera **no máximo uma** mensagem de volta (nunca "obrigado" + pergunta seguidos).
+- **"0" numa adicional** pula o resto: a nota principal fica e sai o agradecimento.
+- **Outra coisa numa adicional** (pergunta, áudio): a pesquisa fecha com o que já foi respondido
+  (`answered`) e a mensagem reabre o atendimento — sem insistir.
+- As adicionais ficam **congeladas na resposta** no envio (`SurveyResponse.questions`): editar a
+  pesquisa no meio não muda o que o cliente vai receber. As notas vão em `answers`
+  (`[{questionId, question, scale, score}]`); `step` diz em qual pergunta está.
+- O relatório principal (média, NPS, por consultor) é da **pergunta principal**; as adicionais
+  aparecem em *Outras perguntas*, cada uma com média/% satisfeitos e distribuição.
+
+## Anti-bloqueio
+
+Toda mensagem da pesquisa sai por `sendAsSystem` **sem autor**, então é **automática** para o
+`SendPacer` e respeita tudo que vale para fluxo e boas-vindas ([Envio](envio.md)): intervalo do
+número (mínimo 3 s no QR), folga extra de automáticas, teto de **automáticas por hora** do
+número, rajada por conversa e expiração da fila. Nada é enviado em lote: no máximo 3 perguntas +
+comentário + agradecimento, cada um como resposta a uma mensagem do cliente, dentro da janela
+de 24 h que ele mesmo abriu.
+
 ## Recusa e "sem insistência"
 
 - **Recusar**: `0`, "não responder", "pular", "não quero"… ou o botão *Não responder*. A pesquisa
@@ -97,5 +122,5 @@ mais usada no período, e a tela mostra as outras para trocar.
 
 ## Modelo de dados
 
-`satisfaction_surveys` (configuração; excluir = desativar, no máximo uma `isDefault` por empresa,
-até 20 ativas) e `survey_responses` (uma por envio). Migração `20261127000000_satisfaction_surveys`.
+`satisfaction_surveys` (configuração, com `extraQuestions`; excluir = desativar, no máximo uma `isDefault` por empresa,
+até 20 ativas) e `survey_responses` (uma por envio). Migrações `20261127000000_satisfaction_surveys` e `20261129000000_survey_extra_questions` (`extraQuestions`, `step`, `questions`, `answers`).

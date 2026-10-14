@@ -1,8 +1,9 @@
 import { BadRequestException, Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { z } from 'zod';
-import { SURVEY_SATISFIED_FROM, SURVEY_SCALE_MAX, SURVEY_SCALES, type SurveyScale } from '@atendo/shared';
+import { SURVEY_EXTRA_QUESTIONS_MAX, SURVEY_SATISFIED_FROM, SURVEY_SCALE_MAX, SURVEY_SCALES, type SurveyScale } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -13,6 +14,12 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
 export const SURVEYS_MAX = 20;
 
+class ExtraQuestionDto {
+  @IsString() @MaxLength(40) id: string;
+  @IsString() @MaxLength(1000) text: string;
+  @IsIn([...SURVEY_SCALES]) scale: SurveyScale;
+}
+
 class SurveyDto {
   @IsString() @MaxLength(80) name: string;
   @IsIn([...SURVEY_SCALES]) scale: SurveyScale;
@@ -21,6 +28,8 @@ class SurveyDto {
   /** vira botão na CSAT de 3 pontos: o WhatsApp corta em 20 caracteres */
   @IsOptional() @IsString() @MaxLength(20) declineLabel?: string;
   @IsOptional() @IsBoolean() askComment?: boolean;
+  /** até 2 além da principal; cada uma só sai depois da resposta anterior */
+  @IsOptional() @IsArray() @ArrayMaxSize(SURVEY_EXTRA_QUESTIONS_MAX) @ValidateNested({ each: true }) @Type(() => ExtraQuestionDto) extraQuestions?: ExtraQuestionDto[];
   @IsOptional() @IsString() @MaxLength(1000) commentPrompt?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) thanksMessage?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) declinedMessage?: string | null;
@@ -34,6 +43,8 @@ class UpdateSurveyDto {
   @IsOptional() @IsBoolean() allowDecline?: boolean;
   @IsOptional() @IsString() @MaxLength(20) declineLabel?: string;
   @IsOptional() @IsBoolean() askComment?: boolean;
+  /** até 2 além da principal; cada uma só sai depois da resposta anterior */
+  @IsOptional() @IsArray() @ArrayMaxSize(SURVEY_EXTRA_QUESTIONS_MAX) @ValidateNested({ each: true }) @Type(() => ExtraQuestionDto) extraQuestions?: ExtraQuestionDto[];
   @IsOptional() @IsString() @MaxLength(1000) commentPrompt?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) thanksMessage?: string | null;
   @IsOptional() @IsString() @MaxLength(1000) declinedMessage?: string | null;
@@ -42,7 +53,13 @@ class UpdateSurveyDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
-const select = { id: true, name: true, scale: true, question: true, allowDecline: true, declineLabel: true, askComment: true, commentPrompt: true, thanksMessage: true, declinedMessage: true, expiresHours: true, isDefault: true, isActive: true, createdAt: true } as const;
+const select = { id: true, name: true, scale: true, question: true, allowDecline: true, declineLabel: true, askComment: true, extraQuestions: true, commentPrompt: true, thanksMessage: true, declinedMessage: true, expiresHours: true, isDefault: true, isActive: true, createdAt: true } as const;
+/** sem texto = descartada; id repetido não pode (é a chave do relatório) */
+function limparExtras(list: ExtraQuestionDto[] | undefined) {
+  const out = (list ?? []).map((q) => ({ id: q.id.trim(), text: q.text.trim(), scale: q.scale })).filter((q) => q.text && q.id);
+  if (new Set(out.map((q) => q.id)).size !== out.length) throw new BadRequestException('Perguntas adicionais com id repetido');
+  return out;
+}
 const vazioViraNulo = (v: string | null | undefined) => (v === undefined ? undefined : v?.trim() || null);
 
 /**
@@ -79,6 +96,7 @@ class SatisfactionSurveysController {
           allowDecline: dto.allowDecline ?? true,
           declineLabel: dto.declineLabel?.trim() || 'Não responder',
           askComment: dto.askComment ?? true,
+          extraQuestions: limparExtras(dto.extraQuestions) as unknown as Prisma.InputJsonValue,
           commentPrompt: vazioViraNulo(dto.commentPrompt),
           thanksMessage: vazioViraNulo(dto.thanksMessage),
           declinedMessage: vazioViraNulo(dto.declinedMessage),
@@ -103,6 +121,7 @@ class SatisfactionSurveysController {
       ...(dto.allowDecline !== undefined && { allowDecline: dto.allowDecline }),
       ...(dto.declineLabel !== undefined && { declineLabel: dto.declineLabel.trim() || 'Não responder' }),
       ...(dto.askComment !== undefined && { askComment: dto.askComment }),
+      ...(dto.extraQuestions !== undefined && { extraQuestions: limparExtras(dto.extraQuestions) as unknown as Prisma.InputJsonValue }),
       ...(dto.commentPrompt !== undefined && { commentPrompt: vazioViraNulo(dto.commentPrompt) }),
       ...(dto.thanksMessage !== undefined && { thanksMessage: vazioViraNulo(dto.thanksMessage) }),
       ...(dto.declinedMessage !== undefined && { declinedMessage: vazioViraNulo(dto.declinedMessage) }),
@@ -233,6 +252,28 @@ class SatisfactionReportController {
       this.prisma.surveyResponse.count({ where: { tenantId: t, sentAt: { gte: from, lt: to }, status: 'failed', scale, ...(f.surveyId && { surveyId: f.surveyId }), ...(f.agentId && { agentId: f.agentId }) } }),
     ]);
 
+    // perguntas adicionais: cada uma com a escala dela (texto e escala congelados na resposta).
+    // SQL parametrizado — o JSON é desdobrado no banco em vez de trazer todas as respostas
+    const extrasRaw = await this.prisma.$queryRaw<{ qid: string; question: string; scale: string; score: number; n: number }[]>(Prisma.sql`
+      select a->>'questionId' as qid, max(a->>'question') as question, a->>'scale' as scale, (a->>'score')::int as score, count(*)::int as n
+      from survey_responses r, jsonb_array_elements(r.answers) a
+      where r."tenantId" = ${t} and r."sentAt" >= ${from} and r."sentAt" < ${to} and r.status <> 'failed'
+        ${f.surveyId ? Prisma.sql`and r."surveyId" = ${f.surveyId}` : Prisma.empty}
+        ${f.agentId ? Prisma.sql`and r."agentId" = ${f.agentId}` : Prisma.empty}
+      group by 1, 3, 4`);
+    const extras = new Map<string, { questionId: string; question: string; scale: SurveyScale; linhas: Linha[] }>();
+    for (const e of extrasRaw) {
+      if (!(SURVEY_SCALES as readonly string[]).includes(e.scale)) continue;
+      const k = `${e.qid}|${e.scale}`;
+      const cur = extras.get(k) ?? { questionId: e.qid, question: e.question, scale: e.scale as SurveyScale, linhas: [] };
+      cur.linhas.push({ status: 'answered', score: e.score, n: e.n });
+      extras.set(k, cur);
+    }
+    const extraQuestions = [...extras.values()].map(({ linhas, ...q }) => {
+      const ind = indicadores(linhas, q.scale);
+      return { ...q, answered: ind.answered, avg: ind.avg, satisfiedPct: ind.satisfiedPct, nps: ind.nps, distribution: ind.distribution };
+    });
+
     // por consultor: nome atual do usuário (o congelado só quando o usuário saiu)
     const ids = [...new Set(porConsultor.map((r) => r.agentId).filter((x): x is string => !!x))];
     const users = ids.length ? await this.prisma.user.findMany({ where: { id: { in: ids }, tenantId: t }, select: { id: true, name: true } }) : [];
@@ -257,6 +298,7 @@ class SatisfactionReportController {
       scales: porEscala.map((s) => ({ scale: s.scale, count: s._count._all })),
       totals: { ...indicadores(totais.map((r) => ({ status: r.status, score: r.score, n: r._count._all })), scale, aguardando), failed },
       byAgent,
+      extraQuestions,
       comments: {
         total,
         page: f.page,
