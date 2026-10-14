@@ -42,6 +42,13 @@ const OverviewQuery = z.object({
 });
 type Filtro = { tagIds?: string[]; agentId?: string };
 
+/**
+ * Encerramento "do consultor": ele encerrou, ou a automação encerrou enquanto a conversa era
+ * dele (`targetId` = dono, gravado no encerramento automático). Sem isto, quem usa fluxo que
+ * fecha a conversa via "Mudar status" sumia do próprio filtro. O ranking continua só pelo ator.
+ */
+const doConsultor = (agentId: string) => Prisma.sql`(e."actorId" = ${agentId} or (e."actorId" is null and e."targetId" = ${agentId}))`;
+
 const SalesDetailsQuery = z.object({
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
@@ -138,7 +145,7 @@ class ReportsController {
       ignoreInReports: false,
       createdAt: { gte: from, lt: to },
       ...(filtro.tagIds && { OR: [{ tagIds: { hasSome: filtro.tagIds } }, { conversation: { tags: { some: { tagId: { in: filtro.tagIds } } } } }] }),
-      ...(filtro.agentId && { actorId: filtro.agentId }),
+      ...(filtro.agentId && { AND: [{ OR: [{ actorId: filtro.agentId }, { actorId: null, targetId: filtro.agentId }] }] }),
     };
     const [closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, won, lost] = await this.load.all([
       // atendimentos ENCERRADOS no período (um encerramento = um atendimento), não conversas
@@ -209,7 +216,7 @@ class ReportsController {
     if (f.tagIds?.length) conds.push(Prisma.sql`(e."tagIds" || e."tagSnapshot") && ARRAY[${Prisma.join(f.tagIds)}]::text[]`);
     if (f.closeReasonId) conds.push(Prisma.sql`e."closeReasonId" = ${f.closeReasonId}`);
     if (f.reason) conds.push(Prisma.sql`e."closeReasonId" is null and trim(regexp_replace(coalesce(e.reason, ''), '(\\s*·\\s*)?encerrado em massa$', '')) = ${f.reason}`);
-    if (f.userId) conds.push(Prisma.sql`e."actorId" = ${f.userId}`);
+    if (f.userId) conds.push(doConsultor(f.userId));
     if (f.search) {
       const ors = [Prisma.sql`c.name ilike ${like(f.search)}`];
       if (digits(f.search).length >= 3) ors.push(Prisma.sql`c.phone like ${like(digits(f.search))}`);
@@ -221,7 +228,7 @@ class ReportsController {
     // a página primeiro (só ids, pelo índice de tenant/tipo/data) e os laterais caros — início do
     // atendimento e contagem de mensagens — só para as linhas da página, não para o período inteiro
     const [rows, resumo, agents] = await this.load.all([
-      () => this.prisma.$queryRaw<{ id: string; closedAt: Date; conversationId: string; outcome: string | null; value: number | null; reason: string | null; tagIds: string[] | null; tagSnapshot: string[] | null; closeReasonId: string | null; reasonName: string | null; reasonColor: string | null; stageTagId: string | null; contactId: string; contactName: string | null; phone: string; userId: string | null; userName: string | null; startedAt: Date | null; messages: number }[]>(Prisma.sql`
+      () => this.prisma.$queryRaw<{ id: string; closedAt: Date; conversationId: string; outcome: string | null; value: number | null; reason: string | null; tagIds: string[] | null; tagSnapshot: string[] | null; closeReasonId: string | null; reasonName: string | null; reasonColor: string | null; stageTagId: string | null; contactId: string; contactName: string | null; phone: string; userId: string | null; userName: string | null; ownerId: string | null; ownerName: string | null; startedAt: Date | null; messages: number }[]>(Prisma.sql`
         with pg as (
           select e.id ${from_} where ${where}
           order by e."createdAt" desc
@@ -230,11 +237,13 @@ class ReportsController {
         select e.id, e."createdAt" as "closedAt", e."conversationId", e.outcome::text as outcome, e."outcomeValue"::float as value, e.reason, e."tagIds", e."tagSnapshot",
                e."closeReasonId", cr.name as "reasonName", cr.color as "reasonColor", e."stageTagId",
                c.id as "contactId", c.name as "contactName", c.phone, e."actorId" as "userId", usr.name as "userName",
+               case when e."actorId" is null then e."targetId" end as "ownerId", own.name as "ownerName",
                ini."startedAt",
                (select count(*)::int from messages m where m."conversationId" = e."conversationId" and m."createdAt" <= e."createdAt" and (ini."startedAt" is null or m."createdAt" > ini."startedAt")) as messages
         from pg
         join conversation_events e on e.id = pg.id
         join conversations cv on cv.id = e."conversationId" join contacts c on c.id = cv."contactId" left join users usr on usr.id = e."actorId"
+        left join users own on own.id = e."targetId" and e."actorId" is null
         left join close_reasons cr on cr.id = e."closeReasonId"
         left join lateral (select max(p."createdAt") as "startedAt" from conversation_events p where p."conversationId" = e."conversationId" and p.type = 'closed' and p."createdAt" < e."createdAt") ini on true
         order by e."createdAt" desc
@@ -274,6 +283,8 @@ class ReportsController {
         messages: Number(r.messages),
         contact: { id: r.contactId, name: r.contactName, phone: r.phone, phoneFormatted: formatPhone(r.phone) },
         user: r.userId ? { id: r.userId, name: r.userName } : null,
+        /** encerrado pela automação: de quem era a conversa (o filtro de consultor conta para ele) */
+        owner: !r.userId && r.ownerId ? { id: r.ownerId, name: r.ownerName } : null,
       })),
     };
   }
@@ -478,7 +489,7 @@ class ReportsController {
    */
   private async lostReasons(tenantId: string, from: Date, to: Date, filtro: Filtro) {
     const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`e.outcome = 'lost'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
-    if (filtro.agentId) conds.push(Prisma.sql`e."actorId" = ${filtro.agentId}`);
+    if (filtro.agentId) conds.push(doConsultor(filtro.agentId));
     if (filtro.tagIds) conds.push(this.eventoTemTag(filtro.tagIds));
     // pelo MOTIVO do encerramento (close_reasons); sem motivo, o texto gravado (encerramentos antigos)
     const rows = await this.prisma.$queryRaw<{ label: string; value: number; closeReasonId: string | null; color: string | null }[]>(Prisma.sql`
@@ -573,7 +584,7 @@ class ReportsController {
     if (d.filters.tagIds?.length) {
       filters.push(porEncerramento ? this.eventoTemTag(d.filters.tagIds) : Prisma.sql`c.id in (select "conversationId" from conversation_tags where "tagId" in (${Prisma.join(d.filters.tagIds)}))`);
     }
-    if (d.filters.agentId) filters.push(porEncerramento ? Prisma.sql`e."actorId" = ${d.filters.agentId}` : Prisma.sql`c."assigneeId" = ${d.filters.agentId}`);
+    if (d.filters.agentId) filters.push(porEncerramento ? doConsultor(d.filters.agentId) : Prisma.sql`c."assigneeId" = ${d.filters.agentId}`);
 
     /**
      * Cada join entra só quando a métrica ou o agrupamento usa: mensagens × tags de cada

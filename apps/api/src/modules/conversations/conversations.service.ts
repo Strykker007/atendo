@@ -558,6 +558,8 @@ export class ConversationsService {
 
   async setStatusSystem(conversationId: string, status: ConversationStatus) {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true, botPausedAt: true } });
+    // quem atendeu de fato (antes de mudar o status): o último da equipe que respondeu neste atendimento
+    const atendeu = status === 'closed' ? await this.quemAtendeu(conversationId) : null;
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
@@ -574,8 +576,10 @@ export class ConversationsService {
       },
     });
     const transitorias = status === 'closed' ? await this.tagsDoAtendimento([conversationId]) : null;
-    // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria
-    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação', ...(transitorias && { stageTagId: transitorias.get(conversationId)?.stage ?? null, tagSnapshot: transitorias.get(conversationId)?.ids ?? [] }) });
+    // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria (o ranking não
+    // conta). `targetId` = quem da equipe atendeu: o filtro de consultor do relatório traz o
+    // atendimento dele que o robô fechou (docs/07-api.md › /reports/attendances). Só robô = nulo
+    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação', ...(atendeu && { targetId: atendeu }), ...(transitorias && { stageTagId: transitorias.get(conversationId)?.stage ?? null, tagSnapshot: transitorias.get(conversationId)?.ids ?? [] }) });
     if (status === 'closed') await this.limparTransitorias([conversationId]);
     if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId: conv.tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     if (status === 'closed') await this.encerrarFluxosPausados([conversationId]);
@@ -1604,6 +1608,23 @@ export class ConversationsService {
    * nenhuma, porque o relatório fica plausível e errado. Se não deu para registrar, a ação
    * falha e aparece.
    */
+  /**
+   * Último da equipe que mandou mensagem neste atendimento (desde o encerramento anterior).
+   * Não é o dono da conversa: o dono fica de um atendimento para o outro, e atendimento que só o
+   * robô respondeu não é de ninguém.
+   */
+  private async quemAtendeu(conversationId: string): Promise<string | null> {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { tenantId: true } });
+    if (!conv) return null;
+    const anterior = await this.prisma.conversationEvent.findFirst({ where: { conversationId, type: 'closed' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+    const m = await this.prisma.message.findFirst({
+      where: { conversationId, direction: 'out', internal: false, author: { tenantId: conv.tenantId }, ...(anterior && { createdAt: { gt: anterior.createdAt } }) },
+      orderBy: { createdAt: 'desc' },
+      select: { authorId: true },
+    });
+    return m?.authorId ?? null;
+  }
+
   private async registrar(e: {
     tenantId: string;
     conversationId: string;
