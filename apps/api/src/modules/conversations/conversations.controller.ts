@@ -165,6 +165,8 @@ class ContactDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
   @IsOptional() @IsString() @MaxLength(160) email?: string;
   @IsOptional() @IsString() @MaxLength(300) address?: string;
+  /** CPF/CNPJ (com ou sem máscara); vazio limpa */
+  @IsOptional() @IsString() @MaxLength(20) document?: string;
   @IsOptional() @IsString() @MaxLength(1000) note1?: string;
   @IsOptional() @IsString() @MaxLength(1000) note2?: string;
   /** volta a receber mensagens automáticas (o contato pediu ao atendente) — só `true` */

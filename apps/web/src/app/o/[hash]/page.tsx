@@ -2,7 +2,7 @@
 import { useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Check, ExternalLink, Upload, Clock, CircleCheck, CircleAlert, Loader2 } from 'lucide-react';
+import { Copy, Check, ExternalLink, Upload, Clock, CircleCheck, CircleAlert, Loader2, Zap } from 'lucide-react';
 import { BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, PIX_KEY_TYPE_LABEL, type PublicBudget } from '@atendo/shared';
 import { MarcaHorizontal } from '@/components/ui/Marca';
 import { useBrand } from '@/lib/brand-context';
@@ -26,7 +26,14 @@ async function fetchBudget(hash: string): Promise<PublicBudget> {
 
 export default function OrcamentoPublicoPage() {
   const { hash } = useParams<{ hash: string }>();
-  const q = useQuery({ queryKey: ['public-budget', hash], queryFn: () => fetchBudget(hash), retry: false, refetchOnWindowFocus: false });
+  const q = useQuery({
+    queryKey: ['public-budget', hash],
+    queryFn: () => fetchBudget(hash),
+    retry: false,
+    // Pix gerado e ainda pendente: confere a cada 5 s para mostrar "Pagamento confirmado" sozinho
+    refetchInterval: (query) => (query.state.data?.pixCharge && query.state.data.status === 'PENDING' ? 5000 : false),
+    refetchOnWindowFocus: (query) => !!query.state.data?.pixCharge,
+  });
 
   return (
     <main className="min-h-dvh bg-chat-bg text-ink">
@@ -80,7 +87,9 @@ function Orcamento({ hash, b }: { hash: string; b: PublicBudget }) {
 
       {b.note && <Cartao><p className="text-xs text-muted mb-1">Observação</p><p className="text-sm whitespace-pre-wrap break-words">{b.note}</p></Cartao>}
 
-      {b.status === 'PENDING' && (b.pix || b.paymentUrl) && (
+      {b.status === 'PENDING' && b.autoPix && <PixAutomatico b={b} />}
+
+      {b.status === 'PENDING' && !b.autoPix && (b.pix || b.paymentUrl) && (
         <Cartao className="space-y-3">
           <h2 className="text-sm font-semibold">Pagamento</h2>
           {b.pix && <Pix pix={b.pix} />}
@@ -92,7 +101,8 @@ function Orcamento({ hash, b }: { hash: string; b: PublicBudget }) {
         </Cartao>
       )}
 
-      {b.status !== 'EXPIRED' && <Comprovante hash={hash} enviado={b.receiptSent} />}
+      {/* Pix automático dá baixa sozinho: comprovante só para quem paga por chave/link */}
+      {b.status !== 'EXPIRED' && !b.autoPix && <Comprovante hash={hash} enviado={b.receiptSent} />}
 
       <p className="text-center text-[11px] text-faint pt-2">Página segura de {b.tenantName || brand.brandName}. Não compartilhe este link.</p>
     </>
@@ -109,15 +119,15 @@ function Selo({ cls, icone, children }: { cls: string; icone: React.ReactNode; c
   return <p className={`mt-3 flex items-start gap-1.5 rounded-lg px-3 py-2 text-xs ${cls}`}><span className="mt-px shrink-0">{icone}</span><span>{children}</span></p>;
 }
 
-function Pix({ pix }: { pix: NonNullable<PublicBudget['pix']> }) {
+/** Copiar com fallback: navegador embutido (WhatsApp, Instagram) às vezes não tem a clipboard API. */
+function useCopiar() {
   const [copiado, setCopiado] = useState(false);
-  async function copiar() {
+  async function copiar(texto: string) {
     try {
-      await navigator.clipboard.writeText(pix.key);
+      await navigator.clipboard.writeText(texto);
     } catch {
-      // navegador embutido sem clipboard API: seleção manual como fallback
       const t = document.createElement('textarea');
-      t.value = pix.key;
+      t.value = texto;
       document.body.appendChild(t);
       t.select();
       document.execCommand('copy');
@@ -126,6 +136,39 @@ function Pix({ pix }: { pix: NonNullable<PublicBudget['pix']> }) {
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2500);
   }
+  return { copiado, copiar };
+}
+
+/**
+ * Pix automático: a cobrança já vem gerada (o atendente informou o CPF no orçamento). QR + copia
+ * e cola com o valor exato; a página fica conferindo até o webhook dar baixa.
+ */
+function PixAutomatico({ b }: { b: PublicBudget }) {
+  const { copiado, copiar } = useCopiar();
+  if (!b.pixCharge) {
+    return <Cartao><p className="text-sm text-muted">O Pix deste orçamento não está disponível. Fale com o atendimento.</p></Cartao>;
+  }
+
+  return (
+    <Cartao className="space-y-3">
+      <h2 className="text-sm font-semibold flex items-center gap-1.5"><Zap size={15} className="text-ok" /> Pix de {brl(b.totalValue)}</h2>
+      {b.pixCharge.qrImage && (
+        // QR para quem abriu no computador e paga pelo celular
+        <img src={`data:image/png;base64,${b.pixCharge.qrImage}`} alt="QR Code do Pix" className="mx-auto w-52 h-52 rounded-lg bg-white p-2" />
+      )}
+      <p className="text-xs text-muted text-center">No celular: copie o código e cole em <b className="text-ink">Pix → Copia e cola</b> no app do seu banco.</p>
+      <p className="font-mono text-[11px] break-all rounded-lg bg-field px-3 py-2 select-all max-h-24 overflow-y-auto">{b.pixCharge.payload}</p>
+      <button type="button" onClick={() => copiar(b.pixCharge!.payload)} className="flex items-center justify-center gap-2 w-full rounded-xl bg-accent hover:bg-accent-hover text-white py-3 text-sm font-semibold">
+        {copiado ? <><Check size={16} /> Código copiado</> : <><Copy size={16} /> Copiar código Pix</>}
+      </button>
+      <p className="flex items-center justify-center gap-1.5 text-xs text-muted"><Loader2 size={13} className="animate-spin" /> Aguardando o pagamento — esta página atualiza sozinha.</p>
+    </Cartao>
+  );
+}
+
+function Pix({ pix }: { pix: NonNullable<PublicBudget['pix']> }) {
+  const { copiado, copiar: copiarTexto } = useCopiar();
+  const copiar = () => copiarTexto(pix.key);
   return (
     <div className="rounded-xl border border-line p-3 space-y-2">
       <div className="text-xs text-muted">Pix · {PIX_KEY_TYPE_LABEL[pix.keyType] ?? pix.keyType}{pix.holderName && <> · {pix.holderName}</>}</div>

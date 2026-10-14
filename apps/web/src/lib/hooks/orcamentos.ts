@@ -13,13 +13,16 @@ export interface Budget {
   expiresAt: string;
   createdAt: string;
   paidAt: string | null;
+  /** manual (atendente) | asaas (webhook do Pix automático) */
+  paidVia: 'manual' | 'asaas' | null;
+  autoPix: boolean;
   note: string | null;
   pixKey: string | null;
   paymentUrl: string | null;
   user: { id: string; name: string };
   receipt: { url: string; mimeType: string; fileName: string; at: string } | null;
 }
-type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validHours?: number };
+type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validHours?: number; autoPix?: boolean; cpfCnpj?: string };
 
 /** Link público do orçamento — no domínio aberto agora, para sair com a marca certa. */
 export const budgetLink = (hash: string) => `${typeof window === 'undefined' ? '' : window.location.origin}/o/${hash}`;
@@ -37,7 +40,11 @@ export const useCreateBudget = () => {
   return useMutation({
     mutationFn: ({ conversationId, ...body }: CreateBody & { conversationId: string }) =>
       api<Budget>(`/conversations/${conversationId}/budgets`, { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ['budgets', v.conversationId] }),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ['budgets', v.conversationId] });
+      // CPF digitado no orçamento foi para a ficha
+      if (v.cpfCnpj) qc.invalidateQueries({ queryKey: ['conversation', v.conversationId] });
+    },
   });
 };
 

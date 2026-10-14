@@ -44,4 +44,11 @@ export interface PublicBudget {
   pix: { key: string; keyType: PixKeyType; holderName: string } | null;
   paymentUrl: string | null;
   receiptSent: boolean;
+  /** Pix automático: o cliente gera a cobrança na página (pede CPF) e o webhook dá a baixa */
+  autoPix: boolean;
+  /** cobrança já gerada (só enquanto PENDING) */
+  pixCharge: { payload: string; qrImage: string } | null;
 }
+
+/** CPF (11) ou CNPJ (14), só dígitos — o Asaas exige um dos dois para gerar a cobrança. */
+export const isCpfCnpjLength = (v: string) => [11, 14].includes(v.replace(/\D/g, '').length);

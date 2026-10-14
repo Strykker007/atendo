@@ -91,6 +91,7 @@ model Tenant {
   surveyResponses     SurveyResponse[]
   salesGoals          SalesGoal[]
   budgets             Budget[]
+  paymentGateway      PaymentGateway?
   @@map("tenants")
 }
 
@@ -498,6 +499,8 @@ model Contact {
   avatarCheckedAt DateTime?
   // ---- ficha do cliente, preenchida pelo atendente ----
   email     String?
+  /// CPF (11) ou CNPJ (14), só dígitos — usado na cobrança do Pix automático (docs/orcamentos.md#pix-automático)
+  document  String?
   address   String?
   /// observações livres; a 2ª existe porque o documento de funções pediu duas
   note1     String?
@@ -2069,6 +2072,15 @@ model Budget {
   receiptAt      DateTime?
   paidAt         DateTime?
   paidById       String?
+  /// manual (atendente marcou) | asaas (webhook)
+  paidVia        String?
+  /// Pix automático: a cobrança é gerada no gateway da empresa quando o cliente pede na página
+  autoPix          Boolean   @default(false)
+  /// id da cobrança no gateway (Asaas `pay_…`) — é por ele que o webhook acha o orçamento
+  gatewayPaymentId String?   @unique
+  /// Pix copia e cola e QR (PNG em base64) da cobrança
+  pixPayload       String?
+  pixQrImage       String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -2080,4 +2092,28 @@ model Budget {
   @@index([conversationId, createdAt])
   @@index([tenantId, status])
   @@map("budgets")
+}
+
+/// Conta de recebimento da empresa para o Pix automático do orçamento (docs/orcamentos.md#pix-automático).
+/// O dinheiro cai direto na conta dela; o sistema só gera a cobrança e escuta o webhook.
+model PaymentGateway {
+  id           String   @id @default(uuid())
+  tenantId     String   @unique
+  /// asaas (por enquanto o único)
+  provider     String   @default("asaas")
+  /// `{ apiKey }` via CryptoService.encryptJson — nunca em claro
+  credentials  String
+  sandbox      Boolean  @default(false)
+  /// segredo que o Asaas devolve no header `asaas-access-token` de cada webhook
+  webhookToken String
+  /// id do webhook cadastrado na conta (para remover ao desconectar)
+  webhookId    String?
+  /// nome da conta no Asaas, para a empresa conferir que conectou a certa
+  accountName  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("payment_gateways")
 }

@@ -1,13 +1,13 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Trash2, Copy, FileText, Check, Undo2, CornerDownLeft } from 'lucide-react';
+import { Plus, Trash2, Copy, FileText, Check, Undo2, CornerDownLeft, Zap } from 'lucide-react';
 import { BUDGET_DEFAULT_HOURS, BUDGET_MAX_ITEMS, BUDGET_STATUS_LABEL, budgetTotal, type BudgetItem, type BudgetStatus } from '@atendo/shared';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { cn } from '@/lib/utils';
-import { budgetLink, useBudgets, useConversation, useCreateBudget, usePixKeys, useSetBudgetStatus, type Budget } from '@/lib/hooks';
+import { cn, formatDoc } from '@/lib/utils';
+import { budgetLink, useBudgets, useConversation, useCreateBudget, usePaymentGateway, usePixKeys, useSetBudgetStatus, type Budget } from '@/lib/hooks';
 
 /**
  * Orçamento rápido no chat (docs/orcamentos.md).
@@ -61,7 +61,16 @@ function Aba({ ativa, onClick, children }: { ativa: boolean; onClick: () => void
 
 function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; onCriado: (b: Budget) => void }) {
   const pix = usePixKeys();
+  const gw = usePaymentGateway();
   const criar = useCreateBudget();
+  // Pix automático disponível (plano + Asaas conectado): já vem ligado — é o caminho sem comprovante
+  const podeAuto = !!gw.data?.feature && !!gw.data.connected;
+  const [autoEscolha, setAuto] = useState<boolean | null>(null);
+  const auto = podeAuto && (autoEscolha ?? true);
+  // mini cadastro: vem da ficha; digitado aqui, a API grava na ficha junto com o orçamento
+  const docFicha = useConversation(conversationId).data?.contact.document ?? '';
+  const [doc, setDoc] = useState<string | null>(null);
+  const documento = doc ?? formatDoc(docFicha);
   const [itens, setItens] = useState<BudgetItem[]>([vazio()]);
   const [pixKeyId, setPixKeyId] = useState('');
   const [paymentUrl, setPaymentUrl] = useState('');
@@ -78,14 +87,18 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
   async function gerar() {
     if (!validos.length) return toast.warn('Adicione ao menos um item com nome');
     const url = paymentUrl.trim();
-    if (chave === 'none' && !url) return toast.warn('Escolha uma chave Pix ou informe um link de pagamento');
+    if (!auto && chave === 'none' && !url) return toast.warn('Escolha uma chave Pix ou informe um link de pagamento');
     if (url && !/^https:\/\//i.test(url)) return toast.warn('O link de pagamento precisa começar com https://');
+    const digitos = documento.replace(/\D/g, '');
+    if (auto && digitos.length !== 11 && digitos.length !== 14) return toast.warn('Informe o CPF (11 dígitos) ou CNPJ (14 dígitos) do cliente para o Pix automático');
     try {
       const b = await criar.mutateAsync({
         conversationId,
         items: validos.map((i) => ({ name: i.name.trim(), dosage: i.dosage?.trim() || undefined, quantity: i.quantity, unitPrice: i.unitPrice })),
-        pixKeyId: chave !== 'none' ? chave : undefined,
-        paymentUrl: url || undefined,
+        pixKeyId: !auto && chave !== 'none' ? chave : undefined,
+        paymentUrl: !auto ? url || undefined : undefined,
+        autoPix: auto || undefined,
+        cpfCnpj: auto && digitos !== docFicha ? digitos : undefined,
         note: note.trim() || undefined,
         validHours,
       });
@@ -117,16 +130,31 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
         </div>
       </div>
 
+      {podeAuto && (
+        <label className="flex items-start gap-2 rounded-xl border border-line px-3 py-2.5 cursor-pointer">
+          <input type="checkbox" className="mt-0.5" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+          <span className="text-sm">
+            <span className="font-medium text-ink inline-flex items-center gap-1"><Zap size={14} className="text-ok" /> Pix automático</span>
+            <span className="block text-xs text-muted">O link já abre com o Pix no valor exato, e o orçamento fica “Pago” sozinho quando o pagamento cai — sem comprovante.</span>
+          </span>
+        </label>
+      )}
+      {auto && (
+        <Field label="CPF / CNPJ do cliente" hint={docFicha ? 'Da ficha do contato. Alterado aqui, a ficha é atualizada.' : 'O Asaas exige para gerar o Pix. Fica salvo na ficha do contato.'}>
+          <input className={cn(inputCls, 'tnum')} inputMode="numeric" placeholder="000.000.000-00" value={documento} maxLength={18} onChange={(e) => setDoc(formatDoc(e.target.value))} />
+        </Field>
+      )}
+
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Chave Pix" hint={chaves.length ? undefined : 'Nenhuma chave cadastrada (Configurações → Chaves Pix).'}>
+        {!auto && <Field label="Chave Pix" hint={chaves.length ? undefined : 'Nenhuma chave cadastrada (Configurações → Chaves Pix).'}>
           <select className={inputCls} value={chave} onChange={(e) => setPixKeyId(e.target.value)}>
             {chaves.map((k) => <option key={k.id} value={k.id}>{k.title}</option>)}
             <option value="none">Sem chave Pix</option>
           </select>
-        </Field>
-        <Field label="Link de pagamento (opcional)">
+        </Field>}
+        {!auto && <Field label="Link de pagamento (opcional)">
           <input className={inputCls} placeholder="https://…" value={paymentUrl} maxLength={500} onChange={(e) => setPaymentUrl(e.target.value)} />
-        </Field>
+        </Field>}
         <Field label="Validade do link">
           <select className={inputCls} value={validHours} onChange={(e) => setValidHours(Number(e.target.value))}>
             {VALIDADES.map((v) => <option key={v.h} value={v.h}>{v.label}</option>)}
@@ -138,7 +166,7 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={gerar} loading={criar.isPending} loadingText="Gerando…">Gerar link</Button>
+        <Button onClick={gerar} loading={criar.isPending} loadingText={auto ? 'Gerando Pix…' : 'Gerando…'}>Gerar link</Button>
       </div>
     </div>
   );
@@ -166,6 +194,8 @@ function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { c
           <div className="flex items-center gap-2 flex-wrap">
             <b className="tnum">{brl(b.totalValue)}</b>
             <span className={cn('text-[11px] rounded-full px-2 py-0.5', STATUS_CLS[b.status])}>{BUDGET_STATUS_LABEL[b.status]}</span>
+            {b.status === 'PAID' && b.paidVia === 'asaas' && <span className="text-[11px] rounded-full px-2 py-0.5 bg-ok-soft text-ok">Baixa automática</span>}
+            {b.status !== 'PAID' && b.autoPix && <span className="text-[11px] rounded-full px-2 py-0.5 bg-field text-muted">Pix automático</span>}
             {b.receipt && <span className="text-[11px] rounded-full px-2 py-0.5 bg-accent-soft text-accent-ink">Comprovante recebido</span>}
             <span className="flex-1" />
             <span className="text-[11px] text-faint">

@@ -150,7 +150,11 @@ export function useRealtime() {
       if (e.alert) toast.warn(`Transmissão "${e.name ?? ''}" pausada: ${e.alert}`);
     });
     socket.on('scheduled_messages', (e: { conversationId: string }) => qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }));
-    socket.on('budgets', (e: { conversationId: string }) => qc.invalidateQueries({ queryKey: ['budgets', e.conversationId] }));
+    // `paid` = o webhook do Pix automático deu baixa: aviso em qualquer tela
+    socket.on('budgets', (e: { conversationId: string; paid?: { total: number; contactName: string } }) => {
+      qc.invalidateQueries({ queryKey: ['budgets', e.conversationId] });
+      if (e.paid) toast.ok(`Pix recebido: ${e.paid.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}${e.paid.contactName ? ` — ${e.paid.contactName}` : ''}`);
+    });
     socket.on('appointment', () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['contact-card'] }); });
     socket.on('number', (n: { id: string; status: string; qrCode?: string }) => {
       if (n.qrCode) qc.setQueryData(['number-qr', n.id], n.qrCode);

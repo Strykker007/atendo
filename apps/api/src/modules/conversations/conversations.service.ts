@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { CloseReasonsService } from '../close-reasons/close-reasons.module';
 import { AuditService } from '../audit/audit.module';
-import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, messagePreview } from '@atendo/shared';
+import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, isCpfCnpjLength, messagePreview } from '@atendo/shared';
 import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -1259,11 +1259,17 @@ export class ConversationsService {
   }
 
   /** Atualiza a ficha do contato. Campo vazio limpa — o atendente apaga o que não vale mais. */
-  async updateContact(tenantId: string, contactId: string, input: { name?: string; email?: string; address?: string; note1?: string; note2?: string; resubscribe?: true }) {
+  async updateContact(tenantId: string, contactId: string, input: { name?: string; email?: string; address?: string; document?: string; note1?: string; note2?: string; resubscribe?: true }) {
     const { resubscribe, ...data } = input;
     const limpo = Object.fromEntries(
       Object.entries(data).map(([k, v]) => [k, typeof v === 'string' && !v.trim() ? null : v?.trim()]),
     );
+    // CPF/CNPJ guardado só com dígitos; tamanho errado é recusado (vira cobrança recusada no Asaas depois)
+    if (typeof limpo.document === 'string') {
+      const doc = limpo.document.replace(/\D/g, '');
+      if (!isCpfCnpjLength(doc)) throw new BadRequestException('CPF precisa ter 11 dígitos e CNPJ, 14.');
+      limpo.document = doc;
+    }
     // contato inexistente (ou de outro cliente) é 404, não erro interno
     // nome digitado na ficha manda; apagado, volta a aceitar o do WhatsApp. Só conta se mudou:
     // a ficha manda o nome junto mesmo quando a pessoa só mexeu no e-mail

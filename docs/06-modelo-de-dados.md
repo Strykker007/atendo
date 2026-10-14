@@ -173,7 +173,7 @@ resposta já foi enviada (uma vez por conversa a cada período). Substituiu `bus
 **contacts.nameSource** (`whatsapp` | `agenda` | `manual`) diz de onde veio o nome e quem pode trocá-lo — ver [providers › De onde vem o nome do contato](04-providers-whatsapp.md#de-onde-vem-o-nome-do-contato-contactsnamesource).
 
 **contacts** ganhou a ficha preenchida pelo atendente: `email`, `address`, `note1` e
-`note2`. Campo enviado vazio vira `null` — o atendente apaga o que não vale mais.
+`note2`. Campo enviado vazio vira `null` — o atendente apaga o que não vale mais. `document` = CPF (11) ou CNPJ (14), só dígitos (tamanho errado = 400), usado no Pix automático do orçamento ([orcamentos.md](orcamentos.md#pix-automático)); também é gravado quando o atendente digita o CPF no modal do orçamento.
 
 **contact_attributes** — campos livres da ficha de **um** contato (`label`, `type`
 `ContactAttributeType`: text, number, date, `value` em texto, `position`). Cada cliente tem os
@@ -182,6 +182,8 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 **pix_keys** — chaves Pix da empresa (`title`, `keyType` em `PIX_KEY_TYPES`, `key` normalizada pelo tipo, `holderName`, `position`). Enviadas pelo painel do chat como cartão "Copiar chave Pix" (até 30 por empresa).
 
 **budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`). Ver [Orçamentos](orcamentos.md).
+
+**payment_gateways** — conta do Asaas da empresa para o Pix automático do orçamento (chave criptografada, `sandbox`, segredo e id do webhook, nome da conta). Uma por empresa. Ver [Orçamentos → Pix automático](orcamentos.md#pix-automático).
 
 **global_variables** — variáveis da empresa (`key` única por tenant, minúsculas/números/`_`; `label`; `value`). Entram no envio como `{{global.<key>}}` e `{{<key>}}`. Ver [Variáveis](variaveis.md).
 

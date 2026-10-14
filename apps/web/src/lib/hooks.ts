@@ -31,3 +31,4 @@ export * from './hooks/motivos';
 export * from './hooks/modelos';
 export * from './hooks/pesquisas';
 export * from './hooks/orcamentos';
+export * from './hooks/pagamentos';

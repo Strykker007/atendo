@@ -16,6 +16,7 @@ import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
 import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
 import { ClosingSection } from '@/components/settings/ClosingSection';
+import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import Link from 'next/link';
 import { Smartphone } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe } from '@/lib/hooks';
@@ -89,6 +90,7 @@ export default function ConfiguracoesPage() {
             {podeConfigurar && <CompaniesSection />}
             {podeEquipe && <DepartmentsSection />}
             {podeVariaveis && <GlobalVariablesSection />}
+            {podeConfigurar && <PixGatewaySection />}
           </>
         )}
         {atual === 'atendimento' && (

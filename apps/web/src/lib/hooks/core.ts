@@ -26,7 +26,7 @@ export interface Conversation {
   lastInboundAt: string | null; numberId: string;
   /** desde quando o contato espera resposta; null = já respondemos */
   awaitingSince: string | null;
-  contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[]; /** pediu para não receber automáticas ("sair") */ optOutAt?: string | null; /** a checagem disse que o telefone não tem WhatsApp */ waInvalidAt?: string | null };
+  contact: { id: string; name: string | null; phone: string; avatarUrl?: string | null; email?: string | null; /** CPF/CNPJ só dígitos (Pix automático) */ document?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[]; /** pediu para não receber automáticas ("sair") */ optOutAt?: string | null; /** a checagem disse que o telefone não tem WhatsApp */ waInvalidAt?: string | null };
   /** `isPrimary` = etapa do atendimento no Kanban (no máximo uma). Transitórias: saem ao encerrar */
   tags: { tag: Tag; isPrimary?: boolean }[];
   /** último encerramento (sobrevive à reabertura): topo da conversa, aba Encerrado, filtro */
@@ -578,7 +578,7 @@ export const useConversationEvents = (id: string | null, enabled = true) =>
 export const useUpdateContact = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ contactId, ...b }: { contactId: string; name?: string; email?: string; address?: string; note1?: string; note2?: string; resubscribe?: true }) => api(`/conversations/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify(b) }),
+    mutationFn: ({ contactId, ...b }: { contactId: string; name?: string; email?: string; address?: string; document?: string; note1?: string; note2?: string; resubscribe?: true }) => api(`/conversations/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify(b) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['conversation'] }); qc.invalidateQueries({ queryKey: ['conversations'] }); },
   });
 };

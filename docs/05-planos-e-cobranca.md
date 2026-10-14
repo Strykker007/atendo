@@ -36,6 +36,7 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
   // 'proactive_messaging' = falar primeiro com quem não escreveu em 24h, só pelo número oficial (envio.md#envio-frio)
   // 'consultant_ranking' = ranking de consultores + metas mensais (metas.md)
   // 'satisfaction_surveys' = pesquisa de satisfação no encerramento + relatório (pesquisa-de-satisfacao.md)
+  // 'pix_payments' = Pix automático no orçamento, baixa pelo webhook do Asaas da empresa (orcamentos.md#pix-automático)
   //   Os dois entraram em TODOS os planos existentes (migração 20261130000100) para ninguém perder o ranking que já usava
 }
 ```
