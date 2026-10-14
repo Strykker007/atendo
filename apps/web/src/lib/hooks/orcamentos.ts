@@ -1,6 +1,6 @@
 'use client';
 /** Orçamentos com link público, gerados no chat (docs/orcamentos.md). */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BudgetItem, BudgetStatus, BudgetValidity } from '@atendo/shared';
 import { api } from '../api';
 
@@ -67,4 +67,26 @@ export const useSetBudgetStatus = () => {
       api<Budget>(`/conversations/${conversationId}/budgets/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
     onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ['budgets', v.conversationId] }),
   });
+};
+
+// ---- tela Orçamentos (docs/orcamentos.md#tela-orçamentos) ----
+export interface BudgetListRow extends Budget {
+  conversationId: string;
+  contact: { id: string; name: string | null; phone: string };
+  paidAfterExpiry: boolean;
+}
+export interface BudgetList {
+  page: number;
+  pageSize: number;
+  total: number;
+  totals: {
+    byStatus: Partial<Record<BudgetStatus, { count: number; value: number }>>;
+    paidByVia: Partial<Record<'asaas' | 'manual', { count: number; value: number }>>;
+  };
+  rows: BudgetListRow[];
+}
+export type BudgetListFilters = { status?: BudgetStatus; via?: 'auto' | 'fora'; userId?: string; from?: string; to?: string; search?: string; page?: number };
+export const useAllBudgets = (f: BudgetListFilters) => {
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
+  return useQuery({ queryKey: ['budgets-all', qs.toString()], queryFn: () => api<BudgetList>(`/budgets?${qs}`), placeholderData: keepPreviousData });
 };

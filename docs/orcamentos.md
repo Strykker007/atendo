@@ -17,6 +17,17 @@ Barra do campo de mensagem → ícone de recibo (**Gerar orçamento / pedido**).
 
 Não há permissão nem recurso de plano próprio: quem pode abrir a conversa pode gerar orçamento (o `ConversationScopeGuard` barra número/departamento de fora).
 
+## Tela Orçamentos
+
+Menu **Orçamentos** (`/orcamentos`), para todos: quem tem `conversations.view_all` vê a equipe e filtra por atendente; os demais veem só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas.
+
+- **Período** (hoje, 7 dias, este mês ou datas), **forma de pagamento** (Pix automático × por fora), **atendente**, **busca** por cliente/número.
+- **Cartões** com o total do período por situação — Pago (com a divisão Pix automático / por fora), Aguardando pagamento, Expirado, Estornado. Clicar filtra a tabela.
+- **Tabela**: gerado em, cliente, atendente, itens, valor, forma, situação (com selos *Após o vencimento*, *No encerramento*, *Comprovante* e a hora de pago/estornado/vencimento) e atalhos: comprovante, copiar link, abrir conversa.
+- Atualiza sozinha pelo socket `budgets`.
+
+Na **lista de conversas**, o selo **💰 Pago** marca a conversa com pagamento confirmado depois do último encerramento e ainda não encerrada como venda — quem encerrar já sabe que é "Comprou". A confirmação também chega como **nota interna** na conversa e como aviso no painel.
+
 ## Página pública `/o/:hash`
 
 Sem login — o `hash` (128 bits aleatórios, base64url de 22 caracteres) é a credencial. Mobile-first, com a logo/cores da marca do domínio e o nome fantasia do cliente.
@@ -91,6 +102,7 @@ A chave Pix é **copiada** para o orçamento na geração: editar ou apagar a ch
 | POST | `/conversations/:id/budgets` | todos (escopo da conversa) | `{items: {name, dosage?, quantity, unitPrice}[] (1–50), pixKeyId?, paymentUrl? (https), note?, validity? (1h\|2h\|4h\|8h\|end_of_day\|24h\|48h; padrão end_of_day), validHours? (1–720), autoPix?, cpfCnpj?}`. Sem Pix e sem link = 400 (exceto `autoPix`). `autoPix` gera a cobrança no Asaas na hora; sem CPF/CNPJ (do body ou da ficha) = 400; `cpfCnpj` informado vai para a ficha |
 | PATCH | `/conversations/:id/budgets/:budgetId` | todos (escopo da conversa) | `{status: 'PAID' \| 'PENDING'}` — PAID cria a venda; PENDING desfaz só o pago por fora ainda não encerrado. Socket `budgets` |
 | POST | `/conversations/:id/budgets/:budgetId/refund` | `settings.manage` | Estorno (Asaas devolve no Pix automático) — ver [Venda](#venda) |
+| GET | `/budgets?from=&to=&status=&via=auto\|fora&userId=&search=&page=` | todos (os seus; `conversations.view_all` = equipe) | Tela Orçamentos: `{page, pageSize (30), total, totals{byStatus{STATUS:{count,value}}, paidByVia{asaas,manual}}, rows[…, conversationId, contact, paidAfterExpiry]}` — os totais ignoram o filtro de `status` |
 | GET | `/budgets/public/:hash` | público (30/min por IP) | `PublicBudget` (packages/shared) |
 | POST | `/budgets/public/:hash/receipt` | público (5/min por IP) | multipart `file`. Socket `budgets` |
 | POST | `/webhooks/pix/asaas/:gatewayId` | Asaas (header `asaas-access-token`) | Baixa automática. Sempre 200 |

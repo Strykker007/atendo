@@ -31,6 +31,8 @@ export interface Conversation {
   tags: { tag: Tag; isPrimary?: boolean }[];
   /** último encerramento (sobrevive à reabertura): topo da conversa, aba Encerrado, filtro */
   lastClosedAt?: string | null;
+  /** orçamentos pagos ainda sem encerramento (docs/orcamentos.md#venda) — selo "Pago" na lista */
+  budgets?: { id: string; totalValue: string | number; paidAt: string | null }[];
   lastCloseOutcome?: ConversationOutcome | null;
   lastCloseReason?: { id: string; name: string; color: string } | null;
   assignee: { id: string; name: string } | null;

@@ -153,6 +153,9 @@ export function useRealtime() {
     // `paid` = o webhook do Pix automático deu baixa: aviso em qualquer tela
     socket.on('budgets', (e: { conversationId: string; paid?: { total: number; contactName: string } }) => {
       qc.invalidateQueries({ queryKey: ['budgets', e.conversationId] });
+      qc.invalidateQueries({ queryKey: ['budgets-all'] });
+      // pagamento confirmado/estornado muda o selo "Pago" da lista
+      qc.invalidateQueries({ queryKey: ['conversations'] });
       if (e.paid) toast.ok(`Pix recebido: ${e.paid.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}${e.paid.contactName ? ` — ${e.paid.contactName}` : ''}`);
     });
     socket.on('appointment', () => { qc.invalidateQueries({ queryKey: ['appointments'] }); qc.invalidateQueries({ queryKey: ['contact-card'] }); });

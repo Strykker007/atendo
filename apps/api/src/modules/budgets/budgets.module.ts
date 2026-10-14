@@ -1,12 +1,12 @@
 import {
-  BadRequestException, Body, Controller, Get, Headers, HttpCode, Injectable, Logger, Module, NotFoundException, OnModuleInit, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors,
+  BadRequestException, Body, Controller, Get, Headers, HttpCode, Injectable, Logger, Module, NotFoundException, OnModuleInit, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BullModule, InjectQueue, Processor } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsBoolean, IsDate, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Budget, Prisma } from '@prisma/client';
 import {
@@ -26,6 +26,8 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationScopeGuard } from '../conversations/conversation-scope.guard';
+import { numberFilter } from '../auth/number-scope';
+import { departmentWhere } from '../auth/department-scope';
 import { ASAAS_PAID_EVENTS, ASAAS_PAID_STATUSES, ASAAS_REFUND_EVENTS, PaymentGatewayService, PaymentsModule, type AsaasAccount, type AsaasPayment } from '../payments/payments.module';
 
 export const QUEUE_BUDGETS = 'budgets';
@@ -58,6 +60,18 @@ class CreateBudgetDto {
 class UpdateBudgetDto {
   /** atendente confirma o pagamento (ou desfaz, voltando a pendente) */
   @IsIn(['PENDING', 'PAID']) status: 'PENDING' | 'PAID';
+}
+
+class ListBudgetsDto {
+  @IsOptional() @IsIn(['PENDING', 'PAID', 'EXPIRED', 'REFUNDED']) status?: BudgetStatus;
+  /** `auto` = Pix automático (Asaas); `fora` = chave/link + comprovante/marcado à mão */
+  @IsOptional() @IsIn(['auto', 'fora']) via?: 'auto' | 'fora';
+  @IsOptional() @IsString() userId?: string;
+  /** período pela criação do orçamento (ISO; `to` exclusivo) */
+  @IsOptional() @Type(() => Date) @IsDate() from?: Date;
+  @IsOptional() @Type(() => Date) @IsDate() to?: Date;
+  @IsOptional() @IsString() @MaxLength(100) search?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
 }
 
 /** 128 bits aleatórios em base64url (22 caracteres): o link é a única credencial da página. */
@@ -249,6 +263,58 @@ export class BudgetsService {
     await this.registrarEstorno(b, b.paidVia === 'asaas' ? `pedido por ${user.name} (devolvido pelo Asaas)` : `registrado por ${user.name}`);
     const atual = await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: { user: { select: { id: true, name: true } } } });
     return this.present(atual);
+  }
+
+  /**
+   * Tela Orçamentos (docs/orcamentos.md#tela-orçamentos): todos os orçamentos do período com filtros
+   * e totais por situação. Quem tem `conversations.view_all` vê a equipe (e filtra por atendente);
+   * os demais, só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas.
+   */
+  async listAll(user: AuthUser, q: ListBudgetsDto) {
+    const verEquipe = user.role === 'super_admin' || !!user.permissions?.includes('conversations.view_all');
+    const numeros = numberFilter(user);
+    const dept = departmentWhere(user);
+    const busca = q.search?.trim();
+    const digitos = busca?.replace(/\D/g, '') ?? '';
+    const where: Prisma.BudgetWhereInput = {
+      tenantId: user.tenantId,
+      ...(verEquipe ? (q.userId ? { userId: q.userId } : {}) : { userId: user.id }),
+      ...(q.via && { autoPix: q.via === 'auto' }),
+      ...((q.from || q.to) && { createdAt: { ...(q.from && { gte: q.from }), ...(q.to && { lt: q.to }) } }),
+      ...((numeros || dept) && { conversation: { ...(numeros && { numberId: numeros }), ...(dept && { AND: [dept] }) } }),
+      ...(busca && { contact: { OR: [{ name: { contains: busca, mode: 'insensitive' as const } }, ...(digitos.length >= 3 ? [{ phone: { contains: digitos } }] : [])] } }),
+    };
+    const PAGE = 30;
+    const page = q.page ?? 1;
+    const [rows, total, porStatus, porVia] = await Promise.all([
+      this.prisma.budget.findMany({
+        where: { ...where, ...(q.status && { status: q.status }) },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * PAGE,
+        take: PAGE,
+        include: { user: { select: { id: true, name: true } }, contact: { select: { id: true, name: true, phone: true } } },
+      }),
+      this.prisma.budget.count({ where: { ...where, ...(q.status && { status: q.status }) } }),
+      // totais ignoram o filtro de situação: os cartões do topo mostram todas, o clique filtra
+      this.prisma.budget.groupBy({ by: ['status'], where, _count: { _all: true }, _sum: { totalValue: true } }),
+      this.prisma.budget.groupBy({ by: ['paidVia'], where: { ...where, status: 'PAID' }, _count: { _all: true }, _sum: { totalValue: true } }),
+    ]);
+    const soma = (v: Prisma.Decimal | null | undefined) => Number(v ?? 0);
+    return {
+      page,
+      pageSize: PAGE,
+      total,
+      totals: {
+        byStatus: Object.fromEntries(porStatus.map((g) => [g.status, { count: g._count._all, value: soma(g._sum.totalValue) }])) as Partial<Record<BudgetStatus, { count: number; value: number }>>,
+        paidByVia: Object.fromEntries(porVia.map((g) => [g.paidVia ?? 'manual', { count: g._count._all, value: soma(g._sum.totalValue) }])) as Partial<Record<'asaas' | 'manual', { count: number; value: number }>>,
+      },
+      rows: rows.map((b) => ({
+        ...this.present(b),
+        conversationId: b.conversationId,
+        contact: b.contact,
+        paidAfterExpiry: !!b.paidAt && b.paidAt.getTime() > b.expiresAt.getTime(),
+      })),
+    };
   }
 
   // ---- vencimento (docs/orcamentos.md#vencimento) ----
@@ -485,6 +551,18 @@ class BudgetsController {
   }
 }
 
+/** Tela Orçamentos: lista do período com totais (cada um vê os seus; `view_all` vê a equipe). */
+@Controller('budgets')
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
+class BudgetsListController {
+  constructor(private readonly budgets: BudgetsService) {}
+
+  @Get()
+  list(@CurrentUser() u: AuthUser, @Query() q: ListBudgetsDto) {
+    return this.budgets.listAll(u, q);
+  }
+}
+
 /** Página pública /o/:hash. Sem login; limite por IP mais apertado que o padrão. */
 @Controller('budgets/public/:hash')
 class PublicBudgetsController {
@@ -543,7 +621,7 @@ class BudgetsProcessor extends TrackedWorkerHost {
     ConversationsModule,
     PaymentsModule,
   ],
-  controllers: [BudgetsController, PublicBudgetsController, PixWebhookController],
+  controllers: [BudgetsController, BudgetsListController, PublicBudgetsController, PixWebhookController],
   providers: [BudgetsService, BudgetsScheduler, BudgetsProcessor],
 })
 export class BudgetsModule {}

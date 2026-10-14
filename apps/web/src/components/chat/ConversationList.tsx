@@ -422,6 +422,12 @@ function agruparPorAtendente(lista: Conversation[]) {
  * tags (`lugar`); filtrando por resultado/motivo nas outras abas, vai junto delas (`extra`) — é o
  * que mostra que todas aquelas foram, por exemplo, "Não comprou · Achou caro".
  */
+/** Pago neste atendimento (depois do último encerramento) e ainda não encerrado como venda */
+function pagoNaConversa(c: Conversation) {
+  const desde = c.lastClosedAt ? new Date(c.lastClosedAt).getTime() : 0;
+  return (c.budgets ?? []).filter((b) => b.paidAt && new Date(b.paidAt).getTime() > desde).reduce((a, b) => a + Number(b.totalValue), 0);
+}
+
 function ConversationRow({ c, active, onClick, agora, selecionando, marcado, encerramento }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean; encerramento: 'lugar' | 'extra' | null }) {
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
@@ -443,7 +449,7 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
       <Avatar name={name} phone={c.contact.phone} src={c.contact.avatarUrl} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{botPaused(c) ? <span title="Fluxo pausado nesta conversa" className="mr-1 inline-flex align-[-1px] text-warn-ink"><BotOff size={12} /></span> : c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}</span>
+          <span className={cn('text-[13px] truncate', c.unreadCount > 0 ? 'font-bold text-ink' : 'font-semibold text-ink')}>{botPaused(c) ? <span title="Fluxo pausado nesta conversa" className="mr-1 inline-flex align-[-1px] text-warn-ink"><BotOff size={12} /></span> : c.activeFlowRunId && <span title="Em automação" className="mr-1">🤖</span>}{name}{pagoNaConversa(c) > 0 && <span title={`Pagamento confirmado: ${pagoNaConversa(c).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — ao encerrar, é venda`} className="ml-1.5 align-[1px] text-[10px] font-semibold rounded px-1 py-px bg-ok-soft text-ok">💰 Pago</span>}</span>
           {/* o canal fica aqui, na linha da hora: embaixo, junto das tags, ele acrescentava uma
               faixa inteira — a lista dobrava de altura. Sempre visível: é por ele que a resposta sai */}
           <ChannelBadge channel={c.number} phone="none" className="shrink-0 max-w-[120px]" />
