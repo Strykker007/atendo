@@ -3,6 +3,12 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.2.1 — 2026-10-14
+
+- fix(relatórios): filtro de consultor inclui atendimento que ele atendeu e a automação encerrou (targetId = quem atendeu), com backfill do histórico
+- fix(modelos): Aplicar aos clientes casa motivo ignorando emoji/acento e renomeia o antigo (mantém histórico); filtro de motivo lista os desativados
+- feat(orçamentos): Pix automático pelo Asaas da empresa (recurso pix_payments) — conexão com webhook cadastrado sozinho, cobrança gerada no orçamento com CPF da ficha do contato, baixa automática e aviso no painel
+
 ## 1.2.0 — 2026-10-14
 
 - feat(orçamentos): orçamento no chat com link seguro /o/:hash, página pública com Pix, pagar agora e envio de comprovante
