@@ -181,6 +181,8 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 
 **pix_keys** — chaves Pix da empresa (`title`, `keyType` em `PIX_KEY_TYPES`, `key` normalizada pelo tipo, `holderName`, `position`). Enviadas pelo painel do chat como cartão "Copiar chave Pix" (até 30 por empresa).
 
+**budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`). Ver [Orçamentos](orcamentos.md).
+
 **global_variables** — variáveis da empresa (`key` única por tenant, minúsculas/números/`_`; `label`; `value`). Entram no envio como `{{global.<key>}}` e `{{<key>}}`. Ver [Variáveis](variaveis.md).
 
 **scheduled_messages** — mensagem que o atendente agendou na conversa (`userId` = autor, `content`, anexo opcional por `mediaKey`, `scheduledFor`, `status` `ScheduledMessageStatus`: pending, sent, cancelled, failed + `error`, `messageId`). Job de 1 minuto envia pelo caminho do chat. Ver [Agendamento de mensagens](agendamento-de-mensagens.md).
