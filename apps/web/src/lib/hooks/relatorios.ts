@@ -137,6 +137,8 @@ export interface AttendanceRow {
   messages: number;
   contact: { id: string; name: string | null; phone: string; phoneFormatted: string };
   user: { id: string; name: string } | null;
+  /** encerrado pela automação: de quem era a conversa (entra no filtro de consultor dele) */
+  owner: { id: string; name: string | null } | null;
 }
 export interface Attendances {
   page: number;

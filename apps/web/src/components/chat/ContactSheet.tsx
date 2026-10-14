@@ -4,7 +4,7 @@ import { UserRound, Mail, MapPin, StickyNote, X, Plus, Trash2 } from 'lucide-rea
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { cn } from '@/lib/utils';
+import { cn, formatDoc } from '@/lib/utils';
 import { ZoomableAvatar } from './AvatarViewer';
 import { formatPhone } from './ChannelBadge';
 import {
@@ -36,12 +36,13 @@ export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: 
   const [form, setForm] = useState({
     name: contact.name ?? '',
     email: contact.email ?? '',
+    document: formatDoc(contact.document ?? ''),
     address: contact.address ?? '',
     note1: contact.note1 ?? '',
     note2: contact.note2 ?? '',
   });
   useEffect(() => {
-    setForm({ name: contact.name ?? '', email: contact.email ?? '', address: contact.address ?? '', note1: contact.note1 ?? '', note2: contact.note2 ?? '' });
+    setForm({ name: contact.name ?? '', email: contact.email ?? '', document: formatDoc(contact.document ?? ''), address: contact.address ?? '', note1: contact.note1 ?? '', note2: contact.note2 ?? '' });
   }, [contact]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -95,6 +96,9 @@ export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: 
         )}
         <Field label="Nome"><input readOnly={!podeEditar} className={inputCls} value={form.name} onChange={set('name')} maxLength={80} placeholder="Como o cliente se chama" /></Field>
         <Field label="E-mail"><input readOnly={!podeEditar} className={inputCls} type="email" value={form.email} onChange={set('email')} maxLength={160} placeholder="para orçamento, nota fiscal…" /></Field>
+        <Field label="CPF / CNPJ" hint="Usado no Pix automático do orçamento.">
+          <input readOnly={!podeEditar} className={inputCls} inputMode="numeric" value={form.document} onChange={(e) => setForm((f) => ({ ...f, document: formatDoc(e.target.value) }))} maxLength={18} placeholder="000.000.000-00" />
+        </Field>
         <Field label="Endereço"><input readOnly={!podeEditar} className={inputCls} value={form.address} onChange={set('address')} maxLength={300} placeholder="Rua, número, bairro, cidade" /></Field>
         <Field label="Observação 1"><textarea readOnly={!podeEditar} className={inputCls} rows={2} value={form.note1} onChange={set('note1')} maxLength={1000} placeholder="Preferências, histórico, o que evitar…" /></Field>
         <Field label="Observação 2"><textarea readOnly={!podeEditar} className={inputCls} rows={2} value={form.note2} onChange={set('note2')} maxLength={1000} /></Field>

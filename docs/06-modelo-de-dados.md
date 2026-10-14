@@ -53,7 +53,7 @@ tenant_templates (global) ── tenants.templateId
 
 **conversation_events** — histórico do atendimento (auditoria). A conversa guarda só a foto do momento: dono atual, data do fechamento, último resultado. Isso não responde "quantos atendimentos a Ana fechou em março", e reabrir **limpa** o desfecho da conversa, então o resultado anterior deixava de existir.
 
-Cada linha é um fato: `claimed`, `transferred`, `released`, `closed`, `reopened`, `bot_paused` (`reason` = duração), `bot_resumed` (ator nulo = fim do tempo ou encerramento, dito em `reason`), `message_deleted` / `history_cleared` (`reason` diz o que e onde foi apagado, nunca o conteúdo — [Apagar mensagens](apagar-mensagens.md)), com `actorId` (nulo = automação), `targetId` (transferência), status de/para e o desfecho **copiado** — congelado ali, para que reabrir não mude o número de um mês já fechado. No `closed`, `tagIds` = tags escolhidas no encerramento (opcionais; também somadas às tags da conversa) e `reason` = os nomes delas, congelados. Encerramento pelo atendente é sempre `won` ou `lost`; `none` sobra para o sistema (fluxo) e o histórico anterior. A migração `20261114000000_close_reasons_to_tags` preencheu `tagIds` dos "Não comprou" antigos cujo motivo bate com o nome de uma tag. Linha gravada nunca é alterada nem apagada.
+Cada linha é um fato: `claimed`, `transferred`, `released`, `closed`, `reopened`, `bot_paused` (`reason` = duração), `bot_resumed` (ator nulo = fim do tempo ou encerramento, dito em `reason`), `message_deleted` / `history_cleared` (`reason` diz o que e onde foi apagado, nunca o conteúdo — [Apagar mensagens](apagar-mensagens.md)), com `actorId` (nulo = automação), `targetId` (transferência; no `closed` da automação — ator nulo — quem da equipe **atendeu**: o último que respondeu, sem nota interna, desde o encerramento anterior; só robô = nulo. Migração `20261204000000_automation_close_attendant` preencheu o histórico), status de/para e o desfecho **copiado** — congelado ali, para que reabrir não mude o número de um mês já fechado. No `closed`, `tagIds` = tags escolhidas no encerramento (opcionais; também somadas às tags da conversa) e `reason` = os nomes delas, congelados. Encerramento pelo atendente é sempre `won` ou `lost`; `none` sobra para o sistema (fluxo) e o histórico anterior. A migração `20261114000000_close_reasons_to_tags` preencheu `tagIds` dos "Não comprou" antigos cujo motivo bate com o nome de uma tag. Linha gravada nunca é alterada nem apagada.
 
 `viaFlow` (migração `20261201000000_event_via_flow`) = nome do fluxo quando o encerramento com resultado (Comprou/Não comprou) foi feito pelo bloco **Encerrar conversa**; nesse caso `actorId` é o **dono da conversa**, que leva o crédito no ranking e nas metas (sem dono, nulo). O histórico mostra "Fluxo “X” encerrou" e "Conta para Fulano". Ver [fluxos › Ação](fluxos.md#ação).
 
@@ -173,7 +173,7 @@ resposta já foi enviada (uma vez por conversa a cada período). Substituiu `bus
 **contacts.nameSource** (`whatsapp` | `agenda` | `manual`) diz de onde veio o nome e quem pode trocá-lo — ver [providers › De onde vem o nome do contato](04-providers-whatsapp.md#de-onde-vem-o-nome-do-contato-contactsnamesource).
 
 **contacts** ganhou a ficha preenchida pelo atendente: `email`, `address`, `note1` e
-`note2`. Campo enviado vazio vira `null` — o atendente apaga o que não vale mais.
+`note2`. Campo enviado vazio vira `null` — o atendente apaga o que não vale mais. `document` = CPF (11) ou CNPJ (14), só dígitos (tamanho errado = 400), usado no Pix automático do orçamento ([orcamentos.md](orcamentos.md#pix-automático)); também é gravado quando o atendente digita o CPF no modal do orçamento.
 
 **contact_attributes** — campos livres da ficha de **um** contato (`label`, `type`
 `ContactAttributeType`: text, number, date, `value` em texto, `position`). Cada cliente tem os
@@ -182,6 +182,8 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 **pix_keys** — chaves Pix da empresa (`title`, `keyType` em `PIX_KEY_TYPES`, `key` normalizada pelo tipo, `holderName`, `position`). Enviadas pelo painel do chat como cartão "Copiar chave Pix" (até 30 por empresa).
 
 **budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`). Ver [Orçamentos](orcamentos.md).
+
+**payment_gateways** — conta do Asaas da empresa para o Pix automático do orçamento (chave criptografada, `sandbox`, segredo e id do webhook, nome da conta). Uma por empresa. Ver [Orçamentos → Pix automático](orcamentos.md#pix-automático).
 
 **global_variables** — variáveis da empresa (`key` única por tenant, minúsculas/números/`_`; `label`; `value`). Entram no envio como `{{global.<key>}}` e `{{<key>}}`. Ver [Variáveis](variaveis.md).
 

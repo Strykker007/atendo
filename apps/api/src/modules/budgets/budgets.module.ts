@@ -1,14 +1,14 @@
 import {
-  BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors,
+  BadRequestException, Body, Controller, Get, Headers, HttpCode, Injectable, Logger, Module, NotFoundException, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateNested } from 'class-validator';
-import { randomBytes } from 'node:crypto';
+import { ArrayMaxSize, ArrayMinSize, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Budget, Prisma } from '@prisma/client';
 import {
-  BUDGET_DEFAULT_HOURS, BUDGET_MAX_HOURS, BUDGET_MAX_ITEMS, BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, budgetTotal,
+  BUDGET_DEFAULT_HOURS, BUDGET_MAX_HOURS, BUDGET_MAX_ITEMS, BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, budgetTotal, isCpfCnpjLength,
   type BudgetItem, type BudgetStatus, type PixKeyType, type PublicBudget,
 } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -21,6 +21,7 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { ConversationScopeGuard } from '../conversations/conversation-scope.guard';
+import { ASAAS_PAID_EVENTS, PaymentGatewayService, PaymentsModule } from '../payments/payments.module';
 
 class BudgetItemDto {
   @IsString() @MaxLength(120) name: string;
@@ -36,6 +37,10 @@ class CreateBudgetDto {
   @IsOptional() @IsUrl({ protocols: ['https'], require_protocol: true }) @MaxLength(500) paymentUrl?: string;
   @IsOptional() @IsString() @MaxLength(500) note?: string;
   @IsOptional() @IsInt() @Min(1) @Max(BUDGET_MAX_HOURS) validHours?: number;
+  /** Pix automático: cobrança no Asaas da empresa, baixa pelo webhook (recurso `pix_payments`) */
+  @IsOptional() @IsBoolean() autoPix?: boolean;
+  /** CPF/CNPJ de quem paga (o Asaas exige). Ausente = o da ficha do contato; informado = grava na ficha */
+  @IsOptional() @IsString() @MaxLength(20) cpfCnpj?: string;
 }
 
 class UpdateBudgetDto {
@@ -58,10 +63,13 @@ const effectiveStatus = (b: Pick<Budget, 'status' | 'expiresAt'>): BudgetStatus 
  */
 @Injectable()
 export class BudgetsService {
+  private readonly log = new Logger(BudgetsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly gateway: ConversationsGateway,
+    private readonly payments: PaymentGatewayService,
   ) {}
 
   async list(tenantId: string, conversationId: string) {
@@ -75,7 +83,7 @@ export class BudgetsService {
   }
 
   async create(user: AuthUser, conversationId: string, dto: CreateBudgetDto) {
-    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId: user.tenantId }, select: { contactId: true } });
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId: user.tenantId }, select: { contactId: true, contact: { select: { name: true, document: true } } } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
 
     let pix: { key: string; keyType: string; holderName: string } | null = null;
@@ -83,7 +91,12 @@ export class BudgetsService {
       pix = await this.prisma.pixKey.findFirst({ where: { id: dto.pixKeyId, tenantId: user.tenantId }, select: { key: true, keyType: true, holderName: true } });
       if (!pix) throw new BadRequestException('Chave Pix não encontrada');
     }
-    if (!pix && !dto.paymentUrl) throw new BadRequestException('Informe uma chave Pix ou um link de pagamento');
+    const account = dto.autoPix ? await this.payments.accountFor(user.tenantId) : null;
+    if (dto.autoPix && !account) throw new BadRequestException('Pix automático indisponível: conecte a conta do Asaas em Configurações → Empresa (recurso do plano).');
+    // mini cadastro: o CPF digitado no orçamento fica na ficha; sem ele, vale o da ficha
+    const doc = (dto.cpfCnpj ?? conv.contact.document ?? '').replace(/\D/g, '');
+    if (dto.autoPix && !isCpfCnpjLength(doc)) throw new BadRequestException('Informe o CPF (11 dígitos) ou CNPJ (14 dígitos) do cliente — o Asaas exige para gerar o Pix.');
+    if (!dto.autoPix && !pix && !dto.paymentUrl) throw new BadRequestException('Informe uma chave Pix ou um link de pagamento');
 
     const items: BudgetItem[] = dto.items.map((i) => ({
       name: i.name.trim(),
@@ -108,10 +121,30 @@ export class BudgetsService {
         paymentUrl: dto.paymentUrl?.trim() || null,
         note: dto.note?.trim() || null,
         expiresAt: new Date(Date.now() + (dto.validHours ?? BUDGET_DEFAULT_HOURS) * 3600_000),
+        autoPix: !!dto.autoPix,
       },
       include: { user: { select: { id: true, name: true } } },
     });
-    return this.present(b);
+    if (!account) return this.present(b);
+
+    // cobrança já na criação: erro do Asaas (CPF inválido, conta bloqueada…) aparece para o
+    // atendente corrigir, nunca para o cliente na página — e o orçamento sem Pix não fica para trás
+    try {
+      const charge = await account.pixCharge({
+        customer: await account.customerId(doc, conv.contact.name?.trim() || 'Cliente'),
+        value: Number(b.totalValue),
+        // vencimento = dia em que o link expira, no fuso de Brasília
+        dueDate: b.expiresAt.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }),
+        description: `Orçamento ${(await this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { name: true } }))?.name ?? ''}`.trim().slice(0, 500),
+        externalReference: b.id,
+      });
+      const comPix = await this.prisma.budget.update({ where: { id: b.id }, data: { gatewayPaymentId: charge.id, pixPayload: charge.payload, pixQrImage: charge.qrImage }, include: { user: { select: { id: true, name: true } } } });
+      if (doc !== conv.contact.document) await this.prisma.contact.update({ where: { id: conv.contactId }, data: { document: doc } });
+      return this.present(comPix);
+    } catch (e) {
+      await this.prisma.budget.delete({ where: { id: b.id } });
+      throw e;
+    }
   }
 
   async update(user: AuthUser, conversationId: string, id: string, dto: UpdateBudgetDto) {
@@ -122,7 +155,7 @@ export class BudgetsService {
     const status = dto.status === 'PAID' ? 'PAID' : b.expiresAt.getTime() < Date.now() ? 'EXPIRED' : 'PENDING';
     const updated = await this.prisma.budget.update({
       where: { id: b.id },
-      data: { status, paidAt: status === 'PAID' ? new Date() : null, paidById: status === 'PAID' ? user.id : null },
+      data: { status, paidAt: status === 'PAID' ? new Date() : null, paidById: status === 'PAID' ? user.id : null, paidVia: status === 'PAID' ? 'manual' : null },
       include: { user: { select: { id: true, name: true } } },
     });
     this.gateway.emitBudgets(user.tenantId, conversationId);
@@ -153,7 +186,31 @@ export class BudgetsService {
       pix: payable && b.pixKey ? { key: b.pixKey, keyType: b.pixKeyType as PixKeyType, holderName: b.pixHolderName ?? '' } : null,
       paymentUrl: payable ? b.paymentUrl : null,
       receiptSent: !!b.receiptKey,
+      autoPix: b.autoPix,
+      pixCharge: payable && b.pixPayload ? { payload: b.pixPayload, qrImage: b.pixQrImage ?? '' } : null,
     };
+  }
+
+  /**
+   * Webhook do Asaas da empresa. O token do header é o segredo gerado ao conectar; evento de
+   * pagamento recebido dá baixa no orçamento pelo id da cobrança — pago vale mesmo vencido.
+   */
+  async asaasWebhook(gatewayId: string, token: string | undefined, body: { event?: string; payment?: { id?: string; externalReference?: string } }) {
+    const g = await this.prisma.paymentGateway.findUnique({ where: { id: gatewayId }, select: { tenantId: true, webhookToken: true } });
+    if (!g || !token || token.length !== g.webhookToken.length || !timingSafeEqual(Buffer.from(token), Buffer.from(g.webhookToken))) {
+      this.log.warn(`webhook Pix recusado (gateway ${gatewayId})`);
+      return { ok: false };
+    }
+    const paymentId = body.payment?.id;
+    if (!paymentId || !(ASAAS_PAID_EVENTS as readonly string[]).includes(body.event ?? '')) return { ok: true };
+
+    const b = await this.prisma.budget.findFirst({ where: { tenantId: g.tenantId, gatewayPaymentId: paymentId } });
+    if (!b || b.status === 'PAID') return { ok: true };
+    await this.prisma.budget.update({ where: { id: b.id }, data: { status: 'PAID', paidAt: new Date(), paidVia: 'asaas' } });
+    const contact = await this.prisma.contact.findUnique({ where: { id: b.contactId }, select: { name: true, phone: true } });
+    this.gateway.emitBudgets(b.tenantId, b.conversationId, { total: Number(b.totalValue), contactName: contact?.name || contact?.phone || '' });
+    this.log.log(`orçamento ${b.id} pago via Asaas (${paymentId})`);
+    return { ok: true };
   }
 
   async uploadReceipt(hash: string, file?: Express.Multer.File) {
@@ -199,6 +256,8 @@ export class BudgetsService {
       expiresAt: b.expiresAt,
       createdAt: b.createdAt,
       paidAt: b.paidAt,
+      paidVia: b.paidVia,
+      autoPix: b.autoPix,
       note: b.note,
       pixKey: b.pixKey,
       paymentUrl: b.paymentUrl,
@@ -251,9 +310,22 @@ class PublicBudgetsController {
   }
 }
 
+/** Webhook do Asaas de cada empresa — cadastrado sozinho ao conectar (payments.module.ts). Sempre 200: o Asaas pausa a fila depois de falhas seguidas. */
+@Controller('webhooks/pix/asaas')
+class PixWebhookController {
+  constructor(private readonly budgets: BudgetsService) {}
+
+  @Post(':gatewayId')
+  @HttpCode(200)
+  @SkipThrottle()
+  handle(@Param('gatewayId') gatewayId: string, @Headers('asaas-access-token') token: string | undefined, @Body() body: Record<string, unknown>) {
+    return this.budgets.asaasWebhook(gatewayId, token, body);
+  }
+}
+
 @Module({
-  imports: [AuthModule, ConversationsModule],
-  controllers: [BudgetsController, PublicBudgetsController],
+  imports: [AuthModule, ConversationsModule, PaymentsModule],
+  controllers: [BudgetsController, PublicBudgetsController, PixWebhookController],
   providers: [BudgetsService],
 })
 export class BudgetsModule {}

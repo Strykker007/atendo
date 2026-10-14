@@ -77,7 +77,7 @@ então grava. Partes, todas opcionais:
   Perfil padrão alterado passa a `customized` (o alinhamento ao catálogo não desfaz). Administrador
   nunca muda. O cache de permissões é invalidado na hora.
 - **Motivos de encerramento**: as tags do modelo marcadas Comprou / Não comprou (Comprou e Não
-  comprou = `both`). Mesmo nome, ignorando maiúsculas → atualiza resultado e cor e reativa; o que
+  comprou = `both`). Mesmo nome — ignorando maiúsculas, acento e emoji/símbolo no começo ("Achou caro" = "💰 Achou caro") → atualiza resultado e cor, reativa e **renomeia mantendo o id** (histórico, filtro e relatórios continuam nele); o que
   faltar é criado; ordem = a do modelo. Motivos de atendimento interno (`ignoreInReports`) não são
   tocados. **Deixar idêntico ao modelo** desativa os motivos do cliente que não estão no modelo
   (desativar, não apagar: histórico e relatórios mantêm o nome); sem isso, eles continuam ativos

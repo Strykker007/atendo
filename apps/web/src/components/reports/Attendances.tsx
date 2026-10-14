@@ -128,7 +128,11 @@ export function Attendances({ from, to, userId, focus }: { from: string; to: str
                       <div className="text-ink truncate max-w-[200px]">{a.contact.name || 'Sem nome'}</div>
                       <div className="text-[11px] text-muted tnum">{a.contact.phoneFormatted}</div>
                     </td>
-                    <td className="px-4 py-2.5 text-ink truncate max-w-[150px]">{a.user?.name ?? <span className="text-muted">(automático)</span>}</td>
+                    <td className="px-4 py-2.5 text-ink truncate max-w-[150px]">
+                      {a.user?.name ?? (a.owner
+                        ? <span title="Encerrado pela automação enquanto a conversa era desta pessoa">{a.owner.name ?? '(usuário removido)'} <span className="text-[11px] text-muted">· robô</span></span>
+                        : <span className="text-muted">(automático)</span>)}
+                    </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <span className={cn('inline-flex items-center gap-1 font-medium', r.cls)}>{r.icon}{rotuloDe(a.outcome, labels)}</span>
                       {a.value != null && <span className="ml-1.5 text-muted tnum">{fmtBRL(a.value)}</span>}

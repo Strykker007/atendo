@@ -271,6 +271,12 @@ export function ConversationList() {
             className={cn('w-full rounded-lg bg-field text-ink px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40', closeFilter.reasonId && 'ring-1 ring-accent')}>
             <option value="">Qualquer motivo</option>
             {(motivos.data ?? []).filter((r) => r.isActive && (!closeFilter.outcome || r.outcome === closeFilter.outcome || r.outcome === 'both')).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {/* desativado some do encerramento, mas o histórico continua nele: precisa dar para filtrar */}
+            {(motivos.data ?? []).some((r) => !r.isActive) && (
+              <optgroup label="Desativados">
+                {(motivos.data ?? []).filter((r) => !r.isActive && (!closeFilter.outcome || r.outcome === closeFilter.outcome || r.outcome === 'both')).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </optgroup>
+            )}
           </select>
         </div>
 

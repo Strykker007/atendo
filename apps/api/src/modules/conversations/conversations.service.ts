@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { CloseReasonsService } from '../close-reasons/close-reasons.module';
 import { AuditService } from '../audit/audit.module';
-import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, messagePreview } from '@atendo/shared';
+import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, isCpfCnpjLength, messagePreview } from '@atendo/shared';
 import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -558,6 +558,8 @@ export class ConversationsService {
 
   async setStatusSystem(conversationId: string, status: ConversationStatus) {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true, botPausedAt: true } });
+    // quem atendeu de fato (antes de mudar o status): o último da equipe que respondeu neste atendimento
+    const atendeu = status === 'closed' ? await this.quemAtendeu(conversationId) : null;
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
@@ -574,8 +576,10 @@ export class ConversationsService {
       },
     });
     const transitorias = status === 'closed' ? await this.tagsDoAtendimento([conversationId]) : null;
-    // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria
-    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação', ...(transitorias && { stageTagId: transitorias.get(conversationId)?.stage ?? null, tagSnapshot: transitorias.get(conversationId)?.ids ?? [] }) });
+    // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria (o ranking não
+    // conta). `targetId` = quem da equipe atendeu: o filtro de consultor do relatório traz o
+    // atendimento dele que o robô fechou (docs/07-api.md › /reports/attendances). Só robô = nulo
+    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação', ...(atendeu && { targetId: atendeu }), ...(transitorias && { stageTagId: transitorias.get(conversationId)?.stage ?? null, tagSnapshot: transitorias.get(conversationId)?.ids ?? [] }) });
     if (status === 'closed') await this.limparTransitorias([conversationId]);
     if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId: conv.tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     if (status === 'closed') await this.encerrarFluxosPausados([conversationId]);
@@ -1259,11 +1263,17 @@ export class ConversationsService {
   }
 
   /** Atualiza a ficha do contato. Campo vazio limpa — o atendente apaga o que não vale mais. */
-  async updateContact(tenantId: string, contactId: string, input: { name?: string; email?: string; address?: string; note1?: string; note2?: string; resubscribe?: true }) {
+  async updateContact(tenantId: string, contactId: string, input: { name?: string; email?: string; address?: string; document?: string; note1?: string; note2?: string; resubscribe?: true }) {
     const { resubscribe, ...data } = input;
     const limpo = Object.fromEntries(
       Object.entries(data).map(([k, v]) => [k, typeof v === 'string' && !v.trim() ? null : v?.trim()]),
     );
+    // CPF/CNPJ guardado só com dígitos; tamanho errado é recusado (vira cobrança recusada no Asaas depois)
+    if (typeof limpo.document === 'string') {
+      const doc = limpo.document.replace(/\D/g, '');
+      if (!isCpfCnpjLength(doc)) throw new BadRequestException('CPF precisa ter 11 dígitos e CNPJ, 14.');
+      limpo.document = doc;
+    }
     // contato inexistente (ou de outro cliente) é 404, não erro interno
     // nome digitado na ficha manda; apagado, volta a aceitar o do WhatsApp. Só conta se mudou:
     // a ficha manda o nome junto mesmo quando a pessoa só mexeu no e-mail
@@ -1598,6 +1608,23 @@ export class ConversationsService {
    * nenhuma, porque o relatório fica plausível e errado. Se não deu para registrar, a ação
    * falha e aparece.
    */
+  /**
+   * Último da equipe que mandou mensagem neste atendimento (desde o encerramento anterior).
+   * Não é o dono da conversa: o dono fica de um atendimento para o outro, e atendimento que só o
+   * robô respondeu não é de ninguém.
+   */
+  private async quemAtendeu(conversationId: string): Promise<string | null> {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { tenantId: true } });
+    if (!conv) return null;
+    const anterior = await this.prisma.conversationEvent.findFirst({ where: { conversationId, type: 'closed' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+    const m = await this.prisma.message.findFirst({
+      where: { conversationId, direction: 'out', internal: false, author: { tenantId: conv.tenantId }, ...(anterior && { createdAt: { gt: anterior.createdAt } }) },
+      orderBy: { createdAt: 'desc' },
+      select: { authorId: true },
+    });
+    return m?.authorId ?? null;
+  }
+
   private async registrar(e: {
     tenantId: string;
     conversationId: string;

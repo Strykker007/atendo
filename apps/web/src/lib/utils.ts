@@ -30,3 +30,10 @@ export function downloadJson(data: unknown, fileName: string) {
 
 /** Nome de arquivo seguro a partir de um título. */
 export const safeFileName = (name: string, fallback: string) => name.replace(/[^a-z0-9\-_ ]/gi, '').trim() || fallback;
+
+/** Máscara de CPF (até 11 dígitos) ou CNPJ (12–14), enquanto digita. */
+export function formatDoc(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 14);
+  if (d.length <= 11) return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/(\d{3})\.(\d{3})\.(\d{3})(\d{1,2})$/, '$1.$2.$3-$4');
+  return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/, (_, a, b, c, e, f) => `${a}.${b}.${c}/${e}${f ? `-${f}` : ''}`);
+}
