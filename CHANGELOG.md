@@ -3,6 +3,28 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.3.0 — 2026-10-15
+
+- fix(chat): opção de foto protegida na tela de prévia do anexo (onde o arquivo escolhido é enviado)
+- feat(site): landing da VogoChat em apps/site; índice de docs e variáveis de ambiente (site e orçamento de IA)
+- fix(relatórios): campo Tag com a mesma altura e borda dos outros filtros
+- feat: intervalo Moderado passa a 3–6s; agrupar por atendente vem marcado por padrão
+- feat(relatórios): filtro de empresa na própria página (independe do menu) e empresa removida continua nos relatórios com o histórico dos números excluídos
+- fix(relatórios): empresa selecionada inclui o histórico dos números excluídos dela — a soma das empresas volta a bater com Todas
+- fix(chat): mídia antiga do histórico importado mostra que o WhatsApp não guarda mais o arquivo, em vez de 'indisponível'
+- fix(chat): rota de mensagens assíncrona (sincronização do histórico)
+- feat(chat): foto protegida — mídia de risco vai por link com validade (padrão 1 dia, escolhida pelo atendente) em vez de imagem no WhatsApp; página /f/:hash, revogar e visualizações na bolha
+- feat(relatórios): relatórios respeitam a empresa selecionada; quadro Por empresa e dimensão Empresa no relatório personalizado
+- feat(chat): histórico anterior ao painel trazido da Evolution conforme a conversa é rolada — sem duplicar, sem automação, sem cobrança e fora dos relatórios; mídia baixada em fila
+- feat(ia): orçamento mensal de IA da plataforma com alertas 50/80/100% e corte ao esgotar; checklist da conta do fornecedor e plano do agente de IA
+- fix(chat): foco do teclado ao alternar nota/mensagem e na legenda da mídia; atalho Orçamento ao lado da Nota interna; Pagamentos vai para Relatórios
+- feat(ranking): pontuação composta 0–100 (faturamento, vendas, conversão suavizada, satisfação, TMA) com pesos ajustáveis; colunas Pontuação e Faturamento
+- feat(relatórios): faturamento por origem (Pix automático × pago por fora × no encerramento) e estornos do período
+- feat(orçamentos): tela Orçamentos (totais por situação, Pix automático × por fora, filtros) e selo Pago na lista de conversas
+- feat(orçamentos): validade em horas (padrão até o fim do dia), cancelamento da cobrança no Asaas após 10 min de tolerância e conferência de pagamentos
+- feat(orçamentos): pagamento vira venda na hora, encerramento absorve sem duplicar, estorno; motivo obrigatório separado por resultado; lista de conversas carrega as páginas seguintes
+- feat(orçamentos): pagamento vira venda na hora, encerramento absorve sem duplicar, estorno; motivo obrigatório separado por resultado; lista de conversas carrega as páginas seguintes
+
 ## 1.2.1 — 2026-10-14
 
 - fix(relatórios): filtro de consultor inclui atendimento que ele atendeu e a automação encerrou (targetId = quem atendeu), com backfill do histórico
