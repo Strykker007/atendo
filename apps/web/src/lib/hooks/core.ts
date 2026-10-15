@@ -45,6 +45,8 @@ export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
   text: string | null; mediaUrl: string | null; mediaMime: string | null; mediaName: string | null; createdAt: string; error?: string | null;
   externalId?: string | null;
+  /** veio do histórico do WhatsApp, anterior à conversa no painel (docs/historico-de-mensagens.md) */
+  imported?: boolean;
   /** id da mensagem citada no provider */
   quotedId?: string | null;
   /** texto do que foi citado, quando a citada não está no nosso histórico (resposta a status) */

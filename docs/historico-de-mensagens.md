@@ -50,5 +50,8 @@ buscada (o story já sumiu).
 - Só preenche **para trás** (antes da mais antiga que temos). Um buraco no meio (webhook perdido
   com a Evolution fora do ar) não é preenchido.
 - Reação e edição feitas no passado não são aplicadas às mensagens importadas.
+- Mídia antiga (na prática, mais de ~30 dias) já saiu do servidor do WhatsApp e a Evolution não
+  guarda o arquivo, só a referência: a bolha mostra "[Áudio antigo · o WhatsApp não guarda mais o
+  arquivo]". Mídia recente do histórico baixa normalmente.
 - O quanto existe depende do que o WhatsApp mandou no pareamento. Para trazer mais, o número
   teria que ser pareado de novo com `syncFullHistory` (hoje desligado em todas as instâncias).

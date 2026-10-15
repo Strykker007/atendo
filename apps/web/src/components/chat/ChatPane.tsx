@@ -1268,6 +1268,8 @@ function irParaMensagem(id: string) {
 function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) => void }) {
   // só mídia: localização, contato, botões e afins são desenhados por `structuredBody`
   if (!['image', 'audio', 'video', 'document', 'sticker'].includes(m.type)) return null;
+  // histórico importado: arquivo com mais de ~30 dias já saiu do servidor do WhatsApp — não é falha nossa
+  if (!m.mediaUrl && m.imported && m.error) return <span className="italic text-muted text-xs" title="Mensagem anterior à conversa no painel: o WhatsApp não guarda mais este arquivo">[{labelOf(m.type)} antigo · o WhatsApp não guarda mais o arquivo]</span>;
   if (!m.mediaUrl) return <span className="italic text-muted text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
   // abre por cima, não em aba nova: abrir fora tirava o atendente da conversa
   if (m.type === 'image' || m.type === 'sticker') {
