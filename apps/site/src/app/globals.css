@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Tokens de tema — CÓPIA de apps/web/src/app/globals.css (site e painel com a mesma cara).
+   Mudou a paleta lá? Copie o bloco :root/.dark para cá também.
+   Regra: componente nunca usa hex; usa classes do tailwind.config (bg-panel, text-muted…).
+   ============================================================ */
+:root {
+  color-scheme: light;
+  --bg: #f2f4f8;
+  --panel: #ffffff;
+  --field: #eef1f6;
+  --line: #dfe4ec;
+  --line-strong: #c9d1de;
+  --ink: #1e2433;
+  --muted: #5f6b80;
+  --faint: #98a3b8;
+
+  --accent: #2f5bea;
+  --accent-hover: #244ccc;
+  --accent-soft: #e4eaff;
+  --accent-ink: #1d3fb8;
+
+  --side: #243043;
+  --side-ink: #c9d2e3;
+  --side-on: #ffffff;
+  --side-on-ink: #243043;
+  --side-line: #2f3d54;
+
+  --wait: #c2410c;  --wait-soft: #ffedd5;
+  --prog: #1d4ed8;  --prog-soft: #dbe4ff;
+  --done: #4b5563;  --done-soft: #e5e7eb;
+
+  --ok: #16a34a;    --ok-soft: #dcfce7;
+  --warn: #d97706;  --warn-soft: #fef3c7; --warn-ink: #92400e;
+  --danger: #dc2626; --danger-soft: #fee2e2; --danger-ink: #991b1b;
+
+  /* off-white zinc-100: o branco estourado cansava; o balão recebido (branco) passa a se destacar */
+  --chat-bg: #f4f4f5;
+  /* ponto da textura do fundo: quase imperceptível de perto, dá profundidade de longe */
+  --chat-dot: #e4e4e7;
+  --bub-in: #ffffff;  --bub-in-ink: #1e2433;
+  /* borda delicada do recebido (zinc-200/60) */
+  --bub-in-line: rgb(228 228 231 / 0.6);
+  --bub-out: #2563eb; --bub-out-ink: #ffffff;
+  /* segunda cor do balão enviado: o leve degradê tira o aspecto de retângulo chapado */
+  --bub-out-2: #1f57d8;
+  /* ✓✓ de "lido": o balão já é azul, então o azul do WhatsApp sumiria — ciano destaca */
+  --tick-read: #67e8f9;
+
+  --meta-soft: #e0e7ff; --meta-ink: #3730a3;
+  --evo-soft: #fff3d6;  --evo-ink: #9a5b00;
+
+  /* gráficos: 6 cores categóricas em ordem fixa (validadas p/ daltonismo e contraste) */
+  --c1: #2f5bea; --c2: #d9730d; --c3: #158f6e; --c4: #7c5cff; --c5: #b5872a; --c6: #c2357f;
+  --grid: #e6eaf1;
+}
+
+.dark {
+  color-scheme: dark;
+  /* tons slate um pouco mais claros e menos saturados: o preto quase puro com texto quase branco cansava */
+  --bg: #111620;
+  --panel: #171c27;
+  --field: #1f2531;
+  --line: #262c39;
+  --line-strong: #323a4a;
+  --ink: #e2e6ee;
+  --muted: #949db0;
+  --faint: #646d80;
+
+  --accent: #4c9cf0;
+  --accent-hover: #6aaef5;
+  --accent-soft: #1c2a3f;
+  --accent-ink: #7cc4ff;
+
+  --side: #0b0e14;
+  --side-ink: #aab3c5;
+  --side-on: #1c2a3f;
+  --side-on-ink: #7cc4ff;
+  --side-line: #1a2030;
+
+  --wait: #fbbf24;  --wait-soft: #3a2c0a;
+  --prog: #5eead4;  --prog-soft: #0f3b36;
+  --done: #8a93a6;  --done-soft: #222836;
+
+  --ok: #34d399;    --ok-soft: #0f3b2c;
+  --warn: #fbbf24;  --warn-soft: #3a2c0a; --warn-ink: #fde68a;
+  --danger: #f87171; --danger-soft: #4a1d1d; --danger-ink: #fecaca;
+
+  /* grafite zinc-900: menos breu que o slate anterior; balões ganham contraste confortável */
+  --chat-bg: #18181b;
+  --chat-dot: transparent;
+  --bub-in: #27272a;  --bub-in-ink: #f4f4f5;
+  --bub-in-line: rgb(63 63 70 / 0.6);
+  /* blue-600 com leve queda: legível com texto branco sem estourar o brilho */
+  --bub-out: #2563eb; --bub-out-ink: #ffffff;
+  --bub-out-2: #1e50c8;
+  --tick-read: #67e8f9;
+
+  --meta-soft: #2a1f3d; --meta-ink: #c4a8ff;
+  --evo-soft: #3a2c0a;  --evo-ink: #fbbf24;
+
+  --c1: #3b82f6; --c2: #c97a22; --c3: #1d9c78; --c4: #8f78ff; --c5: #b08f38; --c6: #cc5c98;
+  --grid: #1f2634;
+}
+
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+/* faixa de logos de clientes: anda metade da lista (que vem duplicada) e recomeça sem emenda */
+@keyframes marquee { to { transform: translateX(calc(-50% - 0.5rem)); } }
+.marquee { animation: marquee 60s linear infinite; }
+.marquee:hover { animation-play-state: paused; }
+.marquee-mask { mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .marquee { animation: none; flex-wrap: wrap; justify-content: center; width: auto; }
+  .marquee > [aria-hidden] { display: none; }
+}
+
+/* ===== Animações ao rolar (só dentro de .motion — rota /animado). Ver landing/motion.tsx ===== */
+.motion .reveal {
+  transition:
+    opacity .8s cubic-bezier(.16, 1, .3, 1) var(--d, 0ms),
+    transform .8s cubic-bezier(.16, 1, .3, 1) var(--d, 0ms),
+    filter .8s cubic-bezier(.16, 1, .3, 1) var(--d, 0ms);
+}
+.motion .reveal:not([data-shown]) { opacity: 0; }
+.motion .reveal[data-variant='up']:not([data-shown]) { transform: translateY(40px); }
+.motion .reveal[data-variant='left']:not([data-shown]) { transform: translateX(-48px); }
+.motion .reveal[data-variant='right']:not([data-shown]) { transform: translateX(48px); }
+.motion .reveal[data-variant='zoom']:not([data-shown]) { transform: scale(.9); }
+.motion .reveal[data-variant='blur']:not([data-shown]) { transform: translateY(20px); filter: blur(10px); }
+
+/* mockup do chat flutuando de leve */
+@keyframes float { 50% { transform: translateY(-10px); } }
+.motion .float { animation: float 6s ease-in-out infinite; }
+
+/* parallax: os brilhos de fundo andam mais devagar que a página */
+.parallax-slow { transform: translateY(calc(var(--sy, 0) * 0.3px)); }
+.parallax-fast { transform: translateY(calc(var(--sy, 0) * -0.15px)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .motion .reveal { transition: none; opacity: 1 !important; transform: none !important; filter: none !important; }
+  .motion .float { animation: none; }
+  .parallax-slow, .parallax-fast { transform: none; }
+}
