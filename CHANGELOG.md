@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.3.1 — 2026-10-15
+
+- fix(foto protegida): frase sem {{link}} ganha o link no final ao salvar, em vez de bloquear
+- feat(pesquisas): seletor de variáveis nos textos da pesquisa (cliente, empresa, ficha, globais e quem atendeu) com prévia em valores de exemplo
+- feat(páginas públicas): frase da foto protegida configurável ({{link}}, {{validade}}, {{primeiro_nome}}) e logo da empresa na foto protegida e no orçamento, com a marca do painel como padrão
+- feat(fluxos): bloco Encerrar conversa pode enviar a pesquisa de satisfação (padrão ou escolhida), com aviso à equipe quando não sai
+
 ## 1.3.0 — 2026-10-15
 
 - fix(chat): opção de foto protegida na tela de prévia do anexo (onde o arquivo escolhido é enviado)
