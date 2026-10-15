@@ -1,17 +1,21 @@
 import {
-  BadRequestException, Body, Controller, Get, Headers, HttpCode, Injectable, Logger, Module, NotFoundException, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors,
+  BadRequestException, Body, Controller, Get, Headers, HttpCode, Injectable, Logger, Module, NotFoundException, OnModuleInit, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { BullModule, InjectQueue, Processor } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsBoolean, IsDate, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Budget, Prisma } from '@prisma/client';
 import {
-  BUDGET_DEFAULT_HOURS, BUDGET_MAX_HOURS, BUDGET_MAX_ITEMS, BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, budgetTotal, isCpfCnpjLength,
-  type BudgetItem, type BudgetStatus, type PixKeyType, type PublicBudget,
+  BUDGET_DEFAULT_VALIDITY, BUDGET_GRACE_MINUTES, BUDGET_MAX_HOURS, BUDGET_MAX_ITEMS, BUDGET_MIN_VALIDITY_MIN, BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, BUDGET_VALIDITY,
+  budgetTotal, isCpfCnpjLength, type BudgetItem, type BudgetStatus, type BudgetValidity, type PixKeyType, type PublicBudget,
 } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
+import { localToUtc, toLocal, TZ_DEFAULT } from '../../common/time';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -22,7 +26,12 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationScopeGuard } from '../conversations/conversation-scope.guard';
-import { ASAAS_PAID_EVENTS, ASAAS_REFUND_EVENTS, PaymentGatewayService, PaymentsModule } from '../payments/payments.module';
+import { numberFilter } from '../auth/number-scope';
+import { departmentWhere } from '../auth/department-scope';
+import { ASAAS_PAID_EVENTS, ASAAS_PAID_STATUSES, ASAAS_REFUND_EVENTS, PaymentGatewayService, PaymentsModule, type AsaasAccount, type AsaasPayment } from '../payments/payments.module';
+
+export const QUEUE_BUDGETS = 'budgets';
+const MIN = 60_000;
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -39,6 +48,8 @@ class CreateBudgetDto {
   @IsOptional() @IsString() pixKeyId?: string;
   @IsOptional() @IsUrl({ protocols: ['https'], require_protocol: true }) @MaxLength(500) paymentUrl?: string;
   @IsOptional() @IsString() @MaxLength(500) note?: string;
+  /** validade da tela (`BUDGET_VALIDITY`); ganha de `validHours`. Nenhum dos dois = até o fim do dia */
+  @IsOptional() @IsIn(BUDGET_VALIDITY) validity?: BudgetValidity;
   @IsOptional() @IsInt() @Min(1) @Max(BUDGET_MAX_HOURS) validHours?: number;
   /** Pix automático: cobrança no Asaas da empresa, baixa pelo webhook (recurso `pix_payments`) */
   @IsOptional() @IsBoolean() autoPix?: boolean;
@@ -49,6 +60,18 @@ class CreateBudgetDto {
 class UpdateBudgetDto {
   /** atendente confirma o pagamento (ou desfaz, voltando a pendente) */
   @IsIn(['PENDING', 'PAID']) status: 'PENDING' | 'PAID';
+}
+
+class ListBudgetsDto {
+  @IsOptional() @IsIn(['PENDING', 'PAID', 'EXPIRED', 'REFUNDED']) status?: BudgetStatus;
+  /** `auto` = Pix automático (Asaas); `fora` = chave/link + comprovante/marcado à mão */
+  @IsOptional() @IsIn(['auto', 'fora']) via?: 'auto' | 'fora';
+  @IsOptional() @IsString() userId?: string;
+  /** período pela criação do orçamento (ISO; `to` exclusivo) */
+  @IsOptional() @Type(() => Date) @IsDate() from?: Date;
+  @IsOptional() @Type(() => Date) @IsDate() to?: Date;
+  @IsOptional() @IsString() @MaxLength(100) search?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
 }
 
 /** 128 bits aleatórios em base64url (22 caracteres): o link é a única credencial da página. */
@@ -82,8 +105,9 @@ export class BudgetsService {
    * encerramento "Comprou" depois absorve (não soma de novo). Nota interna na conversa para a
    * equipe ver onde está atendendo. Idempotente: webhook repetido não cria segunda venda.
    */
-  private async registrarPagamento(b: Budget, via: 'asaas' | 'manual', porUserId?: string) {
-    const agora = new Date();
+  private async registrarPagamento(b: Budget, via: 'asaas' | 'manual', porUserId?: string, pagoEm?: Date) {
+    // hora do pagamento (o aviso pode chegar depois): conta no dia e no mês certos da meta
+    const agora = pagoEm ?? new Date();
     const ok = await this.prisma.budget.updateMany({ where: { id: b.id, status: { in: ['PENDING', 'EXPIRED'] } }, data: { status: 'PAID', paidAt: agora, paidVia: via, paidById: porUserId ?? null } });
     if (!ok.count) return false;
     const itens = b.items as unknown as BudgetItem[];
@@ -108,7 +132,9 @@ export class BudgetsService {
       this.prisma.contact.findUnique({ where: { id: b.contactId }, select: { name: true, phone: true } }),
     ]);
     const total = Number(b.totalValue);
-    await this.conversations.systemNote(b.conversationId, `💰 Pagamento confirmado: ${brl(total)} ${via === 'asaas' ? 'via Pix automático (Asaas)' : '(marcado como pago)'} — orçamento de ${agente?.name ?? 'atendente'}. Já conta como venda; ao encerrar como venda, este valor entra sozinho.`).catch(() => undefined);
+    // dinheiro recebido sempre vale, mesmo depois do vencimento — mas a equipe precisa saber
+    const atrasado = agora.getTime() > b.expiresAt.getTime();
+    await this.conversations.systemNote(b.conversationId, `💰 Pagamento confirmado: ${brl(total)} ${via === 'asaas' ? 'via Pix automático (Asaas)' : '(marcado como pago)'} — orçamento de ${agente?.name ?? 'atendente'}.${atrasado ? ' ⚠️ Pago após o vencimento — confira se o pedido ainda vale.' : ''} Já conta como venda; ao encerrar como venda, este valor entra sozinho.`).catch(() => undefined);
     this.gateway.emitBudgets(b.tenantId, b.conversationId, { total, contactName: contato?.name || contato?.phone || '' });
     return true;
   }
@@ -172,7 +198,7 @@ export class BudgetsService {
         pixHolderName: pix?.holderName,
         paymentUrl: dto.paymentUrl?.trim() || null,
         note: dto.note?.trim() || null,
-        expiresAt: new Date(Date.now() + (dto.validHours ?? BUDGET_DEFAULT_HOURS) * 3600_000),
+        expiresAt: await this.vencimento(user.tenantId, dto),
         autoPix: !!dto.autoPix,
       },
       include: { user: { select: { id: true, name: true } } },
@@ -186,7 +212,7 @@ export class BudgetsService {
         customer: await account.customerId(doc, conv.contact.name?.trim() || 'Cliente'),
         value: Number(b.totalValue),
         // vencimento = dia em que o link expira, no fuso de Brasília
-        dueDate: b.expiresAt.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }),
+        dueDate: toLocal(b.expiresAt, await this.fuso(user.tenantId)).ymd,
         description: `Orçamento ${(await this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { name: true } }))?.name ?? ''}`.trim().slice(0, 500),
         externalReference: b.id,
       });
@@ -230,13 +256,155 @@ export class BudgetsService {
     if (!b) throw new NotFoundException('Orçamento não encontrado');
     if (b.status !== 'PAID') throw new BadRequestException('Só dá para estornar orçamento pago.');
     if (b.paidVia === 'asaas' && b.gatewayPaymentId) {
-      const account = await this.payments.accountFor(user.tenantId);
+      const account = await this.payments.accountOf(user.tenantId);
       if (!account) throw new BadRequestException('Conta do Asaas desconectada: estorne pelo painel do Asaas — a baixa chega pelo webhook.');
       await account.request('POST', `/payments/${b.gatewayPaymentId}/refund`, {});
     }
     await this.registrarEstorno(b, b.paidVia === 'asaas' ? `pedido por ${user.name} (devolvido pelo Asaas)` : `registrado por ${user.name}`);
     const atual = await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: { user: { select: { id: true, name: true } } } });
     return this.present(atual);
+  }
+
+  /**
+   * Relatórios → Pagamentos (docs/orcamentos.md#relatório-de-pagamentos): todos os orçamentos do período com filtros
+   * e totais por situação. Quem tem `conversations.view_all` vê a equipe (e filtra por atendente);
+   * os demais, só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas.
+   */
+  async listAll(user: AuthUser, q: ListBudgetsDto) {
+    const verEquipe = user.role === 'super_admin' || !!user.permissions?.includes('conversations.view_all');
+    const numeros = numberFilter(user);
+    const dept = departmentWhere(user);
+    const busca = q.search?.trim();
+    const digitos = busca?.replace(/\D/g, '') ?? '';
+    const where: Prisma.BudgetWhereInput = {
+      tenantId: user.tenantId,
+      ...(verEquipe ? (q.userId ? { userId: q.userId } : {}) : { userId: user.id }),
+      ...(q.via && { autoPix: q.via === 'auto' }),
+      ...((q.from || q.to) && { createdAt: { ...(q.from && { gte: q.from }), ...(q.to && { lt: q.to }) } }),
+      ...((numeros || dept) && { conversation: { ...(numeros && { numberId: numeros }), ...(dept && { AND: [dept] }) } }),
+      ...(busca && { contact: { OR: [{ name: { contains: busca, mode: 'insensitive' as const } }, ...(digitos.length >= 3 ? [{ phone: { contains: digitos } }] : [])] } }),
+    };
+    const PAGE = 30;
+    const page = q.page ?? 1;
+    const [rows, total, porStatus, porVia] = await Promise.all([
+      this.prisma.budget.findMany({
+        where: { ...where, ...(q.status && { status: q.status }) },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * PAGE,
+        take: PAGE,
+        include: { user: { select: { id: true, name: true } }, contact: { select: { id: true, name: true, phone: true } } },
+      }),
+      this.prisma.budget.count({ where: { ...where, ...(q.status && { status: q.status }) } }),
+      // totais ignoram o filtro de situação: os cartões do topo mostram todas, o clique filtra
+      this.prisma.budget.groupBy({ by: ['status'], where, _count: { _all: true }, _sum: { totalValue: true } }),
+      this.prisma.budget.groupBy({ by: ['paidVia'], where: { ...where, status: 'PAID' }, _count: { _all: true }, _sum: { totalValue: true } }),
+    ]);
+    const soma = (v: Prisma.Decimal | null | undefined) => Number(v ?? 0);
+    return {
+      page,
+      pageSize: PAGE,
+      total,
+      totals: {
+        byStatus: Object.fromEntries(porStatus.map((g) => [g.status, { count: g._count._all, value: soma(g._sum.totalValue) }])) as Partial<Record<BudgetStatus, { count: number; value: number }>>,
+        paidByVia: Object.fromEntries(porVia.map((g) => [g.paidVia ?? 'manual', { count: g._count._all, value: soma(g._sum.totalValue) }])) as Partial<Record<'asaas' | 'manual', { count: number; value: number }>>,
+      },
+      rows: rows.map((b) => ({
+        ...this.present(b),
+        conversationId: b.conversationId,
+        contact: b.contact,
+        paidAfterExpiry: !!b.paidAt && b.paidAt.getTime() > b.expiresAt.getTime(),
+      })),
+    };
+  }
+
+  // ---- vencimento (docs/orcamentos.md#vencimento) ----
+
+  private async fuso(tenantId: string) {
+    return (await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { timezone: true } }))?.timezone || TZ_DEFAULT;
+  }
+
+  /** Validade escolhida → instante. "Até o fim do dia" = 23:59:59 no fuso da empresa; nunca menos de 30 min. */
+  private async vencimento(tenantId: string, dto: { validity?: BudgetValidity; validHours?: number }) {
+    const agora = Date.now();
+    const v = dto.validity ?? (dto.validHours ? undefined : BUDGET_DEFAULT_VALIDITY);
+    let fim: number;
+    if (v === 'end_of_day') {
+      const tz = await this.fuso(tenantId);
+      fim = localToUtc(toLocal(new Date(agora), tz).ymd, '23:59', tz).getTime() + 59_999;
+    } else {
+      const horas = v ? Number(v.replace('h', '')) : dto.validHours!;
+      fim = agora + horas * 3600_000;
+    }
+    return new Date(Math.max(fim, agora + BUDGET_MIN_VALIDITY_MIN * MIN));
+  }
+
+  /**
+   * Quando o cliente pagou, pelo Asaas. A data vem sem hora: sendo hoje (no fuso da empresa), vale
+   * agora; sendo de outro dia (aviso atrasado), 23:59:59 daquele dia — a venda cai no dia certo.
+   */
+  private async pagoEm(tenantId: string, p?: Partial<AsaasPayment>) {
+    const dia = p?.clientPaymentDate || p?.paymentDate || p?.confirmedDate;
+    if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(dia)) return new Date();
+    const tz = await this.fuso(tenantId);
+    if (dia >= toLocal(new Date(), tz).ymd) return new Date();
+    return new Date(localToUtc(dia, '23:59', tz).getTime() + 59_999);
+  }
+
+  /**
+   * Rodada de 1 min (job `budgets`):
+   * 1. PENDING vencido → EXPIRED (a página já mostrava expirado; isto deixa o banco igual).
+   * 2. Pix automático vencido há mais que a tolerância e ainda com cobrança viva: consulta o Asaas —
+   *    paga (o cliente colou o código no limite) vira venda; senão, cancela a cobrança e o QR antigo morre.
+   * 3. A cada 5 min, confere no Asaas os Pix automáticos das últimas 48 h ainda sem pagamento: webhook
+   *    perdido (API fora do ar, rede) não pode deixar dinheiro recebido sem venda.
+   */
+  async processarVencimentos(agora = new Date()) {
+    await this.prisma.budget.updateMany({ where: { status: 'PENDING', expiresAt: { lt: agora } }, data: { status: 'EXPIRED' } });
+
+    const contas = new Map<string, AsaasAccount | null>();
+    const contaDe = async (tenantId: string) => {
+      if (!contas.has(tenantId)) contas.set(tenantId, await this.payments.accountOf(tenantId));
+      return contas.get(tenantId) ?? null;
+    };
+
+    const vencidos = await this.prisma.budget.findMany({
+      where: { autoPix: true, gatewayPaymentId: { not: null }, gatewayCancelledAt: null, status: { in: ['PENDING', 'EXPIRED'] }, expiresAt: { lt: new Date(agora.getTime() - BUDGET_GRACE_MINUTES * MIN) } },
+      orderBy: { expiresAt: 'asc' },
+      take: 50,
+    });
+    for (const b of vencidos) {
+      const conta = await contaDe(b.tenantId);
+      if (!conta) continue; // desconectou: sem como cancelar — a conferência do webhook continua valendo
+      try {
+        if (await this.conferirPagamento(b, conta)) continue;
+        await conta.request('DELETE', `/payments/${b.gatewayPaymentId}`).catch(async (e) => {
+          // recusou cancelar: pode ter sido paga entre a consulta e o cancelamento
+          if (await this.conferirPagamento(b, conta)) return;
+          throw e;
+        });
+        await this.prisma.budget.updateMany({ where: { id: b.id, status: { in: ['PENDING', 'EXPIRED'] } }, data: { gatewayCancelledAt: new Date() } });
+      } catch (e) {
+        this.log.warn(`orçamento ${b.id}: não cancelou a cobrança no Asaas (${e instanceof Error ? e.message : e}) — tenta de novo na próxima rodada`);
+      }
+    }
+
+    if (agora.getUTCMinutes() % 5 !== 0) return;
+    const abertos = await this.prisma.budget.findMany({
+      where: { autoPix: true, gatewayPaymentId: { not: null }, status: { in: ['PENDING', 'EXPIRED'] }, createdAt: { gt: new Date(agora.getTime() - 48 * 60 * MIN) } },
+      take: 200,
+    });
+    for (const b of abertos) {
+      const conta = await contaDe(b.tenantId);
+      if (conta) await this.conferirPagamento(b, conta).catch((e) => this.log.warn(`orçamento ${b.id}: conferência no Asaas falhou (${e instanceof Error ? e.message : e})`));
+    }
+  }
+
+  /** Consulta a cobrança; paga → registra a venda (mesmo caminho do webhook). */
+  private async conferirPagamento(b: Budget, conta: AsaasAccount) {
+    const p = await conta.payment(b.gatewayPaymentId!);
+    if (!ASAAS_PAID_STATUSES.includes(p.status)) return false;
+    if (await this.registrarPagamento(b, 'asaas', undefined, await this.pagoEm(b.tenantId, p))) this.log.log(`orçamento ${b.id} pago (conferência no Asaas, sem webhook)`);
+    return true;
   }
 
   // ---- público (sem login): o hash é a credencial ----
@@ -272,7 +440,7 @@ export class BudgetsService {
    * Webhook do Asaas da empresa. O token do header é o segredo gerado ao conectar; evento de
    * pagamento recebido dá baixa no orçamento pelo id da cobrança — pago vale mesmo vencido.
    */
-  async asaasWebhook(gatewayId: string, token: string | undefined, body: { event?: string; payment?: { id?: string; externalReference?: string } }) {
+  async asaasWebhook(gatewayId: string, token: string | undefined, body: { event?: string; payment?: Partial<AsaasPayment> & { externalReference?: string } }) {
     const g = await this.prisma.paymentGateway.findUnique({ where: { id: gatewayId }, select: { tenantId: true, webhookToken: true } });
     if (!g || !token || token.length !== g.webhookToken.length || !timingSafeEqual(Buffer.from(token), Buffer.from(g.webhookToken))) {
       this.log.warn(`webhook Pix recusado (gateway ${gatewayId})`);
@@ -285,7 +453,7 @@ export class BudgetsService {
     if (!b) return { ok: true };
 
     if ((ASAAS_PAID_EVENTS as readonly string[]).includes(evento)) {
-      if (await this.registrarPagamento(b, 'asaas')) this.log.log(`orçamento ${b.id} pago via Asaas (${paymentId})`);
+      if (await this.registrarPagamento(b, 'asaas', undefined, await this.pagoEm(b.tenantId, body.payment))) this.log.log(`orçamento ${b.id} pago via Asaas (${paymentId})`);
     } else if (evento === 'PAYMENT_REFUNDED') {
       if (await this.registrarEstorno(b, 'feito no Asaas')) this.log.log(`orçamento ${b.id} estornado no Asaas (${paymentId})`);
     } else if ((ASAAS_REFUND_EVENTS as readonly string[]).includes(evento)) {
@@ -383,6 +551,19 @@ class BudgetsController {
   }
 }
 
+/** Relatórios → Pagamentos: lista do período com totais (cada um vê os seus; `view_all` vê a equipe). */
+@Controller('budgets')
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
+class BudgetsListController {
+  constructor(private readonly budgets: BudgetsService) {}
+
+  @Get()
+  @RequirePermission('reports.view')
+  list(@CurrentUser() u: AuthUser, @Query() q: ListBudgetsDto) {
+    return this.budgets.listAll(u, q);
+  }
+}
+
 /** Página pública /o/:hash. Sem login; limite por IP mais apertado que o padrão. */
 @Controller('budgets/public/:hash')
 class PublicBudgetsController {
@@ -415,9 +596,33 @@ class PixWebhookController {
   }
 }
 
+/** Vencimento e conferência a cada minuto (`processarVencimentos`). `upsertJobScheduler` é idempotente entre instâncias. */
+@Injectable()
+class BudgetsScheduler implements OnModuleInit {
+  constructor(@InjectQueue(QUEUE_BUDGETS) private readonly queue: Queue) {}
+  async onModuleInit() {
+    await this.queue.upsertJobScheduler('budgets-expiry', { every: 60_000 }, { name: 'budgets-expiry' });
+  }
+}
+
+@Processor(QUEUE_BUDGETS)
+class BudgetsProcessor extends TrackedWorkerHost {
+  constructor(private readonly budgets: BudgetsService) {
+    super(QUEUE_BUDGETS);
+  }
+  protected async handle(_job: Job) {
+    await this.budgets.processarVencimentos();
+  }
+}
+
 @Module({
-  imports: [AuthModule, ConversationsModule, PaymentsModule],
-  controllers: [BudgetsController, PublicBudgetsController, PixWebhookController],
-  providers: [BudgetsService],
+  imports: [
+    BullModule.registerQueue({ name: QUEUE_BUDGETS, defaultJobOptions: { removeOnComplete: 50, removeOnFail: 50 } }),
+    AuthModule,
+    ConversationsModule,
+    PaymentsModule,
+  ],
+  controllers: [BudgetsController, BudgetsListController, PublicBudgetsController, PixWebhookController],
+  providers: [BudgetsService, BudgetsScheduler, BudgetsProcessor],
 })
 export class BudgetsModule {}

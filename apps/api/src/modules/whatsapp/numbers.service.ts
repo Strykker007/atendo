@@ -4,7 +4,7 @@ import { WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { ProviderRegistry } from './providers/provider.registry';
-import type { NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke } from './providers/provider.interface';
+import type { HistoryQuery, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke } from './providers/provider.interface';
 import type { MetaNumberConfig } from './providers/meta.provider';
 import type { EvolutionNumberConfig } from './providers/evolution.provider';
 import { defaultSendDelay } from './sending-policy';
@@ -203,6 +203,13 @@ export class NumbersService {
     if (!provider.editMessage) return false;
     await provider.editMessage(ctx, target);
     return true;
+  }
+
+  /** Histórico guardado no provider. `null` = o provider do número não guarda histórico (Meta). */
+  async fetchHistory(numberId: string, query: HistoryQuery) {
+    const ctx = await this.context(numberId);
+    const provider = this.registry.get(ctx.provider);
+    return provider.fetchHistory ? provider.fetchHistory(ctx, query) : null;
   }
 
   async context(numberId: string): Promise<NumberContext & { provider: ProviderKind }> {

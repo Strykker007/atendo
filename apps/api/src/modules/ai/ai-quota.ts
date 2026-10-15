@@ -45,3 +45,20 @@ export function decideCanUseAi(
       : 'IA não incluída no seu plano',
   };
 }
+
+/** Faixas do orçamento da plataforma que disparam alerta por e-mail (uma vez por mês cada). */
+export const PLATFORM_ALERT_LEVELS = [50, 80, 100] as const;
+
+/**
+ * Orçamento global de IA: o gasto de **todos** os tenants somados contra o crédito da conta
+ * do fornecedor. Puro. `budgetBrl` 0 = sem orçamento (não bloqueia nem alerta).
+ *
+ * É a trava que protege o dono da chave: o teto por tenant não impede que 200 clientes,
+ * cada um dentro do próprio teto, somem uma fatura que ninguém planejou.
+ */
+export function platformBudgetStatus(spentBrl: number, budgetBrl: number) {
+  if (!budgetBrl) return { blocked: false, level: null as number | null };
+  const pct = (spentBrl / budgetBrl) * 100;
+  const level = [...PLATFORM_ALERT_LEVELS].reverse().find((l) => pct >= l) ?? null;
+  return { blocked: pct >= 100, level };
+}

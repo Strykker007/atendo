@@ -14,7 +14,7 @@ const PAGE_SIZE = 25;
  * número ou produto). O resumo do topo vale para o filtro inteiro, não só a página.
  * `from`/`to` são instantes ISO, `to` exclusivo.
  */
-export function SalesDetails({ from, to, userId, tagIds }: { from: string; to: string; userId?: string; tagIds?: string[] }) {
+export function SalesDetails({ from, to, userId, tagIds, companyId }: { from: string; to: string; userId?: string; tagIds?: string[]; companyId?: string }) {
   const labels = useOutcomeLabels();
   const [busca, setBusca] = useState('');
   const [search, setSearch] = useState('');
@@ -28,9 +28,9 @@ export function SalesDetails({ from, to, userId, tagIds }: { from: string; to: s
     return () => clearTimeout(t);
   }, [busca]);
   // filtro novo = volta para a primeira página
-  useEffect(() => setPage(1), [from, to, userId, tagsQs, search]);
+  useEffect(() => setPage(1), [from, to, userId, tagsQs, search, companyId]);
 
-  const q = useSaleDetails({ startDate: from, endDate: to, userId, tagIds: tagsQs, search: search || undefined, page, pageSize: PAGE_SIZE });
+  const q = useSaleDetails({ startDate: from, endDate: to, companyId, userId, tagIds: tagsQs, search: search || undefined, page, pageSize: PAGE_SIZE });
   const d = q.data;
   const paginas = d ? Math.max(1, Math.ceil(d.total / d.pageSize)) : 1;
 

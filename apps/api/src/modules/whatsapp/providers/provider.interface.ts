@@ -78,6 +78,28 @@ export interface ParsedWebhook {
   };
 }
 
+export interface HistoryQuery {
+  /** telefone do contato, só dígitos */
+  phone: string;
+  /** só mensagens anteriores a este instante (a mais antiga que já temos) */
+  before: Date;
+  limit: number;
+  /**
+   * Ids no provider de mensagens desta conversa que já temos. O provider pode ter o chat
+   * gravado com outro identificador além do telefone (Evolution: `@lid`) e descobre qual por eles.
+   */
+  knownExternalIds: string[];
+}
+
+export interface HistoryPage {
+  /** só o que é mensagem de conversa (sem reação, edição, grupo), com `fromMe` preenchido */
+  messages: InboundMessage[];
+  /** o provider não tem nada mais antigo */
+  exhausted: boolean;
+  /** horário do registro mais antigo lido, mesmo que descartado — de onde a próxima busca continua */
+  oldest?: Date;
+}
+
 /**
  * Contrato único. UI, banco e filas só conhecem esta interface.
  * Trocar Meta <-> Evolution = trocar o campo `provider` do número.
@@ -111,6 +133,12 @@ export interface WhatsAppProvider {
    * Evolution implementa. Devolve `null` quando o contato não tem foto ou a esconde.
    */
   fetchProfilePicture?(ctx: NumberContext, phone: string): Promise<MediaPayload | null>;
+  /**
+   * Histórico da conversa guardado no provider, anterior a `before`, da mais nova para a mais
+   * antiga (docs/historico-de-mensagens.md). Opcional: só a Evolution guarda o que passou pelo
+   * aparelho; a Meta só entrega o que chega pelo webhook.
+   */
+  fetchHistory?(ctx: NumberContext, query: HistoryQuery): Promise<HistoryPage>;
   /** `phone`: telefone do contato, para o provider que precisa do chat além do id */
   markRead(ctx: NumberContext, externalMessageId: string, phone?: string): Promise<void>;
   /**

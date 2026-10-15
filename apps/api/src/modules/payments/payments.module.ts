@@ -57,6 +57,11 @@ export class AsaasAccount {
     return c.id;
   }
 
+  /** Situação da cobrança. `RECEIVED` / `CONFIRMED` / `RECEIVED_IN_CASH` = paga. */
+  payment(id: string) {
+    return this.request<AsaasPayment>('GET', `/payments/${id}`);
+  }
+
   /** Cobrança Pix com o valor exato + QR. `externalReference` = id do orçamento. */
   async pixCharge(input: { customer: string; value: number; dueDate: string; description: string; externalReference: string }) {
     const p = await this.request<{ id: string }>('POST', '/payments', { ...input, billingType: 'PIX' });
@@ -66,6 +71,17 @@ export class AsaasAccount {
 }
 
 type Credentials = { apiKey: string };
+
+export interface AsaasPayment {
+  id: string;
+  status: string;
+  deleted?: boolean;
+  /** datas `YYYY-MM-DD` (sem hora) */
+  paymentDate?: string | null;
+  clientPaymentDate?: string | null;
+  confirmedDate?: string | null;
+}
+export const ASAAS_PAID_STATUSES = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
 
 /**
  * Conta de recebimento da empresa (docs/orcamentos.md#pix-automático). Conectar valida a chave,
@@ -104,6 +120,15 @@ export class PaymentGatewayService implements OnModuleInit {
     const [plan, g] = await Promise.all([this.usage.limits(tenantId), this.prisma.paymentGateway.findUnique({ where: { tenantId } })]);
     if (!g || !plan?.limits.features?.includes('pix_payments')) return null;
     return new AsaasAccount(this.crypto.decryptJson<Credentials>(g.credentials).apiKey, g.sandbox);
+  }
+
+  /**
+   * Conta conectada, **sem olhar o plano**: cancelar cobrança vencida, conferir pagamento e estornar
+   * mexem com dinheiro já cobrado — o cliente perder o recurso não pode deixar QR vivo nem venda sem registro.
+   */
+  async accountOf(tenantId: string): Promise<AsaasAccount | null> {
+    const g = await this.prisma.paymentGateway.findUnique({ where: { tenantId } });
+    return g ? new AsaasAccount(this.crypto.decryptJson<Credentials>(g.credentials).apiKey, g.sandbox) : null;
   }
 
   async status(tenantId: string) {

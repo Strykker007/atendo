@@ -18,6 +18,8 @@
 | [Departamentos](departamentos.md) | Dev / Cliente | Departamentos, quem vê qual fila, transferência entre departamentos e integração com o Distribuidor/Ação |
 | [Editar mensagem enviada](editar-mensagens.md) | Dev / Cliente | Permissão `conversations.edit_message`, prazo de 15 min do WhatsApp, Evolution × Meta, auditoria do texto anterior |
 | [Apagar mensagem e limpar histórico](apagar-mensagens.md) | Dev / Cliente | Quem pode apagar, apagar para todos (Evolution) × só no painel (Meta), registro de auditoria e conteúdo original |
+| [Histórico anterior ao painel](historico-de-mensagens.md) | Dev / Cliente | Mensagens de antes de conectar o número, trazidas da Evolution conforme a pessoa rola: sem duplicar, sem automação, sem cobrança |
+| [Foto protegida](foto-protegida.md) | Dev / Cliente | Foto de remédio/receita por link com validade em vez de mídia no WhatsApp: menos risco de banimento |
 | [Variáveis `{{...}}`](variaveis.md) | Dev / Cliente | Variáveis comuns a fluxos, respostas rápidas, campanhas e chat: empresa, saudação, primeiro nome, campos da ficha |
 | [Agendamento de mensagens](agendamento-de-mensagens.md) | Dev / Cliente | Atendente agenda uma mensagem para sair depois; job de 1 minuto, regras de envio, cancelamento |
 | [Orçamentos](orcamentos.md) | Dev / Cliente | Orçamento gerado no chat vira link seguro `/o/:hash`; página pública com Pix, pagar agora e envio de comprovante |
@@ -36,5 +38,7 @@
 | [18 — Perfis de acesso](18-perfis-de-acesso.md) | Dev / Produto | Permissões configuráveis por cliente: catálogo, guards e as travas contra escalada |
 | [20 — Modelos de perfil](20-modelos-de-perfil.md) | Dev / Produto | Verticais (Farmácia, Clínica…): perfis, respostas e fluxos com que o cliente nasce; import/export em JSON |
 | [19 — Marcas e vertentes](19-marcas-e-vertentes.md) | Dev / Negócio | White-label: como subir uma nova vertente (ex.: clínicas) com outra logo, cores e domínio, e o que ainda é compartilhado |
+| [21 — Site (landing page)](21-site.md) | Dev / Marketing | App `apps/site`: landing pública da VogoChat em domínio próprio, seções, onde editar textos, deploy |
+| [22 — Agente de IA](22-agente-ia.md) | Dev / Produto | Plano: agente que atende e negocia com ferramentas e limites, e onde mais a IA entra no produto |
 
 Convenção: código em inglês, comentários e documentação em português.

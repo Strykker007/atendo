@@ -21,10 +21,10 @@ describe('delayMs — intervalo entre envios', () => {
     expect(amostras.size).toBeGreaterThan(10);
   });
 
-  it('moderado sorteia entre 3000 e 5000ms', () => {
+  it('moderado sorteia entre 3000 e 6000ms', () => {
     expect(delayMs('moderate', () => 0)).toBe(3000);
-    expect(delayMs('moderate', () => 0.5)).toBe(4000);
-    expect(delayMs('moderate', () => 0.9999)).toBeLessThanOrEqual(5000);
+    expect(delayMs('moderate', () => 0.5)).toBe(4500);
+    expect(delayMs('moderate', () => 0.9999)).toBeLessThanOrEqual(6000);
   });
 
   it('perfil desconhecido cai no curto em vez de enviar em rajada', () => {
@@ -110,7 +110,7 @@ describe('o que conta para o teto do dia', () => {
 });
 
 describe('intervalo mínimo no QR', () => {
-  it('padrão do QR é o moderado (3–5s); Rápido (1–2s) não é mais oferecido', async () => {
+  it('padrão do QR é o moderado (3–6s); Rápido (1–2s) não é mais oferecido', async () => {
     const { defaultSendDelay, sendDelayAllowed } = await import('../src/modules/whatsapp/sending-policy');
     expect(defaultSendDelay('evolution')).toBe('moderate');
     expect(defaultSendDelay('meta')).toBe('instant');

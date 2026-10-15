@@ -11,8 +11,11 @@ import { Prisma } from '@prisma/client';
  *
  * `eventoExtra` (ex.: filtro de tag) vale só para encerramentos — orçamento não tem tag, então com
  * o filtro ligado os pagamentos avulsos ficam de fora.
+ *
+ * `numberIds` = escopo de números (empresa selecionada no painel): só vendas de conversas desses números.
  */
-export function vendasPorConsultorSql(tenantId: string, from: Date, to: Date, eventoExtra?: Prisma.Sql) {
+export function vendasPorConsultorSql(tenantId: string, from: Date, to: Date, eventoExtra?: Prisma.Sql, numberIds?: string[]) {
+  const escopo = (col: Prisma.Sql) => (numberIds ? Prisma.sql`and ${col} in (select cs.id from conversations cs where cs."numberId" in (${Prisma.join(numberIds)}))` : Prisma.empty);
   return Prisma.sql`
     select x.uid as "userId", count(*)::int as won, coalesce(sum(x.valor), 0)::float as revenue, count(*) filter (where x.avulso)::int as "paidOnly"
     from (
@@ -22,12 +25,14 @@ export function vendasPorConsultorSql(tenantId: string, from: Date, to: Date, ev
       where e."tenantId" = ${tenantId} and e.type = 'closed' and e.outcome = 'won' and not e."ignoreInReports"
         and e."actorId" is not null and e."createdAt" >= ${from} and e."createdAt" < ${to}
         ${eventoExtra ? Prisma.sql`and ${eventoExtra}` : Prisma.empty}
+        ${escopo(Prisma.sql`e."conversationId"`)}
       union all
       select b."userId" as uid, true as avulso, b."totalValue" as valor
       from budgets b
       where b."tenantId" = ${tenantId} and b.status = 'PAID' and b."closeEventId" is null
         and b."paidAt" >= ${from} and b."paidAt" < ${to}
         ${eventoExtra ? Prisma.sql`and false` : Prisma.empty}
+        ${escopo(Prisma.sql`b."conversationId"`)}
     ) x
     group by 1`;
 }

@@ -31,6 +31,8 @@ export interface Conversation {
   tags: { tag: Tag; isPrimary?: boolean }[];
   /** último encerramento (sobrevive à reabertura): topo da conversa, aba Encerrado, filtro */
   lastClosedAt?: string | null;
+  /** orçamentos pagos ainda sem encerramento (docs/orcamentos.md#venda) — selo "Pago" na lista */
+  budgets?: { id: string; totalValue: string | number; paidAt: string | null }[];
   lastCloseOutcome?: ConversationOutcome | null;
   lastCloseReason?: { id: string; name: string; color: string } | null;
   assignee: { id: string; name: string } | null;
@@ -43,6 +45,8 @@ export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
   text: string | null; mediaUrl: string | null; mediaMime: string | null; mediaName: string | null; createdAt: string; error?: string | null;
   externalId?: string | null;
+  /** veio do histórico do WhatsApp, anterior à conversa no painel (docs/historico-de-mensagens.md) */
+  imported?: boolean;
   /** id da mensagem citada no provider */
   quotedId?: string | null;
   /** texto do que foi citado, quando a citada não está no nosso histórico (resposta a status) */

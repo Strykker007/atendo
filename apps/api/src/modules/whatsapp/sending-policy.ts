@@ -13,25 +13,25 @@ export const DELAY_RANGES: Record<SendDelayProfile, [number, number]> = {
   instant: [0, 0], // só para a API oficial, que não bane por ritmo
   // legado: 1–2s saiu por risco de banimento (migração `send_delay_sem_rapido` passou todos para
   // `moderate`). Fica no enum só para linha antiga não quebrar — e já anda no ritmo do moderado
-  fast: [3, 5],
+  fast: [3, 6],
   short: [3, 4],
-  moderate: [3, 5], // 3000–5000ms
+  moderate: [3, 6], // 3000–6000ms
   medium: [25, 60],
   long: [60, 250],
 };
 
 export const DELAY_LABEL: Record<SendDelayProfile, string> = {
   instant: 'Imediato (só API oficial)',
-  fast: 'Moderado (3–5s)',
+  fast: 'Moderado (3–6s)',
   short: 'Curto (3–4s)',
-  moderate: 'Moderado (3–5s)',
+  moderate: 'Moderado (3–6s)',
   medium: 'Médio (25–60s)',
   long: 'Longo (60–250s)',
 };
 
 /**
  * Intervalo padrão de um número: a oficial não bane por ritmo (imediato); a QR sai no
- * Moderado (3–5s). O Rápido (1–2s) já foi o padrão do QR e saiu: rajada de 1s entre envios
+ * Moderado (3–6s). O Rápido (1–2s) já foi o padrão do QR e saiu: rajada de 1s entre envios
  * é o ritmo que o WhatsApp pune.
  */
 export function defaultSendDelay(provider: string): SendDelayProfile {

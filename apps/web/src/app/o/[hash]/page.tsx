@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Check, ExternalLink, Upload, Clock, CircleCheck, CircleAlert, Loader2, Zap } from 'lucide-react';
@@ -51,8 +51,15 @@ function Cartao({ children, className = '' }: { children: React.ReactNode; class
   return <section className={`rounded-2xl bg-panel border border-line shadow-sm p-4 ${className}`}>{children}</section>;
 }
 
-function Orcamento({ hash, b }: { hash: string; b: PublicBudget }) {
+function Orcamento({ hash, b: recebido }: { hash: string; b: PublicBudget }) {
   const brand = useBrand();
+  const qc = useQueryClient();
+  // relógio da página: no vencimento o Pix some na hora, sem esperar a próxima consulta ao servidor
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setAgora(Date.now()), 15_000); return () => clearInterval(t); }, []);
+  const venceu = recebido.status === 'PENDING' && agora >= new Date(recebido.expiresAt).getTime();
+  useEffect(() => { if (venceu) void qc.invalidateQueries({ queryKey: ['public-budget', hash] }); }, [venceu]); // eslint-disable-line react-hooks/exhaustive-deps
+  const b: PublicBudget = venceu ? { ...recebido, status: 'EXPIRED', pix: null, paymentUrl: null, pixCharge: null } : recebido;
   const validade = new Date(b.expiresAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
   return (
@@ -63,7 +70,7 @@ function Orcamento({ hash, b }: { hash: string; b: PublicBudget }) {
           {b.contactFirstName ? `Olá, ${b.contactFirstName}! ` : ''}Seu orçamento
         </h1>
         {b.agentName && <p className="text-xs text-faint mt-0.5">Preparado por {b.agentName}</p>}
-        <Situacao b={b} validade={validade} />
+        <Situacao b={b} validade={validade} agora={agora} />
       </Cartao>
 
       <Cartao className="p-0 overflow-hidden">
@@ -109,10 +116,13 @@ function Orcamento({ hash, b }: { hash: string; b: PublicBudget }) {
   );
 }
 
-function Situacao({ b, validade }: { b: PublicBudget; validade: string }) {
+function Situacao({ b, validade, agora }: { b: PublicBudget; validade: string; agora: number }) {
   if (b.status === 'PAID') return <Selo cls="bg-ok-soft text-ok" icone={<CircleCheck size={14} />}>Pagamento confirmado. Obrigado!</Selo>;
   if (b.status === 'REFUNDED') return <Selo cls="bg-field text-muted" icone={<CircleAlert size={14} />}>Pagamento estornado. Fale com o atendimento se tiver dúvida.</Selo>;
   if (b.status === 'EXPIRED') return <Selo cls="bg-field text-muted" icone={<CircleAlert size={14} />}>Este orçamento expirou em {validade}. Peça um novo ao atendimento.</Selo>;
+  // última hora: contagem regressiva — quem vai pagar no limite sabe que está no limite
+  const faltam = Math.ceil((new Date(b.expiresAt).getTime() - agora) / 60_000);
+  if (faltam <= 60) return <Selo cls="bg-warn-soft text-warn-ink" icone={<Clock size={14} />}>Vence às {new Date(b.expiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {faltam <= 1 ? 'menos de 1 minuto' : `faltam ${faltam} min`}. Pague antes disso.</Selo>;
   return <Selo cls="bg-warn-soft text-warn-ink" icone={<Clock size={14} />}>Válido até {validade}</Selo>;
 }
 

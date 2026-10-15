@@ -30,7 +30,7 @@ const rotuloDe = (o: AttendanceRow['outcome'], labels: { won: string; lost: stri
  * atendimento — do encerramento anterior até este —, sem os outros dias do cliente misturados.
  * Período e atendente vêm do topo da tela; resultado, tag e busca ficam aqui.
  */
-export function Attendances({ from, to, userId, focus }: { from: string; to: string; userId?: string; focus?: AttendanceFocus | null }) {
+export function Attendances({ from, to, userId, focus, companyId }: { from: string; to: string; userId?: string; focus?: AttendanceFocus | null; companyId?: string }) {
   const [outcome, setOutcome] = useState<'' | 'won' | 'lost'>('');
   const [tagId, setTagId] = useState('');
   const [closeReasonId, setCloseReasonId] = useState('');
@@ -58,9 +58,9 @@ export function Attendances({ from, to, userId, focus }: { from: string; to: str
     const t = setTimeout(() => setSearch(busca.trim()), 350);
     return () => clearTimeout(t);
   }, [busca]);
-  useEffect(() => setPage(1), [from, to, userId, outcome, tagId, closeReasonId, reason, search]);
+  useEffect(() => setPage(1), [from, to, userId, outcome, tagId, closeReasonId, reason, search, companyId]);
 
-  const q = useAttendances({ startDate: from, endDate: to, userId, outcome: outcome || undefined, tagIds: tagId || undefined, closeReasonId: closeReasonId || undefined, reason: reason?.value, search: search || undefined, page, pageSize: PAGE_SIZE });
+  const q = useAttendances({ startDate: from, endDate: to, companyId, userId, outcome: outcome || undefined, tagIds: tagId || undefined, closeReasonId: closeReasonId || undefined, reason: reason?.value, search: search || undefined, page, pageSize: PAGE_SIZE });
   const d = q.data;
   const paginas = d ? Math.max(1, Math.ceil(d.total / PAGE_SIZE)) : 1;
   // tags que fazem sentido filtrar: as do resultado escolhido (ou as de qualquer encerramento)

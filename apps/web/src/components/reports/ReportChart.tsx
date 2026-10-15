@@ -17,7 +17,7 @@ export const METRIC_LABEL: Record<ReportDefinition['metric'], string> = {
   win_rate: 'Taxa de conversão',
 };
 export const GROUP_LABEL: Record<ReportDefinition['groupBy'], string> = {
-  day: 'Dia', week: 'Semana', month: 'Mês', tag: 'Tag', status: 'Status', number: 'Número', agent: 'Atendente', origin: 'Origem', campaign: 'Campanha (anúncio)', reason: 'Motivo do encerramento',
+  day: 'Dia', week: 'Semana', month: 'Mês', tag: 'Tag', status: 'Status', number: 'Número', company: 'Empresa', agent: 'Atendente', origin: 'Origem', campaign: 'Campanha (anúncio)', reason: 'Motivo do encerramento',
 };
 const ENUM_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado', organic: 'Orgânico', ad: 'Anúncio', post: 'Publicação', link: 'Link' };
 

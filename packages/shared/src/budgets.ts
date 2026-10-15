@@ -8,9 +8,25 @@ export const BUDGET_STATUSES = ['PENDING', 'PAID', 'EXPIRED', 'REFUNDED'] as con
 export type BudgetStatus = (typeof BUDGET_STATUSES)[number];
 export const BUDGET_STATUS_LABEL: Record<BudgetStatus, string> = { PENDING: 'Aguardando pagamento', PAID: 'Pago', EXPIRED: 'Expirado', REFUNDED: 'Estornado' };
 
-/** Validade padrão do link e o teto que o atendente pode escolher. */
+/** Teto de `validHours` (API). A tela usa as opções de `BUDGET_VALIDITY`. */
 export const BUDGET_DEFAULT_HOURS = 48;
 export const BUDGET_MAX_HOURS = 24 * 30;
+
+/**
+ * Validade do orçamento (docs/orcamentos.md#vencimento). `end_of_day` = 23:59:59 do dia, no fuso
+ * da empresa — o padrão: proposta de farmácia vale para hoje. Mínimo de 30 min (gerado às 23:50
+ * não vence em 9 min: vai para 00:20).
+ */
+export const BUDGET_VALIDITY = ['1h', '2h', '4h', '8h', 'end_of_day', '24h', '48h'] as const;
+export type BudgetValidity = (typeof BUDGET_VALIDITY)[number];
+export const BUDGET_VALIDITY_LABEL: Record<BudgetValidity, string> = { '1h': '1 hora', '2h': '2 horas', '4h': '4 horas', '8h': '8 horas', end_of_day: 'Até o fim do dia', '24h': '24 horas', '48h': '48 horas' };
+export const BUDGET_DEFAULT_VALIDITY: BudgetValidity = 'end_of_day';
+export const BUDGET_MIN_VALIDITY_MIN = 30;
+/**
+ * Tolerância depois do vencimento antes de cancelar a cobrança no Asaas. No vencimento a página
+ * já some com o QR; quem colou o código antes tem estes minutos para o banco processar.
+ */
+export const BUDGET_GRACE_MINUTES = 10;
 export const BUDGET_MAX_ITEMS = 50;
 /** Comprovante pela página pública: imagem ou PDF, até este tamanho. */
 export const BUDGET_RECEIPT_MAX_MB = 10;

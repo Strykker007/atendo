@@ -5,13 +5,13 @@ import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClie
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, SurveyScale } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, SurveyScale, RankingParts, RankingWeights } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { ConversationOrigin, type Message } from './core';
 
 // ---- Relatórios ----
 export type ReportMetric = 'conversations' | 'messages_in' | 'messages_out' | 'avg_first_response_min' | 'closed' | 'revenue' | 'won' | 'lost' | 'win_rate';
-export type ReportGroup = 'day' | 'week' | 'month' | 'tag' | 'status' | 'number' | 'agent' | 'origin' | 'campaign' | 'reason';
+export type ReportGroup = 'day' | 'week' | 'month' | 'tag' | 'status' | 'number' | 'company' | 'agent' | 'origin' | 'campaign' | 'reason';
 export interface ReportDefinition {
   metric: ReportMetric;
   groupBy: ReportGroup;
@@ -23,7 +23,8 @@ export interface ReportDefinition {
 export interface ReportResult { definition: ReportDefinition; series: { label: string; value: number }[] }
 export interface SavedReport { id: string; name: string; definition: ReportDefinition; createdAt: string }
 
-export const useRunReport = () => useMutation({ mutationFn: (d: ReportDefinition) => api<ReportResult>('/reports/run', { method: 'POST', body: JSON.stringify(d) }) });
+/** `companyId` vai ao lado da definição (relatório salvo não fica preso a uma empresa) */
+export const useRunReport = () => useMutation({ mutationFn: ({ companyId, ...d }: ReportDefinition & { companyId?: string }) => api<ReportResult>('/reports/run', { method: 'POST', body: JSON.stringify({ ...d, companyId }) }) });
 export const useSavedReports = () => useQuery({ queryKey: ['saved-reports'], queryFn: () => api<SavedReport[]>('/reports/saved') });
 export const useSaveReport = () => {
   const qc = useQueryClient();
@@ -32,6 +33,30 @@ export const useSaveReport = () => {
 export const useDeleteSavedReport = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/reports/saved/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }) });
+};
+
+// ---- Relatórios: comparativo por empresa (docs/empresas.md#relatórios) ----
+export interface CompanyReportRow {
+  /** null = números sem empresa */
+  companyId: string | null;
+  name: string;
+  /** empresa removida: sobra o histórico dos números excluídos dela */
+  removed: boolean;
+  conversations: number;
+  closed: number;
+  waitingNow: number;
+  avgFirstResponseMin: number | null;
+  won: number;
+  lost: number;
+  revenue: number;
+  avgTicket: number | null;
+  winRate: number | null;
+}
+/** Empresas do filtro da página de relatórios — inclui as removidas que ainda têm histórico. */
+export const useReportCompanyOptions = () => useQuery({ queryKey: ['report-company-options'], queryFn: () => api<{ id: string; name: string; removed: boolean }[]>('/reports/companies/options'), staleTime: 60_000 });
+export const useReportCompanies = (f: { from: string; to: string; tagIds?: string[]; agentId?: string }, enabled: boolean) => {
+  const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }), ...(f.agentId && { agentId: f.agentId }) });
+  return useQuery({ queryKey: ['report-companies', qs.toString()], enabled, queryFn: () => api<{ rows: CompanyReportRow[] }>(`/reports/companies?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false });
 };
 
 // ---- Relatórios: ranking de consultores ----
@@ -50,8 +75,12 @@ export interface ConsultantRankingRow {
   avgHandleMin: number | null;
   /** pesquisa de satisfação (pergunta principal) na escala `satisfactionScale`; null = sem respostas */
   satisfaction: { answered: number; avg: number | null; nps: number | null } | null;
+  /** nota 0–100 que define a posição (packages/shared/ranking.ts) */
+  score: number;
+  /** cada métrica de 0 a 100; null = sem dado (peso redistribuído) */
+  scoreParts: RankingParts | null;
 }
-export interface ConsultantRanking { satisfactionScale: SurveyScale | null; totals: { closed: number; won: number; conversionRate: number }; ranking: ConsultantRankingRow[] }
+export interface ConsultantRanking { satisfactionScale: SurveyScale | null; weights: RankingWeights; totals: { closed: number; won: number; revenue: number; conversionRate: number }; ranking: ConsultantRankingRow[] }
 export const useConsultantRanking = (f: { from: string; to: string; tagIds?: string[]; enabled?: boolean }) => {
   const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }) });
   return useQuery({ queryKey: ['consultant-ranking', qs.toString()], queryFn: () => api<ConsultantRanking>(`/reports/ranking-consultants?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false, enabled: f.enabled !== false });
@@ -91,7 +120,7 @@ export const useSaveGoals = () => {
 };
 
 // ---- Relatórios: detalhamento de vendas ----
-export interface SaleDetailsFilters { startDate: string; endDate: string; userId?: string; tagIds?: string; search?: string; page: number; pageSize?: number }
+export interface SaleDetailsFilters { startDate: string; endDate: string; userId?: string; tagIds?: string; search?: string; page: number; pageSize?: number; /** empresa do filtro da página (`all` = todas) */ companyId?: string }
 export interface SaleDetailsRow {
   id: string;
   closedAt: string;
@@ -117,7 +146,7 @@ export const useSaleDetails = (f: SaleDetailsFilters) => {
 };
 
 // ---- Auditoria de atendimentos (cada encerramento do período) ----
-export interface AttendanceFilters { startDate: string; endDate: string; outcome?: 'won' | 'lost' | 'none'; tagIds?: string; closeReasonId?: string; reason?: string; userId?: string; search?: string; page: number; pageSize?: number }
+export interface AttendanceFilters { startDate: string; endDate: string; companyId?: string; outcome?: 'won' | 'lost' | 'none'; tagIds?: string; closeReasonId?: string; reason?: string; userId?: string; search?: string; page: number; pageSize?: number }
 export interface AttendanceRow {
   id: string;
   closedAt: string;

@@ -6,9 +6,9 @@ O atendente monta um orçamento/pedido no chat e o contato recebe **só um link*
 
 ## No chat
 
-Barra do campo de mensagem → ícone de recibo (**Gerar orçamento / pedido**). O modal tem duas abas:
+Atalho **Orçamento** na linha das abas acima do campo, ao lado de *Mensagem para o cliente* | *Nota interna* (aparece para todos; na conversa de outra pessoa, não). O link sempre entra no campo da **mensagem** — se estava na nota, o composer volta para a mensagem. O modal tem duas abas:
 
-- **Novo orçamento:** itens (nome, dosagem/apresentação, quantidade, valor unitário), chave Pix cadastrada (a primeira já vem escolhida) e/ou link de pagamento `https://`, validade (24h, **48h** padrão, 3 ou 7 dias) e observação. Pelo menos uma forma de pagamento é obrigatória.
+- **Novo orçamento:** itens (nome, dosagem/apresentação, quantidade, valor unitário), chave Pix cadastrada (a primeira já vem escolhida) e/ou link de pagamento `https://`, validade (1h, 2h, 4h, 8h, **até o fim do dia** — padrão —, 24h ou 48h; ver [Vencimento](#vencimento)) e observação. Pelo menos uma forma de pagamento é obrigatória.
 - **Gerar link** salva o orçamento e **insere no campo** (não envia):
   > Olá {primeiro nome}, acesse o link para visualizar os detalhes do seu orçamento e opções de pagamento: https://<domínio do painel>/o/<hash>
 
@@ -16,6 +16,21 @@ Barra do campo de mensagem → ícone de recibo (**Gerar orçamento / pedido**).
 - **Desta conversa:** orçamentos gerados, com status, "Comprovante recebido", **Ver comprovante** (URL assinada), **Copiar link**, **Inserir no campo** (pendentes) e **Marcar como pago / Desfazer pago**. Atualiza sozinha pelo socket `budgets` quando o comprovante chega.
 
 Não há permissão nem recurso de plano próprio: quem pode abrir a conversa pode gerar orçamento (o `ConversationScopeGuard` barra número/departamento de fora).
+
+## Relatórios
+
+Em **Relatórios → Vendas**: o card **Faturamento por origem** divide o faturado do período em *Pix automático (Asaas)*, *Orçamento pago por fora* e *Informada no encerramento* (venda sem orçamento, ou o adicional além dele), com o % de cada; abaixo, **Estornos no período** (quantidade e valor, já fora do faturado). Faturado, ticket médio, conversão, meta e ranking usam a mesma régua de vendas ([Venda](#venda)).
+
+## Relatório de pagamentos
+
+**Relatórios → Pagamentos** (`/relatorios/pagamentos`, botão no topo de Relatórios; `reports.view`). Mora em Relatórios, não no menu: é acompanhamento — orçamento se cria no chat. Quem tem `conversations.view_all` vê a equipe e filtra por atendente; os demais veem só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas. Sem `reports.view`, o atendente acompanha os seus pelo atalho Orçamento → *Desta conversa*, pelo selo 💰 Pago e pela nota na conversa.
+
+- **Período** (hoje, 7 dias, este mês ou datas), **forma de pagamento** (Pix automático × por fora), **atendente**, **busca** por cliente/número.
+- **Cartões** com o total do período por situação — Pago (com a divisão Pix automático / por fora), Aguardando pagamento, Expirado, Estornado. Clicar filtra a tabela.
+- **Tabela**: gerado em, cliente, atendente, itens, valor, forma, situação (com selos *Após o vencimento*, *No encerramento*, *Comprovante* e a hora de pago/estornado/vencimento) e atalhos: comprovante, copiar link, abrir conversa.
+- Atualiza sozinha pelo socket `budgets`.
+
+Na **lista de conversas**, o selo **💰 Pago** marca a conversa com pagamento confirmado depois do último encerramento e ainda não encerrada como venda — quem encerrar já sabe que é "Comprou". A confirmação também chega como **nota interna** na conversa e como aviso no painel.
 
 ## Página pública `/o/:hash`
 
@@ -59,9 +74,27 @@ Para não haver furo nem duplicidade, o encerramento **absorve** o pagamento (`b
 
 **Estorno**: botão **Estornar** na lista do orçamento (gestão — `settings.manage`). Pix automático pede a devolução ao Asaas (`POST /payments/:id/refund`); por fora, só registra. Também chega pelo webhook (`PAYMENT_REFUNDED`). O orçamento vira `REFUNDED`, a venda ganha `refundedAt` e sai do faturamento, da meta e do ranking (se já estava num encerramento, desconta do valor dele). Estorno parcial ou em andamento só gera nota na conversa — conferir no Asaas. **Desfazer pago** existe só para corrigir clique errado no pago por fora ainda não encerrado; o resto é estorno. Os webhooks já cadastrados são alinhados à lista de eventos (pagamento + estorno) quando a API sobe.
 
-## Status e expiração
+## Vencimento
 
-`PENDING` → `PAID` (atendente marca) ou `EXPIRED` (passou do `expiresAt`). Não há job: o vencimento é aplicado na leitura — a página pública grava `EXPIRED` ao abrir, e o painel mostra como expirado mesmo antes disso. Pago vale mesmo depois de vencido; desfazer o pago de um vencido volta a `EXPIRED`.
+Status: `PENDING` → `PAID` (pago) / `EXPIRED` (venceu sem pagamento) / `REFUNDED` (estornado, ver [Venda](#venda)).
+
+**Validade** (`validity`, `BUDGET_VALIDITY` no shared): 1h, 2h, 4h, 8h, **até o fim do dia** (padrão: 23:59:59 no fuso da empresa), 24h ou 48h. Nunca menos de 30 min — gerado às 23:50 com "fim do dia" vai até 00:20. A API ainda aceita `validHours` (1–720). No Pix automático, o vencimento da cobrança no Asaas é o dia do `expiresAt`, no fuso da empresa.
+
+**Política — dinheiro recebido sempre vale.** Pagamento confirmado pelo Asaas nunca é ignorado, nem depois do vencimento nem com a cobrança cancelada: vira venda (com nota "⚠️ Pago após o vencimento — confira se o pedido ainda vale" e o selo **Pago após o vencimento** na lista). Estornar é decisão da gestão, nunca automática.
+
+| Momento | O que acontece |
+|---|---|
+| Antes do vencimento | Página com o Pix; na última hora, contagem regressiva ("Vence às 18:00 · faltam 4 min") |
+| **No vencimento** | A página some com o Pix na hora (relógio do navegador, sem esperar o servidor); a API passa a responder `EXPIRED` sem `pix`/`pixCharge`/`paymentUrl` |
+| Vencimento **+ 10 min** (`BUDGET_GRACE_MINUTES`) | Job cancela a cobrança no Asaas (`DELETE /payments/:id`, `gatewayCancelledAt`) — quem colou o código antes do vencimento teve a tolerância para o banco processar |
+| Cancelamento recusado | Consulta a cobrança: paga (o "10 segundos antes") → registra a venda na hora; senão, tenta de novo na rodada seguinte |
+| A cada 5 min | Conferência: Pix automáticos das últimas 48 h ainda sem pagamento são consultados no Asaas — paga sem webhook (API fora, rede) vira venda |
+
+**Data da venda** = dia do pagamento no Asaas (`clientPaymentDate`/`paymentDate`, sem hora): aviso que chega no dia seguinte grava 23:59:59 do dia pago, no fuso da empresa — conta no dia e no mês certos da meta.
+
+**Job** `budgets` (BullMQ, a cada 1 min, `BudgetsService.processarVencimentos`, roda na API): `PENDING` vencido → `EXPIRED`; cancelamento após a tolerância (até 50 por rodada); conferência a cada 5 min (até 200). Cancelar, conferir e estornar usam a conta conectada **sem olhar o plano** (`accountOf`): perder o recurso não deixa QR vivo nem venda sem registro. Conta desconectada: não cancela (cancelar pelo painel do Asaas); o webhook continua valendo enquanto existir.
+
+Pago por fora pode ser marcado depois do vencimento (o cliente pagou no prazo e avisou tarde).
 
 A chave Pix é **copiada** para o orçamento na geração: editar ou apagar a chave depois não muda orçamentos já enviados.
 
@@ -70,9 +103,10 @@ A chave Pix é **copiada** para o orçamento na geração: editar ou apagar a ch
 | Método | Rota | Quem | O quê |
 |---|---|---|---|
 | GET | `/conversations/:id/budgets` | todos (escopo da conversa) | Últimos 30 orçamentos da conversa, com `receipt.url` assinada |
-| POST | `/conversations/:id/budgets` | todos (escopo da conversa) | `{items: {name, dosage?, quantity, unitPrice}[] (1–50), pixKeyId?, paymentUrl? (https), note?, validHours? (1–720, padrão 48), autoPix?, cpfCnpj?}`. Sem Pix e sem link = 400 (exceto `autoPix`). `autoPix` gera a cobrança no Asaas na hora; sem CPF/CNPJ (do body ou da ficha) = 400; `cpfCnpj` informado vai para a ficha |
+| POST | `/conversations/:id/budgets` | todos (escopo da conversa) | `{items: {name, dosage?, quantity, unitPrice}[] (1–50), pixKeyId?, paymentUrl? (https), note?, validity? (1h\|2h\|4h\|8h\|end_of_day\|24h\|48h; padrão end_of_day), validHours? (1–720), autoPix?, cpfCnpj?}`. Sem Pix e sem link = 400 (exceto `autoPix`). `autoPix` gera a cobrança no Asaas na hora; sem CPF/CNPJ (do body ou da ficha) = 400; `cpfCnpj` informado vai para a ficha |
 | PATCH | `/conversations/:id/budgets/:budgetId` | todos (escopo da conversa) | `{status: 'PAID' \| 'PENDING'}` — PAID cria a venda; PENDING desfaz só o pago por fora ainda não encerrado. Socket `budgets` |
 | POST | `/conversations/:id/budgets/:budgetId/refund` | `settings.manage` | Estorno (Asaas devolve no Pix automático) — ver [Venda](#venda) |
+| GET | `/budgets?from=&to=&status=&via=auto\|fora&userId=&search=&page=` | `reports.view` (os seus; `conversations.view_all` = equipe) | Relatórios → Pagamentos: `{page, pageSize (30), total, totals{byStatus{STATUS:{count,value}}, paidByVia{asaas,manual}}, rows[…, conversationId, contact, paidAfterExpiry]}` — os totais ignoram o filtro de `status` |
 | GET | `/budgets/public/:hash` | público (30/min por IP) | `PublicBudget` (packages/shared) |
 | POST | `/budgets/public/:hash/receipt` | público (5/min por IP) | multipart `file`. Socket `budgets` |
 | POST | `/webhooks/pix/asaas/:gatewayId` | Asaas (header `asaas-access-token`) | Baixa automática. Sempre 200 |
@@ -84,7 +118,7 @@ Código: `apps/api/src/modules/budgets/budgets.module.ts`, `apps/web/src/compone
 
 ## Modelo
 
-`budgets` ([06 — Modelo de dados](06-modelo-de-dados.md)): `tenantId`, `conversationId`, `contactId`, `userId` (atendente), `hash` (único), `items` (jsonb), `totalValue` (decimal 12,2, soma em centavos), cópia da chave Pix (`pixKey`, `pixKeyType`, `pixHolderName`), `paymentUrl`, `note`, `status`, `expiresAt`, comprovante (`receiptKey` no storage, `receiptMime`, `receiptName`, `receiptAt`), `paidAt`, `paidById`, `paidVia` (`manual` | `asaas`), Pix automático (`autoPix`, `gatewayPaymentId` único, `pixPayload`, `pixQrImage`). `payment_gateways`: uma conta por empresa (`provider` = asaas, `credentials` criptografado, `sandbox`, `webhookToken`, `webhookId`, `accountName`). Migrações `20261202000000_budgets`, `20261203000000_pix_gateway` e `20261203000100_contact_document` (`contacts.document`).
+`budgets` ([06 — Modelo de dados](06-modelo-de-dados.md)): `tenantId`, `conversationId`, `contactId`, `userId` (atendente), `hash` (único), `items` (jsonb), `totalValue` (decimal 12,2, soma em centavos), cópia da chave Pix (`pixKey`, `pixKeyType`, `pixHolderName`), `paymentUrl`, `note`, `status`, `expiresAt`, comprovante (`receiptKey` no storage, `receiptMime`, `receiptName`, `receiptAt`), `paidAt`, `paidById`, `paidVia` (`manual` | `asaas`), Pix automático (`autoPix`, `gatewayPaymentId` único, `pixPayload`, `pixQrImage`). `payment_gateways`: uma conta por empresa (`provider` = asaas, `credentials` criptografado, `sandbox`, `webhookToken`, `webhookId`, `accountName`). Migrações `20261202000000_budgets`, `20261203000000_pix_gateway`, `20261203000100_contact_document` (`contacts.document`), `20261205000000_budget_sale_refund` e `20261206000000_budget_gateway_cancel` (`gatewayCancelledAt`).
 
 ## Limites atuais
 

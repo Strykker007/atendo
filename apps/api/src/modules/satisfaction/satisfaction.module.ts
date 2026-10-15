@@ -4,6 +4,7 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Ma
 import { Type } from 'class-transformer';
 import { z } from 'zod';
 import { SURVEY_EXTRA_QUESTIONS_MAX, SURVEY_SATISFIED_FROM, SURVEY_SCALE_MAX, SURVEY_SCALES, type SurveyScale } from '@atendo/shared';
+import { reportScope } from '../../common/reports/report-scope';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -224,11 +225,14 @@ class SatisfactionReportController {
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
     assertReportRange(from, to);
     // cache curto: 30 s, porque a lista de feedbacks é o que a pessoa fica olhando chegar
-    return this.load.cached(ReportLoadService.key(u.tenantId, 'satisfaction', { ...f, from, to }), () => this.data(u.tenantId, f, from, to), 30);
+    // empresa selecionada no painel (e números da pessoa): só respostas das conversas desses números
+    const nums = await reportScope(this.prisma, u);
+    return this.load.cached(ReportLoadService.key(u.tenantId, 'satisfaction', { ...f, from, to, nums: nums?.join(',') }), () => this.data(u.tenantId, f, from, to, nums), 30);
   }
 
-  private async data(t: string, f: z.infer<typeof ReportQuery>, from: Date, to: Date) {
-    const periodo: Prisma.SurveyResponseWhereInput = { tenantId: t, sentAt: { gte: from, lt: to }, status: { not: 'failed' }, ...(f.surveyId && { surveyId: f.surveyId }) };
+  private async data(t: string, f: z.infer<typeof ReportQuery>, from: Date, to: Date, nums?: string[]) {
+    const escopo: Prisma.SurveyResponseWhereInput = nums ? { conversation: { numberId: { in: nums } } } : {};
+    const periodo: Prisma.SurveyResponseWhereInput = { tenantId: t, sentAt: { gte: from, lt: to }, status: { not: 'failed' }, ...(f.surveyId && { surveyId: f.surveyId }), ...escopo };
 
     const porEscala = await this.load.run(() => this.prisma.surveyResponse.groupBy({ by: ['scale'], where: periodo, _count: { _all: true } }));
     let scale = f.scale;
@@ -259,7 +263,7 @@ class SatisfactionReportController {
         take: f.pageSize,
         select: { id: true, score: true, comment: true, answeredAt: true, sentAt: true, agentId: true, agentName: true, conversationId: true, survey: { select: { name: true } }, conversation: { select: { contact: { select: { id: true, name: true, phone: true } } } } },
       }),
-      () => this.prisma.surveyResponse.count({ where: { tenantId: t, sentAt: { gte: from, lt: to }, status: 'failed', scale, ...(f.surveyId && { surveyId: f.surveyId }), ...(f.agentId && { agentId: f.agentId }) } }),
+      () => this.prisma.surveyResponse.count({ where: { tenantId: t, sentAt: { gte: from, lt: to }, status: 'failed', scale, ...(f.surveyId && { surveyId: f.surveyId }), ...(f.agentId && { agentId: f.agentId }), ...escopo } }),
     ]);
 
     // perguntas adicionais: cada uma com a escala dela (texto e escala congelados na resposta).
@@ -270,6 +274,7 @@ class SatisfactionReportController {
       where r."tenantId" = ${t} and r."sentAt" >= ${from} and r."sentAt" < ${to} and r.status <> 'failed'
         ${f.surveyId ? Prisma.sql`and r."surveyId" = ${f.surveyId}` : Prisma.empty}
         ${f.agentId ? Prisma.sql`and r."agentId" = ${f.agentId}` : Prisma.empty}
+        ${nums ? Prisma.sql`and r."conversationId" in (select cs.id from conversations cs where cs."numberId" in (${Prisma.join(nums)}))` : Prisma.empty}
       group by 1, 3, 4`));
     const extras = new Map<string, { questionId: string; question: string; scale: SurveyScale; linhas: Linha[] }>();
     for (const e of extrasRaw) {

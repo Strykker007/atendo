@@ -91,6 +91,7 @@ model Tenant {
   surveyResponses     SurveyResponse[]
   salesGoals          SalesGoal[]
   budgets             Budget[]
+  secureMedia         SecureMedia[]
   paymentGateway      PaymentGateway?
   @@map("tenants")
 }
@@ -196,6 +197,9 @@ model Company {
   billingType BillingType @default(CONSOLIDATED_GROUP)
   /// Ativa para cobrança: inativa não entra na conta do grupo nem gera vencimento. Só o dono muda.
   isActive    Boolean  @default(true)
+  /// Removida (docs/empresas.md#remover): some do painel, da cobrança e do seletor, mas fica para
+  /// os relatórios — os números excluídos dela continuam apontando para cá com o histórico
+  deletedAt   DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -356,6 +360,9 @@ model TenantSettings {
   /// resultado). Cada um independente — desligado, o motivo fica opcional naquele resultado
   requireReasonOnWon  Boolean @default(true)
   requireReasonOnLost Boolean @default(true)
+  /// pesos da pontuação do ranking (`RankingWeights` no shared). Nulo = padrão
+  /// (`RANKING_WEIGHTS_DEFAULT`) — ver docs/metas.md › Ranking
+  rankingWeights Json?
   /// nome dos dois resultados do encerramento na empresa ("Fechou venda", "Matriculado"…). Só o
   /// rótulo muda: por baixo continuam `won`/`lost` (relatórios, vendas, fluxos e filtros)
   wonLabel  String @default("Comprou")
@@ -892,6 +899,7 @@ model Conversation {
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
   scheduledMessages ScheduledMessage[]
   budgets           Budget[]
+  secureMedia       SecureMedia[]
   surveyResponses   SurveyResponse[]
   @@unique([numberId, contactId])
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
@@ -1122,6 +1130,9 @@ model Message {
   authorName     String?
   /// Nota interna (cadeado): só a equipe vê, nunca vai ao WhatsApp nem conta no uso
   internal       Boolean          @default(false)
+  /// Veio do histórico guardado no provider, anterior à conversa existir no painel
+  /// (docs/historico-de-mensagens.md). Não é tráfego: fora do uso e das métricas de atendimento.
+  imported       Boolean          @default(false)
   error          String?
   raw            Json?
   /// Ordem na fila de envio (docs/envio.md): numa conversa só sai a mensagem pendente de menor
@@ -2092,6 +2103,8 @@ model Budget {
   autoPix          Boolean   @default(false)
   /// id da cobrança no gateway (Asaas `pay_…`) — é por ele que o webhook acha o orçamento
   gatewayPaymentId String?   @unique
+  /// cobrança cancelada no Asaas (vencimento + tolerância) — o QR antigo deixa de valer
+  gatewayCancelledAt DateTime?
   /// Pix copia e cola e QR (PNG em base64) da cobrança
   pixPayload       String?
   pixQrImage       String?
@@ -2106,6 +2119,7 @@ model Budget {
   @@index([conversationId, createdAt])
   @@index([conversationId, status])
   @@index([tenantId, status])
+  @@index([autoPix, status, expiresAt])
   @@map("budgets")
 }
 
@@ -2131,4 +2145,37 @@ model PaymentGateway {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("payment_gateways")
+}
+
+/// Foto protegida (docs/foto-protegida.md): a imagem fica numa página com validade (`/f/:hash`)
+/// e pelo WhatsApp vai só um texto genérico com o link — foto de remédio/receita não trafega
+/// como mídia na conversa.
+model SecureMedia {
+  id             String       @id @default(uuid())
+  tenantId       String
+  conversationId String
+  contactId      String
+  /// atendente que gerou (sem FK: o registro sobrevive à remoção do usuário)
+  userId         String
+  userName       String
+  /// 128 bits aleatórios em base64url — é a credencial da página pública
+  hash           String       @unique
+  mediaKey       String
+  mediaMime      String
+  mediaName      String?
+  /// legenda: vai só na página, nunca no WhatsApp
+  caption        String?
+  validHours     Int
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  revokedById    String?
+  firstViewedAt  DateTime?
+  viewCount      Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("secure_media")
 }

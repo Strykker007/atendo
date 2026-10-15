@@ -59,7 +59,7 @@ export class DuesService {
   async syncGroupUnits(tenantId: string) {
     const t = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { billingType: true, subscription: { include: { plan: true } }, planOverride: true, companies: { select: { billingType: true, isActive: true } } },
+      select: { billingType: true, subscription: { include: { plan: true } }, planOverride: true, companies: { where: { deletedAt: null }, select: { billingType: true, isActive: true } } },
     });
     const sub = t?.subscription;
     if (!t || !sub) return;
@@ -101,7 +101,7 @@ export class DuesService {
         select: {
           name: true, billingType: true,
           subscription: { include: { plan: true } },
-          companies: { orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { include: { plan: true } } } },
+          companies: { where: { deletedAt: null }, orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { include: { plan: true } } } },
         },
       }),
       this.prisma.invoice.findMany({ where: { tenantId, status: 'open', items: { not: Prisma.DbNull } }, select: { externalId: true, items: true } }),

@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, ReceiptText, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -22,10 +22,13 @@ import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { ComposerBar } from './ComposerBar';
+import { BudgetModal } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
-import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS } from '@atendo/shared';
+import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, SECURE_MEDIA_DEFAULT_HOURS, SECURE_MEDIA_MIMES, SECURE_MEDIA_VALIDITY_HOURS, secureMediaMessage, secureMediaValidityLabel } from '@atendo/shared';
+import { useCreateSecureMedia, secureMediaLink } from '@/lib/hooks';
+import { SecureMediaChip } from './SecureMediaChip';
 import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
@@ -95,7 +98,22 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const [textoNota, setTextoNota] = useState('');
   useEffect(() => { setModoNota(false); setTextoNota(''); }, [conversationId]);
   const notaRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { if (modoNota) notaRef.current?.focus(); }, [modoNota]);
+  // alternar nota ⇄ mensagem não pode tirar a mão do teclado: o campo do modo novo já vem focado.
+  // Só na troca (não ao abrir a conversa); o campo do modo novo monta neste render, por isso o rAF
+  const notaAntes = useRef(modoNota);
+  useEffect(() => {
+    if (notaAntes.current === modoNota) return;
+    notaAntes.current = modoNota;
+    requestAnimationFrame(() => {
+      const el = modoNota ? notaRef.current : campoRef.current;
+      if (!el) return;
+      el.focus();
+      // cursor no fim do que já estava escrito, não no começo
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [modoNota]);
+  // orçamento (docs/orcamentos.md): atalho na linha das abas; o link entra no campo da MENSAGEM
+  const [orcando, setOrcando] = useState(false);
   // Alt+N liga/desliga. `code`, não `key`: no Mac Alt+N é tecla morta ("˜")
   useEffect(() => {
     if (!podeNota) return;
@@ -142,6 +160,15 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   useEffect(() => { digitados.current = 0; }, [conversationId]);
   const [attachment, setAttachment] = useState<Upload | null>(null);
   const [uploading, setUploading] = useState(false);
+  // foto protegida (docs/foto-protegida.md): a mídia vai por link com validade, não pelo WhatsApp.
+  // A escolha fica lembrada; a validade volta ao padrão (1 dia) a cada anexo
+  const protegidaLigada = useUI((s) => s.securePhotos);
+  const setProtegida = useUI((s) => s.setSecurePhotos);
+  const [validade, setValidade] = useState<number>(SECURE_MEDIA_DEFAULT_HOURS);
+  useEffect(() => { setValidade(SECURE_MEDIA_DEFAULT_HOURS); }, [attachment?.key]);
+  const criarProtegida = useCreateSecureMedia();
+  const podeProteger = !!attachment && (SECURE_MEDIA_MIMES as readonly string[]).includes(attachment.mimeType);
+  const protegida = podeProteger && protegidaLigada;
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
   const [previa, setPrevia] = useState<File | null>(null);
   // imagens e vídeos desta conversa, na ordem em que aparecem: as setas do visualizador andam por eles
@@ -239,13 +266,25 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     setPrevia(img.name && img.name !== 'image.png' ? img : new File([img], `imagem-${Date.now()}.${img.type.split('/')[1] || 'png'}`, { type: img.type }));
   }
 
+  /**
+   * Foto protegida (docs/foto-protegida.md): guarda o arquivo atrás de um link com validade e
+   * envia só o texto genérico com o link. A legenda vai para a página, nunca para o WhatsApp.
+   */
+  async function enviarProtegida(up: Pick<Upload, 'key' | 'mimeType' | 'fileName'>, caption: string, validHours: number, extra: { quotedExternalId?: string } = {}) {
+    const sm = await criarProtegida.mutateAsync({ conversationId: conv!.id, mediaKey: up.key, mimeType: up.mimeType, fileName: up.fileName, caption: caption.trim() || undefined, validHours });
+    const primeiro = conv!.contact.name?.trim().split(/\s+/)[0] ?? null;
+    const aviso = assinar(secureMediaMessage(secureMediaLink(sm.hash), validHours, primeiro));
+    await send.mutateAsync({ type: 'text', text: aviso, ...extra, simulateTypingChars: aviso.length, idempotencyKey: crypto.randomUUID() });
+  }
+
   /** Confirmou na prévia: sobe o arquivo (já com os rabiscos, se houver) e envia. */
-  async function enviarDaPrevia({ file, caption }: Escolhido) {
+  async function enviarDaPrevia({ file, caption, secureHours }: Escolhido) {
     setUploading(true);
     try {
       const up = await uploadFile(file);
       setPrevia(null);
-      await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, simulateTypingChars: (caption ?? '').length, idempotencyKey: crypto.randomUUID() });
+      if (secureHours) await enviarProtegida(up, caption, secureHours);
+      else await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, simulateTypingChars: (caption ?? '').length, idempotencyKey: crypto.randomUUID() });
     } catch (err) {
       toast.err(err); // a prévia continua aberta: o arquivo escolhido não se perde no erro
     } finally {
@@ -256,6 +295,14 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   // trocar de conversa recomeça: a próxima leva de mensagens é de outra pessoa
   // (a posição de rolagem é recomeçada no useLayoutEffect abaixo, que roda antes deste)
   useEffect(() => { setRespondendo(null); }, [conversationId]);
+  // anexo entrou no campo (documento, resposta rápida com mídia) ou a prévia fechou (enviou/cancelou):
+  // o campo da mensagem volta a ter o teclado — legenda ou próxima mensagem sem precisar clicar
+  useEffect(() => { if (attachment) requestAnimationFrame(() => campoRef.current?.focus()); }, [attachment]);
+  const tinhaPrevia = useRef(false);
+  useEffect(() => {
+    if (previa) { tinhaPrevia.current = true; return; }
+    if (tinhaPrevia.current) { tinhaPrevia.current = false; requestAnimationFrame(() => campoRef.current?.focus()); }
+  }, [previa]);
 
   /**
    * Abriu a conversa = leu. Dispara uma vez por conversa aberta; mensagem que chegar depois,
@@ -476,7 +523,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       return;
     }
     const t = assinar(text);
-    if ((!t && !attachment) || send.isPending) return;
+    if ((!t && !attachment) || send.isPending || criarProtegida.isPending) return;
     const att = attachment;
     // sobre o texto do campo, não o assinado: a assinatura (*Nome:*) não conta como "não digitado"
     const naoDigitado = Math.max(0, text.trim().length - digitados.current);
@@ -489,7 +536,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     try {
       // citação segue o id do provider: é ele que o WhatsApp entende do outro lado
       const citando = respondendo?.externalId ? { quotedExternalId: respondendo.externalId } : {};
-      if (att) {
+      if (att && protegida) {
+        await enviarProtegida(att, text, validade, citando);
+      } else if (att) {
         await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando, ...simular, idempotencyKey });
       } else {
         await send.mutateAsync({ type: 'text', text: t, ...citando, ...simular, idempotencyKey });
@@ -718,10 +767,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       )}
 
       {/* prévia do que vai ser enviado, sobre o chat — nada sobe antes de confirmar */}
+      {/* o link entra no campo da MENSAGEM (sai da nota, se estava nela) — o atendente revisa e envia */}
+      <BudgetModal open={orcando} onClose={() => setOrcando(false)} conversationId={conv.id} onInserir={(t) => { setModoNota(false); inserirNoTexto(t); }} />
       {previa && (
         <MediaPreview
           file={previa}
-          enviando={uploading || send.isPending}
+          enviando={uploading || send.isPending || criarProtegida.isPending}
           onCancel={() => setPrevia(null)}
           onConfirm={enviarDaPrevia}
         />
@@ -734,7 +785,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       {/* Composer */}
       {noteMode ? (
         <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5">
-          <AbasDoEnvio nota onNota={setModoNota} />
+          <AbasDoEnvio nota onNota={setModoNota} podeNota onOrcamento={!ownedByOther ? () => setOrcando(true) : undefined} />
           <div className="flex items-end gap-2">
             <textarea
               ref={notaRef}
@@ -784,14 +835,30 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         </div>
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
-          {podeNota && <AbasDoEnvio nota={false} onNota={setModoNota} />}
+          <AbasDoEnvio nota={false} onNota={setModoNota} podeNota={podeNota} onOrcamento={() => setOrcando(true)} />
           {contatoFrio && <ColdContactNotice numberId={conv.number.id} />}
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
               {attachment.mimeType.startsWith('image/') ? <img src={attachment.url} alt="" className="w-12 h-12 rounded object-cover" /> : <FileText size={20} className="text-muted" />}
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{attachment.fileName}</div>
-                <div className="text-xs text-faint">{(attachment.size / 1024).toFixed(0)} KB · legenda opcional abaixo</div>
+                <div className="text-xs text-faint">{(attachment.size / 1024).toFixed(0)} KB · {protegida ? 'a legenda aparece só na página do link' : 'legenda opcional abaixo'}</div>
+                {podeProteger && (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-ink cursor-pointer" title="A foto não vai pelo WhatsApp: o contato recebe um link que expira. Use para foto de remédio, receita ou documento.">
+                      <input type="checkbox" checked={protegida} onChange={(e) => setProtegida(e.target.checked)} className="accent-accent" />
+                      <Lock size={12} className={protegida ? 'text-accent' : 'text-faint'} /> Enviar como link protegido
+                    </label>
+                    {protegida && (
+                      <label className="inline-flex items-center gap-1 text-xs text-muted">
+                        válido por
+                        <select value={validade} onChange={(e) => setValidade(Number(e.target.value))} className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-xs text-ink">
+                          {[...SECURE_MEDIA_VALIDITY_HOURS].sort((a, b) => a - b).map((h) => <option key={h} value={h}>{secureMediaValidityLabel(h)}</option>)}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
               </div>
               <button type="button" onClick={() => setAttachment(null)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
@@ -860,19 +927,27 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
  * Abas logo acima do campo: "Mensagem para o cliente" | "Nota interna". Antes a nota era um
  * ícone perdido na barra de atalhos e pouca gente achava — a aba deixa o modo sempre à vista.
  */
-function AbasDoEnvio({ nota, onNota }: { nota: boolean; onNota: (v: boolean) => void }) {
+function AbasDoEnvio({ nota, onNota, podeNota, onOrcamento }: { nota: boolean; onNota: (v: boolean) => void; podeNota: boolean; /** abre o orçamento (o link vai para o campo da mensagem) */ onOrcamento?: () => void }) {
   const aba = (ativa: boolean, cor: string) => cn(
     'inline-flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-1 text-[12px] font-semibold transition-colors',
     ativa ? cor : 'border-transparent text-muted hover:text-ink',
   );
   return (
     <div role="tablist" className="flex items-end gap-1 border-b border-line/70">
-      <button type="button" role="tab" aria-selected={!nota} onClick={() => onNota(false)} className={aba(!nota, 'border-accent text-accent-ink')}>
+      {/* mousedown sem default: clicar na aba não tira o foco do campo (o efeito foca o do modo novo) */}
+      <button type="button" role="tab" aria-selected={!nota} onMouseDown={(e) => e.preventDefault()} onClick={() => onNota(false)} className={aba(!nota, 'border-accent text-accent-ink')}>
         <Send size={12} /> Mensagem para o cliente
       </button>
-      <button type="button" role="tab" aria-selected={nota} onClick={() => onNota(true)} title="Só a equipe vê — nunca vai para o WhatsApp (Alt+N)" className={aba(nota, 'border-warn bg-warn/15 text-warn-ink')}>
-        <StickyNote size={12} /> Nota interna <Lock size={11} className={nota ? '' : 'text-faint'} />
-      </button>
+      {podeNota && (
+        <button type="button" role="tab" aria-selected={nota} onMouseDown={(e) => e.preventDefault()} onClick={() => onNota(true)} title="Só a equipe vê — nunca vai para o WhatsApp (Alt+N)" className={aba(nota, 'border-warn bg-warn/15 text-warn-ink')}>
+          <StickyNote size={12} /> Nota interna <Lock size={11} className={nota ? '' : 'text-faint'} />
+        </button>
+      )}
+      {onOrcamento && (
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onOrcamento} title="Gerar orçamento / pedido — no WhatsApp vai só o link seguro" className="inline-flex items-center gap-1.5 rounded-t-lg border-b-2 border-transparent px-3 py-1 text-[12px] font-semibold text-muted hover:text-ink">
+          <ReceiptText size={12} /> Orçamento
+        </button>
+      )}
       {nota && <span className="ml-auto pb-1 text-[11px] text-warn-ink/80 hidden sm:inline whitespace-nowrap">🔒 Visível só para a equipe · Alt+N alterna · Esc sai</span>}
     </div>
   );
@@ -940,6 +1015,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
           <>
             <MediaBody m={m} onVerMidia={onVerMidia} />
             {m.text && <p className="whitespace-pre-wrap break-words">{out ? <TextoAssinado texto={m.text} /> : m.text}</p>}
+            {out && m.type === 'text' && <SecureMediaChip conversationId={m.conversationId} text={m.text} onVerMidia={onVerMidia} />}
           </>
         )}
         <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>
@@ -1200,6 +1276,8 @@ function irParaMensagem(id: string) {
 function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) => void }) {
   // só mídia: localização, contato, botões e afins são desenhados por `structuredBody`
   if (!['image', 'audio', 'video', 'document', 'sticker'].includes(m.type)) return null;
+  // histórico importado: arquivo com mais de ~30 dias já saiu do servidor do WhatsApp — não é falha nossa
+  if (!m.mediaUrl && m.imported && m.error) return <span className="italic text-muted text-xs" title="Mensagem anterior à conversa no painel: o WhatsApp não guarda mais este arquivo">[{labelOf(m.type)} antigo · o WhatsApp não guarda mais o arquivo]</span>;
   if (!m.mediaUrl) return <span className="italic text-muted text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
   // abre por cima, não em aba nova: abrir fora tirava o atendente da conversa
   if (m.type === 'image' || m.type === 'sticker') {

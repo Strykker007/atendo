@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { QUEUE_OUTBOUND, type OutboundJob } from '../whatsapp/queues';
@@ -275,6 +276,56 @@ export class InboundService {
     this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
     this.gateway.emitConversation(number.tenantId, conversation);
     return { message, conversation, isNew, isNewContact: false, returningAfterClosed: false, hoursSinceLastMessage: null, fromMe: true };
+  }
+
+  /**
+   * Grava mensagens antigas vindas do histórico do provider (docs/historico-de-mensagens.md).
+   *
+   * Não é tráfego novo, então de propósito **não** passa por nada do caminho do webhook: sem
+   * `UsageService.record` (não foi enviada nem recebida agora — cobrar seria faturar o passado),
+   * sem fluxo/automação, sem mexer em não-lidas, espera, prévia ou status da conversa, sem
+   * socket (quem pediu recebe na resposta). Duplicata é descartada pelo `externalId`, que é
+   * único: a mesma mensagem nunca entra duas vezes, nem com duas abas sincronizando juntas.
+   * Devolve os ids das que têm mídia — o download vai para uma fila, fora da requisição.
+   */
+  async importHistory(conversation: { id: string; tenantId: string; numberId: string }, msgs: InboundMessage[]) {
+    if (!msgs.length) return { imported: 0, withMedia: [] as string[] };
+    const ja = await this.prisma.message.findMany({ where: { externalId: { in: msgs.map((m) => m.externalId) } }, select: { externalId: true } });
+    const existentes = new Set(ja.map((m) => m.externalId));
+    // da mais antiga para a mais nova: `queueSeq` crescente desempata o mesmo segundo na ordem certa
+    const novas = msgs.filter((m) => !existentes.has(m.externalId)).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    if (!novas.length) return { imported: 0, withMedia: [] };
+
+    const ids = new Map(novas.map((m) => [m.externalId, randomUUID()]));
+    // citada: no próprio lote ou já no banco (do tenant); fora disso fica só o quotedId/preview
+    const fora = [...new Set(novas.map((m) => m.quotedExternalId).filter((q): q is string => !!q && !ids.has(q)))];
+    const citadas = fora.length
+      ? new Map((await this.prisma.message.findMany({ where: { externalId: { in: fora }, conversation: { tenantId: conversation.tenantId } }, select: { id: true, externalId: true } })).map((m) => [m.externalId!, m.id]))
+      : new Map<string, string>();
+
+    const r = await this.prisma.message.createMany({
+      data: novas.map((m) => ({
+        id: ids.get(m.externalId)!,
+        conversationId: conversation.id,
+        numberId: conversation.numberId,
+        direction: m.fromMe ? ('out' as const) : ('in' as const),
+        type: m.type,
+        // antiga já foi entregue; `sent` sem recibo faria o alarme de recebimento parado (receive-stall) disparar
+        status: 'delivered' as const,
+        ...this.conteudo(m),
+        externalId: m.externalId,
+        quotedId: m.quotedExternalId,
+        quotedMessageId: m.quotedExternalId ? ids.get(m.quotedExternalId) ?? citadas.get(m.quotedExternalId) ?? null : null,
+        quotedPreview: m.quotedPreview,
+        quotedFromStatus: m.quotedFromStatus ?? false,
+        // mídia de status citado não é buscada: o story antigo já sumiu do WhatsApp
+        raw: m.raw as Prisma.InputJsonValue,
+        imported: true,
+        createdAt: m.timestamp,
+      })),
+      skipDuplicates: true,
+    });
+    return { imported: r.count, withMedia: novas.filter((m) => m.media).map((m) => ids.get(m.externalId)!) };
   }
 
   /** Campos de conteúdo comuns às duas entradas (recebida e digitada no celular). */

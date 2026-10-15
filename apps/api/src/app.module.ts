@@ -14,6 +14,7 @@ import { GlobalVariablesModule } from './modules/global-variables/global-variabl
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
 import { PixKeysModule } from './modules/pix-keys/pix-keys.module';
 import { BudgetsModule } from './modules/budgets/budgets.module';
+import { SecureMediaModule } from './modules/secure-media/secure-media.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { CloseReasonsModule } from './modules/close-reasons/close-reasons.module';
 import { SatisfactionModule } from './modules/satisfaction/satisfaction.module';
@@ -54,6 +55,7 @@ import { MonitorModule } from './modules/monitor/monitor.module';
     QuickRepliesModule,
     PixKeysModule,
     BudgetsModule,
+    SecureMediaModule,
     PaymentsModule,
     CloseReasonsModule,
     SatisfactionModule,

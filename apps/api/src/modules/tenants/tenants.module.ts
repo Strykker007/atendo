@@ -139,7 +139,7 @@ class TenantsController {
         planOverride: { select: { planId: true, priceMonth: true, expiresAt: true } },
         users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 },
         // plano de cada empresa na própria listagem: com assinatura própria, o plano do cliente não diz tudo
-        companies: { orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { select: { planId: true, status: true, currentPeriodEnd: true, priceMonth: true, plan: { select: { name: true } } } } } },
+        companies: { where: { deletedAt: null }, orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { select: { planId: true, status: true, currentPeriodEnd: true, priceMonth: true, plan: { select: { name: true } } } } } },
         _count: { select: { numbers: true, users: true, conversations: true } } },
     });
   }

@@ -5,7 +5,8 @@ import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '
 import { env } from '../../../config/env';
 import { bytesEmBase64, contextoDaCitacao, lerCitacao } from './quoted';
 import { desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
-import type { MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { HistoryPage, HistoryQuery, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import { phoneVariants } from '../../conversations/phone-variants';
 import { describeProviderError, ProviderSendError } from './provider-error';
 
 /** providerConfig de um número Evolution */
@@ -297,6 +298,38 @@ export class EvolutionProvider implements WhatsAppProvider {
     }
   }
 
+  /**
+   * Histórico do chat no banco da própria Evolution (`/chat/findMessages`), que guarda tudo o
+   * que passou pelo aparelho desde o pareamento — inclusive o lote de histórico que o WhatsApp
+   * manda ao ler o QR. O mesmo chat pode estar gravado como `<telefone>@s.whatsapp.net` (com ou
+   * sem o nono dígito) ou como `@lid`; o `@lid` sai das mensagens que já temos (`storedRemoteJid`).
+   */
+  async fetchHistory(ctx: NumberContext, q: HistoryQuery): Promise<HistoryPage> {
+    const jids = new Set(phoneVariants(q.phone).map((p) => `${p}@s.whatsapp.net`));
+    for (const id of q.knownExternalIds.slice(0, 2)) jids.add(await this.storedRemoteJid(ctx, id, q.phone));
+
+    const lido = new Map<string, any>();
+    let exhausted = true;
+    for (const jid of jids) {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        // remoteJidAlt: versões novas acham também o chat gravado como @lid pelo telefone alternativo.
+        // O filtro de horário só vale com gte E lte.
+        body: JSON.stringify({ where: { key: { remoteJid: jid, remoteJidAlt: jid }, messageTimestamp: { gte: new Date(0).toISOString(), lte: q.before.toISOString() } }, offset: q.limit, page: 1 }),
+      }, this.shard(ctx));
+      const rows: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      if (rows.length >= q.limit) exhausted = false;
+      for (const r of rows) if (r?.key?.id) lido.set(r.key.id, r);
+    }
+
+    const ordenadas = [...lido.values()].sort((a, b) => Number(b.messageTimestamp) - Number(a.messageTimestamp)).slice(0, q.limit);
+    const oldestTs = ordenadas.length ? Number(ordenadas[ordenadas.length - 1].messageTimestamp) : NaN;
+    const messages = ordenadas
+      .filter((m) => ehMensagemDeConversa(m))
+      .map((m) => ({ ...this.toInbound(m, ctx.externalId), fromMe: !!m.key.fromMe }));
+    return { messages, exhausted, oldest: Number.isFinite(oldestTs) ? new Date(oldestTs * 1000) : undefined };
+  }
+
   /** Editar mensagem nossa (`POST /chat/updateMessage`). O WhatsApp só aceita até ~15 min depois do envio. */
   async editMessage(ctx: NumberContext, t: OutboundEdit) {
     // `number` com `@` passa direto pelo createJid da Evolution: precisa ser IGUAL ao gravado
@@ -573,6 +606,17 @@ export class EvolutionProvider implements WhatsAppProvider {
 }
 
 /** A Evolution manda o próprio número (ou nada) quando o contato não tem nome. */
+/**
+ * Registro do histórico que vira bolha: o mesmo filtro do `messages.upsert`, sem os desvios —
+ * reação e edição de mensagem antiga são descartadas em vez de aplicadas.
+ */
+function ehMensagemDeConversa(m: any): boolean {
+  const jid = String(m?.key?.remoteJid ?? '');
+  if (!m?.key?.id || !m.message || jid.endsWith('@g.us') || jid.startsWith('status@')) return false;
+  const msg = desembrulhar(m.message);
+  return !msg?.reactionMessage && !msg?.protocolMessage && !eventoCifrado(m.message);
+}
+
 export function nomeDeContatoValido(name: string, phone: string): boolean {
   const n = name.trim();
   if (!n || n.length > 80) return false;

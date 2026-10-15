@@ -14,8 +14,11 @@ import type { Tag } from '@/lib/hooks';
  *
  * Com `exclusive` (marcar tags num atendimento — não em filtros, onde "A ou B" faz sentido),
  * marcar uma tag tira só as opostas DIRETAS dela (`conflictIds`), nunca em cadeia, e avisa.
+ *
+ * Com `field`, tem a mesma borda, fundo e altura dos campos de formulário (`inputCls`) — para
+ * ficar alinhado numa linha de filtros com selects e datas.
  */
-export function TagPicker({ tags, value, onChange, placeholder, compact, primaryId, onPrimary, exclusive }: { tags: Tag[]; value: string[]; onChange: (ids: string[]) => void; placeholder?: string; compact?: boolean; primaryId?: string | null; onPrimary?: (id: string) => void; exclusive?: boolean }) {
+export function TagPicker({ tags, value, onChange, placeholder, compact, field, primaryId, onPrimary, exclusive }: { tags: Tag[]; value: string[]; onChange: (ids: string[]) => void; placeholder?: string; compact?: boolean; field?: boolean; primaryId?: string | null; onPrimary?: (id: string) => void; exclusive?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -39,7 +42,7 @@ export function TagPicker({ tags, value, onChange, placeholder, compact, primary
 
   return (
     <div ref={ref} className="relative">
-      <div className={cn('flex flex-wrap items-center gap-1 rounded-lg bg-field px-2 min-h-8 cursor-text', compact && 'bg-transparent px-0 min-h-7')} onClick={() => setOpen(true)}>
+      <div className={cn('flex flex-wrap items-center gap-1 rounded-lg bg-field px-2 min-h-8 cursor-text', compact && 'bg-transparent px-0 min-h-7', field && 'min-h-[38px] border border-line bg-panel py-1 focus-within:ring-2 focus-within:ring-accent/40 focus-within:border-accent')} onClick={() => setOpen(true)}>
         <TagIcon size={14} className="text-faint ml-1" />
         {selected.map((t) => (
           <span

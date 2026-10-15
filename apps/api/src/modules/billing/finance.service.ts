@@ -27,7 +27,7 @@ export class FinanceService {
       this.prisma.usageCounter.findMany({ where: { period: { in: periods } } }),
       this.prisma.tenant.findMany({ select: { id: true, createdAt: true, numbers: { select: { infraCostMonth: true } } } }),
       // assinaturas próprias de empresas (modo INDIVIDUAL — docs/empresas.md#cobrança)
-      this.prisma.companySubscription.findMany({ where: { status: { in: ['active', 'past_due'] }, company: { isActive: true, billingType: 'INDIVIDUAL' } }, include: { plan: true } }),
+      this.prisma.companySubscription.findMany({ where: { status: { in: ['active', 'past_due'] }, company: { isActive: true, deletedAt: null, billingType: 'INDIVIDUAL' } }, include: { plan: true } }),
       // livro de descontos inteiro: é o registro para a contabilidade (docs/05#livro-de-descontos)
       this.prisma.discountGrant.findMany({ orderBy: { createdAt: 'desc' } }),
     ]);

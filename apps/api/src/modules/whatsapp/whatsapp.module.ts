@@ -13,6 +13,7 @@ import { SendPacer } from './send-pacer';
 import { OUTBOUND_JOB_OPTS } from './send-queue';
 import { NumbersHealthScheduler, NumbersHealthProcessor, QUEUE_HEALTH } from './health.scheduler';
 import { ContactsSyncProcessor, ContactsSyncScheduler, QUEUE_CONTACTS_SYNC } from './contacts-sync';
+import { HistoryMediaProcessor, HistorySyncService, QUEUE_HISTORY_MEDIA } from './history-sync';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { BillingModule } from '../billing/billing.module';
 import { AuthModule } from '../auth/auth.module';
@@ -26,6 +27,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
       { name: QUEUE_OUTBOUND, defaultJobOptions: OUTBOUND_JOB_OPTS },
       { name: QUEUE_HEALTH, defaultJobOptions: { removeOnComplete: 20, removeOnFail: 20 } },
       { name: QUEUE_CONTACTS_SYNC, defaultJobOptions: { removeOnComplete: 20, removeOnFail: 20 } },
+      { name: QUEUE_HISTORY_MEDIA, defaultJobOptions: { removeOnComplete: true, removeOnFail: 50, attempts: 2, backoff: { type: 'exponential', delay: 5000 } } },
     ),
     forwardRef(() => ConversationsModule),
     BillingModule,
@@ -34,7 +36,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
     forwardRef(() => SchedulingModule),
   ],
   controllers: [NumbersController, WebhooksController],
-  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor, ContactsSyncScheduler, ContactsSyncProcessor, SendPacer],
-  exports: [ProviderRegistry, NumbersService, SendPacer, BullModule],
+  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor, ContactsSyncScheduler, ContactsSyncProcessor, HistorySyncService, HistoryMediaProcessor, SendPacer],
+  exports: [ProviderRegistry, NumbersService, HistorySyncService, SendPacer, BullModule],
 })
 export class WhatsAppModule {}

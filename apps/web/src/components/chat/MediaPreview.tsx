@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Check, FileText, Pencil, Redo2, Send, Trash2, Undo2, X } from 'lucide-react';
+import { Check, FileText, Lock, Pencil, Redo2, Send, Trash2, Undo2, X } from 'lucide-react';
+import { SECURE_MEDIA_DEFAULT_HOURS, SECURE_MEDIA_MIMES, SECURE_MEDIA_VALIDITY_HOURS, secureMediaValidityLabel } from '@atendo/shared';
+import { useUI } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 
@@ -19,6 +21,8 @@ const ESPESSURAS = [3, 6, 12];
 export interface Escolhido {
   file: File;
   caption: string;
+  /** foto protegida (docs/foto-protegida.md): vai por link com esta validade, não como mídia no WhatsApp */
+  secureHours?: number;
 }
 
 export function MediaPreview({ file, onCancel, onConfirm, enviando }: {
@@ -28,12 +32,30 @@ export function MediaPreview({ file, onCancel, onConfirm, enviando }: {
   enviando?: boolean;
 }) {
   const [caption, setCaption] = useState('');
+  // foto protegida: a escolha de marcar fica lembrada; a validade começa sempre em 1 dia
+  const protegidaLigada = useUI((s) => s.securePhotos);
+  const setProtegida = useUI((s) => s.setSecurePhotos);
+  const [validade, setValidade] = useState<number>(SECURE_MEDIA_DEFAULT_HOURS);
+  const podeProteger = (SECURE_MEDIA_MIMES as readonly string[]).includes(file.type);
+  const protegida = podeProteger && protegidaLigada;
+  const secure = protegida ? { secureHours: validade } : {};
+  // a legenda tem que estar com o teclado: o `autoFocus` sozinho perdia o foco quando o seletor de
+  // arquivos do sistema fechava (o navegador devolve o foco a quem tinha antes) ou ao terminar de colar
+  const legendaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const focar = () => legendaRef.current?.focus({ preventScroll: true });
+    const t = setTimeout(focar, 50);
+    window.addEventListener('focus', focar, { once: true });
+    return () => { clearTimeout(t); window.removeEventListener('focus', focar); };
+  }, []);
   const url = useObjectUrl(file);
   const ehImagem = file.type.startsWith('image/');
   const ehVideo = file.type.startsWith('video/');
   const ehAudio = file.type.startsWith('audio/');
 
   const [desenhando, setDesenhando] = useState(false);
+  // saiu do desenho: volta para a legenda (o clique no lápis tinha levado o foco)
+  useEffect(() => { if (!desenhando) legendaRef.current?.focus({ preventScroll: true }); }, [desenhando]);
   const [cor, setCor] = useState(CORES[0]);
   const [espessura, setEspessura] = useState(ESPESSURAS[1]);
   const traçosRef = useRef<Traço[]>([]);
@@ -49,9 +71,9 @@ export function MediaPreview({ file, onCancel, onConfirm, enviando }: {
   }, [onCancel]);
 
   async function confirmar() {
-    if (!ehImagem || !temTraço) return onConfirm({ file, caption });
+    if (!ehImagem || !temTraço) return onConfirm({ file, caption, ...secure });
     const achatada = await achatar(imgRef.current!, traçosRef.current, file);
-    onConfirm({ file: achatada, caption });
+    onConfirm({ file: achatada, caption, ...secure });
   }
 
   return (
@@ -135,8 +157,27 @@ export function MediaPreview({ file, onCancel, onConfirm, enviando }: {
         </div>
       )}
 
+      {podeProteger && (
+        <div className="bg-panel border-t border-line px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <label className="inline-flex items-center gap-1.5 text-xs font-medium text-ink cursor-pointer" title="A foto não vai pelo WhatsApp: o contato recebe um link que expira. Use para foto de remédio, receita ou documento.">
+            <input type="checkbox" checked={protegida} onChange={(e) => setProtegida(e.target.checked)} className="accent-accent" />
+            <Lock size={12} className={protegida ? 'text-accent' : 'text-faint'} /> Enviar como link protegido
+          </label>
+          {protegida && (
+            <label className="inline-flex items-center gap-1 text-xs text-muted">
+              válido por
+              <select value={validade} onChange={(e) => setValidade(Number(e.target.value))} className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-xs text-ink">
+                {[...SECURE_MEDIA_VALIDITY_HOURS].sort((a, b) => a - b).map((h) => <option key={h} value={h}>{secureMediaValidityLabel(h)}</option>)}
+              </select>
+            </label>
+          )}
+          {protegida && <span className="text-[11px] text-faint">a legenda aparece só na página do link</span>}
+        </div>
+      )}
+
       <div className="bg-panel border-t border-line px-2.5 py-2 flex items-end gap-2">
         <textarea
+          ref={legendaRef}
           value={caption}
           onChange={(e) => setCaption(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), void confirmar())}

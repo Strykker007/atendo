@@ -38,7 +38,7 @@ export class PermissionsService {
   async companyNumbers(tenantId: string): Promise<Map<string, string[]>> {
     const hit = this.companies.get(tenantId);
     if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit.map;
-    const rows = await this.prisma.company.findMany({ where: { tenantId }, select: { id: true, numbers: { where: { deletedAt: null }, select: { id: true } } } });
+    const rows = await this.prisma.company.findMany({ where: { tenantId, deletedAt: null }, select: { id: true, numbers: { where: { deletedAt: null }, select: { id: true } } } });
     const map = new Map(rows.map((c) => [c.id, c.numbers.map((n) => n.id)]));
     this.companies.set(tenantId, { at: Date.now(), map });
     return map;

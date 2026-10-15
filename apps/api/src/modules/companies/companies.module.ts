@@ -57,7 +57,7 @@ class CompaniesService {
   constructor(private readonly prisma: PrismaService, private readonly permissions: PermissionsService, private readonly dues: DuesService) {}
 
   list(tenantId: string) {
-    return this.prisma.company.findMany({ where: { tenantId }, orderBy: { name: 'asc' }, select: SELECT });
+    return this.prisma.company.findMany({ where: { tenantId, deletedAt: null }, orderBy: { name: 'asc' }, select: SELECT });
   }
 
   async create(tenantId: string, dto: CompanyDto) {
@@ -71,15 +71,30 @@ class CompaniesService {
 
   async update(tenantId: string, id: string, dto: Partial<CompanyDto>) {
     const { numberIds, userIds, ...data } = dto;
-    await this.prisma.company.findFirstOrThrow({ where: { id, tenantId }, select: { id: true } });
+    await this.prisma.company.findFirstOrThrow({ where: { id, tenantId, deletedAt: null }, select: { id: true } });
     await this.prisma.company.update({ where: { id, tenantId }, data: clean(data) }).catch(duplicate);
     await this.setLinks(tenantId, id, numberIds, userIds);
     return this.prisma.company.findUniqueOrThrow({ where: { id }, select: SELECT });
   }
 
-  /** Os números da empresa ficam sem empresa; conversas e histórico não mudam. */
+  /**
+   * Remover não apaga (docs/empresas.md#remover): a empresa some do painel, do seletor e da
+   * cobrança, mas fica para os relatórios. Os números **ativos** ficam sem empresa e seguem
+   * operando, levando o próprio histórico; os já **excluídos** continuam apontando para ela, e é
+   * esse histórico que o relatório mostra como "<nome> · removida em dd/mm/aaaa". O sufixo no nome
+   * libera o nome para uma empresa nova (`@@unique([tenantId, name])`).
+   */
   async remove(tenantId: string, id: string) {
-    const company = await this.prisma.company.delete({ where: { id, tenantId } });
+    const atual = await this.prisma.company.findFirstOrThrow({ where: { id, tenantId, deletedAt: null }, select: { name: true } });
+    const quando = new Date();
+    const sufixo = ` · removida em ${quando.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+    const company = await this.prisma.$transaction(async (tx) => {
+      await tx.whatsAppNumber.updateMany({ where: { tenantId, companyId: id, deletedAt: null }, data: { companyId: null } });
+      await tx.userCompany.deleteMany({ where: { companyId: id } });
+      // mesma empresa removida duas vezes no dia (recriada e removida de novo): desempata pelo id
+      const livre = !(await tx.company.findFirst({ where: { tenantId, name: atual.name + sufixo }, select: { id: true } }));
+      return tx.company.update({ where: { id }, data: { deletedAt: quando, isActive: false, name: (atual.name + sufixo + (livre ? '' : ` (${id.slice(0, 4)})`)).slice(0, 200) } });
+    });
     this.permissions.invalidate();
     await this.dues.syncGroupUnits(tenantId);
     return company;
@@ -90,7 +105,7 @@ class CompaniesService {
    * grupo mantém a linha antiga (histórico) mas ela deixa de valer. Recalcula o grupo no fim.
    */
   async setBilling(tenantId: string, id: string, dto: CompanyBillingDto) {
-    const company = await this.prisma.company.findFirstOrThrow({ where: { id, tenantId }, select: { id: true, subscription: true } });
+    const company = await this.prisma.company.findFirstOrThrow({ where: { id, tenantId, deletedAt: null }, select: { id: true, subscription: true } });
     await this.prisma.company.update({ where: { id }, data: { billingType: dto.billingType, ...(dto.isActive !== undefined && { isActive: dto.isActive }) } });
     if (dto.billingType === 'INDIVIDUAL') {
       const end = dto.currentPeriodEnd ? new Date(`${dto.currentPeriodEnd}T23:59:59-03:00`) : undefined;
@@ -122,7 +137,8 @@ class CompaniesService {
       const valid = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: ids }, tenantId, deletedAt: null }, select: { id: true } });
       if (valid.length !== ids.length) throw new BadRequestException('Algum número não foi encontrado nesta conta.');
       await this.prisma.$transaction([
-        this.prisma.whatsAppNumber.updateMany({ where: { tenantId, companyId, id: { notIn: ids } }, data: { companyId: null } }),
+        // número excluído fica com a empresa: é o histórico dela nos relatórios (docs/empresas.md#remover)
+        this.prisma.whatsAppNumber.updateMany({ where: { tenantId, companyId, deletedAt: null, id: { notIn: ids } }, data: { companyId: null } }),
         this.prisma.whatsAppNumber.updateMany({ where: { tenantId, id: { in: ids } }, data: { companyId } }),
       ]);
     }
@@ -160,7 +176,7 @@ class CompaniesController {
   @Get('mine')
   async mine(@CurrentUser() u: AuthUser) {
     if (!u.companyIds?.length) return [];
-    return this.prisma.company.findMany({ where: { tenantId: u.tenantId, id: { in: u.companyIds } }, orderBy: { name: 'asc' }, select: { id: true, name: true } });
+    return this.prisma.company.findMany({ where: { tenantId: u.tenantId, id: { in: u.companyIds }, deletedAt: null }, orderBy: { name: 'asc' }, select: { id: true, name: true } });
   }
 
   @Post()

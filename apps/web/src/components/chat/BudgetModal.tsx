@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Plus, Trash2, Copy, FileText, Check, Undo2, CornerDownLeft, Zap } from 'lucide-react';
-import { BUDGET_DEFAULT_HOURS, BUDGET_MAX_ITEMS, BUDGET_STATUS_LABEL, budgetTotal, type BudgetItem, type BudgetStatus } from '@atendo/shared';
+import { BUDGET_DEFAULT_VALIDITY, BUDGET_GRACE_MINUTES, BUDGET_MAX_ITEMS, BUDGET_STATUS_LABEL, BUDGET_VALIDITY, BUDGET_VALIDITY_LABEL, budgetTotal, type BudgetItem, type BudgetStatus, type BudgetValidity } from '@atendo/shared';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Button } from '@/components/ui/Button';
@@ -18,12 +18,6 @@ import { budgetLink, useBudgets, useCan, useConversation, useCreateBudget, usePa
  */
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const VALIDADES = [
-  { h: 24, label: '24 horas' },
-  { h: 48, label: '48 horas' },
-  { h: 72, label: '3 dias' },
-  { h: 168, label: '7 dias' },
-];
 const vazio = (): BudgetItem => ({ name: '', dosage: '', quantity: 1, unitPrice: 0 });
 
 export function BudgetModal({ open, onClose, conversationId, onInserir }: { open: boolean; onClose: () => void; conversationId: string; onInserir: (texto: string) => void }) {
@@ -75,7 +69,7 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
   const [pixKeyId, setPixKeyId] = useState('');
   const [paymentUrl, setPaymentUrl] = useState('');
   const [note, setNote] = useState('');
-  const [validHours, setValidHours] = useState(BUDGET_DEFAULT_HOURS);
+  const [validity, setValidity] = useState<BudgetValidity>(BUDGET_DEFAULT_VALIDITY);
   const chaves = pix.data ?? [];
   // a primeira chave já vem escolhida: é o caso de quase todo mundo
   const chave = pixKeyId === '' ? chaves[0]?.id ?? 'none' : pixKeyId;
@@ -100,7 +94,7 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
         autoPix: auto || undefined,
         cpfCnpj: auto && digitos !== docFicha ? digitos : undefined,
         note: note.trim() || undefined,
-        validHours,
+        validity,
       });
       toast.ok('Link gerado — revise a mensagem no campo e envie');
       onCriado(b);
@@ -155,9 +149,9 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
         {!auto && <Field label="Link de pagamento (opcional)">
           <input className={inputCls} placeholder="https://…" value={paymentUrl} maxLength={500} onChange={(e) => setPaymentUrl(e.target.value)} />
         </Field>}
-        <Field label="Validade do link">
-          <select className={inputCls} value={validHours} onChange={(e) => setValidHours(Number(e.target.value))}>
-            {VALIDADES.map((v) => <option key={v.h} value={v.h}>{v.label}</option>)}
+        <Field label="Validade do link" hint={`No vencimento o cliente não vê mais o Pix${auto ? `; a cobrança é cancelada ${BUDGET_GRACE_MINUTES} min depois` : ''}.`}>
+          <select className={inputCls} value={validity} onChange={(e) => setValidity(e.target.value as BudgetValidity)}>
+            {BUDGET_VALIDITY.map((v) => <option key={v} value={v}>{BUDGET_VALIDITY_LABEL[v]}</option>)}
           </select>
         </Field>
         <Field label="Observação (opcional)" hint="Aparece na página do cliente.">
@@ -197,6 +191,8 @@ function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { c
           <div className="flex items-center gap-2 flex-wrap">
             <b className="tnum">{brl(b.totalValue)}</b>
             <span className={cn('text-[11px] rounded-full px-2 py-0.5', STATUS_CLS[b.status])}>{BUDGET_STATUS_LABEL[b.status]}</span>
+            {b.status === 'PENDING' && <span className="text-[11px] text-muted">vence {new Date(b.expiresAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+            {(b.status === 'PAID' || b.status === 'REFUNDED') && b.paidAt && new Date(b.paidAt) > new Date(b.expiresAt) && <span className="text-[11px] rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink" title="O pagamento chegou depois do vencimento — confira se o pedido ainda vale">Pago após o vencimento</span>}
             {b.status === 'PAID' && b.paidVia === 'asaas' && <span className="text-[11px] rounded-full px-2 py-0.5 bg-ok-soft text-ok">Baixa automática</span>}
             {b.status !== 'PAID' && b.autoPix && <span className="text-[11px] rounded-full px-2 py-0.5 bg-field text-muted">Pix automático</span>}
             {b.receipt && <span className="text-[11px] rounded-full px-2 py-0.5 bg-accent-soft text-accent-ink">Comprovante recebido</span>}

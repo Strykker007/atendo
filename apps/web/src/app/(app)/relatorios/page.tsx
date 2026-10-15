@@ -10,8 +10,10 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useOutcomeLabels, useHasFeature, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
-import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp } from 'lucide-react';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useReportCompanyOptions, useOutcomeLabels, useHasFeature, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useUI } from '@/lib/store';
+import { Building2 } from 'lucide-react';
+import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp, Wallet } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
 import { Attendances, type AttendanceFocus } from '@/components/reports/Attendances';
@@ -48,8 +50,18 @@ export default function RelatoriosPage() {
   /** clique numa tag do "Não comprou, por tag" → auditoria filtrada */
   const [foco, setFoco] = useState<AttendanceFocus | null>(null);
   const periodo = { from: inicioDoDia(range[0]), to: inicioDoDia(range[1]) };
-  const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined };
+  // Empresa: filtro da própria página, independente do seletor do menu (começa nele). Lista as
+  // empresas que a pessoa opera e as removidas que ainda têm histórico (docs/empresas.md#relatórios)
+  const doMenu = useUI((s) => s.companyId);
+  const opcoesEmpresa = useReportCompanyOptions();
+  const empresas = opcoesEmpresa.data ?? [];
+  const [empresa, setEmpresa] = useState<string>(() => doMenu ?? 'all');
+  const temEmpresas = empresas.length > 0;
+  const empresaAtual = empresas.find((c) => c.id === empresa);
+  const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined, companyId: temEmpresas ? empresa : undefined };
   const overview = useReportOverview({ ...periodo, ...filtros });
+  // todas as empresas: compara lado a lado
+  const porEmpresa = useReportCompanies({ ...periodo, ...filtros }, temEmpresas && empresa === 'all');
   const agents = useAgents();
   const temRanking = useHasFeature('consultant_ranking').has;
   const temSatisfacao = useHasFeature('satisfaction_surveys').has;
@@ -71,7 +83,7 @@ export default function RelatoriosPage() {
 
   async function execute(d = def) {
     try {
-      setResult(await run.mutateAsync(d));
+      setResult(await run.mutateAsync({ ...d, companyId: filtros.companyId }));
     } catch (err) {
       toast.err(err);
     }
@@ -104,10 +116,11 @@ export default function RelatoriosPage() {
     <PageShell width="max-w-6xl">
       <PageHeader
         title="Relatórios"
-        subtitle="Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais."
+        subtitle={empresaAtual ? `Só da empresa ${empresaAtual.name}. Tudo sai das conversas, mensagens e tags reais.` : temEmpresas ? 'Todas as empresas somadas — o quadro "Por empresa" separa cada uma.' : 'Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais.'}
         action={
           <div className="flex flex-wrap gap-2">
             {temSatisfacao && <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>}
+            <Link href="/relatorios/pagamentos" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Wallet size={15} className="text-accent" /> Pagamentos</Link>
             {temRanking && <Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking e metas</Link>}
           </div>
         }
@@ -118,7 +131,20 @@ export default function RelatoriosPage() {
         <div className="flex flex-wrap gap-1">
           {PRESETS.map((p) => { const r = p.range(); const on = r[0] === range[0] && r[1] === range[1]; return <button key={p.label} type="button" onClick={() => setRange(r)} className={cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>{p.label}</button>; })}
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={cn('grid gap-2 sm:grid-cols-2', temEmpresas ? 'lg:grid-cols-5' : 'lg:grid-cols-4')}>
+          {temEmpresas && (
+            <Field label="Empresa">
+              <select className={inputCls} value={empresa} onChange={(e) => setEmpresa(e.target.value)}>
+                <option value="all">Todas as empresas</option>
+                {empresas.filter((c) => !c.removed).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {empresas.some((c) => c.removed) && (
+                  <optgroup label="Removidas (histórico)">
+                    {empresas.filter((c) => c.removed).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </Field>
+          )}
           <Field label="Data inicial">
             <input type="date" className={inputCls} value={range[0]} max={shift(range[1], -1)} onChange={(e) => e.target.value && setRange([e.target.value, range[1]])} />
           </Field>
@@ -127,7 +153,7 @@ export default function RelatoriosPage() {
             <input type="date" className={inputCls} value={shift(range[1], -1)} min={range[0]} onChange={(e) => e.target.value && setRange([range[0], shift(e.target.value, 1)])} />
           </Field>
           <Field label="Tag">
-            <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
+            <TagPicker field tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
           </Field>
           <Field label="Consultor">
             <select className={inputCls} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
@@ -149,6 +175,8 @@ export default function RelatoriosPage() {
             <Kpi icon={<CheckCircle2 size={15} />} label="Encerradas" value={`${Math.round(overview.data.kpis.closeRate * 100)}%`} sub={`${overview.data.kpis.closed} de ${overview.data.kpis.conversations}`} />
           </div>
 
+          {empresa === 'all' && porEmpresa.data && porEmpresa.data.rows.length > 1 && <PorEmpresa rows={porEmpresa.data.rows} onAbrir={setEmpresa} />}
+
           <div className="grid gap-4 lg:grid-cols-2">
             <Card title="Atendimentos por dia" hint="Conversas novas + clientes que voltaram"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
             <Card title="Atendimentos por atendente" hint="Encerrados no período, por quem encerrou"><ReportChart def={{ metric: 'closed', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byAgent} height={220} /></Card>
@@ -159,8 +187,8 @@ export default function RelatoriosPage() {
           </div>
 
           <Vendas overview={overview.data} range={range} onAuditar={(f) => setFoco({ ...f, seq: Date.now() })} />
-          <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} />
-          <Attendances from={periodo.from} to={periodo.to} userId={filtros.agentId} focus={foco} />
+          <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} companyId={filtros.companyId} />
+          <Attendances from={periodo.from} to={periodo.to} userId={filtros.agentId} focus={foco} companyId={filtros.companyId} />
         </>
       )}
 
@@ -184,7 +212,7 @@ export default function RelatoriosPage() {
             <Field label="Agrupar por">
               <select className={inputCls} value={def.groupBy} onChange={(e) => set('groupBy', e.target.value as ReportDefinition['groupBy'])}>
                 <optgroup label="Tempo">{TIME_GROUPS.map((k) => <option key={k} value={k}>{GROUP_LABEL[k as ReportDefinition['groupBy']]}</option>)}</optgroup>
-                <optgroup label="Categoria">{Object.entries(GROUP_LABEL).filter(([k]) => !TIME_GROUPS.includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</optgroup>
+                <optgroup label="Categoria">{Object.entries(GROUP_LABEL).filter(([k]) => !TIME_GROUPS.includes(k) && (k !== 'company' || (temEmpresas && empresa === 'all'))).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</optgroup>
               </select>
             </Field>
             <Field label="Período">
@@ -218,7 +246,7 @@ export default function RelatoriosPage() {
                 <option value="">Todas</option><option value="ad">Anúncio</option><option value="post">Publicação</option><option value="link">Link</option><option value="organic">Orgânico</option>
               </select>
             </Field>
-            <Field label="Tags"><TagPicker tags={tags.data ?? []} value={def.filters.tagIds ?? []} onChange={(ids) => setFilter('tagIds', ids.length ? ids : undefined)} placeholder="Qualquer tag" /></Field>
+            <Field label="Tags"><TagPicker field tags={tags.data ?? []} value={def.filters.tagIds ?? []} onChange={(ids) => setFilter('tagIds', ids.length ? ids : undefined)} placeholder="Qualquer tag" /></Field>
             <Field label="Consultor">
               <select className={inputCls} value={def.filters.agentId ?? ''} onChange={(e) => setFilter('agentId', e.target.value || undefined)}>
                 <option value="">Todos</option>{agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
@@ -296,6 +324,9 @@ export default function RelatoriosPage() {
  * vem do histórico de encerramentos: comprou ÷ (comprou + não comprou) — "sem resultado" (fechado
  * pelo sistema, ou anterior à regra que obriga o resultado) fica de fora.
  */
+/** origem da venda (`sales`): orçamento pago no Asaas, orçamento marcado como pago, ou digitada no encerramento */
+const ORIGEM_VENDA = { asaas: 'Pix automático (Asaas)', manual: 'Orçamento pago por fora', close: 'Informada no encerramento' } as const;
+
 function Vendas({ overview, range, onAuditar }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string]; onAuditar: (f: Omit<AttendanceFocus, 'seq'>) => void }) {
   const v = overview.sales;
   const { won, lost, winRate } = overview.kpis;
@@ -329,6 +360,24 @@ function Vendas({ overview, range, onAuditar }: { overview: NonNullable<ReturnTy
               </tbody>
             </table>
           )}
+        </Card>
+        <Card title="Faturamento por origem" hint="De onde veio o dinheiro do período">
+          <table className="w-full text-[12.5px]">
+            <thead><tr className="text-left text-muted border-b border-line"><th className="py-1.5 font-medium">Origem</th><th className="py-1.5 font-medium text-right">Vendas</th><th className="py-1.5 font-medium text-right">Faturado</th><th className="py-1.5 font-medium text-right">%</th></tr></thead>
+            <tbody>
+              {v.bySource.map((o) => (
+                <tr key={o.source} className="border-b border-line last:border-0">
+                  <td className="py-1.5 text-ink">{ORIGEM_VENDA[o.source]}</td>
+                  <td className="py-1.5 text-right tnum">{o.count}</td>
+                  <td className="py-1.5 text-right tnum">{fmtBRL(o.value)}</td>
+                  <td className="py-1.5 text-right tnum text-muted">{v.total ? `${Math.round((o.value / v.total) * 100)}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className={cn('mt-3 rounded-lg px-3 py-2 text-[12.5px]', v.refunds.count ? 'bg-danger-soft text-danger-ink' : 'bg-field text-muted')}>
+            Estornos no período: <b className="tnum">{v.refunds.count}</b> · <b className="tnum">{fmtBRL(v.refunds.value)}</b> — já fora do faturado.
+          </p>
         </Card>
         <Card title={`${labels.lost}, por motivo`} hint='Onde o negócio escapa. Clique num motivo para ver os atendimentos'>
           {overview.lostReasons.length ? (
@@ -371,6 +420,55 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
   );
 }
 const fmtMin = (m: number) => (m < 60 ? `${m.toFixed(0)} min` : `${(m / 60).toFixed(1)} h`);
+
+/** Indicadores principais por empresa, lado a lado. Clicar numa empresa abre a tela só dela. */
+function PorEmpresa({ rows, onAbrir }: { rows: CompanyReportRow[]; onAbrir: (id: string) => void }) {
+  const pct = (v: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-4">
+      <div className="mb-2">
+        <h3 className="font-display font-semibold text-ink text-sm flex items-center gap-1.5"><Building2 size={14} className="text-accent" /> Por empresa</h3>
+        <p className="text-[11px] text-muted">Mesmo período e filtros. Clique numa empresa para ver a tela só dela. Empresa removida aparece com o histórico dos números que ela teve.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-[11px] uppercase tracking-wide text-muted">
+            <tr>
+              <th className="py-2 pr-4">Empresa</th>
+              <th className="py-2 pr-4 text-right">Atendimentos</th>
+              <th className="py-2 pr-4 text-right">Encerrados</th>
+              <th className="py-2 pr-4 text-right">Na fila</th>
+              <th className="py-2 pr-4 text-right">1ª resposta</th>
+              <th className="py-2 pr-4 text-right">Vendas</th>
+              <th className="py-2 pr-4 text-right">Faturamento</th>
+              <th className="py-2 pr-4 text-right">Ticket médio</th>
+              <th className="py-2 text-right">Conversão</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.companyId ?? 'sem'} className="border-t border-line">
+                <td className="py-2 pr-4">
+                  {r.companyId
+                    ? <button type="button" onClick={() => onAbrir(r.companyId!)} className={cn('font-medium hover:underline text-left', r.removed ? 'text-muted' : 'text-accent')}>{r.name}</button>
+                    : <span className="text-muted">{r.name}</span>}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.conversations.toLocaleString('pt-BR')}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.closed.toLocaleString('pt-BR')}</td>
+                <td className={cn('py-2 pr-4 text-right tabular-nums', r.waitingNow > 5 && 'text-warn-ink font-semibold')}>{r.waitingNow}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.avgFirstResponseMin != null ? fmtMin(r.avgFirstResponseMin) : '—'}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.won.toLocaleString('pt-BR')}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{fmtBRL(r.revenue)}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.avgTicket != null ? fmtBRL(r.avgTicket) : '—'}</td>
+                <td className="py-2 text-right tabular-nums">{pct(r.winRate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
 function SaveModal({ open, onClose, onSubmit, pending }: { open: boolean; onClose: () => void; onSubmit: (name: string) => void; pending: boolean }) {
   const [name, setName] = useState('');

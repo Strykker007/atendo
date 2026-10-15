@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, ScheduleConfig, WelcomeMessage, WelcomeMode } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, ScheduleConfig, WelcomeMessage, WelcomeMode, RankingWeights } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 // ---- Configurações do cliente (fuso, atendimento ativo, fluxos padrão, boas-vindas) ----
@@ -18,13 +18,15 @@ export interface TenantSettings {
   requireSaleValue: boolean;
   /** motivo obrigatório em "Comprou" / "Não comprou" (cada um separado; padrão true) */
   requireReasonOnWon: boolean; requireReasonOnLost: boolean;
+  /** pesos da pontuação do ranking; null = padrão (`RANKING_WEIGHTS_DEFAULT`) */
+  rankingWeights: RankingWeights | null;
   /** nome dos resultados do encerramento na empresa — use `useOutcomeLabels` */
   wonLabel: string; lostLabel: string;
   welcomeMessages: WelcomeMessage[]; welcomeMode: WelcomeMode; welcomeEnabled: boolean;
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;
