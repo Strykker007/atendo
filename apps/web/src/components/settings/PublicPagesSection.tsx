@@ -25,9 +25,11 @@ export function PublicPagesSection() {
   useEffect(() => { if (d) setTexto(d.secureMediaText ?? ''); }, [d?.secureMediaText]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!d) return null;
 
-  const efetivo = texto.trim() || SECURE_MEDIA_TEXT_DEFAULT;
-  const semLink = !!texto.trim() && !/\{\{\s*link\s*\}\}/.test(texto);
-  const mudou = (texto.trim() || null) !== (d.secureMediaText ?? null);
+  // sem {{link}} o link vai no final sozinho: ninguém precisa saber da variável para a foto chegar
+  const comLink = (t: string) => (!t || /\{\{\s*link\s*\}\}/.test(t) ? t : `${t} {{link}}`);
+  const final = comLink(texto.trim());
+  const efetivo = final || SECURE_MEDIA_TEXT_DEFAULT;
+  const mudou = (final || null) !== (d.secureMediaText ?? null);
 
   async function escolherLogo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -76,15 +78,14 @@ export function PublicPagesSection() {
         <h3 className="text-sm font-medium text-ink flex items-center gap-1.5"><Lock size={13} /> Frase da foto protegida</h3>
         <textarea className={inputCls} rows={3} maxLength={500} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={SECURE_MEDIA_TEXT_DEFAULT} />
         <p className="text-[11px] text-muted">
-          Vai pelo WhatsApp no lugar da imagem. Use <code>{'{{link}}'}</code> (obrigatório), <code>{'{{validade}}'}</code> e <code>{'{{primeiro_nome}}'}</code>. Evite citar o conteúdo da foto (nome de remédio, receita): o texto é o que o WhatsApp lê. Vazio = a frase padrão.
+          Vai pelo WhatsApp no lugar da imagem. O link entra no final sozinho; para pôr em outro lugar, use <code>{'{{link}}'}</code>. Também dá para usar <code>{'{{validade}}'}</code> e <code>{'{{primeiro_nome}}'}</code>. Evite citar o conteúdo da foto (nome de remédio, receita): o texto é o que o WhatsApp lê. Vazio = a frase padrão.
         </p>
-        {semLink && <p className="text-[12px] text-danger">A frase precisa ter {'{{link}}'}.</p>}
         <div className="rounded-lg bg-field px-3 py-2 text-[12px] text-ink">
           <span className="text-muted">Prévia: </span>{secureMediaMessage('https://seu-painel/f/Ab3dE…', 24, 'Ana', efetivo)}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" disabled={!mudou || semLink} loading={update.isPending}
-            onClick={() => update.mutateAsync({ secureMediaText: texto.trim() || null }).then(() => toast.ok('Frase salva')).catch(toast.err)}>Salvar frase</Button>
+          <Button size="sm" disabled={!mudou} loading={update.isPending}
+            onClick={() => update.mutateAsync({ secureMediaText: final || null }).then(() => { setTexto(final); toast.ok('Frase salva'); }).catch(toast.err)}>Salvar frase</Button>
           {d.secureMediaText && <Button size="sm" variant="ghost" onClick={() => setTexto('')}>Voltar à padrão</Button>}
         </div>
       </div>

@@ -32,8 +32,8 @@ Ao escolher, arrastar ou colar imagem, vídeo ou PDF, a **tela de prévia** (`Me
 
 Em **Configurações → Empresa → Páginas para o cliente** (`settings.manage`):
 
-- **Frase da foto protegida** (`tenant_settings.secureMediaText`): com `{{link}}` (obrigatório — a
-  API recusa sem ele), `{{validade}}` ("1 dia", "4 horas") e `{{primeiro_nome}}` (sem nome, some
+- **Frase da foto protegida** (`tenant_settings.secureMediaText`): com `{{link}}` (se faltar, a tela e
+  a API acrescentam ` {{link}}` no final ao salvar, então o link nunca fica de fora), `{{validade}}` ("1 dia", "4 horas") e `{{primeiro_nome}}` (sem nome, some
   junto com o espaço antes). Vazio = a frase padrão. A tela mostra a prévia. Evitar citar o
   conteúdo da foto: o texto é o que o WhatsApp lê.
 - **Logo da empresa** (`tenant_settings.publicLogoKey`, upload do painel; PNG, JPG ou WEBP até

@@ -47,7 +47,7 @@ class SettingsDto {
   @IsOptional() @IsArray() @ArrayMaxSize(20) welcomeMessages?: WelcomeMessage[];
   @IsOptional() @IsIn(['random', 'sequential']) welcomeMode?: WelcomeMode;
   @IsOptional() @IsBoolean() welcomeEnabled?: boolean;
-  /** frase da foto protegida, com {{link}} obrigatório; vazio/null = a padrão */
+  /** frase da foto protegida; sem {{link}}, ele é acrescentado no final; vazio/null = a padrão */
   @IsOptional() @IsString() @MaxLength(500) secureMediaText?: string | null;
   /** logo das páginas públicas: chave do upload do painel; null = a marca do painel */
   @IsOptional() @IsString() @MaxLength(300) publicLogoKey?: string | null;
@@ -90,8 +90,9 @@ export class TenantSettingsController {
   @RequirePermission('settings.manage')
   update(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     if (dto.timezone && !isTimezone(dto.timezone)) throw new BadRequestException('Fuso horário inválido.');
-    // sem {{link}} o contato receberia a frase e nenhum jeito de abrir a foto
-    if (dto.secureMediaText?.trim() && !/\{\{\s*link\s*\}\}/.test(dto.secureMediaText)) throw new BadRequestException('A frase da foto protegida precisa ter {{link}}.');
+    // sem {{link}} o contato receberia a frase e nenhum jeito de abrir a foto: o link vai no final
+    const frase = dto.secureMediaText?.trim();
+    if (frase && !/\{\{\s*link\s*\}\}/.test(frase)) dto.secureMediaText = `${frase} {{link}}`;
     // a logo vai numa página aberta: só arquivo deste cliente
     if (dto.publicLogoKey && !dto.publicLogoKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('Imagem inválida.');
     if (dto.welcomeMessages) {
