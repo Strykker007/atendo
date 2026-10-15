@@ -30,6 +30,8 @@ export class JwtAuthGuard implements CanActivate {
     const scope = await this.permissions.scope(req.user);
     req.user.permissions = scope.permissions;
     req.user.numberIds = scope.numberIds;
+    req.user.ownNumberIds = scope.numberIds;
+    req.user.companyRestricted = scope.companyIds.length > 0;
     req.user.departmentIds = scope.departmentIds;
 
     // empresa/unidade vira números (ver company-scope.ts): só consulta quando o cliente tem empresas

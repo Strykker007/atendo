@@ -23,7 +23,8 @@ export interface ReportDefinition {
 export interface ReportResult { definition: ReportDefinition; series: { label: string; value: number }[] }
 export interface SavedReport { id: string; name: string; definition: ReportDefinition; createdAt: string }
 
-export const useRunReport = () => useMutation({ mutationFn: (d: ReportDefinition) => api<ReportResult>('/reports/run', { method: 'POST', body: JSON.stringify(d) }) });
+/** `companyId` vai ao lado da definição (relatório salvo não fica preso a uma empresa) */
+export const useRunReport = () => useMutation({ mutationFn: ({ companyId, ...d }: ReportDefinition & { companyId?: string }) => api<ReportResult>('/reports/run', { method: 'POST', body: JSON.stringify({ ...d, companyId }) }) });
 export const useSavedReports = () => useQuery({ queryKey: ['saved-reports'], queryFn: () => api<SavedReport[]>('/reports/saved') });
 export const useSaveReport = () => {
   const qc = useQueryClient();
@@ -39,6 +40,8 @@ export interface CompanyReportRow {
   /** null = números sem empresa */
   companyId: string | null;
   name: string;
+  /** empresa removida: sobra o histórico dos números excluídos dela */
+  removed: boolean;
   conversations: number;
   closed: number;
   waitingNow: number;
@@ -49,6 +52,8 @@ export interface CompanyReportRow {
   avgTicket: number | null;
   winRate: number | null;
 }
+/** Empresas do filtro da página de relatórios — inclui as removidas que ainda têm histórico. */
+export const useReportCompanyOptions = () => useQuery({ queryKey: ['report-company-options'], queryFn: () => api<{ id: string; name: string; removed: boolean }[]>('/reports/companies/options'), staleTime: 60_000 });
 export const useReportCompanies = (f: { from: string; to: string; tagIds?: string[]; agentId?: string }, enabled: boolean) => {
   const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }), ...(f.agentId && { agentId: f.agentId }) });
   return useQuery({ queryKey: ['report-companies', qs.toString()], enabled, queryFn: () => api<{ rows: CompanyReportRow[] }>(`/reports/companies?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false });
@@ -115,7 +120,7 @@ export const useSaveGoals = () => {
 };
 
 // ---- Relatórios: detalhamento de vendas ----
-export interface SaleDetailsFilters { startDate: string; endDate: string; userId?: string; tagIds?: string; search?: string; page: number; pageSize?: number }
+export interface SaleDetailsFilters { startDate: string; endDate: string; userId?: string; tagIds?: string; search?: string; page: number; pageSize?: number; /** empresa do filtro da página (`all` = todas) */ companyId?: string }
 export interface SaleDetailsRow {
   id: string;
   closedAt: string;
@@ -141,7 +146,7 @@ export const useSaleDetails = (f: SaleDetailsFilters) => {
 };
 
 // ---- Auditoria de atendimentos (cada encerramento do período) ----
-export interface AttendanceFilters { startDate: string; endDate: string; outcome?: 'won' | 'lost' | 'none'; tagIds?: string; closeReasonId?: string; reason?: string; userId?: string; search?: string; page: number; pageSize?: number }
+export interface AttendanceFilters { startDate: string; endDate: string; companyId?: string; outcome?: 'won' | 'lost' | 'none'; tagIds?: string; closeReasonId?: string; reason?: string; userId?: string; search?: string; page: number; pageSize?: number }
 export interface AttendanceRow {
   id: string;
   closedAt: string;

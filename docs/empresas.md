@@ -57,29 +57,48 @@ vai com o header.
 
 ## Relatórios
 
-Todos os relatórios respeitam o seletor de empresa, pelo mesmo escopo de números das conversas
-(`numberIds` do `AuthUser`, que já é a empresa ativa ∩ números da pessoa): visão pronta, vendas,
-motivos de perda, auditoria de atendimentos, detalhamento de vendas, ranking, satisfação e o
-relatório personalizado. Antes eles filtravam só pelo cliente, e qualquer empresa selecionada
-mostrava a soma de todas. O cache de relatório (`ReportLoadService`) leva o escopo na chave.
+A página de Relatórios tem o **próprio filtro de Empresa** (primeiro campo dos filtros), separado
+do seletor do menu: começa na empresa do menu, mas trocar ali não muda o resto do painel. Opções:
+"Todas as empresas", as empresas que a pessoa opera e, em **Removidas (histórico)**, as empresas
+removidas que ainda têm histórico (`GET /reports/companies/options`). A escolha vai como
+`companyId` (`all` ou o id) em todas as chamadas da página — visão pronta, vendas, motivos de
+perda, detalhamento de vendas, auditoria e relatório personalizado (no `POST /reports/run`, ao
+lado da definição, para relatório salvo não ficar preso a uma empresa).
 
-**Números excluídos entram no relatório da empresa** (`common/reports/report-scope.ts`). O escopo
-das telas de operação tem só números ativos; relatório é histórico, e um número excluído continua
-vinculado à empresa com as conversas, vendas e fila que teve. Sem isso, a soma das empresas não
-batia com "Todas" (o histórico dos excluídos só aparecia lá). Quem é restrito a alguns números não
-ganha o histórico dos excluídos.
+As telas sem filtro próprio (ranking, satisfação) seguem o seletor do menu. Antes de tudo isso, os
+relatórios filtravam só pelo cliente, e qualquer empresa selecionada mostrava a soma de todas.
 
-- **Empresa selecionada:** a tela mostra só ela e o subtítulo diz qual.
-- **"Todas as empresas"** (quem opera mais de uma): soma tudo e mostra o quadro **Por empresa**
-  (`GET /reports/companies`): atendimentos, encerrados, fila agora, 1ª resposta, vendas,
-  faturamento, ticket médio e conversão de cada empresa, com os mesmos filtros de período, tag e
-  consultor. Clicar numa empresa troca o seletor para ela. "(sem empresa)" = números sem empresa,
-  só para quem enxerga o cliente inteiro.
-- **Relatório personalizado:** dimensão **Empresa** em "Agrupar por" (aparece com mais de uma empresa).
+**Escopo** (`common/reports/report-scope.ts`, `reportScope`): números da empresa ∩ números da
+pessoa (`ownNumberIds`). Relatório é histórico, então entram também os números **excluídos** da
+empresa — continuam vinculados a ela com as conversas, vendas e fila que tiveram. Sem isso, a soma
+das empresas não batia com "Todas". Quem é restrito a alguns números não ganha o histórico dos
+excluídos; quem é vinculado a empresas (`user_companies`) não vê empresas removidas. O cache de
+relatório (`ReportLoadService`) leva o escopo na chave.
+
+- **Uma empresa:** a tela mostra só ela e o subtítulo diz qual.
+- **Todas as empresas:** soma tudo e mostra o quadro **Por empresa** (`GET /reports/companies`):
+  atendimentos, encerrados, fila agora, 1ª resposta, vendas, faturamento, ticket médio e conversão
+  de cada empresa, com os mesmos filtros de período, tag e consultor. Empresa removida aparece no
+  fim, em cinza, com o nome "… · removida em dd/mm/aaaa". Clicar numa empresa troca o filtro da
+  página para ela. "(sem empresa)" = números sem empresa, só para quem enxerga o cliente inteiro.
+- **Relatório personalizado:** dimensão **Empresa** em "Agrupar por" (com o filtro em Todas).
 
 A régua é a mesma da visão pronta (`kpisDoEscopo` reaproveita `query` e `vendasPorConsultorSql`,
-que ganhou o parâmetro `numberIds`): a linha de uma empresa bate com a tela daquela empresa.
+que tem o parâmetro `numberIds`): a linha de uma empresa bate com a tela daquela empresa.
 Metas (`goals`) continuam por consultor, sem escopo de empresa.
+
+## Remover
+
+Remover uma empresa não apaga a linha (`companies.deletedAt`, migration `company_soft_delete`):
+
+- Ela some do cadastro, do seletor do menu, do limite `maxCompanies` e da cobrança (`isActive = false`;
+  `DuesService` e o financeiro ignoram removidas).
+- Os números **ativos** ficam sem empresa e seguem operando, levando o próprio histórico.
+- Os números **já excluídos** continuam apontando para ela: é o histórico que o relatório mostra.
+  Editar os números de uma empresa também não desvincula os excluídos.
+- O nome ganha " · removida em dd/mm/aaaa", o que libera o nome original para uma empresa nova
+  (`@@unique([tenantId, name])`).
+- Vínculos de pessoas (`user_companies`) são apagados.
 
 ## Cobrança
 

@@ -90,8 +90,8 @@ export interface ReportOverview {
   lostReasons: { label: string; value: number; closeReasonId: string | null; color: string | null; tagId: string | null }[];
 }
 /** Filtros globais da tela de Relatórios. `from`/`to` são instantes ISO (início do dia local; `to` exclusivo). */
-export interface ReportOverviewFilters { from: string; to: string; tagIds?: string[]; agentId?: string }
+export interface ReportOverviewFilters { from: string; to: string; tagIds?: string[]; agentId?: string; /** empresa do filtro da página (`all` = todas); ausente = seletor do menu */ companyId?: string }
 export const useReportOverview = (f: ReportOverviewFilters) => {
-  const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }), ...(f.agentId && { agentId: f.agentId }) });
+  const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }), ...(f.agentId && { agentId: f.agentId }), ...(f.companyId && { companyId: f.companyId }) });
   return useQuery({ queryKey: ['report-overview', qs.toString()], queryFn: () => api<ReportOverview>(`/reports/overview?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false });
 };

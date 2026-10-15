@@ -21,6 +21,10 @@ export interface AuthUser {
   companyId?: string | null;
   /** empresas que a pessoa pode selecionar; ausente = cliente sem empresas (ver company-scope.ts) */
   companyIds?: string[];
+  /** números vinculados direto à pessoa (`user_numbers`), antes do recorte da empresa; vazio = todos */
+  ownNumberIds?: string[];
+  /** a pessoa é vinculada a empresas específicas (`user_companies`); false = enxerga todas */
+  companyRestricted?: boolean;
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthUser => {

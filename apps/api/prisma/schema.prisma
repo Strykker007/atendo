@@ -197,6 +197,9 @@ model Company {
   billingType BillingType @default(CONSOLIDATED_GROUP)
   /// Ativa para cobrança: inativa não entra na conta do grupo nem gera vencimento. Só o dono muda.
   isActive    Boolean  @default(true)
+  /// Removida (docs/empresas.md#remover): some do painel, da cobrança e do seletor, mas fica para
+  /// os relatórios — os números excluídos dela continuam apontando para cá com o histórico
+  deletedAt   DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

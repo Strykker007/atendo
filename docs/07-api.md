@@ -114,7 +114,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | **Empresas / unidades** | | | Toda rota aceita o header `x-company-id` (empresa do seletor): vira escopo de números. Ver [Empresas](empresas.md) |
 | GET | `/companies` | todos | Empresas do cliente com números e pessoas vinculadas |
 | GET | `/companies/mine` | todos | Empresas que o usuário pode escolher no seletor (`[]` = cliente sem empresas) |
-| POST / PATCH / DELETE | `/companies[/:id]` | `settings.manage` | `{name, cnpj?, description?, numberIds?, userIds?}` (listas substituem; marcar um número tira ele da outra empresa). `POST` checa `maxCompanies` do plano. Excluir deixa os números sem empresa |
+| POST / PATCH / DELETE | `/companies[/:id]` | `settings.manage` | `{name, cnpj?, description?, numberIds?, userIds?}` (listas substituem; marcar um número tira ele da outra empresa). `POST` checa `maxCompanies` do plano. Excluir **remove sem apagar** ([Remover](empresas.md#remover)): números ativos ficam sem empresa; a empresa continua nos relatórios com o histórico dos números excluídos |
 | GET | `/admin/tenants/:tenantId/companies` | super_admin | Empresas do cliente (mesmo formato de `GET /companies`) |
 | GET | `/admin/tenants/:tenantId/companies/options` | super_admin | `{numbers[{id,label,phone}], users[{id,name,isActive}], maxCompanies}` para o formulário |
 | POST / PATCH / DELETE | `/admin/tenants/:tenantId/companies[/:id]` | super_admin | Mesmo corpo de `/companies`. **Sem** o limite `maxCompanies` do plano (exceção do dono) |
@@ -192,6 +192,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/campaigns/:id/status` | idem | `{status: 'paused'\|'running'\|'canceled'}` — pausar, retomar (limpa `pauseReason`), cancelar. Emite `campaign` |
 | POST | `/reports/run` | todos | Executa um `ReportDefinition` (filtros: `tagIds`, `status`, `numberId`, `origin`, `agentId` — consultor: dono da conversa, ou quem encerrou nas métricas de venda; `groupBy: 'company'` = por empresa) |
 | GET/POST | `/conversations/:id/secure-media` (+ `POST …/:mediaId/revoke`, público `GET /secure-media/public/:hash`) | todos | Foto protegida: mídia atrás de um link com validade; o painel envia só o texto com o link. Ver [Foto protegida](foto-protegida.md) |
+| GET | `/reports/companies/options` | todos | Empresas do filtro da página de relatórios: `[{ id, name, removed }]` (ativas que a pessoa opera + removidas com histórico, para quem enxerga todas). Todas as rotas de relatório aceitam `companyId` (`all` ou id; no `POST /reports/run`, no corpo) — sem ele vale o seletor do menu |
 | GET | `/reports/companies?from=&to=&tagIds=&agentId=` | todos | Comparativo por empresa: `{ rows: [{ companyId (null = sem empresa), name, conversations, closed, waitingNow, avgFirstResponseMin, won, lost, revenue, avgTicket, winRate }] }`, uma linha por empresa que a pessoa opera. Todos os relatórios respeitam o seletor de empresa (`x-company-id`) — ver [Empresas](empresas.md#relatórios) |
 | GET / POST / DELETE | `/reports/saved[/:id]` | todos | Relatórios salvos |
 | **Webhooks** (sem auth de usuário) | | | |

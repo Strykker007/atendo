@@ -281,7 +281,7 @@ export class BillingController {
       this.prisma.usageCounter.findUnique({ where: { tenantId_period: { tenantId: user.tenantId, period: periodOf() } } }),
       this.prisma.flow.count({ where: { tenantId: user.tenantId, isActive: true } }),
       this.prisma.quickReply.count({ where: { folder: { tenantId: user.tenantId } } }),
-      this.prisma.company.count({ where: { tenantId: user.tenantId } }),
+      this.prisma.company.count({ where: { tenantId: user.tenantId, deletedAt: null } }),
       this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { billingType: true } }),
     ]);
     return {

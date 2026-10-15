@@ -9,7 +9,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { NO_NUMBER } from '../auth/company-scope';
-import { reportScope } from '../../common/reports/report-scope';
+import { ReportCompany, reportScope } from '../../common/reports/report-scope';
 import { ReportLoadService, assertReportRange } from '../../common/reports/report-load.service';
 import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
@@ -43,6 +43,8 @@ const OverviewQuery = z.object({
   to: z.coerce.date().optional(),
   tagIds: z.string().optional().transform((v) => v?.split(',').filter(Boolean)).pipe(z.array(z.string().uuid()).max(50).optional()),
   agentId: z.string().uuid().optional(),
+  /** empresa escolhida na página (`all` = todas as que a pessoa opera); ausente = seletor do menu */
+  companyId: ReportCompany,
 });
 /** Linha do comparativo por empresa (`GET /reports/companies`). */
 type KpisDoEscopo = { conversations: number; closed: number; waitingNow: number; avgFirstResponseMin: number | null; won: number; lost: number; revenue: number; avgTicket: number | null; winRate: number | null };
@@ -76,6 +78,7 @@ const SalesDetailsQuery = z.object({
   search: z.string().trim().max(120).optional().transform((v) => v || undefined),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  companyId: ReportCompany,
 });
 
 const AttendancesQuery = z.object({
@@ -92,6 +95,7 @@ const AttendancesQuery = z.object({
   search: z.string().trim().max(120).optional().transform((v) => v || undefined),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  companyId: ReportCompany,
 });
 
 /** "5511999998888" → "+55 11 99999-8888". Fora do padrão BR devolve só com o "+". */
@@ -122,7 +126,8 @@ class ReportsController {
   async run(@CurrentUser() u: AuthUser, @Body() body: unknown) {
     const def = ReportDefinition.parse(body);
     assertReportRange(def.from, def.to);
-    const nums = await reportScope(this.prisma, u);
+    // a empresa vem ao lado da definição: relatório salvo não fica preso a uma empresa
+    const nums = await reportScope(this.prisma, u, ReportCompany.parse((body as { companyId?: unknown } | null)?.companyId ?? undefined));
     const series = await this.load.cached(ReportLoadService.key(u.tenantId, 'run', { d: JSON.stringify(def), nums: nums?.join(',') }), () => this.load.run(() => this.query(u.tenantId, def, nums)));
     return { definition: def, series };
   }
@@ -140,7 +145,7 @@ class ReportsController {
     const f = OverviewQuery.parse(q);
     const to = f.to ?? new Date(Date.now() + 86_400_000);
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
-    const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId, numberIds: await reportScope(this.prisma, u) };
+    const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId, numberIds: await reportScope(this.prisma, u, f.companyId) };
     assertReportRange(from, to);
     return this.load.cached(ReportLoadService.key(u.tenantId, 'overview', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId, nums: filtro.numberIds?.join(',') }), () => this.overviewData(u.tenantId, from, to, filtro));
   }
@@ -230,27 +235,43 @@ class ReportsController {
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
     assertReportRange(from, to);
     const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId };
-    const nums = await reportScope(this.prisma, u);
     return this.load.cached(
-      ReportLoadService.key(u.tenantId, 'companies', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId, nums: nums?.join(','), cos: u.companyIds?.join(',') }),
+      ReportLoadService.key(u.tenantId, 'companies', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId, own: u.ownNumberIds?.join(','), cos: u.companyRestricted ? u.companyIds?.join(',') : 'todas' }),
       async () => {
-        const empresas = await this.prisma.company.findMany({
-          where: { tenantId: u.tenantId, ...(u.companyIds && { id: { in: u.companyIds } }) },
-          select: { id: true, name: true, numbers: { select: { id: true } } },
-          orderBy: { name: 'asc' },
-        });
-        const permitido = (id: string) => !nums || nums.includes(id);
-        const grupos = empresas.map((c) => ({ companyId: c.id as string | null, name: c.name, numberIds: c.numbers.map((n) => n.id).filter(permitido) }));
-        if (!nums && empresas.length) {
+        // ativas que a pessoa opera + removidas que ainda têm histórico (só para quem enxerga todas)
+        const empresas = await this.prisma.company.findMany({ where: this.empresasDoFiltro(u), select: { id: true, name: true, deletedAt: true }, orderBy: [{ deletedAt: { sort: 'asc', nulls: 'first' } }, { name: 'asc' }] });
+        const grupos: { companyId: string | null; name: string; removed: boolean; numberIds: string[] }[] = [];
+        for (const c of empresas) grupos.push({ companyId: c.id, name: c.name, removed: !!c.deletedAt, numberIds: (await reportScope(this.prisma, u, c.id)) ?? [] });
+        if (!u.companyRestricted && !u.ownNumberIds?.length && empresas.length) {
           const soltos = await this.prisma.whatsAppNumber.findMany({ where: { tenantId: u.tenantId, companyId: null }, select: { id: true } });
-          if (soltos.length) grupos.push({ companyId: null, name: '(sem empresa)', numberIds: soltos.map((n) => n.id) });
+          if (soltos.length) grupos.push({ companyId: null, name: '(sem empresa)', removed: false, numberIds: soltos.map((n) => n.id) });
         }
-        const rows: ({ companyId: string | null; name: string } & KpisDoEscopo)[] = [];
+        const rows: ({ companyId: string | null; name: string; removed: boolean } & KpisDoEscopo)[] = [];
         // uma empresa por vez: cada uma já dispara várias consultas pelo limite de concorrência
-        for (const g of grupos) rows.push({ companyId: g.companyId, name: g.name, ...(await this.kpisDoEscopo(u.tenantId, from, to, { ...filtro, numberIds: g.numberIds.length ? g.numberIds : [NO_NUMBER] })) });
+        for (const g of grupos) rows.push({ companyId: g.companyId, name: g.name, removed: g.removed, ...(await this.kpisDoEscopo(u.tenantId, from, to, { ...filtro, numberIds: g.numberIds.length ? g.numberIds : [NO_NUMBER] })) });
         return { period: { from, to }, rows };
       },
     );
+  }
+
+  /**
+   * Empresas do filtro da página de relatórios: as ativas que a pessoa opera e, para quem enxerga
+   * todas, as removidas que ainda têm histórico (docs/empresas.md#remover).
+   */
+  @Get('companies/options')
+  async companyOptions(@CurrentUser() u: AuthUser) {
+    const rows = await this.prisma.company.findMany({ where: this.empresasDoFiltro(u), select: { id: true, name: true, deletedAt: true }, orderBy: [{ deletedAt: { sort: 'asc', nulls: 'first' } }, { name: 'asc' }] });
+    return rows.map((c) => ({ id: c.id, name: c.name, removed: !!c.deletedAt }));
+  }
+
+  private empresasDoFiltro(u: AuthUser): Prisma.CompanyWhereInput {
+    return {
+      tenantId: u.tenantId,
+      OR: [
+        { deletedAt: null, ...(u.companyRestricted && { id: { in: u.companyIds ?? [] } }) },
+        ...(u.companyRestricted ? [] : [{ deletedAt: { not: null }, numbers: { some: {} } }]),
+      ],
+    };
   }
 
   /** Indicadores do comparativo por empresa — a mesma régua dos cartões da visão pronta. */
@@ -312,7 +333,7 @@ class ReportsController {
     if (f.closeReasonId) conds.push(Prisma.sql`e."closeReasonId" = ${f.closeReasonId}`);
     if (f.reason) conds.push(Prisma.sql`e."closeReasonId" is null and trim(regexp_replace(coalesce(e.reason, ''), '(\\s*·\\s*)?encerrado em massa$', '')) = ${f.reason}`);
     if (f.userId) conds.push(doConsultor(f.userId));
-    const nums = await reportScope(this.prisma, u);
+    const nums = await reportScope(this.prisma, u, f.companyId);
     if (nums) conds.push(Prisma.sql`cv."numberId" in (${Prisma.join(nums)})`);
     if (f.search) {
       const ors = [Prisma.sql`c.name ilike ${like(f.search)}`];
@@ -411,7 +432,7 @@ class ReportsController {
     if (f.contactId) conds.push(Prisma.sql`s."contactId" = ${f.contactId}`);
     if (f.phone && digits(f.phone)) conds.push(Prisma.sql`c.phone like ${like(digits(f.phone))}`);
     if (f.customerName) conds.push(Prisma.sql`c.name ilike ${like(f.customerName)}`);
-    const nums = await reportScope(this.prisma, u);
+    const nums = await reportScope(this.prisma, u, f.companyId);
     if (nums) conds.push(conversaNoEscopo(Prisma.sql`s."conversationId"`, nums));
     if (f.search) {
       const ors = [Prisma.sql`c.name ilike ${like(f.search)}`, produtoCasa(f.search)];
@@ -481,7 +502,7 @@ class ReportsController {
     // pesos entram na chave do cache: mudou o peso, a próxima leitura já reordena
     const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { rankingWeights: true } });
     const weights = normalizeRankingWeights(s?.rankingWeights);
-    const nums = await reportScope(this.prisma, u);
+    const nums = await reportScope(this.prisma, u, f.companyId);
     return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(','), w: JSON.stringify(weights), nums: nums?.join(',') }), () => this.rankingData(u.tenantId, from, to, f.tagIds, weights, nums));
   }
 

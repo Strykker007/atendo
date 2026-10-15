@@ -10,8 +10,7 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useMyCompanies, useOutcomeLabels, useHasFeature, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
-import { useQueryClient } from '@tanstack/react-query';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useReportCompanyOptions, useOutcomeLabels, useHasFeature, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 import { Building2 } from 'lucide-react';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp, Wallet } from 'lucide-react';
@@ -51,16 +50,18 @@ export default function RelatoriosPage() {
   /** clique numa tag do "Não comprou, por tag" → auditoria filtrada */
   const [foco, setFoco] = useState<AttendanceFocus | null>(null);
   const periodo = { from: inicioDoDia(range[0]), to: inicioDoDia(range[1]) };
-  const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined };
+  // Empresa: filtro da própria página, independente do seletor do menu (começa nele). Lista as
+  // empresas que a pessoa opera e as removidas que ainda têm histórico (docs/empresas.md#relatórios)
+  const doMenu = useUI((s) => s.companyId);
+  const opcoesEmpresa = useReportCompanyOptions();
+  const empresas = opcoesEmpresa.data ?? [];
+  const [empresa, setEmpresa] = useState<string>(() => doMenu ?? 'all');
+  const temEmpresas = empresas.length > 0;
+  const empresaAtual = empresas.find((c) => c.id === empresa);
+  const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined, companyId: temEmpresas ? empresa : undefined };
   const overview = useReportOverview({ ...periodo, ...filtros });
-  // várias empresas e nenhuma escolhida no seletor: compara lado a lado (docs/empresas.md#relatórios)
-  const { companyId, setCompany } = useUI();
-  const minhasEmpresas = useMyCompanies();
-  const empresas = minhasEmpresas.data ?? [];
-  const empresaAtiva = empresas.find((c) => c.id === companyId);
-  const porEmpresa = useReportCompanies({ ...periodo, ...filtros }, !companyId && empresas.length > 1);
-  const qc = useQueryClient();
-  const abrirEmpresa = (id: string) => { setCompany(id); qc.invalidateQueries(); };
+  // todas as empresas: compara lado a lado
+  const porEmpresa = useReportCompanies({ ...periodo, ...filtros }, temEmpresas && empresa === 'all');
   const agents = useAgents();
   const temRanking = useHasFeature('consultant_ranking').has;
   const temSatisfacao = useHasFeature('satisfaction_surveys').has;
@@ -82,7 +83,7 @@ export default function RelatoriosPage() {
 
   async function execute(d = def) {
     try {
-      setResult(await run.mutateAsync(d));
+      setResult(await run.mutateAsync({ ...d, companyId: filtros.companyId }));
     } catch (err) {
       toast.err(err);
     }
@@ -115,7 +116,7 @@ export default function RelatoriosPage() {
     <PageShell width="max-w-6xl">
       <PageHeader
         title="Relatórios"
-        subtitle={empresaAtiva ? `Só da empresa ${empresaAtiva.name} (troque no seletor do menu). Tudo sai das conversas, mensagens e tags reais.` : empresas.length > 1 ? 'Todas as suas empresas somadas — o quadro "Por empresa" separa cada uma.' : 'Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais.'}
+        subtitle={empresaAtual ? `Só da empresa ${empresaAtual.name}. Tudo sai das conversas, mensagens e tags reais.` : temEmpresas ? 'Todas as empresas somadas — o quadro "Por empresa" separa cada uma.' : 'Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais.'}
         action={
           <div className="flex flex-wrap gap-2">
             {temSatisfacao && <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>}
@@ -130,7 +131,20 @@ export default function RelatoriosPage() {
         <div className="flex flex-wrap gap-1">
           {PRESETS.map((p) => { const r = p.range(); const on = r[0] === range[0] && r[1] === range[1]; return <button key={p.label} type="button" onClick={() => setRange(r)} className={cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>{p.label}</button>; })}
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={cn('grid gap-2 sm:grid-cols-2', temEmpresas ? 'lg:grid-cols-5' : 'lg:grid-cols-4')}>
+          {temEmpresas && (
+            <Field label="Empresa">
+              <select className={inputCls} value={empresa} onChange={(e) => setEmpresa(e.target.value)}>
+                <option value="all">Todas as empresas</option>
+                {empresas.filter((c) => !c.removed).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {empresas.some((c) => c.removed) && (
+                  <optgroup label="Removidas (histórico)">
+                    {empresas.filter((c) => c.removed).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </Field>
+          )}
           <Field label="Data inicial">
             <input type="date" className={inputCls} value={range[0]} max={shift(range[1], -1)} onChange={(e) => e.target.value && setRange([e.target.value, range[1]])} />
           </Field>
@@ -161,7 +175,7 @@ export default function RelatoriosPage() {
             <Kpi icon={<CheckCircle2 size={15} />} label="Encerradas" value={`${Math.round(overview.data.kpis.closeRate * 100)}%`} sub={`${overview.data.kpis.closed} de ${overview.data.kpis.conversations}`} />
           </div>
 
-          {porEmpresa.data && porEmpresa.data.rows.length > 1 && <PorEmpresa rows={porEmpresa.data.rows} onAbrir={abrirEmpresa} />}
+          {empresa === 'all' && porEmpresa.data && porEmpresa.data.rows.length > 1 && <PorEmpresa rows={porEmpresa.data.rows} onAbrir={setEmpresa} />}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card title="Atendimentos por dia" hint="Conversas novas + clientes que voltaram"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
@@ -173,8 +187,8 @@ export default function RelatoriosPage() {
           </div>
 
           <Vendas overview={overview.data} range={range} onAuditar={(f) => setFoco({ ...f, seq: Date.now() })} />
-          <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} />
-          <Attendances from={periodo.from} to={periodo.to} userId={filtros.agentId} focus={foco} />
+          <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} companyId={filtros.companyId} />
+          <Attendances from={periodo.from} to={periodo.to} userId={filtros.agentId} focus={foco} companyId={filtros.companyId} />
         </>
       )}
 
@@ -198,7 +212,7 @@ export default function RelatoriosPage() {
             <Field label="Agrupar por">
               <select className={inputCls} value={def.groupBy} onChange={(e) => set('groupBy', e.target.value as ReportDefinition['groupBy'])}>
                 <optgroup label="Tempo">{TIME_GROUPS.map((k) => <option key={k} value={k}>{GROUP_LABEL[k as ReportDefinition['groupBy']]}</option>)}</optgroup>
-                <optgroup label="Categoria">{Object.entries(GROUP_LABEL).filter(([k]) => !TIME_GROUPS.includes(k) && (k !== 'company' || empresas.length > 1)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</optgroup>
+                <optgroup label="Categoria">{Object.entries(GROUP_LABEL).filter(([k]) => !TIME_GROUPS.includes(k) && (k !== 'company' || (temEmpresas && empresa === 'all'))).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</optgroup>
               </select>
             </Field>
             <Field label="Período">
@@ -414,7 +428,7 @@ function PorEmpresa({ rows, onAbrir }: { rows: CompanyReportRow[]; onAbrir: (id:
     <section className="rounded-2xl bg-panel border border-line p-4">
       <div className="mb-2">
         <h3 className="font-display font-semibold text-ink text-sm flex items-center gap-1.5"><Building2 size={14} className="text-accent" /> Por empresa</h3>
-        <p className="text-[11px] text-muted">Mesmo período e filtros. Clique numa empresa para ver a tela só dela.</p>
+        <p className="text-[11px] text-muted">Mesmo período e filtros. Clique numa empresa para ver a tela só dela. Empresa removida aparece com o histórico dos números que ela teve.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -436,7 +450,7 @@ function PorEmpresa({ rows, onAbrir }: { rows: CompanyReportRow[]; onAbrir: (id:
               <tr key={r.companyId ?? 'sem'} className="border-t border-line">
                 <td className="py-2 pr-4">
                   {r.companyId
-                    ? <button type="button" onClick={() => onAbrir(r.companyId!)} className="font-medium text-accent hover:underline text-left">{r.name}</button>
+                    ? <button type="button" onClick={() => onAbrir(r.companyId!)} className={cn('font-medium hover:underline text-left', r.removed ? 'text-muted' : 'text-accent')}>{r.name}</button>
                     : <span className="text-muted">{r.name}</span>}
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums">{r.conversations.toLocaleString('pt-BR')}</td>
