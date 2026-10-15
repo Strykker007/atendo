@@ -121,7 +121,7 @@ return tonumber(oldest[2]) + win - now
 /**
  * Depois da entrega: o próximo envio do número só sai `numDelay` depois DESTE instante (não do
  * horário reservado). Sem isto, uma mídia que levou 6 s para subir "gastava" o intervalo de
- * 3–5 s e a mensagem seguinte do fluxo saía colada. Só empurra para a frente (max).
+ * 3–6 s e a mensagem seguinte do fluxo saía colada. Só empurra para a frente (max).
  */
 const DELIVERED = `
 local now = tonumber(ARGV[1])

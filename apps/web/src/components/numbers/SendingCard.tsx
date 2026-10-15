@@ -11,7 +11,7 @@ import { useMe, useUpdateNumber, type NumberItem, type SendDelayProfile } from '
 const DELAY_LABEL: Record<Exclude<SendDelayProfile, 'fast'>, string> = {
   instant: 'Imediato — só Meta Cloud API',
   short: 'Curto — 3 a 4s',
-  moderate: 'Moderado — 3 a 5s',
+  moderate: 'Moderado — 3 a 6s',
   medium: 'Médio — 25 a 60s',
   long: 'Longo — 60 a 250s',
 };

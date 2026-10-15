@@ -79,15 +79,15 @@ Uma reserva atômica no Redis cumpre ao mesmo tempo:
 | `wa:cdone:<conversa>` | instante da última **entrega** na conversa — base do piso do Conteúdo (`minGapMs`) |
 
 **A 1ª mensagem também espera.** Número ocioso (sem envio recente, `wa:next` no passado): o
-envio sai depois de um sorteio do perfil (ex.: `moderate` 3–5 s), venha de fluxo, campanha,
+envio sai depois de um sorteio do perfil (ex.: `moderate` 3–6 s), venha de fluxo, campanha,
 resposta rápida, automação ou do atendente digitando — mensagem que sai no mesmo instante do
 gatilho é padrão de robô. Em sequência, a espera é só o intervalo desde a entrega anterior (as
 duas não somam). `instant` (Meta) continua sem espera; no `moderate` (padrão da Evolution) a 1ª
-mensagem leva 3–5 s. O mínimo no QR é 3 s: o `fast` (1–2 s) saiu por risco de banimento.
+mensagem leva 3–6 s. O mínimo no QR é 3 s: o `fast` (1–2 s) saiu por risco de banimento.
 
 **O intervalo conta da entrega, não da reserva.** Depois que o provider aceita a mensagem,
 `SendPacer.delivered` empurra `wa:next` para *agora + novo sorteio do perfil* (ex.: `moderate`
-3000–5000 ms) e `wa:cnext` para *agora + intervalo da conversa* (só para a frente). Antes, a
+3000–6000 ms) e `wa:cnext` para *agora + intervalo da conversa* (só para a frente). Antes, a
 vaga era medida do horário reservado: num fluxo, as mensagens entram juntas e a 2ª só é
 processada quando a 1ª termina (ordem por conversa) — se a 1ª era uma mídia que levou 6 s para
 subir, a vaga da 2ª já tinha passado e ela saía colada. Vale para fluxo, campanha, boas-vindas,
@@ -96,7 +96,7 @@ lembrete e chat (todos passam pelo mesmo worker).
 **Atraso do Conteúdo é piso.** O "esperar X s antes desta mensagem" do bloco Conteúdo (e das
 boas-vindas/faixa) continua agendando o envio X s depois, e agora também vai no job
 (`OutboundJob.minGapMs`): a mensagem só sai X s depois da **entrega** da anterior da conversa.
-Com o ritmo do número, vale o **maior** dos dois (não somam): Conteúdo 2 s + `moderate` → 3–5 s;
+Com o ritmo do número, vale o **maior** dos dois (não somam): Conteúdo 2 s + `moderate` → 3–6 s;
 Conteúdo 10 s + `moderate` → 10 s. O bloco **Esperar** (minutos/horas) segue como antes — é
 muito maior que qualquer perfil.
 

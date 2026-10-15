@@ -179,4 +179,6 @@ Na lista de conversas, o botão com ícone de duas pessoas (ao lado de *Aguardan
 Encerrado*) liga o modo agrupado: uma seção recolhível por atendente responsável (com
 quantidade e não lidas), em ordem alfabética, e **Sem atendente · Fila** por último. Dentro de
 cada seção a ordem é a da lista (o agrupamento separa, não reordena). Desligado, volta à lista
-cronológica. A preferência e as seções recolhidas ficam salvas no navegador.
+cronológica. **Vem ligado por padrão** (inclusive para quem já usava o painel: a versão 1 do
+`atendo-ui` liga uma vez; depois vale a escolha da pessoa). A preferência e as seções recolhidas
+ficam salvas no navegador.
