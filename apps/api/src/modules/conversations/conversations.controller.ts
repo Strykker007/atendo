@@ -300,7 +300,7 @@ export class ConversationsController {
   }
 
   @Get(':id/messages')
-  messages(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('cursor') cursor?: string, @Query('after') after?: string, @Query('until') until?: string) {
+  async messages(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('cursor') cursor?: string, @Query('after') after?: string, @Query('until') until?: string) {
     // `until` (e `after`): um atendimento só — auditoria a partir do relatório
     if (until) {
       const fim = new Date(until);
