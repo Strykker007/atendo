@@ -34,7 +34,7 @@ Na **lista de conversas**, o selo **💰 Pago** marca a conversa com pagamento c
 
 ## Página pública `/o/:hash`
 
-Sem login — o `hash` (128 bits aleatórios, base64url de 22 caracteres) é a credencial. Mobile-first, com a logo/cores da marca do domínio e o nome fantasia do cliente.
+Sem login — o `hash` (128 bits aleatórios, base64url de 22 caracteres) é a credencial. Mobile-first, com as cores da marca do domínio, a **logo da empresa** (Configurações → Empresa → Páginas para o cliente; sem ela, a marca do painel — ver [Foto protegida](foto-protegida.md#configuração)) e o nome fantasia do cliente.
 
 - Mostra itens, dosagens, total, validade, observação e o primeiro nome do contato/atendente. Nada além disso do contato.
 - **Pendente:** cartão Pix com **Copiar chave Pix** e/ou botão **Pagar agora** (link externo).

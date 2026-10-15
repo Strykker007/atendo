@@ -38,8 +38,9 @@ export const useSecureMedia = (conversationId: string | null, enabled = true) =>
 export const useCreateSecureMedia = () => {
   const qc = useQueryClient();
   return useMutation({
+    // `linkBase`: o link sai no domínio aberto agora; a API devolve em `text` a frase da empresa pronta
     mutationFn: ({ conversationId, ...body }: { conversationId: string; mediaKey: string; mimeType: string; fileName?: string; caption?: string; validHours: number }) =>
-      api<SecureMediaItem>(`/conversations/${conversationId}/secure-media`, { method: 'POST', body: JSON.stringify(body) }),
+      api<SecureMediaItem & { text: string }>(`/conversations/${conversationId}/secure-media`, { method: 'POST', body: JSON.stringify({ ...body, linkBase: window.location.origin }) }),
     onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ['secure-media', v.conversationId] }),
   });
 };

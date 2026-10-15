@@ -48,6 +48,8 @@ export const budgetTotal = (items: Pick<BudgetItem, 'quantity' | 'unitPrice'>[])
 /** O que a página pública recebe — nada do contato além do primeiro nome. */
 export interface PublicBudget {
   tenantName: string;
+  /** logo da empresa (Configurações → Páginas públicas), URL assinada curta; null = a marca do painel */
+  logoUrl: string | null;
   contactFirstName: string | null;
   agentName: string;
   items: BudgetItem[];

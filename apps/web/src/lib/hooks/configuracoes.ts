@@ -23,10 +23,14 @@ export interface TenantSettings {
   /** nome dos resultados do encerramento na empresa — use `useOutcomeLabels` */
   wonLabel: string; lostLabel: string;
   welcomeMessages: WelcomeMessage[]; welcomeMode: WelcomeMode; welcomeEnabled: boolean;
+  /** frase da foto protegida (null = a padrão, `SECURE_MEDIA_TEXT_DEFAULT`) */
+  secureMediaText: string | null;
+  /** logo das páginas públicas (foto protegida, orçamento): chave e URL assinada; null = marca do painel */
+  publicLogoKey: string | null; publicLogoUrl: string | null;
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

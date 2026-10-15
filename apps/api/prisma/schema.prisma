@@ -367,6 +367,12 @@ model TenantSettings {
   /// rótulo muda: por baixo continuam `won`/`lost` (relatórios, vendas, fluxos e filtros)
   wonLabel  String @default("Comprou")
   lostLabel String @default("Não comprou")
+  /// Frase da foto protegida (docs/foto-protegida.md) com {{link}}, {{validade}} e {{primeiro_nome}}.
+  /// Null = a padrão (`SECURE_MEDIA_TEXT_DEFAULT`)
+  secureMediaText String?
+  /// Logo da empresa nas páginas públicas (foto protegida e orçamento), chave no storage.
+  /// Null = a marca do painel (VogoChat)
+  publicLogoKey String?
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)

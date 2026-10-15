@@ -1,9 +1,9 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min } from 'class-validator';
 import { randomBytes } from 'node:crypto';
 import type { SecureMedia } from '@prisma/client';
-import { SECURE_MEDIA_DEFAULT_HOURS, SECURE_MEDIA_MAX_HOURS, SECURE_MEDIA_MIMES, type PublicSecureMedia, type SecureMediaStatus } from '@atendo/shared';
+import { SECURE_MEDIA_DEFAULT_HOURS, SECURE_MEDIA_MAX_HOURS, SECURE_MEDIA_MIMES, secureMediaMessage, type PublicSecureMedia, type SecureMediaStatus } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuthModule } from '../auth/auth.module';
@@ -27,6 +27,11 @@ class CreateSecureMediaDto {
   /** vai só para a página — nunca para o WhatsApp */
   @IsOptional() @IsString() @MaxLength(1000) caption?: string;
   @IsOptional() @IsInt() @Min(1) @Max(SECURE_MEDIA_MAX_HOURS) validHours?: number;
+  /**
+   * Endereço do painel aberto agora (`window.location.origin`): o link sai no domínio da marca que
+   * o atendente usa, como no orçamento. A API monta a frase da empresa com ele.
+   */
+  @IsOptional() @IsUrl({ require_tld: false, protocols: ['http', 'https'], require_protocol: true }) @MaxLength(200) linkBase?: string;
 }
 
 const statusOf = (m: Pick<SecureMedia, 'expiresAt' | 'revokedAt'>): SecureMediaStatus =>
@@ -48,7 +53,7 @@ export class SecureMediaService {
     // a chave tem que ser de um arquivo deste cliente: sem isto, quem conhecesse a chave de
     // outro tenant publicaria o arquivo dele numa página aberta
     if (!dto.mediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('Arquivo inválido');
-    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId: u.tenantId }, select: { contactId: true } });
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId: u.tenantId }, select: { contactId: true, contact: { select: { name: true } } } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     const validHours = dto.validHours ?? SECURE_MEDIA_DEFAULT_HOURS;
     const m = await this.prisma.secureMedia.create({
@@ -67,7 +72,11 @@ export class SecureMediaService {
         expiresAt: new Date(Date.now() + validHours * 3_600_000),
       },
     });
-    return this.present(m);
+    // a frase da empresa (Configurações) ou a padrão — o painel envia este texto como está
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { secureMediaText: true } });
+    const link = `${(dto.linkBase ?? '').replace(/\/+$/, '')}/f/${m.hash}`;
+    const text = secureMediaMessage(link, validHours, conv.contact.name?.trim().split(/\s+/)[0] ?? null, s?.secureMediaText);
+    return { ...this.present(m), text };
   }
 
   async list(tenantId: string, conversationId: string) {
@@ -88,15 +97,17 @@ export class SecureMediaService {
     const m = HASH_RE.test(hash) ? await this.prisma.secureMedia.findUnique({ where: { hash } }) : null;
     if (!m) throw new NotFoundException('Link não encontrado');
     const status = statusOf(m);
-    const [tenant, contact] = await Promise.all([
+    const [tenant, contact, settings] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { id: m.tenantId }, select: { name: true } }),
       this.prisma.contact.findUnique({ where: { id: m.contactId }, select: { name: true } }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId: m.tenantId }, select: { publicLogoKey: true } }),
     ]);
     if (status === 'active') {
       await this.prisma.secureMedia.update({ where: { id: m.id }, data: { viewCount: { increment: 1 }, ...(!m.firstViewedAt && { firstViewedAt: new Date() }) } });
     }
     return {
       tenantName: tenant?.name ?? '',
+      logoUrl: settings?.publicLogoKey ? this.storage.signedUrl(settings.publicLogoKey, SIGNED_TTL_S) : null,
       contactFirstName: contact?.name?.trim().split(/\s+/)[0] || null,
       agentName: m.userName.trim().split(/\s+/)[0] ?? '',
       status,

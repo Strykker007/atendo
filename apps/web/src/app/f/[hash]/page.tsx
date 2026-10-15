@@ -29,7 +29,8 @@ export default function FotoProtegidaPage() {
   return (
     <main className="min-h-dvh bg-chat-bg text-ink">
       <div className="mx-auto w-full max-w-md px-4 py-6 space-y-4">
-        <header className="flex justify-center py-2"><MarcaHorizontal className="h-8" /></header>
+        {/* logo da empresa (Configurações → Páginas públicas); sem ela, a marca do painel */}
+        <header className="flex justify-center py-2">{q.isLoading ? <div className="h-12" /> : q.data?.logoUrl ? <img src={q.data.logoUrl} alt={q.data.tenantName} className="h-12 max-w-[220px] object-contain" /> : <MarcaHorizontal className="h-8" />}</header>
         {q.isLoading && <Cartao><p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={16} className="animate-spin" /> Carregando…</p></Cartao>}
         {q.error && <Cartao><p className="text-sm text-muted">{(q.error as Error).message}</p></Cartao>}
         {q.data && <Conteudo m={q.data} />}

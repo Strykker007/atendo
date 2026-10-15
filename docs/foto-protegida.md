@@ -20,12 +20,26 @@ Ao escolher, arrastar ou colar imagem, vídeo ou PDF, a **tela de prévia** (`Me
 - A escolha de marcar fica **lembrada no navegador** (`useUI.securePhotos`): a farmácia marca uma
   vez e as próximas fotos já saem protegidas; desmarca para foto sem risco.
 - A **legenda** vai só para a página, nunca para o WhatsApp (pode citar o remédio).
-- Ao enviar: `POST /conversations/:id/secure-media` guarda o link e o painel envia pelo caminho
-  normal do chat (quota, janela de 24h da Meta, `UsageService`, assinatura do atendente) o texto
-  `secureMediaMessage`:
+- Ao enviar: `POST /conversations/:id/secure-media` guarda o link e devolve em `text` a frase
+  pronta; o painel envia esse texto pelo caminho normal do chat (quota, janela de 24h da Meta,
+  `UsageService`, assinatura do atendente). Frase padrão (`SECURE_MEDIA_TEXT_DEFAULT`):
   > Olá Ana, a imagem está disponível neste link (válido por 1 dia): https://<domínio do painel>/f/<hash>
 
-  O domínio é o que o atendente está usando, então o link sai com a marca certa, como no orçamento.
+  O painel manda o próprio endereço (`linkBase`), então o link sai no domínio da marca que o
+  atendente usa, como no orçamento.
+
+## Configuração
+
+Em **Configurações → Empresa → Páginas para o cliente** (`settings.manage`):
+
+- **Frase da foto protegida** (`tenant_settings.secureMediaText`): com `{{link}}` (obrigatório — a
+  API recusa sem ele), `{{validade}}` ("1 dia", "4 horas") e `{{primeiro_nome}}` (sem nome, some
+  junto com o espaço antes). Vazio = a frase padrão. A tela mostra a prévia. Evitar citar o
+  conteúdo da foto: o texto é o que o WhatsApp lê.
+- **Logo da empresa** (`tenant_settings.publicLogoKey`, upload do painel; PNG, JPG ou WEBP até
+  2 MB): aparece no topo da **foto protegida** e do **orçamento** (`/o/:hash`), em URL assinada de
+  10 min (`logoUrl`). Sem logo, a marca do painel (VogoChat). SVG não é aceito (página aberta).
+  Migration `20261211000000_public_page_branding`.
 
 Na bolha da mensagem enviada, o **SecureMediaChip** mostra a foto (a equipe continua vendo
 depois de expirar), a situação (até quando vale / expirado / revogado), quantas vezes o contato
@@ -36,6 +50,7 @@ pessoa errada).
 
 Sem login: o `hash` (128 bits aleatórios, base64url de 22 caracteres) é a credencial.
 
+- Topo: logo da empresa (ou a marca do painel).
 - Ativa: imagem (ou vídeo/PDF), legenda, "Disponível até …", nome do atendente e da empresa.
   A mídia vem em URL assinada de **10 minutos** (`SIGNED_TTL_S`) — copiar o endereço da imagem
   não vira um link permanente.
@@ -50,7 +65,7 @@ Sem login: o `hash` (128 bits aleatórios, base64url de 22 caracteres) é a cred
 | Método | Rota | O que faz |
 |---|---|---|
 | GET | `/conversations/:id/secure-media` | Links da conversa (até 100), com URL assinada para a equipe |
-| POST | `/conversations/:id/secure-media` | `{ mediaKey, mimeType, fileName?, caption?, validHours? (1–168, padrão 24) }` → link. `mediaKey` tem que ser do próprio cliente (`media/<tenant>/…`, o que o upload do painel devolve). Tipos: JPG, PNG, WEBP, GIF, HEIC, MP4, PDF. **Não envia nada** |
+| POST | `/conversations/:id/secure-media` | `{ mediaKey, mimeType, fileName?, caption?, validHours? (1–168, padrão 24), linkBase? }` → link + `text` (a frase da empresa pronta). `mediaKey` tem que ser do próprio cliente (`media/<tenant>/…`, o que o upload do painel devolve). Tipos: JPG, PNG, WEBP, GIF, HEIC, MP4, PDF. **Não envia nada** |
 | POST | `/conversations/:id/secure-media/:mediaId/revoke` | Tira do ar antes da validade |
 | GET | `/secure-media/public/:hash` | Página pública (`PublicSecureMedia`). Sem login |
 

@@ -23,6 +23,8 @@ export interface SettingsUpdate {
   welcomeMessages?: WelcomeMessage[];
   welcomeMode?: WelcomeMode;
   welcomeEnabled?: boolean;
+  secureMediaText?: string | null;
+  publicLogoKey?: string | null;
 }
 
 export const OUTCOME_LABELS_DEFAULT = { won: 'Comprou', lost: 'Não comprou' } as const;
@@ -37,7 +39,7 @@ export class TenantSettingsService {
   }
 
   async update(tenantId: string, dto: SettingsUpdate) {
-    const { welcomeMessages, wonLabel, lostLabel, rankingWeights, ...rest } = dto;
+    const { welcomeMessages, wonLabel, lostLabel, rankingWeights, secureMediaText, ...rest } = dto;
     const data: Prisma.TenantSettingsUncheckedUpdateInput = {
       ...rest,
       ...(welcomeMessages && { welcomeMessages: welcomeMessages as unknown as Prisma.InputJsonValue }),
@@ -46,6 +48,8 @@ export class TenantSettingsService {
       // apagar o nome volta ao padrão: resultado sem nome deixaria o botão do encerramento vazio
       ...(wonLabel !== undefined && { wonLabel: wonLabel.trim() || OUTCOME_LABELS_DEFAULT.won }),
       ...(lostLabel !== undefined && { lostLabel: lostLabel.trim() || OUTCOME_LABELS_DEFAULT.lost }),
+      // frase vazia = volta à padrão
+      ...(secureMediaText !== undefined && { secureMediaText: secureMediaText?.trim() || null }),
     };
     if (dto.attendanceActive !== undefined) {
       // cada vez que liga/desliga é um período novo da faixa Fechado (a resposta sai de novo)

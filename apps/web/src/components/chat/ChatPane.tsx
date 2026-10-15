@@ -26,8 +26,8 @@ import { BudgetModal } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
-import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, SECURE_MEDIA_DEFAULT_HOURS, SECURE_MEDIA_MIMES, SECURE_MEDIA_VALIDITY_HOURS, secureMediaMessage, secureMediaValidityLabel } from '@atendo/shared';
-import { useCreateSecureMedia, secureMediaLink } from '@/lib/hooks';
+import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, SECURE_MEDIA_DEFAULT_HOURS, SECURE_MEDIA_MIMES, SECURE_MEDIA_VALIDITY_HOURS, secureMediaValidityLabel } from '@atendo/shared';
+import { useCreateSecureMedia } from '@/lib/hooks';
 import { SecureMediaChip } from './SecureMediaChip';
 import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
@@ -271,9 +271,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
    * envia só o texto genérico com o link. A legenda vai para a página, nunca para o WhatsApp.
    */
   async function enviarProtegida(up: Pick<Upload, 'key' | 'mimeType' | 'fileName'>, caption: string, validHours: number, extra: { quotedExternalId?: string } = {}) {
+    // a frase vem pronta da API (a da empresa, em Configurações, ou a padrão)
     const sm = await criarProtegida.mutateAsync({ conversationId: conv!.id, mediaKey: up.key, mimeType: up.mimeType, fileName: up.fileName, caption: caption.trim() || undefined, validHours });
-    const primeiro = conv!.contact.name?.trim().split(/\s+/)[0] ?? null;
-    const aviso = assinar(secureMediaMessage(secureMediaLink(sm.hash), validHours, primeiro));
+    const aviso = assinar(sm.text);
     await send.mutateAsync({ type: 'text', text: aviso, ...extra, simulateTypingChars: aviso.length, idempotencyKey: crypto.randomUUID() });
   }
 

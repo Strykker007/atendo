@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { type ScheduleConfig, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
+import { StorageService } from '../../common/storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -46,6 +47,10 @@ class SettingsDto {
   @IsOptional() @IsArray() @ArrayMaxSize(20) welcomeMessages?: WelcomeMessage[];
   @IsOptional() @IsIn(['random', 'sequential']) welcomeMode?: WelcomeMode;
   @IsOptional() @IsBoolean() welcomeEnabled?: boolean;
+  /** frase da foto protegida, com {{link}} obrigatório; vazio/null = a padrão */
+  @IsOptional() @IsString() @MaxLength(500) secureMediaText?: string | null;
+  /** logo das páginas públicas: chave do upload do painel; null = a marca do painel */
+  @IsOptional() @IsString() @MaxLength(300) publicLogoKey?: string | null;
 }
 class ScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(60) name?: string;
@@ -72,18 +77,23 @@ export class TenantSettingsController {
   constructor(
     private readonly settings: TenantSettingsService,
     private readonly schedules: SchedulesService,
+    private readonly storage: StorageService,
   ) {}
 
   @Get()
   async get(@CurrentUser() u: AuthUser) {
     const [s, now] = await Promise.all([this.settings.get(u.tenantId), this.schedules.now(u.tenantId)]);
-    return { ...s, isOpenNow: now.open, currentBand: now.band.name, nextOpenLabel: now.nextOpenLabel };
+    return { ...s, publicLogoUrl: s.publicLogoKey ? this.storage.signedUrl(s.publicLogoKey) : null, isOpenNow: now.open, currentBand: now.band.name, nextOpenLabel: now.nextOpenLabel };
   }
 
   @Patch()
   @RequirePermission('settings.manage')
   update(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     if (dto.timezone && !isTimezone(dto.timezone)) throw new BadRequestException('Fuso horário inválido.');
+    // sem {{link}} o contato receberia a frase e nenhum jeito de abrir a foto
+    if (dto.secureMediaText?.trim() && !/\{\{\s*link\s*\}\}/.test(dto.secureMediaText)) throw new BadRequestException('A frase da foto protegida precisa ter {{link}}.');
+    // a logo vai numa página aberta: só arquivo deste cliente
+    if (dto.publicLogoKey && !dto.publicLogoKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('Imagem inválida.');
     if (dto.welcomeMessages) {
       const errors = dto.welcomeMessages.flatMap((w, i) => {
         if (!w || typeof w.id !== 'string' || !Array.isArray(w.items) || !w.items.length) return [`Boas-vindas ${i + 1}: adicione ao menos uma mensagem.`];

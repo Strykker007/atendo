@@ -15,6 +15,8 @@ export type SecureMediaStatus = 'active' | 'expired' | 'revoked';
 /** O que a página pública `/f/:hash` recebe. Expirado/revogado não traz a mídia. */
 export interface PublicSecureMedia {
   tenantName: string;
+  /** logo da empresa (Configurações → Páginas públicas), URL assinada curta; null = a marca do painel */
+  logoUrl: string | null;
   contactFirstName: string | null;
   agentName: string;
   status: SecureMediaStatus;
@@ -24,7 +26,25 @@ export interface PublicSecureMedia {
   media: { url: string; mimeType: string; fileName: string | null } | null;
 }
 
-/** Texto que vai pelo WhatsApp: genérico de propósito — nada do conteúdo da foto. */
-export function secureMediaMessage(link: string, hours: number, contactFirstName?: string | null) {
-  return `${contactFirstName ? `Olá ${contactFirstName}, ` : 'Olá, '}a imagem está disponível neste link (válido por ${secureMediaValidityLabel(hours)}): ${link}`;
+/**
+ * Frase padrão que vai pelo WhatsApp: genérica de propósito — nada do conteúdo da foto. A empresa
+ * troca em Configurações (`tenant_settings.secureMediaText`), com as mesmas variáveis.
+ */
+export const SECURE_MEDIA_TEXT_DEFAULT = 'Olá {{primeiro_nome}}, a imagem está disponível neste link (válido por {{validade}}): {{link}}';
+export const SECURE_MEDIA_TEXT_VARS = ['link', 'validade', 'primeiro_nome'] as const;
+
+/**
+ * Monta a frase. `{{link}}` é obrigatório na frase da empresa (a API recusa sem ele); se mesmo
+ * assim faltar, o link vai no fim — mandar a mensagem sem o link seria pior. Sem nome do contato,
+ * "Olá {{primeiro_nome}}," vira "Olá,".
+ */
+export function secureMediaMessage(link: string, hours: number, contactFirstName?: string | null, template?: string | null) {
+  const base = template?.trim() || SECURE_MEDIA_TEXT_DEFAULT;
+  const nome = contactFirstName?.trim() || '';
+  let texto = base
+    .replace(/\{\{\s*validade\s*\}\}/g, secureMediaValidityLabel(hours))
+    .replace(/\s*\{\{\s*primeiro_nome\s*\}\}/g, nome ? ` ${nome}` : '')
+    .replace(/^\s+/, '');
+  texto = /\{\{\s*link\s*\}\}/.test(texto) ? texto.replace(/\{\{\s*link\s*\}\}/g, link) : `${texto} ${link}`;
+  return texto;
 }

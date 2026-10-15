@@ -412,14 +412,17 @@ export class BudgetsService {
   async publicView(hash: string): Promise<PublicBudget> {
     const b = await this.findByHash(hash);
     const status = await this.expireIfDue(b);
-    const [tenant, contact, agent] = await Promise.all([
+    const [tenant, contact, agent, settings] = await Promise.all([
       this.prisma.tenant.findUnique({ where: { id: b.tenantId }, select: { name: true } }),
       this.prisma.contact.findUnique({ where: { id: b.contactId }, select: { name: true } }),
       this.prisma.user.findUnique({ where: { id: b.userId }, select: { name: true } }),
+      // logo da empresa no topo da página (Configurações → Páginas públicas); sem ela, a marca do painel
+      this.prisma.tenantSettings.findUnique({ where: { tenantId: b.tenantId }, select: { publicLogoKey: true } }),
     ]);
     const payable = status === 'PENDING';
     return {
       tenantName: tenant?.name ?? '',
+      logoUrl: settings?.publicLogoKey ? this.storage.signedUrl(settings.publicLogoKey, 600) : null,
       contactFirstName: contact?.name?.trim().split(/\s+/)[0] || null,
       agentName: agent?.name?.trim().split(/\s+/)[0] ?? '',
       items: b.items as unknown as BudgetItem[],
