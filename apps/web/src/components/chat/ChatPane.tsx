@@ -26,7 +26,9 @@ import { BudgetModal } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
-import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS } from '@atendo/shared';
+import { MESSAGE_EDIT_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, SECURE_MEDIA_DEFAULT_HOURS, SECURE_MEDIA_MIMES, SECURE_MEDIA_VALIDITY_HOURS, secureMediaMessage, secureMediaValidityLabel } from '@atendo/shared';
+import { useCreateSecureMedia, secureMediaLink } from '@/lib/hooks';
+import { SecureMediaChip } from './SecureMediaChip';
 import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
@@ -158,6 +160,15 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   useEffect(() => { digitados.current = 0; }, [conversationId]);
   const [attachment, setAttachment] = useState<Upload | null>(null);
   const [uploading, setUploading] = useState(false);
+  // foto protegida (docs/foto-protegida.md): a mídia vai por link com validade, não pelo WhatsApp.
+  // A escolha fica lembrada; a validade volta ao padrão (1 dia) a cada anexo
+  const protegidaLigada = useUI((s) => s.securePhotos);
+  const setProtegida = useUI((s) => s.setSecurePhotos);
+  const [validade, setValidade] = useState<number>(SECURE_MEDIA_DEFAULT_HOURS);
+  useEffect(() => { setValidade(SECURE_MEDIA_DEFAULT_HOURS); }, [attachment?.key]);
+  const criarProtegida = useCreateSecureMedia();
+  const podeProteger = !!attachment && (SECURE_MEDIA_MIMES as readonly string[]).includes(attachment.mimeType);
+  const protegida = podeProteger && protegidaLigada;
   // arquivo escolhido ainda NÃO enviado: fica na prévia até a pessoa confirmar
   const [previa, setPrevia] = useState<File | null>(null);
   // imagens e vídeos desta conversa, na ordem em que aparecem: as setas do visualizador andam por eles
@@ -500,7 +511,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       return;
     }
     const t = assinar(text);
-    if ((!t && !attachment) || send.isPending) return;
+    if ((!t && !attachment) || send.isPending || criarProtegida.isPending) return;
     const att = attachment;
     // sobre o texto do campo, não o assinado: a assinatura (*Nome:*) não conta como "não digitado"
     const naoDigitado = Math.max(0, text.trim().length - digitados.current);
@@ -513,7 +524,13 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     try {
       // citação segue o id do provider: é ele que o WhatsApp entende do outro lado
       const citando = respondendo?.externalId ? { quotedExternalId: respondendo.externalId } : {};
-      if (att) {
+      if (att && protegida) {
+        // a legenda vai só para a página; pelo WhatsApp sai um texto genérico com o link
+        const sm = await criarProtegida.mutateAsync({ conversationId: conv!.id, mediaKey: att.key, mimeType: att.mimeType, fileName: att.fileName, caption: text.trim() || undefined, validHours: validade });
+        const primeiro = conv!.contact.name?.trim().split(/\s+/)[0] ?? null;
+        const aviso = assinar(secureMediaMessage(secureMediaLink(sm.hash), validade, primeiro));
+        await send.mutateAsync({ type: 'text', text: aviso, ...citando, simulateTypingChars: aviso.length, idempotencyKey });
+      } else if (att) {
         await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando, ...simular, idempotencyKey });
       } else {
         await send.mutateAsync({ type: 'text', text: t, ...citando, ...simular, idempotencyKey });
@@ -817,7 +834,23 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               {attachment.mimeType.startsWith('image/') ? <img src={attachment.url} alt="" className="w-12 h-12 rounded object-cover" /> : <FileText size={20} className="text-muted" />}
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{attachment.fileName}</div>
-                <div className="text-xs text-faint">{(attachment.size / 1024).toFixed(0)} KB · legenda opcional abaixo</div>
+                <div className="text-xs text-faint">{(attachment.size / 1024).toFixed(0)} KB · {protegida ? 'a legenda aparece só na página do link' : 'legenda opcional abaixo'}</div>
+                {podeProteger && (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-ink cursor-pointer" title="A foto não vai pelo WhatsApp: o contato recebe um link que expira. Use para foto de remédio, receita ou documento.">
+                      <input type="checkbox" checked={protegida} onChange={(e) => setProtegida(e.target.checked)} className="accent-accent" />
+                      <Lock size={12} className={protegida ? 'text-accent' : 'text-faint'} /> Enviar como link protegido
+                    </label>
+                    {protegida && (
+                      <label className="inline-flex items-center gap-1 text-xs text-muted">
+                        válido por
+                        <select value={validade} onChange={(e) => setValidade(Number(e.target.value))} className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-xs text-ink">
+                          {[...SECURE_MEDIA_VALIDITY_HOURS].sort((a, b) => a - b).map((h) => <option key={h} value={h}>{secureMediaValidityLabel(h)}</option>)}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
               </div>
               <button type="button" onClick={() => setAttachment(null)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
@@ -974,6 +1007,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
           <>
             <MediaBody m={m} onVerMidia={onVerMidia} />
             {m.text && <p className="whitespace-pre-wrap break-words">{out ? <TextoAssinado texto={m.text} /> : m.text}</p>}
+            {out && m.type === 'text' && <SecureMediaChip conversationId={m.conversationId} text={m.text} onVerMidia={onVerMidia} />}
           </>
         )}
         <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>

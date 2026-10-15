@@ -91,6 +91,7 @@ model Tenant {
   surveyResponses     SurveyResponse[]
   salesGoals          SalesGoal[]
   budgets             Budget[]
+  secureMedia         SecureMedia[]
   paymentGateway      PaymentGateway?
   @@map("tenants")
 }
@@ -895,6 +896,7 @@ model Conversation {
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
   scheduledMessages ScheduledMessage[]
   budgets           Budget[]
+  secureMedia       SecureMedia[]
   surveyResponses   SurveyResponse[]
   @@unique([numberId, contactId])
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
@@ -2140,4 +2142,37 @@ model PaymentGateway {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("payment_gateways")
+}
+
+/// Foto protegida (docs/foto-protegida.md): a imagem fica numa página com validade (`/f/:hash`)
+/// e pelo WhatsApp vai só um texto genérico com o link — foto de remédio/receita não trafega
+/// como mídia na conversa.
+model SecureMedia {
+  id             String       @id @default(uuid())
+  tenantId       String
+  conversationId String
+  contactId      String
+  /// atendente que gerou (sem FK: o registro sobrevive à remoção do usuário)
+  userId         String
+  userName       String
+  /// 128 bits aleatórios em base64url — é a credencial da página pública
+  hash           String       @unique
+  mediaKey       String
+  mediaMime      String
+  mediaName      String?
+  /// legenda: vai só na página, nunca no WhatsApp
+  caption        String?
+  validHours     Int
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  revokedById    String?
+  firstViewedAt  DateTime?
+  viewCount      Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("secure_media")
 }

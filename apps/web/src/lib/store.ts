@@ -39,6 +39,9 @@ interface UIState {
   setAssignee: (id: string | null) => void;
   setConversation: (id: string | null) => void;
   setSoundMuted: (muted: boolean) => void;
+  /** foto protegida marcada no anexo (docs/foto-protegida.md): lembra a última escolha do atendente */
+  securePhotos: boolean;
+  setSecurePhotos: (on: boolean) => void;
   setCloseFilter: (f: { outcome: 'won' | 'lost' | null; reasonId: string | null }) => void;
 }
 
@@ -57,6 +60,7 @@ export const useUI = create<UIState>()(
       assigneeId: null,
       conversationId: null,
       soundMuted: false,
+      securePhotos: false,
       closeFilter: { outcome: null, reasonId: null },
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
@@ -70,9 +74,10 @@ export const useUI = create<UIState>()(
       setAssignee: (assigneeId) => set({ assigneeId }),
       setConversation: (conversationId) => set({ conversationId }),
       setSoundMuted: (soundMuted) => set({ soundMuted }),
+      setSecurePhotos: (securePhotos) => set({ securePhotos }),
       setCloseFilter: (closeFilter) => set({ closeFilter }),
     }),
     // `status` não é lembrado: a tela de conversas abre sempre em 'Aguardando' (a fila nova)
-    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, soundMuted: s.soundMuted }) },
+    { name: 'atendo-ui', partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, soundMuted: s.soundMuted, securePhotos: s.securePhotos }) },
   ),
 );

@@ -185,6 +185,8 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 
 **budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`). Ver [Orçamentos](orcamentos.md).
 
+**secure_media** — foto protegida: mídia do chat atrás de um link com validade (`/f/:hash`, `hash` único, `mediaKey`, `caption` só na página, `validHours`, `expiresAt`, `revokedAt`, `viewCount`/`firstViewedAt`). Pelo WhatsApp vai só o texto com o link. Ver [Foto protegida](foto-protegida.md).
+
 **payment_gateways** — conta do Asaas da empresa para o Pix automático do orçamento (chave criptografada, `sandbox`, segredo e id do webhook, nome da conta). Uma por empresa. Ver [Orçamentos → Pix automático](orcamentos.md#pix-automático).
 
 **global_variables** — variáveis da empresa (`key` única por tenant, minúsculas/números/`_`; `label`; `value`). Entram no envio como `{{global.<key>}}` e `{{<key>}}`. Ver [Variáveis](variaveis.md).
