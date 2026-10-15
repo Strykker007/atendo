@@ -4,7 +4,7 @@ import { Trash2, Plus, X, ExternalLink, Lock, LockOpen } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META, DELAY_UNIT, FlowEditorRefs } from './nodes';
-import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, reasonsFor } from '@/lib/hooks';
+import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useSurveys, reasonsFor } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
 import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
@@ -65,6 +65,9 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
   const deptOptions = (current?: string) => (departments.data ?? []).filter((d) => d.isActive || d.id === current);
   const sched = useHasFeature('scheduling');
   const aiFeature = useHasFeature('ai_flows');
+  // pesquisa de satisfação ao encerrar pelo fluxo (docs/pesquisa-de-satisfacao.md)
+  const temPesquisa = useHasFeature('satisfaction_surveys').has;
+  const pesquisas = useSurveys(temPesquisa);
   const services = useServices();
   const pros = useProfessionals();
   const refs = useContext(FlowEditorRefs);
@@ -293,11 +296,21 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                       </select>
                     </Field>
                   )}
+                  {temPesquisa && (
+                    <Field label="Pesquisa de satisfação" hint="Enviada depois de encerrar, como no encerramento pelo painel. A conversa continua encerrada; a nota vai para o dono da conversa. Se não sair (sem pesquisa padrão, contato sem falar há mais de 24 h), a equipe recebe um aviso na conversa.">
+                      <select className={inputCls} value={d.surveyId ?? ''} onChange={(e) => set({ surveyId: e.target.value || undefined })}>
+                        <option value="">Não enviar</option>
+                        <option value="default">Pesquisa padrão da empresa{pesquisas.data?.some((p) => p.isDefault && p.isActive) ? '' : ' (nenhuma marcada como padrão)'}</option>
+                        {pesquisas.data?.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        {d.surveyId && d.surveyId !== 'default' && !pesquisas.data?.some((p) => p.id === d.surveyId && p.isActive) && <option value={d.surveyId}>Pesquisa desativada ou removida</option>}
+                      </select>
+                    </Field>
+                  )}
                   <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">
                     {oc
                       ? <>Conta nos relatórios, no ranking e nas metas em nome do <b>dono da conversa</b> (sem dono, só no total da empresa). Para registrar tags, use <b>Aplicar etiqueta</b> antes deste bloco.</>
                       : <>Encerra sem resultado: não entra em vendas, conversão nem ranking.</>}
-                    {' '}Não dispara fluxo de encerramento nem pesquisa. Depois disso, Atraso e tempo limite deste fluxo param — a conversa está encerrada.
+                    {' '}Não dispara fluxo de encerramento{d.surveyId ? '' : ' nem pesquisa'}. Depois disso, Atraso e tempo limite deste fluxo param — a conversa está encerrada.
                   </p>
                 </>
               );

@@ -108,6 +108,25 @@ pesquisa depois não reescreve notas que já entraram.
 No modal de encerramento, a opção **Enviar pesquisa de satisfação ao encerrar** vem marcada quando
 há pesquisa padrão; com mais de uma ativa, aparece o seletor.
 
+**Sem pesquisa marcada como padrão, nada sai sozinho**: o modal vem desmarcado e só envia se o
+atendente escolher. Para toda conversa receber, marque uma pesquisa como padrão em **Pesquisas**.
+
+## Disparo pelo fluxo
+
+O bloco **Ação → Encerrar conversa** (`set_status` + `closed`) tem o campo **Pesquisa de
+satisfação** (`surveyId`): *Não enviar* (padrão — fluxo antigo não passa a perguntar sozinho),
+*Pesquisa padrão da empresa* (`default`) ou uma pesquisa específica. Depois de encerrar, o motor
+chama o mesmo `SurveyRunnerService.sendOnClose` do painel: a conversa continua encerrada, a
+resposta não reabre e a nota vai para o **dono da conversa antes de encerrar**. Sem pesquisa padrão,
+fora do plano ou envio recusado, a equipe recebe uma nota na conversa (`warnTeam`) e o fluxo segue.
+
+## Quando não sai (contato frio)
+
+A pesquisa é envio **automático**. Como todo automático, é recusada se o contato **não escreve
+neste número há mais de 24 h** (proteção do número — [Envio](envio.md)); fica `failed` com o motivo
+e o encerramento segue normal. Na prática: encerrar um atendimento parado há mais de um dia não
+manda pesquisa.
+
 ## Relatório
 
 `GET /reports/satisfaction` — ver [07 — API](07-api.md). Base: pesquisas **enviadas** no período

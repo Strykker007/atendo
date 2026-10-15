@@ -217,6 +217,11 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
         warnings.push('O motivo de um "Encerrar conversa" foi removido — escolha o motivo no destino.');
         flagReconfig(d, 'motivo do encerramento');
       }
+      // pesquisa escolhida pelo id é do cliente de origem; "padrão da empresa" viaja como está
+      if (typeof d.surveyId === 'string' && d.surveyId !== 'default') {
+        d.surveyId = 'default';
+        warnings.push('A pesquisa de satisfação de um "Encerrar conversa" virou "Pesquisa padrão da empresa" — confira no destino.');
+      }
       // a URL do webhook costuma levar token na query: não sai do cliente
       if (typeof d.url === 'string' && d.url) {
         delete d.url;

@@ -241,6 +241,11 @@ export type ActionNode = FlowNodeBase<'action', {
    */ outcome?: 'won' | 'lost';
   /** set_status + closed: motivo de encerramento (lista `close_reasons`) */ closeReasonId?: string;
   /** set_status + closed + won: valor da venda; aceita {{variáveis}} ("R$ 1.234,56", "1234.56") */ saleValue?: string;
+  /**
+   * set_status + closed: pesquisa de satisfação depois de encerrar (docs/pesquisa-de-satisfacao.md).
+   * Ausente = não envia (fluxos antigos não passam a perguntar sozinhos); `default` = a padrão da
+   * empresa; id = essa pesquisa.
+   */ surveyId?: string;
   /** set_department: id do departamento ou `DEPARTMENT_NONE` (tirar de departamento) */ departmentId?: string;
   /** set_var */ varName?: string; value?: string;
   /** webhook */ url?: string; method?: WebhookMethod; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;

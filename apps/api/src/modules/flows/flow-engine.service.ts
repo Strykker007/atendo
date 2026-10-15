@@ -18,6 +18,7 @@ import { applyAssignments } from './variables';
 import { afterAiAnswer } from './ai-turns';
 import { onScheduleMiss } from './schedule-misses';
 import { AiService } from '../ai/ai.service';
+import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { isOpenAt } from '../tenants/business-hours';
 import { SchedulesService } from '../tenants/schedules.service';
@@ -92,7 +93,29 @@ export class FlowEngineService {
     private readonly schedules: SchedulesService,
     private readonly interpolation: InterpolationService,
     @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowJob>,
+    @Inject(forwardRef(() => SurveyRunnerService)) private readonly surveys: SurveyRunnerService,
   ) {}
+
+  /**
+   * Pesquisa de satisfação no encerramento pelo fluxo (docs/pesquisa-de-satisfacao.md). Mesmo envio
+   * do encerramento pelo painel: a conversa continua encerrada e a resposta não reabre. Não
+   * enviou (fora do plano, pesquisa desativada, sem padrão, contato frio) = aviso à equipe, e o
+   * fluxo segue — a conversa já está encerrada.
+   */
+  private async surveyAfterClose(run: FlowRun & { flow: { name: string } }, surveyId: string, agentId: string | null) {
+    try {
+      const survey = await this.surveys.resolve(run.tenantId, surveyId === 'default' ? undefined : surveyId);
+      if (!survey) {
+        await this.warnTeam(run, 'Encerrar conversa: a pesquisa de satisfação não saiu — não há pesquisa padrão ativa (ou o plano não inclui pesquisas).');
+        return;
+      }
+      const r = await this.surveys.sendOnClose(run.tenantId, run.conversationId, survey, agentId);
+      const final = r ? await this.prisma.surveyResponse.findUnique({ where: { id: r.id }, select: { status: true, error: true } }) : null;
+      if (final?.status === 'failed') await this.warnTeam(run, `Encerrar conversa: a pesquisa de satisfação não foi enviada${final.error ? ` (${final.error.slice(0, 160)})` : ''}.`);
+    } catch (err) {
+      await this.warnTeam(run, `Encerrar conversa: a pesquisa de satisfação não saiu (${err instanceof Error ? err.message : err}).`);
+    }
+  }
 
   // ---------- entrada ----------
 
@@ -872,8 +895,11 @@ export class FlowEngineService {
         break;
       case 'set_status': {
         if (!d.status) break;
+        // consultor da pesquisa: o dono ANTES de encerrar (como no encerramento pelo painel)
+        const dono = d.status === 'closed' && d.surveyId ? (await this.prisma.conversation.findUnique({ where: { id: run.conversationId }, select: { assigneeId: true } }))?.assigneeId ?? null : null;
         if (d.status !== 'closed' || !d.outcome) {
           await this.conversations.setStatusSystem(run.conversationId, d.status);
+          if (d.status === 'closed' && d.surveyId) await this.surveyAfterClose(run, d.surveyId, dono);
           break;
         }
         // encerrar com resultado: conta nos relatórios em nome do dono da conversa
@@ -885,6 +911,7 @@ export class FlowEngineService {
         }
         const avisos = await this.conversations.closeByFlow(run.conversationId, { outcome: d.outcome, value, closeReasonId: d.closeReasonId ?? null, flowName: run.flow.name });
         for (const a of avisos) await this.warnTeam(run, a);
+        if (d.surveyId) await this.surveyAfterClose(run, d.surveyId, dono);
         break;
       }
       case 'handoff':
