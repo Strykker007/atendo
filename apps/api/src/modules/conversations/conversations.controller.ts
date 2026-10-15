@@ -2,11 +2,12 @@ import { BadRequestException, ForbiddenException, NotFoundException, Unprocessab
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
-import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS } from './conversations.service';
+import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS, MESSAGES_PAGE } from './conversations.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { FlowEngineService } from '../flows/flow-engine.service';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { NumbersService } from '../whatsapp/numbers.service';
+import { HistorySyncService } from '../whatsapp/history-sync';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TemplateChoiceDto } from '../whatsapp/template.dto';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -197,7 +198,7 @@ class TypingDto {
 @Controller('conversations')
 @UseGuards(JwtAuthGuard, PermissionsGuard, ConversationScopeGuard)
 export class ConversationsController {
-  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService, private readonly numbers: NumbersService, private readonly surveys: SurveyRunnerService) {}
+  constructor(private readonly conversations: ConversationsService, private readonly flows: FlowEngineService, private readonly prisma: PrismaService, private readonly numbers: NumbersService, private readonly surveys: SurveyRunnerService, private readonly history: HistorySyncService) {}
 
   /** nome dos resultados na empresa (Configurações → Encerramento), para as mensagens de erro */
   private async outcomeLabels(tenantId: string) {
@@ -307,7 +308,12 @@ export class ConversationsController {
       if (Number.isNaN(fim.getTime()) || (ini && Number.isNaN(ini.getTime()))) throw new BadRequestException('Período inválido');
       return this.conversations.messagesInWindow(u.tenantId, id, ini, fim);
     }
-    return this.conversations.messages(u.tenantId, id, cursor);
+    const page = await this.conversations.messages(u.tenantId, id, cursor);
+    // chegou ao começo do que temos: completa a página com o histórico guardado no provider
+    // (docs/historico-de-mensagens.md). Rolar mais para cima continua de onde parou.
+    if (page.length >= MESSAGES_PAGE) return page;
+    const imported = await this.history.syncOlder(u.tenantId, id, MESSAGES_PAGE - page.length);
+    return imported ? this.conversations.messages(u.tenantId, id, cursor) : page;
   }
 
   /** Histórico do atendimento: quem assumiu, transferiu, encerrou e quando. */

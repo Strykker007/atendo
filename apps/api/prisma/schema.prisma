@@ -1125,6 +1125,9 @@ model Message {
   authorName     String?
   /// Nota interna (cadeado): só a equipe vê, nunca vai ao WhatsApp nem conta no uso
   internal       Boolean          @default(false)
+  /// Veio do histórico guardado no provider, anterior à conversa existir no painel
+  /// (docs/historico-de-mensagens.md). Não é tráfego: fora do uso e das métricas de atendimento.
+  imported       Boolean          @default(false)
   error          String?
   raw            Json?
   /// Ordem na fila de envio (docs/envio.md): numa conversa só sai a mensagem pendente de menor

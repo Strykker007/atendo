@@ -95,6 +95,9 @@ export const DELETE_NOTICE = {
   alreadySent: 'A mensagem saiu antes do cancelamento: ela chegou ao contato e foi apagada só no painel.',
 } as const;
 
+/** Mensagens por página no chat — igual a `PAGINA_MENSAGENS` do front (página menor = começo da conversa). */
+export const MESSAGES_PAGE = 50;
+
 @Injectable()
 export class ConversationsService {
   private readonly log = new Logger(ConversationsService.name);
@@ -351,7 +354,7 @@ export class ConversationsService {
     return rows.map((m) => this.present(m));
   }
 
-  async messages(tenantId: string, conversationId: string, cursor?: string, take = 50) {
+  async messages(tenantId: string, conversationId: string, cursor?: string, take = MESSAGES_PAGE) {
     const rows = await this.prisma.message.findMany({
       where: { conversationId, conversation: { tenantId } },
       // o horário vem do WhatsApp em segundos: no mesmo segundo, desempata pela ordem de chegada

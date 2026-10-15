@@ -242,7 +242,7 @@ class ReportsController {
                c.id as "contactId", c.name as "contactName", c.phone, e."actorId" as "userId", usr.name as "userName",
                case when e."actorId" is null then e."targetId" end as "ownerId", own.name as "ownerName",
                ini."startedAt",
-               (select count(*)::int from messages m where m."conversationId" = e."conversationId" and m."createdAt" <= e."createdAt" and (ini."startedAt" is null or m."createdAt" > ini."startedAt")) as messages
+               (select count(*)::int from messages m where m."conversationId" = e."conversationId" and not m.imported and m."createdAt" <= e."createdAt" and (ini."startedAt" is null or m."createdAt" > ini."startedAt")) as messages
         from pg
         join conversation_events e on e.id = pg.id
         join conversations cv on cv.id = e."conversationId" join contacts c on c.id = cv."contactId" left join users usr on usr.id = e."actorId"
@@ -603,8 +603,9 @@ class ReportsController {
     // com o join de tags uma linha vira várias: as contagens são por id distinto
     const metric = {
       conversations: Prisma.sql`count(distinct i.k)`,
-      messages_in: Prisma.sql`count(distinct m.id) filter (where m.direction = 'in')`,
-      messages_out: Prisma.sql`count(distinct m.id) filter (where m.direction = 'out' and not m.internal)`,
+      // importada do histórico do provider não é atendimento feito pelo painel
+      messages_in: Prisma.sql`count(distinct m.id) filter (where m.direction = 'in' and not m.imported)`,
+      messages_out: Prisma.sql`count(distinct m.id) filter (where m.direction = 'out' and not m.internal and not m.imported)`,
       avg_first_response_min: Prisma.sql`avg(extract(epoch from (fr.first_out - c."createdAt")) / 60)`,
       closed: Prisma.sql`count(distinct e.id)`,
       // por tag, a venda com duas tags entra nas duas barras (uma vez em cada) — é o esperado
@@ -661,7 +662,7 @@ class ReportsController {
     }
     if (d.metric === 'avg_first_response_min') {
       joins.push(Prisma.sql`left join lateral (
-        select min(mo."createdAt") as first_out from messages mo where mo."conversationId" = c.id and mo.direction = 'out'
+        select min(mo."createdAt") as first_out from messages mo where mo."conversationId" = c.id and mo.direction = 'out' and not mo.imported
       ) fr on true`);
     }
 
