@@ -63,6 +63,12 @@ motivos de perda, auditoria de atendimentos, detalhamento de vendas, ranking, sa
 relatório personalizado. Antes eles filtravam só pelo cliente, e qualquer empresa selecionada
 mostrava a soma de todas. O cache de relatório (`ReportLoadService`) leva o escopo na chave.
 
+**Números excluídos entram no relatório da empresa** (`common/reports/report-scope.ts`). O escopo
+das telas de operação tem só números ativos; relatório é histórico, e um número excluído continua
+vinculado à empresa com as conversas, vendas e fila que teve. Sem isso, a soma das empresas não
+batia com "Todas" (o histórico dos excluídos só aparecia lá). Quem é restrito a alguns números não
+ganha o histórico dos excluídos.
+
 - **Empresa selecionada:** a tela mostra só ela e o subtítulo diz qual.
 - **"Todas as empresas"** (quem opera mais de uma): soma tudo e mostra o quadro **Por empresa**
   (`GET /reports/companies`): atendimentos, encerrados, fila agora, 1ª resposta, vendas,

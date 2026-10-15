@@ -4,6 +4,7 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Ma
 import { Type } from 'class-transformer';
 import { z } from 'zod';
 import { SURVEY_EXTRA_QUESTIONS_MAX, SURVEY_SATISFIED_FROM, SURVEY_SCALE_MAX, SURVEY_SCALES, type SurveyScale } from '@atendo/shared';
+import { reportScope } from '../../common/reports/report-scope';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -225,7 +226,7 @@ class SatisfactionReportController {
     assertReportRange(from, to);
     // cache curto: 30 s, porque a lista de feedbacks é o que a pessoa fica olhando chegar
     // empresa selecionada no painel (e números da pessoa): só respostas das conversas desses números
-    const nums = u.numberIds?.length ? [...u.numberIds].sort() : undefined;
+    const nums = await reportScope(this.prisma, u);
     return this.load.cached(ReportLoadService.key(u.tenantId, 'satisfaction', { ...f, from, to, nums: nums?.join(',') }), () => this.data(u.tenantId, f, from, to, nums), 30);
   }
 

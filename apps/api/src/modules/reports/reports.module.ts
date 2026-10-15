@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { NO_NUMBER } from '../auth/company-scope';
+import { reportScope } from '../../common/reports/report-scope';
 import { ReportLoadService, assertReportRange } from '../../common/reports/report-load.service';
 import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
@@ -50,11 +51,10 @@ type KpisDoEscopo = { conversations: number; closed: number; waitingNow: number;
 type Filtro = { tagIds?: string[]; agentId?: string; numberIds?: string[] };
 
 /**
- * Escopo do relatório: a empresa selecionada no painel (header `x-company-id`) já chega como os
- * números dela em `numberIds` (company-scope.ts), junto com a restrição de números da pessoa.
- * Sem isto o relatório somava todas as empresas do cliente, com qualquer empresa selecionada.
+ * Escopo do relatório: a empresa selecionada no painel (header `x-company-id`) mais a restrição de
+ * números da pessoa, com os números excluídos da empresa (`reportScope`). Sem isto o relatório
+ * somava todas as empresas do cliente, com qualquer empresa selecionada.
  */
-const escopoDe = (u: AuthUser) => (u.numberIds?.length ? [...u.numberIds].sort() : undefined);
 /** a coluna (id de conversa) é de uma conversa dos números do escopo */
 const conversaNoEscopo = (col: Prisma.Sql, numberIds: string[]) => Prisma.sql`${col} in (select cs.id from conversations cs where cs."numberId" in (${Prisma.join(numberIds)}))`;
 
@@ -122,7 +122,7 @@ class ReportsController {
   async run(@CurrentUser() u: AuthUser, @Body() body: unknown) {
     const def = ReportDefinition.parse(body);
     assertReportRange(def.from, def.to);
-    const nums = escopoDe(u);
+    const nums = await reportScope(this.prisma, u);
     const series = await this.load.cached(ReportLoadService.key(u.tenantId, 'run', { d: JSON.stringify(def), nums: nums?.join(',') }), () => this.load.run(() => this.query(u.tenantId, def, nums)));
     return { definition: def, series };
   }
@@ -140,7 +140,7 @@ class ReportsController {
     const f = OverviewQuery.parse(q);
     const to = f.to ?? new Date(Date.now() + 86_400_000);
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
-    const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId, numberIds: escopoDe(u) };
+    const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId, numberIds: await reportScope(this.prisma, u) };
     assertReportRange(from, to);
     return this.load.cached(ReportLoadService.key(u.tenantId, 'overview', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId, nums: filtro.numberIds?.join(',') }), () => this.overviewData(u.tenantId, from, to, filtro));
   }
@@ -230,7 +230,7 @@ class ReportsController {
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
     assertReportRange(from, to);
     const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId };
-    const nums = escopoDe(u);
+    const nums = await reportScope(this.prisma, u);
     return this.load.cached(
       ReportLoadService.key(u.tenantId, 'companies', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId, nums: nums?.join(','), cos: u.companyIds?.join(',') }),
       async () => {
@@ -312,7 +312,7 @@ class ReportsController {
     if (f.closeReasonId) conds.push(Prisma.sql`e."closeReasonId" = ${f.closeReasonId}`);
     if (f.reason) conds.push(Prisma.sql`e."closeReasonId" is null and trim(regexp_replace(coalesce(e.reason, ''), '(\\s*·\\s*)?encerrado em massa$', '')) = ${f.reason}`);
     if (f.userId) conds.push(doConsultor(f.userId));
-    const nums = escopoDe(u);
+    const nums = await reportScope(this.prisma, u);
     if (nums) conds.push(Prisma.sql`cv."numberId" in (${Prisma.join(nums)})`);
     if (f.search) {
       const ors = [Prisma.sql`c.name ilike ${like(f.search)}`];
@@ -411,7 +411,7 @@ class ReportsController {
     if (f.contactId) conds.push(Prisma.sql`s."contactId" = ${f.contactId}`);
     if (f.phone && digits(f.phone)) conds.push(Prisma.sql`c.phone like ${like(digits(f.phone))}`);
     if (f.customerName) conds.push(Prisma.sql`c.name ilike ${like(f.customerName)}`);
-    const nums = escopoDe(u);
+    const nums = await reportScope(this.prisma, u);
     if (nums) conds.push(conversaNoEscopo(Prisma.sql`s."conversationId"`, nums));
     if (f.search) {
       const ors = [Prisma.sql`c.name ilike ${like(f.search)}`, produtoCasa(f.search)];
@@ -481,7 +481,7 @@ class ReportsController {
     // pesos entram na chave do cache: mudou o peso, a próxima leitura já reordena
     const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { rankingWeights: true } });
     const weights = normalizeRankingWeights(s?.rankingWeights);
-    const nums = escopoDe(u);
+    const nums = await reportScope(this.prisma, u);
     return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(','), w: JSON.stringify(weights), nums: nums?.join(',') }), () => this.rankingData(u.tenantId, from, to, f.tagIds, weights, nums));
   }
 
