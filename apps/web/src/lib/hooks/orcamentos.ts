@@ -69,7 +69,7 @@ export const useSetBudgetStatus = () => {
   });
 };
 
-// ---- tela Orçamentos (docs/orcamentos.md#tela-orçamentos) ----
+// ---- Relatórios → Pagamentos (docs/orcamentos.md#relatório-de-pagamentos) ----
 export interface BudgetListRow extends Budget {
   conversationId: string;
   contact: { id: string; name: string | null; phone: string };

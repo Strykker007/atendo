@@ -11,7 +11,7 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
 import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useOutcomeLabels, useHasFeature, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
-import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp } from 'lucide-react';
+import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp, Wallet } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
 import { Attendances, type AttendanceFocus } from '@/components/reports/Attendances';
@@ -108,6 +108,7 @@ export default function RelatoriosPage() {
         action={
           <div className="flex flex-wrap gap-2">
             {temSatisfacao && <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>}
+            <Link href="/relatorios/pagamentos" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Wallet size={15} className="text-accent" /> Pagamentos</Link>
             {temRanking && <Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking e metas</Link>}
           </div>
         }

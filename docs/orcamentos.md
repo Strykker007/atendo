@@ -6,7 +6,7 @@ O atendente monta um orçamento/pedido no chat e o contato recebe **só um link*
 
 ## No chat
 
-Barra do campo de mensagem → ícone de recibo (**Gerar orçamento / pedido**). O modal tem duas abas:
+Atalho **Orçamento** na linha das abas acima do campo, ao lado de *Mensagem para o cliente* | *Nota interna* (aparece para todos; na conversa de outra pessoa, não). O link sempre entra no campo da **mensagem** — se estava na nota, o composer volta para a mensagem. O modal tem duas abas:
 
 - **Novo orçamento:** itens (nome, dosagem/apresentação, quantidade, valor unitário), chave Pix cadastrada (a primeira já vem escolhida) e/ou link de pagamento `https://`, validade (1h, 2h, 4h, 8h, **até o fim do dia** — padrão —, 24h ou 48h; ver [Vencimento](#vencimento)) e observação. Pelo menos uma forma de pagamento é obrigatória.
 - **Gerar link** salva o orçamento e **insere no campo** (não envia):
@@ -21,9 +21,9 @@ Não há permissão nem recurso de plano próprio: quem pode abrir a conversa po
 
 Em **Relatórios → Vendas**: o card **Faturamento por origem** divide o faturado do período em *Pix automático (Asaas)*, *Orçamento pago por fora* e *Informada no encerramento* (venda sem orçamento, ou o adicional além dele), com o % de cada; abaixo, **Estornos no período** (quantidade e valor, já fora do faturado). Faturado, ticket médio, conversão, meta e ranking usam a mesma régua de vendas ([Venda](#venda)).
 
-## Tela Orçamentos
+## Relatório de pagamentos
 
-Menu **Orçamentos** (`/orcamentos`), para todos: quem tem `conversations.view_all` vê a equipe e filtra por atendente; os demais veem só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas.
+**Relatórios → Pagamentos** (`/relatorios/pagamentos`, botão no topo de Relatórios; `reports.view`). Mora em Relatórios, não no menu: é acompanhamento — orçamento se cria no chat. Quem tem `conversations.view_all` vê a equipe e filtra por atendente; os demais veem só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas. Sem `reports.view`, o atendente acompanha os seus pelo atalho Orçamento → *Desta conversa*, pelo selo 💰 Pago e pela nota na conversa.
 
 - **Período** (hoje, 7 dias, este mês ou datas), **forma de pagamento** (Pix automático × por fora), **atendente**, **busca** por cliente/número.
 - **Cartões** com o total do período por situação — Pago (com a divisão Pix automático / por fora), Aguardando pagamento, Expirado, Estornado. Clicar filtra a tabela.
@@ -106,7 +106,7 @@ A chave Pix é **copiada** para o orçamento na geração: editar ou apagar a ch
 | POST | `/conversations/:id/budgets` | todos (escopo da conversa) | `{items: {name, dosage?, quantity, unitPrice}[] (1–50), pixKeyId?, paymentUrl? (https), note?, validity? (1h\|2h\|4h\|8h\|end_of_day\|24h\|48h; padrão end_of_day), validHours? (1–720), autoPix?, cpfCnpj?}`. Sem Pix e sem link = 400 (exceto `autoPix`). `autoPix` gera a cobrança no Asaas na hora; sem CPF/CNPJ (do body ou da ficha) = 400; `cpfCnpj` informado vai para a ficha |
 | PATCH | `/conversations/:id/budgets/:budgetId` | todos (escopo da conversa) | `{status: 'PAID' \| 'PENDING'}` — PAID cria a venda; PENDING desfaz só o pago por fora ainda não encerrado. Socket `budgets` |
 | POST | `/conversations/:id/budgets/:budgetId/refund` | `settings.manage` | Estorno (Asaas devolve no Pix automático) — ver [Venda](#venda) |
-| GET | `/budgets?from=&to=&status=&via=auto\|fora&userId=&search=&page=` | todos (os seus; `conversations.view_all` = equipe) | Tela Orçamentos: `{page, pageSize (30), total, totals{byStatus{STATUS:{count,value}}, paidByVia{asaas,manual}}, rows[…, conversationId, contact, paidAfterExpiry]}` — os totais ignoram o filtro de `status` |
+| GET | `/budgets?from=&to=&status=&via=auto\|fora&userId=&search=&page=` | `reports.view` (os seus; `conversations.view_all` = equipe) | Relatórios → Pagamentos: `{page, pageSize (30), total, totals{byStatus{STATUS:{count,value}}, paidByVia{asaas,manual}}, rows[…, conversationId, contact, paidAfterExpiry]}` — os totais ignoram o filtro de `status` |
 | GET | `/budgets/public/:hash` | público (30/min por IP) | `PublicBudget` (packages/shared) |
 | POST | `/budgets/public/:hash/receipt` | público (5/min por IP) | multipart `file`. Socket `budgets` |
 | POST | `/webhooks/pix/asaas/:gatewayId` | Asaas (header `asaas-access-token`) | Baixa automática. Sempre 200 |

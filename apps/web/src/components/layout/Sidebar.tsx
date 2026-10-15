@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, ReceiptText } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -37,8 +37,6 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   { href: '/tags', label: 'Tags', icon: Tags, need: 'tags.manage' },
   { href: '/transmissoes', label: 'Transmissões', icon: Send, need: 'campaigns.manage' },
   { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: 'settings.manage', feature: 'satisfaction_surveys' },
-  // cada um vê os seus; quem tem conversations.view_all vê a equipe (docs/orcamentos.md#tela-orçamentos)
-  { href: '/orcamentos', label: 'Orçamentos', icon: ReceiptText },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: 'reports.view' },
   { href: '/equipe', label: 'Equipe', icon: Users, need: 'team.manage' },
   { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: 'billing.manage' },

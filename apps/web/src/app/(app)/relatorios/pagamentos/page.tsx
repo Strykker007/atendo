@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, MessageSquare, Copy, FileText, Zap, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Search, MessageSquare, Copy, FileText, Zap, ChevronLeft, ChevronRight } from 'lucide-react';
 import { BUDGET_STATUS_LABEL, type BudgetStatus } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -12,8 +13,9 @@ import { budgetLink, useAgents, useAllBudgets, useCan, type BudgetListRow } from
 import { useUI } from '@/lib/store';
 
 /**
- * Orçamentos (docs/orcamentos.md#tela-orçamentos): onde a equipe confere o que foi pago, o que
- * espera pagamento, o que venceu e o que foi estornado — sem abrir conversa por conversa.
+ * Relatórios → Pagamentos (docs/orcamentos.md#relatório-de-pagamentos): onde a equipe confere o que
+ * foi pago, o que espera pagamento, o que venceu e o que foi estornado — sem abrir conversa por
+ * conversa. É acompanhamento, não onde se cria orçamento (isso é no chat), por isso mora em Relatórios.
  * Os cartões do topo são os totais do período (e filtram ao clicar).
  */
 
@@ -42,9 +44,10 @@ const STATUS_CLS: Record<BudgetStatus, string> = {
   REFUNDED: 'bg-danger-soft text-danger-ink',
 };
 
-export default function OrcamentosPage() {
+export default function PagamentosPage() {
   const router = useRouter();
   const { setConversation } = useUI();
+  const podeVer = useCan('reports.view');
   const verEquipe = useCan('conversations.view_all');
   const agents = useAgents();
   const [periodo, setPeriodo] = useState<(typeof PERIODOS)[number]['id'] | 'custom'>('hoje');
@@ -68,9 +71,14 @@ export default function OrcamentosPage() {
   const abrir = (r: BudgetListRow) => { setConversation(r.conversationId); router.push('/conversas'); };
   const copiar = (hash: string) => navigator.clipboard.writeText(budgetLink(hash)).then(() => toast.ok('Link copiado'), toast.err);
 
+  if (!podeVer) return <PageShell><p className="text-sm text-muted">Seu perfil de acesso não inclui relatórios.</p></PageShell>;
   return (
     <PageShell width="max-w-6xl">
-      <PageHeader title="Orçamentos" subtitle={verEquipe ? 'Pagos, aguardando, vencidos e estornados da equipe.' : 'Os orçamentos que você gerou.'} />
+      <PageHeader
+        title="Pagamentos"
+        subtitle={verEquipe ? 'Orçamentos pagos, aguardando, vencidos e estornados da equipe.' : 'Os orçamentos que você gerou: pagos, aguardando, vencidos e estornados.'}
+        action={<Link href="/relatorios" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink"><ArrowLeft size={15} /> Relatórios</Link>}
+      />
 
       <div className="flex flex-wrap items-center gap-2 mt-4">
         <div className="inline-flex rounded-lg border border-line p-0.5 text-[12.5px]">

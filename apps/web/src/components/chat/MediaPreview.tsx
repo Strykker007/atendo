@@ -28,12 +28,23 @@ export function MediaPreview({ file, onCancel, onConfirm, enviando }: {
   enviando?: boolean;
 }) {
   const [caption, setCaption] = useState('');
+  // a legenda tem que estar com o teclado: o `autoFocus` sozinho perdia o foco quando o seletor de
+  // arquivos do sistema fechava (o navegador devolve o foco a quem tinha antes) ou ao terminar de colar
+  const legendaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const focar = () => legendaRef.current?.focus({ preventScroll: true });
+    const t = setTimeout(focar, 50);
+    window.addEventListener('focus', focar, { once: true });
+    return () => { clearTimeout(t); window.removeEventListener('focus', focar); };
+  }, []);
   const url = useObjectUrl(file);
   const ehImagem = file.type.startsWith('image/');
   const ehVideo = file.type.startsWith('video/');
   const ehAudio = file.type.startsWith('audio/');
 
   const [desenhando, setDesenhando] = useState(false);
+  // saiu do desenho: volta para a legenda (o clique no lápis tinha levado o foco)
+  useEffect(() => { if (!desenhando) legendaRef.current?.focus({ preventScroll: true }); }, [desenhando]);
   const [cor, setCor] = useState(CORES[0]);
   const [espessura, setEspessura] = useState(ESPESSURAS[1]);
   const traçosRef = useRef<Traço[]>([]);
@@ -137,6 +148,7 @@ export function MediaPreview({ file, onCancel, onConfirm, enviando }: {
 
       <div className="bg-panel border-t border-line px-2.5 py-2 flex items-end gap-2">
         <textarea
+          ref={legendaRef}
           value={caption}
           onChange={(e) => setCaption(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), void confirmar())}

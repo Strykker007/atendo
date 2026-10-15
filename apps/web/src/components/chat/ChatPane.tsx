@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, ReceiptText, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
@@ -22,6 +22,7 @@ import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { ComposerBar } from './ComposerBar';
+import { BudgetModal } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
@@ -95,7 +96,22 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const [textoNota, setTextoNota] = useState('');
   useEffect(() => { setModoNota(false); setTextoNota(''); }, [conversationId]);
   const notaRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { if (modoNota) notaRef.current?.focus(); }, [modoNota]);
+  // alternar nota ⇄ mensagem não pode tirar a mão do teclado: o campo do modo novo já vem focado.
+  // Só na troca (não ao abrir a conversa); o campo do modo novo monta neste render, por isso o rAF
+  const notaAntes = useRef(modoNota);
+  useEffect(() => {
+    if (notaAntes.current === modoNota) return;
+    notaAntes.current = modoNota;
+    requestAnimationFrame(() => {
+      const el = modoNota ? notaRef.current : campoRef.current;
+      if (!el) return;
+      el.focus();
+      // cursor no fim do que já estava escrito, não no começo
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [modoNota]);
+  // orçamento (docs/orcamentos.md): atalho na linha das abas; o link entra no campo da MENSAGEM
+  const [orcando, setOrcando] = useState(false);
   // Alt+N liga/desliga. `code`, não `key`: no Mac Alt+N é tecla morta ("˜")
   useEffect(() => {
     if (!podeNota) return;
@@ -256,6 +272,14 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   // trocar de conversa recomeça: a próxima leva de mensagens é de outra pessoa
   // (a posição de rolagem é recomeçada no useLayoutEffect abaixo, que roda antes deste)
   useEffect(() => { setRespondendo(null); }, [conversationId]);
+  // anexo entrou no campo (documento, resposta rápida com mídia) ou a prévia fechou (enviou/cancelou):
+  // o campo da mensagem volta a ter o teclado — legenda ou próxima mensagem sem precisar clicar
+  useEffect(() => { if (attachment) requestAnimationFrame(() => campoRef.current?.focus()); }, [attachment]);
+  const tinhaPrevia = useRef(false);
+  useEffect(() => {
+    if (previa) { tinhaPrevia.current = true; return; }
+    if (tinhaPrevia.current) { tinhaPrevia.current = false; requestAnimationFrame(() => campoRef.current?.focus()); }
+  }, [previa]);
 
   /**
    * Abriu a conversa = leu. Dispara uma vez por conversa aberta; mensagem que chegar depois,
@@ -718,6 +742,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       )}
 
       {/* prévia do que vai ser enviado, sobre o chat — nada sobe antes de confirmar */}
+      {/* o link entra no campo da MENSAGEM (sai da nota, se estava nela) — o atendente revisa e envia */}
+      <BudgetModal open={orcando} onClose={() => setOrcando(false)} conversationId={conv.id} onInserir={(t) => { setModoNota(false); inserirNoTexto(t); }} />
       {previa && (
         <MediaPreview
           file={previa}
@@ -734,7 +760,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       {/* Composer */}
       {noteMode ? (
         <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5">
-          <AbasDoEnvio nota onNota={setModoNota} />
+          <AbasDoEnvio nota onNota={setModoNota} podeNota onOrcamento={!ownedByOther ? () => setOrcando(true) : undefined} />
           <div className="flex items-end gap-2">
             <textarea
               ref={notaRef}
@@ -784,7 +810,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         </div>
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
-          {podeNota && <AbasDoEnvio nota={false} onNota={setModoNota} />}
+          <AbasDoEnvio nota={false} onNota={setModoNota} podeNota={podeNota} onOrcamento={() => setOrcando(true)} />
           {contatoFrio && <ColdContactNotice numberId={conv.number.id} />}
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">
@@ -860,19 +886,27 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
  * Abas logo acima do campo: "Mensagem para o cliente" | "Nota interna". Antes a nota era um
  * ícone perdido na barra de atalhos e pouca gente achava — a aba deixa o modo sempre à vista.
  */
-function AbasDoEnvio({ nota, onNota }: { nota: boolean; onNota: (v: boolean) => void }) {
+function AbasDoEnvio({ nota, onNota, podeNota, onOrcamento }: { nota: boolean; onNota: (v: boolean) => void; podeNota: boolean; /** abre o orçamento (o link vai para o campo da mensagem) */ onOrcamento?: () => void }) {
   const aba = (ativa: boolean, cor: string) => cn(
     'inline-flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-1 text-[12px] font-semibold transition-colors',
     ativa ? cor : 'border-transparent text-muted hover:text-ink',
   );
   return (
     <div role="tablist" className="flex items-end gap-1 border-b border-line/70">
-      <button type="button" role="tab" aria-selected={!nota} onClick={() => onNota(false)} className={aba(!nota, 'border-accent text-accent-ink')}>
+      {/* mousedown sem default: clicar na aba não tira o foco do campo (o efeito foca o do modo novo) */}
+      <button type="button" role="tab" aria-selected={!nota} onMouseDown={(e) => e.preventDefault()} onClick={() => onNota(false)} className={aba(!nota, 'border-accent text-accent-ink')}>
         <Send size={12} /> Mensagem para o cliente
       </button>
-      <button type="button" role="tab" aria-selected={nota} onClick={() => onNota(true)} title="Só a equipe vê — nunca vai para o WhatsApp (Alt+N)" className={aba(nota, 'border-warn bg-warn/15 text-warn-ink')}>
-        <StickyNote size={12} /> Nota interna <Lock size={11} className={nota ? '' : 'text-faint'} />
-      </button>
+      {podeNota && (
+        <button type="button" role="tab" aria-selected={nota} onMouseDown={(e) => e.preventDefault()} onClick={() => onNota(true)} title="Só a equipe vê — nunca vai para o WhatsApp (Alt+N)" className={aba(nota, 'border-warn bg-warn/15 text-warn-ink')}>
+          <StickyNote size={12} /> Nota interna <Lock size={11} className={nota ? '' : 'text-faint'} />
+        </button>
+      )}
+      {onOrcamento && (
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onOrcamento} title="Gerar orçamento / pedido — no WhatsApp vai só o link seguro" className="inline-flex items-center gap-1.5 rounded-t-lg border-b-2 border-transparent px-3 py-1 text-[12px] font-semibold text-muted hover:text-ink">
+          <ReceiptText size={12} /> Orçamento
+        </button>
+      )}
       {nota && <span className="ml-auto pb-1 text-[11px] text-warn-ink/80 hidden sm:inline whitespace-nowrap">🔒 Visível só para a equipe · Alt+N alterna · Esc sai</span>}
     </div>
   );

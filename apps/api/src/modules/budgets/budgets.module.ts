@@ -266,7 +266,7 @@ export class BudgetsService {
   }
 
   /**
-   * Tela Orçamentos (docs/orcamentos.md#tela-orçamentos): todos os orçamentos do período com filtros
+   * Relatórios → Pagamentos (docs/orcamentos.md#relatório-de-pagamentos): todos os orçamentos do período com filtros
    * e totais por situação. Quem tem `conversations.view_all` vê a equipe (e filtra por atendente);
    * os demais, só os seus. Números e departamentos fora do escopo do usuário ficam de fora, como nas conversas.
    */
@@ -551,13 +551,14 @@ class BudgetsController {
   }
 }
 
-/** Tela Orçamentos: lista do período com totais (cada um vê os seus; `view_all` vê a equipe). */
+/** Relatórios → Pagamentos: lista do período com totais (cada um vê os seus; `view_all` vê a equipe). */
 @Controller('budgets')
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 class BudgetsListController {
   constructor(private readonly budgets: BudgetsService) {}
 
   @Get()
+  @RequirePermission('reports.view')
   list(@CurrentUser() u: AuthUser, @Query() q: ListBudgetsDto) {
     return this.budgets.listAll(u, q);
   }
