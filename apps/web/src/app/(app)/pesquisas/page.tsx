@@ -10,7 +10,18 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { FeatureLocked } from '@/components/billing/FeatureLocked';
+import { TextWithVars, type FlowVar } from '@/components/flows/TextWithVars';
 import { useCan, useHasFeature, useCreateSurvey, useSurveys, useUpdateSurvey, type SatisfactionSurvey, type SurveyInput } from '@/lib/hooks';
+
+/** Além das do sistema e dos campos da ficha (que o TextWithVars já traz): quem atendeu. */
+const SURVEY_VARS: FlowVar[] = [
+  { key: 'agent.name', label: 'Nome de quem atendeu', source: 'system' },
+  { key: 'agent.name | first', label: 'Primeiro nome de quem atendeu', source: 'system' },
+];
+
+/** Prévia com valores de exemplo no lugar das variáveis mais comuns. */
+const EXEMPLO: Record<string, string> = { 'contact.first_name': 'Maria', 'contact.name': 'Maria Souza', 'agent.name': 'Ana Lima', 'agent.name | first': 'Ana', 'company.name': 'sua empresa' };
+const comExemplo = (t: string) => t.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (m, k: string) => EXEMPLO[k.replace(/\s*\|\s*/g, ' | ')] ?? m);
 
 const ESCALA_DICA: Record<SurveyScale, string> = {
   scale_5: 'O cliente digita uma nota de 1 a 5.',
@@ -136,8 +147,8 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
               ))}
             </div>
           </Field>
-          <Field label="Pergunta" hint="Aceita variáveis, como {{contact.first_name}} e {{agent.name}}. A instrução de como responder é acrescentada sozinha.">
-            <textarea className={cn(inputCls, 'resize-none')} rows={3} value={f.question} onChange={(e) => set('question', e.target.value)} maxLength={1000} />
+          <Field label="Pergunta" hint="A instrução de como responder é acrescentada sozinha.">
+            <TextWithVars value={f.question} onChange={(v) => set('question', v)} vars={SURVEY_VARS} flowVarsGroup={false} formatting maxLength={1000} className="min-h-20 resize-none" />
           </Field>
 
           <div className="space-y-2">
@@ -154,7 +165,7 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
                   </select>
                   <button type="button" onClick={() => set('extraQuestions', f.extraQuestions.filter((_, n) => n !== i))} className="w-7 h-7 grid place-items-center rounded-lg text-muted hover:text-danger hover:bg-field" aria-label="Remover pergunta"><Trash2 size={13} /></button>
                 </div>
-                <textarea className={cn(inputCls, 'resize-none')} rows={2} value={q.text} onChange={(e) => mudarExtra(i, { text: e.target.value })} maxLength={1000} placeholder="Ex.: E o tempo de resposta, como foi?" />
+                <TextWithVars value={q.text} onChange={(v) => mudarExtra(i, { text: v })} vars={SURVEY_VARS} flowVarsGroup={false} formatting maxLength={1000} className="min-h-16 resize-none" placeholder="Ex.: E o tempo de resposta, como foi?" />
               </div>
             ))}
             {f.extraQuestions.length > 0 && (
@@ -174,7 +185,7 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
                 </Field>
               )}
               <Field label="Resposta à recusa" hint="Vazio = não responde nada.">
-                <input className={inputCls} value={f.declinedMessage} onChange={(e) => set('declinedMessage', e.target.value)} maxLength={1000} />
+                <TextWithVars multiline={false} value={f.declinedMessage} onChange={(v) => set('declinedMessage', v)} vars={SURVEY_VARS} flowVarsGroup={false} maxLength={1000} />
               </Field>
             </div>
           )}
@@ -185,13 +196,13 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
           </label>
           {f.askComment && (
             <div className="pl-6">
-              <textarea className={cn(inputCls, 'resize-none')} rows={2} value={f.commentPrompt} onChange={(e) => set('commentPrompt', e.target.value)} maxLength={1000} aria-label="Pedido de comentário" />
+              <TextWithVars value={f.commentPrompt} onChange={(v) => set('commentPrompt', v)} vars={SURVEY_VARS} flowVarsGroup={false} formatting maxLength={1000} className="min-h-16 resize-none" />
             </div>
           )}
 
           <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
             <Field label="Agradecimento" hint="Vazio = não responde nada.">
-              <input className={inputCls} value={f.thanksMessage} onChange={(e) => set('thanksMessage', e.target.value)} maxLength={1000} />
+              <TextWithVars multiline={false} value={f.thanksMessage} onChange={(v) => set('thanksMessage', v)} vars={SURVEY_VARS} flowVarsGroup={false} maxLength={1000} />
             </Field>
             <Field label="Espera (horas)" hint="Depois disso, a mensagem reabre o atendimento.">
               <input type="number" min={1} max={168} className={inputCls} value={f.expiresHours} onChange={(e) => set('expiresHours', Math.min(168, Math.max(1, Number(e.target.value) || 1)))} />
@@ -208,19 +219,20 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted">Prévia</div>
           <div className="rounded-xl bg-field p-3 space-y-1.5">
-            <div className="rounded-lg rounded-tl-none bg-panel border border-line px-3 py-2 text-[13px] text-ink whitespace-pre-line">{preview.replace(/\*([^*]+)\*/g, '$1')}</div>
+            <div className="rounded-lg rounded-tl-none bg-panel border border-line px-3 py-2 text-[13px] text-ink whitespace-pre-line">{comExemplo(preview).replace(/\*([^*]+)\*/g, '$1')}</div>
             {botoes.map((b) => <div key={b.id} className="rounded-lg bg-panel border border-line px-3 py-1.5 text-center text-[13px] font-medium text-accent">{b.title}</div>)}
             {f.extraQuestions.filter((q) => q.text.trim()).map((q, i) => {
               const cfg = { scale: q.scale, question: q.text, allowDecline: f.allowDecline, declineLabel: f.declineLabel };
               return (
                 <div key={q.id} className="space-y-1.5 pt-1">
                   <div className="text-center text-[10.5px] text-faint">depois da resposta · {i + 2}ª pergunta</div>
-                  <div className="rounded-lg rounded-tl-none bg-panel border border-line px-3 py-2 text-[13px] text-ink whitespace-pre-line">{surveyPromptText(cfg).replace(/\*([^*]+)\*/g, '$1')}</div>
+                  <div className="rounded-lg rounded-tl-none bg-panel border border-line px-3 py-2 text-[13px] text-ink whitespace-pre-line">{comExemplo(surveyPromptText(cfg)).replace(/\*([^*]+)\*/g, '$1')}</div>
                   {(surveyInteractive(cfg)?.options ?? []).map((b) => <div key={b.id} className="rounded-lg bg-panel border border-line px-3 py-1.5 text-center text-[13px] font-medium text-accent">{b.title}</div>)}
                 </div>
               );
             })}
           </div>
+          <p className="text-[11px] text-faint">Variáveis aparecem com valores de exemplo (Maria, Ana Lima).</p>
           <p className="text-[11px] text-faint">Nos números via QR Code os botões chegam como lista numerada; o número também vale como resposta.</p>
         </div>
 

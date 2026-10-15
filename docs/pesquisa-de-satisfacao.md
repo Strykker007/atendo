@@ -54,6 +54,18 @@ com a sua escala. Ordem: principal → 2ª → 3ª → comentário (se ligado) �
 - O relatório principal (média, NPS, por consultor) é da **pergunta principal**; as adicionais
   aparecem em *Outras perguntas*, cada uma com média/% satisfeitos e distribuição.
 
+## Variáveis nos textos
+
+Pergunta, perguntas adicionais, pedido de comentário, agradecimento e resposta à recusa aceitam
+[variáveis](variaveis.md). No editor, cada campo tem **Inserir variável** (o mesmo menu das
+respostas rápidas): nome e primeiro nome do cliente, empresa, saudação, campos da ficha,
+variáveis globais e, só aqui, **quem atendeu**: `{{agent.name}}` e `{{agent.name | first}}`.
+
+- Quem atendeu = o dono da conversa no encerramento (no fluxo, o dono antes do bloco encerrar).
+  Fica gravado em `SurveyResponse.agentName`, então as mensagens seguintes usam o mesmo nome.
+  Sem dono, a variável sai vazia: use `{{agent.name || 'nossa equipe'}}`.
+- A prévia mostra valores de exemplo (Maria, Ana Lima) no lugar das variáveis.
+
 ## Anti-bloqueio
 
 Toda mensagem da pesquisa sai por `sendAsSystem` **sem autor**, então é **automática** para o
