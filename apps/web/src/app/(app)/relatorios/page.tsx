@@ -153,7 +153,7 @@ export default function RelatoriosPage() {
             <input type="date" className={inputCls} value={shift(range[1], -1)} min={range[0]} onChange={(e) => e.target.value && setRange([range[0], shift(e.target.value, 1)])} />
           </Field>
           <Field label="Tag">
-            <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
+            <TagPicker field tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
           </Field>
           <Field label="Consultor">
             <select className={inputCls} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
@@ -246,7 +246,7 @@ export default function RelatoriosPage() {
                 <option value="">Todas</option><option value="ad">Anúncio</option><option value="post">Publicação</option><option value="link">Link</option><option value="organic">Orgânico</option>
               </select>
             </Field>
-            <Field label="Tags"><TagPicker tags={tags.data ?? []} value={def.filters.tagIds ?? []} onChange={(ids) => setFilter('tagIds', ids.length ? ids : undefined)} placeholder="Qualquer tag" /></Field>
+            <Field label="Tags"><TagPicker field tags={tags.data ?? []} value={def.filters.tagIds ?? []} onChange={(ids) => setFilter('tagIds', ids.length ? ids : undefined)} placeholder="Qualquer tag" /></Field>
             <Field label="Consultor">
               <select className={inputCls} value={def.filters.agentId ?? ''} onChange={(e) => setFilter('agentId', e.target.value || undefined)}>
                 <option value="">Todos</option>{agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}

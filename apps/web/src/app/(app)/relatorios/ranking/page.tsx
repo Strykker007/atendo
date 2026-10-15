@@ -113,7 +113,7 @@ export default function RankingPage() {
             </>
           )}
           <Field label="Tag">
-            <TagPicker tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
+            <TagPicker field tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
           </Field>
         </div>
       </section>
