@@ -11,7 +11,9 @@ foto (com a legenda) fica numa página do Atendo que **expira**.
 
 ## No chat
 
-Ao anexar imagem, vídeo ou PDF, aparece **Enviar como link protegido** no anexo:
+Ao escolher, arrastar ou colar imagem, vídeo ou PDF, a **tela de prévia** (`MediaPreview`) mostra
+**Enviar como link protegido** acima da legenda. O mesmo vale para mídia que entra pelo campo
+(resposta rápida com anexo), na barra do anexo:
 
 - Marcado, aparece **válido por** (1 h, 4 h, 12 h, **1 dia** — padrão —, 3 dias, 7 dias). O
   atendente escolhe a cada envio; a validade volta para 1 dia no próximo anexo.

@@ -266,13 +266,25 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     setPrevia(img.name && img.name !== 'image.png' ? img : new File([img], `imagem-${Date.now()}.${img.type.split('/')[1] || 'png'}`, { type: img.type }));
   }
 
+  /**
+   * Foto protegida (docs/foto-protegida.md): guarda o arquivo atrás de um link com validade e
+   * envia só o texto genérico com o link. A legenda vai para a página, nunca para o WhatsApp.
+   */
+  async function enviarProtegida(up: Pick<Upload, 'key' | 'mimeType' | 'fileName'>, caption: string, validHours: number, extra: { quotedExternalId?: string } = {}) {
+    const sm = await criarProtegida.mutateAsync({ conversationId: conv!.id, mediaKey: up.key, mimeType: up.mimeType, fileName: up.fileName, caption: caption.trim() || undefined, validHours });
+    const primeiro = conv!.contact.name?.trim().split(/\s+/)[0] ?? null;
+    const aviso = assinar(secureMediaMessage(secureMediaLink(sm.hash), validHours, primeiro));
+    await send.mutateAsync({ type: 'text', text: aviso, ...extra, simulateTypingChars: aviso.length, idempotencyKey: crypto.randomUUID() });
+  }
+
   /** Confirmou na prévia: sobe o arquivo (já com os rabiscos, se houver) e envia. */
-  async function enviarDaPrevia({ file, caption }: Escolhido) {
+  async function enviarDaPrevia({ file, caption, secureHours }: Escolhido) {
     setUploading(true);
     try {
       const up = await uploadFile(file);
       setPrevia(null);
-      await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, simulateTypingChars: (caption ?? '').length, idempotencyKey: crypto.randomUUID() });
+      if (secureHours) await enviarProtegida(up, caption, secureHours);
+      else await send.mutateAsync({ type: mediaTypeOf(up.mimeType), mediaKey: up.key, text: caption || undefined, media: { url: up.url, mimeType: up.mimeType, fileName: up.fileName }, simulateTypingChars: (caption ?? '').length, idempotencyKey: crypto.randomUUID() });
     } catch (err) {
       toast.err(err); // a prévia continua aberta: o arquivo escolhido não se perde no erro
     } finally {
@@ -525,11 +537,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       // citação segue o id do provider: é ele que o WhatsApp entende do outro lado
       const citando = respondendo?.externalId ? { quotedExternalId: respondendo.externalId } : {};
       if (att && protegida) {
-        // a legenda vai só para a página; pelo WhatsApp sai um texto genérico com o link
-        const sm = await criarProtegida.mutateAsync({ conversationId: conv!.id, mediaKey: att.key, mimeType: att.mimeType, fileName: att.fileName, caption: text.trim() || undefined, validHours: validade });
-        const primeiro = conv!.contact.name?.trim().split(/\s+/)[0] ?? null;
-        const aviso = assinar(secureMediaMessage(secureMediaLink(sm.hash), validade, primeiro));
-        await send.mutateAsync({ type: 'text', text: aviso, ...citando, simulateTypingChars: aviso.length, idempotencyKey });
+        await enviarProtegida(att, text, validade, citando);
       } else if (att) {
         await send.mutateAsync({ type: mediaTypeOf(att.mimeType), mediaKey: att.key, text: t || undefined, media: { url: att.url, mimeType: att.mimeType, fileName: att.fileName }, ...citando, ...simular, idempotencyKey });
       } else {
@@ -764,7 +772,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       {previa && (
         <MediaPreview
           file={previa}
-          enviando={uploading || send.isPending}
+          enviando={uploading || send.isPending || criarProtegida.isPending}
           onCancel={() => setPrevia(null)}
           onConfirm={enviarDaPrevia}
         />
