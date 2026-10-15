@@ -95,6 +95,14 @@ const schema = z.object({
    */
   AI_PRICE_IN_PER_1K: optionalNumber,
   AI_PRICE_OUT_PER_1K: optionalNumber,
+  /**
+   * Orçamento mensal de IA da **plataforma inteira** (todos os tenants somados), em BRL.
+   * Alerta por e-mail em 50/80/100% e, ao atingir, desliga a IA até virar o mês — os fluxos
+   * caem no humano. 0 = sem orçamento. Use junto com o limite de gasto no console do fornecedor.
+   */
+  AI_PLATFORM_BUDGET_BRL: z.coerce.number().min(0).default(0),
+  /** quem recebe os alertas do orçamento de IA (vírgula separa vários) */
+  AI_ALERT_EMAIL: z.string().optional().default(''),
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
   /** json = uma linha JSON por evento (produção/agregador); pretty = legível no terminal */
   LOG_FORMAT: z.enum(['json', 'pretty']).default(process.env.NODE_ENV === 'production' ? 'json' : 'pretty'),

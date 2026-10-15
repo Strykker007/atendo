@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type { AiTaskKind } from '@prisma/client';
 import { PLAN_FEATURE_LABEL, type PlanFeature, type RewriteTone } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -6,7 +6,7 @@ import { AppLogger } from '../../common/observability/app-logger';
 import { UsageService } from '../billing/usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
 import { AiUsageService } from './ai-usage.service';
-import { decideCanUseAi } from './ai-quota';
+import { decideCanUseAi, platformBudgetStatus } from './ai-quota';
 import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, suggestSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from './prompts';
 import type { AiMessage } from './ai.types';
 import { env } from '../../config/env';
@@ -51,7 +51,11 @@ export class AiService {
     if (!input.messages.length) throw new BadRequestException('Não há mensagens suficientes para a IA trabalhar.');
     const provider = this.registry.get();
 
-    const [plan, used] = await Promise.all([this.usage.limits(input.tenantId), this.aiUsage.current(input.tenantId)]);
+    const [plan, used, platformSpent] = await Promise.all([this.usage.limits(input.tenantId), this.aiUsage.current(input.tenantId), this.aiUsage.platformCost()]);
+    // orçamento da plataforma antes da quota do tenant: protege o crédito da conta do fornecedor
+    if (platformBudgetStatus(platformSpent, env.AI_PLATFORM_BUDGET_BRL).blocked) {
+      throw new ServiceUnavailableException('IA temporariamente indisponível. Tente novamente mais tarde.');
+    }
     const decision = decideCanUseAi(plan, used);
     if (!decision.ok) throw new ForbiddenException(decision.reason);
 

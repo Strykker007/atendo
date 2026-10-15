@@ -6,7 +6,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { env } from '../../config/env';
 import { AppLogger } from '../../common/observability/app-logger';
-import type { AiUsageSnapshot } from './ai-quota';
+import { MailService } from '../../common/mail/mail.service';
+import { platformBudgetStatus, type AiUsageSnapshot } from './ai-quota';
 
 /**
  * Custo de uma chamada em USD. Ordem: endpoint local = 0 → preço do ambiente (endpoint
@@ -21,6 +22,9 @@ export function costOf(model: string, tokensIn: number, tokensOut: number) {
 
 export const aiPeriodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: 'count' | 'cost') => `ai:${tenantId}:${period}:${metric}`;
+/** gasto somado de todos os tenants — o que de fato sai do crédito da conta do fornecedor */
+const platformKey = (period: string) => `ai:_platform:${period}:cost`;
+const alertKey = (period: string, level: number) => `ai:_platform:${period}:alert:${level}`;
 
 /**
  * Ledger de IA. Mesmo desenho do de mensagens: o Postgres é a fonte da verdade,
@@ -33,6 +37,7 @@ export class AiUsageService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly mail: MailService,
   ) {}
 
   /** Grava a chamada (inclusive as que falharam — a linha de erro serve para diagnóstico). */
@@ -58,8 +63,36 @@ export class AiUsageService {
     multi.incr(key(input.tenantId, period, 'count'));
     // custo em centavos de centavo (inteiro) — INCRBYFLOAT perde precisão entre réplicas
     multi.incrby(key(input.tenantId, period, 'cost'), Math.round(costBrl * 10_000));
+    multi.incrby(platformKey(period), Math.round(costBrl * 10_000));
     await multi.exec();
+    if (costBrl > 0) await this.alertPlatformBudget(period).catch((e) => this.log.warn(`alerta de orçamento de IA falhou: ${e}`));
     return { costUsd, costBrl };
+  }
+
+  /** Gasto do mês somando todos os tenants, em BRL. */
+  async platformCost(period = aiPeriodOf()) {
+    return Number((await this.redis.get(platformKey(period))) ?? 0) / 10_000;
+  }
+
+  /** Avisa o dono da conta em 50/80/100% do orçamento — uma vez por faixa por mês. */
+  private async alertPlatformBudget(period: string) {
+    const budget = env.AI_PLATFORM_BUDGET_BRL;
+    const spent = await this.platformCost(period);
+    const { level } = platformBudgetStatus(spent, budget);
+    if (level === null) return;
+    // NX: entre réplicas, só a primeira que cruzar a faixa manda o e-mail
+    const first = await this.redis.set(alertKey(period, level), '1', 'EX', 40 * 86_400, 'NX');
+    if (!first) return;
+    const msg = `Gasto com IA em ${period}: R$ ${spent.toFixed(2)} de R$ ${budget.toFixed(2)} (${level}%).`;
+    this.log.warn(msg);
+    if (!env.AI_ALERT_EMAIL) return;
+    await this.mail.send({
+      to: env.AI_ALERT_EMAIL.split(',').map((e) => e.trim()).filter(Boolean),
+      subject: level >= 100 ? 'Atendo: IA desligada — orçamento do mês atingido' : `Atendo: IA em ${level}% do orçamento do mês`,
+      text: `${msg}\n\n${level >= 100
+        ? 'A IA foi desligada para todos os clientes até virar o mês: o copiloto responde indisponível e os fluxos seguem pela saída "Não conseguiu". Para religar, aumente AI_PLATFORM_BUDGET_BRL e reinicie a API.'
+        : 'Ao atingir 100% a IA é desligada para todos os clientes até virar o mês. Confira o consumo por cliente na tabela ai_usage e o crédito no console do fornecedor.'}`,
+    });
   }
 
   /** Consumo do mês para o guard de quota. */
@@ -77,6 +110,8 @@ export class AiUsageService {
       _count: { _all: true },
       _sum: { costBrl: true },
     });
+    const total = rows.reduce((sum, r) => sum + Number(r._sum.costBrl ?? 0), 0);
+    await this.redis.set(platformKey(period), Math.round(total * 10_000));
     for (const r of rows) {
       await this.redis.mset(
         key(r.tenantId, period, 'count'), r._count._all,

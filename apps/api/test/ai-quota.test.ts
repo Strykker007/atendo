@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanLimits } from '@atendo/shared';
-import { decideCanUseAi } from '../src/modules/ai/ai-quota';
+import { decideCanUseAi, platformBudgetStatus } from '../src/modules/ai/ai-quota';
 
 const base: PlanLimits = {
   maxNumbers: 1,
@@ -63,5 +63,21 @@ describe('decideCanUseAi', () => {
 
   it('o teto vale antes da quota: cliente pagando excedente também para', () => {
     expect(decideCanUseAi(plano(), uso(10_000, 60)).reason).toContain('Teto de gasto');
+  });
+});
+
+describe('platformBudgetStatus', () => {
+  it('sem orçamento não bloqueia nem alerta', () => {
+    expect(platformBudgetStatus(9999, 0)).toEqual({ blocked: false, level: null });
+  });
+  it('abaixo de 50% não alerta', () => {
+    expect(platformBudgetStatus(49, 100)).toEqual({ blocked: false, level: null });
+  });
+  it('alerta na maior faixa atingida', () => {
+    expect(platformBudgetStatus(50, 100)).toEqual({ blocked: false, level: 50 });
+    expect(platformBudgetStatus(85, 100)).toEqual({ blocked: false, level: 80 });
+  });
+  it('bloqueia ao atingir 100%', () => {
+    expect(platformBudgetStatus(100, 100)).toEqual({ blocked: true, level: 100 });
   });
 });
