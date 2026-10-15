@@ -8,6 +8,7 @@ import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { NO_NUMBER } from '../auth/company-scope';
 import { ReportLoadService, assertReportRange } from '../../common/reports/report-load.service';
 import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
@@ -18,7 +19,7 @@ import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
  */
 export const ReportDefinition = z.object({
   metric: z.enum(['conversations', 'messages_in', 'messages_out', 'avg_first_response_min', 'closed', 'revenue', 'won', 'lost', 'win_rate']),
-  groupBy: z.enum(['day', 'week', 'month', 'tag', 'status', 'number', 'agent', 'origin', 'campaign', 'reason']),
+  groupBy: z.enum(['day', 'week', 'month', 'tag', 'status', 'number', 'company', 'agent', 'origin', 'campaign', 'reason']),
   from: z.coerce.date(),
   to: z.coerce.date(),
   filters: z
@@ -42,7 +43,20 @@ const OverviewQuery = z.object({
   tagIds: z.string().optional().transform((v) => v?.split(',').filter(Boolean)).pipe(z.array(z.string().uuid()).max(50).optional()),
   agentId: z.string().uuid().optional(),
 });
-type Filtro = { tagIds?: string[]; agentId?: string };
+/** Linha do comparativo por empresa (`GET /reports/companies`). */
+type KpisDoEscopo = { conversations: number; closed: number; waitingNow: number; avgFirstResponseMin: number | null; won: number; lost: number; revenue: number; avgTicket: number | null; winRate: number | null };
+
+/** `numberIds` = escopo de números da pessoa/empresa selecionada (`escopoDe`); ausente = todos do cliente */
+type Filtro = { tagIds?: string[]; agentId?: string; numberIds?: string[] };
+
+/**
+ * Escopo do relatório: a empresa selecionada no painel (header `x-company-id`) já chega como os
+ * números dela em `numberIds` (company-scope.ts), junto com a restrição de números da pessoa.
+ * Sem isto o relatório somava todas as empresas do cliente, com qualquer empresa selecionada.
+ */
+const escopoDe = (u: AuthUser) => (u.numberIds?.length ? [...u.numberIds].sort() : undefined);
+/** a coluna (id de conversa) é de uma conversa dos números do escopo */
+const conversaNoEscopo = (col: Prisma.Sql, numberIds: string[]) => Prisma.sql`${col} in (select cs.id from conversations cs where cs."numberId" in (${Prisma.join(numberIds)}))`;
 
 /**
  * Encerramento "do consultor": ele encerrou, ou a automação encerrou enquanto a conversa era
@@ -108,7 +122,8 @@ class ReportsController {
   async run(@CurrentUser() u: AuthUser, @Body() body: unknown) {
     const def = ReportDefinition.parse(body);
     assertReportRange(def.from, def.to);
-    const series = await this.load.cached(ReportLoadService.key(u.tenantId, 'run', { d: JSON.stringify(def) }), () => this.load.run(() => this.query(u.tenantId, def)));
+    const nums = escopoDe(u);
+    const series = await this.load.cached(ReportLoadService.key(u.tenantId, 'run', { d: JSON.stringify(def), nums: nums?.join(',') }), () => this.load.run(() => this.query(u.tenantId, def, nums)));
     return { definition: def, series };
   }
 
@@ -125,19 +140,21 @@ class ReportsController {
     const f = OverviewQuery.parse(q);
     const to = f.to ?? new Date(Date.now() + 86_400_000);
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
-    const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId };
+    const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId, numberIds: escopoDe(u) };
     assertReportRange(from, to);
-    return this.load.cached(ReportLoadService.key(u.tenantId, 'overview', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId }), () => this.overviewData(u.tenantId, from, to, filtro));
+    return this.load.cached(ReportLoadService.key(u.tenantId, 'overview', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId, nums: filtro.numberIds?.join(',') }), () => this.overviewData(u.tenantId, from, to, filtro));
   }
 
   /** Corpo da visão pronta: ~20 consultas, todas pelo limite de concorrência (`ReportLoadService`). */
   private async overviewData(t: string, from: Date, to: Date, filtro: Filtro) {
-    const base = { from, to, filters: filtro, chart: 'bar' as const };
+    const base = { from, to, filters: { tagIds: filtro.tagIds, agentId: filtro.agentId }, chart: 'bar' as const };
+    const nums = filtro.numberIds;
     // conversa: tem a tag / está com o consultor
     const conv: Prisma.ConversationWhereInput = {
       tenantId: t,
       ...(filtro.tagIds && { tags: { some: { tagId: { in: filtro.tagIds } } } }),
       ...(filtro.agentId && { assigneeId: filtro.agentId }),
+      ...(nums && { numberId: { in: nums } }),
     };
     // encerramento: tag escolhida nele (ou na conversa) / quem encerrou
     const fechou: Prisma.ConversationEventWhereInput = {
@@ -148,6 +165,7 @@ class ReportsController {
       createdAt: { gte: from, lt: to },
       ...(filtro.tagIds && { OR: [{ tagIds: { hasSome: filtro.tagIds } }, { conversation: { tags: { some: { tagId: { in: filtro.tagIds } } } } }] }),
       ...(filtro.agentId && { AND: [{ OR: [{ actorId: filtro.agentId }, { actorId: null, targetId: filtro.agentId }] }] }),
+      ...(nums && { conversation: { numberId: { in: nums } } }),
     };
     const [closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, lost] = await this.load.all([
       // atendimentos ENCERRADOS no período (um encerramento = um atendimento), não conversas
@@ -157,19 +175,19 @@ class ReportsController {
       () => this.prisma.conversation.count({ where: { ...conv, status: 'in_progress' } }),
       () => this.prisma.message.count({ where: { direction: 'in', createdAt: { gte: from, lt: to }, conversation: conv } }),
       () => this.prisma.message.count({ where: { direction: 'out', internal: false, createdAt: { gte: from, lt: to }, conversation: conv } }),
-      () => this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }),
-      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'day' }),
+      () => this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }, nums),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'day' }, nums),
       // quem encerrou no período (um encerramento = um atendimento); pelo dono ATUAL da conversa
       // ficavam de fora os atendimentos já fechados e os de quem saiu da fila
-      () => this.query(t, { ...base, metric: 'closed', groupBy: 'agent' }),
-      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'origin' }),
-      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }),
-      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }),
-      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }),
+      () => this.query(t, { ...base, metric: 'closed', groupBy: 'agent' }, nums),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'origin' }, nums),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'campaign' }, nums),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'tag' }, nums),
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'status' }, nums),
       () => this.prisma.conversationEvent.count({ where: { ...fechou, outcome: 'lost' } }),
     ]);
     // vendas pela régua da meta/ranking ("Comprou" + orçamento pago sem encerramento − estornos)
-    const vendas = (await this.load.run(() => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number }[]>(vendasPorConsultorSql(t, from, to, filtro.tagIds ? this.eventoTemTag(filtro.tagIds) : undefined))))
+    const vendas = (await this.load.run(() => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number }[]>(vendasPorConsultorSql(t, from, to, filtro.tagIds ? this.eventoTemTag(filtro.tagIds) : undefined, nums))))
       .filter((v) => !filtro.agentId || v.userId === filtro.agentId);
     const wonTotal = vendas.reduce((a, v) => a + Number(v.won), 0);
     const revenueTotal = Math.round(vendas.reduce((a, v) => a + Number(v.revenue) * 100, 0)) / 100;
@@ -200,6 +218,80 @@ class ReportsController {
   }
 
   /**
+   * Comparativo por empresa: os indicadores principais lado a lado, um por empresa que a pessoa
+   * opera (docs/empresas.md#relatórios). Cada linha usa o mesmo escopo de números do seletor, então
+   * bate com o que a tela mostra ao escolher aquela empresa. "(sem empresa)" = números fora de
+   * qualquer empresa, só para quem enxerga o cliente inteiro.
+   */
+  @Get('companies')
+  async byCompany(@CurrentUser() u: AuthUser, @Query() q: Record<string, string | undefined>) {
+    const f = OverviewQuery.parse(q);
+    const to = f.to ?? new Date(Date.now() + 86_400_000);
+    const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
+    assertReportRange(from, to);
+    const filtro: Filtro = { tagIds: f.tagIds?.length ? f.tagIds : undefined, agentId: f.agentId };
+    const nums = escopoDe(u);
+    return this.load.cached(
+      ReportLoadService.key(u.tenantId, 'companies', { from, to, tags: filtro.tagIds?.join(','), agent: filtro.agentId, nums: nums?.join(','), cos: u.companyIds?.join(',') }),
+      async () => {
+        const empresas = await this.prisma.company.findMany({
+          where: { tenantId: u.tenantId, ...(u.companyIds && { id: { in: u.companyIds } }) },
+          select: { id: true, name: true, numbers: { select: { id: true } } },
+          orderBy: { name: 'asc' },
+        });
+        const permitido = (id: string) => !nums || nums.includes(id);
+        const grupos = empresas.map((c) => ({ companyId: c.id as string | null, name: c.name, numberIds: c.numbers.map((n) => n.id).filter(permitido) }));
+        if (!nums && empresas.length) {
+          const soltos = await this.prisma.whatsAppNumber.findMany({ where: { tenantId: u.tenantId, companyId: null }, select: { id: true } });
+          if (soltos.length) grupos.push({ companyId: null, name: '(sem empresa)', numberIds: soltos.map((n) => n.id) });
+        }
+        const rows: ({ companyId: string | null; name: string } & KpisDoEscopo)[] = [];
+        // uma empresa por vez: cada uma já dispara várias consultas pelo limite de concorrência
+        for (const g of grupos) rows.push({ companyId: g.companyId, name: g.name, ...(await this.kpisDoEscopo(u.tenantId, from, to, { ...filtro, numberIds: g.numberIds.length ? g.numberIds : [NO_NUMBER] })) });
+        return { period: { from, to }, rows };
+      },
+    );
+  }
+
+  /** Indicadores do comparativo por empresa — a mesma régua dos cartões da visão pronta. */
+  private async kpisDoEscopo(t: string, from: Date, to: Date, filtro: Filtro & { numberIds: string[] }): Promise<KpisDoEscopo> {
+    const base = { from, to, filters: { tagIds: filtro.tagIds, agentId: filtro.agentId }, chart: 'bar' as const };
+    const nums = filtro.numberIds;
+    const fechou: Prisma.ConversationEventWhereInput = {
+      tenantId: t,
+      type: 'closed',
+      ignoreInReports: false,
+      createdAt: { gte: from, lt: to },
+      conversation: { numberId: { in: nums } },
+      ...(filtro.tagIds && { OR: [{ tagIds: { hasSome: filtro.tagIds } }, { conversation: { tags: { some: { tagId: { in: filtro.tagIds } } } } }] }),
+      ...(filtro.agentId && { AND: [{ OR: [{ actorId: filtro.agentId }, { actorId: null, targetId: filtro.agentId }] }] }),
+    };
+    const [iniciados, closed, lost, waitingNow, firstResp, vendas] = await this.load.all([
+      () => this.query(t, { ...base, metric: 'conversations', groupBy: 'month' }, nums),
+      () => this.prisma.conversationEvent.count({ where: fechou }),
+      () => this.prisma.conversationEvent.count({ where: { ...fechou, outcome: 'lost' } }),
+      () => this.prisma.conversation.count({ where: { tenantId: t, numberId: { in: nums }, status: 'waiting', ...(filtro.agentId && { assigneeId: filtro.agentId }) } }),
+      () => this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }, nums),
+      () => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number }[]>(vendasPorConsultorSql(t, from, to, filtro.tagIds ? this.eventoTemTag(filtro.tagIds) : undefined, nums)),
+    ]);
+    const v = vendas.filter((x) => !filtro.agentId || x.userId === filtro.agentId);
+    const won = v.reduce((a, x) => a + Number(x.won), 0);
+    const revenue = Math.round(v.reduce((a, x) => a + Number(x.revenue) * 100, 0)) / 100;
+    const resp = firstResp.filter((r) => r.value > 0).map((r) => r.value);
+    return {
+      conversations: iniciados.reduce((a, r) => a + r.value, 0),
+      closed,
+      waitingNow,
+      avgFirstResponseMin: resp.length ? resp.reduce((a, b) => a + b, 0) / resp.length : null,
+      won,
+      lost,
+      revenue,
+      avgTicket: won ? revenue / won : null,
+      winRate: won + lost > 0 ? won / (won + lost) : null,
+    };
+  }
+
+  /**
    * Auditoria: cada encerramento do período (um atendimento), com resultado, quem encerrou e as
    * tags escolhidas nele. Sai do histórico (`conversation_events`) — a conversa só guarda o
    * atendimento atual. `startedAt` = encerramento anterior da mesma conversa (null = desde o
@@ -220,6 +312,8 @@ class ReportsController {
     if (f.closeReasonId) conds.push(Prisma.sql`e."closeReasonId" = ${f.closeReasonId}`);
     if (f.reason) conds.push(Prisma.sql`e."closeReasonId" is null and trim(regexp_replace(coalesce(e.reason, ''), '(\\s*·\\s*)?encerrado em massa$', '')) = ${f.reason}`);
     if (f.userId) conds.push(doConsultor(f.userId));
+    const nums = escopoDe(u);
+    if (nums) conds.push(Prisma.sql`cv."numberId" in (${Prisma.join(nums)})`);
     if (f.search) {
       const ors = [Prisma.sql`c.name ilike ${like(f.search)}`];
       if (digits(f.search).length >= 3) ors.push(Prisma.sql`c.phone like ${like(digits(f.search))}`);
@@ -317,6 +411,8 @@ class ReportsController {
     if (f.contactId) conds.push(Prisma.sql`s."contactId" = ${f.contactId}`);
     if (f.phone && digits(f.phone)) conds.push(Prisma.sql`c.phone like ${like(digits(f.phone))}`);
     if (f.customerName) conds.push(Prisma.sql`c.name ilike ${like(f.customerName)}`);
+    const nums = escopoDe(u);
+    if (nums) conds.push(conversaNoEscopo(Prisma.sql`s."conversationId"`, nums));
     if (f.search) {
       const ors = [Prisma.sql`c.name ilike ${like(f.search)}`, produtoCasa(f.search)];
       if (digits(f.search).length >= 3) ors.push(Prisma.sql`c.phone like ${like(digits(f.search))}`);
@@ -385,13 +481,15 @@ class ReportsController {
     // pesos entram na chave do cache: mudou o peso, a próxima leitura já reordena
     const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { rankingWeights: true } });
     const weights = normalizeRankingWeights(s?.rankingWeights);
-    return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(','), w: JSON.stringify(weights) }), () => this.rankingData(u.tenantId, from, to, f.tagIds, weights));
+    const nums = escopoDe(u);
+    return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(','), w: JSON.stringify(weights), nums: nums?.join(',') }), () => this.rankingData(u.tenantId, from, to, f.tagIds, weights, nums));
   }
 
-  private async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[], weights = normalizeRankingWeights(null)) {
+  private async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[], weights = normalizeRankingWeights(null), nums?: string[]) {
     const f = { tagIds };
     const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."actorId" is not null`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (f.tagIds?.length) conds.push(this.eventoTemTag(f.tagIds));
+    if (nums) conds.push(Prisma.sql`c."numberId" in (${Prisma.join(nums)})`);
     const rows = await this.load.run(() => this.prisma.$queryRaw<{ userId: string; name: string | null; closed: number; won: number; revenue: number | null; tmaMin: number | null }[]>(Prisma.sql`
       select e."actorId" as "userId", usr.name,
              count(*)::int as closed,
@@ -413,6 +511,7 @@ class ReportsController {
              count(*) filter (where score >= 9)::int as promoters, count(*) filter (where score <= 6)::int as detractors
       from survey_responses
       where "tenantId" = ${tenantId} and "sentAt" >= ${from} and "sentAt" < ${to} and score is not null and "agentId" is not null
+        ${nums ? Prisma.sql`and ${conversaNoEscopo(Prisma.sql`"conversationId"`, nums)}` : Prisma.empty}
       group by 1, 2
     `));
     const porEscala = new Map<string, number>();
@@ -426,7 +525,7 @@ class ReportsController {
     };
     // vendas pela régua comum com a meta: "Comprou" + orçamento pago sem encerramento − estornos.
     // Pagamento sem encerramento também é atendimento concluído (entra em `closed` e na conversão)
-    const vendas = await this.load.run(() => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number; paidOnly: number }[]>(vendasPorConsultorSql(tenantId, from, to, f.tagIds?.length ? this.eventoTemTag(f.tagIds) : undefined)));
+    const vendas = await this.load.run(() => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number; paidOnly: number }[]>(vendasPorConsultorSql(tenantId, from, to, f.tagIds?.length ? this.eventoTemTag(f.tagIds) : undefined, nums)));
     const porId = new Map(rows.map((r) => [r.userId, r]));
     const soVendas = vendas.filter((v) => v.userId && !porId.has(v.userId)).map((v) => v.userId);
     const nomes = soVendas.length ? await this.prisma.user.findMany({ where: { id: { in: soVendas } }, select: { id: true, name: true } }) : [];
@@ -481,10 +580,12 @@ class ReportsController {
     const conds = [Prisma.sql`s."tenantId" = ${tenantId}`, Prisma.sql`s."closedAt" >= ${from}`, Prisma.sql`s."closedAt" < ${to}`, Prisma.sql`s."refundedAt" is null`];
     if (filtro.agentId) conds.push(Prisma.sql`s."userId" = ${filtro.agentId}`);
     if (filtro.tagIds) conds.push(this.vendaTemTag(filtro.tagIds));
+    if (filtro.numberIds) conds.push(conversaNoEscopo(Prisma.sql`s."conversationId"`, filtro.numberIds));
     const where = Prisma.join(conds, ' and ');
     // estornos do período (pela data do estorno): a venda saiu do faturamento acima, mas a gestão precisa ver
     const condsEstorno = [Prisma.sql`s."tenantId" = ${tenantId}`, Prisma.sql`s."refundedAt" >= ${from}`, Prisma.sql`s."refundedAt" < ${to}`];
     if (filtro.agentId) condsEstorno.push(Prisma.sql`s."userId" = ${filtro.agentId}`);
+    if (filtro.numberIds) condsEstorno.push(conversaNoEscopo(Prisma.sql`s."conversationId"`, filtro.numberIds));
     const [totais, byDay, byAgent, bySource, estornos] = await this.load.all([
       () => this.prisma.$queryRaw<{ total: number | null; count: number }[]>(Prisma.sql`
         select sum(s.amount)::float as total, count(*)::int as count from sales s where ${where}
@@ -533,6 +634,7 @@ class ReportsController {
     const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`e.outcome = 'lost'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (filtro.agentId) conds.push(doConsultor(filtro.agentId));
     if (filtro.tagIds) conds.push(this.eventoTemTag(filtro.tagIds));
+    if (filtro.numberIds) conds.push(conversaNoEscopo(Prisma.sql`e."conversationId"`, filtro.numberIds));
     // pelo MOTIVO do encerramento (close_reasons); sem motivo, o texto gravado (encerramentos antigos)
     const rows = await this.prisma.$queryRaw<{ label: string; value: number; closeReasonId: string | null; color: string | null }[]>(Prisma.sql`
       select cr.id as "closeReasonId", cr.color,
@@ -579,7 +681,7 @@ class ReportsController {
    * Atendimento encerrado como interno (`ignoreInReports`) fica de fora de todas, menos das
    * contagens de mensagens.
    */
-  private async query(tenantId: string, d: ReportDefinition): Promise<{ label: string; value: number }[]> {
+  private async query(tenantId: string, d: ReportDefinition, numberIds?: string[]): Promise<{ label: string; value: number }[]> {
     const porEncerramento = ['closed', 'revenue', 'won', 'lost', 'win_rate'].includes(d.metric);
     const usaMensagens = d.metric === 'messages_in' || d.metric === 'messages_out';
     const porInicio = d.metric === 'conversations';
@@ -592,6 +694,7 @@ class ReportsController {
       tag: Prisma.sql`coalesce(t.name, '(sem tag)')`,
       status: Prisma.sql`c.status::text`,
       number: Prisma.sql`n.label`,
+      company: Prisma.sql`coalesce(co.name, '(sem empresa)')`,
       // encerramento: quem encerrou; o resto: com quem a conversa está
       agent: porEncerramento ? Prisma.sql`coalesce(ea.name, '(automático)')` : Prisma.sql`coalesce(a.name, '(não atribuído)')`,
       origin: Prisma.sql`c.origin::text`,
@@ -623,6 +726,7 @@ class ReportsController {
     else if (!porInicio) filters.push(Prisma.sql`c."createdAt" >= ${d.from}`, Prisma.sql`c."createdAt" < ${d.to}`, Prisma.sql`not ${encerradoInterno(Prisma.sql`c.id`, Prisma.sql`c."createdAt"`)}`);
     if (d.filters.status) filters.push(Prisma.sql`c.status = ${d.filters.status}::"ConversationStatus"`);
     if (d.filters.numberId) filters.push(Prisma.sql`c."numberId" = ${d.filters.numberId}`);
+    if (numberIds) filters.push(Prisma.sql`c."numberId" in (${Prisma.join(numberIds)})`);
     if (d.filters.origin) filters.push(Prisma.sql`c.origin = ${d.filters.origin}::"ConversationOrigin"`);
     if (d.filters.tagIds?.length) {
       filters.push(porEncerramento ? this.eventoTemTag(d.filters.tagIds) : Prisma.sql`c.id in (select "conversationId" from conversation_tags where "tagId" in (${Prisma.join(d.filters.tagIds)}))`);
@@ -646,6 +750,7 @@ class ReportsController {
       ) i on i.conv = c.id and not ${encerradoInterno(Prisma.sql`i.conv`, Prisma.sql`i.em`)}`);
     }
     if (d.groupBy === 'number') joins.push(Prisma.sql`join whatsapp_numbers n on n.id = c."numberId"`);
+    if (d.groupBy === 'company') joins.push(Prisma.sql`left join whatsapp_numbers nco on nco.id = c."numberId" left join companies co on co.id = nco."companyId"`);
     if (d.groupBy === 'agent' && !porEncerramento) joins.push(Prisma.sql`left join users a on a.id = c."assigneeId"`);
     if (porEncerramento) {
       joins.push(Prisma.sql`join conversation_events e on e."conversationId" = c.id and e.type = 'closed' and not e."ignoreInReports"`);

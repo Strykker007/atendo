@@ -55,6 +55,26 @@ vai com o header.
   `maxCompanies`: o limite é para o autoatendimento do cliente, e passar dele é decisão do dono — a
   tela mostra o limite do plano e avisa quando o cliente está acima.
 
+## Relatórios
+
+Todos os relatórios respeitam o seletor de empresa, pelo mesmo escopo de números das conversas
+(`numberIds` do `AuthUser`, que já é a empresa ativa ∩ números da pessoa): visão pronta, vendas,
+motivos de perda, auditoria de atendimentos, detalhamento de vendas, ranking, satisfação e o
+relatório personalizado. Antes eles filtravam só pelo cliente, e qualquer empresa selecionada
+mostrava a soma de todas. O cache de relatório (`ReportLoadService`) leva o escopo na chave.
+
+- **Empresa selecionada:** a tela mostra só ela e o subtítulo diz qual.
+- **"Todas as empresas"** (quem opera mais de uma): soma tudo e mostra o quadro **Por empresa**
+  (`GET /reports/companies`): atendimentos, encerrados, fila agora, 1ª resposta, vendas,
+  faturamento, ticket médio e conversão de cada empresa, com os mesmos filtros de período, tag e
+  consultor. Clicar numa empresa troca o seletor para ela. "(sem empresa)" = números sem empresa,
+  só para quem enxerga o cliente inteiro.
+- **Relatório personalizado:** dimensão **Empresa** em "Agrupar por" (aparece com mais de uma empresa).
+
+A régua é a mesma da visão pronta (`kpisDoEscopo` reaproveita `query` e `vendasPorConsultorSql`,
+que ganhou o parâmetro `numberIds`): a linha de uma empresa bate com a tela daquela empresa.
+Metas (`goals`) continuam por consultor, sem escopo de empresa.
+
 ## Cobrança
 
 Cada empresa paga de um de dois jeitos (`companies.billingType`), e o cliente escolhe se o preço

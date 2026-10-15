@@ -11,7 +11,7 @@ import { ConversationOrigin, type Message } from './core';
 
 // ---- Relatórios ----
 export type ReportMetric = 'conversations' | 'messages_in' | 'messages_out' | 'avg_first_response_min' | 'closed' | 'revenue' | 'won' | 'lost' | 'win_rate';
-export type ReportGroup = 'day' | 'week' | 'month' | 'tag' | 'status' | 'number' | 'agent' | 'origin' | 'campaign' | 'reason';
+export type ReportGroup = 'day' | 'week' | 'month' | 'tag' | 'status' | 'number' | 'company' | 'agent' | 'origin' | 'campaign' | 'reason';
 export interface ReportDefinition {
   metric: ReportMetric;
   groupBy: ReportGroup;
@@ -32,6 +32,26 @@ export const useSaveReport = () => {
 export const useDeleteSavedReport = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/reports/saved/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }) });
+};
+
+// ---- Relatórios: comparativo por empresa (docs/empresas.md#relatórios) ----
+export interface CompanyReportRow {
+  /** null = números sem empresa */
+  companyId: string | null;
+  name: string;
+  conversations: number;
+  closed: number;
+  waitingNow: number;
+  avgFirstResponseMin: number | null;
+  won: number;
+  lost: number;
+  revenue: number;
+  avgTicket: number | null;
+  winRate: number | null;
+}
+export const useReportCompanies = (f: { from: string; to: string; tagIds?: string[]; agentId?: string }, enabled: boolean) => {
+  const qs = new URLSearchParams({ from: f.from, to: f.to, ...(f.tagIds?.length && { tagIds: f.tagIds.join(',') }), ...(f.agentId && { agentId: f.agentId }) });
+  return useQuery({ queryKey: ['report-companies', qs.toString()], enabled, queryFn: () => api<{ rows: CompanyReportRow[] }>(`/reports/companies?${qs}`), placeholderData: keepPreviousData, staleTime: 60_000, refetchOnWindowFocus: false });
 };
 
 // ---- Relatórios: ranking de consultores ----

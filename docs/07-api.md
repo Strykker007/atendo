@@ -190,7 +190,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/campaigns` | idem | `{name, numberId, text?, mediaKey?, mediaType?, mediaName?, template?: {name, language, header?, body?}, startAt?, businessHoursOnly?, audience}` → rascunho com o público materializado. Meta: `template` obrigatório (conferido); QR: texto e/ou anexo, horário de funcionamento forçado. Sem critério de público = 400; >20.000 = 400 |
 | POST | `/campaigns/:id/start` | idem | `{acceptRisk?}` — QR exige o aceite na 1ª vez (`400 qr_risk_not_accepted`); agenda se `startAt` futuro. Emite `campaign` |
 | POST | `/campaigns/:id/status` | idem | `{status: 'paused'\|'running'\|'canceled'}` — pausar, retomar (limpa `pauseReason`), cancelar. Emite `campaign` |
-| POST | `/reports/run` | todos | Executa um `ReportDefinition` (filtros: `tagIds`, `status`, `numberId`, `origin`, `agentId` — consultor: dono da conversa, ou quem encerrou nas métricas de venda) |
+| POST | `/reports/run` | todos | Executa um `ReportDefinition` (filtros: `tagIds`, `status`, `numberId`, `origin`, `agentId` — consultor: dono da conversa, ou quem encerrou nas métricas de venda; `groupBy: 'company'` = por empresa) |
+| GET | `/reports/companies?from=&to=&tagIds=&agentId=` | todos | Comparativo por empresa: `{ rows: [{ companyId (null = sem empresa), name, conversations, closed, waitingNow, avgFirstResponseMin, won, lost, revenue, avgTicket, winRate }] }`, uma linha por empresa que a pessoa opera. Todos os relatórios respeitam o seletor de empresa (`x-company-id`) — ver [Empresas](empresas.md#relatórios) |
 | GET / POST / DELETE | `/reports/saved[/:id]` | todos | Relatórios salvos |
 | **Webhooks** (sem auth de usuário) | | | |
 | GET | `/webhooks/meta` | — | Verificação da Meta (`hub.challenge`) |

@@ -10,7 +10,10 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useOutcomeLabels, useHasFeature, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useMyCompanies, useOutcomeLabels, useHasFeature, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useQueryClient } from '@tanstack/react-query';
+import { useUI } from '@/lib/store';
+import { Building2 } from 'lucide-react';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp, Wallet } from 'lucide-react';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
@@ -50,6 +53,14 @@ export default function RelatoriosPage() {
   const periodo = { from: inicioDoDia(range[0]), to: inicioDoDia(range[1]) };
   const filtros = { tagIds: tagIds.length ? tagIds : undefined, agentId: agentId || undefined };
   const overview = useReportOverview({ ...periodo, ...filtros });
+  // várias empresas e nenhuma escolhida no seletor: compara lado a lado (docs/empresas.md#relatórios)
+  const { companyId, setCompany } = useUI();
+  const minhasEmpresas = useMyCompanies();
+  const empresas = minhasEmpresas.data ?? [];
+  const empresaAtiva = empresas.find((c) => c.id === companyId);
+  const porEmpresa = useReportCompanies({ ...periodo, ...filtros }, !companyId && empresas.length > 1);
+  const qc = useQueryClient();
+  const abrirEmpresa = (id: string) => { setCompany(id); qc.invalidateQueries(); };
   const agents = useAgents();
   const temRanking = useHasFeature('consultant_ranking').has;
   const temSatisfacao = useHasFeature('satisfaction_surveys').has;
@@ -104,7 +115,7 @@ export default function RelatoriosPage() {
     <PageShell width="max-w-6xl">
       <PageHeader
         title="Relatórios"
-        subtitle="Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais."
+        subtitle={empresaAtiva ? `Só da empresa ${empresaAtiva.name} (troque no seletor do menu). Tudo sai das conversas, mensagens e tags reais.` : empresas.length > 1 ? 'Todas as suas empresas somadas — o quadro "Por empresa" separa cada uma.' : 'Como está o atendimento no período. Tudo sai das conversas, mensagens e tags reais.'}
         action={
           <div className="flex flex-wrap gap-2">
             {temSatisfacao && <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>}
@@ -150,6 +161,8 @@ export default function RelatoriosPage() {
             <Kpi icon={<CheckCircle2 size={15} />} label="Encerradas" value={`${Math.round(overview.data.kpis.closeRate * 100)}%`} sub={`${overview.data.kpis.closed} de ${overview.data.kpis.conversations}`} />
           </div>
 
+          {porEmpresa.data && porEmpresa.data.rows.length > 1 && <PorEmpresa rows={porEmpresa.data.rows} onAbrir={abrirEmpresa} />}
+
           <div className="grid gap-4 lg:grid-cols-2">
             <Card title="Atendimentos por dia" hint="Conversas novas + clientes que voltaram"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
             <Card title="Atendimentos por atendente" hint="Encerrados no período, por quem encerrou"><ReportChart def={{ metric: 'closed', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byAgent} height={220} /></Card>
@@ -185,7 +198,7 @@ export default function RelatoriosPage() {
             <Field label="Agrupar por">
               <select className={inputCls} value={def.groupBy} onChange={(e) => set('groupBy', e.target.value as ReportDefinition['groupBy'])}>
                 <optgroup label="Tempo">{TIME_GROUPS.map((k) => <option key={k} value={k}>{GROUP_LABEL[k as ReportDefinition['groupBy']]}</option>)}</optgroup>
-                <optgroup label="Categoria">{Object.entries(GROUP_LABEL).filter(([k]) => !TIME_GROUPS.includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</optgroup>
+                <optgroup label="Categoria">{Object.entries(GROUP_LABEL).filter(([k]) => !TIME_GROUPS.includes(k) && (k !== 'company' || empresas.length > 1)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</optgroup>
               </select>
             </Field>
             <Field label="Período">
@@ -393,6 +406,55 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
   );
 }
 const fmtMin = (m: number) => (m < 60 ? `${m.toFixed(0)} min` : `${(m / 60).toFixed(1)} h`);
+
+/** Indicadores principais por empresa, lado a lado. Clicar numa empresa abre a tela só dela. */
+function PorEmpresa({ rows, onAbrir }: { rows: CompanyReportRow[]; onAbrir: (id: string) => void }) {
+  const pct = (v: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-4">
+      <div className="mb-2">
+        <h3 className="font-display font-semibold text-ink text-sm flex items-center gap-1.5"><Building2 size={14} className="text-accent" /> Por empresa</h3>
+        <p className="text-[11px] text-muted">Mesmo período e filtros. Clique numa empresa para ver a tela só dela.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-[11px] uppercase tracking-wide text-muted">
+            <tr>
+              <th className="py-2 pr-4">Empresa</th>
+              <th className="py-2 pr-4 text-right">Atendimentos</th>
+              <th className="py-2 pr-4 text-right">Encerrados</th>
+              <th className="py-2 pr-4 text-right">Na fila</th>
+              <th className="py-2 pr-4 text-right">1ª resposta</th>
+              <th className="py-2 pr-4 text-right">Vendas</th>
+              <th className="py-2 pr-4 text-right">Faturamento</th>
+              <th className="py-2 pr-4 text-right">Ticket médio</th>
+              <th className="py-2 text-right">Conversão</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.companyId ?? 'sem'} className="border-t border-line">
+                <td className="py-2 pr-4">
+                  {r.companyId
+                    ? <button type="button" onClick={() => onAbrir(r.companyId!)} className="font-medium text-accent hover:underline text-left">{r.name}</button>
+                    : <span className="text-muted">{r.name}</span>}
+                </td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.conversations.toLocaleString('pt-BR')}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.closed.toLocaleString('pt-BR')}</td>
+                <td className={cn('py-2 pr-4 text-right tabular-nums', r.waitingNow > 5 && 'text-warn-ink font-semibold')}>{r.waitingNow}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.avgFirstResponseMin != null ? fmtMin(r.avgFirstResponseMin) : '—'}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.won.toLocaleString('pt-BR')}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{fmtBRL(r.revenue)}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{r.avgTicket != null ? fmtBRL(r.avgTicket) : '—'}</td>
+                <td className="py-2 text-right tabular-nums">{pct(r.winRate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
 function SaveModal({ open, onClose, onSubmit, pending }: { open: boolean; onClose: () => void; onSubmit: (name: string) => void; pending: boolean }) {
   const [name, setName] = useState('');
