@@ -3,6 +3,16 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.4.0 — 2026-10-16
+
+- feat(chat): / no campo abre as respostas rápidas
+- feat(fluxos): card Tratar dados com prévia em valores de exemplo
+- fix(agenda): sincronização diária às 03:00, um aviso por conversa e nomes normalizados
+- fix(whatsapp): teto de buscas de histórico, health check destrava pending_qr e evolution-db com mais memória
+- feat(fluxos): transformar texto números JSON e datas no Manipulador
+- feat(fluxos): salvar mapeamentos HTTP na ficha do contato
+- fix(fluxos): adaptar painéis à largura lateral
+
 ## 1.3.1 — 2026-10-15
 
 - fix(foto protegida): frase sem {{link}} ganha o link no final ao salvar, em vez de bloquear
