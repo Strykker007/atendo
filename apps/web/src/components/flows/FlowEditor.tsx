@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
-import { nodeTypes, NODE_META, PALETTE_GROUPS, defaultData, FlowNodeActions, FlowEditorRefs, type FlowRefs, type ProviderKind } from './nodes';
+import { nodeTypes, NODE_META, PALETTE_GROUPS, TRANSFORM_META, defaultData, type PaletteItem, FlowNodeActions, FlowEditorRefs, type FlowRefs, type ProviderKind } from './nodes';
 import { NodePanel } from './NodePanel';
 import { DeletableEdge } from './DeletableEdge';
 import { autoLayout, looksVertical } from './layout';
@@ -128,20 +128,21 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
   }, [setEdges]);
 
   /** Adiciona um bloco: por clique (abaixo do último) ou por drag-and-drop (na posição solta). */
-  const addNode = (type: FlowNodeType, position?: { x: number; y: number }) => {
+  const addNode = (item: PaletteItem, position?: { x: number; y: number }) => {
+    const type: FlowNodeType = item === 'transform' ? 'variable' : item;
     const id = newNodeId(type);
     const last = nodes[nodes.length - 1];
     // por clique: à direita do último, que é para onde o fluxo cresce
     const pos = position ?? { x: (last?.position.x ?? 0) + 300, y: last?.position.y ?? 200 };
-    setNodes((ns) => [...ns, { id, type, position: pos, data: defaultData(type) as Record<string, unknown> }]);
+    setNodes((ns) => [...ns, { id, type, position: pos, data: defaultData(item) as Record<string, unknown> }]);
     setSelectedId(id);
     setSide('node');
   };
-  const onDragStart = (e: React.DragEvent, type: FlowNodeType) => { e.dataTransfer.setData('application/atendo-node', type); e.dataTransfer.effectAllowed = 'move'; };
+  const onDragStart = (e: React.DragEvent, type: PaletteItem) => { e.dataTransfer.setData('application/atendo-node', type); e.dataTransfer.effectAllowed = 'move'; };
   const onDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const type = e.dataTransfer.getData('application/atendo-node') as FlowNodeType;
+    const type = e.dataTransfer.getData('application/atendo-node') as PaletteItem;
     if (!type) return;
     // converte a posição do mouse (tela) para coordenadas do canvas (respeita zoom/pan)
     const position = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -396,7 +397,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
             <div key={g.label} className="pb-1">
               <div className="text-[10.5px] font-semibold uppercase tracking-wider text-muted px-1 py-1">{g.label}</div>
               {g.types.map((t) => {
-                const m = NODE_META[t];
+                const m = t === 'transform' ? TRANSFORM_META : NODE_META[t];
                 return (
                   <button key={t} draggable onDragStart={(e) => onDragStart(e, t)} onClick={() => addNode(t)} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-field cursor-grab active:cursor-grabbing" title={`${m.hint} — clique ou arraste para o canvas`}>
                     <span className={cn('w-5 h-5 rounded-md grid place-items-center shrink-0', m.color)}>{m.icon}</span>

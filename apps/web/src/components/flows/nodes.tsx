@@ -1,10 +1,10 @@
 'use client';
 import { createContext, useContext } from 'react';
 import { Handle, Position, useNodeId, type NodeProps } from '@xyflow/react';
-import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip, Globe, Trash2 } from 'lucide-react';
+import { Play, MessageSquare, Save, ListOrdered, GitBranch, Zap, Clock, Flag, CalendarClock, Sparkles, Variable, Shuffle, Users, AlertTriangle, Copy, Workflow, ExternalLink, Image as ImageIcon, Film, FileText, Mic, Timer, Paperclip, Globe, Trash2, Wand2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  CLOSED_BAND_ID, DEPARTMENT_NONE, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent, randomizerTotal,
+  CLOSED_BAND_ID, DEPARTMENT_NONE, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent, randomizerTotal, VARIABLE_OP_LABEL,
   type RandomizerBranch,
   type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
@@ -16,8 +16,15 @@ import { useDepartments, useOutcomeLabels, useSchedules } from '@/lib/hooks';
  * azul = distribuição), para o desenho se ler de longe: dá para ver onde o fluxo decide e
  * onde ele entrega sem abrir nenhum card.
  */
-export const PALETTE_GROUPS: { label: string; types: FlowNodeType[] }[] = [
-  { label: 'Estrutura e Conteúdo', types: ['message', 'menu', 'variable', 'connect_flow', 'end'] },
+/** Card "Tratar dados" na paleta e no canvas (nó `variable` com `mode: 'transform'`). */
+export const TRANSFORM_META = { icon: <Wand2 size={13} />, color: 'bg-c4 text-white', label: 'Tratar dados', hint: 'Transforma uma variável: extrai, formata, calcula, lê campo do JSON da API, mexe em datas' };
+/** O nó é um "Tratar dados"? */
+export const isTransform = (type: string, data: unknown) => type === 'variable' && (data as { mode?: string } | undefined)?.mode === 'transform';
+
+/** `transform` não é um tipo de nó: é o Manipulador (`variable`) já aberto nas operações de tratar dados. */
+export type PaletteItem = FlowNodeType | 'transform';
+export const PALETTE_GROUPS: { label: string; types: PaletteItem[] }[] = [
+  { label: 'Estrutura e Conteúdo', types: ['message', 'menu', 'variable', 'transform', 'connect_flow', 'end'] },
   { label: 'Lógica e Decisão', types: ['action', 'http', 'randomizer', 'condition', 'wait', 'ai'] },
   { label: 'Distribuição e Envio', types: ['question', 'distributor', 'schedule'] },
 ];
@@ -35,6 +42,7 @@ export const NODE_META: Record<FlowNodeType, { icon: React.ReactNode; color: str
   connect_flow: { icon: <Workflow size={13} />, color: PURPLE, label: 'Conectar com outro fluxo', hint: 'Termina este fluxo e começa outro do início, levando as variáveis' },
   menu: { icon: <ListOrdered size={13} />, color: PURPLE, label: 'Menu', hint: 'Opções numeradas, cada uma com uma saída; tentativas e tempo limite' },
   variable: { icon: <Variable size={13} />, color: PURPLE, label: 'Manipulador', hint: 'Define, soma, concatena, limpa ou copia variáveis do fluxo' },
+
   end: { icon: <Flag size={13} />, color: PURPLE, label: 'Fim', hint: 'Encerra o fluxo' },
   action: { icon: <Zap size={13} />, color: ORANGE, label: 'Ação', hint: 'Etiqueta, atribuir, status, encerrar, webhook ou humano' },
   randomizer: { icon: <Shuffle size={13} />, color: YELLOW, label: 'Randomizador', hint: 'Divide o tráfego por percentual (teste A/B)' },
@@ -132,7 +140,7 @@ function OutRow({ id, children, tone = 'default' }: { id?: string; children: Rea
 const Rows = ({ children }: { children: React.ReactNode }) => <div className="px-2 pb-2 space-y-1">{children}</div>;
 
 function Shell({ type, selected, children, summary, data }: { type: FlowNodeType; selected?: boolean; children?: React.ReactNode; summary?: string; data?: Record<string, unknown> }) {
-  const m = NODE_META[type];
+  const m = isTransform(type, data) ? TRANSFORM_META : NODE_META[type];
   const id = useNodeId();
   const actions = useContext(FlowNodeActions);
   const reconfig = Array.isArray(data?._reconfig) ? (data._reconfig as string[]) : [];
@@ -400,7 +408,8 @@ function assignmentSummary(a: VariableAssignment) {
     case 'clear': return `${v} = (vazio)`;
     case 'copy': return `${v} = {{${a.from || '?'}}}`;
     case 'now': return `${v} = agora`;
-    default: return `${v} = ${a.value}`;
+    case 'set': return `${v} = ${a.value}`;
+    default: return `${a.value || '?'} → ${VARIABLE_OP_LABEL[a.op!]?.replace(/^\w+: /, '') ?? a.op} → ${v}`;
   }
 }
 
@@ -474,7 +483,7 @@ export const newRule = (): ConditionRule => ({ id: shortId(), operand: 'var', ke
 export const newBranch = (n: number): ConditionBranch => ({ id: shortId(), label: `Ramo ${n}`, match: 'all', rules: [newRule()] });
 
 /** Dados iniciais de um bloco novo. */
-export function defaultData(type: FlowNodeType): FlowNode['data'] {
+export function defaultData(type: PaletteItem): FlowNode['data'] {
   switch (type) {
     case 'start': return {} as never;
     case 'message': return { items: [{ id: shortId(), kind: 'text', text: '' }] };
@@ -487,6 +496,7 @@ export function defaultData(type: FlowNodeType): FlowNode['data'] {
     case 'schedule': return { maxSlots: 6 };
     case 'ai': return { mode: 'answer', instructions: '', knowledge: '', fallbackText: 'Vou verificar isso com um atendente, um momento.', keepTalking: true, maxTurns: 10 };
     case 'variable': return { assignments: [{ id: shortId(), varName: '', op: 'set', value: '' }] };
+    case 'transform': return { mode: 'transform', assignments: [{ id: shortId(), varName: '', op: 'extract', value: '' }] };
     case 'randomizer': return { branches: [{ id: shortId(), label: 'A', weight: 50 }, { id: shortId(), label: 'B', weight: 50 }] };
     case 'distributor': return { mode: 'round_robin', agentIds: [] };
     case 'connect_flow': return {};

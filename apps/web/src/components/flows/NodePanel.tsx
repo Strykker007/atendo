@@ -5,11 +5,12 @@ import { useContext } from 'react';
 import { Trash2, Plus, X, ExternalLink, Lock, LockOpen } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { NODE_META, DELAY_UNIT, FlowEditorRefs } from './nodes';
+import { NODE_META, TRANSFORM_META, isTransform, DELAY_UNIT, FlowEditorRefs } from './nodes';
+import { OpOptions, TransformPreview } from './TransformPreview';
 import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useSurveys, reasonsFor } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
-import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, VARIABLE_OP_LABEL, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
+import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
 import { ContentPanel } from './ContentPanel';
 import { HttpPanel } from './HttpPanel';
@@ -73,7 +74,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
   const services = useServices();
   const pros = useProfessionals();
   const refs = useContext(FlowEditorRefs);
-  const m = NODE_META[node.type];
+  const m = isTransform(node.type, node.data) ? TRANSFORM_META : NODE_META[node.type];
   // editar o bloco é revisá-lo: some o aviso "Reconfigurar" que veio da importação
   const set = (patch: Record<string, unknown>) => {
     const { _reconfig, ...rest } = node.data as Record<string, unknown>;
@@ -436,7 +437,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                       <div className="flex items-center gap-1.5">
                         <span className="tnum font-mono text-[11px] text-faint w-4">{i + 1}</span>
                         <select className={`${inputCls} min-w-0 max-w-full`} value={op} onChange={(e) => upd(a.id, { op: e.target.value as VariableOp })}>
-                          {(Object.keys(VARIABLE_OP_LABEL) as VariableOp[]).map((o) => <option key={o} value={o}>{VARIABLE_OP_LABEL[o]}</option>)}
+                          <OpOptions transform={isTransform(node.type, node.data) && !['set', 'add', 'subtract', 'append', 'clear', 'copy', 'now'].includes(op)} />
                         </select>
                         <button onClick={() => set({ assignments: list.filter((x) => x.id !== a.id) })} disabled={list.length <= 1} className="text-faint hover:text-danger p-1"><X size={14} /></button>
                       </div>
@@ -467,7 +468,8 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                     </div>
                   );
                 })}
-                <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ assignments: [...list, { id: shortId(), varName: '', op: 'set', value: '' }] })}>Adicionar operação</Button>
+                <Button size="sm" variant="ghost" icon={<Plus size={12} />} onClick={() => set({ assignments: [...list, { id: shortId(), varName: '', op: isTransform(node.type, node.data) ? 'extract' : 'set', value: '' }] })}>Adicionar operação</Button>
+                <TransformPreview assignments={list} />
                 <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">Somar/subtrair: variável vazia conta como 0 e aceita vírgula decimal (10,5); se o valor não for número, a variável não muda. Variáveis valem só nesta execução do fluxo.</p>
               </div>
             </Field>

@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, IsInt, MaxLength, Min } from 'class-validator';
 import { randomUUID } from 'node:crypto';
-import { copyName, flowFromPortable, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
+import { copyName, flowFromPortable, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type VariableAssignment, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -16,6 +16,7 @@ import { assertOwnContactFields, assertOwnFlowMedia, validateDefinition } from '
 import { runHttpRequest } from './http-request';
 import { Throttle } from '@nestjs/throttler';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
+import { applyAssignments } from './variables';
 
 /** contato que não existe: o teste da API externa não lê ficha de ninguém */
 const TEST_CONTACT_ID = '00000000-0000-0000-0000-000000000000';
@@ -47,6 +48,11 @@ class ActiveDto extends IdsDto {
 /** Teste do bloco "API externa" no editor: o card como está (salvo ou não) e valores de exemplo. */
 class TestHttpDto {
   @IsObject() data: HttpNode['data'];
+  @IsOptional() @IsObject() vars?: Record<string, string>;
+}
+
+class TransformPreviewDto {
+  @IsArray() @ArrayMaxSize(30) assignments: VariableAssignment[];
   @IsOptional() @IsObject() vars?: Record<string, string>;
 }
 
@@ -180,6 +186,22 @@ export class FlowsController {
       vars: out.vars,
       missing: out.missing,
     };
+  }
+
+  /**
+   * Prévia do Tratar dados / Manipulador: roda as operações (o mesmo `applyAssignments` do
+   * motor) sobre valores de exemplo. Pura — não grava, não chama nada fora.
+   */
+  @Post('transform-preview')
+  @RequirePermission('flows.manage')
+  @Throttle({ default: { ttl: 60_000, limit: 120 } })
+  async transformPreview(@CurrentUser() u: AuthUser, @Body() dto: TransformPreviewDto) {
+    const vars = Object.fromEntries(Object.entries(dto.vars ?? {}).filter(([k, v]) => /^[\w.]{1,60}$/.test(k) && typeof v === 'string').slice(0, 100).map(([k, v]) => [k, v.slice(0, 2000)]));
+    const ctx = await this.interpolation.context(u.tenantId, { id: TEST_CONTACT_ID, name: 'Contato de teste', phone: '5500000000000' }, vars);
+    const timezone = (await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { timezone: true } }))?.timezone || 'America/Sao_Paulo';
+    const assignments = dto.assignments.filter((a) => a && typeof a.varName === 'string').map((a) => ({ ...a, value: String(a.value ?? '').slice(0, 2000) }));
+    const out = applyAssignments(vars, assignments, { contact: ctx.contact, globals: ctx.globals, now: new Date(), timezone });
+    return { vars: out.vars, problems: out.problems };
   }
 
   @Post('delete')

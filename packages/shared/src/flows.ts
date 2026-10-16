@@ -285,7 +285,8 @@ export type WaitNode = FlowNodeBase<'wait', { mode?: 'duration' | 'next_open'; m
  * variáveis do fluxo, executadas em ordem. `op` ausente = 'set' (fluxos antigos).
  * `value` aceita {{variáveis}}.
  */
-export type VariableNode = FlowNodeBase<'variable', { assignments: VariableAssignment[] }>;
+/** `mode: 'transform'`: o mesmo bloco, mostrado no editor como "Tratar dados" (só muda a apresentação). */
+export type VariableNode = FlowNodeBase<'variable', { assignments: VariableAssignment[]; mode?: 'transform' }>;
 export type VariableOp = 'set' | 'add' | 'subtract' | 'append' | 'clear' | 'copy' | 'now' | 'upper' | 'lower' | 'trim' | 'replace' | 'extract' | 'slice' | 'to_number' | 'round' | 'currency' | 'expression' | 'json_path' | 'list_count' | 'date_format' | 'date_add' | 'date_diff';
 export interface VariableAssignment {
   id: string;

@@ -131,6 +131,8 @@ Regra `ConditionRule`: `operand` + `key` (variável ou campo) + `op` + parâmetr
 
 ## Manipulador
 
+**Tratar dados** é este mesmo bloco (`variable`, `data.mode = 'transform'`) com outra apresentação: card próprio na paleta, seletor agrupado (Texto / Número / JSON / Data, sem o Básico) e resumo `{{resposta}} → ler caminho no JSON → {{nome}}` no canvas. O seletor de operação do Manipulador também ficou agrupado (Básico / Texto / Número / JSON / Data). Os dois têm **Testar com valores de exemplo**: o painel pede um valor para cada `{{variável}}` usada que não é criada pelas próprias operações e chama `POST /flows/transform-preview` (`flows.manage`, 120/min), que roda o mesmo `applyAssignments` do motor sem gravar nada e devolve as variáveis e os avisos.
+
 Tipo interno continua `variable` (fluxos salvos intactos); só o nome exibido mudou. `assignments: { id, varName, op?, value, from?, format? }[]`, executadas em ordem — cada operação já vê o resultado da anterior. `op` ausente = `set` (formato antigo).
 
 | `op` | Efeito |
