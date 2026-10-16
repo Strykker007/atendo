@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.4.1 — 2026-10-16
+
+- fix(envio): mensagem do atendente não espera atrás de automática segurada pela proteção
+
 ## 1.4.0 — 2026-10-16
 
 - feat(chat): / no campo abre as respostas rápidas
