@@ -116,3 +116,7 @@ de `GET /contact-attributes/labels`.
 No chat, a resposta rápida já entra no campo com `{{contact.name}}` e `{{agent.name}}` (só a
 forma exata, sem filtro) trocados pelo navegador; as demais (inclusive com filtro) (`{{saudacao}}`, campos da ficha…) aparecem cruas no campo
 e são trocadas pela API no envio.
+
+### Painéis responsivos do editor
+
+API externa usa seções recolhíveis (Requisição aberta inicialmente, Headers, Corpo, Resposta/Mapeamentos e Teste). Headers e mapeamentos quebram em linhas conforme a largura disponível; URL e corpo crescem verticalmente. O JSON do teste tem rolagem própria limitada em altura. Condição, Manipulador e seletor de variáveis respeitam a largura do painel.

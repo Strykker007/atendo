@@ -238,3 +238,7 @@ Antes disso tudo vale a **faixa de horário** do quadro do número: boas-vindas,
 fluxo) da faixa — ex.: Fechado — **uma vez por conversa a cada período**, e se o atendimento
 segue ou para. O antigo *aviso de fora do expediente* virou a mensagem da faixa Fechado com
 "enviar só se nenhum fluxo responder". Ver [Horários](horarios.md).
+
+### Painéis responsivos do editor
+
+API externa usa seções recolhíveis (Requisição aberta inicialmente, Headers, Corpo, Resposta/Mapeamentos e Teste). Headers e mapeamentos quebram em linhas conforme a largura disponível; URL e corpo crescem verticalmente. O JSON do teste tem rolagem própria limitada em altura. Condição, Manipulador e seletor de variáveis respeitam a largura do painel.

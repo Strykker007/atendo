@@ -349,3 +349,7 @@ Tarefa 1.7. Tudo passa pelo módulo único `packages/shared/src/portable.ts` (pu
 - **Copiar/colar cards** (Ctrl+C/V): a área de transferência guarda também o `tenantId` e os nomes de etiquetas/fluxos de origem. Colando na **mesma empresa**, cópia literal (ids novos, ligações internas preservadas, as que saem da seleção descartadas). Colando em **outra empresa** (super admin entrando como clientes diferentes no mesmo navegador), passa por `scrubFlowDefinition` + `restoreFlowDefinition` com as etiquetas do destino — mesmas regras da importação, avisos na tela.
 - **Copiar para outra empresa** (ação na listagem): **não implementado** — o sistema não tem usuário com acesso a mais de uma empresa (`User.tenantId` único; só o super admin entra como cliente). Caminho atual: exportar e importar. Se surgir multiempresa, a ação é `flowToPortable` na origem + `flowFromPortable` no destino, no servidor.
 - **Respostas Rápidas**: `quick-replies/portable.ts` já usa `parsePortableFile`/`toBundle`/`copyName` daqui; a tarefa delas acrescenta só a limpeza própria do item.
+
+### Painéis responsivos do editor
+
+API externa usa seções recolhíveis (Requisição aberta inicialmente, Headers, Corpo, Resposta/Mapeamentos e Teste). Headers e mapeamentos quebram em linhas conforme a largura disponível; URL e corpo crescem verticalmente. O JSON do teste tem rolagem própria limitada em altura. Condição, Manipulador e seletor de variáveis respeitam a largura do painel.
