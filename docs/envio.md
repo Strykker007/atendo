@@ -36,6 +36,8 @@ qualquer origem ──▶ ConversationsService.send / sendAsSystem
    2. planSend (puro, send-queue.ts):
         queuedAt + prazo vencido            → falha "Não saiu: ficou mais de N min esperando a vez"
         há pendente anterior na conversa    → espera a vez (job atrasado 5 s; promovido antes)
+          exceto: mensagem do ATENDENTE atrás de automática segurada pela proteção
+          (teto de automáticas/aquecimento, queuedAt no futuro) → passa na frente e sai já
         número não conectado                → pausa (job atrasado 60 s, sem chamar o provider)
    3. teto do dia — desligado (todo número com sendDailyLimit 0, sem aquecimento);
       se voltar a existir, vale só para envio proativo → falha sem retry
