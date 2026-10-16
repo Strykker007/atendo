@@ -103,8 +103,8 @@ export const REPLY_TIMEOUT_HANDLE = 'timeout';
  */
 export const RETRIES_EXHAUSTED_HANDLE = 'fallback';
 /** Campos da ficha do contato que um fluxo pode preencher. */
-export type ContactField = 'name' | 'email' | 'address' | 'note1' | 'note2';
-export const CONTACT_FIELD_LABEL: Record<ContactField, string> = { name: 'Nome', email: 'E-mail', address: 'Endereço', note1: 'Observação 1', note2: 'Observação 2' };
+export type ContactField = `attribute:${string}` | 'name' | 'email' | 'address' | 'note1' | 'note2';
+export const CONTACT_FIELD_LABEL: Record<Exclude<ContactField, `attribute:${string}`>, string> = { name: 'Nome', email: 'E-mail', address: 'Endereço', note1: 'Observação 1', note2: 'Observação 2' };
 export type MenuNode = FlowNodeBase<'menu', { text: string; options: { id: string; label: string }[]; invalidText?: string; maxRetries: number } & ReplyTimeout>;
 /**
  * Condição: lista de ramos avaliados em ordem; o primeiro verdadeiro define a saída
@@ -415,7 +415,7 @@ export type ConnectFlowNode = FlowNodeBase<'connect_flow', { flowId?: string; fl
 export const MAX_FLOW_HOPS = 5;
 
 /** Resposta da API externa → variável: `path` no JSON (`cliente.nome`, `itens[0].preco`, `$.total`). */
-export interface HttpMapping { id: string; path: string; varName: string }
+export interface HttpMapping { id: string; path: string; varName: string; contactField?: ContactField }
 /**
  * API externa (docs/fluxos.md#api-externa): chama uma URL (mesma proteção do webhook — só
  * http/https público, sem redirecionamento), lê a resposta JSON e grava os campos escolhidos em

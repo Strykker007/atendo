@@ -120,3 +120,7 @@ e são trocadas pela API no envio.
 ### Painéis responsivos do editor
 
 API externa usa seções recolhíveis (Requisição aberta inicialmente, Headers, Corpo, Resposta/Mapeamentos e Teste). Headers e mapeamentos quebram em linhas conforme a largura disponível; URL e corpo crescem verticalmente. O JSON do teste tem rolagem própria limitada em altura. Condição, Manipulador e seletor de variáveis respeitam a largura do painel.
+
+### API externa → ficha do contato
+
+Cada mapeamento permite **Salvar também em** um campo fixo ou livre já existente na empresa, usando o mesmo seletor e gravação do bloco Salvar. O padrão é **Só no fluxo**. Valores persistidos são texto limitado a 1.000 caracteres (listas/objetos em JSON), visíveis na ficha no chat e em `{{contact.<chave>}}` nos próximos fluxos. Falha HTTP ou caminho ausente preserva a ficha. Não cria variável global. A API valida os destinos no tenant autenticado ao salvar, importar e ativar.

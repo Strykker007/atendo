@@ -1,4 +1,5 @@
 'use client';
+import { ContactFieldSelect } from './ContactFieldSelect';
 import { useContext } from 'react';
 import { Trash2, Plus, X, ExternalLink, Lock, LockOpen } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
@@ -131,10 +132,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                 <input className={`${inputCls} min-w-0 max-w-full`} value={node.data.varName} onChange={(e) => set({ varName: varName(e.target.value) })} placeholder="email" />
               </Field>
               <Field label="Também na ficha do contato" hint="Vale fora deste fluxo: aparece na ficha e nas próximas conversas">
-                <select className={`${inputCls} min-w-0 max-w-full`} value={node.data.contactField ?? ''} onChange={(e) => set({ contactField: (e.target.value || undefined) as ContactField | undefined })}>
-                  <option value="">Não salvar no contato</option>
-                  {(Object.keys(CONTACT_FIELD_LABEL) as ContactField[]).map((k) => <option key={k} value={k}>{CONTACT_FIELD_LABEL[k]}</option>)}
-                </select>
+                <ContactFieldSelect value={node.data.contactField} onChange={(contactField) => set({ contactField })} />
               </Field>
               <p className="text-[11.5px] text-muted">Depois, em qualquer bloco, use <code className="font-mono bg-panel border border-line rounded px-1">{`{{${node.data.varName || 'nome'}}}`}</code> — ou clique em <b>Inserir variável</b> nos campos de texto.</p>
             </div>

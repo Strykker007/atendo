@@ -1,4 +1,5 @@
 'use client';
+import { ContactFieldSelect } from './ContactFieldSelect';
 import { useMemo, useState } from 'react';
 import { Plus, X, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { HTTP_MAX_MAPPINGS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, suggestVarName, type HttpMapping, type HttpNode, type WebhookHeader } from '@atendo/shared';
@@ -149,6 +150,9 @@ export function HttpPanel({ data, set, vars }: { data: HttpNode['data']; set: (p
                 <input className={`${inputCls} min-w-0 font-mono text-[12px]`} value={m.varName} placeholder="nome" aria-label="Variável" onChange={(e) => updM(m.id, { varName: varName(e.target.value) })} />
                 <button aria-label="Remover campo" onClick={() => set({ mappings: mappings.filter((x) => x.id !== m.id) })} className="text-faint hover:text-danger p-1"><X size={14} /></button>
               </div>
+              <Field label="Salvar também em" hint="Campo da ficha do contato: aparece no chat e em outros fluxos.">
+                <ContactFieldSelect value={m.contactField} onChange={(contactField) => updM(m.id, { contactField })} />
+              </Field>
               {lido !== undefined && (
                 <div className="text-[10.5px] text-muted pl-1 truncate">
                   {res?.missing.includes(m.path) ? <span className="text-warn-ink">não veio na resposta (fica vazia)</span> : <>no teste: <span className="text-ink">{lido || '(vazio)'}</span></>}

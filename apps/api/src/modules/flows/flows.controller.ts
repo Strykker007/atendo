@@ -12,7 +12,7 @@ import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { FlowEngineService } from './flow-engine.service';
 import { UsageService } from '../billing/usage.service';
 import { botPaused } from '../conversations/bot-pause';
-import { assertOwnFlowMedia, validateDefinition } from './flow-validation';
+import { assertOwnContactFields, assertOwnFlowMedia, validateDefinition } from './flow-validation';
 import { runHttpRequest } from './http-request';
 import { Throttle } from '@nestjs/throttler';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
@@ -103,6 +103,7 @@ export class FlowsController {
   async create(@CurrentUser() u: AuthUser, @Body() dto: FlowDto) {
     validateDefinition(dto.definition, { strict: true });
     assertOwnFlowMedia(u.tenantId, dto.definition);
+      await assertOwnContactFields(this.prisma, u.tenantId, dto.definition);
     // `maxFlows` conta fluxos ATIVOS: criar desativado (rascunho) sempre pode
     if (dto.isActive ?? true) await this.usage.assertRoom(u.tenantId, 'maxFlows');
     return this.prisma.flow.create({
@@ -126,10 +127,12 @@ export class FlowsController {
     if (dto.definition) {
       validateDefinition(dto.definition, { strict: true });
       assertOwnFlowMedia(u.tenantId, dto.definition);
+      await assertOwnContactFields(this.prisma, u.tenantId, dto.definition);
     }
     const current = await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     // ativar pela lista não passa pelo editor: o desenho salvo (cópia, importado) precisa estar válido
     if (dto.isActive && !current.isActive && !dto.definition) validateDefinition(current.definition as unknown as FlowDefinition);
+    if (dto.isActive && !current.isActive) await assertOwnContactFields(this.prisma, u.tenantId, (dto.definition ?? current.definition) as unknown as FlowDefinition);
     if (dto.isActive && !current.isActive) await this.usage.assertRoom(u.tenantId, 'maxFlows');
     // optimistic locking: só grava se ninguém salvou depois que o editor carregou (renomear faixa
     // de horário também conta — docs/horarios.md). Toda escrita incrementa a versão.
@@ -239,6 +242,7 @@ export class FlowsController {
       if (dto.isActive) {
         try {
           validateDefinition(f.definition as unknown as FlowDefinition);
+          await assertOwnContactFields(this.prisma, u.tenantId, f.definition as unknown as FlowDefinition);
         } catch (e) {
           failed.push({ id: f.id, name: f.name, reason: e instanceof Error ? e.message : 'desenho inválido' });
           continue;
@@ -310,11 +314,12 @@ export class FlowsController {
 
     const newId = (type: FlowNodeType) => `${type}-${randomUUID().slice(0, 6)}`;
     const built = items.map((p) => flowFromPortable(p, tagIdByName, newId));
-    built.forEach((b) => {
+    for (const b of built) {
       validateDefinition(b.definition);
       // arquivo editado à mão pode apontar para anexo de outro cliente
       assertOwnFlowMedia(u.tenantId, b.definition);
-    });
+      await assertOwnContactFields(this.prisma, u.tenantId, b.definition);
+    }
 
     const taken = (await this.prisma.flow.findMany({ where: { tenantId: u.tenantId }, select: { name: true } })).map((f) => f.name);
     const flows = [];
