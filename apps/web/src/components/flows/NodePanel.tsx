@@ -1,4 +1,5 @@
 'use client';
+import { VariableTransformFields } from './VariableTransformFields';
 import { ContactFieldSelect } from './ContactFieldSelect';
 import { useContext } from 'react';
 import { Trash2, Plus, X, ExternalLink, Lock, LockOpen } from 'lucide-react';
@@ -461,6 +462,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                           <option value="time">Só a hora (14:30)</option>
                         </select>
                       )}
+                      <VariableTransformFields assignment={a} vars={vars} onChange={(patch) => upd(a.id, patch)} />
                       {op === 'clear' && <p className="text-[11px] text-muted">A variável fica vazia.</p>}
                     </div>
                   );

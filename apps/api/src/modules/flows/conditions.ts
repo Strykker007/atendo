@@ -50,7 +50,9 @@ export function toNumber(s: string) {
   const t = s.trim();
   if (!t) return NaN;
   const n = /,\d+$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
-  return Number(n);
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(n)) return NaN;
+  const value = Number(n);
+  return Number.isFinite(value) ? value : NaN;
 }
 
 /** "HH:MM" → minutos do dia; inválido = NaN. */
@@ -75,8 +77,8 @@ function compareText(rule: ConditionRule, raw: string, env: RuleEnv): boolean {
   const a = norm(raw);
   const b = norm(interpolate(rule.value ?? '', env));
   switch (rule.op) {
-    case 'eq': return a === b;
-    case 'neq': return a !== b;
+    case 'eq': return Number.isFinite(toNumber(a)) && Number.isFinite(toNumber(b)) ? toNumber(a) === toNumber(b) : a === b;
+    case 'neq': return Number.isFinite(toNumber(a)) && Number.isFinite(toNumber(b)) ? toNumber(a) !== toNumber(b) : a !== b;
     case 'contains': return a.includes(b);
     case 'not_contains': return !a.includes(b);
     case 'starts_with': return a.startsWith(b);

@@ -524,8 +524,8 @@ export class FlowEngineService {
           }
           case 'variable': {
             const ops = node.data.assignments ?? [];
-            // fuso só é buscado se alguma operação gravar a data/hora atual
-            const timezone = ops.some((a) => a.op === 'now') ? (await this.tenantSettings.get(run.tenantId)).timezone : 'America/Sao_Paulo';
+            // datas usam sempre o fuso configurado pelo cliente
+            const timezone = ops.some((a) => a.op === 'now' || a.op?.startsWith('date_')) ? (await this.tenantSettings.get(run.tenantId)).timezone : 'America/Sao_Paulo';
             const { vars: next, problems } = applyAssignments(vars, ops, { contact: ctx.contact, globals: ctx.globals, now: new Date(), timezone });
             if (problems.length) await this.warnTeam(run, `Manipulador: ${problems.join(' ')}`);
             await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: next } });

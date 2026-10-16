@@ -286,12 +286,21 @@ export type WaitNode = FlowNodeBase<'wait', { mode?: 'duration' | 'next_open'; m
  * `value` aceita {{variáveis}}.
  */
 export type VariableNode = FlowNodeBase<'variable', { assignments: VariableAssignment[] }>;
-export type VariableOp = 'set' | 'add' | 'subtract' | 'append' | 'clear' | 'copy' | 'now';
+export type VariableOp = 'set' | 'add' | 'subtract' | 'append' | 'clear' | 'copy' | 'now' | 'upper' | 'lower' | 'trim' | 'replace' | 'extract' | 'slice' | 'to_number' | 'round' | 'currency' | 'expression' | 'json_path' | 'list_count' | 'date_format' | 'date_add' | 'date_diff';
 export interface VariableAssignment {
   id: string;
   varName: string;
   op?: VariableOp;
   value: string;
+  pattern?: string;
+  replacement?: string;
+  regex?: boolean;
+  start?: string;
+  length?: string;
+  decimals?: string;
+  path?: string;
+  days?: string;
+  otherDate?: string;
   /** copy: nome da variável de origem */
   from?: string;
   /** now: formato gravado (no fuso do cliente) */
@@ -299,6 +308,9 @@ export interface VariableAssignment {
 }
 export const VARIABLE_OP_LABEL: Record<VariableOp, string> = {
   set: 'Definir valor', add: 'Somar', subtract: 'Subtrair', append: 'Acrescentar texto',
+  upper: 'Texto: maiúsculas', lower: 'Texto: minúsculas', trim: 'Texto: aparar espaços', replace: 'Texto: substituir', extract: 'Texto: extrair por regex', slice: 'Texto: cortar',
+  to_number: 'Número: converter', round: 'Número: arredondar', currency: 'Número: moeda BRL', expression: 'Número: expressão aritmética',
+  json_path: 'JSON: ler caminho', list_count: 'JSON: contar lista', date_format: 'Data: formatar', date_add: 'Data: somar/subtrair dias', date_diff: 'Data: diferença em dias',
   clear: 'Limpar', copy: 'Copiar de outra variável', now: 'Data/hora atual',
 };
 /**
