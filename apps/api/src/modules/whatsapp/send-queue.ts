@@ -77,7 +77,7 @@ export function headOf(prisma: PrismaService, conversationId: string) {
   return prisma.message.findFirst({
     where: { conversationId, ...PENDING_OUT },
     orderBy: { queueSeq: 'asc' },
-    select: { id: true, queueSeq: true, queuedAt: true },
+    select: { id: true, queueSeq: true, queuedAt: true, authorId: true },
   });
 }
 
@@ -124,9 +124,9 @@ export type SendPlan =
 
 export interface PlanInput {
   now: number;
-  message: { id: string; status: string; internal: boolean; queuedAt: Date };
+  message: { id: string; status: string; internal: boolean; queuedAt: Date; authorId?: string | null };
   /** pendente mais antiga da conversa (pode ser a própria) */
-  head: { id: string; queuedAt: Date } | null;
+  head: { id: string; queuedAt: Date; authorId?: string | null } | null;
   numberStatus: string;
   maxQueueAgeMin: number;
 }
@@ -152,7 +152,11 @@ export function planSend(i: PlanInput): SendPlan {
   if (i.message.status !== 'pending' || i.message.internal) return { action: 'skip' };
   const maxAge = i.maxQueueAgeMin * 60_000;
   if (i.now - i.message.queuedAt.getTime() > maxAge) return { action: 'expire', reason: expiredReason(i.maxQueueAgeMin) };
-  if (i.head && i.head.id !== i.message.id) {
+  // Mensagem do atendente não espera atrás de automática segurada pela proteção (teto de
+  // automáticas/aquecimento: `queuedAt` no futuro). O robô continua no ritmo dele; quem está no
+  // balcão não fica minutos sem a mensagem sair (Drogaria Balneário, 16/10/2026).
+  const humanoPassaNaFrente = !!i.head && !!i.message.authorId && !i.head.authorId && i.head.queuedAt.getTime() > i.now;
+  if (i.head && i.head.id !== i.message.id && !humanoPassaNaFrente) {
     const stale = i.now - i.head.queuedAt.getTime() > maxAge;
     // número parado: ninguém da conversa vai sair tão cedo, não precisa olhar a cada 5 s
     const recheck = i.numberStatus === 'connected' ? TURN_RECHECK_MS : DISCONNECTED_RECHECK_MS;

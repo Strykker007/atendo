@@ -18,6 +18,17 @@ const base = (over: Partial<PlanInput> = {}): PlanInput => ({
 });
 
 describe('planSend — decisão do worker', () => {
+  it('atendente passa na frente de automática segurada pela proteção', () => {
+    const held = { id: 'bot', queuedAt: new Date(now + 180_000), authorId: null };
+    expect(planSend(base({ message: { ...base().message, authorId: 'agente' }, head: held }))).toEqual({ action: 'send' });
+  });
+  it('automática atrás de automática segurada continua esperando a vez', () => {
+    const held = { id: 'bot', queuedAt: new Date(now + 180_000), authorId: null };
+    expect(planSend(base({ head: held })).action).toBe('wait_turn');
+  });
+  it('atendente atrás de automática que já pode sair (não segurada) espera a vez, para manter a ordem', () => {
+    expect(planSend(base({ message: { ...base().message, authorId: 'agente' }, head: { id: 'bot', queuedAt: at(5000), authorId: null } })).action).toBe('wait_turn');
+  });
   it('cabeça da conversa com número conectado: envia', () => {
     expect(planSend(base())).toEqual({ action: 'send' });
   });
