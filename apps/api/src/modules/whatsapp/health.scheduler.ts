@@ -34,11 +34,15 @@ export class NumbersHealthProcessor extends TrackedWorkerHost {
     super(QUEUE_HEALTH);
   }
   protected async handle(_job: Job) {
-    const list = await this.prisma.whatsAppNumber.findMany({ where: { isActive: true, status: { not: 'pending_qr' } } });
+    // `pending_qr` entra também: depois de um reinício a Evolution manda 'connecting' e às vezes não
+    // manda o 'open' (ou ele chega antes) — o número fica conectado de verdade e o painel preso em
+    // "aguardando QR". Nele só promove para `connected`: com o QR na tela o estado é 'connecting'.
+    const list = await this.prisma.whatsAppNumber.findMany({ where: { isActive: true, deletedAt: null } });
     for (const n of list) {
       try {
         const ctx = await this.numbers.context(n.id);
         const status = await this.registry.get(n.provider).getStatus(ctx);
+        if (n.status === 'pending_qr' && status !== 'connected') continue;
         if (status !== n.status) {
           await this.prisma.whatsAppNumber.update({ where: { id: n.id }, data: { status } });
           this.gateway.emitNumber(n.tenantId, { id: n.id, status });

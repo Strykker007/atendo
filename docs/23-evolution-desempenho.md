@@ -1,0 +1,242 @@
+# 23 — Evolution: incidente de CPU e manutenção (16/10/2026)
+
+Runbook para continuar o trabalho de 16/10/2026: o que aconteceu, o que já foi feito em produção,
+o que está só no repositório e o passo a passo da manutenção da noite. Horários em Brasília
+(o servidor está em `-03`; o banco do Atendo grava em UTC).
+
+Acesso: ver memória/`reference-servidor-producao` — `ssh -i ~/.ssh/atendo-prod.key ubuntu@163.176.200.252`.
+
+---
+
+## 1. O que aconteceu
+
+| Horário | Fato |
+|---|---|
+| ~08:30–09:20 | Servidor (4 núcleos, 24 GB) a 100% de CPU, load 33. `evolution-db` a 266–290%. Mensagens de cliente chegando com atraso (Farmavila, outros) |
+| 09:13–09:21 | Criados 3 índices na tabela `Message` da Evolution → `evolution-db` caiu para ~25%, load para 9 |
+| ~09:30 | Segundo pico (`evolution-db` 123%) e **conversas travando 8 s ao abrir** |
+| 09:38–09:40 | Criados mais 3 índices (formato `#>` do Prisma) → `evolution-db` ~18%, load 2,3, abrir conversa ~1,2 s |
+
+### Causa
+
+A tabela `Message` do banco da Evolution tem **~3,5 mi de linhas (3,2 GB)** e só tinha índice em
+`instanceId`. A Evolution procura mensagens por campos de dentro do JSON `key` (`id`, `remoteJid`,
+`remoteJidAlt`) — cada busca varria a instância inteira (até **350 mil linhas**, top 5 instâncias
+com 200–350 mil). Com 42 números conectados, chegaram a 48 consultas simultâneas de 20–50 s.
+
+Dois geradores de carga:
+
+1. **A própria Evolution**, a cada mensagem/confirmação de entrega/citação:
+   `SELECT * FROM "Message" WHERE "instanceId" = $1 AND "key"->>'id' = $2`.
+2. **O nosso histórico ao abrir conversa** (`apps/api/src/modules/whatsapp/history-sync.ts` →
+   `EvolutionProvider.fetchHistory`, `POST /chat/findMessages`): por abertura, até 2 buscas por id
+   + uma por variante do telefone (COUNT + SELECT, `remoteJid OR remoteJidAlt` desde 1970), em até
+   3 rodadas. O Prisma da Evolution monta isso como `("key" #> ARRAY['id'])::jsonb = '"..."'`,
+   formato que os índices `->>` **não** cobrem. A tela esperava até 8 s (`PRAZO_MS`) — daí o
+   "travando ao abrir conversa", sempre 8.0xx ms no log.
+
+`evolution-db` não tinha nenhum limite/prioridade de CPU (a Evolution tem `cpu_shares: 512`, o
+banco dela não), então ele tomou a máquina e o painel travou junto.
+
+---
+
+## 2. Já feito em produção ✅
+
+Índices no banco da Evolution, todos com `CREATE INDEX CONCURRENTLY` (sem travar, sem downtime).
+Ficam no volume `infra/volumes/evolution-db` — sobrevivem a restart e deploy; **recriar só se o
+banco da Evolution for restaurado do zero** (o SQL também está em [04](04-providers-whatsapp.md)).
+
+```sql
+CREATE INDEX CONCURRENTLY "Message_instanceId_keyId_idx"            ON "Message" ("instanceId", ("key"->>'id'));
+CREATE INDEX CONCURRENTLY "Message_instanceId_remoteJid_idx"        ON "Message" ("instanceId", ("key"->>'remoteJid'));
+CREATE INDEX CONCURRENTLY "Message_instanceId_messageTimestamp_idx" ON "Message" ("instanceId", "messageTimestamp");
+CREATE INDEX CONCURRENTLY "Message_instanceId_keyIdJson_idx"        ON "Message" ("instanceId", ("key" #> '{id}'));
+CREATE INDEX CONCURRENTLY "Message_instanceId_remoteJidJson_idx"    ON "Message" ("instanceId", ("key" #> '{remoteJid}'));
+CREATE INDEX CONCURRENTLY "Message_instanceId_remoteJidAltJson_idx" ON "Message" ("instanceId", ("key" #> '{remoteJidAlt}'));
+```
+
+Conferido com `EXPLAIN ANALYZE`: busca por id 12 ms → índice; consulta do histórico (BitmapOr nos
+dois índices `#>`) 0,1 ms. Com plano genérico o Postgres não usaria o índice `#>`, mas ele só troca
+para o genérico quando sai mais barato que o custom (aqui é 27× mais caro) — **não** foi preciso
+`plan_cache_mode = force_custom_plan`. Se um dia as consultas `#>` voltarem a aparecer lentas no
+`pg_stat_activity`, é o primeiro suspeito.
+
+Nada mais foi alterado em produção (nenhum restart, nenhum cron).
+
+---
+
+## 3. No repositório, sem commit e sem deploy ⏳
+
+Depende de `pnpm typecheck` (usuário) → commit na `develop` → merge/deploy (usuário).
+
+| Arquivo | Mudança |
+|---|---|
+| `apps/api/src/modules/whatsapp/history-sync.ts` | Teto de **4 buscas de histórico simultâneas** no sistema todo (ZSET `wa:history:running` no Redis; vaga vence junto com a trava de 20 s). Cheio → a conversa abre com o que tem. `PRAZO_MS` 8 s → **3 s** |
+| `apps/api/src/modules/whatsapp/providers/evolution.provider.ts` + `provider.interface.ts` | `fetchHistory` devolve `chatIds` e aceita de volta: o JID do chat é descoberto uma vez por busca, não a cada rodada (eram até 6 consultas extras por abertura) |
+| `apps/api/src/modules/whatsapp/health.scheduler.ts` | Health check também confere números em `pending_qr` e os promove para `connected` quando a Evolution diz `open` (caso Farmácia Rezende: preso em "aguardando QR" depois de um Reiniciar) |
+| `infra/docker-compose.prod.yml` | `evolution-db`: `command: shared_buffers=2GB, effective_cache_size=8GB` |
+| `docs/04-providers-whatsapp.md`, `docs/historico-de-mensagens.md` | Documentação das mudanças acima e SQL dos índices |
+
+> No mesmo working tree há mudanças **do usuário** que não são deste incidente
+> (`contacts-sync.ts`, `numbers.controller.ts`, `ChatPane.tsx`, `ComposerBar.tsx`, `docs/07`, `docs/08`).
+> Commitar só os arquivos da tabela acima.
+
+---
+
+## 4. Manutenção de hoje à noite (16→17/10, 02:00)
+
+Horário escolhido pelo volume das últimas 24 h: 01h–04h têm 1–3 mensagens/hora (pico: 3.800/hora).
+O único passo que derruba algo é o restart do `evolution-db` (alguns segundos; a Evolution e as
+sessões do WhatsApp continuam de pé).
+
+### 4.1 Antes de começar
+
+```sh
+ssh -i ~/.ssh/atendo-prod.key ubuntu@163.176.200.252
+uptime
+docker stats --no-stream --format "{{.Name}} {{.CPUPerc}}"
+docker exec atendo-prod-evolution-db-1 psql -U evolution -d evolution -Atc "show shared_buffers"   # esperado: 128MB
+```
+
+### 4.2 Limite de CPU do `evolution-db` (sem restart)
+
+Vale na hora, não derruba conexão. Perde-se se o container for recriado — por isso também vai no compose (4.4).
+
+```sh
+docker update --cpus 2 --cpu-shares 512 atendo-prod-evolution-db-1
+docker inspect atendo-prod-evolution-db-1 --format '{{.HostConfig.NanoCpus}} {{.HostConfig.CpuShares}}'   # 2000000000 512
+```
+
+- `cpus: 2` — teto rígido: nunca passa de 200% (2 dos 4 núcleos). Sobram sempre 2 para API, painel, workers e postgres principal.
+- `cpu_shares: 512` — prioridade na disputa: perde para a API (1024) e o postgres principal (2048). Com folga, não muda nada.
+- Efeito colateral: no teto, a Evolution demora mais para gravar e avisar o Atendo — atraso restrito ao WhatsApp, o painel segue respondendo. Hoje ele roda a ~18%, o teto é só proteção.
+
+### 4.3 `shared_buffers` 128 MB → 2 GB (restart do `evolution-db`)
+
+Script pronto (gerado em 16/10, sintaxe conferida). Ele aplica com `ALTER SYSTEM` (gravado no
+volume, sem mexer nos arquivos do git no servidor), reinicia só o `evolution-db`, espera até 60 s e,
+se o banco não voltar, **reverte sozinho** e reinicia com o padrão. Log em
+`~/atendo-maint/evolution-db-tune.log`.
+
+Pode rodar à mão às 02:00 (`sh ~/atendo-maint/evolution-db-tune.sh`) ou agendar no cron
+(o script remove a própria linha ao rodar):
+
+```sh
+mkdir -p ~/atendo-maint
+cat > ~/atendo-maint/evolution-db-tune.sh <<'EOF'
+#!/bin/sh
+# Manutenção agendada: sobe o shared_buffers do banco da Evolution de 128MB para 2GB.
+# Roda uma vez pelo cron e se remove. Se o banco não voltar em 60s, desfaz e reinicia de novo.
+set -u
+C=atendo-prod-evolution-db-1
+VOL=/home/ubuntu/atendo/infra/volumes/evolution-db
+LOG=/home/ubuntu/atendo-maint/evolution-db-tune.log
+exec >>"$LOG" 2>&1
+echo "== $(date) início"
+crontab -l 2>/dev/null | grep -v evolution-db-tune.sh | crontab -
+
+sql() { docker exec -i "$C" sh -c 'psql -U "$POSTGRES_USER" -d evolution -v ON_ERROR_STOP=1 -At'; }
+espera() { for i in $(seq 1 30); do docker exec "$C" pg_isready -U evolution >/dev/null 2>&1 && return 0; sleep 2; done; return 1; }
+
+echo "antes: $(echo 'show shared_buffers' | sql)"
+echo "ALTER SYSTEM SET shared_buffers = '2GB'; ALTER SYSTEM SET effective_cache_size = '8GB';" | sql || { echo "ALTER SYSTEM falhou, nada mudou"; exit 1; }
+docker restart "$C"
+if espera; then
+  echo "ok: shared_buffers=$(echo 'show shared_buffers' | sql) effective_cache_size=$(echo 'show effective_cache_size' | sql)"
+else
+  echo "banco não voltou: revertendo"
+  docker logs --tail 40 "$C"
+  docker run --rm -v "$VOL":/d postgres:16-alpine sh -c "sed -i '/shared_buffers\|effective_cache_size/d' /d/postgresql.auto.conf"
+  docker restart "$C"
+  espera && echo "revertido, banco de pé com o padrão" || echo "ATENÇÃO: banco da Evolution continua fora"
+fi
+sleep 30
+echo "instâncias conectadas: $(docker exec atendo-prod-evolution-1 sh -c 'wget -qO- --header="apikey: $AUTHENTICATION_API_KEY" http://localhost:8080/instance/fetchInstances' | grep -o '"connectionStatus":"open"' | wc -l)"
+echo "== $(date) fim"
+EOF
+chmod +x ~/atendo-maint/evolution-db-tune.sh
+
+# agendar para 02:00 de 17/10 (fuso do servidor já é -03):
+(crontab -l 2>/dev/null; echo "0 2 17 10 * /home/ubuntu/atendo-maint/evolution-db-tune.sh") | crontab -
+crontab -l
+```
+
+> O `docker restart` mantém o limite de CPU do passo 4.2 (só `docker compose up` recriando o container o descarta).
+
+### 4.4 Deixar permanente no compose
+
+Em `infra/docker-compose.prod.yml`, serviço `evolution-db` (o `command` já está no repo; faltam as duas linhas de CPU):
+
+```yaml
+  evolution-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    cpus: 2
+    cpu_shares: 512
+    environment: ...
+    # tabela Message com milhões de linhas: com o padrão (128MB) quase nada fica em memória
+    command: ["postgres", "-c", "shared_buffers=2GB", "-c", "effective_cache_size=8GB"]
+```
+
+O `-c` da linha de comando tem precedência sobre o `ALTER SYSTEM`; os valores são os mesmos, então
+não há conflito. Vale no próximo deploy (`docker compose up -d` recria o container).
+
+### 4.5 Conferir (de manhã, ou logo depois)
+
+```sh
+cat ~/atendo-maint/evolution-db-tune.log            # "ok: shared_buffers=2GB" e nº de instâncias conectadas
+crontab -l                                           # a linha do script deve ter sumido
+docker exec atendo-prod-evolution-db-1 psql -U evolution -d evolution -Atc "show shared_buffers"
+uptime; docker stats --no-stream --format "{{.Name}} {{.CPUPerc}}"
+```
+
+No banco do Atendo, mensagens fluindo (saída e entrada por minuto, horário BRT):
+
+```sql
+select to_char(date_trunc('minute',"createdAt")-interval '3 hours','HH24:MI') brt,
+  count(*) filter (where direction='out') sai,
+  count(*) filter (where direction='out' and status in ('delivered','read')) entregue,
+  count(*) filter (where direction='in') entra
+from messages where "createdAt" > now()-interval '30 minutes' group by 1 order by 1 desc;
+```
+
+E abrir conversa (`GET /conversations/:id/messages`) sem os 8 s:
+
+```sh
+for c in atendo-prod-api-1 atendo-prod-api-2; do docker logs --since 10m $c 2>&1 | grep -o "GET /conversations/:id/messages 200 [0-9]*ms"; done | awk '{print $NF}' | sort -n | tail
+```
+
+### 4.6 Reverter (se precisar)
+
+```sh
+# shared_buffers de volta ao padrão
+docker exec atendo-prod-evolution-db-1 psql -U evolution -d evolution -c "ALTER SYSTEM RESET shared_buffers; ALTER SYSTEM RESET effective_cache_size;"
+docker restart atendo-prod-evolution-db-1
+# limite de CPU
+docker update --cpus 0 --cpu-shares 1024 atendo-prod-evolution-db-1
+```
+
+Índices: não há motivo para remover (só ocupam disco). Se precisar: `DROP INDEX CONCURRENTLY "<nome>";`.
+
+---
+
+## 5. Ainda em aberto
+
+- [ ] **Commit + deploy** das mudanças da seção 3 (histórico com teto, health check `pending_qr`, compose).
+- [ ] **Sincronização de agenda (3º pico, 10:08 BRT)**: em produção roda **a cada 6 h** desde o deploy e cada nome atualizado avisava todos os painéis (~1.860 avisos em 2 min → milhares de `GET /conversations`/`counts`). Corrigido no repo (sem commit): cron fixo 03:00 `America/Sao_Paulo`, um aviso por conversa no fim do lote, nomes normalizados (espaço duplo deixava de ser "mudança"); testes `contacts-sync.test.ts`/`contact-name.test.ts` passando. Até o deploy, o pico se repete a cada 6 h (~16:08, ~22:08, ~04:08).
+- [ ] **46 jobs `delayed` na fila `wa-inbound`** (visto às ~09:30): conferir se são mensagens de cliente que falharam no pico e estão em retentativa — garantir que nenhuma se perdeu.
+- [ ] **Drogaria Balneário, "cEL 5196"**: removido pelo WhatsApp às 09:25 (401 / LOGOUT). Precisa ler o QR de novo, respeitando a pausa de reconexão; 1 mensagem parada na fila desde 09:20.
+- [ ] **Crescimento da `Message` da Evolution**: só cresce (nós já guardamos as mensagens no nosso banco). Avaliar limpeza de mensagens antigas (ex.: > 90 dias) — antes, medir impacto no histórico ao rolar a conversa e na citação/apagar/editar, que usam o `findMessages`.
+
+## 6. Decisão: máquina separada para a Evolution
+
+**Agora não.** O pico foi falta de índice, não de máquina: com os índices o `evolution-db` roda a
+~18% e o servidor fica 60–70% ocioso. Separar traria IP novo para as 42 sessões (reconexão em
+massa de IP diferente é sinal que o WhatsApp pune), rede/TLS entre máquinas para o webhook
+(hoje `http://api:4000` interno), backup e monitoramento duplicados e custo. O isolamento que
+importava (a Evolution não derrubar o painel) vem do limite de CPU do passo 4.2.
+
+**Quando reavaliar:** CPU sustentada acima de 60% mesmo com os índices, ou ~100 números
+conectados. O código já suporta: `EvolutionProvider.shard(ctx)` aceita `baseUrl`/`apiKey` por
+número — dá para subir uma segunda Evolution e mandar para ela só os números **novos**, sem migrar
+os atuais.

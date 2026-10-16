@@ -185,5 +185,7 @@ services:
       POSTGRES_USER: evolution
       POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD}
       POSTGRES_DB: evolution
+    # tabela Message com milhões de linhas: com o padrão (128MB) quase nada fica em memória
+    command: ["postgres", "-c", "shared_buffers=2GB", "-c", "effective_cache_size=8GB"]
     volumes: ["./volumes/evolution-db:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U evolution"], interval: 5s, retries: 10 }

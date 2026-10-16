@@ -23,7 +23,14 @@ const TRAVA_MS = 20_000;
 /** Quantas buscas ao provider por pedido, quando um lote vem só com o que não vira bolha (reações, edições). */
 const RODADAS = 3;
 /** O atendente está esperando a tela: passado disso, mostra o que já tem. */
-const PRAZO_MS = 8_000;
+const PRAZO_MS = 3_000;
+/**
+ * Buscas de histórico ao mesmo tempo, somando todas as contas. Cada uma consulta o banco da
+ * Evolution várias vezes; com a equipe toda abrindo conversa de manhã, sem teto, o banco dela
+ * levou o servidor a 100% de CPU. Cheio: a conversa abre com o que já tem.
+ */
+const MAX_SIMULTANEAS = 4;
+const VAGAS_KEY = 'wa:history:running';
 
 const fimKey = (conversationId: string) => `wa:history:end:${conversationId}`;
 const travaKey = (conversationId: string) => `wa:history:lock:${conversationId}`;
@@ -51,6 +58,10 @@ export class HistorySyncService {
   async syncOlder(tenantId: string, conversationId: string, want: number): Promise<number> {
     if (await this.redis.exists(fimKey(conversationId))) return 0;
     if ((await this.redis.set(travaKey(conversationId), '1', 'PX', TRAVA_MS, 'NX')) !== 'OK') return 0;
+    if (!(await this.takeSlot(conversationId))) {
+      await this.redis.del(travaKey(conversationId)).catch(() => undefined);
+      return 0;
+    }
     // passou do prazo: a busca termina em segundo plano (a próxima rolagem já encontra o que
     // entrou) e só ela solta a trava — senão outra rodada começaria junto
     const busca = this.run(tenantId, conversationId, want)
@@ -58,13 +69,29 @@ export class HistorySyncService {
         this.log.warn(`histórico da conversa ${conversationId}: ${err instanceof Error ? err.message : err}`);
         return 0;
       })
-      .finally(() => this.redis.del(travaKey(conversationId)).catch(() => undefined));
+      .finally(() => this.redis.multi().del(travaKey(conversationId)).zrem(VAGAS_KEY, conversationId).exec().catch(() => undefined));
     let prazo: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([busca, new Promise<number>((resolve) => (prazo = setTimeout(() => resolve(0), PRAZO_MS)))]);
     } finally {
       clearTimeout(prazo);
     }
+  }
+
+  /**
+   * Vaga entre todos os processos da API. Conjunto ordenado pelo horário de entrada: vaga de
+   * processo que morreu no meio vence junto com a trava (TRAVA_MS) em vez de ficar presa.
+   */
+  private async takeSlot(conversationId: string): Promise<boolean> {
+    const agora = Date.now();
+    const [, , [, total]] = (await this.redis.multi()
+      .zremrangebyscore(VAGAS_KEY, 0, agora - TRAVA_MS)
+      .zadd(VAGAS_KEY, agora, conversationId)
+      .zcard(VAGAS_KEY)
+      .exec()) as [unknown, unknown, [unknown, number]];
+    if (total <= MAX_SIMULTANEAS) return true;
+    await this.redis.zrem(VAGAS_KEY, conversationId);
+    return false;
   }
 
   private async run(tenantId: string, conversationId: string, want: number) {
@@ -91,8 +118,9 @@ export class HistorySyncService {
 
     let before = maisAntiga?.createdAt ?? new Date();
     let imported = 0;
+    let chatIds: string[] | undefined;
     for (let rodada = 0; rodada < RODADAS && imported < want; rodada++) {
-      const page = await this.numbers.fetchHistory(conv.numberId, { phone: conv.contact.phone, before, limit: want - imported, knownExternalIds });
+      const page = await this.numbers.fetchHistory(conv.numberId, { phone: conv.contact.phone, before, limit: want - imported, knownExternalIds, chatIds });
       if (!page) {
         await this.redis.set(fimKey(conversationId), '1', 'EX', FIM_TTL_S);
         break;
@@ -104,6 +132,7 @@ export class HistorySyncService {
         await this.redis.set(fimKey(conversationId), '1', 'EX', FIM_TTL_S);
         break;
       }
+      chatIds = page.chatIds;
       // sem avanço (lote todo de reação/edição): continua de onde o provider parou
       if (!page.oldest || page.oldest.getTime() >= before.getTime()) break;
       before = page.oldest;

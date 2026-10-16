@@ -40,5 +40,6 @@
 | [19 — Marcas e vertentes](19-marcas-e-vertentes.md) | Dev / Negócio | White-label: como subir uma nova vertente (ex.: clínicas) com outra logo, cores e domínio, e o que ainda é compartilhado |
 | [21 — Site (landing page)](21-site.md) | Dev / Marketing | App `apps/site`: landing pública da VogoChat em domínio próprio, seções, onde editar textos, deploy |
 | [22 — Agente de IA](22-agente-ia.md) | Dev / Produto | Plano: agente que atende e negocia com ferramentas e limites, e onde mais a IA entra no produto |
+| [23 — Evolution: desempenho](23-evolution-desempenho.md) | Ops | Incidente de CPU de 16/10/2026: índices no banco da Evolution, teto do histórico, manutenção de `shared_buffers` e limite de CPU |
 
 Convenção: código em inglês, comentários e documentação em português.

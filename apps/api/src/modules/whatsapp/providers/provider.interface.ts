@@ -89,6 +89,8 @@ export interface HistoryQuery {
    * gravado com outro identificador além do telefone (Evolution: `@lid`) e descobre qual por eles.
    */
   knownExternalIds: string[];
+  /** identificadores do chat já descobertos numa rodada anterior (`HistoryPage.chatIds`): pula a descoberta */
+  chatIds?: string[];
 }
 
 export interface HistoryPage {
@@ -98,6 +100,8 @@ export interface HistoryPage {
   exhausted: boolean;
   /** horário do registro mais antigo lido, mesmo que descartado — de onde a próxima busca continua */
   oldest?: Date;
+  /** identificadores do chat usados nesta busca, para a próxima rodada não descobrir de novo */
+  chatIds?: string[];
 }
 
 /**

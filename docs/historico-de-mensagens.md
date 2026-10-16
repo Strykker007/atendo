@@ -37,7 +37,8 @@ Lote só com o que é descartado (ex.: 50 reações) não trava a rolagem: o ser
 | Distorcer relatórios | Coluna `messages.imported = true`. Contagem de mensagens, mensagens por atendimento e tempo de primeira resposta ignoram as importadas |
 | Alarme de recebimento parado | Importada entra como `delivered`; `sent` sem recibo dispararia o `receive-stall` |
 | Desfazer "Limpar histórico" | Conversa com evento `history_cleared` nunca sincroniza |
-| Travar a tela | Prazo de 8 s: passou, mostra o que tem e a busca termina em segundo plano. Erro da Evolution = página do banco, sem erro na tela |
+| Travar a tela | Prazo de 3 s: passou, mostra o que tem e a busca termina em segundo plano. Erro da Evolution = página do banco, sem erro na tela |
+| Sobrecarregar a Evolution | No máximo **4 buscas ao mesmo tempo** somando todas as contas (`wa:history:running` no Redis, vaga vence junto com a trava de 20 s). Cheio: a conversa abre com o que tem e a próxima rolagem tenta de novo. O identificador do chat (`@lid`/telefone) é descoberto uma vez por busca e reaproveitado nas rodadas seguintes (`HistoryPage.chatIds`). Sem teto, a equipe abrindo conversa de manhã levou o servidor a 100% de CPU em 16/10/2026 |
 | Perguntar à toa | Provider sem nada mais antigo (ou Meta) → marca `wa:history:end:<id>` por 3 dias |
 | Lotar storage e travar a requisição com mídia | Mídia vai para a fila `wa-history-media` (2 por vez, 2 tentativas). Mídia antiga que já saiu do servidor do WhatsApp fica "indisponível", como uma recebida que falhou |
 
