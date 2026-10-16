@@ -305,8 +305,8 @@ export class EvolutionProvider implements WhatsAppProvider {
    * sem o nono dígito) ou como `@lid`; o `@lid` sai das mensagens que já temos (`storedRemoteJid`).
    */
   async fetchHistory(ctx: NumberContext, q: HistoryQuery): Promise<HistoryPage> {
-    const jids = new Set(phoneVariants(q.phone).map((p) => `${p}@s.whatsapp.net`));
-    for (const id of q.knownExternalIds.slice(0, 2)) jids.add(await this.storedRemoteJid(ctx, id, q.phone));
+    const jids = new Set(q.chatIds ?? phoneVariants(q.phone).map((p) => `${p}@s.whatsapp.net`));
+    if (!q.chatIds) for (const id of q.knownExternalIds.slice(0, 2)) jids.add(await this.storedRemoteJid(ctx, id, q.phone));
 
     const lido = new Map<string, any>();
     let exhausted = true;
@@ -327,7 +327,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     const messages = ordenadas
       .filter((m) => ehMensagemDeConversa(m))
       .map((m) => ({ ...this.toInbound(m, ctx.externalId), fromMe: !!m.key.fromMe }));
-    return { messages, exhausted, oldest: Number.isFinite(oldestTs) ? new Date(oldestTs * 1000) : undefined };
+    return { messages, exhausted, oldest: Number.isFinite(oldestTs) ? new Date(oldestTs * 1000) : undefined, chatIds: [...jids] };
   }
 
   /** Editar mensagem nossa (`POST /chat/updateMessage`). O WhatsApp só aceita até ~15 min depois do envio. */

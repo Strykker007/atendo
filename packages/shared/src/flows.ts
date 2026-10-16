@@ -103,8 +103,8 @@ export const REPLY_TIMEOUT_HANDLE = 'timeout';
  */
 export const RETRIES_EXHAUSTED_HANDLE = 'fallback';
 /** Campos da ficha do contato que um fluxo pode preencher. */
-export type ContactField = 'name' | 'email' | 'address' | 'note1' | 'note2';
-export const CONTACT_FIELD_LABEL: Record<ContactField, string> = { name: 'Nome', email: 'E-mail', address: 'Endereço', note1: 'Observação 1', note2: 'Observação 2' };
+export type ContactField = `attribute:${string}` | 'name' | 'email' | 'address' | 'note1' | 'note2';
+export const CONTACT_FIELD_LABEL: Record<Exclude<ContactField, `attribute:${string}`>, string> = { name: 'Nome', email: 'E-mail', address: 'Endereço', note1: 'Observação 1', note2: 'Observação 2' };
 export type MenuNode = FlowNodeBase<'menu', { text: string; options: { id: string; label: string }[]; invalidText?: string; maxRetries: number } & ReplyTimeout>;
 /**
  * Condição: lista de ramos avaliados em ordem; o primeiro verdadeiro define a saída
@@ -285,13 +285,23 @@ export type WaitNode = FlowNodeBase<'wait', { mode?: 'duration' | 'next_open'; m
  * variáveis do fluxo, executadas em ordem. `op` ausente = 'set' (fluxos antigos).
  * `value` aceita {{variáveis}}.
  */
-export type VariableNode = FlowNodeBase<'variable', { assignments: VariableAssignment[] }>;
-export type VariableOp = 'set' | 'add' | 'subtract' | 'append' | 'clear' | 'copy' | 'now';
+/** `mode: 'transform'`: o mesmo bloco, mostrado no editor como "Tratar dados" (só muda a apresentação). */
+export type VariableNode = FlowNodeBase<'variable', { assignments: VariableAssignment[]; mode?: 'transform' }>;
+export type VariableOp = 'set' | 'add' | 'subtract' | 'append' | 'clear' | 'copy' | 'now' | 'upper' | 'lower' | 'trim' | 'replace' | 'extract' | 'slice' | 'to_number' | 'round' | 'currency' | 'expression' | 'json_path' | 'list_count' | 'date_format' | 'date_add' | 'date_diff';
 export interface VariableAssignment {
   id: string;
   varName: string;
   op?: VariableOp;
   value: string;
+  pattern?: string;
+  replacement?: string;
+  regex?: boolean;
+  start?: string;
+  length?: string;
+  decimals?: string;
+  path?: string;
+  days?: string;
+  otherDate?: string;
   /** copy: nome da variável de origem */
   from?: string;
   /** now: formato gravado (no fuso do cliente) */
@@ -299,6 +309,9 @@ export interface VariableAssignment {
 }
 export const VARIABLE_OP_LABEL: Record<VariableOp, string> = {
   set: 'Definir valor', add: 'Somar', subtract: 'Subtrair', append: 'Acrescentar texto',
+  upper: 'Texto: maiúsculas', lower: 'Texto: minúsculas', trim: 'Texto: aparar espaços', replace: 'Texto: substituir', extract: 'Texto: extrair por regex', slice: 'Texto: cortar',
+  to_number: 'Número: converter', round: 'Número: arredondar', currency: 'Número: moeda BRL', expression: 'Número: expressão aritmética',
+  json_path: 'JSON: ler caminho', list_count: 'JSON: contar lista', date_format: 'Data: formatar', date_add: 'Data: somar/subtrair dias', date_diff: 'Data: diferença em dias',
   clear: 'Limpar', copy: 'Copiar de outra variável', now: 'Data/hora atual',
 };
 /**
@@ -415,7 +428,7 @@ export type ConnectFlowNode = FlowNodeBase<'connect_flow', { flowId?: string; fl
 export const MAX_FLOW_HOPS = 5;
 
 /** Resposta da API externa → variável: `path` no JSON (`cliente.nome`, `itens[0].preco`, `$.total`). */
-export interface HttpMapping { id: string; path: string; varName: string }
+export interface HttpMapping { id: string; path: string; varName: string; contactField?: ContactField }
 /**
  * API externa (docs/fluxos.md#api-externa): chama uma URL (mesma proteção do webhook — só
  * http/https público, sem redirecionamento), lê a resposta JSON e grava os campos escolhidos em

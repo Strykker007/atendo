@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, IsInt, MaxLength, Min } from 'class-validator';
 import { randomUUID } from 'node:crypto';
-import { copyName, flowFromPortable, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
+import { copyName, flowFromPortable, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type VariableAssignment, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -12,10 +12,11 @@ import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { FlowEngineService } from './flow-engine.service';
 import { UsageService } from '../billing/usage.service';
 import { botPaused } from '../conversations/bot-pause';
-import { assertOwnFlowMedia, validateDefinition } from './flow-validation';
+import { assertOwnContactFields, assertOwnFlowMedia, validateDefinition } from './flow-validation';
 import { runHttpRequest } from './http-request';
 import { Throttle } from '@nestjs/throttler';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
+import { applyAssignments } from './variables';
 
 /** contato que não existe: o teste da API externa não lê ficha de ninguém */
 const TEST_CONTACT_ID = '00000000-0000-0000-0000-000000000000';
@@ -47,6 +48,11 @@ class ActiveDto extends IdsDto {
 /** Teste do bloco "API externa" no editor: o card como está (salvo ou não) e valores de exemplo. */
 class TestHttpDto {
   @IsObject() data: HttpNode['data'];
+  @IsOptional() @IsObject() vars?: Record<string, string>;
+}
+
+class TransformPreviewDto {
+  @IsArray() @ArrayMaxSize(30) assignments: VariableAssignment[];
   @IsOptional() @IsObject() vars?: Record<string, string>;
 }
 
@@ -103,6 +109,7 @@ export class FlowsController {
   async create(@CurrentUser() u: AuthUser, @Body() dto: FlowDto) {
     validateDefinition(dto.definition, { strict: true });
     assertOwnFlowMedia(u.tenantId, dto.definition);
+      await assertOwnContactFields(this.prisma, u.tenantId, dto.definition);
     // `maxFlows` conta fluxos ATIVOS: criar desativado (rascunho) sempre pode
     if (dto.isActive ?? true) await this.usage.assertRoom(u.tenantId, 'maxFlows');
     return this.prisma.flow.create({
@@ -126,10 +133,12 @@ export class FlowsController {
     if (dto.definition) {
       validateDefinition(dto.definition, { strict: true });
       assertOwnFlowMedia(u.tenantId, dto.definition);
+      await assertOwnContactFields(this.prisma, u.tenantId, dto.definition);
     }
     const current = await this.prisma.flow.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     // ativar pela lista não passa pelo editor: o desenho salvo (cópia, importado) precisa estar válido
     if (dto.isActive && !current.isActive && !dto.definition) validateDefinition(current.definition as unknown as FlowDefinition);
+    if (dto.isActive && !current.isActive) await assertOwnContactFields(this.prisma, u.tenantId, (dto.definition ?? current.definition) as unknown as FlowDefinition);
     if (dto.isActive && !current.isActive) await this.usage.assertRoom(u.tenantId, 'maxFlows');
     // optimistic locking: só grava se ninguém salvou depois que o editor carregou (renomear faixa
     // de horário também conta — docs/horarios.md). Toda escrita incrementa a versão.
@@ -177,6 +186,22 @@ export class FlowsController {
       vars: out.vars,
       missing: out.missing,
     };
+  }
+
+  /**
+   * Prévia do Tratar dados / Manipulador: roda as operações (o mesmo `applyAssignments` do
+   * motor) sobre valores de exemplo. Pura — não grava, não chama nada fora.
+   */
+  @Post('transform-preview')
+  @RequirePermission('flows.manage')
+  @Throttle({ default: { ttl: 60_000, limit: 120 } })
+  async transformPreview(@CurrentUser() u: AuthUser, @Body() dto: TransformPreviewDto) {
+    const vars = Object.fromEntries(Object.entries(dto.vars ?? {}).filter(([k, v]) => /^[\w.]{1,60}$/.test(k) && typeof v === 'string').slice(0, 100).map(([k, v]) => [k, v.slice(0, 2000)]));
+    const ctx = await this.interpolation.context(u.tenantId, { id: TEST_CONTACT_ID, name: 'Contato de teste', phone: '5500000000000' }, vars);
+    const timezone = (await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { timezone: true } }))?.timezone || 'America/Sao_Paulo';
+    const assignments = dto.assignments.filter((a) => a && typeof a.varName === 'string').map((a) => ({ ...a, value: String(a.value ?? '').slice(0, 2000) }));
+    const out = applyAssignments(vars, assignments, { contact: ctx.contact, globals: ctx.globals, now: new Date(), timezone });
+    return { vars: out.vars, problems: out.problems };
   }
 
   @Post('delete')
@@ -239,6 +264,7 @@ export class FlowsController {
       if (dto.isActive) {
         try {
           validateDefinition(f.definition as unknown as FlowDefinition);
+          await assertOwnContactFields(this.prisma, u.tenantId, f.definition as unknown as FlowDefinition);
         } catch (e) {
           failed.push({ id: f.id, name: f.name, reason: e instanceof Error ? e.message : 'desenho inválido' });
           continue;
@@ -310,11 +336,12 @@ export class FlowsController {
 
     const newId = (type: FlowNodeType) => `${type}-${randomUUID().slice(0, 6)}`;
     const built = items.map((p) => flowFromPortable(p, tagIdByName, newId));
-    built.forEach((b) => {
+    for (const b of built) {
       validateDefinition(b.definition);
       // arquivo editado à mão pode apontar para anexo de outro cliente
       assertOwnFlowMedia(u.tenantId, b.definition);
-    });
+      await assertOwnContactFields(this.prisma, u.tenantId, b.definition);
+    }
 
     const taken = (await this.prisma.flow.findMany({ where: { tenantId: u.tenantId }, select: { name: true } })).map((f) => f.name);
     const flows = [];

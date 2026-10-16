@@ -63,6 +63,13 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
+  useEffect(() => {
+    if (multiline && ref.current) {
+      ref.current.style.height = 'auto';
+      ref.current.style.height = `${ref.current.scrollHeight}px`;
+    }
+  }, [value, multiline]);
+
   function insert(key: string) {
     const el = ref.current;
     const token = `{{${key}}}`;
@@ -93,15 +100,15 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
   ];
 
   return (
-    <div ref={wrap} className="relative">
+    <div ref={wrap} className="relative min-w-0 max-w-full">
       {multiline ? (
-        <textarea ref={ref as React.RefObject<HTMLTextAreaElement>} className={cn(inputCls, 'min-h-24 pr-2', className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} required={required} maxLength={maxLength} />
+        <textarea ref={ref as React.RefObject<HTMLTextAreaElement>} className={cn(inputCls, 'min-h-24 pr-2 min-w-0 max-w-full whitespace-pre-wrap break-all resize-y', className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} required={required} maxLength={maxLength} />
       ) : (
-        <input ref={ref as React.RefObject<HTMLInputElement>} className={cn(inputCls, className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} required={required} maxLength={maxLength} />
+        <input ref={ref as React.RefObject<HTMLInputElement>} className={cn(inputCls, 'min-w-0 max-w-full', className)} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} required={required} maxLength={maxLength} />
       )}
-      <div className="mt-1 flex items-center justify-between">
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-1">
         <div className="flex items-center gap-1">
-          <button type="button" onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-accent-ink hover:underline whitespace-nowrap">
+          <button type="button" onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-accent-ink hover:underline ">
             <Braces size={12} /> Inserir variável <ChevronDown size={11} />
           </button>
           {formatting && WA_MARKS.map((f) => (
@@ -121,7 +128,7 @@ export function TextWithVars({ value, onChange, vars, multiline = true, placehol
               {list.length === 0 && title === 'Criadas neste fluxo' && <div className="px-3 pb-2 text-xs text-faint">Nenhuma ainda — adicione um bloco <b>Salvar</b> ou <b>Manipulador</b> para criar.</div>}
               {list.map((v) => (
                 <button type="button" key={v.key} onClick={() => insert(v.key)} className="w-full text-left px-3 py-1.5 hover:bg-field">
-                  <div className="font-mono text-[12px] text-ink">{`{{${v.key}}}`}</div>
+                  <div className="font-mono text-[12px] text-ink break-all">{`{{${v.key}}}`}</div>
                   <div className="text-[11px] text-muted">{v.label}</div>
                 </button>
               ))}

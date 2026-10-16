@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -21,7 +21,7 @@ import { channelOffline } from './ChannelBadge';
 import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { Modal, inputCls } from '@/components/ui/Modal';
-import { ComposerBar } from './ComposerBar';
+import { ComposerBar, QuickReplyPopover } from './ComposerBar';
 import { BudgetModal } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
@@ -152,6 +152,11 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const setContactTags = useSetContactTags();
   const usage = useUsage();
   const [text, setText] = useState('');
+  /** `/` digitado no campo abre as respostas rápidas; guarda onde estava, para devolver a barra no Esc */
+  const [barra, setBarra] = useState<number | null>(null);
+  const rapidas = useQuickReplies();
+  const temRapidas = (rapidas.data ?? []).some((f) => f.replies.length > 0);
+  useEffect(() => setBarra(null), [conversationId]);
   // "digitando…" no WhatsApp do contato enquanto o atendente escreve (começo e fim)
   const presenca = useTypingPresence(conversationId);
   // quantos caracteres do campo foram digitados de verdade: o resto (resposta rápida inserida,
@@ -872,7 +877,20 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               <button type="button" onClick={() => setRespondendo(null)} className="text-faint hover:text-ink self-center" title="Cancelar resposta"><X size={15} /></button>
             </div>
           )}
-          <div className="flex items-end gap-2">
+          <div className="relative flex items-end gap-2">
+          {barra !== null && (
+            <QuickReplyPopover
+              conversationId={conv.id}
+              onEscolhido={() => { setBarra(null); requestAnimationFrame(() => campoRef.current?.focus()); }}
+              onCancelar={() => {
+                // Esc: a pessoa queria a barra mesmo — devolve no lugar onde foi digitada
+                const pos = barra;
+                setBarra(null);
+                setText((t) => t.slice(0, pos) + '/' + t.slice(pos));
+                requestAnimationFrame(() => { const el = campoRef.current; if (el) { el.focus(); el.setSelectionRange(pos + 1, pos + 1); } });
+              }}
+            />
+          )}
           <input ref={fileRef} type="file" hidden onChange={pickFile} accept={accept} />
           {!gravando && (
             <>
@@ -881,6 +899,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
                 value={text}
                 onChange={(e) => {
                   const tipo = (e.nativeEvent as InputEvent).inputType ?? '';
+                  // `/` no começo ou depois de espaço abre as respostas rápidas (URL e "1/2" não)
+                  const pos = e.target.selectionStart - 1;
+                  if (temRapidas && tipo === 'insertText' && (e.nativeEvent as InputEvent).data === '/' && (pos === 0 || /\s/.test(e.target.value[pos - 1]))) {
+                    setBarra(pos);
+                    return;
+                  }
                   if (tipo.startsWith('insert') && tipo !== 'insertFromPaste' && tipo !== 'insertFromDrop') digitados.current += Math.max(0, e.target.value.length - text.length);
                   if (!e.target.value) digitados.current = 0;
                   setText(e.target.value);

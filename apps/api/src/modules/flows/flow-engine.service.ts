@@ -1,3 +1,4 @@
+import { saveFlowContactField, saveHttpContactMappings } from './contact-field';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -523,8 +524,8 @@ export class FlowEngineService {
           }
           case 'variable': {
             const ops = node.data.assignments ?? [];
-            // fuso só é buscado se alguma operação gravar a data/hora atual
-            const timezone = ops.some((a) => a.op === 'now') ? (await this.tenantSettings.get(run.tenantId)).timezone : 'America/Sao_Paulo';
+            // datas usam sempre o fuso configurado pelo cliente
+            const timezone = ops.some((a) => a.op === 'now' || a.op?.startsWith('date_')) ? (await this.tenantSettings.get(run.tenantId)).timezone : 'America/Sao_Paulo';
             const { vars: next, problems } = applyAssignments(vars, ops, { contact: ctx.contact, globals: ctx.globals, now: new Date(), timezone });
             if (problems.length) await this.warnTeam(run, `Manipulador: ${problems.join(' ')}`);
             await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: next } });
@@ -540,6 +541,7 @@ export class FlowEngineService {
           case 'http': {
             // API externa: grava as variáveis lidas da resposta e sai por Sucesso ou Erro
             const out = await runHttpRequest(node.data, ctx);
+            await saveHttpContactMappings(this.prisma, run.tenantId, run.conversationId, node.data, out);
             if (!out.ok) this.log.warn(`API externa do fluxo ${run.flowId} (nó ${node.id}): ${out.error}`);
             if (Object.keys(out.vars).length) await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, ...out.vars } } });
             await this.goNext(runId, def, node.id, out.ok ? undefined : WEBHOOK_ERROR_HANDLE);
@@ -632,7 +634,7 @@ export class FlowEngineService {
       if (!validAnswer(answer, node.data.validation)) return this.retry(run, node.data.maxRetries, node.data.invalidText ?? 'Não entendi. Pode repetir?', RETRIES_EXHAUSTED_HANDLE);
       const vars = { ...(run.vars as Record<string, string>), [node.data.varName]: answer };
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
-      if (node.data.contactField) await this.saveContactField(run.conversationId, node.data.contactField, answer);
+      if (node.data.contactField) await saveFlowContactField(this.prisma, run.tenantId, run.conversationId, node.data.contactField, answer);
       return this.next(run.id, undefined);
     }
     if (node.type === 'menu') {
@@ -1044,13 +1046,6 @@ export class FlowEngineService {
     if (node.data.mode === 'next_open') return this.schedules.nextOpen(tenantId, numberId, new Date());
     const due = new Date(Date.now() + Math.max(1, Number(node.data.minutes) || 1) * 60_000);
     return node.data.businessHours ? this.schedules.nextOpen(tenantId, numberId, due) : due;
-  }
-
-  /** Bloco "Salvar" com destino na ficha: o que o contato respondeu vira dado dele. */
-  private async saveContactField(conversationId: string, field: 'name' | 'email' | 'address' | 'note1' | 'note2', value: string) {
-    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId }, select: { contactId: true } });
-    // nome que o próprio contato digitou vale mais que o pushName: protege como manual
-    await this.prisma.contact.update({ where: { id: conv.contactId }, data: { [field]: value.slice(0, 500), ...(field === 'name' && { nameSource: 'manual' as const }) } });
   }
 
   /**

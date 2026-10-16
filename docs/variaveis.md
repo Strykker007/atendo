@@ -116,3 +116,21 @@ de `GET /contact-attributes/labels`.
 No chat, a resposta rápida já entra no campo com `{{contact.name}}` e `{{agent.name}}` (só a
 forma exata, sem filtro) trocados pelo navegador; as demais (inclusive com filtro) (`{{saudacao}}`, campos da ficha…) aparecem cruas no campo
 e são trocadas pela API no envio.
+
+### Painéis responsivos do editor
+
+API externa usa seções recolhíveis (Requisição aberta inicialmente, Headers, Corpo, Resposta/Mapeamentos e Teste). Headers e mapeamentos quebram em linhas conforme a largura disponível; URL e corpo crescem verticalmente. O JSON do teste tem rolagem própria limitada em altura. Condição, Manipulador e seletor de variáveis respeitam a largura do painel.
+
+### API externa → ficha do contato
+
+Cada mapeamento permite **Salvar também em** um campo fixo ou livre já existente na empresa, usando o mesmo seletor e gravação do bloco Salvar. O padrão é **Só no fluxo**. Valores persistidos são texto limitado a 1.000 caracteres (listas/objetos em JSON), visíveis na ficha no chat e em `{{contact.<chave>}}` nos próximos fluxos. Falha HTTP ou caminho ausente preserva a ficha. Não cria variável global. A API valida os destinos no tenant autenticado ao salvar, importar e ativar.
+
+### Transformações do Manipulador
+
+Operações em ordem, com origem e parâmetros que aceitam `{{variáveis}}`:
+- Texto: maiúsculas, minúsculas, aparar espaços, substituir texto (todas as ocorrências) ou regex simples, extrair primeiro grupo e cortar por início (zero) e tamanho.
+- Número: converter `1.234,56`/`1234.56`, arredondar de 0 a 10 casas, formatar BRL e calcular expressão com números, variáveis, `+ - * /` e parênteses. Parser próprio, sem `eval`/`Function`, até 1.000 caracteres e 32 níveis; variável entra como número, nunca como código.
+- JSON: ler caminho `a.b[0].c` e contar itens de lista. Caminho ausente retorna vazio; objetos/listas retornam JSON.
+- Data: formatar DD/MM/AAAA, somar/subtrair dias (retorno AAAA-MM-DD), diferença em dias (origem menos segunda data). Aceita DD/MM/AAAA, AAAA-MM-DD ou ISO com fuso explícito; timestamps viram dia civil no fuso do cliente, inclusive nas transições de horário de verão.
+
+Regex limitada a 200 caracteres e texto a 2.000, sem alternativas, lookaround, referências, repetição de grupos ou quantificadores em chaves; no máximo um quantificador simples. Substituição é literal. Erros nas novas operações deixam o destino vazio, registram aviso como as operações atuais e continuam o fluxo. Somar/subtrair legados preservam o comportamento anterior. Condição compara igualdade/desigualdade numericamente quando ambos os lados são números; comparadores de ordem já eram numéricos. Todos os destinos aparecem no seletor de variáveis.

@@ -110,3 +110,13 @@ describe('agendaParaRestaurar', () => {
   });
 });
 
+
+describe('normalização dos nomes da agenda', () => {
+  it('não trata espaços repetidos, tabulação e quebras de linha como mudança', () => {
+    expect(nomeDaAgendaTroca({ name: ' Flávia  Rezende ', nameSource: 'agenda' }, 'Flávia\tRezende', false)).toBe(false);
+    expect(trocaNaAgenda({ name: 'Flávia\nRezende', previousName: null }, ' Flávia  Rezende ')).toBeNull();
+  });
+  it('normaliza nomes novos e anteriores ao gravar', () => {
+    expect(trocaNaAgenda({ name: ' Ana  Silva ', previousName: null }, ' Flávia\n Rezende ')).toEqual({ name: 'Flávia Rezende', previousName: 'Ana Silva' });
+  });
+});

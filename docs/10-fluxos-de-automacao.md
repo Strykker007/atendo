@@ -20,6 +20,7 @@ o desenho de longe: roxo = estrutura, amarelo/laranja = decisão, azul = entrega
 | Estrutura e Conteúdo | **Conteúdo** (`message`) | **Várias mensagens em sequência**, reordenáveis: texto (variáveis + *negrito* _itálico_ ~tachado~), imagem/vídeo/documento com legenda, áudio gravado (PTT) ou como arquivo. Intervalo opcional entre elas (segundos). Detalhes em [fluxos.md](fluxos.md#conteúdo) | 1 |
 | Estrutura e Conteúdo | **Menu** (`menu`) | Envia as opções como **botões/lista** (Meta) ou texto numerado (Evolution). Aceita toque no botão, número (`2`, `2.`, `2)`) ou texto da opção, **sem diferenciar maiúsculas e acentos**. Inválida → mensagem + nova tentativa; estourou → saída *Tentativas esgotadas* (ou humano, se não ligada). **Tempo limite** opcional → saída *Não respondeu*. Detalhes em [fluxos.md](fluxos.md#menu) | uma por opção + `fallback` (tentativas esgotadas) + `timeout` (com tempo limite) |
 | Estrutura e Conteúdo | **Manipulador** (`variable`) | Operações sobre variáveis do fluxo, em ordem (a segunda já vê o resultado da primeira): definir, somar, subtrair, acrescentar texto, limpar, copiar de outra variável (ou dado do contato), data/hora atual (no fuso do cliente). Valores aceitam `{{…}}`. Antes chamado *Variável global* | 1 |
+| Estrutura e Conteúdo | **Tratar dados** (`variable` com `mode: 'transform'`) | O mesmo Manipulador, mesmo motor e mesma validação; muda só a apresentação: entra na paleta já numa operação de tratar dados (texto, número, JSON da resposta de API, data), o seletor esconde o grupo Básico e o card mostra `entrada → operação → {{saída}}`. **Prévia** no painel: `POST /flows/transform-preview` roda `applyAssignments` com valores de exemplo, sem gravar (também aparece no Manipulador) | 1 |
 | Estrutura e Conteúdo | **Conectar com outro fluxo** (`connect_flow`) | Termina este fluxo e começa outro (mesma empresa) do início, levando as variáveis. Sem retorno. Destino excluído/desativado ou loop → para e fica com o atendente atribuído (ou vai para a fila). Detalhes em [fluxos.md](fluxos.md#conectar-com-outro-fluxo) | 0 |
 | Estrutura e Conteúdo | **Fim** (`end`) | Encerra o fluxo; opcionalmente encerra a conversa | 0 |
 | Lógica e Decisão | **Ação** (`action`) | Aplicar/remover etiqueta (na conversa ou 📌 no contato) · atribuir a atendente · mudar status · **encerrar conversa** · **chamar webhook** (método, headers, corpo com variáveis, tempo limite, resposta em variável) · **transferir para atendente humano** (encerra o fluxo). `set_var` (Definir variável) continua funcionando nos fluxos antigos, mas só aparece no seletor de quem já usa. Detalhes em [fluxos.md](fluxos.md#ação) | 1 (handoff: nenhuma; webhook: normal + `error`) |
@@ -238,3 +239,21 @@ Antes disso tudo vale a **faixa de horário** do quadro do número: boas-vindas,
 fluxo) da faixa — ex.: Fechado — **uma vez por conversa a cada período**, e se o atendimento
 segue ou para. O antigo *aviso de fora do expediente* virou a mensagem da faixa Fechado com
 "enviar só se nenhum fluxo responder". Ver [Horários](horarios.md).
+
+### Painéis responsivos do editor
+
+API externa usa seções recolhíveis (Requisição aberta inicialmente, Headers, Corpo, Resposta/Mapeamentos e Teste). Headers e mapeamentos quebram em linhas conforme a largura disponível; URL e corpo crescem verticalmente. O JSON do teste tem rolagem própria limitada em altura. Condição, Manipulador e seletor de variáveis respeitam a largura do painel.
+
+### API externa → ficha do contato
+
+Cada mapeamento permite **Salvar também em** um campo fixo ou livre já existente na empresa, usando o mesmo seletor e gravação do bloco Salvar. O padrão é **Só no fluxo**. Valores persistidos são texto limitado a 1.000 caracteres (listas/objetos em JSON), visíveis na ficha no chat e em `{{contact.<chave>}}` nos próximos fluxos. Falha HTTP ou caminho ausente preserva a ficha. Não cria variável global. A API valida os destinos no tenant autenticado ao salvar, importar e ativar.
+
+### Transformações do Manipulador
+
+Operações em ordem, com origem e parâmetros que aceitam `{{variáveis}}`:
+- Texto: maiúsculas, minúsculas, aparar espaços, substituir texto (todas as ocorrências) ou regex simples, extrair primeiro grupo e cortar por início (zero) e tamanho.
+- Número: converter `1.234,56`/`1234.56`, arredondar de 0 a 10 casas, formatar BRL e calcular expressão com números, variáveis, `+ - * /` e parênteses. Parser próprio, sem `eval`/`Function`, até 1.000 caracteres e 32 níveis; variável entra como número, nunca como código.
+- JSON: ler caminho `a.b[0].c` e contar itens de lista. Caminho ausente retorna vazio; objetos/listas retornam JSON.
+- Data: formatar DD/MM/AAAA, somar/subtrair dias (retorno AAAA-MM-DD), diferença em dias (origem menos segunda data). Aceita DD/MM/AAAA, AAAA-MM-DD ou ISO com fuso explícito; timestamps viram dia civil no fuso do cliente, inclusive nas transições de horário de verão.
+
+Regex limitada a 200 caracteres e texto a 2.000, sem alternativas, lookaround, referências, repetição de grupos ou quantificadores em chaves; no máximo um quantificador simples. Substituição é literal. Erros nas novas operações deixam o destino vazio, registram aviso como as operações atuais e continuam o fluxo. Somar/subtrair legados preservam o comportamento anterior. Condição compara igualdade/desigualdade numericamente quando ambos os lados são números; comparadores de ordem já eram numéricos. Todos os destinos aparecem no seletor de variáveis.

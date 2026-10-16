@@ -28,9 +28,9 @@ function DaysPicker({ days, onChange }: { days: number[]; onChange: (d: number[]
 
 function TimeRange({ from, to, onChange }: { from?: string; to?: string; onChange: (p: { from?: string; to?: string }) => void }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Das"><input type="time" className={inputCls} value={from ?? ''} onChange={(e) => onChange({ from: e.target.value })} /></Field>
-      <Field label="Até"><input type="time" className={inputCls} value={to ?? ''} onChange={(e) => onChange({ to: e.target.value })} /></Field>
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2">
+      <Field label="Das"><input type="time" className={`${inputCls} min-w-0 max-w-full`} value={from ?? ''} onChange={(e) => onChange({ from: e.target.value })} /></Field>
+      <Field label="Até"><input type="time" className={`${inputCls} min-w-0 max-w-full`} value={to ?? ''} onChange={(e) => onChange({ to: e.target.value })} /></Field>
     </div>
   );
 }
@@ -54,7 +54,7 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
   return (
     <div className="rounded-lg border border-line p-2 space-y-1.5 bg-panel">
       <div className="flex items-center gap-1.5">
-        <select className={inputCls} value={rule.operand} onChange={(e) => setOperand(e.target.value as ConditionOperand)}>
+        <select className={`${inputCls} min-w-0 max-w-full`} value={rule.operand} onChange={(e) => setOperand(e.target.value as ConditionOperand)}>
           {(Object.keys(CONDITION_OPERANDS) as ConditionOperand[]).map((o) => <option key={o} value={o}>{CONDITION_OPERANDS[o].label}</option>)}
         </select>
         <button type="button" onClick={onRemove} disabled={!canRemove} className="text-faint hover:text-danger p-1 disabled:opacity-30" title="Remover regra"><X size={14} /></button>
@@ -63,26 +63,26 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
       {rule.operand === 'var' && (
         <>
           {/* texto livre + sugestões: a variável pode vir de um bloco que ainda não foi desenhado */}
-          <input className={inputCls} list={listId} value={rule.key ?? ''} placeholder="nome_da_variavel" onChange={(e) => set({ key: e.target.value.replace(/[^\w]/g, '_').toLowerCase() })} />
+          <input className={`${inputCls} min-w-0 max-w-full`} list={listId} value={rule.key ?? ''} placeholder="nome_da_variavel" onChange={(e) => set({ key: e.target.value.replace(/[^\w]/g, '_').toLowerCase() })} />
           <datalist id={listId}>{vars.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}</datalist>
         </>
       )}
       {rule.operand === 'contact' && (
-        <select className={inputCls} value={rule.key ?? ''} onChange={(e) => set({ key: e.target.value })}>
+        <select className={`${inputCls} min-w-0 max-w-full`} value={rule.key ?? ''} onChange={(e) => set({ key: e.target.value })}>
           <option value="">Campo…</option>
           {Object.entries(CONDITION_CONTACT_FIELD_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
       )}
       {rule.operand === 'message' && <p className="text-[11px] text-muted">Última mensagem que o contato enviou nesta conversa.</p>}
       {rule.operand === 'tag' && (
-        <select className={inputCls} value={rule.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}>
+        <select className={`${inputCls} min-w-0 max-w-full`} value={rule.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}>
           <option value="">Etiqueta…</option>
           {tags.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       )}
 
       {rule.operand === 'schedule_band' && (
-        <select className={inputCls} value={rule.band ?? ''} onChange={(e) => set({ band: e.target.value || undefined })}>
+        <select className={`${inputCls} min-w-0 max-w-full`} value={rule.band ?? ''} onChange={(e) => set({ band: e.target.value || undefined })}>
           <option value="">Faixa…</option>
           {bandNames.map((n) => <option key={n} value={n}>{n}</option>)}
           <option value={CLOSED_BAND_ID}>{CLOSED_BAND_NAME}</option>
@@ -91,7 +91,7 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
       )}
       {bandMissing && <p className="text-[11px] text-danger">A faixa “{rule.band}” não existe em nenhum quadro de horários: esta regra nunca casa. Escolha outra ou crie a faixa em Configurações.</p>}
 
-      <select className={inputCls} value={rule.op} onChange={(e) => set({ op: e.target.value as ConditionRule['op'] })}>
+      <select className={`${inputCls} min-w-0 max-w-full`} value={rule.op} onChange={(e) => set({ op: e.target.value as ConditionRule['op'] })}>
         {CONDITION_OPS[kind].map((o) => (
           <option key={o.op} value={o.op}>
             {rule.operand === 'tag' ? (o.op === 'is_true' ? 'conversa ou contato tem a etiqueta' : 'não tem a etiqueta')
@@ -154,13 +154,13 @@ export function ConditionPanel({ branches, vars, onChange }: { branches: Conditi
         {branches.map((b, i) => (
           <div key={b.id} className="rounded-lg border border-line bg-field p-2 space-y-2">
             <div className="flex items-center gap-1">
-              <input className={inputCls} value={b.label} placeholder="Nome do ramo" onChange={(e) => update(b.id, { label: e.target.value })} />
+              <input className={`${inputCls} min-w-0 max-w-full`} value={b.label} placeholder="Nome do ramo" onChange={(e) => update(b.id, { label: e.target.value })} />
               <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="text-faint hover:text-ink p-1 disabled:opacity-30" title="Subir"><ChevronUp size={14} /></button>
               <button type="button" onClick={() => move(i, 1)} disabled={i === branches.length - 1} className="text-faint hover:text-ink p-1 disabled:opacity-30" title="Descer"><ChevronDown size={14} /></button>
               <button type="button" onClick={() => onChange(branches.filter((x) => x.id !== b.id))} disabled={branches.length <= 1} className="text-faint hover:text-danger p-1 disabled:opacity-30" title="Remover ramo (a ligação dele some)"><X size={14} /></button>
             </div>
             {b.rules.length > 1 && (
-              <select className={inputCls} value={b.match} onChange={(e) => update(b.id, { match: e.target.value as ConditionBranch['match'] })}>
+              <select className={`${inputCls} min-w-0 max-w-full`} value={b.match} onChange={(e) => update(b.id, { match: e.target.value as ConditionBranch['match'] })}>
                 <option value="all">Todas as regras (E)</option>
                 <option value="any">Qualquer regra (OU)</option>
               </select>

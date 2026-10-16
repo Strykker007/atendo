@@ -32,6 +32,8 @@ export interface HttpTestResult {
   vars: Record<string, string>;
   missing: string[];
 }
+/** Prévia do Tratar dados / Manipulador (`POST /flows/transform-preview`): roda as operações em valores de exemplo, sem gravar. */
+export const useTransformPreview = () => useMutation({ mutationFn: (b: { assignments: unknown[]; vars?: Record<string, string> }) => api<{ vars: Record<string, string>; problems: string[] }>('/flows/transform-preview', { method: 'POST', body: JSON.stringify(b) }) });
 export const useTestHttp = () => useMutation({ mutationFn: (b: { data: Record<string, unknown>; vars?: Record<string, string> }) => api<HttpTestResult>('/flows/test-http', { method: 'POST', body: JSON.stringify(b) }) });
 export const useCreateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: Omit<Flow, 'id' | 'updatedAt'>) => api<Flow>('/flows', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };
 export const useUpdateFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...b }: Partial<Flow> & { id: string }) => api<Flow>(`/flows/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invFlows(qc) }); };

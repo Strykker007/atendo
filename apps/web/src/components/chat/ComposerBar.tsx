@@ -189,12 +189,45 @@ function ItemMenu({ icone, children, onClick }: { icone?: React.ReactNode; child
  * digitando e não quer tirar a mão do campo.
  */
 function MenuRespostas({ conversationId, onFechar }: { conversationId: string; onFechar: () => void }) {
+  return (
+    <Menu largura="w-96">
+      <QuickReplyPicker conversationId={conversationId} onEscolhido={onFechar} onCancelar={onFechar} />
+    </Menu>
+  );
+}
+
+/**
+ * Seletor de resposta rápida que abre ao digitar `/` no campo de mensagem. Sobe colado ao
+ * campo (como um dropdown invertido), com a busca já focada. Clique fora fecha como Esc.
+ */
+export function QuickReplyPopover({ conversationId, onEscolhido, onCancelar }: { conversationId: string; onEscolhido: () => void; onCancelar: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const clique = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onCancelar(); };
+    document.addEventListener('mousedown', clique);
+    return () => document.removeEventListener('mousedown', clique);
+  }, [onCancelar]);
+  return (
+    <div ref={ref} className="absolute bottom-full left-0 right-0 mb-2 z-30 rounded-xl border border-line bg-panel shadow-lg max-h-[min(60vh,28rem)] overflow-y-auto overscroll-contain scrollbar-thin">
+      <QuickReplyPicker conversationId={conversationId} onEscolhido={onEscolhido} onCancelar={onCancelar} dicas />
+    </div>
+  );
+}
+
+/** Busca + lista navegável pelo teclado (↑ ↓ Enter Esc). Escolher dispara o mesmo evento do painel da direita. */
+function QuickReplyPicker({ conversationId, onEscolhido, onCancelar, dicas }: { conversationId: string; onEscolhido: () => void; onCancelar: () => void; dicas?: boolean }) {
   const folders = useQuickReplies();
   const me = useMe();
   const conv = useConversation(conversationId).data;
   const [q, setQ] = useState('');
+  const [ativo, setAtivo] = useState(0);
+  const itensRef = useRef<(HTMLButtonElement | null)[]>([]);
   const todas = (folders.data ?? []).flatMap((f) => f.replies.map((r) => ({ ...r, pasta: f.name })));
-  const filtradas = todas.filter((r) => !q || `${r.title} ${r.body}`.toLowerCase().includes(q.toLowerCase()));
+  const termo = q.trim().toLowerCase();
+  const filtradas = todas.filter((r) => !termo || `${r.title} ${r.body} ${r.pasta}`.toLowerCase().includes(termo));
+
+  useEffect(() => setAtivo(0), [termo]);
+  useEffect(() => { itensRef.current[ativo]?.scrollIntoView({ block: 'nearest' }); }, [ativo]);
 
   const resolver = (r: QuickReplyItem) => {
     const nome = conv?.contact.name ?? conv?.contact.phone ?? '';
@@ -205,24 +238,57 @@ function MenuRespostas({ conversationId, onFechar }: { conversationId: string; o
   const escolher = (r: QuickReplyItem) => {
     const media = r.mediaKey && r.mediaUrl ? { key: r.mediaKey, url: r.mediaUrl, mimeType: r.mediaMime ?? '', fileName: r.mediaName ?? 'arquivo', size: 0 } : undefined;
     window.dispatchEvent(new CustomEvent<QuickReplyEventDetail>(QUICK_REPLY_EVENT, { detail: { title: r.title, text: resolver(r), media } }));
+    onEscolhido();
+  };
+
+  const tecla = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setAtivo((i) => Math.min(i + 1, filtradas.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setAtivo((i) => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (filtradas[ativo]) escolher(filtradas[ativo]); }
+    // não deixa o Esc chegar nos outros atalhos da tela
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancelar(); }
+    // Backspace com a busca vazia = apagar a `/`: fecha sem devolvê-la
+    else if (e.key === 'Backspace' && !q) { e.preventDefault(); onEscolhido(); }
   };
 
   return (
-    <Menu largura="w-80">
-      <div className="sticky top-0 z-10 bg-panel p-1.5 border-b border-line flex items-center gap-1.5">
+    <>
+      <div className="sticky top-0 z-10 bg-panel p-2 border-b border-line flex items-center gap-2">
+        <Zap size={14} className="text-accent shrink-0" />
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={tecla} placeholder="Buscar resposta rápida…" className="w-full bg-transparent text-[13px] focus:outline-none" />
         <Search size={13} className="text-faint shrink-0" />
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar resposta…" className="w-full bg-transparent text-[12.5px] focus:outline-none" />
       </div>
-      <div>
-        {filtradas.length === 0 && <p className="px-3 py-3 text-[12px] text-faint">Nenhuma resposta encontrada.</p>}
-        {filtradas.map((r) => (
-          <button key={r.id} type="button" onClick={() => { escolher(r); onFechar(); }} className="w-full text-left px-3 py-1.5 hover:bg-accent-soft">
-            <div className="text-[12.5px] font-medium text-ink truncate">{r.title}</div>
-            <div className="text-[11px] text-muted truncate">{r.body || r.mediaName}</div>
+      <div className="py-1">
+        {folders.isLoading && <p className="px-3 py-3 text-[12px] text-faint">Carregando…</p>}
+        {!folders.isLoading && filtradas.length === 0 && <p className="px-3 py-3 text-[12px] text-faint">{todas.length ? 'Nenhuma resposta encontrada.' : 'Nenhuma resposta rápida cadastrada.'}</p>}
+        {filtradas.map((r, i) => (
+          <button
+            key={r.id}
+            ref={(el) => { itensRef.current[i] = el; }}
+            type="button"
+            onMouseEnter={() => setAtivo(i)}
+            onClick={() => escolher(r)}
+            className={cn('w-full text-left px-3 py-2 flex items-start gap-2.5', i === ativo ? 'bg-accent-soft' : 'hover:bg-field')}
+          >
+            <span className={cn('mt-0.5 shrink-0', i === ativo ? 'text-accent-ink' : 'text-faint')}>
+              {r.mediaKey ? <Paperclip size={14} /> : <Zap size={14} />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="text-[13px] font-medium text-ink truncate">{r.title}</span>
+                <span className="ml-auto shrink-0 rounded bg-field px-1.5 py-px text-[10.5px] text-muted">{r.pasta}</span>
+              </span>
+              <span className="block text-[11.5px] text-muted line-clamp-2 whitespace-pre-line">{r.body || r.mediaName}</span>
+            </span>
           </button>
         ))}
       </div>
-    </Menu>
+      {dicas && (
+        <div className="sticky bottom-0 bg-panel border-t border-line px-3 py-1.5 text-[10.5px] text-faint flex gap-3">
+          <span><kbd className="font-sans">↑ ↓</kbd> navegar</span><span><kbd className="font-sans">Enter</kbd> usar</span><span><kbd className="font-sans">Esc</kbd> fechar</span>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -1,3 +1,5 @@
+import { CONTACT_FIELD_LABEL, VARIABLE_OP_LABEL } from '@atendo/shared';
+import type { PrismaService } from '../../common/prisma/prisma.service';
 import { BadRequestException } from '@nestjs/common';
 import { CONTENT_MAX_DELAY_SEC, HTTP_MAX_MAPPINGS, WEBHOOK_MAX_TIMEOUT_SEC, parseJsonPath, WEBHOOK_METHODS, contentMediaError, normalizeCondition, normalizeContent, randomizerTotal, type ContentItem, type FlowDefinition, type FlowNode } from '@atendo/shared';
 
@@ -30,6 +32,8 @@ export function validateDefinition(def: FlowDefinition, { strict = false }: { st
       // somar/subtrair só aceita número; com {{variável}} o valor só é conhecido na execução
       // (lá, valor que não é número não altera a variável)
       for (const a of n.data.assignments ?? []) {
+        if (a.op && !Object.hasOwn(VARIABLE_OP_LABEL, a.op)) errors.push(`"Manipulador" (${n.id}): operação desconhecida.`);
+        if (a.op === 'expression' && (a.value ?? '').length > 1000) errors.push(`"Manipulador" (${n.id}): expressão excede 1.000 caracteres.`);
         if (!a.varName || (a.op !== 'add' && a.op !== 'subtract') || /\{\{/.test(a.value ?? '')) continue;
         if (Number.isNaN(toNumber(a.value ?? ''))) errors.push(`"Manipulador" (${n.id}): "${a.value ?? ''}" não é um número para ${a.op === 'add' ? 'somar' : 'subtrair'} em {{${a.varName}}}.`);
       }
@@ -158,6 +162,19 @@ export function assertOwnFlowMedia(tenantId: string, def: FlowDefinition) {
     if (n.type !== 'message') continue;
     for (const it of normalizeContent(n.data)) {
       if (it.mediaKey && !it.mediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException(`"Conteúdo" (${n.id}): arquivo inválido.`);
+    }
+  }
+}
+
+/** Confere os destinos com o tenant autenticado antes de salvar/ativar/importar. */
+export async function assertOwnContactFields(prisma: PrismaService, tenantId: string, def: FlowDefinition) {
+  for (const node of def.nodes) {
+    const fields = node.type === 'http' ? (node.data.mappings ?? []).map((m) => m.contactField) : node.type === 'question' ? [node.data.contactField] : [];
+    for (const field of fields) {
+      if (!field || Object.hasOwn(CONTACT_FIELD_LABEL, field)) continue;
+      if (typeof field !== 'string' || !field.startsWith('attribute:') || !await prisma.contactAttribute.findFirst({ where: { tenantId, label: field.slice(10) }, select: { id: true } })) {
+        throw new BadRequestException('Campo da ficha não existe nesta empresa.');
+      }
     }
   }
 }

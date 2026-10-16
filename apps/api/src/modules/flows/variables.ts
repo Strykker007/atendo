@@ -1,3 +1,4 @@
+import { transformVariable } from './variable-transforms';
 import type { VariableAssignment } from '@atendo/shared';
 import { interpolate, type InterpolateCtx } from './answer';
 import { toNumber } from './conditions';
@@ -50,6 +51,14 @@ export function applyAssignments(
       case 'now':
         next[a.varName] = formatNow(env.now, env.timezone, a.format ?? 'datetime');
         break;
+      default:
+        try {
+          const resolve = (key: string) => interpolate(`{{${key}}}`, { contact: env.contact, globals: env.globals, vars: next });
+          next[a.varName] = transformVariable(a, value(), resolve, env.timezone).slice(0, 10000);
+        } catch (error) {
+          next[a.varName] = '';
+          problems.push(`{{${a.varName}}}: ${error instanceof Error ? error.message : 'Não foi possível transformar o valor.'} A variável ficou vazia.`);
+        }
     }
   }
   return { vars: next, problems };
