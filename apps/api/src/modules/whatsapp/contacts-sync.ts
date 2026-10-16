@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectQueue, Processor } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
@@ -8,8 +8,11 @@ import { ProviderRegistry } from './providers/provider.registry';
 import { InboundService } from '../conversations/inbound.service';
 
 export const QUEUE_CONTACTS_SYNC = 'wa-contacts-sync';
-/** De quanto em quanto tempo a agenda do aparelho é relida inteira. O webhook cobre o dia a dia. */
-export const CONTACTS_SYNC_EVERY_MS = 6 * 60 * 60_000;
+/**
+ * De quanto em quanto tempo a agenda do aparelho é relida inteira: uma vez por dia. O webhook
+ * cobre o dia a dia; reler milhares de contatos mais que isso só pesa na Evolution.
+ */
+export const CONTACTS_SYNC_EVERY_MS = 24 * 60 * 60_000;
 
 /** Job com `numberId` = só aquele número (botão "Sincronizar contatos"); sem = todos. */
 export interface ContactsSyncJob {
@@ -28,11 +31,27 @@ export interface ContactsSyncJob {
 export class ContactsSyncScheduler implements OnModuleInit {
   constructor(@InjectQueue(QUEUE_CONTACTS_SYNC) private readonly queue: Queue<ContactsSyncJob>) {}
   async onModuleInit() {
-    await this.queue.upsertJobScheduler('contacts-sync', { every: CONTACTS_SYNC_EVERY_MS }, { name: 'sync', data: {} });
+    await this.queue.upsertJobScheduler('contacts-sync', { pattern: '0 3 * * *', tz: 'America/Sao_Paulo' }, { name: 'sync', data: {} });
   }
-  /** Sincronizar um número agora. `jobId` fixo: clicar várias vezes não empilha rodadas. */
+  /**
+   * Sincronizar um número agora — no máximo uma vez por dia por número. `jobId` fixo: clicar
+   * várias vezes não empilha rodadas, e o job concluído fica guardado 24 h como marca da última
+   * vez. Falha não conta (`removeOnFail`): dá para tentar de novo.
+   */
   async enqueue(numberId: string) {
-    await this.queue.add('sync', { numberId }, { jobId: `contacts-sync-${numberId}`, removeOnComplete: true, removeOnFail: true });
+    const jobId = `contacts-sync-${numberId}`;
+    const anterior = await this.queue.getJob(jobId);
+    if (anterior) {
+      if (!anterior.finishedOn) return; // ainda na fila ou rodando
+      const falta = anterior.finishedOn + CONTACTS_SYNC_EVERY_MS - Date.now();
+      if (falta > 0) {
+        const horas = Math.ceil(falta / 3_600_000);
+        throw new HttpException(`A agenda deste número já foi sincronizada hoje. Tente de novo em ${horas} h.`, HttpStatus.TOO_MANY_REQUESTS);
+      }
+      // a limpeza por idade do BullMQ é preguiçosa: o job velho ainda bloquearia o `jobId`
+      await anterior.remove();
+    }
+    await this.queue.add('sync', { numberId }, { jobId, removeOnComplete: { age: CONTACTS_SYNC_EVERY_MS / 1000 }, removeOnFail: true });
   }
 }
 

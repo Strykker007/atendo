@@ -1,5 +1,10 @@
 import type { ContactNameSource } from '@prisma/client';
 
+/** Evita tratar diferenças de espaços da agenda como mudança de nome. */
+export function normalizeContactName(name?: string | null): string {
+  return (name ?? '').trim().replace(/\s+/g, ' ');
+}
+
 /**
  * O pushName que chega na mensagem pode trocar o nome do contato?
  *
@@ -7,8 +12,8 @@ import type { ContactNameSource } from '@prisma/client';
  * troca nome que também veio do WhatsApp, ou preenche quem ainda não tem nome.
  */
 export function pushNameTrocaNome(contact: { name: string | null; nameSource: ContactNameSource }, pushName?: string | null): boolean {
-  const novo = pushName?.trim();
-  if (!novo || novo === contact.name) return false;
+  const novo = normalizeContactName(pushName);
+  if (!novo || novo === normalizeContactName(contact.name)) return false;
   return !contact.name || contact.nameSource === 'whatsapp';
 }
 
@@ -20,8 +25,8 @@ export function pushNameTrocaNome(contact: { name: string | null; nameSource: Co
  * mensagens já cuida dele. Nome manual nunca é trocado.
  */
 export function nomeDaAgendaTroca(contact: { name: string | null; nameSource: ContactNameSource }, nome: string, jaVeioEmMensagem: boolean): boolean {
-  const novo = nome.trim();
-  if (!novo || novo === contact.name || jaVeioEmMensagem) return false;
+  const novo = normalizeContactName(nome);
+  if (!novo || novo === normalizeContactName(contact.name) || jaVeioEmMensagem) return false;
   return contact.nameSource !== 'manual' || !contact.name;
 }
 
@@ -41,11 +46,11 @@ type EntradaDaAgenda = { name: string; previousName: string | null };
  * e o troca pelo nome de perfil do WhatsApp, então uma "troca de agenda" pode ser só isso.
  */
 export function trocaNaAgenda(atual: EntradaDaAgenda | null, nome: string): EntradaDaAgenda | null {
-  const novo = nome.trim();
+  const novo = normalizeContactName(nome);
   if (!novo) return null;
   if (!atual) return { name: novo, previousName: null };
-  if (atual.name === novo) return null;
-  return { name: novo, previousName: atual.name };
+  if (normalizeContactName(atual.name) === novo) return null;
+  return { name: novo, previousName: normalizeContactName(atual.name) };
 }
 
 /**
@@ -54,8 +59,8 @@ export function trocaNaAgenda(atual: EntradaDaAgenda | null, nome: string): Entr
  * sem mandar mensagem), não a agenda do celular. Devolve o nome a restaurar, ou `null`.
  */
 export function agendaParaRestaurar(entrada: EntradaDaAgenda, pushName?: string | null): string | null {
-  const p = pushName?.trim();
-  if (!p || !entrada.previousName || entrada.name !== p || entrada.previousName === p) return null;
-  return entrada.previousName;
+  const p = normalizeContactName(pushName);
+  if (!p || !entrada.previousName || normalizeContactName(entrada.name) !== p || normalizeContactName(entrada.previousName) === p) return null;
+  return normalizeContactName(entrada.previousName);
 }
 

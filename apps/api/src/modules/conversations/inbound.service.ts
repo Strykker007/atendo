@@ -14,7 +14,7 @@ import { ConversationsGateway } from './conversations.gateway';
 import { ConversationsService, MESSAGE_INCLUDE, inicioDaEspera } from './conversations.service';
 import { SurveyRunnerService, type SurveyClaim } from '../satisfaction/survey-runner.service';
 import { decidirEntrada, ehConfirmacao, naCarencia, voltandoDepoisDeEncerrado } from './reopen';
-import { agendaParaRestaurar, escolherDaAgenda, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
+import { agendaParaRestaurar, escolherDaAgenda, normalizeContactName, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
 
@@ -90,7 +90,7 @@ export class InboundService {
     // o pushName só troca nome que também veio do WhatsApp (ou contato ainda sem nome): nome da
     // ficha ou da agenda não pode ser desfeito pela próxima mensagem do cliente
     if (pushNameTrocaNome(contact, msg.contactName)) {
-      contact = await this.prisma.contact.update({ where: { id: contact.id }, data: { name: msg.contactName, nameSource: 'whatsapp' } });
+      contact = await this.prisma.contact.update({ where: { id: contact.id }, data: { name: normalizeContactName(msg.contactName), nameSource: 'whatsapp' } });
     }
 
     // A conversa com esta pessoa neste número é UMA só, encerrada ou não (ver reopen.ts).
@@ -431,7 +431,7 @@ export class InboundService {
       await this.prisma.phonebookEntry.findMany({ where: { tenantId: number.tenantId, phone }, take: 10 }),
       number.id,
     );
-    const inicial = agenda ? { name: agenda.name, nameSource: 'agenda' as const } : { name: pushName?.trim() || null, nameSource: 'whatsapp' as const };
+    const inicial = agenda ? { name: normalizeContactName(agenda.name), nameSource: 'agenda' as const } : { name: normalizeContactName(pushName) || null, nameSource: 'whatsapp' as const };
     return this.prisma.contact.upsert({
       where: { tenantId_phone: { tenantId: number.tenantId, phone } },
       create: { tenantId: number.tenantId, phone, ...inicial },
@@ -447,23 +447,24 @@ export class InboundService {
    * O mesmo evento também chega com o pushName de cada mensagem: se o contato já mandou
    * mensagem com exatamente esse nome, não é agenda — nem guarda, nem aplica.
    */
-  async applyContactName(number: WhatsAppNumber, c: { phone: string; name: string }) {
-    const name = c.name.trim();
+  async applyContactName(number: WhatsAppNumber, c: { phone: string; name: string }, changedContactIds?: Set<string>) {
+    const name = normalizeContactName(c.name);
+    if (!name) return;
     const contact = await this.prisma.contact.findUnique({
       where: { tenantId_phone: { tenantId: number.tenantId, phone: c.phone } },
       select: { id: true, name: true, nameSource: true },
     });
     const jaVeioEmMensagem = !!contact && !!(await this.prisma.message.findFirst({
-      where: { direction: 'in', conversation: { contactId: contact.id }, raw: { path: ['pushName'], equals: c.name } },
+      where: { direction: 'in', conversation: { tenantId: number.tenantId, contactId: contact.id }, raw: { path: ['pushName'], equals: c.name } },
       select: { id: true },
     }));
     if (jaVeioEmMensagem) return;
     const chave = { numberId_phone: { numberId: number.id, phone: c.phone } };
-    const atual = await this.prisma.phonebookEntry.findUnique({ where: chave, select: { name: true, previousName: true } });
+    const atual = await this.prisma.phonebookEntry.findUnique({ where: { ...chave, tenantId: number.tenantId }, select: { name: true, previousName: true } });
     const registro = trocaNaAgenda(atual, name);
     if (registro) {
       await this.prisma.phonebookEntry.upsert({
-        where: chave,
+        where: { ...chave, tenantId: number.tenantId },
         create: { tenantId: number.tenantId, numberId: number.id, phone: c.phone, name: registro.name },
         update: registro,
       });
@@ -471,8 +472,9 @@ export class InboundService {
       if (atual) this.log.log(`agenda ${number.id} …${c.phone.slice(-4)}: "${atual.name}" → "${registro.name}"`);
     }
     if (!contact || !nomeDaAgendaTroca(contact, name, false)) return;
-    await this.prisma.contact.update({ where: { id: contact.id }, data: { name, nameSource: 'agenda' } });
-    await this.emitContactConversations(number.tenantId, contact.id);
+    await this.prisma.contact.update({ where: { id: contact.id, tenantId: number.tenantId }, data: { name, nameSource: 'agenda' } });
+    if (changedContactIds) changedContactIds.add(contact.id);
+    else await this.emitContactConversations(number.tenantId, contact.id);
   }
 
   /**
@@ -492,7 +494,7 @@ export class InboundService {
       if (!nome) continue;
       await this.prisma.phonebookEntry.update({ where: { id: e.id }, data: { name: nome, previousName: null } });
       this.log.warn(`agenda ${e.numberId} …${contact.phone.slice(-4)}: "${e.name}" era o nome de perfil do WhatsApp, não a agenda — volta para "${nome}"`);
-      if (contact.nameSource === 'agenda' && contact.name === e.name) paraContato = nome;
+      if (contact.nameSource === 'agenda' && normalizeContactName(contact.name) === normalizeContactName(e.name)) paraContato = nome;
     }
     if (!paraContato) return contact;
     return this.prisma.contact.update({ where: { id: contact.id }, data: { name: paraContato } });
@@ -505,12 +507,22 @@ export class InboundService {
    * última vez — a agenda tem milhares de linhas e quase nada muda entre uma rodada e outra.
    */
   async syncPhonebook(number: WhatsAppNumber, list: { phone: string; name: string }[]) {
-    const atual = new Map((await this.prisma.phonebookEntry.findMany({ where: { numberId: number.id }, select: { phone: true, name: true } })).map((e) => [e.phone, e.name]));
+    const currentNames = new Map((await this.prisma.phonebookEntry.findMany({
+      where: { tenantId: number.tenantId, numberId: number.id }, select: { phone: true, name: true },
+    })).map((entry) => [entry.phone, normalizeContactName(entry.name)]));
+    const changedContactIds = new Set<string>();
     let changed = 0;
-    for (const c of list) {
-      if (atual.get(c.phone) === c.name.trim()) continue;
-      await this.applyContactName(number, c);
-      changed++;
+    try {
+      for (const entry of list) {
+        const name = normalizeContactName(entry.name);
+        if (!name || currentNames.get(entry.phone) === name) continue;
+        await this.applyContactName(number, { ...entry, name }, changedContactIds);
+        currentNames.set(entry.phone, name);
+        changed++;
+      }
+    } finally {
+      // Mesmo com falha parcial, publica uma vez as conversas dos contatos já atualizados.
+      if (changedContactIds.size) await this.emitContactConversations(number.tenantId, [...changedContactIds]);
     }
     return { total: list.length, changed };
   }
@@ -529,9 +541,14 @@ export class InboundService {
   }
 
   /** O nome aparece na lista e no cabeçalho: avisa as telas abertas. */
-  private async emitContactConversations(tenantId: string, contactId: string) {
-    const convs = await this.prisma.conversation.findMany({ where: { tenantId, contactId } });
-    for (const c of convs) this.gateway.emitConversation(tenantId, c);
+  private async emitContactConversations(tenantId: string, contactId: string | string[]) {
+    const convs = await this.prisma.conversation.findMany({ where: { tenantId, contactId: Array.isArray(contactId) ? { in: contactId } : contactId } });
+    const emitted = new Set<string>();
+    for (const conversation of convs) {
+      if (emitted.has(conversation.id)) continue;
+      emitted.add(conversation.id);
+      this.gateway.emitConversation(tenantId, conversation);
+    }
   }
 
   /**

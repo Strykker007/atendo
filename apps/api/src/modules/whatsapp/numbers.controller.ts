@@ -230,7 +230,8 @@ export class NumbersController {
 
   /**
    * Reler agora a agenda de contatos do aparelho (Evolution). Roda no worker — a agenda pode ter
-   * milhares de nomes; a resposta só confirma que entrou na fila. Também roda sozinho a cada 6 h.
+   * milhares de nomes; a resposta só confirma que entrou na fila. Uma vez por dia por número (429
+   * antes disso); também roda sozinho uma vez por dia.
    */
   @Post(':id/contacts/sync')
   @RequirePermission('numbers.manage')
