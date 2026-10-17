@@ -20,11 +20,17 @@ export interface MessageTemplate {
   footer?: string;
   /** rótulos dos botões, só para a pré-visualização */
   buttons?: string[];
+  /**
+   * Botões que pedem valor no envio, pela posição no template (a Meta identifica por ela):
+   * `url` = link com final dinâmico (`https://loja.com/pedido/{{1}}`), `copy_code` = cupom do
+   * botão "Copiar código". O atendente preenche o valor em `TemplateChoice.buttons`.
+   */
+  dynamicButtons?: { index: number; kind: 'url' | 'copy_code'; text: string; url?: string }[];
   /** variáveis do cabeçalho e do corpo, na ordem em que aparecem (`1`, `2`… ou nomes) */
   headerParams: string[];
   bodyParams: string[];
   /**
-   * Motivo de não dar para enviar pelo painel (cabeçalho de mídia, botão com URL dinâmica…).
+   * Motivo de não dar para enviar pelo painel (cabeçalho de localização, autenticação…).
    * Ausente = enviável. A tela mostra o template desabilitado com este texto.
    */
   unsupported?: string;
@@ -32,6 +38,29 @@ export interface MessageTemplate {
 
 /** Valores preenchidos pelo atendente, por variável (`{ "1": "Ana" }` ou `{ "first_name": "Ana" }`). */
 export type TemplateValues = Record<string, string>;
+
+/** Cabeçalho de mídia que o envio aceita (localização fica de fora). */
+export type TemplateHeaderMedia = 'image' | 'video' | 'document';
+
+/** `headerFormat` → tipo de mídia do cabeçalho; `null` = cabeçalho sem mídia. */
+export function templateHeaderMedia(t: Pick<MessageTemplate, 'headerFormat'>): TemplateHeaderMedia | null {
+  return t.headerFormat === 'IMAGE' ? 'image' : t.headerFormat === 'VIDEO' ? 'video' : t.headerFormat === 'DOCUMENT' ? 'document' : null;
+}
+
+/**
+ * Escolha de template vinda da tela (composer, Nova conversa, transmissão, lembrete da Agenda).
+ * `buttons`: valor de cada botão dinâmico (final da URL ou cupom), pela posição (`{ "0": "123" }`).
+ * `headerMediaKey`: arquivo do cabeçalho de mídia, a chave devolvida por `POST /uploads`.
+ */
+export interface TemplateChoice {
+  name: string;
+  language: string;
+  header?: TemplateValues;
+  body?: TemplateValues;
+  buttons?: TemplateValues;
+  headerMediaKey?: string;
+  headerMediaName?: string;
+}
 
 const PLACEHOLDER = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g;
 

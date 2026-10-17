@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
+import { templateHeaderMedia, type TemplateChoice } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { SchedulesService } from '../tenants/schedules.service';
 import { SendPacer } from '../whatsapp/send-pacer';
@@ -15,7 +16,7 @@ import { QR_WINDOW_MS } from './dispatch';
 export type { Audience } from './segmentation.service';
 
 /** escolha de template salva na campanha (Meta) — a mesma do envio manual */
-export interface CampaignTemplate { name: string; language: string; header?: Record<string, string>; body?: Record<string, string> }
+export type CampaignTemplate = TemplateChoice;
 
 export interface CreateCampaign {
   name: string;
@@ -64,7 +65,13 @@ export class CampaignsService {
     if (number.provider === 'meta') {
       // API oficial: campanha ativa = conversa iniciada pela empresa → só template aprovado
       if (!dto.template) throw new BadRequestException('Na API oficial a transmissão precisa de um template aprovado pela Meta.');
-      await this.numbers.template(number.id, dto.template.name, dto.template.language);
+      const definition = await this.numbers.template(number.id, dto.template.name, dto.template.language);
+      // o envio é por contato, minutos depois: o que falta no template recusa agora, não em cada envio
+      if (definition.unsupported) throw new BadRequestException(definition.unsupported);
+      if (templateHeaderMedia(definition) && !dto.template.headerMediaKey) throw new BadRequestException('Anexe o arquivo do cabeçalho do template.');
+      if (dto.template.headerMediaKey && !dto.template.headerMediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException('Arquivo do cabeçalho inválido');
+      const semBotao = (definition.dynamicButtons ?? []).find((b) => !dto.template!.buttons?.[String(b.index)]?.trim());
+      if (semBotao) throw new BadRequestException(`Preencha o valor do botão "${semBotao.text}".`);
     } else {
       if (dto.template) throw new BadRequestException('Template só existe na API oficial (Meta).');
       if (!dto.text?.trim() && !dto.mediaKey) throw new BadRequestException('Escreva a mensagem ou anexe um arquivo.');

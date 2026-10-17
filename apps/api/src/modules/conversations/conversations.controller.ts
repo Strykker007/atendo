@@ -245,7 +245,7 @@ export class ConversationsController {
     if (dto.template) {
       // o número tem de ser do tenant ANTES de perguntar à Meta pelos templates dele
       await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: dto.numberId, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
-      template = { definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language), header: dto.template.header, body: dto.template.body };
+      template = { ...dto.template, definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language) };
     }
     return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey }, (numberId, phone) => this.numbers.hasWhatsApp(numberId, phone));
   }
@@ -331,7 +331,7 @@ export class ConversationsController {
       const conv = await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { numberId: true, contactId: true, number: { select: { provider: true } } } });
       if (conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
       const definition = await this.numbers.template(conv.numberId, dto.template.name, dto.template.language);
-      const msg = await this.conversations.templateMessage(u.tenantId, conv.contactId, definition, dto.template, { agentName: u.name });
+      const { systemMedia: _m, ...msg } = await this.conversations.templateMessage(u.tenantId, conv.contactId, definition, dto.template, { agentName: u.name });
       return this.conversations.send(u.tenantId, u, id, { ...msg, expectedNumberId: dto.expectedNumberId, idempotencyKey: dto.idempotencyKey });
     }
     if (dto.pixKeyId) {

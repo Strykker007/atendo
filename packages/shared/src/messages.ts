@@ -190,8 +190,11 @@ export interface OutboundMessage {
    * que não suporta ignora. Usado no envio automático (docs/envio.md#humanização).
    */
   typingMs?: number;
-  /** Somente Meta: template aprovado. Obrigatório fora da janela de 24h. */
-  template?: { name: string; language: string; components?: unknown[]; category: BillingCategory };
+  /**
+   * Somente Meta: template aprovado. Obrigatório fora da janela de 24h. `headerMedia`: o
+   * cabeçalho é de mídia e o arquivo vai em `media` (o adapter monta o parâmetro do cabeçalho).
+   */
+  template?: { name: string; language: string; components?: unknown[]; category: BillingCategory; headerMedia?: 'image' | 'video' | 'document' };
   /**
    * Menu interativo (botões ou lista). Provider que não suporta (Evolution) converte para
    * texto numerado; a resposta do contato pode vir como id da opção ou como número/texto.

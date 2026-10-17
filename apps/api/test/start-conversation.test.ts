@@ -37,7 +37,8 @@ describe('parseMetaTemplate', () => {
     expect(t.unsupported).toBeUndefined();
   });
   it('marca como não suportado o que o painel não preenche', () => {
-    expect(parseMetaTemplate({ ...raw, components: [{ type: 'HEADER', format: 'IMAGE' }, { type: 'BODY', text: 'oi' }] })!.unsupported).toMatch(/mídia/);
+    expect(parseMetaTemplate({ ...raw, components: [{ type: 'HEADER', format: 'LOCATION' }, { type: 'BODY', text: 'oi' }] })!.unsupported).toMatch(/localização/);
+    expect(parseMetaTemplate({ ...raw, components: [{ type: 'HEADER', format: 'IMAGE' }, { type: 'BODY', text: 'oi' }] })!.unsupported).toBeUndefined();
     expect(parseMetaTemplate({ ...raw, category: 'AUTHENTICATION' })!.unsupported).toBeTruthy();
     expect(parseMetaTemplate({ ...raw, status: 'REJECTED' })).toBeNull();
   });

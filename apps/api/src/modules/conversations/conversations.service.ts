@@ -6,7 +6,7 @@ import type { Conversation, ConversationEventType, ConversationOrigin, Conversat
 import { CloseReasonsService } from '../close-reasons/close-reasons.module';
 import { AuditService } from '../audit/audit.module';
 import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, isCpfCnpjLength, messagePreview } from '@atendo/shared';
-import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
+import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateChoice, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -42,6 +42,15 @@ const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permis
 
 
 const META_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Valores de um template escolhido (tela ou config salva): variáveis, botões e arquivo do cabeçalho. */
+export type TemplateValuesInput = Pick<TemplateChoice, 'header' | 'body' | 'buttons' | 'headerMediaKey' | 'headerMediaName'>;
+
+/**
+ * Template pronto para envio. Com cabeçalho de mídia: `mediaKey`/`media` para o `send` do
+ * atendente e `systemMedia` para o `sendAsSystem` (lembrete, transmissão).
+ */
+export type TemplateOutbound = Omit<OutboundMessage, 'to'> & { mediaKey?: string; systemMedia?: { key: string; type: 'image' | 'video' | 'document'; name?: string } };
+
 /** O contato escreveu nas últimas 24h? Fora disso a Meta só aceita template. */
 const inMetaWindow = (lastInboundAt: Date | null | undefined) => !!lastInboundAt && Date.now() - lastInboundAt.getTime() < META_WINDOW_MS;
 
@@ -507,7 +516,7 @@ export class ConversationsService {
    * `outsideWindow`: número Meta e contato fora da janela de 24h → pede o template a quem chamou
    * (recebe o número, porque o template é aprovado por conta). Sem ele, o envio é recusado.
    */
-  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; allowCold?: boolean; checkPhone?: PhoneCheck; outsideWindow?: (numberId: string) => Promise<Omit<OutboundMessage, 'to'> | null> }) {
+  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; allowCold?: boolean; checkPhone?: PhoneCheck; outsideWindow?: (numberId: string) => Promise<TemplateOutbound | null> }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
     let conv = await this.prisma.conversation.findFirst({ where: { tenantId, contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } });
     if (!conv) {
@@ -520,7 +529,7 @@ export class ConversationsService {
     if (conv.number.provider === 'meta' && !inMetaWindow(conv.lastInboundAt) && opts?.outsideWindow) {
       const tpl = await opts.outsideWindow(conv.numberId);
       if (!tpl?.template) throw new BadRequestException('O contato não escreve há mais de 24 horas e não há template aprovado configurado para este envio (na API oficial, depois de 24 horas só sai template).');
-      return this.sendAsSystem(conv.id, tpl.text, undefined, undefined, { ...send, template: tpl.template });
+      return this.sendAsSystem(conv.id, tpl.text, tpl.systemMedia, undefined, { ...send, template: tpl.template });
     }
     return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, send);
   }
@@ -815,12 +824,24 @@ export class ConversationsService {
    * Os valores aceitam `{{contact.first_name}}`, globais e `vars` (ex.: `{{servico}}` do
    * lembrete); variável que resolve vazia conta como não preenchida (400 com o nome dela).
    */
-  async templateMessage(tenantId: string, contactId: string, definition: MessageTemplate, values: { header?: TemplateValues; body?: TemplateValues }, extra?: { agentName?: string | null; vars?: Record<string, string> }): Promise<Omit<OutboundMessage, 'to'>> {
+  async templateMessage(tenantId: string, contactId: string, definition: MessageTemplate, values: TemplateValuesInput, extra?: { agentName?: string | null; vars?: Record<string, string> }): Promise<TemplateOutbound> {
+    // o arquivo do cabeçalho tem de ser do storage do próprio tenant (vem da tela ou da config salva)
+    if (values.headerMediaKey && !values.headerMediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException('Arquivo do cabeçalho inválido.');
     const ctx = await this.interpolation.forContact(tenantId, contactId, extra?.vars ?? {}, { agentName: extra?.agentName });
     const fill = (v?: TemplateValues) => Object.fromEntries(Object.entries(v ?? {}).map(([k, x]) => [k, interpolate(String(x ?? ''), ctx, undefined, { keepUnknown: false })]));
     try {
-      const built = buildTemplateSend(definition, { header: fill(values.header), body: fill(values.body) });
-      return { type: 'text', text: built.text, template: built.template };
+      const built = buildTemplateSend(definition, {
+        header: fill(values.header),
+        body: fill(values.body),
+        buttons: fill(values.buttons),
+        headerMedia: values.headerMediaKey ? { key: values.headerMediaKey, name: values.headerMediaName } : undefined,
+      });
+      return {
+        type: 'text',
+        text: built.text,
+        template: built.template,
+        ...(built.media && { mediaKey: built.media.key, media: { url: built.media.key, fileName: built.media.name }, systemMedia: built.media }),
+      };
     } catch (err) {
       throw new BadRequestException(err instanceof Error ? err.message : String(err));
     }
@@ -847,7 +868,7 @@ export class ConversationsService {
       phone?: string;
       name?: string;
       text?: string;
-      template?: { definition: MessageTemplate; header?: TemplateValues; body?: TemplateValues };
+      template?: TemplateValuesInput & { definition: MessageTemplate };
       idempotencyKey?: string;
     },
     checkPhone?: PhoneCheck,
@@ -895,7 +916,7 @@ export class ConversationsService {
 
     // template: variáveis do painel ({{contact.first_name}}…) resolvidas antes de ir para a Meta
     const agentName = input.template ? (await this.prisma.user.findUnique({ where: { id: author.id }, select: { name: true } }))?.name : undefined;
-    const message: Omit<OutboundMessage, 'to'> = input.template
+    const message: TemplateOutbound = input.template
       ? await this.templateMessage(tenantId, contact.id, input.template.definition, input.template, { agentName })
       : { type: 'text', text: input.text };
 
@@ -905,7 +926,8 @@ export class ConversationsService {
     } else if (conv.status === 'closed') {
       conv = await this.setStatus(tenantId, conv.id, 'in_progress', author.id);
     }
-    const sent = await this.send(tenantId, author, conv.id, { ...message, idempotencyKey: input.idempotencyKey });
+    const { systemMedia: _m, ...msg } = message;
+    const sent = await this.send(tenantId, author, conv.id, { ...msg, idempotencyKey: input.idempotencyKey });
     return { conversationId: conv.id, message: sent };
   }
 

@@ -11,4 +11,9 @@ export class TemplateChoiceDto {
   /** valores por variável (`{ "1": "Ana" }`) */
   @IsOptional() @IsObject() header?: Record<string, string>;
   @IsOptional() @IsObject() body?: Record<string, string>;
+  /** valor de cada botão dinâmico (final da URL ou cupom), pela posição: `{ "0": "123" }` */
+  @IsOptional() @IsObject() buttons?: Record<string, string>;
+  /** cabeçalho de mídia: chave devolvida por `POST /uploads` (conferida como do tenant no envio) */
+  @IsOptional() @IsString() @MaxLength(512) headerMediaKey?: string;
+  @IsOptional() @IsString() @MaxLength(255) headerMediaName?: string;
 }

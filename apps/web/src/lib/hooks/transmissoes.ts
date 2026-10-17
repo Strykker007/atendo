@@ -2,6 +2,7 @@
 /** Transmissões (envio em massa) — docs/envio.md#transmissão. */
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api';
+import type { TemplateChoice } from '@atendo/shared';
 
 /** Público: filtros (E) + seleção manual e telefones importados (somam). Sem critério, só com `all`. */
 export interface CampaignAudience {
@@ -20,7 +21,7 @@ export interface CampaignAudience {
 }
 export interface CampaignStats { total: number; pending: number; sent: number; delivered: number; read: number; failed: number; skipped: number }
 export type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'paused' | 'done' | 'canceled';
-export interface CampaignTemplateChoice { name: string; language: string; header?: Record<string, string>; body?: Record<string, string> }
+export type CampaignTemplateChoice = TemplateChoice;
 export interface Campaign {
   id: string;
   name: string;
