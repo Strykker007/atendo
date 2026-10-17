@@ -128,6 +128,10 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   emitBudgets(tenantId: string, conversationId: string, paid?: { total: number; contactName: string }) {
     this.room(tenantId).emit('budgets', { conversationId, ...(paid && { paid }) });
   }
+  /** Conversa excluída: o painel tira da lista e fecha se estiver aberta. */
+  emitConversationDeleted(tenantId: string, conversationId: string) {
+    this.room(tenantId).emit('conversation_deleted', { conversationId });
+  }
   emitMessagesCleared(tenantId: string, conversationId: string) {
     this.room(tenantId).emit('messages_cleared', { conversationId });
   }

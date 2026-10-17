@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -78,6 +78,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const [limpando, setLimpando] = useState(false);
   const apagar = useDeleteMessage();
   const limpar = useClearHistory();
+  const podeExcluir = useCan('conversations.delete_conversation');
+  const [excluindo, setExcluindo] = useState(false);
+  const excluir = useDeleteConversation();
   const podeApagar = (m: Message) =>
     !m.deletedAt && (podeApagarQualquer || (m.direction === 'out' && !!m.authorId && m.authorId === me.data?.id && Date.now() - new Date(m.createdAt).getTime() < OWN_MESSAGE_DELETE_WINDOW_MS));
   // Editar (docs/editar-mensagens.md): qualquer mensagem de texto enviada pelo número (própria, de
@@ -679,6 +682,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         {podeLimpar && (
           <Button size="sm" variant="ghost" icon={<Eraser size={14} />} onClick={() => setLimpando(true)} title="Limpar o histórico desta conversa (fica registrado quem limpou)" aria-label="Limpar histórico" />
         )}
+        {podeExcluir && (
+          <Button size="sm" variant="ghost" className="hover:text-danger" icon={<Trash2 size={14} />} onClick={() => setExcluindo(true)} title="Excluir esta conversa do painel (o contato continua cadastrado)" aria-label="Excluir conversa" />
+        )}
       </header>
 
       <ContactSummary contact={conv.contact} onOpen={() => setFichaAberta(true)} />
@@ -762,6 +768,18 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           .then((r) => toast.ok(`${r.cleared} ${r.cleared === 1 ? 'mensagem apagada' : 'mensagens apagadas'}`))
           .catch((err) => { toast.err(err); throw err; })}
         onClose={() => setLimpando(false)}
+      />
+      <ConfirmDialog
+        open={excluindo}
+        title="Excluir esta conversa?"
+        danger
+        typeToConfirm="EXCLUIR"
+        confirmLabel="Excluir conversa"
+        text={'A conversa some do painel com todas as mensagens, o histórico do atendimento, as tags e as mensagens agendadas — e sai dos relatórios. No celular do contato nada muda, e o contato continua cadastrado: se ele escrever de novo, abre uma conversa nova.\n\nFica registrado na auditoria quem excluiu. Não dá para desfazer. Conversa com venda ou orçamento pago não pode ser excluída (use "Limpar histórico").'}
+        onConfirm={() => excluir.mutateAsync(conv.id)
+          .then(() => toast.ok('Conversa excluída'))
+          .catch((err) => { toast.err(err); throw err; })}
+        onClose={() => setExcluindo(false)}
       />
 
       {encaminhando && <ForwardModal message={encaminhando} onClose={() => setEncaminhando(null)} />}

@@ -1272,6 +1272,27 @@ export class ConversationsService {
     return r;
   }
 
+  /**
+   * Excluir a conversa (a "janela" com o contato) de vez: mensagens, eventos, tags, agendadas e
+   * execuções de fluxo vão junto (cascade); o contato fica. Se a pessoa escrever de novo, nasce
+   * uma conversa nova. Nada é apagado no WhatsApp (ver `clearHistory`).
+   *
+   * Venda e orçamento pago ficariam fora do faturamento sem ninguém perceber: com eles, recusa —
+   * o caminho é limpar o histórico, que mantém o atendimento nos relatórios. Fica na auditoria.
+   */
+  async deleteConversation(tenantId: string, actor: Viewer & { name: string }, conversationId: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, select: { id: true, _count: { select: { sales: true, messages: true } } } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    const pagos = await this.prisma.budget.count({ where: { conversationId, status: 'PAID' } });
+    if (conv._count.sales || pagos) {
+      throw new BadRequestException({ code: 'has_sales', message: 'Esta conversa tem venda ou orçamento pago registrado: excluir tiraria o valor do faturamento. Use "Limpar histórico" — o atendimento continua nos relatórios.' });
+    }
+    await this.audit.record(tenantId, 'conversation.deleted', actor.id, [{ conversationId, data: { messages: conv._count.messages } }]);
+    await this.prisma.conversation.delete({ where: { id: conversationId } });
+    this.gateway.emitConversationDeleted(tenantId, conversationId);
+    return { ok: true };
+  }
+
   /** Prévia do card e resumo da IA não podem continuar mostrando o que foi apagado. */
   private async refreshAfterDeletion(tenantId: string, conversationId: string) {
     const last = await this.prisma.message.findFirst({ where: { conversationId, internal: false }, orderBy: { createdAt: 'desc' }, select: { deletedAt: true } });

@@ -7,7 +7,7 @@ import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken, refresh } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingEvent, SendLimits } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
-import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache } from './core';
+import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache, dropConversationFromCache } from './core';
 import type { MessageTemplate, TemplateValues } from '@atendo/shared';
 import { receiveSystemNotice, type SystemNotice } from './avisos';
 import { playMessageSound, unlockMessageSound } from '../message-sound';
@@ -116,6 +116,8 @@ export function useRealtime() {
       if (m.direction === 'in') qc.setQueryData<Typing>(['typing', m.conversationId], null);
     });
     // histórico limpo: um evento só, a conversa recarrega já sem o conteúdo
+    // conversa excluída (por outra pessoa da equipe): some da lista e fecha se estiver aberta
+    socket.on('conversation_deleted', (e: { conversationId: string }) => dropConversationFromCache(qc, e.conversationId));
     socket.on('messages_cleared', (e: { conversationId: string }) => {
       qc.invalidateQueries({ queryKey: ['messages', e.conversationId] });
     });

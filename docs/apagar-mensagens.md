@@ -56,6 +56,26 @@ pedir ao provider uma a uma seria uma rajada de chamadas no número (risco de bl
 estava na fila é cancelado. A conversa continua existindo (é a linha do tempo com a pessoa): se o
 contato escrever, segue normalmente. Registra `history_cleared` com a contagem.
 
+## Excluir conversa
+
+Lixeira no cabeçalho da conversa, ao lado de *Limpar histórico* — com a permissão
+`conversations.delete_conversation` (*Excluir conversas*; no padrão só o **Administrador**, a
+migration `delete_conversation` acrescenta no perfil não editado). Confirmação digitando
+`EXCLUIR`.
+
+- `DELETE /conversations/:id` apaga a conversa **de vez** (`ConversationsService.deleteConversation`):
+  mensagens, eventos do atendimento, tags da conversa, agendadas, execuções de fluxo, pesquisas e
+  fotos protegidas vão junto (cascade). Sai dos relatórios. O **contato fica**; se ele escrever de
+  novo, nasce uma conversa nova. No WhatsApp nada muda.
+- **Com venda ou orçamento pago, recusa** (400 `has_sales`): o valor sairia do faturamento sem
+  ninguém perceber. Nesse caso o caminho é *Limpar histórico*, que mantém o atendimento nos relatórios.
+- O **ledger de cobrança fica**: `message_usage.messageId` virou `ON DELETE SET NULL` (antes era
+  cascade e a exclusão apagaria linhas de cobrança). `ai_usage` já era assim.
+- Auditoria: `audit_logs` com `conversation.deleted` (quem, quando, contato, quantas mensagens),
+  gravado antes de apagar.
+- Tempo real: `conversation_deleted { conversationId }` — o painel de todos tira da lista e fecha
+  a conversa se estiver aberta (`dropConversationFromCache`).
+
 ## Redação (`present()`)
 
 Mensagem com `deletedAt` sai da API — HTTP **e** socket — sem `text`, mídia, `content`, reações,

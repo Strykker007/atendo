@@ -1801,7 +1801,8 @@ model MessageUsage {
   id              String           @id @default(uuid())
   tenantId        String
   numberId        String
-  messageId       String           @unique
+  /// nulo = a mensagem foi excluída com a conversa; a linha do ledger fica (cobrança não some)
+  messageId       String?          @unique
   provider        WhatsAppProvider
   direction       MessageDirection
   billingCategory BillingCategory
@@ -1812,7 +1813,7 @@ model MessageUsage {
 
   tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   number  WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
-  message Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, occurredAt])
   @@index([numberId, occurredAt])

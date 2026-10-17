@@ -6,6 +6,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, onAccessToken } from '../api';
+import { useUI } from '../store';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
@@ -481,6 +482,33 @@ export const useDeletedOriginal = (m: Pick<Message, 'id' | 'conversationId'>, en
     // URL de mídia assinada expira: não guardar por muito tempo
     staleTime: 60_000,
   });
+
+/**
+ * Tira uma conversa excluída de tudo que o painel tem em cache (listas, contagens, a própria) e
+ * fecha se estiver aberta. Usado no sucesso local e no evento `conversation_deleted` do socket.
+ */
+export const dropConversationFromCache = (qc: ReturnType<typeof useQueryClient>, id: string) => {
+  qc.setQueriesData<{ pages?: { items?: { id: string }[] }[] } | { id: string }[] | undefined>({ queryKey: ['conversations'] }, (old) => {
+    if (!old) return old;
+    if (Array.isArray(old)) return old.filter((c) => c.id !== id);
+    if (old.pages) return { ...old, pages: old.pages.map((p) => ({ ...p, items: p.items?.filter((c) => c.id !== id) })) };
+    return old;
+  });
+  qc.removeQueries({ queryKey: ['conversation', id] });
+  qc.removeQueries({ queryKey: ['messages', id] });
+  qc.invalidateQueries({ queryKey: ['conversations'] });
+  qc.invalidateQueries({ queryKey: ['conversation-counts'] });
+  if (useUI.getState().conversationId === id) useUI.getState().setConversation(null);
+};
+
+/** Excluir a conversa inteira (só no painel; o contato fica). Recusa com venda registrada. */
+export const useDeleteConversation = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (conversationId: string) => api<{ ok: true }>(`/conversations/${conversationId}`, { method: 'DELETE' }),
+    onSuccess: (_, id) => dropConversationFromCache(qc, id),
+  });
+};
 
 /** Limpar o histórico da conversa (só no painel). */
 export const useClearHistory = () => {

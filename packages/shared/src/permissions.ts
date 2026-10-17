@@ -25,6 +25,7 @@ export const PERMISSIONS = {
   // é permissão para poder TIRAR de quem não deve editar
   'conversations.edit_message': 'Editar mensagens de texto enviadas (qualquer origem, até 15 min depois do envio)',
   'conversations.delete_chat': 'Limpar o histórico de uma conversa',
+  'conversations.delete_conversation': 'Excluir conversas (some do painel e dos relatórios)',
   // trava contra maquiar métrica: atendimento interno sai do TMR, do volume e da conversão, então
   // só gestão encerra assim — e cada uso fica na auditoria (docs/06-modelo-de-dados.md#encerramento-interno)
   'conversations.close_internal': 'Encerrar como atendimento interno (fora dos relatórios de desempenho)',
@@ -52,7 +53,7 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 /** Agrupamento só para a tela de edição do perfil não virar uma lista de 14 itens soltos. */
 export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
-  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit'] },
+  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.delete_conversation', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit'] },
   { label: 'Conteúdo', items: ['tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage'] },
   { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage'] },
   { label: 'Conta', items: ['numbers.manage', 'billing.manage'] },

@@ -413,6 +413,13 @@ export class ConversationsController {
     return this.conversations.deletedOriginal(u.tenantId, id, messageId);
   }
 
+  /** Excluir a conversa inteira (só no painel; o contato fica e uma nova nasce se ele escrever). */
+  @Delete(':id')
+  @RequirePermission('conversations.delete_conversation')
+  deleteConversation(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.deleteConversation(u.tenantId, u, id);
+  }
+
   /** Limpar o histórico da conversa (só no painel; a conversa continua existindo). */
   @Delete(':id/messages')
   @RequirePermission('conversations.delete_chat')
