@@ -140,10 +140,10 @@ function DeleteDialog({ target, onClose, onDelete, onDeactivate }: { target: Del
       {!u ? <p className="text-sm text-muted">Conferindo os agendamentos…</p> : (
         <p className="text-sm text-muted">
           {u.future > 0
-            ? <><b className="text-ink">"{target?.name}"</b> tem {u.future} agendamento{u.future > 1 ? 's' : ''} futuro{u.future > 1 ? 's' : ''}. Cancele ou remarque antes de excluir — ou desative para não receber novos.</>
+            ? <><b className="text-ink">“{target?.name}”</b> tem {u.future} agendamento{u.future > 1 ? 's' : ''} futuro{u.future > 1 ? 's' : ''}. Cancele ou remarque antes de excluir — ou desative para não receber novos.</>
             : u.past > 0
-              ? <><b className="text-ink">"{target?.name}"</b> tem {u.past} agendamento{u.past > 1 ? 's' : ''} no histórico. Excluir apaga esse histórico junto (some também da ficha dos clientes). Para só tirar da agenda e guardar o histórico, desative.</>
-              : <><b className="text-ink">"{target?.name}"</b> nunca foi usado em agendamentos e será excluído definitivamente.</>}
+              ? <><b className="text-ink">“{target?.name}”</b> tem {u.past} agendamento{u.past > 1 ? 's' : ''} no histórico. Excluir apaga esse histórico junto (some também da ficha dos clientes). Para só tirar da agenda e guardar o histórico, desative.</>
+              : <><b className="text-ink">“{target?.name}”</b> nunca foi usado em agendamentos e será excluído definitivamente.</>}
         </p>
       )}
       <div className="flex flex-wrap justify-end gap-2 pt-5">
