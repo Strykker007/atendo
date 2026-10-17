@@ -4,7 +4,7 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api, getAccessToken, onAccessToken, refresh } from '../api';
+import { api, getAccessToken, onAccessToken, refresh, refreshRefused } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingEvent, SendLimits } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache, dropConversationFromCache } from './core';
@@ -139,11 +139,18 @@ export function useRealtime() {
     const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: (cb) => cb({ token: getAccessToken() }), withCredentials: true, reconnectionDelayMax: 5000 });
     let encerrado = false;
     let jaConectou = false;
+    let recuperar: ReturnType<typeof setTimeout> | null = null;
     const status = useRealtimeStatus.setState;
     socket.on('connect', () => {
       status({ downSince: null });
       // reconexão: busca o que chegou enquanto estava fora (mensagens, listas, kanban, números)
-      if (jaConectou) for (const key of REALTIME_KEYS) qc.invalidateQueries({ queryKey: [key] });
+      // Espalhado em até 5 s: num deploy/reinício da API todos os painéis reconectam juntos, e
+      // recarregar tudo no mesmo segundo seria um pico (a lista de conversas é a consulta mais
+      // pesada). Só recarrega o que está na tela — o resto fica marcado e busca ao abrir.
+      if (jaConectou) {
+        if (recuperar) clearTimeout(recuperar);
+        recuperar = setTimeout(() => { recuperar = null; for (const key of REALTIME_KEYS) qc.invalidateQueries({ queryKey: [key] }); }, Math.random() * 5_000);
+      }
       jaConectou = true;
     });
     // Token vencido na reconexão (aba parada, notebook que dormiu, API reiniciada): o servidor
@@ -156,11 +163,13 @@ export function useRealtime() {
       religando = true;
       try {
         for (let espera = 2000; !encerrado && !socket.connected; espera = Math.min(espera * 2, 30_000)) {
-          // `false` também é API fora do ar (502 no deploy): continua tentando. Sessão encerrada de
-          // vez cai no login pelo próximo pedido à API (sessionExpired em lib/api.ts)
+          // `false` com 5xx/sem resposta = API fora do ar (deploy): continua tentando, com espera
+          // crescente e um sorteio para os painéis não baterem juntos. 401/403 = sessão encerrada
+          // de vez: para aqui (o próximo pedido à API leva ao login, ver sessionExpired)
           const ok = await refresh().catch(() => false);
           if (ok) { socket.connect(); return; }
-          await new Promise((r) => setTimeout(r, espera));
+          if (refreshRefused()) return;
+          await new Promise((r) => setTimeout(r, espera * (0.75 + Math.random() * 0.5)));
         }
       } finally { religando = false; }
     }
@@ -261,6 +270,7 @@ export function useRealtime() {
     return () => {
       encerrado = true;
       if (listasTimer) clearTimeout(listasTimer);
+      if (recuperar) clearTimeout(recuperar);
       clearInterval(vigia);
       window.removeEventListener('online', conferir);
       document.removeEventListener('visibilitychange', aoVoltar);

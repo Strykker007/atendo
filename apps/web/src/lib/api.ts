@@ -51,8 +51,17 @@ export function refresh(): Promise<boolean> {
  */
 let refreshBlock: string | null = null;
 
+/**
+ * Status HTTP da última renovação (null = nem chegou na API). 401/403 = a sessão acabou de vez:
+ * quem tenta de novo em laço (o socket do tempo real) para de martelar a API.
+ */
+let lastRefreshStatus: number | null = null;
+export const refreshRefused = () => lastRefreshStatus === 401 || lastRefreshStatus === 403;
+
 async function doRefresh(): Promise<boolean> {
+  lastRefreshStatus = null;
   const r = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
+  lastRefreshStatus = r.status;
   if (r.status === 403) refreshBlock = (await r.json().catch(() => ({}))).code ?? null;
   if (!r.ok) return false;
   // pelo setter: o socket do tempo real precisa saber do token novo
