@@ -93,10 +93,11 @@ No `infra/docker-compose.prod.yml`:
 | web | 1024 | — | padrão |
 | worker | 512 | 1.0 | filas aguentam segundos de atraso |
 | evolution | 512 | — | recebe as mensagens de todos os números; teto atrasaria mensagem chegando |
-| backup | 128 | 0.5 | roda a cada 24h desde que o container subiu (pode cair em horário comercial) e compacta banco + mídia |
+| evolution-db | 512 | 2 | num pico (consulta sem índice, dump do backup) não toma a máquina: sobram 2 núcleos para API e painel |
+| backup | 128 | 0.5 | roda todo dia em `BACKUP_AT` (padrão 03:30, Brasília — `infra/backup/agenda.sh`) e compacta banco + mídia. O teto vale para o container; o `pg_dump` pesa nos bancos, daí a madrugada |
 
-`cpu_shares` só pesa quando há disputa; com CPU sobrando, todos usam o que quiserem. `cpus` fica
-≤ 1 porque o Docker recusa teto maior que o número de núcleos da máquina.
+`cpu_shares` só pesa quando há disputa; com CPU sobrando, todos usam o que quiserem. `cpus` nunca
+pode passar do número de núcleos da máquina (o Docker recusa); hoje são 4.
 
 Para achar o culpado de um pico: `sudo docker stats --no-stream` no momento em que acontece.
 

@@ -101,6 +101,24 @@ export function useRealtime() {
       }
       playMessageSound();
     }
+    // Lista, contagens e quadro: o evento `conversation` chega a cada mensagem de QUALQUER conversa
+    // do cliente; recarregar tudo a cada um fazia cada painel buscar a lista várias vezes por
+    // segundo nas contas movimentadas (CPU a 100% em 17/10/2026). Junta e recarrega no máximo
+    // uma vez a cada 2 s — a conversa aberta continua atualizando na hora.
+    let listasTimer: ReturnType<typeof setTimeout> | null = null;
+    let listasUltima = 0;
+    const recarregarListas = () => {
+      if (listasTimer) return;
+      const espera = Math.max(0, listasUltima + 2000 - Date.now());
+      listasTimer = setTimeout(() => {
+        listasTimer = null;
+        listasUltima = Date.now();
+        qc.invalidateQueries({ queryKey: ['conversations'] });
+        qc.invalidateQueries({ queryKey: ['conversation-counts'] });
+        // tag principal, posse, status e última mensagem mudam o quadro
+        qc.invalidateQueries({ queryKey: ['kanban'] });
+      }, espera);
+    };
     // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
     const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: (cb) => cb({ token: getAccessToken() }), withCredentials: true, reconnectionDelayMax: 5000 });
     // token vencido na reconexão (aba parada, notebook que dormiu): o servidor derruba o socket e o
@@ -131,14 +149,11 @@ export function useRealtime() {
           qc.setQueryData<Conversation[]>(key, (old) => old?.filter((x) => x.id !== c.id));
         }
       }
-      qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['conversation', c.id] });
-      qc.invalidateQueries({ queryKey: ['conversation-counts'] });
       qc.invalidateQueries({ queryKey: ['active-run', c.id] });
       // pausa/retomada do robô entra no histórico
       qc.invalidateQueries({ queryKey: ['conversation-events', c.id] });
-      // tag principal, posse, status e última mensagem mudam o quadro
-      qc.invalidateQueries({ queryKey: ['kanban'] });
+      recarregarListas();
     });
     // aviso global do dono do sistema: popup no topo + sino
     socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
@@ -168,6 +183,7 @@ export function useRealtime() {
     socket.on('tenant_number', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
     socket.on('tenant_presence', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
     return () => {
+      if (listasTimer) clearTimeout(listasTimer);
       socket.disconnect();
     };
   }, [qc, sala]);
