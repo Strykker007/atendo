@@ -123,6 +123,25 @@ um atalho que alguém usava.
 Dá para alternar no editor (*Atalho no chat*) ou direto na lista de Fluxos, pelo ícone de
 alfinete.
 
+## Fluxos de encerramento
+
+Cada fluxo tem `showOnClosing` (padrão `false`): decide se ele aparece no select **Fluxo** do
+modal de encerrar atendimento (`components/chat/CloseModal.tsx`). O modal mostra **só** os fluxos
+ativos marcados **mais** os fluxos padrão de encerramento (Configurações → Fluxos padrão:
+`onCloseFlowId`, `wonFlowId`, `lostFlowId`), que aparecem sempre — senão o padrão pré-selecionado
+sumiria do select.
+
+- **Cliente**: no editor (*Aparece no encerramento*) ou na lista de Fluxos, pelo ícone de porta
+  (`PATCH /flows/:id` com `{ showOnClosing }`, `flows.manage`).
+- **Dono do sistema**: nos **modelos de perfil** (Clientes → Modelos → Fluxos), o botão
+  **Encerramento** de cada fluxo define quais o cliente novo já recebe marcados. Vai no arquivo
+  portável (`PortableFlow.showOnClosing`), então exportar/importar entre clientes e "criar modelo a
+  partir de um cliente" preservam a marca. Para um cliente existente, o dono entra como ele e marca
+  na tela Fluxos.
+- Duplicar copia a marca; importar mantém a do arquivo.
+- Migração `20270102000000_flow_show_on_closing`: fluxos que já eram padrão de encerramento entram
+  marcados; os demais saem do modal até o admin marcar.
+
 ## Replicar um fluxo
 
 Duas operações diferentes de propósito, porque o risco é diferente.

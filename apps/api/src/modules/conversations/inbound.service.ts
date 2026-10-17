@@ -84,6 +84,8 @@ export class InboundService {
 
     // digitada no celular do cliente, não no painel: entra como enviada
     if (msg.fromMe) return this.ingestFromDevice(number, msg);
+    // chegou mensagem de cliente: se o número estava marcado "parou de receber", já voltou
+    if (number.receiveStalledAt) await this.voltouAReceber(number.id, number.tenantId);
 
     let contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
       ?? await this.createContact(number, msg.from, msg.contactName);
@@ -394,7 +396,20 @@ export class InboundService {
     if (st.status === 'failed' && (m.status === 'delivered' || m.status === 'read')) return; // já chegou: erro tardio é ruído
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(m.conversation.tenantId, this.conversations.present(updated));
+    // confirmação de entrega também é sinal de vida do recebimento
+    if (m.direction === 'out' && m.numberId && (st.status === 'delivered' || st.status === 'read')) await this.voltouAReceber(m.numberId, m.conversation.tenantId);
     if (m.direction === 'in' && st.status === 'read') await this.lidaNoCelular(m.conversationId, m.conversation.tenantId, m.createdAt);
+  }
+
+  /**
+   * Número marcado "parou de receber" (whatsapp/receive-stall.ts) deu sinal de vida: desmarca na
+   * hora, sem esperar o health check de 5 min — o aviso vermelho some assim que resolve.
+   */
+  private async voltouAReceber(numberId: string, tenantId: string) {
+    const res = await this.prisma.whatsAppNumber.updateMany({ where: { id: numberId, receiveStalledAt: { not: null } }, data: { receiveStalledAt: null } });
+    if (!res.count) return;
+    const n = await this.prisma.whatsAppNumber.findUnique({ where: { id: numberId }, select: { id: true, status: true } });
+    if (n) this.gateway.emitNumber(tenantId, n);
   }
 
   /**

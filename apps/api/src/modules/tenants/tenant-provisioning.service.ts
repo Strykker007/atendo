@@ -71,7 +71,7 @@ export class TenantProvisioningService {
       assertOwnFlowMedia(tenantId, b.definition);
       const name = uniqueName(b.name, taken);
       taken.push(name);
-      await tx.flow.create({ data: { tenantId, name, position: taken.length - 1, description: b.description, isActive: false, trigger: b.trigger as object, definition: b.definition as object } });
+      await tx.flow.create({ data: { tenantId, name, position: taken.length - 1, description: b.description, isActive: false, showOnClosing: b.showOnClosing, trigger: b.trigger as object, definition: b.definition as object } });
     }
   }
 
@@ -96,7 +96,7 @@ export class TenantProvisioningService {
     const qr = replies.map((r) => toPortableReply(r, r.folder.name));
     qr.forEach((o) => o.warnings.forEach((w) => warnings.add(w)));
     const portableFlows = flows.map((f) => {
-      const out = flowToPortable({ name: f.name, description: f.description, trigger: f.trigger as unknown as FlowTrigger, definition: f.definition as unknown as FlowDefinition }, { tagNameById, flowNameById });
+      const out = flowToPortable({ name: f.name, description: f.description, showOnClosing: f.showOnClosing, trigger: f.trigger as unknown as FlowTrigger, definition: f.definition as unknown as FlowDefinition }, { tagNameById, flowNameById });
       out.warnings.forEach((w) => warnings.add(`${f.name}: ${w}`));
       return out.portable;
     });

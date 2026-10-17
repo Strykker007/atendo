@@ -221,7 +221,9 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   /** com pesquisa, o fluxo de encerramento não roda (a API ignora) */
   const comPesquisa = enviarPesquisa && !!surveyId;
 
-  const ativos = (flows.data ?? []).filter((f) => f.isActive);
+  // só os marcados "aparece no encerramento" (tela Fluxos) + os padrões de encerramento
+  const padroes = new Set([settings.data?.onCloseFlowId, settings.data?.wonFlowId, settings.data?.lostFlowId].filter(Boolean));
+  const ativos = (flows.data ?? []).filter((f) => f.isActive && (f.showOnClosing || padroes.has(f.id)));
   /** padrão do desfecho, senão o geral "ao encerrar" — só se o fluxo ainda existe e está ativo */
   const padraoDe = (o: CloseOutcome | null) => {
     const s = settings.data;

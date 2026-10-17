@@ -70,21 +70,26 @@ function useViewport() {
  *
  * Dois modos: a equipe do cliente vê as conversas dela + o canal **Suporte** fixado no topo; o
  * dono do sistema (logado como ele mesmo) vê os canais de suporte de todos os clientes
- * (docs/chat-interno.md#suporte). "Entrando como" um cliente, o dono não vê o widget.
+ * (docs/chat-interno.md#suporte). "Entrando como" um cliente, o dono vê só o canal de suporte
+ * daquele cliente — já aberto — e responde como Suporte.
  */
 export function InternalChatWidget() {
   const me = useMe();
   const ehDono = me.data?.role === 'super_admin' && !me.data.impersonatorId;
   const ehEquipe = !!me.data?.tenantId && me.data.role !== 'super_admin' && !me.data.impersonatorId;
-  const habilitado = ehDono || ehEquipe;
+  /** dono "entrando como": usa as rotas do cliente, que devolvem só o canal de suporte */
+  const entrandoComo = !!me.data?.tenantId && !!me.data.impersonatorId;
+  const habilitado = ehDono || ehEquipe || entrandoComo;
   const scope: ChatScope = ehDono ? 'support' : 'team';
-  const titulo = ehDono ? 'Suporte aos clientes' : 'Chat da equipe';
-  const { open, minimized, side, y, chatId, set } = useWidget();
-  const chatsEquipe = useInternalChats(ehEquipe);
+  const titulo = ehDono ? 'Suporte aos clientes' : entrandoComo ? 'Suporte a este cliente' : 'Chat da equipe';
+  const { open, minimized, side, y, chatId: chatSalvo, set } = useWidget();
+  const chatsEquipe = useInternalChats(ehEquipe || entrandoComo);
   const chatsSuporte = useSupportChats(ehDono);
   const chats = ehDono ? chatsSuporte : chatsEquipe;
   const naoLidas = (chats.data ?? []).reduce((a, c) => a + (c.unread ?? 0), 0);
   const equipe = useInternalUsers(ehEquipe);
+  // entrando como: a única conversa é o canal de suporte do cliente, aberto direto
+  const chatId = entrandoComo ? chatsEquipe.data?.find((c) => c.isSupport)?.id ?? null : chatSalvo;
   const online = (equipe.data ?? []).filter((u) => u.online);
   const vp = useViewport();
 
@@ -140,7 +145,7 @@ export function InternalChatWidget() {
       <div className="fixed z-[65] touch-none" style={estilo}>
         <Launcher
           titulo={titulo}
-          dono={ehDono}
+          dono={ehDono || entrandoComo}
           naoLidas={naoLidas}
           online={online}
           side={side}
@@ -156,6 +161,7 @@ export function InternalChatWidget() {
   }
 
   const aberta = chats.data?.find((c) => c.id === chatId) ?? null;
+  const voltar = entrandoComo ? null : () => set({ chatId: null });
   return (
     <div className="fixed z-[65] flex flex-col rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden" style={{ ...estilo, width: w, height: h }} role="dialog" aria-label="Chat interno">
       <div
@@ -166,8 +172,8 @@ export function InternalChatWidget() {
         onPointerUp={() => { soltar(); }}
         onPointerCancel={cancelar}
       >
-        {aberta && !minimized && (
-          <button data-no-drag type="button" onClick={() => set({ chatId: null })} className="p-1 rounded hover:bg-white/10" aria-label="Voltar"><ArrowLeft size={15} /></button>
+        {aberta && !minimized && voltar && (
+          <button data-no-drag type="button" onClick={voltar} className="p-1 rounded hover:bg-white/10" aria-label="Voltar"><ArrowLeft size={15} /></button>
         )}
         <ChatGlyph size={18} className="shrink-0" />
         <span className="flex-1 min-w-0 truncate text-sm font-semibold">{aberta && !minimized ? aberta.name : titulo}</span>
@@ -178,7 +184,7 @@ export function InternalChatWidget() {
         <button data-no-drag type="button" onClick={() => set({ open: false })} className="p-1 rounded hover:bg-white/10" aria-label="Fechar"><X size={15} /></button>
       </div>
       {!minimized && (aberta
-        ? <ChatView chat={aberta} meId={me.data!.id} scope={scope} onLeave={() => set({ chatId: null })} />
+        ? <ChatView chat={aberta} meId={me.data!.id} scope={entrandoComo ? 'support' : scope} api={entrandoComo ? 'team' : scope} onLeave={() => set({ chatId: null })} />
         : ehDono
           ? <OwnerHome chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />
           : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
@@ -453,11 +459,12 @@ function Home({ chats, loading, onOpen }: { chats: InternalChat[]; loading: bool
  * Responder como no WhatsApp: botão no balão (ou duplo clique) cita a mensagem; clicar na
  * citação leva até a original. Grupo: botão de membros abre o painel do grupo.
  */
-function ChatView({ chat, meId, scope, onLeave }: { chat: InternalChat; meId: string; scope: ChatScope; onLeave: () => void }) {
-  const msgs = useInternalMessages(chat.id, scope);
+/** `scope` = de que lado da conversa a tela está (textos); `api` = quais rotas usa (padrão: as do `scope`). */
+function ChatView({ chat, meId, scope, api = scope, onLeave }: { chat: InternalChat; meId: string; scope: ChatScope; api?: ChatScope; onLeave: () => void }) {
+  const msgs = useInternalMessages(chat.id, api);
   const lista = useMemo(() => internalMessagesInOrder(msgs.data), [msgs.data]);
-  const send = useSendInternalMessage(chat.id, scope);
-  const read = useMarkInternalRead(scope);
+  const send = useSendInternalMessage(chat.id, api);
+  const read = useMarkInternalRead(api);
   // canal de suporte: várias pessoas do cliente de um lado, o suporte do outro — mostra quem escreveu
   const mostraAutor = chat.isGroup || !!chat.isSupport;
   const [texto, setTexto] = useState('');

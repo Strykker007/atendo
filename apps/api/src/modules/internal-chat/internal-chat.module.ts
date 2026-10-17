@@ -99,6 +99,8 @@ class InternalChatController {
   /** Equipe para iniciar conversa: ativos do cliente, com quem está com o painel aberto agora. */
   @Get('users')
   async users(@CurrentUser() u: AuthUser) {
+    // dono "entrando como": não é da equipe, só fala pelo canal de suporte
+    if (u.impersonatorId) return [];
     const [rows, presenca] = await Promise.all([
       this.prisma.user.findMany({ where: { tenantId: u.tenantId, isActive: true, id: { not: u.id } }, select: { id: true, name: true, email: true }, orderBy: { name: 'asc' } }),
       this.gateway.presence(),
@@ -113,7 +115,7 @@ class InternalChatController {
     // o canal de suporte existe sempre e fica fixado no topo (docs/chat-interno.md#suporte)
     await ensureSupportChat(this.prisma, u.tenantId);
     const rows = await this.prisma.internalChat.findMany({
-      where: { tenantId: u.tenantId, deletedAt: null, OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] },
+      where: { tenantId: u.tenantId, deletedAt: null, ...(u.impersonatorId ? { isSupport: true } : { OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] }) },
       include: { members: { select: MEMBER_SELECT } },
       orderBy: [{ lastMessageAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       take: 100,
@@ -176,6 +178,11 @@ class InternalChatController {
   @Post('chats/:id/messages')
   async send(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SendDto) {
     const chat = await this.chatOf(u, id);
+    // dono "entrando como" o cliente: responde no canal de suporte como Suporte, com o nome dele
+    if (chat.isSupport && u.impersonatorId) {
+      const dono = await this.prisma.user.findUniqueOrThrow({ where: { id: u.impersonatorId }, select: { id: true, name: true } });
+      return sendSupport(this.prisma, this.gateway, chat, dono, dto, true);
+    }
     const author = await this.assertMember(u);
     if (chat.isSupport) return sendSupport(this.prisma, this.gateway, chat, { id: u.id, name: author.name }, dto, false);
     const text = dto.text.trim();
@@ -298,10 +305,10 @@ class InternalChatController {
 
   /**
    * Conversa de que a pessoa participa — quem não é membro recebe 404 (nem sabe que existe).
-   * O canal de suporte é da equipe inteira do cliente.
+   * O canal de suporte é da equipe inteira do cliente — e é o único que o dono "entrando como" vê.
    */
   private async chatOf(u: AuthUser, id: string) {
-    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, deletedAt: null, OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] }, include: { members: { select: { userId: true } } } });
+    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, deletedAt: null, ...(u.impersonatorId ? { isSupport: true } : { OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] }) }, include: { members: { select: { userId: true } } } });
     if (!chat) throw new NotFoundException('Conversa não encontrada');
     return chat;
   }
@@ -332,7 +339,7 @@ class InternalChatController {
     return { ...this.present(c, u.id), unread: 0 };
   }
 
-  /** O dono do sistema "entrando como" o cliente não é da equipe: audita, mas não conversa. */
+  /** O dono do sistema "entrando como" o cliente não é da equipe: audita e fala só pelo canal de suporte. */
   private async assertMember(u: AuthUser) {
     const me = await this.prisma.user.findFirst({ where: { id: u.id, tenantId: u.tenantId, isActive: true }, select: { name: true } });
     if (!me || u.impersonatorId) throw new ForbiddenException('Só membros da equipe usam o chat interno.');

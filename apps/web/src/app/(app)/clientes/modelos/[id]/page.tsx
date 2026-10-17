@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { ArrowLeft, Send, GripVertical, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
+import { ArrowLeft, DoorClosed, Send, GripVertical, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
 import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -353,7 +353,7 @@ function FlowsSection({ items, onChange }: { items: TemplateFlow[]; onChange: (i
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 className="font-display font-semibold text-ink">Fluxos <span className="text-muted font-normal text-sm">· {items.length}</span></h2>
-          <p className="text-[12px] text-muted">Entram no cliente novo <b>desligados</b>, para o admin revisar e ligar depois de conectar o número. Para criar ou alterar, monte o fluxo num cliente, exporte na tela Fluxos e importe aqui (mesmo nome substitui).</p>
+          <p className="text-[12px] text-muted">Entram no cliente novo <b>desligados</b>, para o admin revisar e ligar depois de conectar o número. Para criar ou alterar, monte o fluxo num cliente, exporte na tela Fluxos e importe aqui (mesmo nome substitui). <b>Encerramento</b> marca os que aparecem no modal de encerrar do cliente.</p>
         </div>
         <input ref={file} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onImport(f); }} />
         <Button variant="ghost" size="sm" icon={<Upload size={14} />} onClick={() => file.current?.click()}>Importar JSON</Button>
@@ -368,6 +368,13 @@ function FlowsSection({ items, onChange }: { items: TemplateFlow[]; onChange: (i
                 <div className="text-sm font-medium text-ink">{f.name}</div>
                 {f.description && <div className="text-[12px] text-muted truncate">{f.description}</div>}
               </div>
+              <button
+                title={f.showOnClosing ? 'Aparece no encerramento do cliente novo — clique para tirar' : 'Fora do encerramento — clique para mostrar no modal de encerrar'}
+                className={cn('flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold', f.showOnClosing ? 'text-accent-ink bg-accent-soft' : 'text-faint hover:text-ink')}
+                onClick={() => onChange(items.map((x, j) => (j === i ? { ...x, showOnClosing: !x.showOnClosing } : x)))}
+              >
+                <DoorClosed size={14} /> Encerramento
+              </button>
               <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => onChange(items.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
             </div>
           ))}

@@ -127,19 +127,26 @@ Caso real: Drog. Kelly I, 12/10/2026, um dia sem receber até o cliente notar.
 **Detecção** (`whatsapp/receive-stall.ts`, rodando no health check a cada 5 min): depois do último
 sinal de vida do número (mensagem recebida ou entrega/leitura confirmada) e do último QR lido
 (`sessionStartedAt`), saíram **≥ 3 mensagens para ≥ 2 contatos** há mais de 15 min, e nenhuma foi
-confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`; limpa sozinho quando volta a
-chegar mensagem/confirmação ou quando o QR é lido de novo. Um contato só com o celular desligado não
-marca.
+confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`. Um contato só com o celular
+desligado não marca.
+
+**Desmarcar**: na hora, na primeira mensagem de cliente que chega ou entrega/leitura confirmada
+(`InboundService.voltouAReceber`, emite `number`) — sem esperar o health check. No health check, número
+já marcado **não é reavaliado pelas regras** (isso fazia o aviso sumir e voltar a cada hora): só
+desmarca com sinal de vida depois da marcação ou com QR lido de novo (`sessionStartedAt` novo).
 
 **Segunda regra — silêncio anormal** (para número com pouco envio, onde a de cima demora horas a
 juntar 3 mensagens): nenhum sinal de vida há **60 min** num horário em que, **no mesmo dia da semana
-passada**, o número recebeu **≥ 5 mensagens** na mesma hora (`silenceVsLastWeek`/`isSilentTooLong`).
+passada**, o número recebeu **≥ 5 mensagens** na mesma hora (`silenceVsLastWeek`/`isSilentTooLong`),
+**e** há ao menos **uma enviada sem confirmação** depois do último sinal — silêncio sozinho (loja
+parada, feriado) não acende o aviso.
 Mesmo dia da semana para noite, domingo e loja fechada não virarem alarme; feriado pode dar falso
 positivo (só aviso, limpa quando chegar algo). Caso Drog. Kelly I, 17/10/2026: parou às 11:12; a
 regra antiga marcaria às 13:51, esta às ~12:15.
 
-**Na tela:** faixa vermelha no topo para todos ("parou de receber mensagens") e, em Números, o card
-com o passo a passo:
+**Na tela:** faixa vermelha no topo para todos ("parou de receber mensagens") — o **×** oculta neste
+navegador até uma nova ocorrência (chave `número@receiveStalledAt` em `localStorage`,
+`atendo-aviso-sem-receber`) — e, em Números, o card com o passo a passo:
 1. **Reiniciar conexão** (`POST /numbers/:id/restart` → `POST /instance/restart` da Evolution): fecha e
    reabre a sessão com as mesmas credenciais, sem QR. Resolve conexão travada.
 2. Se continuar sem receber, **Desconectar + Conectar (QR)**: pareamento novo gera chaves novas — é o

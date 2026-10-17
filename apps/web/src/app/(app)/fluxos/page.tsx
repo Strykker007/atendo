@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, Power, PowerOff, GripVertical } from 'lucide-react';
+import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, Power, PowerOff, GripVertical, DoorClosed } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { cn, downloadJson, safeFileName } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
@@ -203,6 +203,13 @@ export default function FluxosPage() {
                     className={cn('p-1 rounded-md', f.showInChat ? 'text-accent-ink bg-accent-soft' : 'text-faint hover:text-ink')}
                   >
                     <Pin size={15} className={cn(f.showInChat && 'fill-current')} />
+                  </button>
+                  <button
+                    title={f.showOnClosing ? 'Aparece no encerramento — clique para tirar' : 'Fora do encerramento — clique para mostrar no modal de encerrar'}
+                    onClick={() => update.mutateAsync({ id: f.id, showOnClosing: !f.showOnClosing }).then(() => toast.ok(f.showOnClosing ? 'Fluxo tirado do encerramento' : 'Fluxo aparece no encerramento')).catch(toast.err)}
+                    className={cn('p-1 rounded-md', f.showOnClosing ? 'text-accent-ink bg-accent-soft' : 'text-faint hover:text-ink')}
+                  >
+                    <DoorClosed size={15} />
                   </button>
                   <button title="Duplicar neste cliente" onClick={() => onDuplicate([f.id])} className="text-faint hover:text-accent-ink p-1"><Copy size={15} /></button>
                   <button title="Exportar para usar em outro cliente" onClick={() => onExport(f)} className="text-faint hover:text-accent-ink p-1"><Download size={15} /></button>

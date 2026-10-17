@@ -3,12 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, addEdge, useNodesState, useEdgesState, useReactFlow, MarkerType, type Connection, type Edge, type Node, BackgroundVariant } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Save, ArrowLeft, Settings2, Activity, LayoutGrid, Copy, CopyPlus, ClipboardPaste, Trash2, X, Unlink, SquareDashed, AlignStartHorizontal, AlignStartVertical, AlignHorizontalSpaceAround } from 'lucide-react';
+import { Save, ArrowLeft, Settings2, Activity, LayoutGrid, Copy, CopyPlus, ClipboardPaste, Trash2, X, Unlink, SquareDashed, AlignStartHorizontal, AlignStartVertical, AlignHorizontalSpaceAround, Rows3, Rows2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
-import { nodeTypes, NODE_META, PALETTE_GROUPS, TRANSFORM_META, defaultData, type PaletteItem, FlowNodeActions, FlowEditorRefs, type FlowRefs, type ProviderKind } from './nodes';
+import { nodeTypes, NODE_META, PALETTE_GROUPS, TRANSFORM_META, defaultData, type PaletteItem, FlowNodeActions, FlowEditorRefs, FlowViewModeContext, type FlowViewMode, type FlowRefs, type ProviderKind } from './nodes';
 import { NodePanel } from './NodePanel';
 import { DeletableEdge } from './DeletableEdge';
 import { autoLayout, looksVertical } from './layout';
@@ -20,6 +20,7 @@ import { cloneFlowFragment, randomizerPercents, randomizerTotal, restoreFlowDefi
 
 const EMPTY: FlowDefinition = { nodes: [{ id: 'start', type: 'start', position: { x: 40, y: 200 }, data: {} as never }], edges: [] };
 const edgeTypes = { deletable: DeletableEdge };
+const VIEW_KEY = 'atendo-fluxo-visualizacao';
 const EDGE_DEFAULTS = { type: 'deletable', markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: 'var(--line-strong)' }, style: { stroke: 'var(--line-strong)', strokeWidth: 2 } };
 
 /**
@@ -53,11 +54,11 @@ const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.isCon
 /** 409 do PATCH /flows/:id quando outra pessoa (ou o sistema) salvou depois de o editor carregar. */
 export const FLOW_VERSION_CONFLICT = 'flow_version_conflict';
 
-export function FlowEditor(props: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
+export function FlowEditor(props: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; showInChat: boolean; showOnClosing: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
   return <ReactFlowProvider><FlowEditorInner {...props} /></ReactFlowProvider>;
 }
 
-function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
+function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave: (f: { name: string; description?: string; isActive: boolean; showInChat: boolean; showOnClosing: boolean; trigger: FlowTrigger; definition: FlowDefinition }) => Promise<unknown>; saving: boolean }) {
   const rf = useReactFlow();
   const def = flow.definition ?? EMPTY;
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(def.nodes.map(toRf));
@@ -73,10 +74,20 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
     isActive: flow.isActive ?? true,
     // fluxo novo: só vira atalho se for de disparo manual — os automáticos poluiriam a lista
     showInChat: flow.showInChat ?? (flow.trigger?.type ?? 'manual') === 'manual',
+    showOnClosing: flow.showOnClosing ?? false,
     trigger: flow.trigger ?? ({ type: 'manual' } as FlowTrigger),
   });
   const [side, setSide] = useState<'node' | 'settings' | 'runs'>('settings');
   const [dirty, setDirty] = useState(false);
+  // detalhado/compacto vale para todos os fluxos, por navegador
+  const [viewMode, setViewMode] = useState<FlowViewMode>('detailed');
+  useEffect(() => {
+    try { if (localStorage.getItem(VIEW_KEY) === 'compact') setViewMode('compact'); } catch { /* storage bloqueado */ }
+  }, []);
+  const changeViewMode = (m: FlowViewMode) => {
+    setViewMode(m);
+    try { localStorage.setItem(VIEW_KEY, m); } catch { /* storage bloqueado */ }
+  };
   const numbers = useNumbers();
   const runs = useFlowRuns(flow.id ?? null);
   const flows = useFlows();
@@ -384,6 +395,13 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
         {dirty
           ? <span className="text-[10.5px] font-semibold rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink whitespace-nowrap" title="Ctrl+S salva">Alterações não salvas</span>
           : <span className="text-[11px] text-faint hidden sm:inline">salvo</span>}
+        <div className="flex items-center rounded-lg border border-line p-0.5" role="group" aria-label="Visualização dos cards">
+          {([['detailed', 'Detalhado', Rows3, 'Cards mostram o conteúdo configurado: texto, opções, regras, etiquetas'], ['compact', 'Compacto', Rows2, 'Cards só com título e saídas — visão geral de fluxos grandes']] as const).map(([m, label, Icon, hint]) => (
+            <button key={m} type="button" title={hint} aria-pressed={viewMode === m} onClick={() => changeViewMode(m)} className={cn('flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] font-medium', viewMode === m ? 'bg-accent-soft text-accent-ink' : 'text-muted hover:text-ink')}>
+              <Icon size={13} /> <span className="hidden md:inline">{label}</span>
+            </button>
+          ))}
+        </div>
         <Button size="sm" variant="ghost" icon={<LayoutGrid size={13} />} onClick={organize} title="Reposiciona os cards da esquerda para a direita a partir do Início">Organizar automaticamente</Button>
         <Button size="sm" variant="ghost" icon={<Settings2 size={13} />} onClick={() => setSide('settings')}>Gatilho</Button>
         {flow.id && <Button size="sm" variant="ghost" icon={<Activity size={13} />} onClick={() => setSide('runs')}>Execuções</Button>}
@@ -422,6 +440,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
           )}
           <FlowEditorRefs.Provider value={refs}>
           <FlowNodeActions.Provider value={nodeActions}>
+          <FlowViewModeContext.Provider value={viewMode}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -447,6 +466,7 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
             <Controls showInteractive={false} className="!bg-panel !border-line !shadow-sm [&>button]:!bg-panel [&>button]:!border-line [&>button]:!text-ink" />
             <MiniMap pannable zoomable className="!bg-panel !border-line" nodeColor={() => 'var(--line-strong)'} maskColor="color-mix(in srgb, var(--bg) 70%, transparent)" />
           </ReactFlow>
+          </FlowViewModeContext.Provider>
           </FlowNodeActions.Provider>
           </FlowEditorRefs.Provider>
           {multi.length > 1 && (
@@ -519,6 +539,13 @@ function FlowEditorInner({ flow, onSave, saving }: { flow: Partial<Flow>; onSave
                 <span>
                   Atalho no chat
                   <span className="block text-[11px] text-muted">Aparece na aba Fluxos para o atendente disparar. Fluxo que roda sozinho não precisa.</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-ink">
+                <input type="checkbox" className="mt-0.5" checked={meta.showOnClosing} onChange={(e) => setMeta({ ...meta, showOnClosing: e.target.checked })} />
+                <span>
+                  Aparece no encerramento
+                  <span className="block text-[11px] text-muted">Opção no modal de encerrar atendimento (pós-venda, pesquisa). O fluxo padrão de encerramento aparece sempre.</span>
                 </span>
               </label>
 

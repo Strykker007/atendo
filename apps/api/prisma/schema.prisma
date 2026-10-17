@@ -1318,6 +1318,9 @@ model Flow {
   /// aparece como atalho na aba Fluxos do chat. Fluxo que roda sozinho (nova conversa,
   /// palavra-chave) não precisa estar lá — vira ruído para quem atende.
   showInChat  Boolean  @default(true)
+  /// aparece na lista de fluxos do modal de encerramento (docs/fluxos.md#fluxos-de-encerramento).
+  /// O fluxo padrão de encerramento (`onCloseFlowId`/`wonFlowId`/`lostFlowId`) aparece sempre.
+  showOnClosing Boolean @default(false)
   /// ordem na lista de Fluxos (e nos atalhos do chat), definida arrastando
   position    Int      @default(0)
   /// FlowTrigger (packages/shared)

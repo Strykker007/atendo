@@ -63,9 +63,21 @@ export class NumbersHealthProcessor extends TrackedWorkerHost {
    * muda `sessionStartedAt`, e as mensagens de antes deixam de contar.
    */
   private async checkReceiving(n: { id: string; tenantId: string; label: string; provider: string; sessionStartedAt: Date | null; receiveStalledAt: Date | null }, status: NumberStatus) {
-    const stalled = n.provider === 'evolution' && status === 'connected'
-      && (isReceiveStalled(await unackedSinceLastSignal(this.prisma, n.id, n.sessionStartedAt))
-        || isSilentTooLong(await silenceVsLastWeek(this.prisma, n.id, n.sessionStartedAt)));
+    let stalled = false;
+    if (n.provider === 'evolution' && status === 'connected') {
+      const unacked = await unackedSinceLastSignal(this.prisma, n.id, n.sessionStartedAt);
+      const silence = await silenceVsLastWeek(this.prisma, n.id, n.sessionStartedAt);
+      if (n.receiveStalledAt) {
+        // já marcado: só desmarca com sinal de vida DEPOIS da marcação (ou QR novo). Reavaliar as
+        // regras aqui fazia o aviso piscar — some, volta na hora seguinte — mesmo resolvido ou não
+        const ultimoSinal = silence.silentMs === null ? null : Date.now() - silence.silentMs;
+        const sessaoNova = !!n.sessionStartedAt && n.sessionStartedAt > n.receiveStalledAt;
+        stalled = !sessaoNova && !(ultimoSinal !== null && ultimoSinal > n.receiveStalledAt.getTime());
+      } else {
+        // silêncio sozinho (loja parada, feriado) não basta: precisa de ao menos uma enviada sem confirmação
+        stalled = isReceiveStalled(unacked) || (unacked.unacked >= 1 && isSilentTooLong(silence));
+      }
+    }
     if (stalled === !!n.receiveStalledAt) return;
     await this.prisma.whatsAppNumber.update({ where: { id: n.id }, data: { receiveStalledAt: stalled ? new Date() : null } });
     this.gateway.emitNumber(n.tenantId, { id: n.id, status });

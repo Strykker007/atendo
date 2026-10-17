@@ -97,6 +97,9 @@ Outros tipos existentes não pedidos: Início (`start`), Fim (`end`), IA (`ai`),
 - **Copiar/colar blocos** entre fluxos: existe (Ctrl+C/V, `localStorage`) — confirmado na tarefa 1.7: ligações internas da seleção preservadas, as que saem dela descartadas; colar vindo de **outra empresa** passa pela limpeza da importação.
 - **Conexões laterais**: entrada à esquerda, saídas à direita, uma por opção (tarefa 1.1). Ids de handle iguais aos antigos, então fluxos salvos continuam ligados.
 - **Organizar automaticamente**: botão na barra; aviso quando o desenho parece vertical. Nunca roda sozinho.
+- **Visualização Detalhado / Compacto**: botão na barra superior (`FlowViewModeContext` em `nodes.tsx`; lembrado por navegador em `localStorage`, `atendo-fluxo-visualizacao`, vale para todos os fluxos).
+  - **Detalhado** (padrão) — o card mostra o que foi configurado, sem abrir o painel: Conteúdo com a prévia das mensagens e selos dos anexos ("2 imagens · 1 áudio"); Menu com o texto e todas as opções numeradas; Condição com a regra de cada ramo ("Se tem a etiqueta "Cliente VIP" E …", com o **nome** da etiqueta); Ação com a etiqueta aplicada/removida, o atendente atribuído, o departamento, o status ou o método + URL do webhook; API externa com método, URL e variáveis.
+  - **Compacto** — só cabeçalho, uma linha de resumo e as saídas (as bolinhas ficam nos dois modos: as ligações não mudam). Cards mais estreitos, para enxergar fluxos grandes; "Organizar automaticamente" usa a altura medida, então funciona nos dois.
 - **Cortar ligação**: tesoura no meio da aresta (hover/seleção) ou Delete/Backspace.
 
 ## Randomizador
@@ -344,7 +347,7 @@ Dados: `{ mode?, minutes, unit?, businessHours? }`.
 
 Tarefa 1.7. Tudo passa pelo módulo único `packages/shared/src/portable.ts` (puro, sem Prisma).
 
-- **Arquivo individual**: `{ atendo: 'flow', version: 1, name, description?, trigger, definition }`. **Lote**: `{ atendo: 'flow-bundle', version: 1, items: [<individual>…] }` (até 100).
+- **Arquivo individual**: `{ atendo: 'flow', version: 1, name, description?, showOnClosing?, trigger, definition }` (`showOnClosing` só sai quando `true`; ver [Fluxos de encerramento](10-fluxos-de-automacao.md#fluxos-de-encerramento)). **Lote**: `{ atendo: 'flow-bundle', version: 1, items: [<individual>…] }` (até 100).
 - **Listagem** (`/fluxos`): checkbox por fluxo + "selecionar todos" → **Ativar**, **Desativar** (`POST /flows/active`; ativar valida cada desenho, os inválidos ficam como estavam e aparecem com o motivo), **Duplicar** (`POST /flows/duplicate`), **Exportar selecionados** (`POST /flows/export`, um arquivo `.fluxos.json`). Importar aceita individual ou lote.
 - **Não sai do cliente** (`scrubFlowDefinition`, com aviso e marca `_reconfig` no card): etiqueta vira nome; atendente(s), departamento, motivo do "Encerrar conversa" (`closeReasonId`; o resultado viaja), serviço/profissional, anexos (chave com o tenant), destino do Conectar (fica o nome), URL do webhook, **headers sensíveis do webhook** (`isSensitiveHeader`: `Authorization`, `X-Api-Key` e qualquer nome com `token` ou `secret`, removidos inteiros — os demais headers viajam com valor), números do gatilho.
 - **Corpo do webhook** viaja (é conteúdo). Se algum webhook do arquivo tiver corpo (`hasWebhookBody`), a listagem mostra antes de baixar: *"Este arquivo contém o corpo de webhooks. Verifique se não há tokens ou senhas."* — baixa só se confirmar.

@@ -11,7 +11,7 @@ ledger de uso. O histórico é **permanente e auditável** — não existe apaga
 | Conversa **direta**: uma só por par de pessoas (`directKey = "<menor id>:<maior id>"`, único por cliente). Abrir de novo devolve a mesma | `InternalChatController.create` |
 | **Grupo**: nome obrigatório; quem cria entra junto. Membros só da equipe ativa do mesmo cliente | idem |
 | Só membro lê e escreve (quem não é recebe 404 — nem sabe que a conversa existe) | `chatOf` |
-| O dono do sistema "entrando como" o cliente não é da equipe: não usa o chat (403), mas pode auditar | `assertMember` |
+| O dono do sistema "entrando como" o cliente não é da equipe: não vê nem cria conversas da equipe (403/404), mas pode auditar e fala pelo **canal de suporte** daquele cliente | `assertMember`, `chatOf` |
 | Nome do autor gravado na mensagem (`authorName`): a auditoria continua legível depois que a pessoa sai da equipe (`authorId` vira null) | `internal_messages` |
 | Não lidas por pessoa: `internal_chat_members.lastReadAt`. Escrever marca como lido até ali | `send` / `read` |
 | Tempo real: `internal_message` e `internal_chat` vão **só para a sala de cada membro** (`user:<tenant>:<id>`), nunca para a sala do cliente | `ConversationsGateway.emitInternalMessage` |
@@ -37,8 +37,13 @@ Canal direto entre o cliente e o **suporte do sistema** (o dono, `super_admin`),
 
 **Dono do sistema**: logado como ele mesmo, o widget aparece em modo **Suporte aos clientes**
 (ícone de headset): aba **Conversas** (canais com mensagem, mais recentes primeiro, com não
-lidas) e aba **Clientes** (busca; clicar abre ou cria o canal para puxar conversa). "Entrando
-como" um cliente, o widget não aparece.
+lidas) e aba **Clientes** (busca; clicar abre ou cria o canal para puxar conversa).
+
+**"Entrando como" um cliente**: o widget aparece como **Suporte a este cliente**, já aberto no canal
+de suporte dele (sem lista, sem equipe, sem grupos). Usa as rotas `/internal-chat/*` com o token do
+cliente: `GET /chats` devolve só o canal de suporte, `GET /users` devolve vazio, e o envio sai como
+`fromSupport`, assinado com o nome do dono (`impersonatorId`) — igual a responder pelo modo Suporte.
+A leitura (não lidas) é a mesma linha do dono nos dois modos.
 
 ## Auditoria
 
