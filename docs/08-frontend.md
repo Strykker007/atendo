@@ -67,7 +67,8 @@ src/
 
 `useRealtime()` (em `hooks.ts`) abre o socket com `auth: { token }` e:
 - `message` → insere/atualiza no cache `['messages', conversationId]`. Também é por aqui que chega a mudança de status (webhook de entrega/leitura): a mensagem vem inteira e o `StatusIcon` da bolha troca sozinho — 🕒 enviando, ✓ enviada, ✓✓ entregue, ✓✓ ciano (`--tick-read`) lida, ⚠ falha (tooltip com o erro).
-  - **Som de chegada** (`lib/message-sound.ts`): `message` com `direction: 'in'` toca um "plim" curto (Web Audio, sem arquivo). Só na primeira vez que o id aparece (status/reação reenviam a mesma mensagem), só se a mensagem tem até 2 min (reimportação de histórico não toca) e no máximo um a cada 1,5 s. Como o evento vai para o tenant inteiro, toca só para quem enxerga a conversa: ela está numa lista `['conversations']` em cache (já filtrada pela API) ou o `GET /conversations/:id` responde (o `ConversationScopeGuard` dá 404 fora do escopo de número/empresa/departamento). O navegador só libera áudio após um gesto na página: o primeiro clique/tecla destrava; antes disso não toca. **Desligar**: `soundMuted` no store `atendo-ui` (por navegador, como a aparência) — atalho no alto da lista de conversas (ícone de alto-falante, âmbar quando mudo) e Configurações → **Notificações** (interruptor + "Testar som", que toca na hora sem o intervalo mínimo).
+  - **Som de chegada** (`lib/message-sound.ts`): `message` com `direction: 'in'` toca um "plim" curto (Web Audio, sem arquivo). Só na primeira vez que o id aparece (status/reação reenviam a mesma mensagem), só se a mensagem tem até 2 min (reimportação de histórico não toca) e no máximo um a cada 1,5 s. Como o evento vai para o tenant inteiro, toca só para quem enxerga a conversa: ela está numa lista `['conversations']` em cache (já filtrada pela API) ou o `GET /conversations/:id` responde (o `ConversationScopeGuard` dá 404 fora do escopo de número/empresa/departamento). O navegador só libera áudio após um gesto na página: o primeiro clique/tecla destrava; antes disso não toca. **Desligar**: `soundMuted` no store `atendo-ui` (por navegador, como a aparência) — atalho no alto da lista de conversas (ícone de alto-falante, âmbar quando mudo) e Configurações → **Notificações** (interruptor + "Testar som" e "Testar alarme de transferência", que tocam na hora sem o intervalo mínimo, mesmo com o som desligado). Quando o Web Audio não está rodando (Safari "interrupted", contexto que não retomou), o som sai por um `<audio>` com o mesmo tom em WAV gerado no navegador — o teste usa sempre esse caminho, dentro do clique: antes ele esperava o `resume()` e ficava mudo quando o contexto não voltava `running`.
+  - **Transferência para mim** (`transfer_alert`, sala `user:<tenant>:<usuário>` — só a pessoa que recebeu): alarme (três toques agudos, diferente do plim; respeita o som desligado) e aviso fixo no topo da tela (`components/layout/TransferAlert.tsx`) com "Abrir conversa", que só sai no clique. Quem transfere para si mesmo não recebe.
 - `conversation` → invalida `['conversations']`, a conversa e `['kanban']`.
 - `kanban` → invalida `['kanban']` e `['tags']` (colunas mudaram).
 - `messages_cleared` → histórico limpo: invalida `['messages', conversationId]`. Mensagem apagada chega pelo próprio `message` (já com `deletedAt` e sem conteúdo) e vira o aviso "Mensagem apagada por…" na bolha ([Apagar mensagens](apagar-mensagens.md)).
@@ -475,6 +476,14 @@ Uma armadilha vale registrar: gravar a cada mudança de valor **apaga o que acab
 lido**. Na montagem, o efeito de escrita roda no mesmo ciclo do de leitura e ainda enxerga o
 valor inicial. Por isso o hook só grava depois que o usuário mexeu, marcado no próprio setter
 — depender da ordem dos efeitos não resolve.
+
+## Contatos (`/contatos`)
+
+Importar e exportar a base (permissão `contacts.import_export`, item **Contatos** no menu). **Exportar** baixa o CSV de `GET /contacts/export`. **Importar** aceita .csv ou .xlsx: o .xlsx é lido no navegador por `lib/xlsx-read.ts` (zip + XML com `DecompressionStream`, sem biblioteca de planilha; só a 1ª aba e os valores) e vai como `rows`. A tela sempre confere antes (`dryRun`): mostra novos, atualizados, sem mudança, inválidos (com a linha), repetidos e tags que não existem; só grava no botão **Importar N contato(s)**. "Sobrescrever o que já está na ficha" refaz a prévia.
+
+## Transferência de atendimento
+
+Configurações → Atendimento → **Transferência de atendimento** (`TransferSection`): liga/desliga o aviso ao cliente e edita os dois textos — para pessoa (`{{atendente}}`, primeiro nome) e para departamento (`{{departamento}}`). Em branco = o padrão. O alerta com som para quem recebe é sempre ligado (ver Tempo real).
 
 ## Kanban (`/kanban`)
 

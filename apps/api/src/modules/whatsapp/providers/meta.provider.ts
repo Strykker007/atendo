@@ -377,7 +377,7 @@ export function parseMetaTemplate(raw: any): MessageTemplate | null {
   else if (buttons.some((b) => ['FLOW', 'CATALOG', 'MPM', 'OTP'].includes(String(b?.type).toUpperCase()))) unsupported = 'Botão de formulário/catálogo ainda não é suportado no painel.';
 
   // botões que pedem valor no envio: link com {{1}} no fim e "Copiar código" (cupom)
-  const dynamicButtons = buttons.flatMap((b, index) => {
+  const dynamicButtons = buttons.flatMap((b, index): NonNullable<MessageTemplate['dynamicButtons']> => {
     const type = String(b?.type).toUpperCase();
     if (type === 'URL' && templateParams(b?.url).length) return [{ index, kind: 'url' as const, text: String(b?.text ?? ''), url: String(b.url) }];
     if (type === 'COPY_CODE') return [{ index, kind: 'copy_code' as const, text: String(b?.text ?? 'Copiar código') }];
