@@ -6,6 +6,7 @@
 - Auth: login, refresh rotativo, RBAC, throttling
 - Números: cadastro, QR da Evolution em tempo real, troca de provider, revalidar, ativar/desativar, excluir
 - Adapters Meta e Evolution (envio de texto/mídia por URL, recepção, status, conexão)
+- Templates Meta (HSM): lista dos aprovados da WABA, variáveis, cabeçalho de mídia (imagem/vídeo/PDF) e botões dinâmicos (link e cupom) no composer, Nova conversa, transmissões e lembrete da Agenda
 - Webhooks autenticados + filas BullMQ (inbound/outbound com retry)
 - Conversas: lista com filtros (status, número, busca, tags), chat estilo WhatsApp, envio, encerrar/reabrir, tags no cabeçalho
 - Respostas rápidas (pastas → respostas → insere no composer)
@@ -34,9 +35,8 @@
 ## Próximos, em ordem sugerida
 
 1. **IA, etapa 3** — agente autônomo: base de conhecimento por arquivo (PDF/planilha) com busca vetorial no `pgvector`, resposta fora do fluxo em toda conversa nova e handoff por confiança. As etapas 1 e 2 (bloco de IA no fluxo e copiloto) estão prontas — ver [15](15-ia.md).
-2. **Templates Meta** — listar templates aprovados da WABA e compor no chat quando a janela expirou.
-3. **Validar com credencial real** — Meta (WABA de teste), Stripe (chaves de teste) e Resend nunca rodaram fora do simulado. É o maior risco em aberto.
-4. **Testes de integração** — e2e de receber → responder com banco e fila de verdade (os atuais são unitários e offline).
-5. **Métricas e alerta** — profundidade das filas e falhas de envio num endpoint Prometheus; alerta ativo quando uma fila acumula ou um número cai.
-6. **2FA** (TOTP) para admins.
-7. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.
+2. **Validar com credencial real** — Meta (WABA de teste), Stripe (chaves de teste) e Resend nunca rodaram fora do simulado. É o maior risco em aberto.
+3. **Testes de integração** — e2e de receber → responder com banco e fila de verdade (os atuais são unitários e offline).
+4. **Métricas e alerta** — profundidade das filas e falhas de envio num endpoint Prometheus; alerta ativo quando uma fila acumula ou um número cai.
+5. **2FA** (TOTP) para admins.
+6. **Atribuição automática** de conversas (round-robin entre atendentes online) — a posse manual já existe.

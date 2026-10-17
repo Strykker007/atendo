@@ -114,8 +114,8 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
         const idempotencyKey = `campaign-${campaign.id}-${target.id}`;
         let message;
         if (tpl && definition) {
-          const built = await this.conversations.templateMessage(campaign.tenantId, target.contactId, definition, { header: tpl.header, body: tpl.body });
-          message = await this.conversations.sendCampaign(campaign.tenantId, target.contactId, campaign.numberId, { text: built.text, template: built.template!, idempotencyKey });
+          const built = await this.conversations.templateMessage(campaign.tenantId, target.contactId, definition, tpl);
+          message = await this.conversations.sendCampaign(campaign.tenantId, target.contactId, campaign.numberId, { text: built.text, media: built.systemMedia, template: built.template!, idempotencyKey });
         } else {
           const text = campaign.text ? interpolate(campaign.text, await this.interpolation.context(campaign.tenantId, target.contact)) : undefined;
           const media = campaign.mediaKey ? { key: campaign.mediaKey, type: (campaign.mediaType ?? 'document') as MediaType, name: campaign.mediaName ?? undefined } : undefined;

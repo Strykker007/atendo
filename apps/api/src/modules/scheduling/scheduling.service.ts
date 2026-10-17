@@ -8,10 +8,10 @@ import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { computeSlots, type Slot } from './slots';
 import { REMINDER_OPTIONS, reminderChoice } from './reminder-reply';
 import { NumbersService } from '../whatsapp/numbers.service';
-import type { TemplateValues } from '@atendo/shared';
+import type { TemplateChoice } from '@atendo/shared';
 
 /** Template do lembrete guardado nas preferências (`SchedulingSettings.reminderTemplate`). */
-type ReminderTemplate = { name: string; language: string; header?: TemplateValues; body?: TemplateValues };
+type ReminderTemplate = TemplateChoice;
 
 /**
  * Variáveis do agendamento para o template do lembrete: `{{servico}}`, `{{profissional}}`,

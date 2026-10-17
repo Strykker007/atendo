@@ -1,9 +1,13 @@
-import { renderTemplatePreview, type MessageTemplate, type OutboundMessage, type TemplateValues } from '@atendo/shared';
+import { renderTemplatePreview, templateHeaderMedia, type MessageTemplate, type OutboundMessage, type TemplateValues } from '@atendo/shared';
 
 /** Valores do template já interpolados ({{contact.first_name}} etc. resolvidos antes). */
 export interface TemplateFill {
   header?: TemplateValues;
   body?: TemplateValues;
+  /** valor de cada botão dinâmico (final da URL ou cupom), pela posição do botão */
+  buttons?: TemplateValues;
+  /** arquivo do cabeçalho de mídia (chave do storage, já conferida como do tenant) */
+  headerMedia?: { key: string; name?: string };
 }
 
 /**
@@ -26,14 +30,24 @@ function params(keys: string[], values: TemplateValues | undefined, where: strin
  * Template + valores → o que vai para o provider e o texto que fica no histórico do painel.
  * Lança `Error` com mensagem para o atendente quando falta variável ou o template não é enviável.
  */
-export function buildTemplateSend(t: MessageTemplate, fill: TemplateFill): { template: NonNullable<OutboundMessage['template']>; text: string } {
+export function buildTemplateSend(t: MessageTemplate, fill: TemplateFill): { template: NonNullable<OutboundMessage['template']>; text: string; media?: { key: string; type: 'image' | 'video' | 'document'; name?: string } } {
   if (t.unsupported) throw new Error(t.unsupported);
+  const headerMedia = templateHeaderMedia(t);
+  if (headerMedia && !fill.headerMedia?.key) throw new Error(`Anexe ${headerMedia === 'image' ? 'a imagem' : headerMedia === 'video' ? 'o vídeo' : 'o documento'} do cabeçalho do template.`);
   const components: unknown[] = [];
   if (t.headerParams.length) components.push({ type: 'header', parameters: params(t.headerParams, fill.header, 'cabeçalho') });
   if (t.bodyParams.length) components.push({ type: 'body', parameters: params(t.bodyParams, fill.body, 'corpo') });
+  for (const b of t.dynamicButtons ?? []) {
+    const v = fill.buttons?.[String(b.index)]?.trim();
+    if (!v) throw new Error(`Preencha o ${b.kind === 'url' ? 'final do link' : 'código'} do botão "${b.text}".`);
+    // botão de link: só o trecho dinâmico (a Meta junta com a URL aprovada); cupom: até 15 caracteres
+    const parameter = b.kind === 'url' ? { type: 'text', text: cleanTemplateParam(v) } : { type: 'coupon_code', coupon_code: cleanTemplateParam(v).slice(0, 15) };
+    components.push({ type: 'button', sub_type: b.kind, index: String(b.index), parameters: [parameter] });
+  }
   const clean = (v?: TemplateValues) => Object.fromEntries(Object.entries(v ?? {}).map(([k, x]) => [k, cleanTemplateParam(x)]));
   return {
-    template: { name: t.name, language: t.language, category: t.category, ...(components.length && { components }) },
+    template: { name: t.name, language: t.language, category: t.category, ...(components.length && { components }), ...(headerMedia && { headerMedia }) },
     text: renderTemplatePreview(t, clean(fill.header), clean(fill.body)),
+    ...(headerMedia && fill.headerMedia && { media: { key: fill.headerMedia.key, type: headerMedia, name: fill.headerMedia.name } }),
   };
 }

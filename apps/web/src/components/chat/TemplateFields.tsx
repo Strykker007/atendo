@@ -1,14 +1,16 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
-import { renderTemplatePreview, type MessageTemplate, type TemplateValues } from '@atendo/shared';
+import { useEffect, useRef, useState } from 'react';
+import { Paperclip, RefreshCw } from 'lucide-react';
+import { renderTemplatePreview, templateHeaderMedia, type MessageTemplate, type TemplateChoice, type TemplateValues } from '@atendo/shared';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useTemplates } from '@/lib/hooks';
+import { uploadFile, useTemplates } from '@/lib/hooks';
 
-/** O que vai para a API: nome + idioma e os valores (podem ter `{{contact.first_name}}`). */
-export interface TemplateChoice { name: string; language: string; header?: TemplateValues; body?: TemplateValues }
+/** O que vai para a API: nome + idioma, os valores (podem ter `{{contact.first_name}}`), botões e o arquivo do cabeçalho. */
+export type { TemplateChoice };
+
+const ACCEPT: Record<string, string> = { image: 'image/jpeg,image/png', video: 'video/mp4,video/3gpp', document: 'application/pdf' };
 
 const keyOf = (t: Pick<MessageTemplate, 'name' | 'language'>) => `${t.name}|${t.language}`;
 
@@ -21,6 +23,8 @@ export function useTemplateChoice(numberId: string | null, enabled = true, initi
   const [sel, setSel] = useState(initial ? keyOf(initial) : '');
   const [header, setHeader] = useState<TemplateValues>(initial?.header ?? {});
   const [body, setBody] = useState<TemplateValues>(initial?.body ?? {});
+  const [buttons, setButtons] = useState<TemplateValues>(initial?.buttons ?? {});
+  const [media, setMedia] = useState<{ key: string; name?: string } | null>(initial?.headerMediaKey ? { key: initial.headerMediaKey, name: initial.headerMediaName } : null);
   const tpl = templates.data?.find((t) => keyOf(t) === sel);
   const [primeira, setPrimeira] = useState(true);
 
@@ -28,15 +32,22 @@ export function useTemplateChoice(numberId: string | null, enabled = true, initi
     setSel(key);
     const t = templates.data?.find((x) => keyOf(x) === key);
     setHeader({});
+    setButtons({});
+    setMedia(null);
     setBody(t?.bodyParams[0] ? { [t.bodyParams[0]]: '{{contact.first_name}}' } : {});
   }
   // trocou de número: o template de outra conta não vale aqui (a escolha salva só na 1ª carga)
-  useEffect(() => { if (primeira) { setPrimeira(false); return; } setSel(''); setHeader({}); setBody({}); }, [numberId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (primeira) { setPrimeira(false); return; } setSel(''); setHeader({}); setBody({}); setButtons({}); setMedia(null); }, [numberId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const faltando = !!tpl && [...tpl.headerParams.map((k) => header[k]), ...tpl.bodyParams.map((k) => body[k])].some((v) => !v?.trim());
+  const faltando = !!tpl && (
+    [...tpl.headerParams.map((k) => header[k]), ...tpl.bodyParams.map((k) => body[k]), ...(tpl.dynamicButtons ?? []).map((b) => buttons[String(b.index)])].some((v) => !v?.trim())
+    || (!!templateHeaderMedia(tpl) && !media)
+  );
   const valid = !!tpl && !tpl.unsupported && !faltando;
-  const value: TemplateChoice | null = tpl ? { name: tpl.name, language: tpl.language, header, body } : null;
-  return { templates, sel, escolher, tpl, header, setHeader, body, setBody, valid, value, reset: () => escolher('') };
+  const value: TemplateChoice | null = tpl
+    ? { name: tpl.name, language: tpl.language, header, body, ...(tpl.dynamicButtons?.length && { buttons }), ...(templateHeaderMedia(tpl) && media && { headerMediaKey: media.key, headerMediaName: media.name }) }
+    : null;
+  return { templates, sel, escolher, tpl, header, setHeader, body, setBody, buttons, setButtons, media, setMedia, valid, value, reset: () => escolher('') };
 }
 
 export type TemplateChoiceState = ReturnType<typeof useTemplateChoice>;
@@ -46,7 +57,7 @@ export type TemplateChoiceState = ReturnType<typeof useTemplateChoice>;
  * oferece `{{servico}}`, `{{data}}`…). `preview` desliga a prévia onde não cabe.
  */
 export function TemplateFields({ choice, hint, preview = true }: { choice: TemplateChoiceState; hint?: React.ReactNode; preview?: boolean }) {
-  const { templates, sel, escolher, tpl, header, setHeader, body, setBody } = choice;
+  const { templates, sel, escolher, tpl, header, setHeader, body, setBody, buttons, setButtons } = choice;
   const salvoSumiu = !!sel && !tpl && !templates.isLoading && !!templates.data;
   return (
     <>
@@ -78,6 +89,12 @@ export function TemplateFields({ choice, hint, preview = true }: { choice: Templ
               </Field>
             );
           })}
+          {(tpl.dynamicButtons ?? []).map((b) => (
+            <Field key={`button-${b.index}`} label={`Botão "${b.text}" · ${b.kind === 'url' ? 'final do link' : 'código do cupom'}`} hint={b.kind === 'url' ? b.url : 'Até 15 caracteres.'}>
+              <input value={buttons[String(b.index)] ?? ''} onChange={(e) => setButtons((v) => ({ ...v, [String(b.index)]: e.target.value }))} maxLength={b.kind === 'url' ? 1024 : 15} className={inputCls} />
+            </Field>
+          ))}
+          {templateHeaderMedia(tpl) && <HeaderMediaField choice={choice} />}
           {(tpl.headerParams.length > 0 || tpl.bodyParams.length > 0) && <p className="text-xs text-faint">{hint ?? <>Aceita variáveis como {'{{contact.first_name}}'}, {'{{contact.name}}'} e as globais da empresa.</>}</p>}
           {preview && (
             <div className="rounded-lg bg-field px-3 py-2 text-sm text-ink whitespace-pre-wrap break-words">
@@ -89,5 +106,37 @@ export function TemplateFields({ choice, hint, preview = true }: { choice: Templ
         </>
       )}
     </>
+  );
+}
+
+/** Arquivo do cabeçalho de mídia: sobe pelo `/uploads` e guarda a chave na escolha. */
+function HeaderMediaField({ choice }: { choice: TemplateChoiceState }) {
+  const { tpl, media, setMedia } = choice;
+  const input = useRef<HTMLInputElement>(null);
+  const [subindo, setSubindo] = useState(false);
+  const kind = tpl ? templateHeaderMedia(tpl) : null;
+  if (!kind) return null;
+  const label = kind === 'image' ? 'Imagem' : kind === 'video' ? 'Vídeo' : 'Documento (PDF)';
+  async function escolher(file?: File) {
+    if (!file) return;
+    setSubindo(true);
+    try {
+      const up = await uploadFile(file);
+      setMedia({ key: up.key, name: up.fileName });
+    } catch (e) {
+      toast.err(e);
+    } finally {
+      setSubindo(false);
+      if (input.current) input.current.value = '';
+    }
+  }
+  return (
+    <Field label={`Cabeçalho · ${label}`} hint="O arquivo vai no topo do template, como a Meta aprovou o formato.">
+      <div className="flex items-center gap-2">
+        <input ref={input} type="file" accept={ACCEPT[kind]} className="hidden" onChange={(e) => escolher(e.target.files?.[0])} />
+        <Button type="button" variant="ghost" onClick={() => input.current?.click()} loading={subindo} loadingText="Enviando…"><Paperclip size={14} /> {media ? 'Trocar arquivo' : 'Anexar arquivo'}</Button>
+        {media && <span className="text-xs text-faint truncate">{media.name ?? 'arquivo anexado'}</span>}
+      </div>
+    </Field>
   );
 }

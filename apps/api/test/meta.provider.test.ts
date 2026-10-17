@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { MessageStatus, MessageType, BillingCategory } from '@atendo/shared';
-import { MetaProvider } from '../src/modules/whatsapp/providers/meta.provider';
+import { MetaProvider, parseMetaTemplate } from '../src/modules/whatsapp/providers/meta.provider';
+import { describeMetaError } from '../src/modules/whatsapp/providers/provider-error';
 import type { NumberContext } from '../src/modules/whatsapp/providers/provider.interface';
 
 const provider = new MetaProvider();
@@ -253,5 +254,85 @@ describe('MetaProvider.send', () => {
   it('erro da Meta vira exceção com a mensagem da API', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ error: { message: 'Invalid parameter' } }) }) as any));
     await expect(provider.send(ctx, { to: '55119', type: MessageType.TEXT, text: 'x' } as any)).rejects.toThrow('Invalid parameter');
+  });
+});
+
+describe('MetaProvider — templates com mídia e botões dinâmicos', () => {
+  let calls: { url: string; init: any }[];
+  beforeEach(() => {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      calls.push({ url, init });
+      if (url.endsWith('/media')) return { ok: true, json: async () => ({ id: 'media-123' }) } as any;
+      return { ok: true, json: async () => ({ messages: [{ id: 'wamid.tpl' }], success: true }) } as any;
+    }));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const body = () => JSON.parse(calls[calls.length - 1].init.body);
+
+  it('cabeçalho de imagem do storage sobe para a Meta e vai por id antes do corpo', async () => {
+    await provider.send(
+      ctx,
+      { to: '5511999999999', type: MessageType.TEXT, template: { name: 'promo', language: 'pt_BR', category: BillingCategory.MARKETING, headerMedia: 'image', components: [{ type: 'body', parameters: [{ type: 'text', text: 'Ana' }] }] } } as any,
+      { data: Buffer.from('x'), mimeType: 'image/png', fileName: 'banner.png' },
+    );
+    expect(calls[0].url).toContain('/pnid-1/media');
+    expect(body().template.components).toEqual([
+      { type: 'header', parameters: [{ type: 'image', image: { id: 'media-123' } }] },
+      { type: 'body', parameters: [{ type: 'text', text: 'Ana' }] },
+    ]);
+  });
+
+  it('cabeçalho de documento leva o nome do arquivo; link público vai como link', async () => {
+    await provider.send(ctx, { to: '55119', type: MessageType.TEXT, media: { url: 'https://x/boleto.pdf', fileName: 'boleto.pdf' }, template: { name: 'boleto', language: 'pt_BR', category: BillingCategory.UTILITY, headerMedia: 'document' } } as any);
+    expect(body().template.components[0]).toEqual({ type: 'header', parameters: [{ type: 'document', document: { link: 'https://x/boleto.pdf', filename: 'boleto.pdf' } }] });
+  });
+
+  it('cabeçalho de mídia sem arquivo recusa antes de chamar a Meta', async () => {
+    await expect(provider.send(ctx, { to: '55119', type: MessageType.TEXT, template: { name: 'promo', language: 'pt_BR', category: BillingCategory.MARKETING, headerMedia: 'video' } } as any)).rejects.toThrow('cabeçalho');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('conectar valida o número e inscreve o app na WABA (sem isso não chega webhook)', async () => {
+    await provider.connect(ctx);
+    expect(calls.map((c) => c.url.replace(/^.*graph\.facebook\.com\/[^/]+\//, ''))).toEqual(['pnid-1?fields=display_phone_number', 'waba-1/subscribed_apps']);
+    expect(calls[1].init.method).toBe('POST');
+  });
+
+  it('o health check só lê o número, sem reinscrever', async () => {
+    await provider.getStatus(ctx);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('parseMetaTemplate', () => {
+  it('cabeçalho de imagem e botão de link dinâmico são enviáveis', () => {
+    const t = parseMetaTemplate({
+      id: '1', name: 'pedido', language: 'pt_BR', status: 'APPROVED', category: 'UTILITY',
+      components: [
+        { type: 'HEADER', format: 'IMAGE' },
+        { type: 'BODY', text: 'Oi {{1}}, seu pedido saiu.' },
+        { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: 'Ok' }, { type: 'URL', text: 'Rastrear', url: 'https://loja.com/r/{{1}}' }, { type: 'COPY_CODE', text: 'Copiar cupom' }] },
+      ],
+    })!;
+    expect(t.unsupported).toBeUndefined();
+    expect(t.headerFormat).toBe('IMAGE');
+    expect(t.dynamicButtons).toEqual([
+      { index: 1, kind: 'url', text: 'Rastrear', url: 'https://loja.com/r/{{1}}' },
+      { index: 2, kind: 'copy_code', text: 'Copiar cupom' },
+    ]);
+  });
+
+  it('localização no cabeçalho e autenticação continuam indisponíveis', () => {
+    expect(parseMetaTemplate({ name: 'a', status: 'APPROVED', components: [{ type: 'HEADER', format: 'LOCATION' }, { type: 'BODY', text: 'x' }] })!.unsupported).toMatch(/localização/);
+    expect(parseMetaTemplate({ name: 'b', status: 'APPROVED', category: 'AUTHENTICATION', components: [{ type: 'BODY', text: 'x' }] })!.unsupported).toMatch(/autenticação/);
+  });
+});
+
+describe('describeMetaError', () => {
+  it('código conhecido vira texto em português; desconhecido usa o detalhe da Meta', () => {
+    expect(describeMetaError({ code: 131047, title: 'Re-engagement message' }, 'x')).toMatch(/24 horas/);
+    expect(describeMetaError({ code: 999, title: 'Algo', error_data: { details: 'Detalhe específico' } }, 'x')).toBe('Detalhe específico');
+    expect(describeMetaError(undefined, 'padrão')).toBe('padrão');
   });
 });

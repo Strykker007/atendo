@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsArray, IsBoolean, IsDateString, IsEnum, IsHexColor, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AppointmentStatus, Prisma } from '@prisma/client';
@@ -86,6 +86,8 @@ export class SchedulingController {
   async updateSettings(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     await this.scheduling.settings(u.tenantId);
     const { reminderTemplate, ...rest } = dto;
+    // arquivo do cabeçalho do template: só do storage do próprio tenant
+    if (reminderTemplate?.headerMediaKey && !reminderTemplate.headerMediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('Arquivo do cabeçalho inválido');
     const tpl = reminderTemplate === undefined ? {} : { reminderTemplate: reminderTemplate === null ? Prisma.DbNull : ({ ...reminderTemplate } as Prisma.InputJsonValue) };
     return this.prisma.schedulingSettings.update({ where: { tenantId: u.tenantId }, data: { ...rest, ...tpl } });
   }
