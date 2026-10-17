@@ -240,3 +240,13 @@ importava (a Evolution não derrubar o painel) vem do limite de CPU do passo 4.2
 conectados. O código já suporta: `EvolutionProvider.shard(ctx)` aceita `baseUrl`/`apiKey` por
 número — dá para subir uma segunda Evolution e mandar para ela só os números **novos**, sem migrar
 os atuais.
+
+### Drog. Kelly I — socket zumbi (17/10/2026, 11:12)
+
+"DROGARIA KELLY 1" parou de receber e de ter confirmação às 11:12 com a Evolution dizendo `open`;
+dois "Reiniciar" (13:47) não fizeram nada — o patch do restart via `ws.isOpen` verdadeiro no zumbi.
+Só o QR resolve na versão em produção. Corrigido no repo: restart força socket novo quando o objeto
+`client` não mudou (`infra/evolution/patch-evolution-restart.mjs`) e o health check ganhou a regra
+de silêncio anormal. **Deploy do patch exige rebuild da imagem da Evolution + restart do container
+(todos os números reconectam): fazer de madrugada.**
+

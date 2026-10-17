@@ -113,7 +113,7 @@ O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineSer
 A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (típico depois de o host dormir). Todo envio devolve `428 Connection Closed`. Tratamento automático: o `OutboundProcessor` detecta a mensagem, chama `provider.restart()` (`POST /instance/restart/:name`) e deixa o retry do BullMQ reenviar. Além disso, um job a cada 5 min (`NumbersHealthProcessor`) confere o status real de cada número no provider e corrige o banco (a UI mostra "desconectado" e o botão de reconectar). Número em `pending_qr` também é conferido, mas só sobe para `connected`: depois de um **Reiniciar** a Evolution pode mandar `connecting` sem o `open` em seguida, e o painel ficava preso em "aguardando QR" com o WhatsApp funcionando. Se nem o restart resolver, reinicie o container (`docker compose restart evolution`) — as sessões ficam no banco da Evolution e reconectam sem QR.
 
 **Por que o restart não resolvia** (Drogaria Pontual, 13/10/2026: ~1h20 sem enviar nem receber, 6 envios falhos): logo depois de ler o QR, a instância sincronizava ~1.000 contatos; o pool do Prisma da Evolution (padrão 9 conexões para 34 instâncias) esgotou (`P2024` / `deadlock detected`) e a reconexão pedida pelo WhatsApp (`stream:error 515`) nasceu morta com o estado `open`. O restart da 2.3.7 fecha o socket (já fechado: o `end()` do Baileys sai em `if (closed) return`, sem evento de close) e chama o connect, que vê `open` e não faz nada — dezenas de restarts sem efeito. Correções:
-- `infra/evolution/patch-evolution-restart.mjs`: depois de fechar, se em 3 s nenhum socket novo apareceu, o restart cria um com as credenciais salvas (sem QR);
+- `infra/evolution/patch-evolution-restart.mjs`: depois de fechar, se em 3 s nenhum socket novo apareceu, o restart cria um com as credenciais salvas (sem QR); "Socket novo" é outro objeto em `client` — o zumbi mantém `ws.isOpen` verdadeiro, e a 1ª versão (que olhava só isso) não reconectava (Drog. Kelly I, 17/10/2026). Mudou o patch: **rebuild da imagem da Evolution e restart do container**, que reconecta todos os números — fazer de madrugada.
 - `DATABASE_CONNECTION_URI` da Evolution com `connection_limit=40&pool_timeout=30` (o Postgres dela aceita 100);
 - `NumbersService.claimRestart`: no máximo um restart automático por número a cada 2 min entre todos os workers — antes era um por envio falho, e com o restart que recria o socket isso abriria sockets duplicados.
 
@@ -130,6 +130,13 @@ sinal de vida do número (mensagem recebida ou entrega/leitura confirmada) e do 
 confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`; limpa sozinho quando volta a
 chegar mensagem/confirmação ou quando o QR é lido de novo. Um contato só com o celular desligado não
 marca.
+
+**Segunda regra — silêncio anormal** (para número com pouco envio, onde a de cima demora horas a
+juntar 3 mensagens): nenhum sinal de vida há **60 min** num horário em que, **no mesmo dia da semana
+passada**, o número recebeu **≥ 5 mensagens** na mesma hora (`silenceVsLastWeek`/`isSilentTooLong`).
+Mesmo dia da semana para noite, domingo e loja fechada não virarem alarme; feriado pode dar falso
+positivo (só aviso, limpa quando chegar algo). Caso Drog. Kelly I, 17/10/2026: parou às 11:12; a
+regra antiga marcaria às 13:51, esta às ~12:15.
 
 **Na tela:** faixa vermelha no topo para todos ("parou de receber mensagens") e, em Números, o card
 com o passo a passo:
