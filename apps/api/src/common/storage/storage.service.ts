@@ -67,7 +67,12 @@ export class StorageService {
 
   /** URL válida por `ttlSeconds` (padrão 1h). A chave já começa com media/, servida por GET /media/*path?exp&sig */
   signedUrl(key: string, ttlSeconds = 3600) {
-    const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+    // vencimento arredondado para a próxima janela de 30 min: a mesma foto devolve a MESMA URL
+    // por meia hora e o navegador usa o cache. Com o segundo exato, cada recarga da lista gerava
+    // URL nova e baixava tudo de novo (~27 mil GET /media por hora em 17/10/2026). Vale entre
+    // `ttlSeconds` e `ttlSeconds` + 30 min.
+    const janela = 1800;
+    const exp = (Math.floor(Date.now() / 1000 / janela) + 1) * janela + ttlSeconds;
     const sig = this.sign(key, exp);
     return `${env.API_PUBLIC_URL}/${key}?exp=${exp}&sig=${sig}`;
   }

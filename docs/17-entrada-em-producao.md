@@ -248,7 +248,7 @@ Backup e Stripe são os dois que eu não colocaria um cliente pagante sem ter.
 
 ## 6. Backup — como funciona
 
-O serviço `backup` do compose de produção roda **uma vez por dia** e guarda:
+O serviço `backup` do compose de produção roda **todo dia às 03:30** (horário de Brasília; mude com `BACKUP_AT=HH:MM` no `.env`) e guarda:
 
 | O quê | Por que importa |
 |---|---|

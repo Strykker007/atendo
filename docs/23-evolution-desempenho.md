@@ -241,7 +241,28 @@ conectados. O código já suporta: `EvolutionProvider.shard(ctx)` aceita `baseUr
 número — dá para subir uma segunda Evolution e mandar para ela só os números **novos**, sem migrar
 os atuais.
 
-### Drog. Kelly I — socket zumbi (17/10/2026, 11:12)
+---
+
+## 7. 17/10/2026 — novo pico de manhã (carga 8 às 09:18, sábado)
+
+`shared_buffers` 2 GB já estava valendo (o deploy da v1.4.0 recriou o `evolution-db` às 11:15 de
+16/10). Na última hora, com 78 usuários: 27,6 mil `GET /media`, 15,2 mil `GET /conversations/counts`,
+10 mil `GET /conversations`, 7,2 mil `GET /conversations/:id/flow`. Era o painel recarregando demais:
+
+| Causa | Correção |
+|---|---|
+| `StorageService.signedUrl` vencia no segundo exato: cada resposta gerava URL nova para cada foto e o navegador nunca usava o cache | vencimento arredondado para a próxima janela de 30 min — a mesma foto devolve a mesma URL por meia hora |
+| evento `conversation` (a cada mensagem de qualquer conversa do cliente) recarregava lista, contagens e quadro em todo painel aberto | `lib/hooks/numeros.ts`: lista/contagens/quadro recarregam no máximo 1 vez a cada 2 s; a conversa aberta segue imediata |
+| fluxo ativo da conversa aberta consultado a cada 15 s | 60 s (o websocket já invalida a cada evento da conversa) |
+| backup a cada 24 h desde a subida do container — rodava às 13:38, `pg_dump` de GBs nos bancos em pleno expediente | horário fixo `BACKUP_AT` (03:30) via `infra/backup/agenda.sh` |
+| `evolution-db` sem teto de CPU | `cpus: 2`, `cpu_shares: 512` no compose (sai do passo 4.2 manual) |
+
+Também: **build das imagens roda no próprio servidor** no deploy (16/10: ~11:15–11:34), o que leva a
+CPU a 100% por minutos. Mover o build para fora (GitHub Actions + registry) ainda está em aberto.
+
+---
+
+## 8. 17/10/2026 — Drog. Kelly I, socket zumbi (11:12)
 
 "DROGARIA KELLY 1" parou de receber e de ter confirmação às 11:12 com a Evolution dizendo `open`;
 dois "Reiniciar" (13:47) não fizeram nada — o patch do restart via `ws.isOpen` verdadeiro no zumbi.
