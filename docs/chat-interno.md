@@ -72,7 +72,7 @@ por isso continua aberto e na mesma conversa ao trocar de página.
   está na metade de baixo da tela, para baixo na metade de cima — e é limitada ao tamanho da tela
   (margem de 12 px). Redimensionar a janela do navegador reencaixa na hora.
 - Aberto: abas **Conversas**, **Equipe** (online primeiro; clicar abre a conversa direta) e
-  **Novo grupo** (marcar pessoas + nome). Arrasta pelo cabeçalho; minimiza para a barra.
+  **Novo grupo** (marcar pessoas + nome). Arrasta pelo cabeçalho; minimiza para a barra — clicar em qualquer ponto da barra minimizada (sem arrastar) reabre.
 - **Responder**: botão de seta ao passar o mouse no balão (ou duplo clique). A citação aparece
   acima do campo (Esc cancela); no balão, clicar na citação leva até a original.
 - **Grupo**: a faixa de membros no topo da conversa ("Gerenciar") abre o painel do grupo — nome,

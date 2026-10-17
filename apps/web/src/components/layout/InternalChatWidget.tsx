@@ -169,8 +169,14 @@ export function InternalChatWidget() {
         style={{ height: BARRA }}
         onPointerDown={iniciarArrasto}
         onPointerMove={mover}
-        onPointerUp={() => { soltar(); }}
+        onPointerUp={() => {
+          // clique (sem arrastar) em qualquer ponto da barra minimizada reabre; os botões dela
+          // (`data-no-drag`) não iniciam o gesto, então não caem aqui
+          const naBarra = !!arrasto.current;
+          if (!soltar() && naBarra && minimized) set({ minimized: false });
+        }}
         onPointerCancel={cancelar}
+        title={minimized ? 'Clique para abrir (arraste para mudar de lado)' : undefined}
       >
         {aberta && !minimized && voltar && (
           <button data-no-drag type="button" onClick={voltar} className="p-1 rounded hover:bg-white/10" aria-label="Voltar"><ArrowLeft size={15} /></button>
