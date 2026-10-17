@@ -51,6 +51,11 @@ export type TemplateValuesInput = Pick<TemplateChoice, 'header' | 'body' | 'butt
  */
 export type TemplateOutbound = Omit<OutboundMessage, 'to'> & { mediaKey?: string; systemMedia?: { key: string; type: 'image' | 'video' | 'document'; name?: string } };
 
+/** Assinatura do atendente no formato do painel (`*Nome:*` na 1ª linha); já assinada fica como está. */
+export function signText(text: string, name: string): string {
+  return /^\*[^*\n]{1,80}?:?\*\n/.test(text) ? text : `*${name.slice(0, 80)}:*\n${text.trim()}`;
+}
+
 /** O contato escreveu nas últimas 24h? Fora disso a Meta só aceita template. */
 const inMetaWindow = (lastInboundAt: Date | null | undefined) => !!lastInboundAt && Date.now() - lastInboundAt.getTime() < META_WINDOW_MS;
 
@@ -614,6 +619,9 @@ export class ConversationsService {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { tenantId: true, status: true, assigneeId: true, botPausedAt: true } });
     if (!antes || antes.status === 'closed') return avisos;
     const tenantId = antes.tenantId;
+    // empresa sem venda (atendimento): o valor do card não vira faturamento
+    const vendas = (await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true } }))?.salesEnabled ?? true;
+    if (!vendas) d = { ...d, value: null };
     // pagamento confirmado: o robô não pode dar "Não comprou" — vira "Comprou" com o valor pago
     const pagos = await this.pagosAbertos(conversationId);
     if (pagos.ids.length && d.outcome === 'lost') {
@@ -741,6 +749,12 @@ export class ConversationsService {
       const agent = await this.prisma.user.findUnique({ where: { id: authorId }, select: { name: true } });
       const ctx = await this.interpolation.forContact(tenantId, conv.contactId, {}, { agentName: agent?.name });
       input = { ...input, text: interpolate(input.text, ctx, undefined, { keepUnknown: true }) };
+    }
+    // assinatura obrigatória (Configurações → Atendimento): a tela já trava o botão ligado; aqui
+    // é para nenhum caminho (app antigo, API) sair sem o nome. Template, encaminhada e Pix saem intactos
+    if (input.text?.trim() && !input.template && !input.forwarded && !input.pix && (await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { requireSignature: true } }))?.requireSignature) {
+      const nome = (await this.prisma.user.findUnique({ where: { id: authorId }, select: { name: true } }))?.name?.trim();
+      if (nome) input = { ...input, text: signText(input.text, nome) };
     }
     const created = await this.createOnce(conv.id, key, () => this.prisma.message.create({
       data: {

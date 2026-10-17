@@ -16,6 +16,7 @@ import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
 import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
 import { ClosingSection } from '@/components/settings/ClosingSection';
+import { SignatureSection } from '@/components/settings/SignatureSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
 import Link from 'next/link';
@@ -99,6 +100,7 @@ export default function ConfiguracoesPage() {
           <>
             <ScheduleSection />
             <WelcomeSection />
+            <SignatureSection />
             <ClosingSection />
             <DefaultFlowsSection />
           </>

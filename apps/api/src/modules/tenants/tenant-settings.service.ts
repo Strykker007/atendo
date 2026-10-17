@@ -13,6 +13,8 @@ export interface SettingsUpdate {
   wonFlowId?: string | null;
   lostFlowId?: string | null;
   requireSaleValue?: boolean;
+  salesEnabled?: boolean;
+  requireSignature?: boolean;
   requireReasonOnWon?: boolean;
   requireReasonOnLost?: boolean;
   rankingWeights?: Record<string, number> | null;

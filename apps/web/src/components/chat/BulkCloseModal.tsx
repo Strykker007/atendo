@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useBulkClose, useCloseReasons, useTags, reasonsFor, useOutcomeLabels } from '@/lib/hooks';
-import { CloseReasonField, CloseTagsField, InternalCloseToggle, OUTCOMES, Secao } from './CloseModal';
+import { useBulkClose, useCloseReasons, useTags, reasonsFor, useOutcomeLabels, useTenantSettings } from '@/lib/hooks';
+import { CloseReasonField, CloseTagsField, InternalCloseToggle, OUTCOMES, Secao, type CloseOutcome } from './CloseModal';
 
 /**
  * Encerrar vários atendimentos selecionados.
@@ -27,8 +27,12 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
   const [interno, setInterno] = useState(false);
   const reasons = useCloseReasons();
   const tags = useTags();
-  const faltaMotivo = reasonsFor(reasons.data, interno ? 'internal' : 'lost').length > 0 && !closeReasonId;
-  const naoComprou = OUTCOMES.find((o) => o.id === 'lost')!;
+  // sem venda (empresa de atendimento) dá para encerrar em massa nos dois resultados; com venda,
+  // o positivo é um a um (cada venda tem o seu valor)
+  const vendas = useTenantSettings().data?.salesEnabled ?? true;
+  const [outcome, setOutcome] = useState<CloseOutcome>('lost');
+  const resultado = vendas ? 'lost' : outcome;
+  const faltaMotivo = reasonsFor(reasons.data, interno ? 'internal' : resultado).length > 0 && !closeReasonId;
   const labels = useOutcomeLabels();
 
   async function submit(e: React.FormEvent) {
@@ -37,7 +41,7 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
       if (faltaMotivo) { setTentou(true); return; }
       const r = await bulk.mutateAsync(interno
         ? { ids, outcome: 'none', internal: true, closeReasonId: closeReasonId ?? undefined }
-        : { ids, outcome: 'lost', tagIds: tagIds.length ? tagIds : undefined, closeReasonId: closeReasonId ?? undefined });
+        : { ids, outcome: resultado, tagIds: tagIds.length ? tagIds : undefined, closeReasonId: closeReasonId ?? undefined });
       // "ignorados" acontece de verdade: alguém da equipe pode ter encerrado no meio do caminho,
       // ou a conversa saiu do que este usuário opera. Dizer o número evita achar que falhou.
       toast.ok(r.ignored > 0 ? `${r.closed} encerrados · ${r.ignored} já estavam fechados ou fora do seu acesso` : `${r.closed} atendimento(s) encerrados`);
@@ -57,21 +61,26 @@ export function BulkCloseModal({ ids, onDone, onClose }: { ids: string[]; onDone
         {interno ? (
           <CloseReasonField outcome="internal" value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivo} />
         ) : <>
-        <Secao titulo="Resultado" dica={`Vale para todos os selecionados. Venda (“${labels.won}”) é encerrada uma a uma, com o valor de cada atendimento.`}>
-          <div className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium ${naoComprou.cls}`}>
-            {naoComprou.icon} {labels.lost}
+        <Secao titulo="Resultado" dica={vendas ? `Vale para todos os selecionados. Venda (“${labels.won}”) é encerrada uma a uma, com o valor de cada atendimento.` : 'Vale para todos os selecionados.'}>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Resultado">
+            {OUTCOMES.filter((o) => !vendas || o.id === 'lost').map((o) => (
+              <button key={o.id} type="button" aria-pressed={resultado === o.id} onClick={() => { setOutcome(o.id); setCloseReasonId(null); }}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium ${resultado === o.id ? o.cls : 'border-line text-muted hover:bg-field'}`}>
+                {o.icon} {labels[o.id]}
+              </button>
+            ))}
           </div>
         </Secao>
 
         <div className="border-t border-line pt-4">
-          <CloseReasonField outcome="lost" value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivo} />
+          <CloseReasonField outcome={resultado} value={closeReasonId} onChange={setCloseReasonId} erro={tentou && faltaMotivo} />
         </div>
 
         {/* tags opcionais: só quando há tag marcada para "Não comprou" (o motivo é o principal) */}
-        {(tags.data ?? []).some((t) => t.showOnLost) && (
+        {(tags.data ?? []).some((t) => (resultado === 'won' ? t.showOnWon : t.showOnLost)) && (
           <div className="border-t border-line pt-4">
             <Secao titulo="Tags" opcional dica="Aplicadas ao registro de todos.">
-              <CloseTagsField outcome="lost" value={tagIds} onChange={setTagIds} />
+              <CloseTagsField outcome={resultado} value={tagIds} onChange={setTagIds} />
             </Secao>
           </div>
         )}

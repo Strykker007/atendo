@@ -9,7 +9,7 @@ import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, R
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
+import { useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
@@ -57,6 +57,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const setFilterStatus: typeof ui.setStatus = embedded ? () => undefined : ui.setStatus;
   const conv = useConversation(conversationId).data;
   const me = useMe();
+  const tenantSettings = useTenantSettings();
   const agents = useAgents();
   const claim = useClaim();
   const transfer = useTransfer();
@@ -193,7 +194,10 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
    * meio do atendimento fica invisível. Fica guardado por navegador, porque é preferência de
    * quem atende, não configuração da empresa.
    */
-  const [assinando, setAssinando] = usePersistedState('assinar-mensagens', false);
+  const [assinandoPref, setAssinando] = usePersistedState('assinar-mensagens', false);
+  // a empresa pode exigir (Configurações → Atendimento): aí fica ligada e o botão trava
+  const assinaturaObrigatoria = !!tenantSettings.data?.requireSignature;
+  const assinando = assinandoPref || assinaturaObrigatoria;
   const campoRef = useRef<HTMLTextAreaElement>(null);
   useAutoResize(campoRef);
   useAutoResize(notaRef);
@@ -935,6 +939,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               onEscolherArquivo={pick}
               enviando={uploading}
               assinando={assinando}
+              assinaturaObrigatoria={assinaturaObrigatoria}
               onAssinando={setAssinando}
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
               texto={text}

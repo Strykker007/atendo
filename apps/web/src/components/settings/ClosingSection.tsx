@@ -12,8 +12,11 @@ import {
   useCan, useInternalCloseAudit, useOutcomeLabels, OUTCOME_LABELS_DEFAULT, type CloseReason, type CloseReasonOutcome,
 } from '@/lib/hooks';
 
+/** nomes sugeridos quando a empresa desliga a venda (atendimento, não comercial) */
+const SERVICE_LABELS = { won: 'Resolvido', lost: 'Não resolvido' } as const;
+
 /**
- * Regras do encerramento de atendimento: o nome dos dois resultados e exigir o valor em "Comprou".
+ * Regras do encerramento de atendimento: com ou sem venda, o nome dos dois resultados e exigir o valor em "Comprou".
  * Ligado (padrão), toda venda soma faturamento e ticket médio. Desligado serve a quem não sabe o
  * valor na hora (orçamento fechado depois, venda no balcão) — o "Comprou" conta na conversão,
  * mas não vira venda no relatório.
@@ -29,17 +32,28 @@ export function ClosingSection() {
     const novo = !d[campo];
     update.mutateAsync({ [campo]: novo }).then(() => toast.ok(`${nome} agora é ${novo ? 'obrigatório' : 'opcional'}`)).catch(toast.err);
   };
+  // desligar a venda com os nomes de venda ainda no padrão troca para nomes de atendimento (e volta)
+  const alternarVendas = () => {
+    const novo = !d.salesEnabled;
+    const nomes = novo
+      ? (d.wonLabel === SERVICE_LABELS.won && d.lostLabel === SERVICE_LABELS.lost ? { wonLabel: OUTCOME_LABELS_DEFAULT.won, lostLabel: OUTCOME_LABELS_DEFAULT.lost } : {})
+      : (d.wonLabel === OUTCOME_LABELS_DEFAULT.won && d.lostLabel === OUTCOME_LABELS_DEFAULT.lost ? { wonLabel: SERVICE_LABELS.won, lostLabel: SERVICE_LABELS.lost } : {});
+    update.mutateAsync({ salesEnabled: novo, ...nomes }).then(() => toast.ok(novo ? 'Encerramento com venda ligado' : 'Encerramento sem venda: só resultado, motivo e tags')).catch(toast.err);
+  };
   return (
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
       <div>
         <h2 className="font-display font-semibold text-ink flex items-center gap-1.5"><CheckCircle2 size={16} className="text-ok" /> Encerramento</h2>
         <p className="text-sm text-muted">Como o atendente fecha um atendimento. As tags de cada resultado ficam em Tags.</p>
       </div>
+      <Regra on={d.salesEnabled} disabled={update.isPending} onToggle={alternarVendas}
+        titulo="Encerramento com venda"
+        desc={d.salesEnabled ? 'Ligado: o encerramento pede valor e itens da venda, que somam faturamento e ticket médio.' : 'Desligado: atendimento sem venda (condomínio, suporte, serviço público). O encerramento só tem resultado, motivo e tags — nada vira faturamento.'} />
       <OutcomeLabelsFields />
       <div className="space-y-2.5">
-        <Regra on={d.requireSaleValue} disabled={update.isPending} onToggle={() => alternar('requireSaleValue', `Valor em “${labels.won}”`)}
+        {d.salesEnabled && <Regra on={d.requireSaleValue} disabled={update.isPending} onToggle={() => alternar('requireSaleValue', `Valor em “${labels.won}”`)}
           titulo={`Exigir valor ao encerrar como “${labels.won}”`}
-          desc={d.requireSaleValue ? 'Ligado: sem valor, não encerra. Toda venda soma faturamento e ticket médio. Orçamento pago no atendimento já conta como valor.' : 'Desligado: dá para encerrar sem valor. Conta na taxa de conversão, mas não soma no faturamento.'} />
+          desc={d.requireSaleValue ? 'Ligado: sem valor, não encerra. Toda venda soma faturamento e ticket médio. Orçamento pago no atendimento já conta como valor.' : 'Desligado: dá para encerrar sem valor. Conta na taxa de conversão, mas não soma no faturamento.'} />}
         <Regra on={d.requireReasonOnWon} disabled={update.isPending} onToggle={() => alternar('requireReasonOnWon', `Motivo em “${labels.won}”`)}
           titulo={`Exigir motivo ao encerrar como “${labels.won}”`}
           desc={d.requireReasonOnWon ? `Ligado: com motivo cadastrado para “${labels.won}”, o atendente escolhe um para encerrar.` : 'Desligado: o motivo aparece, mas é opcional.'} />
@@ -53,7 +67,7 @@ export function ClosingSection() {
   );
 }
 
-function Regra({ on, disabled, onToggle, titulo, desc }: { on: boolean; disabled?: boolean; onToggle: () => void; titulo: string; desc: string }) {
+export function Regra({ on, disabled, onToggle, titulo, desc }: { on: boolean; disabled?: boolean; onToggle: () => void; titulo: string; desc: string }) {
   return (
     <div className="flex items-start gap-3">
       <button type="button" role="switch" aria-checked={on} aria-label={titulo} disabled={disabled} onClick={onToggle}
@@ -85,7 +99,7 @@ function OutcomeLabelsFields() {
     <div className="space-y-2">
       <div>
         <div className="text-sm font-medium text-ink">Nome dos resultados</div>
-        <p className="text-xs text-muted">Como os botões aparecem no encerramento, nos filtros e nos relatórios. O primeiro conta como venda; o segundo, como perda.</p>
+        <p className="text-xs text-muted">Como os botões aparecem no encerramento, nos filtros e nos relatórios. O primeiro é o resultado positivo (a venda, quando o encerramento tem venda); o segundo, o negativo.</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {([['wonLabel', 'won', 'text-ok', CheckCircle2], ['lostLabel', 'lost', 'text-danger', XCircle]] as const).map(([campo, o, cls, Icon]) => (

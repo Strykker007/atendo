@@ -182,7 +182,9 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   // e "Não comprou" não vale — a API recusa igual (`budget_paid`)
   const budgets = useBudgets(conversationId);
   const ultimoEncerramento = useConversation(conversationId).data?.lastClosedAt;
-  const pagos = (budgets.data ?? []).filter((b) => b.status === 'PAID' && !b.absorbed && (!ultimoEncerramento || (b.paidAt && b.paidAt > ultimoEncerramento)));
+  /** encerramento com venda (Configurações → Atendimento → Encerramento); desligado = só resultado, motivo e tags */
+  const vendas = settings.data?.salesEnabled ?? true;
+  const pagos = vendas ? (budgets.data ?? []).filter((b) => b.status === 'PAID' && !b.absorbed && (!ultimoEncerramento || (b.paidAt && b.paidAt > ultimoEncerramento))) : [];
   const jaPago = Math.round(pagos.reduce((a, b) => a + b.totalValue * 100, 0)) / 100;
   useEffect(() => { if (jaPago > 0) setOutcome((o) => o ?? 'won'); }, [jaPago]);
   const [valor, setValor] = useState<number | null>(null);
@@ -237,16 +239,18 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
   const mudarItem = (idx: number, patch: Partial<(typeof itens)[number]>) =>
     setItens((l) => l.map((i, n) => (n === idx ? { ...i, ...patch } : i)));
 
-  const lista = outcome === 'won' && modoLista;
+  /** campos de venda (valor, itens, observação) só com venda ligada */
+  const comVenda = outcome === 'won' && vendas;
+  const lista = comVenda && modoLista;
   const totalVenda = lista ? totalItens : valor ?? 0;
   // resultado é obrigatório e "Comprou" exige valor — a API recusa do mesmo jeito
   const faltaResultado = !outcome;
   // a empresa pode dispensar o valor (Configurações → Atendimento → Encerramento); a API confere igual
   const exigeValor = settings.data?.requireSaleValue ?? true;
   // com orçamento pago, o valor já está coberto: o campo é só o que foi vendido a mais
-  const faltaValor = outcome === 'won' && exigeValor && !(totalVenda + jaPago > 0);
+  const faltaValor = comVenda && exigeValor && !(totalVenda + jaPago > 0);
   /** Comprou sem valor (permitido): conta na conversão, mas não vira venda — produtos e observação não ficam */
-  const semValor = outcome === 'won' && !exigeValor && !(totalVenda + jaPago > 0);
+  const semValor = comVenda && !exigeValor && !(totalVenda + jaPago > 0);
   // motivo obrigatório quando há motivo cadastrado para o resultado e a empresa exige naquele resultado
   const motivoObrigatorio = outcome === 'won' ? settings.data?.requireReasonOnWon ?? true : outcome === 'lost' ? settings.data?.requireReasonOnLost ?? true : false;
   const faltaMotivo = !!outcome && motivoObrigatorio && reasonsFor(reasons.data, outcome).length > 0 && !closeReasonId;
@@ -273,7 +277,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
     e.preventDefault();
     if (interno) return submitInterno();
     if (!outcome || faltaValor || faltaMotivo) { setTentou(true); return; }
-    const value = outcome === 'won' ? totalVenda : undefined;
+    const value = comVenda ? totalVenda : undefined;
     try {
       await setStatus.mutateAsync({
         id: conversationId,
@@ -282,10 +286,10 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
         value,
         tagIds: tagIds.length ? tagIds : undefined,
         closeReasonId: closeReasonId ?? undefined,
-        products: outcome === 'won' && !lista ? produtos.trim() || undefined : undefined,
+        products: comVenda && !lista ? produtos.trim() || undefined : undefined,
         // em lista, a API soma os itens e monta o resumo em `products`
         items: lista && itensValidos.length ? itensValidos : undefined,
-        notes: outcome === 'won' ? observacoes.trim() || undefined : undefined,
+        notes: comVenda ? observacoes.trim() || undefined : undefined,
         // sem o recurso o servidor decide; com ele, o que está na tela é o que vale ("Nenhum" = null).
         // Antes de carregar as configurações, deixa o servidor aplicar o padrão.
         flowId: flowsFeature.has && carregou ? flowId || null : undefined,
@@ -330,7 +334,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
           </p>
         )}
 
-        {outcome === 'won' && (lista ? (
+        {comVenda && (lista ? (
           <div className="space-y-1.5">
             {itens.map((item, idx) => (
               <div key={idx} className="flex items-center gap-1.5">
@@ -383,7 +387,7 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
           </div>
         )}
 
-        {outcome && (flowsFeature.has || outcome === 'won') && (
+        {outcome && (flowsFeature.has || comVenda) && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[12.5px]">
             {flowsFeature.has && (
               <label className="flex items-center gap-1.5 text-muted min-w-0">
@@ -394,10 +398,10 @@ export function CloseModal({ conversationId, onClose, onClosed }: { conversation
                 </select>
               </label>
             )}
-            {outcome === 'won' && !comObs && <button type="button" onClick={() => setComObs(true)} className={link}>+ Observação</button>}
+            {comVenda && !comObs && <button type="button" onClick={() => setComObs(true)} className={link}>+ Observação</button>}
           </div>
         )}
-        {outcome === 'won' && comObs && (
+        {comVenda && comObs && (
           <textarea className={`${inputCls} resize-none`} rows={2} autoFocus placeholder="Observação da venda (o contato não vê): pagamento, entrega, desconto…" aria-label="Observação" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} maxLength={1000} />
         )}
         </>}

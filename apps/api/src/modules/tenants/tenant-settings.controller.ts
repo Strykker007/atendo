@@ -33,6 +33,10 @@ class SettingsDto {
   @IsOptional() @IsUUID() lostFlowId?: string | null;
   /** "Comprou" exige valor */
   @IsOptional() @IsBoolean() requireSaleValue?: boolean;
+  /** encerramento com venda (valor/itens); desligado = só resultado, motivo e tags */
+  @IsOptional() @IsBoolean() salesEnabled?: boolean;
+  /** assinatura do atendente obrigatória nas mensagens */
+  @IsOptional() @IsBoolean() requireSignature?: boolean;
   /** motivo de encerramento obrigatório em "Comprou" / "Não comprou" (cada um separado) */
   @IsOptional() @IsBoolean() requireReasonOnWon?: boolean;
   @IsOptional() @IsBoolean() requireReasonOnLost?: boolean;

@@ -353,6 +353,12 @@ model TenantSettings {
   /// fluxo padrão por desfecho do encerramento — vem pré-selecionado no modal; sem ele vale `onCloseFlowId`
   wonFlowId  String?
   lostFlowId String?
+  /// Encerramento com venda (valor, itens, observação, orçamento). Desligado = empresa de
+  /// atendimento (condomínio, suporte, órgão público): o encerramento só tem resultado, motivo e
+  /// tags — nada vira venda nem faturamento (docs/06-modelo-de-dados.md#encerramento-sem-venda)
+  salesEnabled Boolean @default(true)
+  /// assinatura do atendente (`*Nome:*` na 1ª linha) obrigatória: a API acrescenta quando falta
+  requireSignature Boolean @default(false)
   /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na
   /// conversão, não soma faturamento (sem linha em `sales`)
   requireSaleValue Boolean @default(true)
