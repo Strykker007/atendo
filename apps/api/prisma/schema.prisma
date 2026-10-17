@@ -2292,6 +2292,9 @@ model InternalChat {
   createdById        String?
   lastMessageAt      DateTime?
   lastMessagePreview String?
+  /// grupo apagado: some para os membros, o histórico continua na auditoria
+  deletedAt          DateTime?
+  deletedById        String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -2327,10 +2330,16 @@ model InternalMessage {
   /// nome gravado no envio: a auditoria continua legível depois que o usuário sai
   authorName String
   text       String
+  /// resposta a outra mensagem da mesma conversa (citação, como no WhatsApp)
+  replyToId  String?
+  /// aviso do sistema no histórico ("Ana adicionou Bruno"): registro de quem mexeu no grupo
+  system     Boolean  @default(false)
   createdAt  DateTime @default(now())
 
-  chat   InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  author User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  chat    InternalChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  author  User?             @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  replyTo InternalMessage?  @relation("internalReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies InternalMessage[] @relation("internalReply")
 
   @@index([chatId, createdAt])
   @@index([tenantId, createdAt])

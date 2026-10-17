@@ -2,12 +2,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ArrowLeft, Check, ChevronDown, ChevronUp, MessagesSquare, Plus, Send, Users, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronUp, LogOut, MessagesSquare, Plus, Reply, Send, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import {
-  internalMessagesInOrder, useCreateInternalChat, useInternalChats, useInternalMessages, useInternalUsers, useMarkInternalRead, useMe, useSendInternalMessage,
-  type InternalChat,
+  internalMessagesInOrder, useAddInternalMembers, useCan, useCreateInternalChat, useDeleteInternalChat, useInternalChats, useInternalMessages, useInternalUsers, useMarkInternalRead, useMe,
+  useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage,
+  type InternalChat, type InternalMessage,
 } from '@/lib/hooks';
 
 /**
@@ -166,7 +167,7 @@ export function InternalChatWidget() {
         </button>
         <button data-no-drag type="button" onClick={() => set({ open: false })} className="p-1 rounded hover:bg-white/10" aria-label="Fechar"><X size={15} /></button>
       </div>
-      {!minimized && (aberta ? <ChatView chat={aberta} meId={me.data!.id} /> : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
+      {!minimized && (aberta ? <ChatView chat={aberta} meId={me.data!.id} onLeave={() => set({ chatId: null })} /> : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
     </div>
   );
 }
@@ -257,13 +258,20 @@ function Home({ chats, loading, onOpen }: { chats: InternalChat[]; loading: bool
   );
 }
 
-/** Conversa aberta: histórico (rola para cima para trazer as anteriores) + campo de envio. */
-function ChatView({ chat, meId }: { chat: InternalChat; meId: string }) {
+/**
+ * Conversa aberta: histórico (rola para cima para trazer as anteriores) + campo de envio.
+ * Responder como no WhatsApp: botão no balão (ou duplo clique) cita a mensagem; clicar na
+ * citação leva até a original. Grupo: botão de membros abre o painel do grupo.
+ */
+function ChatView({ chat, meId, onLeave }: { chat: InternalChat; meId: string; onLeave: () => void }) {
   const msgs = useInternalMessages(chat.id);
   const lista = useMemo(() => internalMessagesInOrder(msgs.data), [msgs.data]);
   const send = useSendInternalMessage(chat.id);
   const read = useMarkInternalRead();
   const [texto, setTexto] = useState('');
+  const [respondendo, setRespondendo] = useState<InternalMessage | null>(null);
+  const [painel, setPainel] = useState(false);
+  const campo = useRef<HTMLTextAreaElement>(null);
   const fim = useRef<HTMLDivElement>(null);
   const ultima = lista[lista.length - 1]?.id;
 
@@ -272,17 +280,41 @@ function ChatView({ chat, meId }: { chat: InternalChat; meId: string }) {
     fim.current?.scrollIntoView({ block: 'end' });
     if (ultima && chat.unread) read.mutate(chat.id);
   }, [ultima]); // eslint-disable-line react-hooks/exhaustive-deps
+  // trocou de conversa: a citação era da outra
+  useEffect(() => { setRespondendo(null); setPainel(false); }, [chat.id]);
+
+  function responder(m: InternalMessage) {
+    setRespondendo(m);
+    campo.current?.focus();
+  }
+  /** Leva até a mensagem citada e pisca o balão (se ela já está carregada). */
+  function irPara(id: string) {
+    const el = document.getElementById(`im-${id}`);
+    if (!el) { toast.warn('Mensagem antiga: role para cima para carregar.'); return; }
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('ring-2', 'ring-accent');
+    setTimeout(() => el.classList.remove('ring-2', 'ring-accent'), 1200);
+  }
 
   async function enviar() {
     const t = texto.trim();
     if (!t) return;
-    setTexto('');
-    try { await send.mutateAsync(t); } catch (err) { setTexto(t); toast.err(err); }
+    const citada = respondendo;
+    setTexto(''); setRespondendo(null);
+    try { await send.mutateAsync({ text: t, replyToId: citada?.id }); } catch (err) { setTexto(t); setRespondendo(citada); toast.err(err); }
   }
+
+  if (painel && chat.isGroup) return <GroupPanel chat={chat} meId={meId} onBack={() => setPainel(false)} onLeave={onLeave} />;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {chat.isGroup && <p className="px-3 py-1.5 text-[11.5px] text-faint border-b border-line truncate">{chat.members.map((m) => m.name).join(', ')}</p>}
+      {chat.isGroup && (
+        <button type="button" onClick={() => setPainel(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] text-muted border-b border-line hover:bg-field text-left" title="Membros e opções do grupo">
+          <Users size={13} className="shrink-0" />
+          <span className="truncate flex-1">{chat.members.map((m) => m.name).join(', ')}</span>
+          <span className="text-accent shrink-0">Gerenciar</span>
+        </button>
+      )}
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-3 py-2 space-y-1.5">
         {msgs.hasNextPage && (
           <button type="button" onClick={() => void msgs.fetchNextPage()} disabled={msgs.isFetchingNextPage} className="mx-auto block text-[12px] text-accent hover:underline">
@@ -292,22 +324,57 @@ function ChatView({ chat, meId }: { chat: InternalChat; meId: string }) {
         {msgs.isLoading && <p className="text-sm text-faint">Carregando…</p>}
         {!msgs.isLoading && !lista.length && <p className="text-sm text-muted text-center pt-6">Comece a conversa. Tudo aqui fica registrado para auditoria.</p>}
         {lista.map((m) => {
+          if (m.system) return <p key={m.id} id={`im-${m.id}`} className="mx-auto w-fit max-w-[90%] rounded-full bg-field px-3 py-0.5 text-center text-[11px] text-muted">{m.text} · {hora(m.createdAt)}</p>;
           const minha = m.authorId === meId;
           return (
-            <div key={m.id} className={cn('flex flex-col max-w-[85%]', minha ? 'ml-auto items-end' : 'items-start')}>
-              {chat.isGroup && !minha && <span className="text-[10.5px] text-muted px-1">{m.authorName}</span>}
-              <div className={cn('rounded-2xl px-3 py-1.5 text-sm whitespace-pre-wrap break-words', minha ? 'bg-accent text-white rounded-br-sm' : 'bg-field text-ink rounded-bl-sm')}>{m.text}</div>
-              <span className="text-[10px] text-faint px-1">{hora(m.createdAt)}</span>
+            <div key={m.id} className={cn('group flex items-center gap-1 max-w-[88%]', minha ? 'ml-auto flex-row-reverse' : '')}>
+              <div className={cn('flex flex-col min-w-0', minha ? 'items-end' : 'items-start')}>
+                {chat.isGroup && !minha && <span className="text-[10.5px] text-muted px-1">{m.authorName}</span>}
+                <div id={`im-${m.id}`} onDoubleClick={() => responder(m)} className={cn('rounded-2xl px-3 py-1.5 text-sm whitespace-pre-wrap break-words transition-shadow', minha ? 'bg-accent text-white rounded-br-sm' : 'bg-field text-ink rounded-bl-sm')}>
+                  {m.replyToId && (
+                    <button
+                      type="button"
+                      onClick={() => m.replyTo && irPara(m.replyTo.id)}
+                      className={cn('mb-1 block w-full text-left rounded-lg border-l-[3px] px-2 py-1 text-[12px]', minha ? 'bg-white/15 border-white/70' : 'bg-panel border-accent')}
+                    >
+                      {m.replyTo ? (
+                        <>
+                          <span className={cn('block font-semibold', minha ? 'text-white' : 'text-accent')}>{m.replyTo.authorId === meId ? 'Você' : m.replyTo.authorName}</span>
+                          <span className={cn('block line-clamp-2', minha ? 'text-white/85' : 'text-muted')}>{m.replyTo.text}</span>
+                        </>
+                      ) : <span className="italic opacity-80">Mensagem indisponível</span>}
+                    </button>
+                  )}
+                  {m.text}
+                </div>
+                <span className="text-[10px] text-faint px-1">{hora(m.createdAt)}</span>
+              </div>
+              <button type="button" onClick={() => responder(m)} className="shrink-0 p-1 rounded-full text-faint hover:text-ink hover:bg-field opacity-0 group-hover:opacity-100 focus:opacity-100" title="Responder" aria-label="Responder">
+                <Reply size={14} />
+              </button>
             </div>
           );
         })}
         <div ref={fim} />
       </div>
+      {respondendo && (
+        <div className="flex items-start gap-2 mx-2 mt-2 rounded-lg border-l-[3px] border-accent bg-field px-2.5 py-1.5">
+          <div className="flex-1 min-w-0 text-[12px]">
+            <span className="block font-semibold text-accent">Respondendo a {respondendo.authorId === meId ? 'você' : respondendo.authorName}</span>
+            <span className="block truncate text-muted">{respondendo.text}</span>
+          </div>
+          <button type="button" onClick={() => setRespondendo(null)} className="text-muted hover:text-ink" aria-label="Cancelar resposta"><X size={14} /></button>
+        </div>
+      )}
       <form className="flex items-end gap-2 p-2 border-t border-line" onSubmit={(e) => { e.preventDefault(); void enviar(); }}>
         <textarea
+          ref={campo}
           value={texto}
           onChange={(e) => setTexto(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void enviar(); } }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void enviar(); }
+            if (e.key === 'Escape' && respondendo) setRespondendo(null);
+          }}
           rows={1}
           maxLength={4000}
           placeholder="Mensagem para a equipe"
@@ -315,6 +382,117 @@ function ChatView({ chat, meId }: { chat: InternalChat; meId: string }) {
         />
         <button type="submit" disabled={!texto.trim() || send.isPending} className="rounded-lg bg-accent p-2 text-white disabled:opacity-50" aria-label="Enviar"><Send size={15} /></button>
       </form>
+    </div>
+  );
+}
+
+/**
+ * Painel do grupo: nome, membros, adicionar/tirar, sair e apagar. Quem criou o grupo (ou quem
+ * gerencia a equipe) mexe em tudo; os demais só veem os membros e podem sair. Cada mudança vira
+ * um aviso no histórico, e apagar só esconde dos membros — a auditoria continua lendo.
+ */
+function GroupPanel({ chat, meId, onBack, onLeave }: { chat: InternalChat; meId: string; onBack: () => void; onLeave: () => void }) {
+  const gerenteDaEquipe = useCan('team.manage');
+  const gerencia = chat.createdById === meId || gerenteDaEquipe;
+  const users = useInternalUsers(gerencia);
+  const add = useAddInternalMembers(chat.id);
+  const remove = useRemoveInternalMember(chat.id);
+  const rename = useRenameInternalChat(chat.id);
+  const apagar = useDeleteInternalChat();
+  const [nome, setNome] = useState(chat.name);
+  const [adicionando, setAdicionando] = useState<string[]>([]);
+  const noGrupo = new Set(chat.members.map((m) => m.id));
+  const fora = (users.data ?? []).filter((u) => !noGrupo.has(u.id));
+
+  async function salvarNome() {
+    const n = nome.trim();
+    if (!n || n === chat.name) return;
+    try { await rename.mutateAsync(n); toast.ok('Grupo renomeado'); } catch (err) { setNome(chat.name); toast.err(err); }
+  }
+  async function adicionar() {
+    try { await add.mutateAsync(adicionando); setAdicionando([]); toast.ok('Adicionado ao grupo'); } catch (err) { toast.err(err); }
+  }
+  async function tirar(id: string, nomeMembro: string) {
+    const eu = id === meId;
+    if (!confirm(eu ? 'Sair do grupo? Você deixa de ver as mensagens.' : `Remover ${nomeMembro} do grupo?`)) return;
+    try { await remove.mutateAsync(id); if (eu) onLeave(); } catch (err) { toast.err(err); }
+  }
+  async function apagarGrupo() {
+    if (!confirm(`Apagar o grupo "${chat.name}"? Ele some para todos os membros. O histórico continua disponível na auditoria.`)) return;
+    try { await apagar.mutateAsync(chat.id); toast.ok('Grupo apagado'); onLeave(); } catch (err) { toast.err(err); }
+  }
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      <button type="button" onClick={onBack} className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] text-accent border-b border-line hover:bg-field text-left"><ArrowLeft size={13} /> Voltar à conversa</button>
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3 space-y-4">
+        {gerencia && (
+          <form onSubmit={(e) => { e.preventDefault(); void salvarNome(); }} className="space-y-1">
+            <label className="text-[11.5px] font-semibold text-muted" htmlFor="ic-nome">Nome do grupo</label>
+            <div className="flex gap-2">
+              <input id="ic-nome" value={nome} onChange={(e) => setNome(e.target.value)} maxLength={60} className="flex-1 min-w-0 rounded-lg border border-line bg-panel px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent/40" />
+              <button type="submit" disabled={!nome.trim() || nome.trim() === chat.name || rename.isPending} className="rounded-lg bg-accent px-3 text-xs font-semibold text-white disabled:opacity-50">Salvar</button>
+            </div>
+          </form>
+        )}
+
+        <div>
+          <p className="text-[11.5px] font-semibold text-muted mb-1">Membros ({chat.members.length})</p>
+          <ul className="divide-y divide-line rounded-lg border border-line">
+            {chat.members.map((m) => (
+              <li key={m.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                <span className="w-7 h-7 rounded-full bg-field text-muted grid place-items-center text-[10.5px] font-bold shrink-0">{iniciais(m.name)}</span>
+                <span className="flex-1 min-w-0 truncate text-sm text-ink">
+                  {m.id === meId ? 'Você' : m.name}
+                  {m.id === chat.createdById && <span className="ml-1 text-[10.5px] text-faint">· criou o grupo</span>}
+                  {!m.active && <span className="ml-1 text-[10.5px] text-faint">· inativo</span>}
+                </span>
+                {gerencia && m.id !== meId && (
+                  <button type="button" disabled={remove.isPending} onClick={() => void tirar(m.id, m.name)} className="p-1 rounded text-muted hover:text-danger hover:bg-field" title="Remover do grupo" aria-label={`Remover ${m.name}`}><UserMinus size={14} /></button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {gerencia && (
+          <div>
+            <p className="text-[11.5px] font-semibold text-muted mb-1">Adicionar pessoas</p>
+            {users.isLoading ? <p className="text-[12px] text-faint">Carregando…</p> : !fora.length ? (
+              <p className="text-[12px] text-faint">Toda a equipe já está no grupo.</p>
+            ) : (
+              <>
+                <ul className="divide-y divide-line rounded-lg border border-line max-h-40 overflow-y-auto">
+                  {fora.map((u) => {
+                    const on = adicionando.includes(u.id);
+                    return (
+                      <li key={u.id}>
+                        <button type="button" onClick={() => setAdicionando((a) => (on ? a.filter((x) => x !== u.id) : [...a, u.id]))} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-field">
+                          <span className="flex-1 min-w-0 truncate text-sm text-ink">{u.name}</span>
+                          <span className={cn('w-4 h-4 rounded border grid place-items-center', on ? 'bg-accent border-accent text-white' : 'border-line')}>{on && <Check size={11} />}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <button type="button" disabled={!adicionando.length || add.isPending} onClick={() => void adicionar()} className="mt-2 inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                  <UserPlus size={13} /> Adicionar{adicionando.length ? ` (${adicionando.length})` : ''}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="space-y-1.5 border-t border-line pt-3">
+          {chat.members.length > 1 && (
+            <button type="button" disabled={remove.isPending} onClick={() => void tirar(meId, '')} className="w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-ink hover:bg-field"><LogOut size={14} /> Sair do grupo</button>
+          )}
+          {gerencia && (
+            <button type="button" disabled={apagar.isPending} onClick={() => void apagarGrupo()} className="w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-danger hover:bg-danger-soft"><Trash2 size={14} /> Apagar grupo</button>
+          )}
+          {!gerencia && <p className="text-[11.5px] text-faint">Só quem criou o grupo muda nome e membros.</p>}
+        </div>
+      </div>
     </div>
   );
 }

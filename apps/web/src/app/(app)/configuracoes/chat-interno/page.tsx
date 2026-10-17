@@ -49,6 +49,7 @@ export default function ChatInternoAuditoriaPage() {
                       <span className="flex items-center gap-1.5">
                         {c.isGroup && <Users size={13} className="text-muted shrink-0" />}
                         <span className="truncate text-sm font-medium text-ink">{c.name}</span>
+                        {c.deletedAt && <span className="shrink-0 rounded-full bg-danger-soft px-1.5 text-[10px] font-semibold text-danger-ink">apagado</span>}
                         <span className="ml-auto text-[11px] text-faint shrink-0 tnum">{c.messages ?? 0} msg</span>
                       </span>
                       <span className="block truncate text-[12px] text-muted">{c.isGroup ? c.members.map((m) => m.name).join(', ') : c.lastMessagePreview ?? 'Sem mensagens'}</span>
@@ -66,7 +67,7 @@ export default function ChatInternoAuditoriaPage() {
             ) : (
               <>
                 <div className="px-4 py-3 border-b border-line">
-                  <p className="font-display font-semibold text-ink">{aberta.name}</p>
+                  <p className="font-display font-semibold text-ink">{aberta.name}{aberta.deletedAt && <span className="ml-2 text-[12px] font-normal text-danger">· apagado em {dataHora(aberta.deletedAt)}</span>}</p>
                   <p className="text-[12px] text-muted">{aberta.members.map((m) => m.name + (m.active ? '' : ' (inativo)')).join(', ')}</p>
                 </div>
                 <div className="flex-1 overflow-y-auto max-h-[65vh] px-4 py-3 space-y-2">
@@ -75,10 +76,18 @@ export default function ChatInternoAuditoriaPage() {
                       {msgs.isFetchingNextPage ? 'Carregando…' : 'Mensagens anteriores'}
                     </button>
                   )}
-                  {msgs.isLoading ? <SkeletonRows /> : !lista.length ? <p className="text-sm text-muted">Sem mensagens.</p> : lista.map((m) => (
+                  {msgs.isLoading ? <SkeletonRows /> : !lista.length ? <p className="text-sm text-muted">Sem mensagens.</p> : lista.map((m) => m.system ? (
+                    // aviso do sistema: quem adicionou, tirou, renomeou ou apagou
+                    <p key={m.id} className="text-[12px] text-muted italic"><span className="not-italic text-faint tnum">{dataHora(m.createdAt)}</span> {m.text}</p>
+                  ) : (
                     <div key={m.id} className="text-sm">
                       <span className="text-[11.5px] text-faint tnum">{dataHora(m.createdAt)}</span>{' '}
                       <b className="text-ink">{m.authorName}</b>
+                      {m.replyToId && (
+                        <p className="mt-0.5 border-l-2 border-line pl-2 text-[12px] text-muted line-clamp-2">
+                          {m.replyTo ? <>Em resposta a <b>{m.replyTo.authorName}</b>: {m.replyTo.text}</> : 'Em resposta a uma mensagem indisponível'}
+                        </p>
+                      )}
                       <p className="whitespace-pre-wrap break-words text-ink/90">{m.text}</p>
                     </div>
                   ))}

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Module, NotFoundException, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsISO8601, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -18,6 +18,14 @@ class CreateChatDto {
 }
 class SendDto {
   @IsString() @IsNotEmpty() @MaxLength(4000) text: string;
+  /** responder a uma mensagem da mesma conversa */
+  @IsOptional() @IsUUID() replyToId?: string;
+}
+class MembersDto {
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(50) @IsUUID('all', { each: true }) userIds: string[];
+}
+class RenameDto {
+  @IsString() @IsNotEmpty() @MaxLength(60) name: string;
 }
 class PageQuery {
   /** mensagens anteriores a este instante (rolar para cima) */
@@ -30,6 +38,8 @@ class AuditQuery {
 
 const PAGE = 50;
 const MEMBER_SELECT = { userId: true, lastReadAt: true, user: { select: { id: true, name: true, isActive: true } } } as const;
+/** a mensagem citada vem junto: a tela mostra o trecho sem buscar de novo */
+const MESSAGE_INCLUDE = { replyTo: { select: { id: true, authorId: true, authorName: true, text: true, system: true } } } as const;
 
 type ChatRow = Prisma.InternalChatGetPayload<{ include: { members: { select: typeof MEMBER_SELECT } } }>;
 
@@ -62,7 +72,7 @@ class InternalChatController {
   @Get('chats')
   async chats(@CurrentUser() u: AuthUser) {
     const rows = await this.prisma.internalChat.findMany({
-      where: { tenantId: u.tenantId, members: { some: { userId: u.id } } },
+      where: { tenantId: u.tenantId, deletedAt: null, members: { some: { userId: u.id } } },
       include: { members: { select: MEMBER_SELECT } },
       orderBy: [{ lastMessageAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       take: 100,
@@ -126,9 +136,13 @@ class InternalChatController {
     const author = await this.assertMember(u);
     const text = dto.text.trim();
     if (!text) throw new BadRequestException('Mensagem vazia.');
+    // citação só de mensagem desta conversa (id de outra conversa vazaria o conteúdo dela)
+    if (dto.replyToId && !(await this.prisma.internalMessage.findFirst({ where: { id: dto.replyToId, chatId: chat.id }, select: { id: true } }))) {
+      throw new BadRequestException('A mensagem respondida não é desta conversa.');
+    }
     const agora = new Date();
     const [message] = await this.prisma.$transaction([
-      this.prisma.internalMessage.create({ data: { tenantId: u.tenantId, chatId: chat.id, authorId: u.id, authorName: author.name, text, createdAt: agora } }),
+      this.prisma.internalMessage.create({ data: { tenantId: u.tenantId, chatId: chat.id, authorId: u.id, authorName: author.name, text, replyToId: dto.replyToId ?? null, createdAt: agora }, include: MESSAGE_INCLUDE }),
       this.prisma.internalChat.update({ where: { id: chat.id }, data: { lastMessageAt: agora, lastMessagePreview: `${author.name}: ${text}`.slice(0, 140) } }),
       // quem escreve leu tudo até aqui
       this.prisma.internalChatMember.update({ where: { chatId_userId: { chatId: chat.id, userId: u.id } }, data: { lastReadAt: agora } }),
@@ -142,6 +156,61 @@ class InternalChatController {
     await this.chatOf(u, id);
     await this.prisma.internalChatMember.update({ where: { chatId_userId: { chatId: id, userId: u.id } }, data: { lastReadAt: new Date() } });
     this.gateway.emitInternalChat(u.tenantId, [u.id], id);
+    return { ok: true };
+  }
+
+  // ---------- grupo ----------
+  // Quem gerencia: quem criou o grupo, ou quem tem `team.manage`. Cada mudança vira um aviso
+  // no histórico (mensagem `system`) — a auditoria mostra quem adicionou, tirou ou apagou.
+
+  @Post('chats/:id/members')
+  async addMembers(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: MembersDto) {
+    const chat = await this.grupoGerenciavel(u, id);
+    const atuais = new Set(chat.members.map((m) => m.userId));
+    const novos = [...new Set(dto.userIds)].filter((x) => !atuais.has(x));
+    if (!novos.length) throw new BadRequestException('Essas pessoas já estão no grupo.');
+    const users = await this.prisma.user.findMany({ where: { id: { in: novos }, tenantId: u.tenantId, isActive: true }, select: { id: true, name: true } });
+    if (users.length !== novos.length) throw new BadRequestException('Alguém da lista não faz parte da equipe.');
+    await this.prisma.internalChatMember.createMany({ data: users.map((x) => ({ chatId: chat.id, userId: x.id })), skipDuplicates: true });
+    await this.aviso(u, chat.id, `adicionou ${users.map((x) => x.name).join(', ')}`);
+    return this.detalhe(u, chat.id);
+  }
+
+  /** Tirar alguém do grupo — ou sair, quando é a própria pessoa (qualquer membro pode sair). */
+  @Delete('chats/:id/members/:userId')
+  async removeMember(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('userId', ParseUUIDPipe) userId: string) {
+    const saindo = userId === u.id;
+    const chat = saindo ? await this.chatOf(u, id) : await this.grupoGerenciavel(u, id);
+    if (!chat.isGroup) throw new BadRequestException('Só dá para sair de grupos.');
+    if (!chat.members.some((m) => m.userId === userId)) throw new NotFoundException('Esta pessoa não está no grupo.');
+    if (chat.members.length <= 1) throw new BadRequestException('O grupo precisa de pelo menos uma pessoa. Para encerrá-lo, apague o grupo.');
+    const alvo = await this.prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    // o aviso sai antes de tirar: quem saiu também recebe o registro e a lista dele atualiza
+    await this.aviso(u, chat.id, saindo ? 'saiu do grupo' : `removeu ${alvo?.name ?? 'um membro'}`);
+    await this.prisma.internalChatMember.delete({ where: { chatId_userId: { chatId: chat.id, userId } } });
+    this.gateway.emitInternalChat(u.tenantId, [userId], chat.id);
+    return { ok: true };
+  }
+
+  @Patch('chats/:id')
+  async rename(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: RenameDto) {
+    const chat = await this.grupoGerenciavel(u, id);
+    const name = dto.name.trim();
+    await this.prisma.internalChat.update({ where: { id: chat.id }, data: { name } });
+    await this.aviso(u, chat.id, `renomeou o grupo para "${name}"`);
+    return this.detalhe(u, chat.id);
+  }
+
+  /**
+   * Apagar o grupo: some para todos os membros, mas NÃO sai do banco — o chat interno é
+   * auditável, e quem tem `internal_chat.audit` continua lendo (marcado como apagado).
+   */
+  @Delete('chats/:id')
+  async remove(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    const chat = await this.grupoGerenciavel(u, id);
+    await this.aviso(u, chat.id, 'apagou o grupo');
+    await this.prisma.internalChat.update({ where: { id: chat.id }, data: { deletedAt: new Date(), deletedById: u.id } });
+    this.gateway.emitInternalChat(u.tenantId, chat.members.map((m) => m.userId), chat.id);
     return { ok: true };
   }
 
@@ -177,15 +246,42 @@ class InternalChatController {
       where: { chatId, ...(before && { createdAt: { lt: new Date(before) } }) },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: PAGE,
+      include: MESSAGE_INCLUDE,
     });
     return rows.reverse();
   }
 
   /** Conversa de que a pessoa participa — quem não é membro recebe 404 (nem sabe que existe). */
   private async chatOf(u: AuthUser, id: string) {
-    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, members: { some: { userId: u.id } } }, include: { members: { select: { userId: true } } } });
+    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, deletedAt: null, members: { some: { userId: u.id } } }, include: { members: { select: { userId: true } } } });
     if (!chat) throw new NotFoundException('Conversa não encontrada');
     return chat;
+  }
+
+  /** Grupo de que a pessoa participa e que ela pode gerenciar (criou, ou tem `team.manage`). */
+  private async grupoGerenciavel(u: AuthUser, id: string) {
+    const chat = await this.chatOf(u, id);
+    if (!chat.isGroup) throw new BadRequestException('Conversa direta não tem membros para gerenciar.');
+    if (chat.createdById !== u.id && !u.permissions?.includes('team.manage')) throw new ForbiddenException('Só quem criou o grupo (ou quem gerencia a equipe) pode mudar o grupo.');
+    return chat;
+  }
+
+  /** Aviso do sistema no histórico do grupo, assinado por quem fez — e entregue ao vivo aos membros. */
+  private async aviso(u: AuthUser, chatId: string, acao: string) {
+    const ator = await this.assertMember(u);
+    const agora = new Date();
+    const message = await this.prisma.internalMessage.create({ data: { tenantId: u.tenantId, chatId, authorId: u.id, authorName: ator.name, text: `${ator.name} ${acao}`, system: true, createdAt: agora }, include: MESSAGE_INCLUDE });
+    await this.prisma.internalChat.update({ where: { id: chatId }, data: { lastMessageAt: agora, lastMessagePreview: message.text.slice(0, 140) } });
+    const membros = await this.prisma.internalChatMember.findMany({ where: { chatId }, select: { userId: true } });
+    const ids = membros.map((m) => m.userId);
+    this.gateway.emitInternalMessage(u.tenantId, ids, message);
+    this.gateway.emitInternalChat(u.tenantId, ids, chatId);
+  }
+
+  /** Conversa já atualizada, no formato da lista. */
+  private async detalhe(u: AuthUser, id: string) {
+    const c = await this.prisma.internalChat.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, include: { members: { select: MEMBER_SELECT } } });
+    return { ...this.present(c, u.id), unread: 0 };
   }
 
   /** O dono do sistema "entrando como" o cliente não é da equipe: audita, mas não conversa. */
@@ -200,7 +296,7 @@ class InternalChatController {
     const members = c.members.map((m) => ({ id: m.user.id, name: m.user.name, active: m.user.isActive }));
     const outros = members.filter((m) => m.id !== viewerId);
     const name = c.isGroup ? c.name ?? 'Grupo' : viewerId ? outros[0]?.name ?? 'Conversa' : members.map((m) => m.name).join(' · ');
-    return { id: c.id, isGroup: c.isGroup, name, members, lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview };
+    return { id: c.id, isGroup: c.isGroup, name, members, createdById: c.createdById, deletedAt: c.deletedAt, lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview };
   }
 }
 

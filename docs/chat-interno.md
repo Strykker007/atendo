@@ -15,6 +15,11 @@ ledger de uso. O histórico é **permanente e auditável** — não existe apaga
 | Nome do autor gravado na mensagem (`authorName`): a auditoria continua legível depois que a pessoa sai da equipe (`authorId` vira null) | `internal_messages` |
 | Não lidas por pessoa: `internal_chat_members.lastReadAt`. Escrever marca como lido até ali | `send` / `read` |
 | Tempo real: `internal_message` e `internal_chat` vão **só para a sala de cada membro** (`user:<tenant>:<id>`), nunca para a sala do cliente | `ConversationsGateway.emitInternalMessage` |
+| **Responder** (citação, como no WhatsApp): `replyToId` só de mensagem da mesma conversa; a mensagem vem com o trecho citado (`replyTo`). Citada que sumiu vira "Mensagem indisponível" | `send`, `MESSAGE_INCLUDE` |
+| **Gerenciar grupo** (adicionar/tirar membros, renomear, apagar): quem criou o grupo ou quem tem `team.manage`. **Sair** do grupo: qualquer membro. O grupo nunca fica sem ninguém (apague-o) | `grupoGerenciavel` |
+| Cada mudança no grupo vira um **aviso no histórico** (`system = true`, assinado por quem fez: "Ana adicionou Bruno") — é o registro de auditoria de quem mexeu | `aviso` |
+| **Apagar grupo** = `deletedAt`/`deletedById`: some da lista e das rotas de todos os membros, mas **não sai do banco** — a auditoria continua lendo, marcado "apagado". Conversa direta não se apaga | `DELETE /internal-chat/chats/:id` |
+| Quem é removido perde o acesso na hora (404) e o histórico anterior continua na auditoria | `removeMember` |
 | "Online agora" = está com o painel aberto (sockets conectados, mesmo mecanismo do monitor do dono) | `GET /internal-chat/users` |
 
 ## Auditoria
@@ -40,6 +45,10 @@ por isso continua aberto e na mesma conversa ao trocar de página.
   (margem de 12 px). Redimensionar a janela do navegador reencaixa na hora.
 - Aberto: abas **Conversas**, **Equipe** (online primeiro; clicar abre a conversa direta) e
   **Novo grupo** (marcar pessoas + nome). Arrasta pelo cabeçalho; minimiza para a barra.
+- **Responder**: botão de seta ao passar o mouse no balão (ou duplo clique). A citação aparece
+  acima do campo (Esc cancela); no balão, clicar na citação leva até a original.
+- **Grupo**: a faixa de membros no topo da conversa ("Gerenciar") abre o painel do grupo — nome,
+  membros (remover), adicionar pessoas, sair e apagar (com confirmação).
 - Fica acima de modais e toasts (`z-[65]`); só os avisos do topo (`z-[70]`) passam por cima.
 - Lateral, altura, aberto/minimizado e conversa aberta ficam no navegador (`localStorage`,
   `atendo-chat-interno`, versão 1 — a posição livre antiga é descartada).
@@ -47,11 +56,11 @@ por isso continua aberto e na mesma conversa ao trocar de página.
 
 ## Dados
 
-- `internal_chats` — `{tenantId, isGroup, name, directKey, createdById, lastMessageAt, lastMessagePreview}`.
+- `internal_chats` — `{tenantId, isGroup, name, directKey, createdById, lastMessageAt, lastMessagePreview, deletedAt, deletedById}`.
 - `internal_chat_members` — `{chatId, userId, lastReadAt, joinedAt}`, chave `(chatId, userId)`.
-- `internal_messages` — `{tenantId, chatId, authorId, authorName, text, createdAt}`, índices `(chatId, createdAt)` e `(tenantId, createdAt)`.
+- `internal_messages` — `{tenantId, chatId, authorId, authorName, text, replyToId, system, createdAt}`, índices `(chatId, createdAt)` e `(tenantId, createdAt)`.
 
-Migração: `20261230000000_ignored_contacts_internal_chat`.
+Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_internal_chat_groups` (resposta, avisos, grupo apagado).
 
 ## API
 
@@ -61,7 +70,11 @@ Migração: `20261230000000_ignored_contacts_internal_chat`.
 | GET | `/internal-chat/chats` | logado | Suas conversas, mais recentes primeiro, com `unread` |
 | POST | `/internal-chat/chats` | membro da equipe | `{userIds, name?}` — um id sem nome = direta (reaproveita); senão grupo |
 | GET | `/internal-chat/chats/:id/messages?before=` | membro | 50 mensagens anteriores a `before` (ISO), em ordem cronológica |
-| POST | `/internal-chat/chats/:id/messages` | membro | `{text}` (até 4000) |
+| POST | `/internal-chat/chats/:id/messages` | membro | `{text, replyToId?}` (até 4000) |
+| POST | `/internal-chat/chats/:id/members` | quem criou / `team.manage` | `{userIds}` — adiciona ao grupo |
+| DELETE | `/internal-chat/chats/:id/members/:userId` | quem criou / `team.manage`; a própria pessoa = sair | Tira do grupo |
+| PATCH | `/internal-chat/chats/:id` | quem criou / `team.manage` | `{name}` — renomeia |
+| DELETE | `/internal-chat/chats/:id` | quem criou / `team.manage` | Apaga o grupo (some para os membros; fica na auditoria) |
 | POST | `/internal-chat/chats/:id/read` | membro | Marca como lida |
 | GET | `/internal-chat/audit/chats?userId=` | `internal_chat.audit` | Todas as conversas do cliente, com contagem de mensagens |
 | GET | `/internal-chat/audit/chats/:id/messages?before=` | `internal_chat.audit` | Histórico de qualquer conversa do cliente |
