@@ -7,12 +7,14 @@ import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken, refresh } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingEvent, SendLimits } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
-import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache } from './core';
+import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache, dropConversationFromCache } from './core';
 import type { MessageTemplate, TemplateValues } from '@atendo/shared';
 import { receiveSystemNotice, type SystemNotice } from './avisos';
 import { playMessageSound, unlockMessageSound } from '../message-sound';
 import { useUI } from '../store';
 import { toast } from '@/components/ui/Toast';
+import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
+import { upsertInternalMessage, type InternalMessage } from './chat-interno';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -134,6 +136,8 @@ export function useRealtime() {
       if (m.direction === 'in') qc.setQueryData<Typing>(['typing', m.conversationId], null);
     });
     // histórico limpo: um evento só, a conversa recarrega já sem o conteúdo
+    // conversa excluída (por outra pessoa da equipe): some da lista e fecha se estiver aberta
+    socket.on('conversation_deleted', (e: { conversationId: string }) => dropConversationFromCache(qc, e.conversationId));
     socket.on('messages_cleared', (e: { conversationId: string }) => {
       qc.invalidateQueries({ queryKey: ['messages', e.conversationId] });
     });
@@ -141,11 +145,13 @@ export function useRealtime() {
       const next: Typing = e.state === 'paused' ? null : { state: e.state, at: Date.now() };
       qc.setQueryData<Typing>(['typing', e.conversationId], next);
     });
-    socket.on('conversation', (c: { id: string; status?: ConversationStatus }) => {
+    socket.on('conversation', (c: { id: string; status?: ConversationStatus; ticketExempt?: boolean }) => {
       // encerrada (por outro atendente, pelo robô ou pelo sistema): sai na hora das listas de outro status
       if (c.status === 'closed') {
         for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
-          if ((key[1] as { status?: ConversationStatus } | undefined)?.status === 'closed') continue;
+          const aba = (key[1] as { status?: string } | undefined)?.status;
+          // aba "Livres" mostra a conversa livre em qualquer status
+          if (aba === 'closed' || (aba === 'free' && c.ticketExempt)) continue;
           qc.setQueryData<Conversation[]>(key, (old) => old?.filter((x) => x.id !== c.id));
         }
       }
@@ -157,6 +163,24 @@ export function useRealtime() {
     });
     // aviso global do dono do sistema: popup no topo + sino
     socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
+    // atendimento transferido para MIM (sala só minha): alarme + aviso em destaque
+    socket.on('transfer_alert', (e: TransferAlertEvent) => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      receiveTransferAlert(e);
+    });
+    // chat interno da equipe (sala só dos membros): entra na conversa e toca para quem não escreveu
+    socket.on('internal_message', (m: InternalMessage) => {
+      upsertInternalMessage(qc, m);
+      const eu = qc.getQueryData<{ id: string }>(['me'])?.id;
+      if (m.authorId !== eu && !useUI.getState().soundMuted) playMessageSound();
+    });
+    socket.on('internal_chat', () => { qc.invalidateQueries({ queryKey: ['internal-chats'] }); });
+    // canal de suporte, lado do dono (sala `owners`): mensagem de qualquer cliente
+    socket.on('support_message', (m: InternalMessage & { fromSupport?: boolean }) => {
+      upsertInternalMessage(qc, m);
+      if (!m.fromSupport && !useUI.getState().soundMuted) playMessageSound();
+    });
+    socket.on('support_chat', () => { qc.invalidateQueries({ queryKey: ['support-chats'] }); });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
     socket.on('campaign', (e: { id: string; status: string; name?: string; alert?: string }) => {
@@ -164,7 +188,7 @@ export function useRealtime() {
       qc.invalidateQueries({ queryKey: ['campaign', e.id] });
       if (e.alert) toast.warn(`Transmissão "${e.name ?? ''}" pausada: ${e.alert}`);
     });
-    socket.on('scheduled_messages', (e: { conversationId: string }) => qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }));
+    socket.on('scheduled_messages', (e: { conversationId: string }) => { qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }); qc.invalidateQueries({ queryKey: ['scheduled-messages-all'] }); });
     // `paid` = o webhook do Pix automático deu baixa: aviso em qualquer tela
     socket.on('budgets', (e: { conversationId: string; paid?: { total: number; contactName: string } }) => {
       qc.invalidateQueries({ queryKey: ['budgets', e.conversationId] });

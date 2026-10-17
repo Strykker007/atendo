@@ -1,12 +1,12 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, QrCode } from 'lucide-react';
+import { Plus, Pencil, Trash2, QrCode, ArrowUp, ArrowDown } from 'lucide-react';
 import { PIX_KEY_TYPES, PIX_KEY_TYPE_LABEL, type PixKeyType } from '@atendo/shared';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { usePixKeys, useCreatePixKey, useUpdatePixKey, useDeletePixKey, type PixKey } from '@/lib/hooks';
+import { usePixKeys, useCreatePixKey, useUpdatePixKey, useDeletePixKey, useReorderPixKeys, type PixKey } from '@/lib/hooks';
 
 const PLACEHOLDER: Record<PixKeyType, string> = {
   cpf: '000.000.000-00',
@@ -27,6 +27,15 @@ export function PixKeysSection({ podeEditar }: { podeEditar: boolean }) {
   const create = useCreatePixKey();
   const update = useUpdatePixKey();
   const remove = useDeletePixKey();
+  const reorder = useReorderPixKeys();
+  /** sobe/desce uma posição — é a ordem da pasta "Pix" no chat */
+  const move = (i: number, d: -1 | 1) => {
+    const list = [...(keys.data ?? [])];
+    const j = i + d;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    reorder.mutate(list, { onError: (err) => toast.err(err) });
+  };
   const [draft, setDraft] = useState<Draft | null>(null);
   const [deleting, setDeleting] = useState<PixKey | null>(null);
 
@@ -57,7 +66,7 @@ export function PixKeysSection({ podeEditar }: { podeEditar: boolean }) {
       {keys.data?.length === 0 && <p className="rounded-2xl border border-dashed border-line px-5 py-4 text-sm text-faint">Nenhuma chave cadastrada. Ex.: “Pix Matriz - CNPJ”.</p>}
       {!!keys.data?.length && (
         <div className="rounded-2xl bg-panel border border-line divide-y divide-line">
-          {keys.data.map((k) => (
+          {keys.data.map((k, i) => (
             <div key={k.id} className="flex items-center gap-3 px-5 py-3">
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-ink truncate">{k.title}</div>
@@ -65,6 +74,12 @@ export function PixKeysSection({ podeEditar }: { podeEditar: boolean }) {
               </div>
               {podeEditar && (
                 <>
+                  {keys.data!.length > 1 && (
+                    <span className="flex flex-col -my-1">
+                      <button onClick={() => move(i, -1)} disabled={i === 0} className="text-faint hover:text-ink disabled:opacity-30 disabled:hover:text-faint" title="Subir" aria-label={`Subir ${k.title}`}><ArrowUp size={13} /></button>
+                      <button onClick={() => move(i, 1)} disabled={i === keys.data!.length - 1} className="text-faint hover:text-ink disabled:opacity-30 disabled:hover:text-faint" title="Descer" aria-label={`Descer ${k.title}`}><ArrowDown size={13} /></button>
+                    </span>
+                  )}
                   <button onClick={() => setDraft({ id: k.id, title: k.title, keyType: k.keyType, key: k.key, holderName: k.holderName })} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={15} /></button>
                   <button onClick={() => setDeleting(k)} className="text-faint hover:text-danger p-1" title="Excluir"><Trash2 size={15} /></button>
                 </>

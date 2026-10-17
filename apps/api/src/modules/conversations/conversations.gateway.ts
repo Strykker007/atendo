@@ -24,6 +24,14 @@ export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role 
  * que caiu lá (mensagem recebida, status do envio) sumia em silêncio. Nesse caso publicamos
  * direto no Redis; o `RedisIoAdapter` da API entrega aos sockets da sala.
  */
+/** Aviso de transferência para quem recebeu o atendimento (docs/08-frontend.md#transferência). */
+export interface TransferAlert {
+  conversationId: string;
+  contactName: string;
+  /** quem transferiu; null = automação */
+  byName: string | null;
+}
+
 @Injectable()
 @WebSocketGateway({ cors: { origin: webOrigins, credentials: true } })
 export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
@@ -40,6 +48,8 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
       // presença (monitor do dono): quem está com o painel aberto. O dono "entrando como" não conta
       client.data = { userId: payload.sub, tenantId: payload.tenantId ?? null, owner: isOwner(payload) };
       if (payload.tenantId) await client.join(`tenant:${payload.tenantId}`);
+      // sala da pessoa: avisos só dela (ex.: atendimento transferido para ela)
+      if (payload.tenantId && payload.sub) await client.join(`user:${payload.tenantId}:${payload.sub}`);
       if (payload.role === 'super_admin' && !payload.impersonatorId) await client.join(OWNERS_ROOM);
       // sala dos clientes logados: avisos globais do sistema. O dono é quem escreve o aviso —
       // não recebe de volta, nem quando está "entrando como" um cliente.
@@ -127,6 +137,42 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   /** Orçamentos da conversa mudaram (comprovante chegou pela página pública, pago): o painel recarrega. */
   emitBudgets(tenantId: string, conversationId: string, paid?: { total: number; contactName: string }) {
     this.room(tenantId).emit('budgets', { conversationId, ...(paid && { paid }) });
+  }
+  /** Conversa excluída: o painel tira da lista e fecha se estiver aberta. */
+  /**
+   * Atendimento transferido para uma pessoa: só a tela dela recebe (alerta em destaque + som).
+   * A sala inclui o cliente: o mesmo usuário "entrando como" outro cliente não recebe daqui.
+   */
+  emitTransferAlert(tenantId: string, userId: string, event: TransferAlert) {
+    this.to(`user:${tenantId}:${userId}`).emit('transfer_alert', event);
+  }
+
+  /**
+   * Chat interno da equipe (docs/chat-interno.md): vai só para a sala de cada membro — o resto do
+   * cliente não recebe nem o aviso de que a conversa existe.
+   */
+  emitInternalMessage(tenantId: string, userIds: string[], message: unknown) {
+    for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('internal_message', message);
+  }
+  /**
+   * Canal de suporte (docs/chat-interno.md#suporte): a equipe inteira do cliente recebe (sala do
+   * cliente) e o dono do sistema também (sala `owners`), em qualquer tela.
+   */
+  emitSupportMessage(tenantId: string, message: unknown) {
+    this.room(tenantId).emit('internal_message', message);
+    this.to(OWNERS_ROOM).emit('support_message', message);
+  }
+  emitSupportChat(tenantId: string, chatId: string) {
+    this.room(tenantId).emit('internal_chat', { chatId });
+    this.to(OWNERS_ROOM).emit('support_chat', { chatId });
+  }
+  /** Conversa interna criada/renomeada/lida: a lista do widget recarrega. */
+  emitInternalChat(tenantId: string, userIds: string[], chatId: string) {
+    for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('internal_chat', { chatId });
+  }
+
+  emitConversationDeleted(tenantId: string, conversationId: string) {
+    this.room(tenantId).emit('conversation_deleted', { conversationId });
   }
   emitMessagesCleared(tenantId: string, conversationId: string) {
     this.room(tenantId).emit('messages_cleared', { conversationId });

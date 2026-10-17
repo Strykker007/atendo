@@ -1,7 +1,8 @@
 'use client';
 import Link from 'next/link';
 import { useRef, useState } from 'react';
-import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, Power, PowerOff } from 'lucide-react';
+import { Plus, Workflow, Trash2, Zap, Lock, Copy, Download, Upload, Pin, Power, PowerOff, GripVertical } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { cn, downloadJson, safeFileName } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -9,7 +10,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { hasWebhookBody, type FlowDefinition } from '@atendo/shared';
-import { useFlows, useDeleteFlow, useDeleteFlows, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useSetFlowsActive, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
+import { useFlows, useDeleteFlow, useDeleteFlows, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useSetFlowsActive, useReorderFlows, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
@@ -28,6 +29,15 @@ export default function FluxosPage() {
   const exportFlows = useExportFlows();
   const importFlow = useImportFlow();
   const setActive = useSetFlowsActive();
+  const reorder = useReorderFlows();
+  /** Arrastar pela alça: a ordem vale para a lista e para os atalhos de fluxo do chat. */
+  function onDragEnd(r: DropResult) {
+    if (!flows.data || !r.destination || r.destination.index === r.source.index) return;
+    const list = [...flows.data];
+    const [m] = list.splice(r.source.index, 1);
+    list.splice(r.destination.index, 0, m);
+    reorder.mutate(list, { onError: toast.err });
+  }
   const fileInput = useRef<HTMLInputElement>(null);
   // `refs`: fluxos que conectam a este (bloco "Conectar com outro fluxo"); listados no aviso
   const [deleting, setDeleting] = useState<(FlowSummary & { refs?: { id: string; name: string }[] }) | null>(null);
@@ -135,7 +145,10 @@ export default function FluxosPage() {
       {flows.isLoading && <SkeletonRows rows={3} />}
       {flows.data?.length === 0 && <Empty icon={<Workflow size={36} />} title="Nenhum fluxo" text="Crie o primeiro: por exemplo, uma triagem com menu 'Vendas / Suporte'." />}
       {!!flows.data?.length && (
-        <div className="rounded-2xl bg-panel border border-line divide-y divide-line">
+        <DragDropContext onDragEnd={onDragEnd}>
+        <Droppable droppableId="fluxos" isDropDisabled={!isAdmin}>
+        {(drop) => (
+        <div ref={drop.innerRef} {...drop.droppableProps} className="rounded-2xl bg-panel border border-line divide-y divide-line">
           {isAdmin && (
             <div className="flex items-center gap-3 px-4 py-2 bg-field/50 rounded-t-2xl text-xs">
               <input type="checkbox" aria-label="Selecionar todos" checked={allOn} ref={(el) => { if (el) el.indeterminate = sel.length > 0 && !allOn; }} onChange={() => setSelected(allOn ? [] : visible)} />
@@ -151,8 +164,11 @@ export default function FluxosPage() {
               )}
             </div>
           )}
-          {flows.data.map((f) => (
-            <div key={f.id} className={cn('flex items-center gap-3 px-4 py-3', sel.includes(f.id) && 'bg-accent-soft/40')}>
+          {flows.data.map((f, i) => (
+            <Draggable key={f.id} draggableId={f.id} index={i} isDragDisabled={!isAdmin}>
+            {(drag, snap) => (
+            <div ref={drag.innerRef} {...drag.draggableProps} className={cn('flex items-center gap-3 px-4 py-3 bg-panel', sel.includes(f.id) && 'bg-accent-soft/40', snap.isDragging && 'shadow-lg rounded-lg ring-1 ring-line')}>
+              {isAdmin && <span {...drag.dragHandleProps} className="text-faint hover:text-ink cursor-grab -ml-1" title="Arraste para ordenar"><GripVertical size={15} /></span>}
               {isAdmin && <input type="checkbox" aria-label={`Selecionar ${f.name}`} checked={sel.includes(f.id)} onChange={() => toggle(f.id)} />}
               <span className={cn('w-8 h-8 rounded-lg grid place-items-center shrink-0', f.isActive ? 'bg-accent-soft text-accent-ink' : 'bg-field text-faint')}><Zap size={15} /></span>
               <div className="min-w-0 flex-1">
@@ -194,8 +210,14 @@ export default function FluxosPage() {
                 </>
               )}
             </div>
+            )}
+            </Draggable>
           ))}
+          {drop.placeholder}
         </div>
+        )}
+        </Droppable>
+        </DragDropContext>
       )}
       <ConfirmDialog open={!!pendingDownload} onClose={() => setPendingDownload(null)} title="Exportar fluxo" confirmLabel="Baixar mesmo assim" text="Este arquivo contém o corpo de webhooks. Verifique se não há tokens ou senhas." onConfirm={() => { if (pendingDownload) downloadJson(pendingDownload.data, pendingDownload.file); }} />
       <ConfirmDialog

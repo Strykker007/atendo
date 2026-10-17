@@ -46,6 +46,13 @@ const schema = z.object({
    * Desligado = sai como texto (docs/04-providers-whatsapp.md#chave-pix-copiar-chave-pix).
    */
   EVOLUTION_PIX_BUTTON: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  /**
+   * Menu do fluxo com até 3 opções como botões clicáveis (resposta rápida nativa) na Evolution.
+   * Mesmo requisito do Pix: imagem com o patch do <biz>. Desligado = texto com lista numerada
+   * (docs/04-providers-whatsapp.md#menus-interativos-botões-e-listas). Ligar só depois de ver os
+   * botões chegarem num aparelho real.
+   */
+  EVOLUTION_MENU_BUTTONS: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   META_GRAPH_VERSION: z.string().default('v21.0'),
   META_APP_SECRET: z.string().optional().default(''),
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(1),

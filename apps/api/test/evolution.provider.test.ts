@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { MessageStatus, MessageType, NumberStatus, BillingCategory } from '@atendo/shared';
-import { EvolutionProvider } from '../src/modules/whatsapp/providers/evolution.provider';
+import { EvolutionProvider, menuButtonsPayload } from '../src/modules/whatsapp/providers/evolution.provider';
 import type { NumberContext } from '../src/modules/whatsapp/providers/provider.interface';
 
 const provider = new EvolutionProvider();
@@ -386,5 +386,21 @@ describe('EvolutionProvider.subscribePresence', () => {
     await provider.subscribePresence(ctx, '5500999990000');
     expect(calls[0].path).toContain(`/chat/sendPresence/${INSTANCE}`);
     expect(calls[0].body).toEqual({ number: '5500999990000', presence: 'paused', delay: 0 });
+  });
+});
+
+describe('menuButtonsPayload (menu do fluxo como botões no QR)', () => {
+  it('1ª linha vira título, o resto descrição, e cada opção um botão reply', () => {
+    const p = menuButtonsPayload({ text: '*Atendimento*\nComo podemos ajudar?', interactive: { options: [{ id: 'a', title: 'Segunda via de boleto' }, { id: 'b', title: 'Falar com síndico' }] } });
+    expect(p.title).toBe('*Atendimento*');
+    expect(p.description).toBe('Como podemos ajudar?');
+    expect(p.buttons).toEqual([
+      { type: 'reply', displayText: 'Segunda via de bolet', id: 'a' },
+      { type: 'reply', displayText: 'Falar com síndico', id: 'b' },
+    ]);
+  });
+  it('com cabeçalho, o texto inteiro vai na descrição', () => {
+    const p = menuButtonsPayload({ text: 'Escolha', interactive: { header: 'Portaria', options: [{ id: 'x', title: 'Sim' }] } });
+    expect(p).toMatchObject({ title: 'Portaria', description: 'Escolha' });
   });
 });

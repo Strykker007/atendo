@@ -87,6 +87,7 @@ Outros tipos existentes não pedidos: Início (`start`), Fim (`end`), IA (`ai`),
 
 - **Ativar/desativar fluxo**: existe — checkbox "Fluxo ativo" no editor e interruptor direto na lista (`/fluxos`, só com `flows.manage`). Ativar valida o desenho salvo (400 com o motivo se inválido). Fluxo inativo não dispara nem aparece no chat; **conversas que já estão no meio dele continuam até o fim** (`onInbound` entrega a resposta ao run ativo sem olhar `isActive`).
 - **Pausar o robô numa conversa**: existe — pausar congela o fluxo e continuar segue de onde parou. Ver [Pausar o robô na conversa](#pausar-o-robô-na-conversa).
+- **Ordem da listagem**: arrastar pela alça (⋮⋮) à esquerda de cada fluxo, como nas respostas rápidas (só com `flows.manage`). Fica em `flows.position` e vale para a lista e para os atalhos de fluxo do chat; `PATCH /flows/reorder` com `{ ids }` na ordem nova. Fluxo novo, cópia e importado entram no fim; a migration começou pela ordem alfabética.
 - **Ações em lote na listagem**: checkbox por fluxo + "selecionar todos" → Ativar, Desativar, Duplicar, Exportar selecionados (tarefa 1.7). Ver [Exportação, importação e cópia](#exportação-importação-e-cópia).
 - **Duplicar fluxo**: existe (`POST /flows/:id/duplicate` e em lote; cópia nasce inativa).
 - **Duplicar bloco**: existe (tarefa 1.1) — botão no card, Ctrl/Cmd+D, menu de contexto. Sem ligações.

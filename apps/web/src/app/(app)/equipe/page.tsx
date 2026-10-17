@@ -36,6 +36,8 @@ export default function EquipePage() {
   // e-mail (login) e papel: admin edita atendentes e gerentes; gerente, só atendentes. Admin não muda o
   // próprio login por aqui — trocar encerra as sessões da pessoa
   const canEditAccess = (a: Agent) => canManageTeam && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager'));
+  // e-mail de outro admin (ou o próprio): só o admin da conta — o papel continua fora do alcance
+  const canEditEmail = (a: Agent) => canEditAccess(a) || (canManageTeam && me.data?.role === 'tenant_admin' && a.role === 'tenant_admin');
   async function saveEdit(a: Agent, b: { name?: string; email?: string; role?: 'agent' | 'manager' }) {
     try {
       await update.mutateAsync({ id: a.id, ...b });
@@ -92,7 +94,7 @@ export default function EquipePage() {
                 <tr key={a.id} className={cn(!a.isActive && 'opacity-50')}>
                   <td className="px-5 py-3 font-medium">
                     {a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}
-                    {canRename(a) && !canEditAccess(a) && <button onClick={() => setEditing(a)} className="ml-1.5 align-middle text-faint hover:text-ink p-0.5" title="Editar" aria-label={`Editar ${a.name}`}><Pencil size={12} /></button>}
+                    {(canRename(a) || canEditEmail(a)) && !canEditAccess(a) && <button onClick={() => setEditing(a)} className="ml-1.5 align-middle text-faint hover:text-ink p-0.5" title="Editar" aria-label={`Editar ${a.name}`}><Pencil size={12} /></button>}
                   </td>
                   <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}</td>
                   <td className="px-5 py-3">
@@ -192,7 +194,7 @@ export default function EquipePage() {
       <AccessProfiles />
 
       <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ?? null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Atendente criado — mande o link do convite'); } else toast.ok(b.role === 'manager' ? 'Gerente criado' : 'Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
-      <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
+      <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditEmail={!!editing && canEditEmail(editing)} isSelf={editing?.id === me.data?.id} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
   );
@@ -242,7 +244,7 @@ function ResetPasswordModal({ agent, onClose, onSubmit, pending }: { agent: Agen
   );
 }
 
-function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canEditRole }: { agent: Agent | null; onClose: () => void; onSubmit: (b: { name?: string; email?: string; role?: 'agent' | 'manager' }) => void; pending: boolean; canEditAccess: boolean; canEditRole: boolean }) {
+function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canEditEmail, isSelf, canEditRole }: { agent: Agent | null; onClose: () => void; onSubmit: (b: { name?: string; email?: string; role?: 'agent' | 'manager' }) => void; pending: boolean; canEditAccess: boolean; canEditEmail: boolean; isSelf: boolean; canEditRole: boolean }) {
   const [f, setF] = useState<{ name: string; email: string; role: 'agent' | 'manager' }>({ name: '', email: '', role: 'agent' });
   const [forId, setForId] = useState<string | null>(null);
   // preenche com os dados atuais ao abrir para outra pessoa
@@ -251,7 +253,7 @@ function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canE
   // manda só o que mudou: e-mail/papel encerram as sessões da pessoa
   const changes = agent ? {
     ...(f.name.trim() !== agent.name && { name: f.name.trim() }),
-    ...(canEditAccess && f.email.trim() !== agent.email && { email: f.email.trim() }),
+    ...(canEditEmail && f.email.trim().toLowerCase() !== agent.email.toLowerCase() && { email: f.email.trim().toLowerCase() }),
     ...(canEditAccess && canEditRole && f.role !== agent.role && { role: f.role }),
   } : {};
   const dirty = Object.keys(changes).length > 0;
@@ -259,8 +261,8 @@ function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canE
     <Modal open={!!agent} onClose={onClose} title={`Editar · ${agent?.name ?? ''}`} width="max-w-sm">
       <form onSubmit={(e) => { e.preventDefault(); if (f.name.trim() && dirty) onSubmit(changes); }} className="space-y-4">
         <Field label="Nome de exibição"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={80} required autoFocus /></Field>
-        {canEditAccess ? (
-          <Field label="E-mail" hint="É o login. Ao trocar, a pessoa precisa entrar de novo."><input type="email" className={inputCls} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={120} required /></Field>
+        {canEditEmail ? (
+          <Field label="E-mail" hint={isSelf ? 'É o seu login. Ao trocar, você sai e entra de novo com o novo e-mail.' : 'É o login. Ao trocar, a pessoa precisa entrar de novo.'}><input type="email" className={inputCls} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={120} required /></Field>
         ) : (
           <p className="text-xs text-muted">{agent?.email}</p>
         )}

@@ -151,7 +151,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
 
         {node.type === 'menu' && (
           <>
-            <Field label="Texto do menu" hint="As opções são numeradas automaticamente"><TextWithVars value={node.data.text} onChange={(v) => set({ text: v })} vars={vars} placeholder="Como posso ajudar?" /></Field>
+            <Field label="Texto do menu" hint="Na API oficial (Meta) as opções viram botões (até 3) ou lista clicável (até 10). No QR Code, até 3 opções viram botões quando o servidor libera; senão vão numeradas."><TextWithVars value={node.data.text} onChange={(v) => set({ text: v })} vars={vars} placeholder="Como posso ajudar?" /></Field>
             <Field label="Opções">
               <div className="space-y-1.5">
                 {node.data.options.map((o, i) => (
@@ -165,7 +165,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               </div>
             </Field>
             <Field label="Mensagem se inválido"><TextWithVars multiline={false} value={node.data.invalidText ?? ''} onChange={(v) => set({ invalidText: v })} vars={vars} placeholder="Opção inválida. Responda com o número." /></Field>
-            <p className="text-[11px] text-muted">O contato pode responder o <b>número</b> ou o <b>texto</b> da opção (maiúsculas e acentos não importam). A opção escolhida fica na variável <code className="font-mono bg-field rounded px-1">{`{{menu_${node.id}}}`}</code>.</p>
+            <p className="text-[11px] text-muted">O contato pode tocar no botão ou responder o <b>número</b> ou o <b>texto</b> da opção (maiúsculas e acentos não importam). A opção escolhida fica na variável <code className="font-mono bg-field rounded px-1">{`{{menu_${node.id}}}`}</code>.</p>
             <Field label="Tentativas" hint="Respostas inválidas aceitas antes de seguir pela saída 'Tentativas esgotadas' (sem ligação, entrega para humano)"><input type="number" min={0} max={5} className={`${inputCls} min-w-0 max-w-full`} value={node.data.maxRetries} onChange={(e) => set({ maxRetries: Number(e.target.value) })} /></Field>
             <ReplyTimeoutFields data={node.data} set={set} />
           </>

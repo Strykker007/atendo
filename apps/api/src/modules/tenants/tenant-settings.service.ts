@@ -13,6 +13,8 @@ export interface SettingsUpdate {
   wonFlowId?: string | null;
   lostFlowId?: string | null;
   requireSaleValue?: boolean;
+  salesEnabled?: boolean;
+  requireSignature?: boolean;
   requireReasonOnWon?: boolean;
   requireReasonOnLost?: boolean;
   rankingWeights?: Record<string, number> | null;
@@ -25,6 +27,9 @@ export interface SettingsUpdate {
   welcomeEnabled?: boolean;
   secureMediaText?: string | null;
   publicLogoKey?: string | null;
+  transferMessageEnabled?: boolean;
+  transferMessageText?: string | null;
+  departmentTransferMessageText?: string | null;
 }
 
 export const OUTCOME_LABELS_DEFAULT = { won: 'Comprou', lost: 'Não comprou' } as const;
@@ -39,7 +44,7 @@ export class TenantSettingsService {
   }
 
   async update(tenantId: string, dto: SettingsUpdate) {
-    const { welcomeMessages, wonLabel, lostLabel, rankingWeights, secureMediaText, ...rest } = dto;
+    const { welcomeMessages, wonLabel, lostLabel, rankingWeights, secureMediaText, transferMessageText, departmentTransferMessageText, ...rest } = dto;
     const data: Prisma.TenantSettingsUncheckedUpdateInput = {
       ...rest,
       ...(welcomeMessages && { welcomeMessages: welcomeMessages as unknown as Prisma.InputJsonValue }),
@@ -50,6 +55,8 @@ export class TenantSettingsService {
       ...(lostLabel !== undefined && { lostLabel: lostLabel.trim() || OUTCOME_LABELS_DEFAULT.lost }),
       // frase vazia = volta à padrão
       ...(secureMediaText !== undefined && { secureMediaText: secureMediaText?.trim() || null }),
+      ...(transferMessageText !== undefined && { transferMessageText: transferMessageText?.trim() || null }),
+      ...(departmentTransferMessageText !== undefined && { departmentTransferMessageText: departmentTransferMessageText?.trim() || null }),
     };
     if (dto.attendanceActive !== undefined) {
       // cada vez que liga/desliga é um período novo da faixa Fechado (a resposta sai de novo)

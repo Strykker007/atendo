@@ -37,6 +37,40 @@ function flatten(value: unknown, depth = 0): string {
 }
 
 /**
+ * Erros da Cloud API que o atendente precisa entender para agir — o texto da Meta vem em inglês
+ * e genérico ("Re-engagement message"). Fora daqui, vale o texto original.
+ * https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes
+ */
+const META_ERROR_TEXT: Record<number, string> = {
+  190: 'Token da Meta expirado ou inválido. Gere um token permanente do System User e atualize o número.',
+  368: 'A Meta bloqueou temporariamente este número por violação de política.',
+  131021: 'Não dá para enviar mensagem para o próprio número.',
+  131026: 'Mensagem não entregue: o telefone não tem WhatsApp ou não aceitou a mensagem (app desatualizado ou termos não aceitos).',
+  131031: 'A conta WhatsApp Business foi bloqueada pela Meta.',
+  131042: 'Problema de pagamento na conta WhatsApp Business. Confira a forma de pagamento no Gerenciador de Negócios.',
+  131047: 'O contato não escreve há mais de 24 horas: na API oficial, só sai template aprovado.',
+  131049: 'A Meta não entregou esta mensagem de marketing para preservar o engajamento do contato. Tente mais tarde.',
+  131050: 'O contato optou por não receber mensagens de marketing.',
+  131051: 'Tipo de mensagem não suportado pela Meta.',
+  131053: 'A Meta não conseguiu processar a mídia (formato ou tamanho não aceitos).',
+  132000: 'O número de variáveis não confere com o template aprovado.',
+  132001: 'O template não existe neste idioma (ou ainda não foi aprovado).',
+  132005: 'O texto do template ficou grande demais depois de preencher as variáveis.',
+  132007: 'O conteúdo do template viola a política da Meta.',
+  132012: 'Variável do template em formato inválido.',
+  132015: 'O template foi pausado pela Meta por baixa qualidade.',
+  132016: 'O template foi desativado pela Meta por baixa qualidade.',
+  133010: 'O número ainda não está registrado na Cloud API. Registre-o no Gerenciador do WhatsApp (ou pela API /register).',
+};
+
+/** Texto do erro da Meta: o nosso, em português, quando o código é conhecido; senão o da API. */
+export function describeMetaError(error: { code?: unknown; message?: unknown; title?: unknown; error_data?: { details?: unknown } } | undefined, fallback: string): string {
+  const code = typeof error?.code === 'number' ? error.code : Number(error?.code);
+  if (Number.isFinite(code) && META_ERROR_TEXT[code]) return META_ERROR_TEXT[code];
+  return describeProviderError(error?.error_data?.details ?? error, fallback);
+}
+
+/**
  * Erro HTTP do provider, com o status (e o código da Meta, quando há) para a fila decidir se
  * vale tentar de novo. Continua sendo 400 para quem chama pela API (conectar, reagir…).
  */

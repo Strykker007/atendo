@@ -24,9 +24,9 @@ senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 | Grupo | Permissões |
 |---|---|
-| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.close_internal`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit` |
+| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.close_internal`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit`, `contacts.import_export` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `variables.manage`, `agenda.manage`, `campaigns.manage` |
-| Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
+| Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage`, `internal_chat.audit` |
 | Conta | `numbers.manage`, `billing.manage` |
 
 `DEFAULT_PERMISSIONS` reproduz **exatamente** o acesso que cada papel já tinha antes dos
@@ -47,6 +47,8 @@ editados (migration `global_variables`) — ver [Variáveis](variaveis.md).
 perfis padrão Gerente e Administrador não editados (migration `close_internal_audit`); o atendente
 fica sem, para não "limpar" do relatório o atendimento demorado ou perdido — ver
 [Encerramento interno](06-modelo-de-dados.md#encerramento-interno).
+`internal_chat.audit` (ler qualquer conversa do chat interno) entrou só no perfil padrão
+Administrador não editado (migration `ignored_contacts_internal_chat`) — ver [Chat interno](chat-interno.md).
 
 ## Como é aplicado
 
@@ -164,6 +166,7 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `conversations.view_deleted` | olho no aviso "Mensagem apagada por…" para ver o original |
 | `conversations.schedule_message` | relógio na barra do campo (agendar) e o X de cancelar na faixa de agendadas. Vendido à parte: no padrão só o Administrador tem ([Agendamento de mensagens](agendamento-de-mensagens.md)) |
 | `contacts.edit` | ficha do contato fica só de leitura, com o motivo escrito |
+| `contacts.import_export` | item **Contatos** some do menu (importar/exportar planilha). Padrão: Administrador e Gerente — a base inteira numa planilha é dado sensível. A migração `20261220020000_transfer_message_contacts_io` deu a permissão aos perfis padrão não editados |
 | `tags.manage`, `flows.manage`, `agenda.manage`, `team.manage`, `reports.view`, `billing.manage` | item somem do menu lateral; `reports.view` também barra a rota direta |
 | `quick_replies.manage` | botões de editar em /respostas |
 | `numbers.manage` | botões em Números e o atalho em Configurações |

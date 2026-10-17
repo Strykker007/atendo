@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsBoolean, IsDateString, IsEnum, IsHexColor, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsHexColor, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { TemplateChoiceDto } from '../whatsapp/template.dto';
@@ -10,6 +10,8 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { SchedulingService } from './scheduling.service';
+import { normalizeReminderMinutes } from './slots';
+import { deletionVerdict, type DeletionUsage } from './deletion';
 
 class ProfessionalDto {
   @IsString() @MaxLength(80) name: string;
@@ -43,7 +45,8 @@ class UpdateServiceDto {
 }
 class SettingsDto {
   @IsOptional() @IsInt() @Min(5) slotMinutes?: number;
-  @IsOptional() @IsArray() clientReminderMinutes?: number[];
+  /** minutos antes (a tela oferece "1 dia antes", "2 horas antes"…) */
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsInt({ each: true }) @Min(1, { each: true }) clientReminderMinutes?: number[];
   @IsOptional() @IsInt() @Min(0) proReminderMinutes?: number;
   @IsOptional() @IsUUID() numberId?: string;
   @IsOptional() @IsInt() @Min(1) daysAhead?: number;
@@ -85,9 +88,11 @@ export class SchedulingController {
   @RequirePermission('agenda.manage')
   async updateSettings(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
     await this.scheduling.settings(u.tenantId);
-    const { reminderTemplate, ...rest } = dto;
+    const { reminderTemplate, clientReminderMinutes, ...rest } = dto;
+    // arquivo do cabeçalho do template: só do storage do próprio tenant
+    if (reminderTemplate?.headerMediaKey && !reminderTemplate.headerMediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('Arquivo do cabeçalho inválido');
     const tpl = reminderTemplate === undefined ? {} : { reminderTemplate: reminderTemplate === null ? Prisma.DbNull : ({ ...reminderTemplate } as Prisma.InputJsonValue) };
-    return this.prisma.schedulingSettings.update({ where: { tenantId: u.tenantId }, data: { ...rest, ...tpl } });
+    return this.prisma.schedulingSettings.update({ where: { tenantId: u.tenantId }, data: { ...rest, ...(clientReminderMinutes && { clientReminderMinutes: normalizeReminderMinutes(clientReminderMinutes) }), ...tpl } });
   }
 
   // ----- profissionais -----
@@ -112,11 +117,24 @@ export class SchedulingController {
       include: { hours: true },
     });
   }
+  /** Quantos agendamentos o profissional tem — a tela mostra antes de excluir. */
+  @Get('professionals/:id/usage')
+  async professionalUsage(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    await this.prisma.professional.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
+    return this.usage({ professionalId: id });
+  }
+  /**
+   * Exclusão definitiva (docs/13-agendamento.md#excluir). Desativar é o "Ativo" da edição.
+   * Recusa com agendamento futuro; com só histórico, exige `?withHistory=true` (apaga junto).
+   */
   @Delete('professionals/:id')
   @RequirePermission('agenda.manage')
-  async deleteProfessional(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+  async deleteProfessional(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('withHistory') withHistory?: string) {
     await this.prisma.professional.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
-    await this.prisma.professional.update({ where: { id }, data: { isActive: false } }); // preserva histórico
+    const verdict = deletionVerdict('profissional', await this.usage({ professionalId: id }), withHistory === 'true');
+    if (!verdict.ok) throw new ConflictException({ code: verdict.code, message: verdict.message });
+    // agendamentos e horários de trabalho caem em cascata (schema)
+    await this.prisma.professional.delete({ where: { id } });
     return { ok: true };
   }
 
@@ -136,12 +154,34 @@ export class SchedulingController {
     await this.prisma.service.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
     return this.prisma.service.update({ where: { id }, data: dto });
   }
+  @Get('services/:id/usage')
+  async serviceUsage(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    await this.prisma.service.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
+    return this.usage({ serviceId: id });
+  }
+  /** Exclusão definitiva, mesmas regras do profissional. */
   @Delete('services/:id')
   @RequirePermission('agenda.manage')
-  async deleteService(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+  async deleteService(@CurrentUser() u: AuthUser, @Param('id') id: string, @Query('withHistory') withHistory?: string) {
     await this.prisma.service.findFirstOrThrow({ where: { id, tenantId: u.tenantId } });
-    await this.prisma.service.update({ where: { id }, data: { isActive: false } });
+    const verdict = deletionVerdict('serviço', await this.usage({ serviceId: id }), withHistory === 'true');
+    if (!verdict.ok) throw new ConflictException({ code: verdict.code, message: verdict.message });
+    // a relação agendamento → serviço não tem cascata: apaga o histórico antes, na mesma transação
+    await this.prisma.$transaction([
+      this.prisma.appointment.deleteMany({ where: { serviceId: id, tenantId: u.tenantId } }),
+      this.prisma.service.delete({ where: { id } }),
+    ]);
     return { ok: true };
+  }
+
+  /** Agendamentos futuros ativos × o resto (histórico) de um profissional ou serviço. */
+  private async usage(where: { professionalId: string } | { serviceId: string }): Promise<DeletionUsage> {
+    const ativos = { status: { in: ['scheduled', 'confirmed'] as AppointmentStatus[] }, startAt: { gt: new Date() } };
+    const [future, total] = await Promise.all([
+      this.prisma.appointment.count({ where: { ...where, ...ativos } }),
+      this.prisma.appointment.count({ where }),
+    ]);
+    return { future, past: total - future };
   }
 
   // ----- disponibilidade e agendamentos -----

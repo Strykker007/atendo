@@ -58,12 +58,19 @@ a troca é uma config por número, sem downtime.
 2. App do tipo *Business* em `developers.facebook.com` → produto **WhatsApp**.
 3. **WABA** (WhatsApp Business Account) e um número de telefone que **não** esteja em uso
    no app do WhatsApp comum.
-4. **System User** com permissão na WABA → gerar **token permanente**.
-5. Anotar: `accessToken`, `phoneNumberId`, `wabaId` — são o que se preenche no cadastro do
-   número, dentro do Atendo (ficam criptografados no banco).
-6. Webhook do app: `https://api.SEUDOMINIO/webhooks/meta`, com o *Verify Token* que você
+4. **System User** (Configurações do negócio → Usuários do sistema) com acesso **total** à
+   WABA e ao app → gerar **token permanente** com as permissões `whatsapp_business_messaging`
+   e `whatsapp_business_management` (a segunda é a que lista templates e inscreve o app).
+5. **Registrar o número** na Cloud API (WhatsApp Manager → Telefones, ou
+   `POST /{phone_number_id}/register` com um PIN de 6 dígitos). Sem isso o envio volta com o
+   erro 133010.
+6. Anotar: `accessToken`, `phoneNumberId`, `wabaId` — são o que se preenche no cadastro do
+   número, dentro do Atendo (ficam criptografados no banco). Ao conectar, o Atendo inscreve o
+   app na WABA (`subscribed_apps`) sozinho — sem essa inscrição a Meta não manda webhook.
+7. Webhook do app: `https://api.SEUDOMINIO/webhooks/meta`, com o *Verify Token* que você
    definir, e assinar o campo `messages`.
-7. Copiar o **App Secret** do app.
+8. Forma de pagamento na WABA (template é cobrado; sem cartão, só resposta na janela de 24h).
+9. Copiar o **App Secret** do app (Configurações do app → Básico).
 
 ### Variáveis
 

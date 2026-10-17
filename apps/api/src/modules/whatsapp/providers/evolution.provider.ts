@@ -137,8 +137,21 @@ export class EvolutionProvider implements WhatsAppProvider {
       if (err instanceof ProviderSendError && (err.providerStatus === 400 || err.providerStatus === 404)) return null;
       throw err;
     }) : null;
+    // menu com até 3 opções como botões de resposta rápida (nativeFlow quick_reply), só com
+    // EVOLUTION_MENU_BUTTONS — mesmo motivo do Pix: sem o <biz> o aparelho não mostra. Versão que
+    // recusa (400/404) cai na lista numerada; a resposta volta como interactiveResponseMessage
+    const opcoes = m.interactive?.options ?? [];
+    const botoes = !cartaoPix && env.EVOLUTION_MENU_BUTTONS && opcoes.length > 0 && opcoes.length <= 3 ? await this.api<any>(`/message/sendButtons/${name}`, {
+      method: 'POST',
+      body: JSON.stringify({ number: m.to, ...menuButtonsPayload(m), quoted, delay }),
+    }, this.shard(ctx)).catch((err) => {
+      if (err instanceof ProviderSendError && (err.providerStatus === 400 || err.providerStatus === 404)) return null;
+      throw err;
+    }) : null;
     if (cartaoPix) {
       r = cartaoPix;
+    } else if (botoes) {
+      r = botoes;
     } else if (m.type === MessageType.TEXT || m.interactive) {
       // Botões/listas não funcionam de forma confiável em contas QR: vira lista numerada
       const text = m.interactive?.options.length ? `${m.text ?? ''}\n\n${m.interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : (m.text ?? '');
@@ -395,6 +408,12 @@ export class EvolutionProvider implements WhatsAppProvider {
     return out;
   }
 
+  /** Grupos da instância (`GET /group/fetchAllGroups`), sem participantes — só o necessário para a lista. */
+  async listGroups(ctx: NumberContext) {
+    const rows = await this.api<any[]>(`/group/fetchAllGroups/${this.instance(ctx)}?getParticipants=false`, undefined, this.shard(ctx));
+    return parseGroupList(rows);
+  }
+
   /** Nome guardado pela Evolution para o contato (`POST /chat/findContacts`). */
   async contactName(ctx: NumberContext, phone: string) {
     const rows = await this.api<any[]>(`/chat/findContacts/${this.instance(ctx)}`, {
@@ -605,7 +624,19 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 }
 
-/** A Evolution manda o próprio número (ou nada) quando o contato não tem nome. */
+/** Resposta do `fetchAllGroups` → só grupos válidos (`@g.us`), sem repetição. */
+export function parseGroupList(rows: unknown): { jid: string; name: string; size: number }[] {
+  const out = new Map<string, { jid: string; name: string; size: number }>();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const jid = String((r as any)?.id ?? '');
+    if (!jid.endsWith('@g.us')) continue;
+    const name = typeof (r as any)?.subject === 'string' && (r as any).subject.trim() ? (r as any).subject.trim() : jid.replace(/@.*$/, '');
+    const size = Number((r as any)?.size ?? (r as any)?.participants?.length ?? 0);
+    out.set(jid, { jid, name: name.slice(0, 120), size: Number.isFinite(size) ? size : 0 });
+  }
+  return [...out.values()];
+}
+
 /**
  * Registro do histórico que vira bolha: o mesmo filtro do `messages.upsert`, sem os desvios —
  * reação e edição de mensagem antiga são descartadas em vez de aplicadas.
@@ -622,4 +653,21 @@ export function nomeDeContatoValido(name: string, phone: string): boolean {
   if (!n || n.length > 80) return false;
   const digitos = n.replace(/\D/g, '');
   return !(digitos.length >= 8 && digitos === n.replace(/[\s+()-]/g, '')) && digitos !== phone;
+}
+
+/**
+ * Menu → `POST /message/sendButtons` com botões `reply` (o Baileys monta nativeFlow quick_reply).
+ * O título é o cabeçalho do menu ou a 1ª linha do texto; o resto vai na descrição. Rótulo do
+ * botão até 20 caracteres, como na Meta (o WhatsApp corta maior).
+ */
+export function menuButtonsPayload(m: Pick<OutboundMessage, 'text' | 'interactive'>) {
+  const text = (m.text ?? '').trim();
+  const [primeira, ...resto] = text.split('\n');
+  const header = m.interactive?.header?.trim();
+  return {
+    title: (header || primeira || 'Escolha uma opção').slice(0, 60),
+    description: (header ? text : resto.join('\n').trim()) || undefined,
+    footer: m.interactive?.footer?.slice(0, 60) || undefined,
+    buttons: (m.interactive?.options ?? []).slice(0, 3).map((o) => ({ type: 'reply', displayText: o.title.slice(0, 20), id: o.id.slice(0, 256) })),
+  };
 }

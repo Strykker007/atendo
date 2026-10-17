@@ -62,6 +62,10 @@ class StartDto {
   @IsOptional() @IsBoolean() resumeBot?: boolean;
 }
 
+class ReorderFlowsDto {
+  @IsArray() @ArrayMaxSize(1000) @IsUUID('4', { each: true }) ids: string[];
+}
+
 /** Fluxos de automação — funcionalidade plugável no plano (`features: ['flows']`). */
 @Controller('flows')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard, FeatureGuard)
@@ -79,8 +83,8 @@ export class FlowsController {
   list(@CurrentUser() u: AuthUser) {
     return this.prisma.flow.findMany({
       where: { tenantId: u.tenantId },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true, description: true, isActive: true, showInChat: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
+      select: { id: true, name: true, description: true, isActive: true, showInChat: true, position: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
     });
   }
 
@@ -115,6 +119,7 @@ export class FlowsController {
     return this.prisma.flow.create({
       data: {
         tenantId: u.tenantId,
+        position: await this.nextPosition(u.tenantId),
         name: dto.name,
         description: dto.description,
         isActive: dto.isActive ?? true,
@@ -124,6 +129,20 @@ export class FlowsController {
         definition: dto.definition as object,
       },
     });
+  }
+
+  /** Ordem da lista (arrastar): a tela manda os ids na ordem nova; id de outro tenant é ignorado. */
+  @Patch('reorder')
+  @RequirePermission('flows.manage')
+  async reorder(@CurrentUser() u: AuthUser, @Body() dto: ReorderFlowsDto) {
+    await this.prisma.$transaction(dto.ids.map((id, position) => this.prisma.flow.updateMany({ where: { id, tenantId: u.tenantId }, data: { position } })));
+    return { ok: true };
+  }
+
+  /** novo fluxo entra no fim da lista */
+  private async nextPosition(tenantId: string) {
+    const last = await this.prisma.flow.aggregate({ where: { tenantId }, _max: { position: true } });
+    return (last._max.position ?? -1) + 1;
   }
 
   @Patch(':id')
@@ -242,7 +261,7 @@ export class FlowsController {
       const name = copyName(f.name, taken);
       taken.push(name);
       created.push(await this.prisma.flow.create({
-        data: { tenantId, name, description: f.description, isActive: false, showInChat: f.showInChat, trigger: f.trigger as object, definition: f.definition as object },
+        data: { tenantId, name, position: await this.nextPosition(tenantId), description: f.description, isActive: false, showInChat: f.showInChat, trigger: f.trigger as object, definition: f.definition as object },
       }));
     }
     return created;
@@ -350,7 +369,7 @@ export class FlowsController {
       const name = uniqueName(b.name, taken);
       taken.push(name);
       flows.push(await this.prisma.flow.create({
-        data: { tenantId: u.tenantId, name, description: b.description, isActive: false, trigger: b.trigger as object, definition: b.definition as object },
+        data: { tenantId: u.tenantId, name, position: await this.nextPosition(u.tenantId), description: b.description, isActive: false, trigger: b.trigger as object, definition: b.definition as object },
       }));
       b.warnings.forEach((w) => warnings.add(built.length > 1 ? `${name}: ${w}` : w));
     }

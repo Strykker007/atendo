@@ -6,7 +6,7 @@ import type { Conversation, ConversationEventType, ConversationOrigin, Conversat
 import { CloseReasonsService } from '../close-reasons/close-reasons.module';
 import { AuditService } from '../audit/audit.module';
 import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, isCpfCnpjLength, messagePreview } from '@atendo/shared';
-import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateValues } from '@atendo/shared';
+import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateChoice, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -27,6 +27,7 @@ import { spin } from './spin';
 import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, hasColdSlot, isWarm } from './cold-send';
 import { RedisService } from '../../common/redis/redis.service';
 import { conflictMap, resolveConflicts } from '../tags/conflicts';
+import { buildTransferMessage, DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFER_TEXT, type TransferVars } from './transfer-message';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -42,6 +43,20 @@ const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permis
 
 
 const META_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Valores de um template escolhido (tela ou config salva): variáveis, botões e arquivo do cabeçalho. */
+export type TemplateValuesInput = Pick<TemplateChoice, 'header' | 'body' | 'buttons' | 'headerMediaKey' | 'headerMediaName'>;
+
+/**
+ * Template pronto para envio. Com cabeçalho de mídia: `mediaKey`/`media` para o `send` do
+ * atendente e `systemMedia` para o `sendAsSystem` (lembrete, transmissão).
+ */
+export type TemplateOutbound = Omit<OutboundMessage, 'to'> & { mediaKey?: string; systemMedia?: { key: string; type: 'image' | 'video' | 'document'; name?: string } };
+
+/** Assinatura do atendente no formato do painel (`*Nome:*` na 1ª linha); já assinada fica como está. */
+export function signText(text: string, name: string): string {
+  return /^\*[^*\n]{1,80}?:?\*\n/.test(text) ? text : `*${name.slice(0, 80)}:*\n${text.trim()}`;
+}
+
 /** O contato escreveu nas últimas 24h? Fora disso a Meta só aceita template. */
 const inMetaWindow = (lastInboundAt: Date | null | undefined) => !!lastInboundAt && Date.now() - lastInboundAt.getTime() < META_WINDOW_MS;
 
@@ -176,7 +191,7 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
+    q: { status?: ConversationStatus; free?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
@@ -186,12 +201,14 @@ export class ConversationsService {
     // abaixo também usa OR, e dois OR no mesmo nível se sobrescreveriam
     const dept = departmentWhere(viewer, q.departmentId);
     const ownership: Prisma.ConversationWhereInput =
-      q.assigneeId && isAdmin ? { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
+      q.free ? {} : q.assigneeId && isAdmin ? { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
       number: { deletedAt: null },
-      ...(q.status && { status: q.status }),
+      // aba "Livres": só os contatos isentos de ticket, em qualquer status. As abas de atendimento
+      // nunca mostram conversa livre (docs/contatos-isentos.md)
+      ...(q.free ? { ticketExempt: true } : { ticketExempt: false, ...(q.status && { status: q.status }) }),
       ...(q.origin && { origin: q.origin }),
       ...ownership,
       // o número pedido é interseccionado com o escopo do usuário; `null` = pediu um número
@@ -214,7 +231,7 @@ export class ConversationsService {
       // "Encerradas": quem acabou de encerrar primeiro (`closedAt`). Pela última mensagem, a recém-
       // encerrada podia cair abaixo das 50 primeiras e só "aparecia" depois de outra mensagem
       orderBy:
-        q.status === 'closed'
+        q.status === 'closed' && !q.free
           ? [{ closedAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
           : q.sort === 'waiting'
           ? [{ awaitingSince: { sort: 'asc', nulls: 'last' } }, { lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
@@ -232,15 +249,18 @@ export class ConversationsService {
   async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string) {
     const scoped = narrowTo(viewer, numberId);
     const dept = departmentWhere(viewer, departmentId);
-    const base: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
-    const [waiting, closed, mine, all] = await Promise.all([
+    const escopo: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
+    // conversa livre (contato isento) não é fila: conta só na aba "Livres"
+    const base: Prisma.ConversationWhereInput = { ...escopo, ticketExempt: false };
+    const [waiting, closed, mine, all, free] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'in_progress', assigneeId: viewer.id } }),
       this.prisma.conversation.count({ where: { ...base, status: 'in_progress' } }),
+      this.prisma.conversation.count({ where: { ...escopo, ticketExempt: true } }),
     ]);
     // atendente comum conta só as suas em atendimento; admin conta todas
-    return { waiting, in_progress: may(viewer, 'conversations.view_all') ? all : mine, closed, in_progress_mine: mine, in_progress_all: all };
+    return { waiting, in_progress: may(viewer, 'conversations.view_all') ? all : mine, closed, in_progress_mine: mine, in_progress_all: all, free };
   }
 
   /**
@@ -274,7 +294,30 @@ export class ConversationsService {
     const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: target.id, status: conv.status === 'closed' ? 'closed' : 'in_progress' } });
     await this.registrar({ tenantId, conversationId: id, type: 'transferred', actorId: by.id, targetId: target.id, fromStatus: conv.status, toStatus: updated.status });
     this.gateway.emitConversation(tenantId, updated);
+    if (conv.assigneeId !== target.id) {
+      // alerta (som + destaque) só na tela de quem recebeu — e não em quem transferiu para si mesmo
+      if (target.id !== by.id) {
+        const contact = await this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { name: true, phone: true } });
+        const autor = await this.prisma.user.findUnique({ where: { id: by.id }, select: { name: true } });
+        this.gateway.emitTransferAlert(tenantId, target.id, { conversationId: id, contactName: contact?.name || contact?.phone || 'Cliente', byName: autor?.name ?? null });
+      }
+      if (updated.status !== 'closed') await this.sendTransferNotice(tenantId, id, { agentName: target.name });
+    }
     return updated;
+  }
+
+  /**
+   * Mensagem automática ao cliente na transferência (Configurações → Transferência). Sai pela
+   * fila de saída como mensagem do sistema (quota, janela de 24h da Meta, ledger). Nunca derruba
+   * a transferência: número desconectado, fora da janela da Meta ou descadastro só pulam o aviso.
+   */
+  private async sendTransferNotice(tenantId: string, conversationId: string, vars: TransferVars) {
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { transferMessageEnabled: true, transferMessageText: true, departmentTransferMessageText: true } });
+    if (!s?.transferMessageEnabled) return;
+    const department = vars.departmentName !== undefined;
+    const text = buildTransferMessage(department ? (s.departmentTransferMessageText ?? DEFAULT_DEPARTMENT_TRANSFER_TEXT) : (s.transferMessageText ?? DEFAULT_TRANSFER_TEXT), vars);
+    if (!text) return;
+    await this.sendAsSystem(conversationId, text).catch((err) => this.log.warn(`aviso de transferência não enviado (${conversationId}): ${err instanceof Error ? err.message : err}`));
   }
 
   /**
@@ -300,6 +343,8 @@ export class ConversationsService {
     });
     await this.registrar({ tenantId, conversationId: id, type: 'department_changed', actorId: by.id, fromStatus: conv.status, toStatus: updated.status, reason: departmentChangeReason(conv.department?.name, target?.name) });
     this.gateway.emitConversation(tenantId, updated);
+    // tirar de departamento não é transferência para alguém: sem aviso ao cliente
+    if (target && updated.status !== 'closed') await this.sendTransferNotice(tenantId, id, { departmentName: target.name });
     return this.one(tenantId, id);
   }
 
@@ -507,7 +552,7 @@ export class ConversationsService {
    * `outsideWindow`: número Meta e contato fora da janela de 24h → pede o template a quem chamou
    * (recebe o número, porque o template é aprovado por conta). Sem ele, o envio é recusado.
    */
-  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; allowCold?: boolean; checkPhone?: PhoneCheck; outsideWindow?: (numberId: string) => Promise<Omit<OutboundMessage, 'to'> | null> }) {
+  async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; allowCold?: boolean; checkPhone?: PhoneCheck; outsideWindow?: (numberId: string) => Promise<TemplateOutbound | null> }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
     let conv = await this.prisma.conversation.findFirst({ where: { tenantId, contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } });
     if (!conv) {
@@ -520,7 +565,7 @@ export class ConversationsService {
     if (conv.number.provider === 'meta' && !inMetaWindow(conv.lastInboundAt) && opts?.outsideWindow) {
       const tpl = await opts.outsideWindow(conv.numberId);
       if (!tpl?.template) throw new BadRequestException('O contato não escreve há mais de 24 horas e não há template aprovado configurado para este envio (na API oficial, depois de 24 horas só sai template).');
-      return this.sendAsSystem(conv.id, tpl.text, undefined, undefined, { ...send, template: tpl.template });
+      return this.sendAsSystem(conv.id, tpl.text, tpl.systemMedia, undefined, { ...send, template: tpl.template });
     }
     return this.sendAsSystem(conv.id, text, undefined, opts?.interactive, send);
   }
@@ -605,6 +650,9 @@ export class ConversationsService {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { tenantId: true, status: true, assigneeId: true, botPausedAt: true } });
     if (!antes || antes.status === 'closed') return avisos;
     const tenantId = antes.tenantId;
+    // empresa sem venda (atendimento): o valor do card não vira faturamento
+    const vendas = (await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true } }))?.salesEnabled ?? true;
+    if (!vendas) d = { ...d, value: null };
     // pagamento confirmado: o robô não pode dar "Não comprou" — vira "Comprou" com o valor pago
     const pagos = await this.pagosAbertos(conversationId);
     if (pagos.ids.length && d.outcome === 'lost') {
@@ -715,7 +763,8 @@ export class ConversationsService {
     // Responder = assumir. Atômico: se outra atendente assumiu no meio tempo, falha com o nome dela.
     // Conversa de OUTRA pessoa: ninguém (nem admin) responde ao cliente por ela — admin/gerente usa
     // nota interna (cadeado). Para atender, transfere para si.
-    if (conv.assigneeId !== authorId) {
+    // Conversa livre (contato isento, docs/contatos-isentos.md) não tem dono: responder não assume.
+    if (conv.assigneeId !== authorId && !conv.ticketExempt) {
       const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, OR: [{ assigneeId: null }, { assigneeId: authorId }] }, data: { assigneeId: authorId, status: 'in_progress' } });
       if (r.count === 0) {
         const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
@@ -732,6 +781,12 @@ export class ConversationsService {
       const agent = await this.prisma.user.findUnique({ where: { id: authorId }, select: { name: true } });
       const ctx = await this.interpolation.forContact(tenantId, conv.contactId, {}, { agentName: agent?.name });
       input = { ...input, text: interpolate(input.text, ctx, undefined, { keepUnknown: true }) };
+    }
+    // assinatura obrigatória (Configurações → Atendimento): a tela já trava o botão ligado; aqui
+    // é para nenhum caminho (app antigo, API) sair sem o nome. Template, encaminhada e Pix saem intactos
+    if (input.text?.trim() && !input.template && !input.forwarded && !input.pix && (await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { requireSignature: true } }))?.requireSignature) {
+      const nome = (await this.prisma.user.findUnique({ where: { id: authorId }, select: { name: true } }))?.name?.trim();
+      if (nome) input = { ...input, text: signText(input.text, nome) };
     }
     const created = await this.createOnce(conv.id, key, () => this.prisma.message.create({
       data: {
@@ -815,12 +870,24 @@ export class ConversationsService {
    * Os valores aceitam `{{contact.first_name}}`, globais e `vars` (ex.: `{{servico}}` do
    * lembrete); variável que resolve vazia conta como não preenchida (400 com o nome dela).
    */
-  async templateMessage(tenantId: string, contactId: string, definition: MessageTemplate, values: { header?: TemplateValues; body?: TemplateValues }, extra?: { agentName?: string | null; vars?: Record<string, string> }): Promise<Omit<OutboundMessage, 'to'>> {
+  async templateMessage(tenantId: string, contactId: string, definition: MessageTemplate, values: TemplateValuesInput, extra?: { agentName?: string | null; vars?: Record<string, string> }): Promise<TemplateOutbound> {
+    // o arquivo do cabeçalho tem de ser do storage do próprio tenant (vem da tela ou da config salva)
+    if (values.headerMediaKey && !values.headerMediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException('Arquivo do cabeçalho inválido.');
     const ctx = await this.interpolation.forContact(tenantId, contactId, extra?.vars ?? {}, { agentName: extra?.agentName });
     const fill = (v?: TemplateValues) => Object.fromEntries(Object.entries(v ?? {}).map(([k, x]) => [k, interpolate(String(x ?? ''), ctx, undefined, { keepUnknown: false })]));
     try {
-      const built = buildTemplateSend(definition, { header: fill(values.header), body: fill(values.body) });
-      return { type: 'text', text: built.text, template: built.template };
+      const built = buildTemplateSend(definition, {
+        header: fill(values.header),
+        body: fill(values.body),
+        buttons: fill(values.buttons),
+        headerMedia: values.headerMediaKey ? { key: values.headerMediaKey, name: values.headerMediaName } : undefined,
+      });
+      return {
+        type: 'text',
+        text: built.text,
+        template: built.template,
+        ...(built.media && { mediaKey: built.media.key, media: { url: built.media.key, fileName: built.media.name }, systemMedia: built.media }),
+      };
     } catch (err) {
       throw new BadRequestException(err instanceof Error ? err.message : String(err));
     }
@@ -847,7 +914,7 @@ export class ConversationsService {
       phone?: string;
       name?: string;
       text?: string;
-      template?: { definition: MessageTemplate; header?: TemplateValues; body?: TemplateValues };
+      template?: TemplateValuesInput & { definition: MessageTemplate };
       idempotencyKey?: string;
     },
     checkPhone?: PhoneCheck,
@@ -895,7 +962,7 @@ export class ConversationsService {
 
     // template: variáveis do painel ({{contact.first_name}}…) resolvidas antes de ir para a Meta
     const agentName = input.template ? (await this.prisma.user.findUnique({ where: { id: author.id }, select: { name: true } }))?.name : undefined;
-    const message: Omit<OutboundMessage, 'to'> = input.template
+    const message: TemplateOutbound = input.template
       ? await this.templateMessage(tenantId, contact.id, input.template.definition, input.template, { agentName })
       : { type: 'text', text: input.text };
 
@@ -905,7 +972,8 @@ export class ConversationsService {
     } else if (conv.status === 'closed') {
       conv = await this.setStatus(tenantId, conv.id, 'in_progress', author.id);
     }
-    const sent = await this.send(tenantId, author, conv.id, { ...message, idempotencyKey: input.idempotencyKey });
+    const { systemMedia: _m, ...msg } = message;
+    const sent = await this.send(tenantId, author, conv.id, { ...msg, idempotencyKey: input.idempotencyKey });
     return { conversationId: conv.id, message: sent };
   }
 
@@ -1234,6 +1302,27 @@ export class ConversationsService {
     this.gateway.emitConversation(tenantId, updated);
     this.gateway.emitMessagesCleared(tenantId, conversationId);
     return r;
+  }
+
+  /**
+   * Excluir a conversa (a "janela" com o contato) de vez: mensagens, eventos, tags, agendadas e
+   * execuções de fluxo vão junto (cascade); o contato fica. Se a pessoa escrever de novo, nasce
+   * uma conversa nova. Nada é apagado no WhatsApp (ver `clearHistory`).
+   *
+   * Venda e orçamento pago ficariam fora do faturamento sem ninguém perceber: com eles, recusa —
+   * o caminho é limpar o histórico, que mantém o atendimento nos relatórios. Fica na auditoria.
+   */
+  async deleteConversation(tenantId: string, actor: Viewer & { name: string }, conversationId: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, select: { id: true, _count: { select: { sales: true, messages: true } } } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    const pagos = await this.prisma.budget.count({ where: { conversationId, status: 'PAID' } });
+    if (conv._count.sales || pagos) {
+      throw new BadRequestException({ code: 'has_sales', message: 'Esta conversa tem venda ou orçamento pago registrado: excluir tiraria o valor do faturamento. Use "Limpar histórico" — o atendimento continua nos relatórios.' });
+    }
+    await this.audit.record(tenantId, 'conversation.deleted', actor.id, [{ conversationId, data: { messages: conv._count.messages } }]);
+    await this.prisma.conversation.delete({ where: { id: conversationId } });
+    this.gateway.emitConversationDeleted(tenantId, conversationId);
+    return { ok: true };
   }
 
   /** Prévia do card e resumo da IA não podem continuar mostrando o que foi apagado. */

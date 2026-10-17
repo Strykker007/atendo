@@ -22,6 +22,8 @@ import type { SetPrimaryTagInput } from '@atendo/shared';
 
 class ListDto {
   @IsOptional() @IsEnum(ConversationStatus) status?: ConversationStatus;
+  /** aba "Livres": conversas de contatos isentos de ticket (ignora `status`) */
+  @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() free?: boolean;
   @IsOptional() @IsUUID() numberId?: string;
   /** id do departamento ou `none` (só as sem departamento) */
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;
@@ -223,7 +225,9 @@ export class ConversationsController {
     if (dto.internal) assertCanCloseInternal(u);
     else {
       const labels = await this.outcomeLabels(u.tenantId);
-      if (dto.outcome === 'won') throw new BadRequestException(`“${labels.won}” é encerrado um a um, com o valor de cada venda.`);
+      // sem venda (empresa de atendimento) não há valor a repetir: "Resolvido" em massa vale
+      const vendas = (await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { salesEnabled: true } }))?.salesEnabled ?? true;
+      if (dto.outcome === 'won' && vendas) throw new BadRequestException(`“${labels.won}” é encerrado um a um, com o valor de cada venda.`);
       assertOutcome(dto, true, labels);
     }
     return this.conversations.closeMany(u.tenantId, u, dto.ids, { outcome: dto.outcome ?? 'none', tagIds: dto.tagIds, closeReasonId: dto.closeReasonId, internal: dto.internal });
@@ -245,7 +249,7 @@ export class ConversationsController {
     if (dto.template) {
       // o número tem de ser do tenant ANTES de perguntar à Meta pelos templates dele
       await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: dto.numberId, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
-      template = { definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language), header: dto.template.header, body: dto.template.body };
+      template = { ...dto.template, definition: await this.numbers.template(dto.numberId, dto.template.name, dto.template.language) };
     }
     return this.conversations.start(u.tenantId, u, { numberId: dto.numberId, contactId: dto.contactId, phone: dto.phone, name: dto.name, text: dto.text, template, idempotencyKey: dto.idempotencyKey }, (numberId, phone) => this.numbers.hasWhatsApp(numberId, phone));
   }
@@ -331,7 +335,7 @@ export class ConversationsController {
       const conv = await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { numberId: true, contactId: true, number: { select: { provider: true } } } });
       if (conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
       const definition = await this.numbers.template(conv.numberId, dto.template.name, dto.template.language);
-      const msg = await this.conversations.templateMessage(u.tenantId, conv.contactId, definition, dto.template, { agentName: u.name });
+      const { systemMedia: _m, ...msg } = await this.conversations.templateMessage(u.tenantId, conv.contactId, definition, dto.template, { agentName: u.name });
       return this.conversations.send(u.tenantId, u, id, { ...msg, expectedNumberId: dto.expectedNumberId, idempotencyKey: dto.idempotencyKey });
     }
     if (dto.pixKeyId) {
@@ -411,6 +415,13 @@ export class ConversationsController {
     return this.conversations.deletedOriginal(u.tenantId, id, messageId);
   }
 
+  /** Excluir a conversa inteira (só no painel; o contato fica e uma nova nasce se ele escrever). */
+  @Delete(':id')
+  @RequirePermission('conversations.delete_conversation')
+  deleteConversation(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.deleteConversation(u.tenantId, u, id);
+  }
+
   /** Limpar o histórico da conversa (só no painel; a conversa continua existindo). */
   @Delete(':id/messages')
   @RequirePermission('conversations.delete_chat')
@@ -432,9 +443,12 @@ export class ConversationsController {
     const interno = dto.status === 'closed' && !!dto.internal;
     if (interno) assertCanCloseInternal(u);
     else if (dto.status === 'closed') {
-      const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { requireSaleValue: true, wonLabel: true, lostLabel: true } });
-      const pago = dto.outcome === 'won' ? (await this.conversations.pagosAbertos(id)).total : 0;
-      assertOutcome(dto, s?.requireSaleValue ?? true, s ? { won: s.wonLabel, lost: s.lostLabel } : undefined, pago);
+      const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { requireSaleValue: true, salesEnabled: true, wonLabel: true, lostLabel: true } });
+      // sem venda (empresa de atendimento): o resultado continua obrigatório, mas valor, itens e
+      // observação de venda não existem — descartados aqui para nenhum caminho gravar venda
+      if (s && !s.salesEnabled) Object.assign(dto, { value: undefined, items: undefined, products: undefined, notes: undefined });
+      const pago = dto.outcome === 'won' && s?.salesEnabled !== false ? (await this.conversations.pagosAbertos(id)).total : 0;
+      assertOutcome(dto, (s?.requireSaleValue ?? true) && s?.salesEnabled !== false, s ? { won: s.wonLabel, lost: s.lostLabel } : undefined, pago);
     }
     // pesquisa: conferida ANTES de encerrar (id inválido não pode fechar sem ela). Interno não tem
     const pesquisa = dto.status === 'closed' && !interno ? await this.surveys.resolve(u.tenantId, dto.surveyId) : null;

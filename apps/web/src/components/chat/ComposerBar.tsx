@@ -37,6 +37,8 @@ export interface ComposerBarProps {
   enviando?: boolean;
   /** assinatura ligada: o nome do atendente vai junto na mensagem */
   assinando: boolean;
+  /** a empresa exige a assinatura: o botão fica ligado e não desliga */
+  assinaturaObrigatoria?: boolean;
   onAssinando: (v: boolean) => void;
   /** conteúdo extra à direita (copiloto de IA) */
   direita?: React.ReactNode;
@@ -46,7 +48,7 @@ export interface ComposerBarProps {
   onAgendado: () => void;
 }
 
-export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, onAssinando, direita, texto, onAgendado }: ComposerBarProps) {
+export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, assinaturaObrigatoria, onAssinando, direita, texto, onAgendado }: ComposerBarProps) {
   const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'mencao' | 'variavel' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
   const [agendando, setAgendando] = useState(false);
@@ -95,9 +97,9 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
       <Atalho
         icone={<span className="text-[15px] font-bold underline underline-offset-2 decoration-2 leading-none">A</span>}
-        titulo={assinando ? 'Assinatura ligada: seu nome vai junto' : 'Assinar as mensagens com o seu nome'}
+        titulo={assinaturaObrigatoria ? 'Assinatura obrigatória nesta empresa: seu nome vai junto' : assinando ? 'Assinatura ligada: seu nome vai junto' : 'Assinar as mensagens com o seu nome'}
         ativo={assinando}
-        onClick={() => onAssinando(!assinando)}
+        onClick={() => { if (!assinaturaObrigatoria) onAssinando(!assinando); }}
       />
       {enviando && <span className="text-[11px] text-muted ml-1">enviando arquivo…</span>}
       <span className="flex-1" />

@@ -124,6 +124,9 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 | `kanban` | `{}` | colunas do Kanban mudaram (ordem, tag virou/deixou de ser etapa, criada, excluída) |
 | `tenant_number` | `{tenantId, id, status}` | sala `owners`: espelho do `number` de qualquer cliente (sem QR) — o monitor recarrega |
 | `tenant_presence` | `{tenantId}` | sala `owners`: alguém do cliente abriu/fechou o painel (o dono "entrando como" não conta) |
+| `internal_message` | `InternalMessage` | mensagem do chat interno — só para a sala `user:` de cada membro ([chat-interno.md](chat-interno.md)) |
+| `internal_chat` | `{chatId}` | conversa interna criada/lida — a lista do widget recarrega |
+| `support_message` / `support_chat` | `InternalMessage` / `{chatId}` | canal de suporte de um cliente — só na sala `owners` ([chat-interno.md#suporte](chat-interno.md#suporte)) |
 | `system_notice` | `SystemNotice` | aviso global publicado pelo dono (sala `global`) — ver [avisos.md](avisos.md) |
 | `typing` | `TypingEvent` `{conversationId, state}` | contato digitando (`composing`), gravando (`recording`) ou parou (`paused`). Efêmero, só Evolution |
 

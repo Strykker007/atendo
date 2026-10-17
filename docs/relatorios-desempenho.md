@@ -40,3 +40,4 @@ e no ranking. Listas paginadas (auditoria, vendas) não usam cache, só o limite
 2. Resultado agregado (não paginado) vai por `this.load.cached(ReportLoadService.key(tenantId, 'nome', filtros), …)`.
 3. Período passa por `assertReportRange(from, to)`.
 4. Hook do front com `staleTime` e `refetchOnWindowFocus: false`.
+5. Conversa de contato isento de ticket fica de fora: `not c."ticketExempt"` quando a consulta junta `conversations`, ou `semIsento(<coluna conversationId>)` quando não junta ([Contatos isentos](contatos-isentos.md)).

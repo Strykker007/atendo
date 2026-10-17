@@ -4,7 +4,7 @@ import { MessageStatus, MessageType, NumberStatus, BillingCategory, templatePara
 import type { InboundMessage, MessageTemplate, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
 import type { MediaPayload, NumberContext, OutboundReaction, ParsedWebhook, WhatsAppProvider } from './provider.interface';
-import { describeProviderError, ProviderSendError } from './provider-error';
+import { describeMetaError, ProviderSendError } from './provider-error';
 import { textoQualquer } from './payload-text';
 
 /** providerConfig (criptografado) de um número Meta */
@@ -33,13 +33,19 @@ export class MetaProvider implements WhatsAppProvider {
       headers: { Authorization: `Bearer ${cfg.accessToken}`, 'Content-Type': 'application/json', ...init?.headers },
     });
     const json = (await res.json()) as any;
-    if (!res.ok) throw new ProviderSendError(describeProviderError(json?.error, `Meta API ${res.status}`), res.status, typeof json?.error?.code === 'number' ? json.error.code : undefined);
+    if (!res.ok) throw new ProviderSendError(describeMetaError(json?.error, `Meta API ${res.status}`), res.status, typeof json?.error?.code === 'number' ? json.error.code : undefined);
     return json as T;
   }
 
+  /**
+   * Na Meta não há QR: conectar = validar token e phone_number_id e inscrever o app na WABA.
+   * Sem a inscrição (`subscribed_apps`) a Meta não manda webhook nenhum do número — recebe nada,
+   * mesmo com o webhook configurado no app. É idempotente: reconectar não duplica.
+   */
   async connect(ctx: NumberContext) {
-    // Na Meta não há "conectar": basta validar o token/phone_number_id.
-    await this.graph(this.cfg(ctx), `${this.cfg(ctx).phoneNumberId}?fields=display_phone_number`);
+    const cfg = this.cfg(ctx);
+    await this.graph(cfg, `${cfg.phoneNumberId}?fields=display_phone_number`);
+    if (cfg.wabaId) await this.graph(cfg, `${cfg.wabaId}/subscribed_apps`, { method: 'POST' });
     return { status: NumberStatus.CONNECTED };
   }
 
@@ -47,9 +53,11 @@ export class MetaProvider implements WhatsAppProvider {
     /* nada a fazer: o número continua na WABA */
   }
 
+  /** Só lê o número (o health check roda sempre; a inscrição fica no `connect`). */
   async getStatus(ctx: NumberContext) {
     try {
-      await this.connect(ctx);
+      const cfg = this.cfg(ctx);
+      await this.graph(cfg, `${cfg.phoneNumberId}?fields=display_phone_number`);
       return NumberStatus.CONNECTED;
     } catch {
       return NumberStatus.ERROR;
@@ -84,7 +92,16 @@ export class MetaProvider implements WhatsAppProvider {
       }
     } else if (m.template) {
       body.type = 'template';
-      body.template = { name: m.template.name, language: { code: m.template.language }, components: m.template.components };
+      const components = [...(m.template.components ?? [])];
+      const kind = m.template.headerMedia;
+      if (kind) {
+        // cabeçalho de mídia: arquivo do nosso storage sobe para a Meta (vai por id); link público vai como está
+        const ref = media ? { id: await this.uploadMedia(cfg, media) } : m.media?.url?.startsWith('http') ? { link: m.media.url } : null;
+        if (!ref) throw new BadRequestException('Template com cabeçalho de mídia sem o arquivo do cabeçalho.');
+        const fileName = media?.fileName ?? m.media?.fileName;
+        components.unshift({ type: 'header', parameters: [{ type: kind, [kind]: { ...ref, ...(kind === 'document' && fileName && { filename: fileName }) } }] });
+      }
+      body.template = { name: m.template.name, language: { code: m.template.language }, ...(components.length && { components }) };
       billingCategory = m.template.category;
     } else if (m.type === MessageType.TEXT) {
       body.type = 'text';
@@ -116,7 +133,7 @@ export class MetaProvider implements WhatsAppProvider {
     form.append('file', new Blob([new Uint8Array(media.data)], { type: media.mimeType }), media.fileName ?? 'file');
     const res = await fetch(`${this.base}/${cfg.phoneNumberId}/media`, { method: 'POST', headers: { Authorization: `Bearer ${cfg.accessToken}` }, body: form });
     const json = (await res.json()) as any;
-    if (!res.ok) throw new ProviderSendError(describeProviderError(json?.error, 'Falha no upload de mídia para a Meta'), res.status, typeof json?.error?.code === 'number' ? json.error.code : undefined);
+    if (!res.ok) throw new ProviderSendError(describeMetaError(json?.error, 'Falha no upload de mídia para a Meta'), res.status, typeof json?.error?.code === 'number' ? json.error.code : undefined);
     return json.id as string;
   }
 
@@ -207,7 +224,7 @@ export class MetaProvider implements WhatsAppProvider {
             externalId: st.id,
             status: this.mapStatus(st.status),
             timestamp: new Date(Number(st.timestamp) * 1000),
-            error: st.errors?.[0]?.title,
+            error: st.errors?.[0] ? describeMetaError(st.errors[0], 'Falha na entrega') : undefined,
           });
         }
       }
@@ -339,9 +356,9 @@ function metaMediaExtras(type: string, caption?: string, filename?: string) {
 
 /**
  * Template da Graph API → formato canônico. `null` = não é aprovado (a listagem já filtra, mas
- * status muda). O que o painel ainda não sabe preencher (cabeçalho de mídia, URL dinâmica em
- * botão, código de autenticação) volta com `unsupported` em vez de sumir: o atendente vê que o
- * template existe e por que não dá para usar daqui.
+ * status muda). O que o painel ainda não sabe preencher (cabeçalho de localização, botão de
+ * formulário/catálogo, código de autenticação) volta com `unsupported` em vez de sumir: o
+ * atendente vê que o template existe e por que não dá para usar daqui.
  */
 export function parseMetaTemplate(raw: any): MessageTemplate | null {
   if (!raw?.name || String(raw.status ?? 'APPROVED').toUpperCase() !== 'APPROVED') return null;
@@ -356,8 +373,16 @@ export function parseMetaTemplate(raw: any): MessageTemplate | null {
 
   let unsupported: string | undefined;
   if (category === 'authentication') unsupported = 'Template de autenticação (código) não é enviado pelo painel.';
-  else if (headerFormat && headerFormat !== 'TEXT') unsupported = 'Cabeçalho com mídia ainda não é suportado no painel.';
-  else if (buttons.some((b) => String(b?.type).toUpperCase() === 'URL' && templateParams(b?.url).length)) unsupported = 'Botão com link dinâmico ainda não é suportado no painel.';
+  else if (headerFormat === 'LOCATION') unsupported = 'Cabeçalho com localização ainda não é suportado no painel.';
+  else if (buttons.some((b) => ['FLOW', 'CATALOG', 'MPM', 'OTP'].includes(String(b?.type).toUpperCase()))) unsupported = 'Botão de formulário/catálogo ainda não é suportado no painel.';
+
+  // botões que pedem valor no envio: link com {{1}} no fim e "Copiar código" (cupom)
+  const dynamicButtons = buttons.flatMap((b, index): NonNullable<MessageTemplate['dynamicButtons']> => {
+    const type = String(b?.type).toUpperCase();
+    if (type === 'URL' && templateParams(b?.url).length) return [{ index, kind: 'url' as const, text: String(b?.text ?? ''), url: String(b.url) }];
+    if (type === 'COPY_CODE') return [{ index, kind: 'copy_code' as const, text: String(b?.text ?? 'Copiar código') }];
+    return [];
+  });
 
   return {
     id: String(raw.id ?? `${raw.name}:${raw.language}`),
@@ -371,6 +396,7 @@ export function parseMetaTemplate(raw: any): MessageTemplate | null {
     buttons: buttons.map((b) => String(b?.text ?? '')).filter(Boolean),
     headerParams: headerFormat === 'TEXT' ? templateParams(header?.text) : [],
     bodyParams: templateParams(body?.text),
+    ...(dynamicButtons.length && { dynamicButtons }),
     ...(unsupported && { unsupported }),
   };
 }

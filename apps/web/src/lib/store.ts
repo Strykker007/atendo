@@ -3,6 +3,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ConversationStatus, ConversationOrigin } from '@atendo/shared';
 
+/** Abas da lista de conversas: os três status do atendimento + "Livres" (contatos isentos de ticket). */
+export type ConversationTab = ConversationStatus | 'free';
+
 interface UIState {
   sidebarCollapsed: boolean;
   rightPanelOpen: boolean;
@@ -14,7 +17,7 @@ interface UIState {
   numberId: string | null;
   /** filtro de departamento: id, 'none' (sem departamento) ou null = todos */
   departmentId: string | null;
-  status: ConversationStatus;
+  status: ConversationTab;
   tagIds: string[];
   /** filtro de origem do lead; null = todas */
   origin: ConversationOrigin | null;
@@ -33,7 +36,7 @@ interface UIState {
   setNumber: (id: string | null) => void;
   setDepartment: (id: string | null) => void;
   /** keep = true mantém a conversa selecionada (usado ao responder) */
-  setStatus: (s: ConversationStatus, keep?: boolean) => void;
+  setStatus: (s: ConversationTab, keep?: boolean) => void;
   setTags: (ids: string[]) => void;
   setOrigin: (o: ConversationOrigin | null) => void;
   setAssignee: (id: string | null) => void;

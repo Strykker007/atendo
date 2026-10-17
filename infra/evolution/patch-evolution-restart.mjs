@@ -8,12 +8,16 @@
 //
 // Aqui, depois de fechar, espera a reconexão normal; se nenhum socket novo apareceu, cria um
 // com as credenciais salvas (sem QR). Socket vivo segue o caminho de antes (o evento reconecta).
+//
+// "Socket novo" = OUTRO objeto em `client`. A 1ª versão olhava só `ws.isOpen`, e o zumbi continua
+// com `isOpen` verdadeiro: o restart fechava, esperava, via "aberto" e não fazia nada (Drog. Kelly I,
+// 17/10/2026 — dois restarts, nenhum evento, só o QR resolveu).
 // Falha o build se não achar o trecho: versão nova pede revisão.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const FILES = ['/evolution/dist/main.js', '/evolution/dist/main.mjs'];
 const ORIGINAL = 'e.client?.ws?.close(),e.client?.end(new Error("restart")),await this.connectToWhatsapp({instanceName:s})';
-const PATCHED = 'e.client?.ws?.close(),e.client?.end(new Error("restart")),await new Promise(o=>setTimeout(o,3e3)),(e.client?.ws?.isOpen||e.client?.ws?.isConnecting||await e.connectToWhatsapp(e.phoneNumber)),await new Promise(o=>setTimeout(o,2e3)),await this.connectionState({instanceName:s})/*atendo-restart*/';
+const PATCHED = 'e.__atendoAntes=e.client,e.client?.ws?.close(),e.client?.end(new Error("restart")),await new Promise(o=>setTimeout(o,3e3)),(e.client!==e.__atendoAntes&&(e.client?.ws?.isOpen||e.client?.ws?.isConnecting)||await e.connectToWhatsapp(e.phoneNumber)),await new Promise(o=>setTimeout(o,2e3)),await this.connectionState({instanceName:s})/*atendo-restart*/';
 
 for (const file of FILES) {
   let src = readFileSync(file, 'utf8');

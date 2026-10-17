@@ -8,7 +8,7 @@ import { TenantGuard } from '../auth/tenant.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 
-export type AuditAction = 'conversation.closed_internal';
+export type AuditAction = 'conversation.closed_internal' | 'conversation.deleted';
 
 /**
  * Auditoria imutável (`audit_logs`): só grava e lista — não existe rota de alterar nem de apagar.
@@ -38,7 +38,7 @@ export class AuditService {
 }
 
 const ListQuery = z.object({
-  action: z.enum(['conversation.closed_internal']).optional(),
+  action: z.enum(['conversation.closed_internal', 'conversation.deleted']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });

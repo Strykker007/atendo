@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, Module, NotFoundException, Param, Put, Post, UseGuards } from '@nestjs/common';
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { BadRequestException, Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Put, Post, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { PIX_KEY_TYPES, PIX_KEY_TYPE_LABEL, type PixKeyType, type MessageContent, type PixPayment } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
@@ -17,6 +17,11 @@ class PixKeyDto {
   @IsString() @MaxLength(77) key: string;
   /** nome do recebedor no cartão; vazio = o título */
   @IsOptional() @IsString() @MaxLength(60) holderName?: string;
+}
+
+class ReorderPixKeysDto {
+  /** ids na ordem nova (a do chat) */
+  @IsArray() @ArrayMaxSize(PIX_KEYS_MAX) @IsUUID('4', { each: true }) ids: string[];
 }
 
 const select = { id: true, title: true, keyType: true, key: true, holderName: true, position: true } as const;
@@ -82,6 +87,14 @@ class PixKeysController {
     const total = await this.prisma.pixKey.count({ where: { tenantId: u.tenantId } });
     if (total >= PIX_KEYS_MAX) throw new BadRequestException(`Limite de ${PIX_KEYS_MAX} chaves Pix por empresa`);
     return this.prisma.pixKey.create({ data: { tenantId: u.tenantId, position: total, ...this.data(dto) }, select });
+  }
+
+  /** Ordem das chaves (setas na tela): ids na ordem nova; id de outro cliente é ignorado. Antes de `:id`. */
+  @Patch('reorder')
+  @RequirePermission('quick_replies.manage')
+  async reorder(@CurrentUser() u: AuthUser, @Body() dto: ReorderPixKeysDto) {
+    await this.prisma.$transaction(dto.ids.map((id, position) => this.prisma.pixKey.updateMany({ where: { id, tenantId: u.tenantId }, data: { position } })));
+    return { ok: true };
   }
 
   @Put(':id')

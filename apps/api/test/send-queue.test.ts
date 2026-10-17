@@ -241,6 +241,8 @@ describe('deduplicação', () => {
     const { svc, queue } = service({
       conversation: { findFirst: vi.fn().mockResolvedValue(conv), update: vi.fn() },
       message: { findUnique, findFirst: vi.fn(), create: vi.fn().mockRejectedValue(p2002) },
+      // assinatura obrigatória desligada (conversations.service consulta antes de criar)
+      tenantSettings: { findUnique: vi.fn().mockResolvedValue(null) },
     });
     const r = await svc.send('t1', author, 'c1', { type: 'text', text: 'oi', idempotencyKey: 'k1' });
     expect(r.id).toBe('m-1');

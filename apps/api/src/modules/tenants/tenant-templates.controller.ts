@@ -30,6 +30,8 @@ class RolloutDto {
   @IsOptional() @IsBoolean() closeReasons?: boolean;
   @IsOptional() @IsBoolean() replaceCloseReasons?: boolean;
   @IsOptional() @IsBoolean() tags?: boolean;
+  /** configurações de atendimento do modelo (encerramento com/sem venda, assinatura, nomes) */
+  @IsOptional() @IsBoolean() settings?: boolean;
   /** só calcula (prévia), sem gravar */
   @IsOptional() @IsBoolean() dryRun?: boolean;
 }

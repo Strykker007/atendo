@@ -223,7 +223,8 @@ class TenantsController {
         },
         include: { subscription: true },
       });
-      await tx.tenantSettings.create({ data: { tenantId: tenant.id } });
+      // configurações de atendimento do modelo (encerramento sem venda, assinatura, nomes dos resultados)
+      await tx.tenantSettings.create({ data: { tenantId: tenant.id, ...content?.settings } });
       // livro de descontos: nasceu com promoção (docs/05#livro-de-descontos)
       if (promo) await this.ledger.open({ tenantId: tenant.id, plan, priceMonth: promo.priceMonth, kind: 'promotion', source: 'tenant_create', promotion: promo.promotion, endsAt: promo.expiresAt }, tx);
       // tags do modelo, na ordem dele (é a das colunas do Kanban). As marcadas para o encerramento
@@ -323,8 +324,9 @@ class TenantsController {
     // gerente não promove ninguém a gerente (mesma regra do convite)
     if (dto.role !== undefined && u.role === 'manager') throw new BadRequestException('Só o admin da conta muda o papel.');
     if (dto.email !== undefined) {
-      rest.email = dto.email.trim();
-      const taken = await this.prisma.user.count({ where: { email: rest.email, id: { not: id } } });
+      // login em minúsculas; a unicidade é conferida sem diferenciar maiúsculas (o índice do banco diferencia)
+      rest.email = dto.email.trim().toLowerCase();
+      const taken = await this.prisma.user.count({ where: { email: { equals: rest.email, mode: 'insensitive' }, id: { not: id } } });
       if (taken) throw new BadRequestException('Este e-mail já está em uso.');
     }
     // `passwordSetAt` é o que libera o login de quem foi convidado: sem isto, definir a
@@ -340,12 +342,13 @@ class TenantsController {
       : base;
     // gerente não altera admins nem outros gerentes. Só a velocidade de digitação vale para qualquer
     // um da equipe (admin também atende) — não dá acesso nem tira de ninguém. O nome, o admin da
-    // conta edita de qualquer pessoa (inclusive de outro admin): é só rótulo, não muda acesso
+    // conta edita de qualquer pessoa (inclusive de outro admin): é só rótulo, não muda acesso.
+    // O e-mail (login) de outro admin — ou o próprio — também só o admin da conta troca
     const only = (keys: string[]) => Object.entries(dto).every(([k, v]) => keys.includes(k) || v === undefined);
     const editable = only(['typingSpeed'])
       ? (['agent', 'manager', 'tenant_admin'] as const)
       : u.role === 'manager' ? (['agent'] as const)
-      : u.role === 'tenant_admin' && only(['name', 'typingSpeed']) ? (['agent', 'manager', 'tenant_admin'] as const)
+      : u.role === 'tenant_admin' && only(['name', 'email', 'typingSpeed']) ? (['agent', 'manager', 'tenant_admin'] as const)
       : (['agent', 'manager'] as const);
     const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, email: true, role: true, isActive: true } });
     // revoga sessões ativas ao trocar senha, desativar, ou mudar login/papel (vão no token).

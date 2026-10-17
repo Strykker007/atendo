@@ -16,6 +16,10 @@ export interface TenantSettings {
   wonFlowId: string | null; lostFlowId: string | null;
   /** "Comprou" exige valor (padrão true) */
   requireSaleValue: boolean;
+  /** encerramento com venda (valor, itens, orçamento). false = empresa de atendimento: só resultado, motivo e tags */
+  salesEnabled: boolean;
+  /** assinatura do atendente obrigatória (o botão fica travado ligado; a API assina se faltar) */
+  requireSignature: boolean;
   /** motivo obrigatório em "Comprou" / "Não comprou" (cada um separado; padrão true) */
   requireReasonOnWon: boolean; requireReasonOnLost: boolean;
   /** pesos da pontuação do ranking; null = padrão (`RANKING_WEIGHTS_DEFAULT`) */
@@ -27,10 +31,13 @@ export interface TenantSettings {
   secureMediaText: string | null;
   /** logo das páginas públicas (foto protegida, orçamento): chave e URL assinada; null = marca do painel */
   publicLogoKey: string | null; publicLogoUrl: string | null;
+  /** mensagem automática ao cliente na transferência; textos null = os padrões (`transferDefaults`) */
+  transferMessageEnabled: boolean; transferMessageText: string | null; departmentTransferMessageText: string | null;
+  transferDefaults: { agent: string; department: string };
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'requireSignature' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

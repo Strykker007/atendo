@@ -56,11 +56,40 @@ const diasAteVencer = (t: TenantRow) => {
   return Math.ceil((new Date(s.currentPeriodEnd).getTime() - Date.now()) / 86_400_000);
 };
 
-type Filtros = { busca: string; plano: string; status: string; vencimento: '' | 'vencido' | '7dias' | '30dias'; situacao: '' | 'ativos' | 'desativados'; ordem: 'nome' | 'recentes' | 'vencimento' | 'conversas' };
-const FILTROS_VAZIOS: Filtros = { busca: '', plano: '', status: '', vencimento: '', situacao: '', ordem: 'nome' };
+type Filtros = {
+  busca: string; plano: string; status: string; vencimento: '' | 'vencido' | '7dias' | '30dias'; situacao: '' | 'ativos' | 'desativados';
+  /** painel aberto agora / visto nas últimas 24 h / sem acesso há 7+ dias / nunca acessou */
+  presenca: '' | 'online' | 'hoje' | 'inativo7' | 'nunca';
+  /** saúde dos números ativos do cliente */
+  conexao: '' | 'ok' | 'problema' | 'sem_receber' | 'sem_numero' | 'meta' | 'qr';
+  ordem: 'nome' | 'recentes' | 'vencimento' | 'conversas' | 'atividade';
+};
+const FILTROS_VAZIOS: Filtros = { busca: '', plano: '', status: '', vencimento: '', situacao: '', presenca: '', conexao: '', ordem: 'nome' };
+
+const DIA_MS = 86_400_000;
+/** número ativo com problema: fora de "conectado" ou conectado sem receber (receive-stall) */
+const comProblema = (n: TenantLiveNumber) => n.isActive && (n.status !== 'connected' || !!n.receiveStalledAt);
+
+/** Presença e conexão vêm do monitor (`/monitor/tenants`): sem a leitura ainda, o filtro não esconde ninguém. */
+function casaAoVivo(live: TenantLive | undefined, f: Filtros) {
+  if (!f.presenca && !f.conexao) return true;
+  if (!live) return false;
+  const visto = live.lastActivityAt ? Date.now() - new Date(live.lastActivityAt).getTime() : null;
+  if (f.presenca === 'online' && live.onlineUsers === 0) return false;
+  if (f.presenca === 'hoje' && !(live.onlineUsers > 0 || (visto !== null && visto <= DIA_MS))) return false;
+  if (f.presenca === 'inativo7' && (live.onlineUsers > 0 || visto === null || visto < 7 * DIA_MS)) return false;
+  if (f.presenca === 'nunca' && (live.onlineUsers > 0 || live.lastActivityAt)) return false;
+  const ativos = live.numbers.filter((n) => n.isActive);
+  if (f.conexao === 'ok' && (!ativos.length || ativos.some(comProblema))) return false;
+  if (f.conexao === 'problema' && !ativos.some(comProblema)) return false;
+  if (f.conexao === 'sem_receber' && !ativos.some((n) => n.status === 'connected' && n.receiveStalledAt)) return false;
+  if (f.conexao === 'sem_numero' && ativos.length) return false;
+  if ((f.conexao === 'meta' || f.conexao === 'qr') && !ativos.some((n) => n.provider === (f.conexao === 'meta' ? 'meta' : 'evolution'))) return false;
+  return true;
+}
 
 /** Filtro da listagem (no navegador: a lista inteira já vem numa chamada só). */
-function filtrarClientes(rows: TenantRow[], f: Filtros) {
+function filtrarClientes(rows: TenantRow[], f: Filtros, liveDe: Map<string, TenantLive>) {
   const q = norm(f.busca.trim());
   const qDigitos = f.busca.replace(/\D/g, '');
   const out = rows.filter((t) => {
@@ -73,6 +102,7 @@ function filtrarClientes(rows: TenantRow[], f: Filtros) {
     if (f.plano && (f.plano === 'sem' ? !!t.subscription : t.subscription?.plan.id !== f.plano)) return false;
     if (f.status && (t.subscription?.status ?? '') !== f.status) return false;
     if (f.situacao && t.isActive !== (f.situacao === 'ativos')) return false;
+    if (!casaAoVivo(liveDe.get(t.id), f)) return false;
     if (f.vencimento) {
       const d = diasAteVencer(t);
       if (d === null) return false;
@@ -81,10 +111,13 @@ function filtrarClientes(rows: TenantRow[], f: Filtros) {
     return true;
   });
   const vence = (t: TenantRow) => diasAteVencer(t) ?? Number.POSITIVE_INFINITY;
+  // online primeiro, depois o visto há menos tempo; nunca acessou no fim
+  const atividade = (t: TenantRow) => { const l = liveDe.get(t.id); return l?.onlineUsers ? Number.POSITIVE_INFINITY : l?.lastActivityAt ? new Date(l.lastActivityAt).getTime() : 0; };
   return out.sort((a, b) =>
     f.ordem === 'recentes' ? b.createdAt.localeCompare(a.createdAt)
     : f.ordem === 'vencimento' ? vence(a) - vence(b)
     : f.ordem === 'conversas' ? b._count.conversations - a._count.conversations
+    : f.ordem === 'atividade' ? atividade(b) - atividade(a)
     : a.name.localeCompare(b.name, 'pt-BR'));
 }
 
@@ -173,7 +206,7 @@ export default function ClientesPage() {
   const [personalizando, setPersonalizando] = useState<TenantRow | null>(null);
   const [filtros, setFiltros] = useState<Filtros>(FILTROS_VAZIOS);
   const set = (p: Partial<Filtros>) => setFiltros((f) => ({ ...f, ...p }));
-  const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros), [tenants.data, filtros]);
+  const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros, liveDe), [tenants.data, filtros, liveDe]);
   const filtrando = JSON.stringify({ ...filtros, ordem: 'nome' }) !== JSON.stringify(FILTROS_VAZIOS);
   if (me.data && me.data.role !== 'super_admin') return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
@@ -223,11 +256,28 @@ export default function ClientesPage() {
             <option value="ativos">Só ativos</option>
             <option value="desativados">Só desativados</option>
           </select>
+          <select value={filtros.presenca} onChange={(e) => set({ presenca: e.target.value as Filtros['presenca'] })} className={selCls} aria-label="Presença">
+            <option value="">Qualquer presença</option>
+            <option value="online">Online agora</option>
+            <option value="hoje">Acessou nas últimas 24 h</option>
+            <option value="inativo7">Sem acesso há 7+ dias</option>
+            <option value="nunca">Nunca acessou</option>
+          </select>
+          <select value={filtros.conexao} onChange={(e) => set({ conexao: e.target.value as Filtros['conexao'] })} className={selCls} aria-label="Conexão dos números">
+            <option value="">Qualquer conexão</option>
+            <option value="ok">Todos os números conectados</option>
+            <option value="problema">Algum número com problema</option>
+            <option value="sem_receber">Conectado sem receber</option>
+            <option value="sem_numero">Sem número ativo</option>
+            <option value="meta">Com API oficial (Meta)</option>
+            <option value="qr">Com QR Code</option>
+          </select>
           <select value={filtros.ordem} onChange={(e) => set({ ordem: e.target.value as Filtros['ordem'] })} className={selCls} aria-label="Ordenar">
             <option value="nome">Ordem: nome</option>
             <option value="recentes">Ordem: mais recentes</option>
             <option value="vencimento">Ordem: vencimento</option>
             <option value="conversas">Ordem: mais conversas</option>
+            <option value="atividade">Ordem: atividade recente</option>
           </select>
           <span className="text-[12px] text-muted tnum ml-auto">{lista.length === tenants.data.length ? `${lista.length} clientes` : `${lista.length} de ${tenants.data.length} clientes`}</span>
           {filtrando && <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => setFiltros({ ...FILTROS_VAZIOS, ordem: filtros.ordem })}>Limpar filtros</Button>}
@@ -235,9 +285,10 @@ export default function ClientesPage() {
       )}
       {live.data && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-[12.5px] text-muted">
-          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-ok" /><b className="text-ink tnum">{resumo.online}</b> cliente{resumo.online === 1 ? '' : 's'} online agora</span>
+          {/* os números do resumo são atalhos para o filtro correspondente */}
+          <button type="button" onClick={() => set({ presenca: 'online' })} className="inline-flex items-center gap-1.5 hover:text-ink" title="Filtrar os online"><span className="size-2 rounded-full bg-ok" /><b className="text-ink tnum">{resumo.online}</b> cliente{resumo.online === 1 ? '' : 's'} online agora</button>
           <span><b className="text-ink tnum">{resumo.conectados}</b> de <span className="tnum">{resumo.total}</span> números conectados</span>
-          {resumo.problema > 0 && <span className="text-danger-ink font-medium"><span className="tnum">{resumo.problema}</span> com problema (desconectado, QR pendente, erro ou sem receber)</span>}
+          {resumo.problema > 0 && <button type="button" onClick={() => set({ conexao: 'problema' })} className="text-danger-ink font-medium hover:underline" title="Filtrar os clientes com número com problema"><span className="tnum">{resumo.problema}</span> com problema (desconectado, QR pendente, erro ou sem receber)</button>}
           <span className="ml-auto text-[11px] text-faint">ao vivo</span>
         </div>
       )}

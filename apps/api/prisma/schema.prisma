@@ -76,6 +76,7 @@ model Tenant {
   schedules     BusinessSchedule[]
   accessProfiles AccessProfile[]
   campaigns     Campaign[]
+  whatsappGroups WhatsAppGroup[]
   conversationEvents ConversationEvent[]
   sales         Sale[]
   departments   Department[]
@@ -92,6 +93,8 @@ model Tenant {
   salesGoals          SalesGoal[]
   budgets             Budget[]
   secureMedia         SecureMedia[]
+  ignoredContacts     IgnoredContact[]
+  internalChats       InternalChat[]
   paymentGateway      PaymentGateway?
   @@map("tenants")
 }
@@ -161,6 +164,8 @@ model User {
 
   scheduledMessages ScheduledMessage[]
   budgets           Budget[]
+  internalChats     InternalChatMember[]
+  internalMessages  InternalMessage[]
   @@index([tenantId])
   @@index([profileId])
   @@map("users")
@@ -353,6 +358,12 @@ model TenantSettings {
   /// fluxo padrão por desfecho do encerramento — vem pré-selecionado no modal; sem ele vale `onCloseFlowId`
   wonFlowId  String?
   lostFlowId String?
+  /// Encerramento com venda (valor, itens, observação, orçamento). Desligado = empresa de
+  /// atendimento (condomínio, suporte, órgão público): o encerramento só tem resultado, motivo e
+  /// tags — nada vira venda nem faturamento (docs/06-modelo-de-dados.md#encerramento-sem-venda)
+  salesEnabled Boolean @default(true)
+  /// assinatura do atendente (`*Nome:*` na 1ª linha) obrigatória: a API acrescenta quando falta
+  requireSignature Boolean @default(false)
   /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na
   /// conversão, não soma faturamento (sem linha em `sales`)
   requireSaleValue Boolean @default(true)
@@ -376,6 +387,12 @@ model TenantSettings {
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)
+  /// mensagem automática ao cliente quando o atendimento é transferido (conversations/transfer-message.ts)
+  transferMessageEnabled Boolean @default(false)
+  /// texto da transferência para uma pessoa, com {{atendente}}; null = o padrão
+  transferMessageText String?
+  /// texto da transferência para um departamento, com {{departamento}}; null = o padrão
+  departmentTransferMessageText String?
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -491,6 +508,7 @@ model WhatsAppNumber {
   users         UserNumber[]
   campaigns     Campaign[]
   phonebook     PhonebookEntry[]
+  groups        WhatsAppGroup[]
 
   @@unique([provider, externalId])
   @@unique([tenantId, phone])
@@ -900,6 +918,9 @@ model Conversation {
   /// período da faixa de horário cuja resposta já foi enviada (`<faixa>@<início>`, ver docs/horarios.md):
   /// a resposta de Fechado/faixa especial sai uma vez por conversa a cada período
   scheduleNoticeKey String?
+  /// Contato na lista de isentos (docs/contatos-isentos.md): chat livre, sem ticket. Não entra na
+  /// fila, não reabre atendimento, não aciona automação e fica fora de todos os relatórios.
+  ticketExempt      Boolean   @default(false)
 
   /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
@@ -918,6 +939,7 @@ model Conversation {
   @@index([tenantId, createdAt])
   @@index([tenantId, departmentId, status])
   @@index([numberId, contactId])
+  @@index([tenantId, ticketExempt, lastMessageAt(sort: Desc)])
   aiUsage   AiUsage[]
 
   @@map("conversations")
@@ -1296,6 +1318,8 @@ model Flow {
   /// aparece como atalho na aba Fluxos do chat. Fluxo que roda sozinho (nova conversa,
   /// palavra-chave) não precisa estar lá — vira ruído para quem atende.
   showInChat  Boolean  @default(true)
+  /// ordem na lista de Fluxos (e nos atalhos do chat), definida arrastando
+  position    Int      @default(0)
   /// FlowTrigger (packages/shared)
   trigger     Json
   /// FlowDefinition (packages/shared): nós + arestas
@@ -1793,7 +1817,8 @@ model MessageUsage {
   id              String           @id @default(uuid())
   tenantId        String
   numberId        String
-  messageId       String           @unique
+  /// nulo = a mensagem foi excluída com a conversa; a linha do ledger fica (cobrança não some)
+  messageId       String?          @unique
   provider        WhatsAppProvider
   direction       MessageDirection
   billingCategory BillingCategory
@@ -1804,7 +1829,7 @@ model MessageUsage {
 
   tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   number  WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
-  message Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, occurredAt])
   @@index([numberId, occurredAt])
@@ -1928,6 +1953,55 @@ enum CampaignStatus {
   canceled
 }
 
+/// Grupo do WhatsApp (QR/Evolution) que o admin liberou como DESTINO de transmissão
+/// (docs/grupos.md). Opt-in estrito: grupo fora desta lista (ou com `authorized = false`) não
+/// existe para o sistema. Nenhum grupo abre conversa — o webhook descarta toda mensagem `@g.us`.
+model WhatsAppGroup {
+  id         String   @id @default(uuid())
+  tenantId   String
+  numberId   String
+  /// id do grupo no WhatsApp, com o sufixo (`1203630...@g.us`)
+  jid        String
+  name       String
+  /// participantes na última listagem (só informativo)
+  size       Int      @default(0)
+  /// marcado pelo admin: pode receber transmissão
+  authorized Boolean  @default(false)
+  authorizedAt   DateTime?
+  authorizedById String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  number  WhatsAppNumber        @relation(fields: [numberId], references: [id], onDelete: Cascade)
+  targets CampaignGroupTarget[]
+
+  @@unique([numberId, jid])
+  @@index([tenantId, authorized])
+  @@map("whatsapp_groups")
+}
+
+/// Grupo autorizado como alvo de uma transmissão. Separado de `campaign_targets` de propósito:
+/// grupo não é contato e não tem conversa — sai direto pelo provider, com as mesmas travas
+/// antiban da fila de saída (campaigns/group-sender.ts).
+model CampaignGroupTarget {
+  id         String               @id @default(uuid())
+  campaignId String
+  groupId    String
+  status     CampaignTargetStatus @default(pending)
+  /// id da mensagem no WhatsApp (não há linha em `messages`)
+  externalId String?
+  error      String?
+  sentAt     DateTime?
+
+  campaign Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  group    WhatsAppGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, groupId])
+  @@index([campaignId, status])
+  @@map("campaign_group_targets")
+}
+
 enum CampaignTargetStatus {
   pending
   sent
@@ -1971,6 +2045,7 @@ model Campaign {
   tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   number  WhatsAppNumber   @relation(fields: [numberId], references: [id], onDelete: Cascade)
   targets CampaignTarget[]
+  groupTargets CampaignGroupTarget[]
 
   @@index([tenantId, status])
   @@map("campaigns")
@@ -2184,4 +2259,94 @@ model SecureMedia {
 
   @@index([conversationId, createdAt])
   @@map("secure_media")
+}
+
+/// Telefones que nunca geram ticket (docs/contatos-isentos.md): a mensagem entra como chat livre
+/// (aba "Livres"), sem fila, sem automação e fora dos relatórios de desempenho.
+model IgnoredContact {
+  id          String   @id @default(uuid())
+  tenantId    String
+  /// só dígitos, com DDI (o nono dígito é conferido nas duas formas — phone-variants.ts)
+  phone       String
+  /// apelido para a lista (ex.: "Fornecedor X", "Diretoria")
+  label       String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, phone])
+  @@map("ignored_contacts")
+}
+
+/// Chat interno da equipe (docs/chat-interno.md): conversa direta (dois membros) ou grupo.
+/// Nada daqui vai ao WhatsApp nem passa pelo ledger de uso. Nunca é apagado — é auditável.
+model InternalChat {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  isGroup            Boolean   @default(false)
+  /// canal com o suporte do sistema (docs/chat-interno.md#suporte): um por cliente
+  /// (`directKey = "support"`), aberto a toda a equipe do cliente e ao dono do sistema
+  isSupport          Boolean   @default(false)
+  /// nome do grupo; conversa direta usa o nome do outro membro
+  name               String?
+  /// conversa direta: "<menor userId>:<maior userId>" — uma só por par
+  directKey          String?
+  createdById        String?
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  /// grupo apagado: some para os membros, o histórico continua na auditoria
+  deletedAt          DateTime?
+  deletedById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members  InternalChatMember[]
+  messages InternalMessage[]
+
+  @@unique([tenantId, directKey])
+  @@index([tenantId, lastMessageAt(sort: Desc)])
+  @@map("internal_chats")
+}
+
+model InternalChatMember {
+  chatId     String
+  userId     String
+  /// até onde a pessoa leu (badge de não lidas)
+  lastReadAt DateTime?
+  joinedAt   DateTime  @default(now())
+
+  chat InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([userId])
+  @@map("internal_chat_members")
+}
+
+model InternalMessage {
+  id         String   @id @default(uuid())
+  tenantId   String
+  chatId     String
+  authorId   String?
+  /// nome gravado no envio: a auditoria continua legível depois que o usuário sai
+  authorName String
+  text       String
+  /// resposta a outra mensagem da mesma conversa (citação, como no WhatsApp)
+  replyToId  String?
+  /// aviso do sistema no histórico ("Ana adicionou Bruno"): registro de quem mexeu no grupo
+  system     Boolean  @default(false)
+  /// escrita pelo suporte do sistema (dono), no canal de suporte do cliente
+  fromSupport Boolean @default(false)
+  createdAt  DateTime @default(now())
+
+  chat    InternalChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  author  User?             @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  replyTo InternalMessage?  @relation("internalReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies InternalMessage[] @relation("internalReply")
+
+  @@index([chatId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("internal_messages")
 }

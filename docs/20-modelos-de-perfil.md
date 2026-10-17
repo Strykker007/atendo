@@ -1,7 +1,7 @@
 # 20 — Modelos de perfil (verticais)
 
 Um **modelo de perfil** (Farmácia, Clínica…) é o pacote com que um cliente novo já nasce:
-permissões padrão dos perfis, respostas rápidas, fluxos e tags (cor, Kanban, encerramento). Só o dono do
+permissões padrão dos perfis, respostas rápidas, fluxos, tags (cor, Kanban, encerramento) e as **configurações de atendimento** (encerramento com ou sem venda, assinatura obrigatória, nome dos resultados). Só o dono do
 sistema mexe (tela **Clientes → Modelos de perfil → Editar**, rota `/clientes/modelos/:id`).
 
 Um modelo pode ser marcado como **padrão** (`isDefault`, no máximo um): ele já vem escolhido no
@@ -13,7 +13,7 @@ O formulário **Novo cliente** tem `Modelo de perfil: [ Farmácia (padrão) | Cl
 Na API: `templateId` ausente = modelo padrão (se houver); `null` = nenhum.
 `POST /tenants` cria, **numa única transação**:
 
-1. cliente + assinatura + configuração + **tags** (`provisionedTags`; as marcadas Comprou/Não comprou viram **motivos de encerramento** — `close_reasons` — e só continuam tag se forem etapa do Kanban; "Gerar de um cliente" traz os motivos de volta como tags marcadas): as de `tags` do modelo, na
+1. cliente + assinatura + configuração (`tenant_settings` com o `settings` do modelo: `salesEnabled`, `requireSignature`, `wonLabel`, `lostLabel`; o que o modelo não define fica no padrão) + **tags** (`provisionedTags`; as marcadas Comprou/Não comprou viram **motivos de encerramento** — `close_reasons` — e só continuam tag se forem etapa do Kanban; "Gerar de um cliente" traz os motivos de volta como tags marcadas): as de `tags` do modelo, na
    ordem dele (é a das colunas do Kanban), cada uma com cor, `isKanban`, `showOnWon` e `showOnLost`. Modelo
    sem `tags` (formato antigo): `lossReasons` — ou, sem ela, `DEFAULT_LOSS_REASONS` do catálogo —
    como tags de encerramento **fora do Kanban** com a cor de `lossReasonColors`;
@@ -36,6 +36,7 @@ Modelo com mais respostas do que o `maxQuickReplies` do plano é recusado (400) 
 
 ## Editor do modelo
 
+- **Atendimento** — interruptores **Encerramento com venda** e **Assinatura obrigatória** e os nomes dos resultados (positivo / negativo), as mesmas opções de Configurações → Atendimento ([06](06-modelo-de-dados.md#encerramento-sem-venda)). Desligar a venda com os nomes vazios sugere "Resolvido" / "Não resolvido". Nada definido = padrão do sistema. "Gerar de um cliente" copia as do cliente.
 - **Perfis e permissões** — lista com um cartão por perfil, cada um com as próprias permissões
   (editadas num modal, por grupo). Sempre aparecem Administrador (fixo: acesso total), Gerente e
   Atendente; "Novo perfil" cria quantos extras o segmento pedir ("Farmacêutico", "Atendente
@@ -82,6 +83,7 @@ então grava. Partes, todas opcionais:
   tocados. **Deixar idêntico ao modelo** desativa os motivos do cliente que não estão no modelo
   (desativar, não apagar: histórico e relatórios mantêm o nome); sem isso, eles continuam ativos
   depois dos do modelo.
+- **Configurações de atendimento**: grava no cliente só o que o modelo define (encerramento com/sem venda, assinatura obrigatória, nomes dos resultados); o resto das configurações dele não muda. A prévia lista o que muda ("Encerramento com venda: desligado").
 - **Tags que faltam**: cria as tags do modelo (as que continuam tag na criação do cliente) que o
   cliente não tem, no fim da lista. Não altera nem remove as dele; conflitos não são replicados.
 
@@ -113,7 +115,8 @@ Salvar → Aplicar aos clientes → Motivos de encerramento + Deixar idêntico �
     { "name": "Indicação", "color": "#22c55e", "showOnWon": true },
     { "name": "Achou caro", "color": "#f59e0b", "showOnLost": true },
     { "name": "Receita vencida", "color": "#dc2626", "showOnLost": true }
-  ]
+  ],
+  "settings": { "salesEnabled": true, "requireSignature": false, "wonLabel": "Comprou", "lostLabel": "Não comprou" }
 }
 ```
 
@@ -130,6 +133,7 @@ Salvar → Aplicar aos clientes → Motivos de encerramento + Deixar idêntico �
   `tags` continuam valendo — viram tags fora do Kanban, com a cor de cada uma, que aparecem nos dois
   encerramentos (Comprou e Não comprou), como era antes da separação.
   Com `tags` presente, as duas são ignoradas, e salvar pelo editor grava só `tags`.
+- `settings` (opcional): `salesEnabled` e `requireSignature` booleanos (outro tipo recusa o arquivo), `wonLabel`/`lostLabel` até 30 caracteres. Chave ausente = padrão do sistema.
 - `quickReplies` e `flows` são exatamente os itens das exportações de Respostas e Fluxos
   (formato portável — `quick-replies/portable.ts` e `packages/shared/src/portable.ts`): sem ids,
   etiquetas por nome, sem anexos.

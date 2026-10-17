@@ -23,6 +23,39 @@ const LOOKBACK = '3 days';
 
 export const isReceiveStalled = (s: { unacked: number; conversations: number }) => s.unacked >= MIN_SENT && s.conversations >= MIN_CONVERSATIONS;
 
+/**
+ * Segunda regra, para número com pouco envio: SILÊNCIO anormal. A primeira depende de mensagens
+ * sem confirmação — mas se nada chega, quase ninguém responde, e ela demora horas para juntar
+ * as 3 (Drog. Kelly I, 17/10/2026: parou às 11:12, só marcaria às 13:51). Aqui: nenhum sinal de
+ * vida há `SILENCE_MS` num horário em que, no MESMO dia da semana passada, o número recebeu
+ * pelo menos `SILENCE_MIN_EXPECTED` mensagens. Mesmo dia da semana: noite, domingo e loja
+ * fechada não viram alarme. Feriado pode dar falso positivo — é só um aviso, e some sozinho.
+ */
+export const SILENCE_MS = 60 * 60_000;
+export const SILENCE_MIN_EXPECTED = 5;
+
+export const isSilentTooLong = (s: { silentMs: number | null; expected: number }) =>
+  s.silentMs !== null && s.silentMs >= SILENCE_MS && s.expected >= SILENCE_MIN_EXPECTED;
+
+/** Há quanto tempo o número não dá sinal (null = sem sinal recente) e quanto recebeu na mesma hora 7 dias atrás. */
+export async function silenceVsLastWeek(prisma: PrismaService, numberId: string, sessionStartedAt: Date | null) {
+  const since = sessionStartedAt ?? new Date(0);
+  const semanaPassada = Date.now() - 7 * 86_400_000;
+  const [de, ate] = [new Date(semanaPassada - SILENCE_MS), new Date(semanaPassada)];
+  const [row] = await prisma.$queryRaw<{ last: Date | null; expected: bigint }[]>(Prisma.sql`
+    SELECT
+      (SELECT max("createdAt") FROM messages
+        WHERE "numberId" = ${numberId} AND "createdAt" > now() - ${LOOKBACK}::interval AND "createdAt" > ${since}
+          AND (direction = 'in' OR status IN ('delivered', 'read'))) AS last,
+      (SELECT count(*) FROM messages
+        WHERE "numberId" = ${numberId} AND direction = 'in'
+          AND "createdAt" > ${de} AND "createdAt" <= ${ate}) AS expected
+  `);
+  // sessão nova sem sinal ainda: a regra de cima cobre; aqui só com um último sinal conhecido
+  const silentMs = row?.last ? Date.now() - new Date(row.last).getTime() : null;
+  return { silentMs, expected: Number(row?.expected ?? 0) };
+}
+
 /** Mensagens enviadas sem confirmação desde o último sinal de vida (e desde o QR lido). */
 export async function unackedSinceLastSignal(prisma: PrismaService, numberId: string, sessionStartedAt: Date | null) {
   const since = sessionStartedAt ?? new Date(0);

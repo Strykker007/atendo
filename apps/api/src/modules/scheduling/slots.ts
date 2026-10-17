@@ -49,3 +49,14 @@ export function computeSlots(i: ComputeSlotsInput): Slot[] {
   }
   return slots;
 }
+
+/** No máximo tantos lembretes ao cliente por agendamento — mais que isso vira spam. */
+export const MAX_CLIENT_REMINDERS = 6;
+
+/**
+ * Lista de lembretes como a tela manda (escolhas tipo "1 dia antes", "2 horas antes", em
+ * minutos): sem repetidos, só positivos inteiros, do mais cedo (maior antecedência) ao mais tarde.
+ */
+export function normalizeReminderMinutes(list: number[]): number[] {
+  return [...new Set(list.filter((n) => Number.isInteger(n) && n > 0))].sort((a, b) => b - a).slice(0, MAX_CLIENT_REMINDERS);
+}

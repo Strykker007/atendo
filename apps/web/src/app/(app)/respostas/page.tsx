@@ -1,7 +1,7 @@
 'use client';
 import { useRef, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { Paperclip, X, Plus, Pencil, Trash2, Folder, FolderOpen, Zap, GripVertical, ChevronDown, ChevronRight, Copy, Download, Upload } from 'lucide-react';
+import { Paperclip, X, Plus, Pencil, Trash2, Folder, FolderOpen, Zap, GripVertical, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Copy, Download, Upload } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -126,6 +126,14 @@ export default function RespostasPage() {
     reorderReplies.mutate({ tree: next, items }, { onError });
   }
 
+  /**
+   * Setas ↑↓: o mesmo caminho do arraste, uma posição por clique — funciona no celular e pelo
+   * teclado, onde arrastar é ruim.
+   */
+  function move(type: 'FOLDER' | 'REPLY', droppableId: string, index: number, d: -1 | 1) {
+    onDragEnd({ type, source: { droppableId, index }, destination: { droppableId, index: index + d } } as DropResult);
+  }
+
   async function saveFolder(e: React.FormEvent) {
     e.preventDefault();
     if (!folderModal) return;
@@ -203,6 +211,7 @@ export default function RespostasPage() {
                           <span className="font-medium text-sm truncate">{f.name}</span>
                         </button>
                         <span className="text-xs text-faint mr-2">{f.replies.length}</span>
+                        {podeEditar && (folders.data?.length ?? 0) > 1 && <Arrows label={f.name} first={fi === 0} last={fi === (folders.data?.length ?? 0) - 1} onMove={(d) => move('FOLDER', 'folders', fi, d)} />}
                         {podeEditar && <>
                           <button onClick={() => setReplyModal({ folderId: f.id, title: '', body: '' })} className="text-xs rounded-lg border border-line px-2 py-1 text-ink hover:bg-field"><Plus size={12} className="inline -mt-0.5" /> Resposta</button>
                           <button onClick={() => setFolderModal({ id: f.id, name: f.name })} className="text-faint hover:text-ink p-1"><Pencil size={14} /></button>
@@ -224,6 +233,7 @@ export default function RespostasPage() {
                                       <div className="text-xs text-muted whitespace-pre-wrap line-clamp-2">{r.body}</div>
                                     </div>
                                     {podeEditar && <>
+                                      {f.replies.length > 1 && <Arrows label={r.title} first={ri === 0} last={ri === f.replies.length - 1} onMove={(d) => move('REPLY', f.id, ri, d)} />}
                                       <button title="Duplicar" onClick={() => onDuplicate([r.id])} className="text-faint hover:text-accent-ink p-1"><Copy size={14} /></button>
                                       <button title="Exportar para usar em outro cliente" onClick={() => onExport(r)} className="text-faint hover:text-accent-ink p-1"><Download size={14} /></button>
                                       <button onClick={() => setReplyModal({ id: r.id, folderId: f.id, title: r.title, body: r.body })} className="text-faint hover:text-ink p-1"><Pencil size={14} /></button>
@@ -317,5 +327,15 @@ export default function RespostasPage() {
 
       <PixKeysSection podeEditar={podeEditar} />
     </PageShell>
+  );
+}
+
+/** Subir/descer uma posição (alternativa ao arraste). */
+function Arrows({ label, first, last, onMove }: { label: string; first: boolean; last: boolean; onMove: (d: -1 | 1) => void }) {
+  return (
+    <span className="flex flex-col shrink-0 -my-1">
+      <button type="button" onClick={() => onMove(-1)} disabled={first} className="text-faint hover:text-ink disabled:opacity-30 disabled:hover:text-faint" title="Subir" aria-label={`Subir ${label}`}><ArrowUp size={13} /></button>
+      <button type="button" onClick={() => onMove(1)} disabled={last} className="text-faint hover:text-ink disabled:opacity-30 disabled:hover:text-faint" title="Descer" aria-label={`Descer ${label}`}><ArrowDown size={13} /></button>
+    </span>
   );
 }

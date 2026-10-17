@@ -6,6 +6,9 @@
  * saída que já existe, herdando intervalo aleatório entre envios, teto diário por número e
  * aquecimento. Um caminho de envio paralelo seria a forma mais fácil de perder a proteção
  * contra banimento que já custou a ser construída.
+ *
+ * Exceção única: grupo autorizado (docs/grupos.md) não tem conversa, então não cabe na fila
+ * de saída — `GroupSender` reaplica as mesmas travas (cota, teto do dia, aquecimento, ritmo).
  */
 
 /** Quantas mensagens a campanha solta por vez. Pequeno de propósito: cada lote reconsulta o

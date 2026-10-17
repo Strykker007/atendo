@@ -9,9 +9,9 @@ import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, R
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useAiStatus, useDepartments, useSetConversationDepartment } from '@/lib/hooks';
+import { useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -57,6 +57,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const setFilterStatus: typeof ui.setStatus = embedded ? () => undefined : ui.setStatus;
   const conv = useConversation(conversationId).data;
   const me = useMe();
+  const tenantSettings = useTenantSettings();
   const agents = useAgents();
   const claim = useClaim();
   const transfer = useTransfer();
@@ -77,6 +78,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const [limpando, setLimpando] = useState(false);
   const apagar = useDeleteMessage();
   const limpar = useClearHistory();
+  const podeExcluir = useCan('conversations.delete_conversation');
+  const [excluindo, setExcluindo] = useState(false);
+  const excluir = useDeleteConversation();
   const podeApagar = (m: Message) =>
     !m.deletedAt && (podeApagarQualquer || (m.direction === 'out' && !!m.authorId && m.authorId === me.data?.id && Date.now() - new Date(m.createdAt).getTime() < OWN_MESSAGE_DELETE_WINDOW_MS));
   // Editar (docs/editar-mensagens.md): qualquer mensagem de texto enviada pelo número (própria, de
@@ -193,7 +197,10 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
    * meio do atendimento fica invisível. Fica guardado por navegador, porque é preferência de
    * quem atende, não configuração da empresa.
    */
-  const [assinando, setAssinando] = usePersistedState('assinar-mensagens', false);
+  const [assinandoPref, setAssinando] = usePersistedState('assinar-mensagens', false);
+  // a empresa pode exigir (Configurações → Atendimento): aí fica ligada e o botão trava
+  const assinaturaObrigatoria = !!tenantSettings.data?.requireSignature;
+  const assinando = assinandoPref || assinaturaObrigatoria;
   const campoRef = useRef<HTMLTextAreaElement>(null);
   useAutoResize(campoRef);
   useAutoResize(notaRef);
@@ -595,17 +602,24 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           </div>
           )}
         </div>
-        <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
-          <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
-        </span>
+        {conv.ticketExempt ? (
+          // contato isento: chat livre, sem fila, sem dono e fora dos relatórios (docs/contatos-isentos.md)
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted" title="Contato isento de ticket: não entra na fila nem nos relatórios">
+            <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre · sem ticket
+          </span>
+        ) : (
+          <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
+            <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
+          </span>
+        )}
         {/* Encerrar é a ação que fecha o atendimento (e alimenta o relatório de vendas): verde, com
             texto sempre visível e a PRIMEIRA das ações — no fim da fila, ela ia para a segunda linha
             ou ficava atrás do painel da direita e o atendente não achava */}
-        {conv.status !== 'closed' ? (
+        {conv.status !== 'closed' ? (conv.ticketExempt ? null : (
           <Button size="sm" variant="success" className="shrink-0" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
             Encerrar
           </Button>
-        ) : (
+        )) : (
           <Button size="sm" variant="ghost" className="shrink-0" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Conversa reaberta'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Reabrir">
             Reabrir
           </Button>
@@ -674,6 +688,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         </Button>
         {podeLimpar && (
           <Button size="sm" variant="ghost" icon={<Eraser size={14} />} onClick={() => setLimpando(true)} title="Limpar o histórico desta conversa (fica registrado quem limpou)" aria-label="Limpar histórico" />
+        )}
+        {podeExcluir && (
+          <Button size="sm" variant="ghost" className="hover:text-danger" icon={<Trash2 size={14} />} onClick={() => setExcluindo(true)} title="Excluir esta conversa do painel (o contato continua cadastrado)" aria-label="Excluir conversa" />
         )}
       </header>
 
@@ -758,6 +775,18 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           .then((r) => toast.ok(`${r.cleared} ${r.cleared === 1 ? 'mensagem apagada' : 'mensagens apagadas'}`))
           .catch((err) => { toast.err(err); throw err; })}
         onClose={() => setLimpando(false)}
+      />
+      <ConfirmDialog
+        open={excluindo}
+        title="Excluir esta conversa?"
+        danger
+        typeToConfirm="EXCLUIR"
+        confirmLabel="Excluir conversa"
+        text={'A conversa some do painel com todas as mensagens, o histórico do atendimento, as tags e as mensagens agendadas — e sai dos relatórios. No celular do contato nada muda, e o contato continua cadastrado: se ele escrever de novo, abre uma conversa nova.\n\nFica registrado na auditoria quem excluiu. Não dá para desfazer. Conversa com venda ou orçamento pago não pode ser excluída (use "Limpar histórico").'}
+        onConfirm={() => excluir.mutateAsync(conv.id)
+          .then(() => toast.ok('Conversa excluída'))
+          .catch((err) => { toast.err(err); throw err; })}
+        onClose={() => setExcluindo(false)}
       />
 
       {encaminhando && <ForwardModal message={encaminhando} onClose={() => setEncaminhando(null)} />}
@@ -935,6 +964,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               onEscolherArquivo={pick}
               enviando={uploading}
               assinando={assinando}
+              assinaturaObrigatoria={assinaturaObrigatoria}
               onAssinando={setAssinando}
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
               texto={text}

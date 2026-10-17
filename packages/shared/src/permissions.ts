@@ -25,6 +25,7 @@ export const PERMISSIONS = {
   // é permissão para poder TIRAR de quem não deve editar
   'conversations.edit_message': 'Editar mensagens de texto enviadas (qualquer origem, até 15 min depois do envio)',
   'conversations.delete_chat': 'Limpar o histórico de uma conversa',
+  'conversations.delete_conversation': 'Excluir conversas (some do painel e dos relatórios)',
   // trava contra maquiar métrica: atendimento interno sai do TMR, do volume e da conversão, então
   // só gestão encerra assim — e cada uso fica na auditoria (docs/06-modelo-de-dados.md#encerramento-interno)
   'conversations.close_internal': 'Encerrar como atendimento interno (fora dos relatórios de desempenho)',
@@ -32,6 +33,8 @@ export const PERMISSIONS = {
   // vendida à parte: o cliente só tem se o perfil dele tiver (docs/agendamento-de-mensagens.md)
   'conversations.schedule_message': 'Agendar mensagens para o cliente',
   'contacts.edit': 'Editar a ficha do contato',
+  // a base inteira sai numa planilha: é dado sensível, fica com a gestão (docs/18-perfis-de-acesso.md)
+  'contacts.import_export': 'Importar e exportar a base de contatos (planilha)',
   'tags.manage': 'Criar e editar etiquetas',
   'quick_replies.manage': 'Criar e editar respostas rápidas',
   'flows.manage': 'Criar, editar e importar fluxos de automação',
@@ -42,6 +45,9 @@ export const PERMISSIONS = {
   'team.manage': 'Convidar, editar e desativar membros da equipe',
   'profiles.manage': 'Criar e editar perfis de acesso',
   'settings.manage': 'Mudar horário de funcionamento e fluxos padrão',
+  // ler conversas do chat interno das quais a pessoa não participa (docs/chat-interno.md):
+  // só o administrador vem com ela — gerente que precisa auditar recebe por perfil
+  'internal_chat.audit': 'Auditar o chat interno da equipe (ler todas as conversas)',
   'numbers.manage': 'Conectar e configurar números de WhatsApp',
   'billing.manage': 'Ver e mudar o plano, acessar faturas',
 } as const;
@@ -52,9 +58,9 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 /** Agrupamento só para a tela de edição do perfil não virar uma lista de 14 itens soltos. */
 export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
-  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit'] },
+  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.delete_conversation', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit', 'contacts.import_export'] },
   { label: 'Conteúdo', items: ['tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage'] },
-  { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage'] },
+  { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage', 'internal_chat.audit'] },
   { label: 'Conta', items: ['numbers.manage', 'billing.manage'] },
 ];
 
@@ -68,7 +74,7 @@ export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
  */
 export const DEFAULT_PERMISSIONS: Record<'tenant_admin' | 'manager' | 'agent', Permission[]> = {
   tenant_admin: [...ALL_PERMISSIONS],
-  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'contacts.edit', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'team.manage', 'settings.manage'],
+  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'contacts.edit', 'contacts.import_export', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'team.manage', 'settings.manage'],
   // o padrão do atendente reproduz EXATAMENTE o que ele já podia antes dos perfis: respostas
   // rápidas e relatórios nunca foram restritos, e tirá-los agora seria perder acesso numa
   // migração. Quem quiser restringir, cria um perfil sem eles. Nota interna entrou depois

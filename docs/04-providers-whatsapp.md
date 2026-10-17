@@ -70,7 +70,11 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 
 **Janela de 24h:** `Conversation.lastInboundAt` guarda a última mensagem do contato. `ConversationsService.send` recusa mensagem livre fora da janela — o atendente precisa mandar um template. O template vai em `OutboundMessage.template` com `category` (`utility | marketing | authentication`) que define o custo.
 
-**Templates (HSM):** `MetaProvider.listTemplates` lê `GET /{wabaId}/message_templates?status=APPROVED` (paginado, até 1.000) e normaliza com `parseMetaTemplate` → `MessageTemplate`. Variáveis posicionais (`{{1}}`) e nomeadas (`{{first_name}}`, enviadas com `parameter_name`) são suportadas; cabeçalho de mídia, botão de URL dinâmica e templates de autenticação voltam marcados `unsupported`. O envio monta os `components` em `whatsapp/templates.ts` (`buildTemplateSend`), que também limpa os valores (sem quebra de linha/tab, ≤ 1024 — a Meta recusaria na entrega com 132018) e gera o texto que fica no histórico do painel. Quem usa: **Nova conversa** (`POST /conversations/start`), o **composer** quando a janela fecha (`POST /conversations/:id/messages` com `template`) e o **lembrete da Agenda** fora da janela ([Agendamento](13-agendamento.md)). A lista é cacheada 5 min por número (`NumbersService.templates`).
+**Templates (HSM):** `MetaProvider.listTemplates` lê `GET /{wabaId}/message_templates?status=APPROVED` (paginado, até 1.000) e normaliza com `parseMetaTemplate` → `MessageTemplate`. Variáveis posicionais (`{{1}}`) e nomeadas (`{{first_name}}`, enviadas com `parameter_name`) são suportadas. **Cabeçalho de mídia** (imagem, vídeo, PDF): o atendente anexa o arquivo na tela (`POST /uploads` → `TemplateChoice.headerMediaKey`, conferida como do tenant); a mensagem guarda a chave em `mediaUrl` e o adapter sobe o binário para a Meta e monta o parâmetro `header` com o `id` (`OutboundMessage.template.headerMedia` diz o tipo). **Botões dinâmicos** (`MessageTemplate.dynamicButtons`): link com `{{1}}` no fim da URL e "Copiar código" (cupom, até 15 caracteres) — o valor vai em `TemplateChoice.buttons` pela posição do botão e vira `{ type: 'button', sub_type: 'url' | 'copy_code', index }`. Continuam `unsupported`: cabeçalho de localização, botões de formulário/catálogo e templates de autenticação. O envio monta os `components` em `whatsapp/templates.ts` (`buildTemplateSend`), que também limpa os valores (sem quebra de linha/tab, ≤ 1024 — a Meta recusaria na entrega com 132018) e gera o texto que fica no histórico do painel. Quem usa: **Nova conversa** (`POST /conversations/start`), o **composer** quando a janela fecha (`POST /conversations/:id/messages` com `template`), as **transmissões** (a escolha é validada ao criar — arquivo e botões obrigatórios) e o **lembrete da Agenda** fora da janela ([Agendamento](13-agendamento.md)). A lista é cacheada 5 min por número (`NumbersService.templates`).
+
+**Conectar (Meta):** `connect` valida o token/`phone_number_id` e faz `POST /{wabaId}/subscribed_apps` — sem a inscrição do app na WABA a Meta não manda webhook do número, mesmo com o webhook configurado no app. É idempotente; o health check (`getStatus`) só lê o número.
+
+**Erros da Meta:** `describeMetaError` (`providers/provider-error.ts`) troca os códigos que o atendente precisa entender (131047 janela fechada, 131026 sem WhatsApp, 131049/131050 marketing, 132xxx template, 133010 número não registrado, 190 token…) por texto em português — no envio e no status `failed` do webhook. Código desconhecido usa `error_data.details` da Meta.
 
 **Categorias de cobrança (`BillingCategory`):** `service` = resposta livre na janela (grátis); `utility`, `marketing`, `authentication` = templates (pagos); `unofficial` = Evolution (grátis).
 
@@ -91,7 +95,7 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 | Provider | Como sai | Como volta |
 |---|---|---|
 | **Meta** | até 3 opções → **botões**; 4–10 → **lista** (`interactive.type = list`) | `messages[].type = 'interactive'` com `button_reply`/`list_reply` → `InboundMessage.interactiveReplyId` + `text` = título |
-| **Evolution** | texto + **lista numerada** ("1 - Corte", "2 - Barba") — botões não são confiáveis em contas QR desde 2022 (muitos aparelhos não renderizam) | número, ou texto da opção |
+| **Evolution** | Padrão: texto + **lista numerada** ("1 - Corte", "2 - Barba"). Com `EVOLUTION_MENU_BUTTONS=true` (exige a imagem com o [patch do `<biz>`](#versão-da-evolution)) e **até 3 opções**: `POST /message/sendButtons` com botões `{ type: 'reply', displayText, id }` (`menuButtonsPayload`: título = cabeçalho ou 1ª linha, resto na descrição) → botões clicáveis; 400/404 cai na lista numerada. 4+ opções continuam numeradas (a Evolution não tem lista nativeFlow). Desligado por padrão: sem o `<biz>` o WhatsApp entrega e o aparelho não mostra nada — ligar depois de ver num aparelho real | `interactiveResponseMessage`/`buttonsResponseMessage` → id da opção; ou número, ou texto da opção |
 
 O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineService.choose`). Assim o mesmo fluxo funciona nos dois providers e ganha botões de verdade quando o cliente migra para a Meta. No histórico do painel a mensagem interativa aparece como texto + opções numeradas.
 
@@ -109,7 +113,7 @@ O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineSer
 A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (típico depois de o host dormir). Todo envio devolve `428 Connection Closed`. Tratamento automático: o `OutboundProcessor` detecta a mensagem, chama `provider.restart()` (`POST /instance/restart/:name`) e deixa o retry do BullMQ reenviar. Além disso, um job a cada 5 min (`NumbersHealthProcessor`) confere o status real de cada número no provider e corrige o banco (a UI mostra "desconectado" e o botão de reconectar). Número em `pending_qr` também é conferido, mas só sobe para `connected`: depois de um **Reiniciar** a Evolution pode mandar `connecting` sem o `open` em seguida, e o painel ficava preso em "aguardando QR" com o WhatsApp funcionando. Se nem o restart resolver, reinicie o container (`docker compose restart evolution`) — as sessões ficam no banco da Evolution e reconectam sem QR.
 
 **Por que o restart não resolvia** (Drogaria Pontual, 13/10/2026: ~1h20 sem enviar nem receber, 6 envios falhos): logo depois de ler o QR, a instância sincronizava ~1.000 contatos; o pool do Prisma da Evolution (padrão 9 conexões para 34 instâncias) esgotou (`P2024` / `deadlock detected`) e a reconexão pedida pelo WhatsApp (`stream:error 515`) nasceu morta com o estado `open`. O restart da 2.3.7 fecha o socket (já fechado: o `end()` do Baileys sai em `if (closed) return`, sem evento de close) e chama o connect, que vê `open` e não faz nada — dezenas de restarts sem efeito. Correções:
-- `infra/evolution/patch-evolution-restart.mjs`: depois de fechar, se em 3 s nenhum socket novo apareceu, o restart cria um com as credenciais salvas (sem QR);
+- `infra/evolution/patch-evolution-restart.mjs`: depois de fechar, se em 3 s nenhum socket novo apareceu, o restart cria um com as credenciais salvas (sem QR); "Socket novo" é outro objeto em `client` — o zumbi mantém `ws.isOpen` verdadeiro, e a 1ª versão (que olhava só isso) não reconectava (Drog. Kelly I, 17/10/2026). Mudou o patch: **rebuild da imagem da Evolution e restart do container**, que reconecta todos os números — fazer de madrugada.
 - `DATABASE_CONNECTION_URI` da Evolution com `connection_limit=40&pool_timeout=30` (o Postgres dela aceita 100);
 - `NumbersService.claimRestart`: no máximo um restart automático por número a cada 2 min entre todos os workers — antes era um por envio falho, e com o restart que recria o socket isso abriria sockets duplicados.
 
@@ -126,6 +130,13 @@ sinal de vida do número (mensagem recebida ou entrega/leitura confirmada) e do 
 confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`; limpa sozinho quando volta a
 chegar mensagem/confirmação ou quando o QR é lido de novo. Um contato só com o celular desligado não
 marca.
+
+**Segunda regra — silêncio anormal** (para número com pouco envio, onde a de cima demora horas a
+juntar 3 mensagens): nenhum sinal de vida há **60 min** num horário em que, **no mesmo dia da semana
+passada**, o número recebeu **≥ 5 mensagens** na mesma hora (`silenceVsLastWeek`/`isSilentTooLong`).
+Mesmo dia da semana para noite, domingo e loja fechada não virarem alarme; feriado pode dar falso
+positivo (só aviso, limpa quando chegar algo). Caso Drog. Kelly I, 17/10/2026: parou às 11:12; a
+regra antiga marcaria às 13:51, esta às ~12:15.
 
 **Na tela:** faixa vermelha no topo para todos ("parou de receber mensagens") e, em Números, o card
 com o passo a passo:
@@ -149,7 +160,7 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 
 | Evento | O que fazemos |
 |---|---|
-| `messages.upsert` | Mensagens de contatos e do celular do cliente (`fromMe`), reações e edições; ignora grupos `@g.us`. Tipos: ver [Tipos de mensagem recebida](#tipos-de-mensagem-recebida) |
+| `messages.upsert` | Mensagens de contatos e do celular do cliente (`fromMe`), reações e edições. Grupos `@g.us` nem chegam à fila: `stripGroupEvents` os tira no controller ([Grupos restritos](grupos.md)). Tipos: ver [Tipos de mensagem recebida](#tipos-de-mensagem-recebida) |
 | `messages.edited` | Edição de mensagem (ver tabela de tipos) |
 | `contacts.upsert` / `contacts.update` | Nome da agenda do celular → `contacts.name` com origem `agenda` (ver [De onde vem o nome do contato](#de-onde-vem-o-nome-do-contato-contactsnamesource)). Enfileirados com 30 s de atraso |
 | `messages.update` | Status (texto ou número do Baileys): `SERVER_ACK`/2→sent, `DELIVERY_ACK`/3→delivered, `READ`/4 e `PLAYED`/5 (áudio ouvido)→read, `ERROR`/0→failed. `InboundService.applyStatus` não deixa regredir (e ignora falha tardia de algo já entregue) e reemite a mensagem pelo evento `message` do socket |

@@ -8,7 +8,7 @@ import { ProviderRegistry } from './providers/provider.registry';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { QUEUE_OUTBOUND, type OutboundJob } from './queues';
 import { resumeNumber } from './send-queue';
-import { isReceiveStalled, unackedSinceLastSignal } from './receive-stall';
+import { isReceiveStalled, isSilentTooLong, silenceVsLastWeek, unackedSinceLastSignal } from './receive-stall';
 import type { NumberStatus } from '@prisma/client';
 
 export const QUEUE_HEALTH = 'wa-health';
@@ -63,7 +63,9 @@ export class NumbersHealthProcessor extends TrackedWorkerHost {
    * muda `sessionStartedAt`, e as mensagens de antes deixam de contar.
    */
   private async checkReceiving(n: { id: string; tenantId: string; label: string; provider: string; sessionStartedAt: Date | null; receiveStalledAt: Date | null }, status: NumberStatus) {
-    const stalled = n.provider === 'evolution' && status === 'connected' && isReceiveStalled(await unackedSinceLastSignal(this.prisma, n.id, n.sessionStartedAt));
+    const stalled = n.provider === 'evolution' && status === 'connected'
+      && (isReceiveStalled(await unackedSinceLastSignal(this.prisma, n.id, n.sessionStartedAt))
+        || isSilentTooLong(await silenceVsLastWeek(this.prisma, n.id, n.sessionStartedAt)));
     if (stalled === !!n.receiveStalledAt) return;
     await this.prisma.whatsAppNumber.update({ where: { id: n.id }, data: { receiveStalledAt: stalled ? new Date() : null } });
     this.gateway.emitNumber(n.tenantId, { id: n.id, status });

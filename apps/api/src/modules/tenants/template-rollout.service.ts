@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { SYSTEM_PROFILES } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { PermissionsService } from '../auth/permissions.service';
-import { provisionedTags, type TemplateContent } from './tenant-template';
+import { provisionedTags, type TemplateContent, type TemplateSettings } from './tenant-template';
 
 /** O que replicar do modelo. Cada parte é opcional — o dono escolhe só o que quer mexer. */
 export interface RolloutParts {
@@ -15,6 +15,8 @@ export interface RolloutParts {
   replaceCloseReasons?: boolean;
   /** cria as tags do modelo que o cliente ainda não tem (não altera nem remove as dele) */
   tags?: boolean;
+  /** configurações de atendimento do modelo (encerramento com/sem venda, assinatura, nomes dos resultados) */
+  settings?: boolean;
 }
 
 export interface RolloutTenantResult {
@@ -23,6 +25,8 @@ export interface RolloutTenantResult {
   profiles: { created: string[]; updated: string[] };
   closeReasons: { created: string[]; updated: string[]; reactivated: string[]; deactivated: string[] };
   tags: { created: string[] };
+  /** configurações que mudaram, em texto para a prévia ("Encerramento com venda: desligado") */
+  settings: { changed: string[] };
 }
 
 const lower = (s: string) => s.trim().toLowerCase();
@@ -60,7 +64,8 @@ export class TemplateRolloutService {
       if (!p) throw new BadRequestException(`O perfil "${name}" não está no modelo.`);
       return p;
     });
-    if (!profiles.length && !parts.closeReasons && !parts.tags) throw new BadRequestException('Escolha o que aplicar.');
+    if (!profiles.length && !parts.closeReasons && !parts.tags && !parts.settings) throw new BadRequestException('Escolha o que aplicar.');
+    if (parts.settings && !content.settings) throw new BadRequestException('O modelo não tem configurações de atendimento — nada para aplicar.');
 
     const modelo = provisionedTags(content);
     const motivos = modelo
@@ -84,19 +89,21 @@ export class TemplateRolloutService {
         profiles: { created: [], updated: [] },
         closeReasons: { created: [], updated: [], reactivated: [], deactivated: [] },
         tags: { created: [] },
+        settings: { changed: [] },
       };
       // um cliente por transação: falha num não deixa o outro pela metade
       await this.prisma.$transaction(async (tx) => {
         if (profiles.length) await this.applyProfiles(tx, t.id, profiles, r, dryRun);
         if (parts.closeReasons) await this.applyCloseReasons(tx, t.id, motivos, !!parts.replaceCloseReasons, r, dryRun);
         if (parts.tags) await this.applyTags(tx, t.id, tags, r, dryRun);
+        if (parts.settings && content.settings) await this.applySettings(tx, t.id, content.settings, r, dryRun);
       });
       out.push(r);
     }
 
     if (!dryRun) {
       if (profiles.length) this.permissions.invalidate();
-      this.log.log(`modelo aplicado em ${out.length} cliente(s): ${JSON.stringify({ profiles: parts.profiles, closeReasons: parts.closeReasons, replace: parts.replaceCloseReasons, tags: parts.tags })}`);
+      this.log.log(`modelo aplicado em ${out.length} cliente(s): ${JSON.stringify({ profiles: parts.profiles, closeReasons: parts.closeReasons, replace: parts.replaceCloseReasons, tags: parts.tags, settings: parts.settings })}`);
     }
     return out;
   }
@@ -179,5 +186,17 @@ export class TemplateRolloutService {
       });
     }
     r.tags.created.push(...novas.map((t) => t.name));
+  }
+
+  /** Só o que o modelo define; o resto do `tenant_settings` do cliente fica como está. */
+  private async applySettings(tx: Prisma.TransactionClient, tenantId: string, settings: TemplateSettings, r: RolloutTenantResult, dryRun: boolean) {
+    const atual = await tx.tenantSettings.upsert({ where: { tenantId }, create: { tenantId }, update: {} });
+    const sim = (v: boolean) => (v ? 'ligado' : 'desligado');
+    const data: TemplateSettings = {};
+    if (settings.salesEnabled !== undefined && settings.salesEnabled !== atual.salesEnabled) { data.salesEnabled = settings.salesEnabled; r.settings.changed.push(`Encerramento com venda: ${sim(settings.salesEnabled)}`); }
+    if (settings.requireSignature !== undefined && settings.requireSignature !== atual.requireSignature) { data.requireSignature = settings.requireSignature; r.settings.changed.push(`Assinatura obrigatória: ${sim(settings.requireSignature)}`); }
+    if (settings.wonLabel && settings.wonLabel !== atual.wonLabel) { data.wonLabel = settings.wonLabel; r.settings.changed.push(`Resultado positivo: “${settings.wonLabel}”`); }
+    if (settings.lostLabel && settings.lostLabel !== atual.lostLabel) { data.lostLabel = settings.lostLabel; r.settings.changed.push(`Resultado negativo: “${settings.lostLabel}”`); }
+    if (!dryRun && Object.keys(data).length) await tx.tenantSettings.update({ where: { tenantId }, data });
   }
 }

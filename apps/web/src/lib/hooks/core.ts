@@ -6,6 +6,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, onAccessToken } from '../api';
+import { useUI, type ConversationTab } from '../store';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
@@ -40,6 +41,8 @@ export interface Conversation {
   departmentId?: string | null;
   department?: { id: string; name: string; color: string; isActive: boolean } | null;
   number: { id: string; label: string; phone?: string; color?: string; provider?: 'meta' | 'evolution'; status?: string };
+  /** contato isento de ticket: chat livre, fora da fila e dos relatórios (docs/contatos-isentos.md) */
+  ticketExempt?: boolean;
 }
 export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
@@ -139,12 +142,13 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export type ConversationsQuery = { status: ConversationStatus; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null };
+export type ConversationsQuery = { status: ConversationTab; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null };
 /** Tamanho da página no servidor (`take` padrão de GET /conversations). Página cheia = pode haver mais. */
 export const CONVERSATIONS_PAGE = 50;
 
 function conversationsParams(q: ConversationsQuery) {
-  const p = new URLSearchParams({ status: q.status });
+  // "Livres": contatos isentos de ticket, em qualquer status (docs/contatos-isentos.md)
+  const p = new URLSearchParams(q.status === 'free' ? { free: '1' } : { status: q.status });
   if (q.numberId) p.set('numberId', q.numberId);
   if (q.departmentId) p.set('departmentId', q.departmentId);
   if (q.assigneeId) p.set('assigneeId', q.assigneeId);
@@ -217,7 +221,7 @@ export const useConversationCounts = (numberId: string | null, departmentId: str
       const p = new URLSearchParams();
       if (numberId) p.set('numberId', numberId);
       if (departmentId) p.set('departmentId', departmentId);
-      return api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number }>(`/conversations/counts${p.toString() ? `?${p}` : ''}`);
+      return api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number; free: number }>(`/conversations/counts${p.toString() ? `?${p}` : ''}`);
     },
     refetchInterval: 30_000,
   });
@@ -481,6 +485,33 @@ export const useDeletedOriginal = (m: Pick<Message, 'id' | 'conversationId'>, en
     // URL de mídia assinada expira: não guardar por muito tempo
     staleTime: 60_000,
   });
+
+/**
+ * Tira uma conversa excluída de tudo que o painel tem em cache (listas, contagens, a própria) e
+ * fecha se estiver aberta. Usado no sucesso local e no evento `conversation_deleted` do socket.
+ */
+export const dropConversationFromCache = (qc: ReturnType<typeof useQueryClient>, id: string) => {
+  qc.setQueriesData<{ pages?: { items?: { id: string }[] }[] } | { id: string }[] | undefined>({ queryKey: ['conversations'] }, (old) => {
+    if (!old) return old;
+    if (Array.isArray(old)) return old.filter((c) => c.id !== id);
+    if (old.pages) return { ...old, pages: old.pages.map((p) => ({ ...p, items: p.items?.filter((c) => c.id !== id) })) };
+    return old;
+  });
+  qc.removeQueries({ queryKey: ['conversation', id] });
+  qc.removeQueries({ queryKey: ['messages', id] });
+  qc.invalidateQueries({ queryKey: ['conversations'] });
+  qc.invalidateQueries({ queryKey: ['conversation-counts'] });
+  if (useUI.getState().conversationId === id) useUI.getState().setConversation(null);
+};
+
+/** Excluir a conversa inteira (só no painel; o contato fica). Recusa com venda registrada. */
+export const useDeleteConversation = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (conversationId: string) => api<{ ok: true }>(`/conversations/${conversationId}`, { method: 'DELETE' }),
+    onSuccess: (_, id) => dropConversationFromCache(qc, id),
+  });
+};
 
 /** Limpar o histórico da conversa (só no painel). */
 export const useClearHistory = () => {

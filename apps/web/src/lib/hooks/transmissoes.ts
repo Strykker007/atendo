@@ -2,6 +2,7 @@
 /** Transmissões (envio em massa) — docs/envio.md#transmissão. */
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api';
+import type { TemplateChoice } from '@atendo/shared';
 
 /** Público: filtros (E) + seleção manual e telefones importados (somam). Sem critério, só com `all`. */
 export interface CampaignAudience {
@@ -17,10 +18,12 @@ export interface CampaignAudience {
   agentId?: string;
   contactIds?: string[];
   phones?: string[];
+  /** grupos autorizados (docs/grupos.md) — só QR Code */
+  groupIds?: string[];
 }
 export interface CampaignStats { total: number; pending: number; sent: number; delivered: number; read: number; failed: number; skipped: number }
 export type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'paused' | 'done' | 'canceled';
-export interface CampaignTemplateChoice { name: string; language: string; header?: Record<string, string>; body?: Record<string, string> }
+export type CampaignTemplateChoice = TemplateChoice;
 export interface Campaign {
   id: string;
   name: string;
@@ -47,7 +50,7 @@ export interface CampaignDetail extends Campaign {
   daily: { sent: number; limit: number | null };
   problemas: { contato: string; status: string; motivo: string | null }[];
 }
-export interface AudiencePreview { total: number; novos: number; invalidos: number; optOut: number; excedeu: boolean; max: number }
+export interface AudiencePreview { total: number; novos: number; invalidos: number; optOut: number; excedeu: boolean; max: number; /** grupos autorizados escolhidos */ groups?: number }
 export interface NewCampaign {
   name: string;
   numberId: string;

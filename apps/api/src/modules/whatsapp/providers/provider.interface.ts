@@ -190,6 +190,11 @@ export interface WhatsAppProvider {
    * a Meta não expõe a agenda do celular. Usado pela sincronização periódica de contatos.
    */
   listContacts?(ctx: NumberContext): Promise<{ phone: string; name: string }[]>;
+  /**
+   * Grupos de que o número participa (`jid` com `@g.us`). Opcional: só a Evolution — a API
+   * oficial não fala com grupos. Usado só pela tela de grupos autorizados (docs/grupos.md).
+   */
+  listGroups?(ctx: NumberContext): Promise<{ jid: string; name: string; size: number }[]>;
 
   /** Valida assinatura/autenticidade do webhook. Lança se inválido. */
   verifyWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer): void;
