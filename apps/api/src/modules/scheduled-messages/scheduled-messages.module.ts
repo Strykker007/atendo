@@ -1,8 +1,8 @@
-import { Body, Controller, Delete, Get, Injectable, Module, OnModuleInit, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Injectable, Module, OnModuleInit, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { BullModule, InjectQueue, Processor } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { Type } from 'class-transformer';
-import { IsDate, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsDate, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -10,7 +10,7 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationScopeGuard } from '../conversations/conversation-scope.guard';
-import { ScheduledMessagesService, type ScheduledMediaType } from './scheduled-messages.service';
+import { ScheduledMessagesService, type ScheduledMediaType, type ScheduledListQuery } from './scheduled-messages.service';
 
 export const QUEUE_SCHEDULED_MESSAGES = 'scheduled-messages';
 
@@ -49,6 +49,37 @@ class ScheduledMessagesController {
   }
 }
 
+class ListQueryDto {
+  @IsOptional() @IsIn(['pending', 'sent', 'failed', 'cancelled', 'all']) status?: ScheduledListQuery['status'];
+  @IsOptional() @IsUUID() userId?: string;
+  @IsOptional() @IsUUID() numberId?: string;
+  @IsOptional() @Type(() => Date) @IsDate() from?: Date;
+  @IsOptional() @Type(() => Date) @IsDate() to?: Date;
+  @IsOptional() @IsString() @MaxLength(100) q?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+}
+
+/**
+ * Mensagens agendadas de todas as conversas (tela "Agendadas"). O escopo (próprias ou de todos,
+ * número e departamento) é do service.
+ */
+@Controller('scheduled-messages')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+class AllScheduledMessagesController {
+  constructor(private readonly scheduled: ScheduledMessagesService) {}
+
+  @Get()
+  list(@CurrentUser() u: AuthUser, @Query() q: ListQueryDto) {
+    return this.scheduled.listAll(u, q);
+  }
+
+  @Delete(':scheduledId')
+  @RequirePermission('conversations.schedule_message')
+  cancel(@CurrentUser() u: AuthUser, @Param('scheduledId') scheduledId: string) {
+    return this.scheduled.cancelById(u, scheduledId);
+  }
+}
+
 /** Verifica a cada minuto o que já venceu. */
 @Injectable()
 class ScheduledMessagesScheduler implements OnModuleInit {
@@ -74,7 +105,7 @@ class ScheduledMessagesProcessor extends TrackedWorkerHost {
     AuthModule,
     ConversationsModule,
   ],
-  controllers: [ScheduledMessagesController],
+  controllers: [ScheduledMessagesController, AllScheduledMessagesController],
   providers: [ScheduledMessagesService, ScheduledMessagesScheduler, ScheduledMessagesProcessor],
 })
 export class ScheduledMessagesModule {}

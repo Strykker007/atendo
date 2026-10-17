@@ -149,7 +149,7 @@ export function useRealtime() {
       qc.invalidateQueries({ queryKey: ['campaign', e.id] });
       if (e.alert) toast.warn(`Transmissão "${e.name ?? ''}" pausada: ${e.alert}`);
     });
-    socket.on('scheduled_messages', (e: { conversationId: string }) => qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }));
+    socket.on('scheduled_messages', (e: { conversationId: string }) => { qc.invalidateQueries({ queryKey: ['scheduled-messages', e.conversationId] }); qc.invalidateQueries({ queryKey: ['scheduled-messages-all'] }); });
     // `paid` = o webhook do Pix automático deu baixa: aviso em qualquer tela
     socket.on('budgets', (e: { conversationId: string; paid?: { total: number; contactName: string } }) => {
       qc.invalidateQueries({ queryKey: ['budgets', e.conversationId] });

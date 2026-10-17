@@ -25,6 +25,21 @@ visível para todos da conversa.
   ficam em vermelho com o motivo até alguém dispensar (X).
 - Hoje o modal agenda **só texto**. A API já aceita anexo (`mediaKey`…), a tela ainda não.
 
+## Tela "Agendadas"
+
+Item **Agendadas** no menu lateral (`app/(app)/agendadas/page.tsx`): todas as mensagens agendadas,
+de todas as conversas, com filtros de **status** (agendadas — padrão —, não enviadas, enviadas,
+canceladas, todos), **quem agendou**, **número**, **período** (data do agendamento) e **busca** por
+contato, telefone ou trecho do texto. Cada linha mostra horário, status, contato, número, autor,
+texto e o motivo quando não saiu; **Conversa** abre a conversa e **Cancelar**/**Dispensar** (com
+`conversations.schedule_message`) tira da fila. Paginada de 50 em 50.
+
+- Quem tem `conversations.view_all` (Administrador, Gerente) vê as da equipe e filtra por autor;
+  os demais veem só as que **eles** agendaram. O recorte por número e departamento do usuário vale
+  sempre — a API aplica (`ScheduledMessagesService.listAll`).
+- API: `GET /scheduled-messages?status=&userId=&numberId=&from=&to=&q=&page=` e
+  `DELETE /scheduled-messages/:id` (mesmo escopo; cancelar avisa a conversa pelo socket).
+
 ## Regras
 
 - Na criação: 1 minuto à frente no mínimo, até 365 dias; texto obrigatório (ou anexo).

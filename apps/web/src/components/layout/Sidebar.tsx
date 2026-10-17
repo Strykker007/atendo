@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -34,6 +34,7 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: 'agenda.manage' },
   { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: 'flows.manage' },
   { href: '/respostas', label: 'Respostas', icon: Zap },
+  { href: '/agendadas', label: 'Agendadas', icon: AlarmClock },
   { href: '/tags', label: 'Tags', icon: Tags, need: 'tags.manage' },
   { href: '/transmissoes', label: 'Transmissões', icon: Send, need: 'campaigns.manage' },
   { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: 'settings.manage', feature: 'satisfaction_surveys' },

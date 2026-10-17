@@ -1,5 +1,9 @@
 import { BadRequestException, ConflictException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { Prisma, ScheduledMessageStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { AuthUser } from '../auth/current-user.decorator';
+import { numberFilter } from '../auth/number-scope';
+import { departmentWhere } from '../auth/department-scope';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 
@@ -23,6 +27,25 @@ export interface ScheduleInput {
 }
 
 const USER_SELECT = { user: { select: { id: true, name: true } } } as const;
+
+/** Filtros da tela "Mensagens agendadas" (todas as conversas). */
+export interface ScheduledListQuery {
+  /** padrão `pending`; `all` = todos os status */
+  status?: ScheduledMessageStatus | 'all';
+  /** quem agendou (só para quem vê as de todos) */
+  userId?: string;
+  numberId?: string;
+  /** intervalo do horário agendado */
+  from?: Date;
+  to?: Date;
+  /** nome/telefone do contato ou trecho do texto */
+  q?: string;
+  page?: number;
+}
+const PAGE_SIZE = 50;
+
+/** Ver as agendadas de toda a equipe: quem vê todas as conversas (admin, gerente). Os outros veem as próprias. */
+const seesAll = (u: AuthUser) => u.role === 'super_admin' || !!u.permissions?.includes('conversations.view_all');
 
 /**
  * Mensagens agendadas pelo atendente (docs/agendamento-de-mensagens.md).
@@ -50,6 +73,60 @@ export class ScheduledMessagesService {
       include: USER_SELECT,
       take: 100,
     });
+  }
+
+  /**
+   * Todas as agendadas do tenant, com filtros — a tela "Mensagens agendadas". Quem não vê todas
+   * as conversas só vê o que ele mesmo agendou; o recorte por número e departamento vale sempre.
+   */
+  async listAll(u: AuthUser, q: ScheduledListQuery) {
+    const status = q.status ?? 'pending';
+    const numeros = numberFilter(u);
+    const texto = q.q?.trim();
+    const digitos = texto?.replace(/\D/g, '') ?? '';
+    const conversation: Prisma.ConversationWhereInput = {
+      ...(numeros && { numberId: numeros }),
+      ...(q.numberId && { AND: [{ numberId: q.numberId }] }),
+      ...departmentWhere(u),
+    };
+    const where: Prisma.ScheduledMessageWhereInput = {
+      tenantId: u.tenantId,
+      ...(status !== 'all' && { status }),
+      ...(seesAll(u) ? (q.userId && { userId: q.userId }) : { userId: u.id }),
+      ...((q.from || q.to) && { scheduledFor: { ...(q.from && { gte: q.from }), ...(q.to && { lte: q.to }) } }),
+      conversation,
+      ...(texto && {
+        OR: [
+          { content: { contains: texto, mode: 'insensitive' } },
+          { contact: { name: { contains: texto, mode: 'insensitive' } } },
+          ...(digitos.length >= 3 ? [{ contact: { phone: { contains: digitos } } }] : []),
+        ],
+      }),
+    };
+    const page = Math.max(1, q.page ?? 1);
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.scheduledMessage.count({ where }),
+      this.prisma.scheduledMessage.findMany({
+        where,
+        // pendentes: a próxima primeiro; histórico (enviadas, canceladas): a mais recente primeiro
+        orderBy: { scheduledFor: status === 'pending' || status === 'failed' ? 'asc' : 'desc' },
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        include: {
+          ...USER_SELECT,
+          contact: { select: { id: true, name: true, phone: true } },
+          conversation: { select: { id: true, status: true, number: { select: { id: true, label: true, color: true } } } },
+        },
+      }),
+    ]);
+    return { total, page, pageSize: PAGE_SIZE, rows };
+  }
+
+  /** Cancelar pela tela geral: a conversa sai da linha; quem não vê todas só cancela as próprias. */
+  async cancelById(u: AuthUser, id: string) {
+    const row = await this.prisma.scheduledMessage.findFirst({ where: { id, tenantId: u.tenantId, ...(seesAll(u) ? {} : { userId: u.id }) }, select: { conversationId: true } });
+    if (!row) throw new NotFoundException('Agendamento não encontrado');
+    return this.cancel(u.tenantId, u.id, row.conversationId, id);
   }
 
   async create(tenantId: string, userId: string, conversationId: string, input: ScheduleInput) {
