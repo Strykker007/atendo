@@ -25,9 +25,9 @@ visível para todos da conversa.
   ficam em vermelho com o motivo até alguém dispensar (X).
 - Hoje o modal agenda **só texto**. A API já aceita anexo (`mediaKey`…), a tela ainda não.
 
-## Tela "Agendadas"
+## Tela "Mensagens agendadas"
 
-Item **Agendadas** no menu lateral (`app/(app)/agendadas/page.tsx`): todas as mensagens agendadas,
+Item **Mensagens agendadas** no menu lateral (`app/(app)/agendadas/page.tsx`): todas as mensagens agendadas,
 de todas as conversas, com filtros de **status** (agendadas — padrão —, não enviadas, enviadas,
 canceladas, todos), **quem agendou**, **número**, **período** (data do agendamento) e **busca** por
 contato, telefone ou trecho do texto. Cada linha mostra horário, status, contato, número, autor,

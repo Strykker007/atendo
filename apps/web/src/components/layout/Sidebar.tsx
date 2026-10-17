@@ -34,7 +34,7 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: 'agenda.manage' },
   { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: 'flows.manage' },
   { href: '/respostas', label: 'Respostas', icon: Zap },
-  { href: '/agendadas', label: 'Agendadas', icon: AlarmClock },
+  { href: '/agendadas', label: 'Mensagens agendadas', icon: AlarmClock },
   { href: '/tags', label: 'Tags', icon: Tags, need: 'tags.manage' },
   { href: '/contatos', label: 'Contatos', icon: BookUser, need: 'contacts.import_export' },
   { href: '/transmissoes', label: 'Transmissões', icon: Send, need: 'campaigns.manage' },

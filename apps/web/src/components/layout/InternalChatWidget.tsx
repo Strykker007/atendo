@@ -2,13 +2,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ArrowLeft, Check, ChevronDown, ChevronUp, LogOut, MessagesSquare, Plus, Reply, Send, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronUp, LogOut, Plus, Reply, Send, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import {
   internalMessagesInOrder, useAddInternalMembers, useCan, useCreateInternalChat, useDeleteInternalChat, useInternalChats, useInternalMessages, useInternalUsers, useMarkInternalRead, useMe,
   useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage,
-  type InternalChat, type InternalMessage,
+  type InternalChat, type InternalMessage, type InternalUser,
 } from '@/lib/hooks';
 
 /**
@@ -41,7 +41,7 @@ const W = 340;
 const H = 480;
 /** distância mínima da borda da tela */
 const M = 12;
-const BOLHA = 48;
+const BOLHA = 56;
 const BARRA = 42;
 /** abaixo disto é clique, não arrasto (trackpad sempre mexe um pouco ao clicar) */
 const LIMIAR = 5;
@@ -75,6 +75,8 @@ export function InternalChatWidget() {
   const { open, minimized, side, y, chatId, set } = useWidget();
   const chats = useInternalChats(habilitado);
   const naoLidas = (chats.data ?? []).reduce((a, c) => a + (c.unread ?? 0), 0);
+  const equipe = useInternalUsers(habilitado);
+  const online = (equipe.data ?? []).filter((u) => u.online);
   const vp = useViewport();
 
   // tamanho do que está na tela: botão, barra minimizada ou janela (limitada ao tamanho da tela)
@@ -127,20 +129,17 @@ export function InternalChatWidget() {
   if (!open) {
     return (
       <div className="fixed z-[65] touch-none" style={estilo}>
-        <button
-          type="button"
+        <Launcher
+          naoLidas={naoLidas}
+          online={online}
+          side={side}
+          arrastando={!!livre}
           onPointerDown={iniciarArrasto}
           onPointerMove={mover}
           onPointerUp={() => { if (!soltar()) set({ open: true, minimized: false }); }}
           onPointerCancel={cancelar}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set({ open: true, minimized: false }); } }}
-          className={cn('relative grid place-items-center w-12 h-12 rounded-full bg-accent text-white shadow-xl hover:opacity-95', livre ? 'cursor-grabbing' : 'cursor-pointer')}
-          title="Chat interno da equipe (arraste para mudar de canto)"
-          aria-label="Abrir chat interno"
-        >
-          <MessagesSquare size={20} />
-          {naoLidas > 0 && <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-danger text-white text-[11px] font-bold grid place-items-center tnum">{naoLidas > 99 ? '99+' : naoLidas}</span>}
-        </button>
+          onOpen={() => set({ open: true, minimized: false })}
+        />
       </div>
     );
   }
@@ -149,7 +148,7 @@ export function InternalChatWidget() {
   return (
     <div className="fixed z-[65] flex flex-col rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden" style={{ ...estilo, width: w, height: h }} role="dialog" aria-label="Chat interno">
       <div
-        className={cn('flex items-center gap-2 px-3 bg-side text-white select-none touch-none shrink-0', livre ? 'cursor-grabbing' : 'cursor-grab')}
+        className={cn('flex items-center gap-2 px-3 bg-gradient-to-br from-accent to-accent-hover text-white select-none touch-none shrink-0 shadow-[inset_0_-1px_0_rgb(0_0_0/0.08)]', livre ? 'cursor-grabbing' : 'cursor-grab')}
         style={{ height: BARRA }}
         onPointerDown={iniciarArrasto}
         onPointerMove={mover}
@@ -159,7 +158,7 @@ export function InternalChatWidget() {
         {aberta && !minimized && (
           <button data-no-drag type="button" onClick={() => set({ chatId: null })} className="p-1 rounded hover:bg-white/10" aria-label="Voltar"><ArrowLeft size={15} /></button>
         )}
-        <MessagesSquare size={15} className="shrink-0" />
+        <ChatGlyph size={18} className="shrink-0" />
         <span className="flex-1 min-w-0 truncate text-sm font-semibold">{aberta && !minimized ? aberta.name : 'Chat da equipe'}</span>
         {naoLidas > 0 && minimized && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-[10px] font-bold grid place-items-center tnum">{naoLidas}</span>}
         <button data-no-drag type="button" onClick={() => set({ minimized: !minimized })} className="p-1 rounded hover:bg-white/10" aria-label={minimized ? 'Expandir' : 'Minimizar'}>
@@ -168,6 +167,106 @@ export function InternalChatWidget() {
         <button data-no-drag type="button" onClick={() => set({ open: false })} className="p-1 rounded hover:bg-white/10" aria-label="Fechar"><X size={15} /></button>
       </div>
       {!minimized && (aberta ? <ChatView chat={aberta} meId={me.data!.id} onLeave={() => set({ chatId: null })} /> : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
+    </div>
+  );
+}
+
+/**
+ * Desenho do chat da equipe: dois balões sobrepostos — o de trás vazado, o da frente cheio com
+ * os três pontos de "digitando" (animados quando há mensagem nova). Feito à mão em SVG para ter
+ * identidade própria, em vez do ícone genérico da biblioteca.
+ */
+function ChatGlyph({ size = 26, className, vivo = false }: { size?: number; className?: string; vivo?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden className={className}>
+      <path d="M13 7.5V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-.5v3.2a.6.6 0 0 1-1 .45L20.8 17" stroke="currentColor" strokeOpacity=".75" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 10.5h13a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-6.6l-4.6 3.7a.6.6 0 0 1-1-.47V24.5H6a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3z" fill="currentColor" />
+      {[8.6, 12.5, 16.4].map((cx, i) => (
+        <circle key={cx} cx={cx} cy="17.5" r="1.45" className={cn('fill-accent', vivo && 'typing-dot')} style={vivo ? { animationDelay: `${i * 0.15}s`, transformBox: 'fill-box', transformOrigin: 'center' } : undefined} />
+      ))}
+    </svg>
+  );
+}
+
+const MAX_ROSTOS = 3;
+
+/**
+ * Botão do chat fechado. Squircle com degradê da cor da marca, brilho interno e sombra colorida;
+ * selo de não lidas com pulso; ponto verde quando há colega online. Ao passar o mouse, uma
+ * etiqueta desliza para dentro da tela com quem está online agora (rostos sobrepostos).
+ */
+function Launcher({ naoLidas, online, side, arrastando, onOpen, ...ponteiro }: {
+  naoLidas: number;
+  online: InternalUser[];
+  side: 'left' | 'right';
+  arrastando: boolean;
+  onOpen: () => void;
+  onPointerDown: (e: React.PointerEvent) => void;
+  onPointerMove: (e: React.PointerEvent) => void;
+  onPointerUp: () => void;
+  onPointerCancel: () => void;
+}) {
+  const rostos = online.slice(0, MAX_ROSTOS);
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        {...ponteiro}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+        className={cn(
+          'relative grid place-items-center w-14 h-14 rounded-[20px] text-white',
+          'bg-gradient-to-br from-accent to-accent-hover',
+          'shadow-[0_10px_28px_-6px_color-mix(in_srgb,var(--accent)_55%,transparent),inset_0_1px_0_rgb(255_255_255/0.28),inset_0_-2px_0_rgb(0_0_0/0.12)]',
+          'ring-1 ring-white/10 transition-transform duration-200 ease-out motion-reduce:transition-none',
+          arrastando ? 'cursor-grabbing scale-105 rotate-3' : 'cursor-pointer hover:-translate-y-0.5 hover:scale-[1.04] active:scale-95',
+        )}
+        title="Chat da equipe (arraste para mudar de lado)"
+        aria-label={`Abrir chat da equipe${naoLidas ? ` — ${naoLidas} não lida(s)` : ''}`}
+      >
+        {/* brilho de vidro na metade de cima */}
+        <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[20px] bg-[radial-gradient(120%_85%_at_25%_0%,rgb(255_255_255/0.38),transparent_58%)]" />
+        <ChatGlyph size={34} vivo={naoLidas > 0} className="relative drop-shadow-[0_1px_1px_rgb(0_0_0/0.2)]" />
+
+        {naoLidas > 0 && (
+          <span className="absolute -top-1.5 -right-1.5">
+            <span aria-hidden className="absolute inset-0 rounded-full bg-danger opacity-60 animate-ping motion-reduce:animate-none" />
+            <span className="relative grid place-items-center min-w-[22px] h-[22px] px-1 rounded-full bg-danger text-white text-[11px] font-bold tnum ring-2 ring-panel shadow">{naoLidas > 99 ? '99+' : naoLidas}</span>
+          </span>
+        )}
+        {online.length > 0 && (
+          <span aria-hidden className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-ok ring-2 ring-panel" />
+        )}
+      </button>
+
+      {/* etiqueta do hover: sai para o lado de dentro da tela */}
+      {!arrastando && (
+        <div
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap rounded-2xl border border-line bg-panel/95 backdrop-blur px-3 py-2 shadow-xl',
+            'opacity-0 transition-all duration-200 group-hover:opacity-100 motion-reduce:transition-none',
+            side === 'right' ? 'right-full mr-3 translate-x-2 group-hover:translate-x-0' : 'left-full ml-3 -translate-x-2 group-hover:translate-x-0',
+          )}
+        >
+          <div className="flex items-center gap-2.5">
+            {rostos.length > 0 && (
+              <div className="flex -space-x-2">
+                {rostos.map((u) => (
+                  <span key={u.id} className="w-7 h-7 rounded-full bg-accent-soft text-accent-ink grid place-items-center text-[10px] font-bold ring-2 ring-panel">{iniciais(u.name)}</span>
+                ))}
+                {online.length > MAX_ROSTOS && <span className="w-7 h-7 rounded-full bg-field text-muted grid place-items-center text-[10px] font-bold ring-2 ring-panel">+{online.length - MAX_ROSTOS}</span>}
+              </div>
+            )}
+            <div className="leading-tight">
+              <p className="text-[13px] font-semibold text-ink">Chat da equipe</p>
+              <p className="text-[11.5px] text-muted">
+                {online.length ? <><span className="inline-block w-1.5 h-1.5 rounded-full bg-ok mr-1 align-middle" />{online.length} online agora</> : 'Ninguém online agora'}
+                {naoLidas > 0 && <span className="text-danger font-semibold"> · {naoLidas} nova{naoLidas > 1 ? 's' : ''}</span>}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

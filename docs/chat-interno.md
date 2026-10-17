@@ -35,7 +35,12 @@ o histórico completo. Ler pela auditoria não marca como lida para os membros.
 `components/layout/InternalChatWidget.tsx`, montado no shell autenticado (`app/(app)/layout.tsx`) —
 por isso continua aberto e na mesma conversa ao trocar de página.
 
-- Fechado: botão redondo com o total de não lidas. Arrasta pelo próprio botão; movimento abaixo
+- Fechado: botão próprio (`Launcher`) — squircle com degradê da cor da marca, brilho de vidro e
+  sombra colorida; desenho dos dois balões feito em SVG (`ChatGlyph`), com os três pontos de
+  "digitando" animados quando há mensagem nova. Selo vermelho com pulso para não lidas e ponto
+  verde quando há colega online. No hover, uma etiqueta desliza para dentro da tela com os rostos
+  (iniciais) de quem está online e o total de novas. Animações respeitam "reduzir movimento".
+  Arrasta pelo próprio botão; movimento abaixo
   de 5 px conta como clique (trackpad sempre mexe um pouco ao clicar — antes isso virava arrasto e
   o chat não abria).
 - **Trava magnética**: ao soltar (botão, barra ou janela), o widget gruda na lateral mais próxima
