@@ -36,11 +36,33 @@ Ordem:
 
 ```json
 { "statusCode": 403, "code": "FOR_OUT_OF_SCHEDULE",
-  "message": "FOR_OUT_OF_SCHEDULE: Acesso bloqueado. Solicite autorização de plantão ao gestor." }
+  "message": "Você está fora do horário da sua escala de trabalho.",
+  "requestToken": "<jwt de 30 min>", "userName": "Ana Souza" }
 ```
+
+A tela reage pelo `code`, nunca pelo texto. O `requestToken` só existe porque a senha já foi
+conferida: ele abre as rotas do pedido de autorização (abaixo) e nada mais — é assinado com um
+segredo próprio (`JWT_ACCESS_SECRET` + sufixo), então o `JwtAuthGuard` não o aceita como sessão.
 
 No refresh recusado o token **não** é rotacionado. O front leva para `/login?bloqueio=<code>`,
 que mostra o motivo (`ACCESS_BLOCK_MESSAGES` em `apps/web/src/lib/api.ts`).
+
+## Pedido de autorização
+
+Barrado no login, a pessoa vê um **popup** (`components/auth/AccessRequestModal.tsx`) em vez de
+um erro: "Agora está fora do horário da sua escala…", com **Solicitar acesso** / **Agora não**.
+
+1. **Solicitar acesso** → escolhe **para quem** pedir (quem tem `team.manage` no cliente, ou
+   "qualquer gestor") e escreve o **motivo**; o texto confirma para quem vai. **Confirmar pedido**
+   grava em `schedule_access_requests` (`pending`). Já havia um pendente: atualiza motivo e
+   destinatário (não acumula pedidos repetidos).
+2. O gestor escolhido (ou todos que podem aprovar) recebe na hora um aviso com som (socket
+   `access_request`, sala da pessoa) e o contador no menu **Escalas e plantões**.
+3. No painel, seção **Pedidos de autorização**: **Recusar** ou **Aprovar** — aprovar abre a
+   escolha de **até que dia e hora** vale (atalhos +2h, +4h, +8h, +12h, até o fim do dia; no
+   máximo 7 dias). Aprovar cria a `schedule_overrides` (de agora até lá) e liga ao pedido.
+4. O popup confere a resposta a cada 10 s enquanto aberto: aprovado mostra "autorizou seu acesso
+   até hoje às 22:00" e **Entrar agora** (refaz o login com a senha já digitada); recusado avisa.
 
 ## Liberação excepcional (`schedule_overrides`)
 
@@ -66,7 +88,7 @@ serve para outro dia. Conta inativa deixa de contar em `maxAgents`. Status na li
 
 ## API
 
-Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado.
+Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — menos as três `/auth/access-requests`, que usam o `requestToken` (tenant e usuário vêm dele, nunca do corpo).
 
 | Método | Rota | Descrição |
 |---|---|---|
@@ -78,6 +100,12 @@ Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado.
 | GET | `/work-schedules/overrides` | Liberações ativas ou futuras |
 | POST | `/work-schedules/overrides` | `{userId, hours (1–72), reason?}` — "Autorizar plantão excepcional" |
 | DELETE | `/work-schedules/overrides/:id` | Encerra a liberação |
+| POST | `/auth/access-requests/approvers` | **Sem sessão**, `{token}` (o `requestToken` do login): quem pode aprovar |
+| POST | `/auth/access-requests` | **Sem sessão**, `{token, reason, approverId?}` — cria/atualiza o pedido pendente |
+| POST | `/auth/access-requests/status` | **Sem sessão**, `{token}` — situação do último pedido (`validUntil` quando aprovado) |
+| GET | `/work-schedules/access-requests` | Pedidos pendentes |
+| POST | `/work-schedules/access-requests/:id/approve` | `{validUntil}` (ISO, até 7 dias) — cria a liberação |
+| POST | `/work-schedules/access-requests/:id/deny` | Recusa |
 | PATCH | `/users/:id/schedule` | `{scheduleId \| null}` — gerente só altera atendentes; admin não recebe escala |
 | GET | `/users/temporary` | Contas temporárias (últimas 100) com `status` |
 | POST | `/users/temporary` | `{name, hours (1–72), scheduleId?, numberIds?}` → `{id, name, email, password, accessExpiresAt}`. Respeita `maxAgents` |

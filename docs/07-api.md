@@ -214,7 +214,7 @@ Rotas em [Contatos isentos](contatos-isentos.md#api) (`/ignored-contacts`, `sett
 
 ### Escalas, plantões e acessos temporários (`team.manage`)
 
-Rotas em [Escalas](escalas.md#api): `/work-schedules`, `/work-schedules/team`, `/work-schedules/overrides`, `PATCH /users/:id/schedule` e `/users/temporary`. Login e refresh devolvem `403` com `code` `FOR_OUT_OF_SCHEDULE` (fora da escala, sem liberação) ou `ACCOUNT_EXPIRED` (conta temporária vencida).
+Rotas em [Escalas](escalas.md#api): `/work-schedules`, `/work-schedules/team`, `/work-schedules/overrides`, `PATCH /users/:id/schedule` e `/users/temporary`. Login e refresh devolvem `403` com `code` `FOR_OUT_OF_SCHEDULE` (fora da escala, sem liberação — com `requestToken` para o pedido de autorização) ou `ACCOUNT_EXPIRED` (conta temporária vencida).
 
 ### Contatos: importar e exportar (`contacts.import_export`)
 

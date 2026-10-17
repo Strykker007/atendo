@@ -241,6 +241,13 @@ export function useRealtime() {
       upsertInternalMessage(qc, m);
       if (!m.fromSupport && !useUI.getState().soundMuted) playMessageSound();
     });
+    // pedido de autorização de plantão (sala de quem pode aprovar): aviso + som; respondido = só recarrega
+    socket.on('access_request', (e: { id: string; userName?: string; reason?: string; decided?: boolean }) => {
+      qc.invalidateQueries({ queryKey: ['work-schedules'] });
+      if (e.decided || !e.userName) return;
+      toast.warn(`${e.userName} pediu autorização para entrar fora da escala${e.reason ? `: "${e.reason}"` : ''}. Responda em Escalas e plantões.`);
+      if (!useUI.getState().soundMuted) playMessageSound();
+    });
     socket.on('support_chat', () => { qc.invalidateQueries({ queryKey: ['support-chats'] }); });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela

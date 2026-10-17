@@ -18,6 +18,8 @@ import { BillingModule } from '../billing/billing.module';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { TenantsModule } from '../tenants/tenants.module';
 import { TenantProvisioningService } from '../tenants/tenant-provisioning.service';
+import { ConversationsModule } from '../conversations/conversations.module';
+import { AccessRequestsController, PublicAccessRequestsController } from './access-requests.controller';
 
 const QUEUE_WORK_SCHEDULES = 'work-schedules';
 const TYPES = ['FIXED_12X36', 'COMMERCIAL_44H', 'CUSTOM'] as const;
@@ -291,8 +293,9 @@ class WorkSchedulesProcessor extends TrackedWorkerHost {
     AuthModule,
     BillingModule,
     TenantsModule,
+    ConversationsModule,
   ],
-  controllers: [WorkSchedulesController, UsersScheduleController],
+  controllers: [WorkSchedulesController, UsersScheduleController, AccessRequestsController, PublicAccessRequestsController],
   providers: [WorkSchedulesScheduler, WorkSchedulesProcessor],
 })
 export class WorkSchedulesModule {}

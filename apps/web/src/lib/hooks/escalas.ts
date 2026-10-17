@@ -114,3 +114,24 @@ export const useExpireTemporaryUser = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/users/temporary/${id}/expire`, { method: 'POST' }), onSuccess: () => { invalidar(qc); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };
+
+// ---- pedidos de autorização feitos na tela de login (docs/escalas.md#pedido-de-autorização) ----
+export interface AccessRequest {
+  id: string;
+  reason: string;
+  createdAt: string;
+  updatedAt: string;
+  user: { id: string; name: string; schedule: { id: string; name: string } | null };
+  /** gestor escolhido; null = qualquer um */
+  approver: { id: string; name: string } | null;
+}
+/** Sem polling: o socket (`access_request`) recarrega quando chega ou é respondido um pedido. */
+export const useAccessRequests = (enabled = true) => useQuery({ queryKey: ['work-schedules', 'access-requests'], enabled, queryFn: () => api<AccessRequest[]>('/work-schedules/access-requests') });
+export const useDecideAccessRequest = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, validUntil }: { id: string; validUntil?: string }) =>
+      api<{ ok: boolean; validUntil?: string }>(`/work-schedules/access-requests/${id}/${validUntil ? 'approve' : 'deny'}`, { method: 'POST', body: JSON.stringify(validUntil ? { validUntil } : {}) }),
+    onSuccess: () => invalidar(qc),
+  });
+};

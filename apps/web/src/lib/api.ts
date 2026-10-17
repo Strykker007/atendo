@@ -78,7 +78,8 @@ async function doRefresh(): Promise<boolean> {
 
 /** Erro da API com o status HTTP e, quando a API manda, um `code` para a tela reagir sem comparar texto. */
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) {
+  /** `data` = o corpo inteiro do erro (campos extras, ex.: `requestToken` do login fora da escala) */
+  constructor(message: string, readonly status: number, readonly code?: string, readonly data?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -104,8 +105,8 @@ export const SESSION_EXPIRED_MESSAGE = 'Sua sessão expirou. Entre novamente par
 
 /** Mensagens dos bloqueios de acesso (docs/escalas.md), pelo `code` que a API devolve. */
 export const ACCESS_BLOCK_MESSAGES: Record<string, string> = {
-  FOR_OUT_OF_SCHEDULE: 'FOR_OUT_OF_SCHEDULE: Acesso bloqueado. Solicite autorização de plantão ao gestor.',
-  ACCOUNT_EXPIRED: 'Este acesso temporário expirou. Peça um novo ao gestor.',
+  FOR_OUT_OF_SCHEDULE: 'Seu horário de trabalho terminou. Se precisar continuar, entre de novo e peça autorização ao seu gestor.',
+  ACCOUNT_EXPIRED: 'Este acesso temporário expirou. Peça um novo ao seu gestor.',
 };
 
 /**
@@ -131,7 +132,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}, ret
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.message ?? `Erro ${res.status}`, res.status, body.code);
+    throw new ApiError(body.message ?? `Erro ${res.status}`, res.status, body.code, body);
   }
   // corpo vazio (204, ou o Nest devolvendo `null`) vira null em vez de erro de JSON
   const text = await res.text();

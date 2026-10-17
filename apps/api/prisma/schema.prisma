@@ -56,6 +56,7 @@ model Tenant {
   workSchedules     WorkSchedule[]
   supportTickets    SupportTicket[]
   scheduleOverrides ScheduleOverride[]
+  scheduleAccessRequests ScheduleAccessRequest[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
   contactAttributes ContactAttribute[]
@@ -182,6 +183,8 @@ model User {
   expiredAt       DateTime?
   scheduleOverrides ScheduleOverride[] @relation("overrideUser")
   approvedOverrides ScheduleOverride[] @relation("overrideApprover")
+  accessRequests    ScheduleAccessRequest[] @relation("accessRequestUser")
+  accessRequestsToMe ScheduleAccessRequest[] @relation("accessRequestApprover")
   createdTemporaryUsers User[]         @relation("temporaryCreator")
   temporaryCreatedById  String?
   temporaryCreatedBy    User?          @relation("temporaryCreator", fields: [temporaryCreatedById], references: [id], onDelete: SetNull)
@@ -250,6 +253,39 @@ model ScheduleOverride {
   @@index([tenantId, validUntil])
   @@index([userId, validUntil])
   @@map("schedule_overrides")
+}
+
+enum AccessRequestStatus {
+  pending
+  approved
+  denied
+}
+
+/// Pedido de autorização de plantão feito na tela de login por quem foi barrado pela escala
+/// (docs/escalas.md#pedido-de-autorização). Aprovado vira uma `ScheduleOverride`.
+model ScheduleAccessRequest {
+  id            String              @id @default(uuid())
+  tenantId      String
+  userId        String
+  /// gestor escolhido para aprovar; null = qualquer um com `team.manage`
+  approverId    String?
+  reason        String
+  status        AccessRequestStatus @default(pending)
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  /// liberação criada na aprovação
+  overrideId    String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User   @relation("accessRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  approver User?  @relation("accessRequestApprover", fields: [approverId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([userId, status])
+  @@map("schedule_access_requests")
 }
 
 /// Quais números o usuário opera. **Sem nenhuma linha = opera todos** — é o estado de quem

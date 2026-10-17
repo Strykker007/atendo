@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { CalendarClock, Copy, KeyRound, ShieldCheck, TimerOff, UserPlus } from 'lucide-react';
+import { CalendarClock, Check, Copy, Hand, KeyRound, ShieldCheck, TimerOff, UserPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -9,8 +9,8 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import {
-  useCan, useCreateOverride, useCreateTemporaryUser, useExpireTemporaryUser, useRevokeOverride, useScheduleOverrides, useTeamShifts, useTemporaryUsers, useWorkSchedules,
-  type TeamShift,
+  useAccessRequests, useCan, useCreateOverride, useCreateTemporaryUser, useDecideAccessRequest, useExpireTemporaryUser, useRevokeOverride, useScheduleOverrides, useTeamShifts, useTemporaryUsers, useWorkSchedules,
+  type AccessRequest, type TeamShift,
 } from '@/lib/hooks';
 
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -34,6 +34,9 @@ export default function AprovacoesPage() {
   const expirar = useExpireTemporaryUser();
   const [autorizar, setAutorizar] = useState<TeamShift | true | null>(null);
   const [gerar, setGerar] = useState(false);
+  const pedidos = useAccessRequests();
+  const decidir = useDecideAccessRequest();
+  const [aprovar, setAprovar] = useState<AccessRequest | null>(null);
 
   if (!pode) return <PageShell width="max-w-3xl"><Empty icon={<CalendarClock size={28} />} title="Sem permissão" text="Seu perfil de acesso não inclui gerenciar a equipe." /></PageShell>;
 
@@ -51,6 +54,26 @@ export default function AprovacoesPage() {
           </div>
         }
       />
+
+      {!!pedidos.data?.length && (
+        <section className="rounded-2xl border border-warn bg-warn-soft/40">
+          <h2 className="flex items-center gap-1.5 px-4 pt-4 pb-2 font-display font-semibold text-ink text-sm"><Hand size={15} className="text-warn-ink" /> Pedidos de autorização ({pedidos.data.length})</h2>
+          <ul className="divide-y divide-line border-t border-line bg-panel rounded-b-2xl">
+            {pedidos.data.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+                <div className="flex-1 min-w-48">
+                  <p className="text-sm text-ink truncate"><b>{r.user.name}</b>{r.user.schedule ? <span className="text-faint"> · {r.user.schedule.name}</span> : null}</p>
+                  <p className="text-[12.5px] text-muted">&ldquo;{r.reason}&rdquo;</p>
+                  <p className="text-[11.5px] text-faint">pedido {quando(r.updatedAt)}{r.approver ? ` · para ${r.approver.name}` : ' · para qualquer gestor'}</p>
+                </div>
+                <Button size="sm" variant="subtle" loading={decidir.isPending && decidir.variables?.id === r.id && !decidir.variables.validUntil}
+                  onClick={() => decidir.mutate({ id: r.id }, { onSuccess: () => toast.ok('Pedido recusado.'), onError: (err) => toast.err(err) })}><X size={13} /> Recusar</Button>
+                <Button size="sm" onClick={() => setAprovar(r)}><Check size={13} /> Aprovar</Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="rounded-2xl border border-line bg-panel">
         <h2 className="px-4 pt-4 pb-2 font-display font-semibold text-ink text-sm">Equipe com escala — agora</h2>
@@ -123,6 +146,7 @@ export default function AprovacoesPage() {
 
       {autorizar && <OverrideModal pessoa={autorizar === true ? null : autorizar} equipe={escalados} onClose={() => setAutorizar(null)} />}
       {gerar && <TemporaryModal onClose={() => setGerar(false)} />}
+      {aprovar && <ApproveRequestModal pedido={aprovar} onClose={() => setAprovar(null)} />}
     </PageShell>
   );
 }
@@ -227,6 +251,58 @@ function TemporaryModal({ onClose }: { onClose: () => void }) {
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={criar.isPending} disabled={!name.trim() || hours < 1 || hours > 72}><UserPlus size={14} /> Gerar acesso</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+const ymdLocal = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const hmLocal = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+/** Aprovar pedido: o gestor escolhe até que dia e hora vale (atalhos para os casos comuns). */
+function ApproveRequestModal({ pedido, onClose }: { pedido: AccessRequest; onClose: () => void }) {
+  const decidir = useDecideAccessRequest();
+  // padrão: daqui a 4 horas, arredondado para a próxima meia hora
+  const [inicial] = useState(() => { const d = new Date(Date.now() + 4 * 3_600_000); d.setMinutes(d.getMinutes() < 30 ? 30 : 60, 0, 0); return d; });
+  const [dia, setDia] = useState(ymdLocal(inicial));
+  const [hora, setHora] = useState(hmLocal(inicial));
+  const fim = new Date(`${dia}T${hora}`);
+  const valido = !Number.isNaN(fim.getTime()) && fim.getTime() > Date.now() && fim.getTime() - Date.now() <= 7 * 86_400_000;
+
+  const atalho = (d: Date) => { setDia(ymdLocal(d)); setHora(hmLocal(d)); };
+  const fimDoDia = () => { const d = new Date(); d.setHours(23, 59, 0, 0); return d; };
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      await decidir.mutateAsync({ id: pedido.id, validUntil: fim.toISOString() });
+      toast.ok(`${pedido.user.name} pode entrar até ${quando(fim.toISOString())}.`);
+      onClose();
+    } catch (err) { toast.err(err); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Aprovar acesso de ${pedido.user.name}`}>
+      <form className="space-y-4" onSubmit={submit}>
+        <p className="rounded-lg bg-field px-3 py-2 text-[13px] text-ink">&ldquo;{pedido.reason}&rdquo;</p>
+        <Field label="Autorizado até" hint="A partir de agora. Máximo de 7 dias.">
+          <div className="grid grid-cols-2 gap-2">
+            <input type="date" className={inputCls} value={dia} min={ymdLocal(new Date())} onChange={(e) => setDia(e.target.value)} required aria-label="Dia" />
+            <input type="time" className={inputCls} value={hora} onChange={(e) => setHora(e.target.value)} required aria-label="Hora" />
+          </div>
+        </Field>
+        <div className="flex flex-wrap gap-1.5">
+          {[2, 4, 8, 12].map((h) => (
+            <button key={h} type="button" onClick={() => atalho(new Date(Date.now() + h * 3_600_000))} className="rounded-lg border border-line px-3 py-1.5 text-xs text-ink hover:bg-field">+{h}h</button>
+          ))}
+          <button type="button" onClick={() => atalho(fimDoDia())} className="rounded-lg border border-line px-3 py-1.5 text-xs text-ink hover:bg-field">Até o fim do dia</button>
+        </div>
+        {!valido && <p className="text-[12.5px] text-danger">Escolha um horário no futuro, em até 7 dias.</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button type="submit" loading={decidir.isPending} disabled={!valido}><Check size={14} /> Aprovar</Button>
         </div>
       </form>
     </Modal>

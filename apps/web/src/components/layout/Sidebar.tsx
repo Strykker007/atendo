@@ -11,7 +11,7 @@ import { CompanySwitcher } from './CompanySwitcher';
 import { NoticeBell } from './SystemNotices';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
 import { useTheme, applyTheme } from '@/lib/theme';
-import { useAppVersion, useConversationCounts, useMe, usePermissions, useUsage } from '@/lib/hooks';
+import { useAccessRequests, useAppVersion, useConversationCounts, useMe, usePermissions, useUsage } from '@/lib/hooks';
 import type { Permission, PlanFeature } from '@atendo/shared';
 
 const OWNER_ITEMS = [
@@ -80,6 +80,8 @@ export function Sidebar() {
     window.location.href = '/login';
   }
   const waiting = counts.data?.waiting ?? 0;
+  // pedidos de autorização de plantão esperando resposta (docs/escalas.md#pedido-de-autorização)
+  const pedidos = useAccessRequests(me.data?.role !== 'super_admin' && permitido('team.manage')).data?.length ?? 0;
 
   return (
     <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-14' : 'w-52')}>
@@ -114,7 +116,7 @@ export function Sidebar() {
       <nav className="flex-1 py-2">
         {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items.filter((i) => (!i.need || permitido(i.need)) && (!i.feature || noPlano(i.feature)))).map(({ href, label, icon: Icon }) => {
           const active = target ? target === href : path.startsWith(href);
-          const badge = href === '/conversas' && waiting > 0 ? waiting : null;
+          const badge = href === '/conversas' && waiting > 0 ? waiting : href === '/escalas/aprovacoes' && pedidos > 0 ? pedidos : null;
           return (
             <Link
               key={href}

@@ -166,6 +166,15 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
     this.room(tenantId).emit('internal_chat', { chatId });
     this.to(OWNERS_ROOM).emit('support_chat', { chatId });
   }
+  /**
+   * Pedido de autorização de plantão (docs/escalas.md#pedido-de-autorização): novo pedido vai
+   * para a sala de cada gestor que pode aprovar (aviso + som); `userIds` vazio = respondido,
+   * o cliente inteiro só recarrega a lista.
+   */
+  emitAccessRequest(tenantId: string, userIds: string[], payload: { id: string; userName?: string; reason?: string; decided?: boolean }) {
+    if (!userIds.length) { this.room(tenantId).emit('access_request', payload); return; }
+    for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('access_request', payload);
+  }
   /** Conversa interna criada/renomeada/lida: a lista do widget recarrega. */
   emitInternalChat(tenantId: string, userIds: string[], chatId: string) {
     for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('internal_chat', { chatId });
