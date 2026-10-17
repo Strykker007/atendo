@@ -13,7 +13,9 @@ export interface TemplateFlow { atendo: 'flow'; version: number; name: string; d
 /** tag com que o cliente nasce — as mesmas opções da tela de Tags */
 /** `conflictsWith`: nomes de tags do modelo que não convivem com esta (simétrico — basta um lado) */
 export interface TemplateTag { name: string; color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean; conflictsWith?: string[] }
-export interface TemplateContent { profiles: TemplateProfile[]; quickReplies: TemplateQuickReply[]; flows: TemplateFlow[]; /** ausente = as de encerramento do formato antigo / catálogo (`effectiveTags`) */ tags?: TemplateTag[]; /** formato antigo, só leitura */ lossReasons?: string[]; /** cor `#rrggbb` do botão de cada motivo */ lossReasonColors?: Record<string, string> }
+export interface TemplateContent { profiles: TemplateProfile[]; quickReplies: TemplateQuickReply[]; flows: TemplateFlow[]; /** ausente = as de encerramento do formato antigo / catálogo (`effectiveTags`) */ tags?: TemplateTag[]; /** formato antigo, só leitura */ lossReasons?: string[]; /** cor `#rrggbb` do botão de cada motivo */ lossReasonColors?: Record<string, string>; /** configurações de atendimento com que o cliente nasce; ausente = padrão do sistema */ settings?: TemplateSettings }
+/** Configurações → Atendimento do cliente novo: encerramento com/sem venda, assinatura, nomes dos resultados. */
+export interface TemplateSettings { salesEnabled?: boolean; requireSignature?: boolean; wonLabel?: string; lostLabel?: string }
 export interface TenantTemplateDetail { id: string; name: string; description: string | null; isDefault: boolean; tenants: number; content: TemplateContent; /** o que o cliente recebe hoje (com `tags` ausente, vem do formato antigo ou do catálogo) */ effectiveTags: TemplateTag[] }
 
 const inv = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['tenant-templates'] });
@@ -31,13 +33,15 @@ export const useUpdateTenantTemplate = () => { const qc = useQueryClient(); retu
 export const useDeleteTenantTemplate = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api(`/tenant-templates/${id}`, { method: 'DELETE' }), onSuccess: inv(qc) }); };
 
 /** "Aplicar aos clientes": replica partes do modelo SALVO em clientes que já existem. `dryRun` = prévia. */
-export interface TemplateRolloutBody { tenantIds?: string[]; profiles?: string[]; closeReasons?: boolean; replaceCloseReasons?: boolean; tags?: boolean; dryRun?: boolean }
+export interface TemplateRolloutBody { tenantIds?: string[]; profiles?: string[]; closeReasons?: boolean; replaceCloseReasons?: boolean; tags?: boolean; settings?: boolean; dryRun?: boolean }
 export interface TemplateRolloutResult {
   tenantId: string;
   name: string;
   profiles: { created: string[]; updated: string[] };
   closeReasons: { created: string[]; updated: string[]; reactivated: string[]; deactivated: string[] };
   tags: { created: string[] };
+  /** configurações que mudaram, em texto ("Encerramento com venda: desligado") */
+  settings: { changed: string[] };
 }
 export const useRolloutTenantTemplate = () => {
   const qc = useQueryClient();

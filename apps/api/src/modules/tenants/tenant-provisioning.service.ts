@@ -81,12 +81,13 @@ export class TenantProvisioningService {
    * modelo congelaria a matriz de hoje.
    */
   async capture(tenantId: string): Promise<{ content: TemplateContent; warnings: string[] }> {
-    const [profiles, replies, flows, tags, motivos] = await Promise.all([
+    const [profiles, replies, flows, tags, motivos, ajustes] = await Promise.all([
       this.prisma.accessProfile.findMany({ where: { tenantId }, orderBy: [{ isSystem: 'desc' }, { name: 'asc' }] }),
       this.prisma.quickReply.findMany({ where: { folder: { tenantId } }, include: { folder: { select: { name: true } } }, orderBy: [{ folder: { position: 'asc' } }, { position: 'asc' }] }),
       this.prisma.flow.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
       this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnWon: true, showOnLost: true, conflictsA: { select: { otherId: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
       this.prisma.closeReason.findMany({ where: { tenantId, isActive: true }, select: { name: true, color: true, outcome: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true, requireSignature: true, wonLabel: true, lostLabel: true } }),
     ]);
     const admin = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
     const warnings = new Set<string>();
@@ -113,6 +114,8 @@ export class TenantProvisioningService {
           ...tags.map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), isKanban: t.isKanban, showOnWon: t.showOnWon, showOnLost: t.showOnLost, ...(t.conflictsA.length && { conflictsWith: t.conflictsA.map((c) => tagNameById[c.otherId]).filter(Boolean) }) })),
           ...motivos.filter((m) => !tags.some((t) => t.name.toLowerCase() === m.name.toLowerCase())).map((m) => ({ name: m.name, ...(/^#[0-9a-f]{6}$/i.test(m.color) && { color: m.color.toLowerCase() }), isKanban: false, showOnWon: m.outcome !== 'lost', showOnLost: m.outcome !== 'won' })),
         ].slice(0, TEMPLATE_TAGS_MAX),
+        // configurações de atendimento como estão no cliente
+        ...(ajustes && { settings: { salesEnabled: ajustes.salesEnabled, requireSignature: ajustes.requireSignature, wonLabel: ajustes.wonLabel, lostLabel: ajustes.lostLabel } }),
       },
       warnings: [...warnings],
     };

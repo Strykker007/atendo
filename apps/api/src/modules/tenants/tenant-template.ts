@@ -39,6 +39,38 @@ export interface TemplateTag {
   conflictsWith?: string[];
 }
 
+/**
+ * Configurações de atendimento com que o cliente nasce (as mesmas de Configurações →
+ * Atendimento). Ausente = o padrão do sistema (com venda, assinatura opcional, Comprou/Não comprou).
+ */
+export interface TemplateSettings {
+  /** encerramento com venda (valor, itens); `false` = atendimento sem venda (condomínio, suporte…) */
+  salesEnabled?: boolean;
+  /** assinatura do atendente obrigatória */
+  requireSignature?: boolean;
+  /** nome dos resultados do encerramento ("Resolvido" / "Não resolvido"…) */
+  wonLabel?: string;
+  lostLabel?: string;
+}
+
+/** Só o que veio no modelo, já validado — vira `tenant_settings` na criação e no Aplicar aos clientes. */
+export function parseTemplateSettings(raw: unknown): TemplateSettings | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('"settings" deve ser um objeto.');
+  const o = raw as Record<string, unknown>;
+  const out: TemplateSettings = {};
+  for (const k of ['salesEnabled', 'requireSignature'] as const) {
+    if (o[k] === undefined) continue;
+    if (typeof o[k] !== 'boolean') throw new Error(`"settings.${k}" deve ser verdadeiro ou falso.`);
+    out[k] = o[k] as boolean;
+  }
+  for (const k of ['wonLabel', 'lostLabel'] as const) {
+    const v = str(o[k], 30);
+    if (v) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** teto de tags num modelo */
 export const TEMPLATE_TAGS_MAX = 200;
 
@@ -62,6 +94,8 @@ export interface TemplateContent {
   lossReasons?: string[];
   /** Cor (`#rrggbb`) de cada uma dessas tags, pelo nome. Ausente = cor padrão. */
   lossReasonColors?: Record<string, string>;
+  /** configurações de atendimento (encerramento com/sem venda, assinatura, nomes dos resultados) */
+  settings?: TemplateSettings;
 }
 
 /** O arquivo `.json` de importar/exportar. */
@@ -147,9 +181,10 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
     tagConflicts(tags, o.tags as Partial<TemplateTag>[]);
   }
 
+  const settings = parseTemplateSettings(o.settings);
   // com `tags`, o formato antigo sai: uma fonte só do que o cliente recebe
-  if (tags) return { profiles, quickReplies, flows, tags };
-  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }) };
+  if (tags) return { profiles, quickReplies, flows, tags, ...(settings && { settings }) };
+  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }), ...(settings && { settings }) };
 }
 
 /**
@@ -189,7 +224,7 @@ export function templateTagConflictPairs(tags: TemplateTag[]): [string, string][
   return out;
 }
 
-export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }) });
+export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }), ...(f.settings && { settings: f.settings }) });
 
 /**
  * Tags com que o cliente nasce, na ordem: as do modelo; em modelo antigo, a lista de motivos

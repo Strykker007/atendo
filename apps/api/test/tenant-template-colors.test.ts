@@ -23,3 +23,16 @@ describe('cores dos motivos no modelo', () => {
     expect(provisionedLossReasonColors(null)).toEqual({});
   });
 });
+
+describe('configurações de atendimento no modelo', () => {
+  it('guarda encerramento sem venda, assinatura e nomes dos resultados', () => {
+    const c = parseTemplateContent({ settings: { salesEnabled: false, requireSignature: true, wonLabel: ' Resolvido ', lostLabel: 'Não resolvido' } });
+    expect(c.settings).toEqual({ salesEnabled: false, requireSignature: true, wonLabel: 'Resolvido', lostLabel: 'Não resolvido' });
+  });
+  it('sem nada definido, não grava a chave', () => {
+    expect(parseTemplateContent({ settings: { wonLabel: '  ' } }).settings).toBeUndefined();
+  });
+  it('recusa valor que não é verdadeiro/falso', () => {
+    expect(() => parseTemplateContent({ settings: { salesEnabled: 'não' } })).toThrow();
+  });
+});

@@ -223,7 +223,8 @@ class TenantsController {
         },
         include: { subscription: true },
       });
-      await tx.tenantSettings.create({ data: { tenantId: tenant.id } });
+      // configurações de atendimento do modelo (encerramento sem venda, assinatura, nomes dos resultados)
+      await tx.tenantSettings.create({ data: { tenantId: tenant.id, ...content?.settings } });
       // livro de descontos: nasceu com promoção (docs/05#livro-de-descontos)
       if (promo) await this.ledger.open({ tenantId: tenant.id, plan, priceMonth: promo.priceMonth, kind: 'promotion', source: 'tenant_create', promotion: promo.promotion, endsAt: promo.expiresAt }, tx);
       // tags do modelo, na ordem dele (é a das colunas do Kanban). As marcadas para o encerramento

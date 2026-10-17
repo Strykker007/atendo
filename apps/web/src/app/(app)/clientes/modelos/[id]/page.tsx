@@ -11,7 +11,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useUnsavedGuard } from '@/lib/unsaved-guard';
-import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateFlow, type TemplateProfile, type TemplateQuickReply, type TemplateTag } from '@/lib/hooks';
+import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateFlow, type TemplateProfile, type TemplateQuickReply, type TemplateSettings, type TemplateTag } from '@/lib/hooks';
 import { PALETTE, ColorPopover } from '@/components/ui/ColorSwatches';
 import { ApplyToTenantsModal } from './ApplyToTenants';
 
@@ -75,7 +75,7 @@ export default function TemplateEditorPage() {
   return (
     <PageShell width="max-w-6xl">
       {modal}
-      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} />
+      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} settings={tpl.data.content.settings} />
       <PageHeader
         title={tpl.data.name}
         subtitle={<>Tudo com que um cliente novo nasce ao ser criado com este modelo. Clientes que já existem só mudam pelo “Aplicar aos clientes”.</>}
@@ -101,6 +101,7 @@ export default function TemplateEditorPage() {
           </label>
         </div>
 
+        <SettingsSection value={content.settings} onChange={(settings) => edit({ settings })} />
         <ProfilesSection profiles={content.profiles} onChange={(profiles) => edit({ profiles })} />
         <QuickRepliesSection items={content.quickReplies} onChange={(quickReplies) => edit({ quickReplies })} />
         <FlowsSection items={content.flows} onChange={(flows) => edit({ flows })} />
@@ -108,6 +109,49 @@ export default function TemplateEditorPage() {
         <TagsSection value={content.tags} fallback={content.lossReasons || content.lossReasonColors ? tpl.data.effectiveTags : CATALOGO_TAGS} onChange={(tags) => edit({ tags, lossReasons: undefined, lossReasonColors: undefined })} />
       </div>
     </PageShell>
+  );
+}
+
+/** nomes sugeridos para atendimento sem venda (condomínio, suporte…) */
+const SERVICE_LABELS = { wonLabel: 'Resolvido', lostLabel: 'Não resolvido' };
+
+/**
+ * Configurações → Atendimento com que o cliente nasce: encerramento com ou sem venda, assinatura
+ * obrigatória e o nome dos resultados. Sem nada marcado, vale o padrão do sistema.
+ */
+function SettingsSection({ value, onChange }: { value?: TemplateSettings; onChange: (s: TemplateSettings | undefined) => void }) {
+  const s = value ?? {};
+  const vendas = s.salesEnabled ?? true;
+  const set = (patch: Partial<TemplateSettings>) => {
+    const next = { ...s, ...patch };
+    (Object.keys(next) as (keyof TemplateSettings)[]).forEach((k) => { if (next[k] === undefined || next[k] === '') delete next[k]; });
+    onChange(Object.keys(next).length ? next : undefined);
+  };
+  // desligar a venda com os nomes vazios já sugere os de atendimento (dá para trocar)
+  const alternarVendas = () => set(vendas ? { salesEnabled: false, ...(!s.wonLabel && !s.lostLabel && SERVICE_LABELS) } : { salesEnabled: true, ...(s.wonLabel === SERVICE_LABELS.wonLabel && s.lostLabel === SERVICE_LABELS.lostLabel && { wonLabel: undefined, lostLabel: undefined }) });
+  const Switch = ({ on, onToggle, titulo, desc }: { on: boolean; onToggle: () => void; titulo: string; desc: string }) => (
+    <div className="flex items-start gap-3">
+      <button type="button" role="switch" aria-checked={on} aria-label={titulo} onClick={onToggle} className={`relative mt-0.5 w-9 h-5 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-line'}`}>
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      </button>
+      <div className="text-sm"><div className="font-medium text-ink">{titulo}</div><p className="text-xs text-muted">{desc}</p></div>
+    </div>
+  );
+  return (
+    <div className={section}>
+      <div>
+        <h2 className="font-display font-semibold text-ink">Atendimento</h2>
+        <p className="text-[12px] text-muted">Como o cliente novo encerra e assina os atendimentos (Configurações → Atendimento). O cliente pode mudar depois. {value ? '' : 'Sem nada definido: padrão do sistema (com venda, assinatura opcional, “Comprou” / “Não comprou”).'}</p>
+      </div>
+      <Switch on={vendas} onToggle={alternarVendas} titulo="Encerramento com venda"
+        desc={vendas ? 'Ligado: o encerramento pede valor e itens da venda (faturamento, ticket médio).' : 'Desligado: atendimento sem venda (condomínio, suporte, serviço público) — só resultado, motivo e tags.'} />
+      <Switch on={!!s.requireSignature} onToggle={() => set({ requireSignature: !s.requireSignature })} titulo="Assinatura obrigatória"
+        desc={s.requireSignature ? 'Ligado: toda mensagem do atendente sai com o nome dele.' : 'Desligado: cada atendente escolhe no chat.'} />
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Resultado positivo"><input className={inputCls} value={s.wonLabel ?? ''} maxLength={30} placeholder={vendas ? 'Comprou' : 'Resolvido'} onChange={(e) => set({ wonLabel: e.target.value })} /></Field>
+        <Field label="Resultado negativo"><input className={inputCls} value={s.lostLabel ?? ''} maxLength={30} placeholder={vendas ? 'Não comprou' : 'Não resolvido'} onChange={(e) => set({ lostLabel: e.target.value })} /></Field>
+      </div>
+    </div>
   );
 }
 

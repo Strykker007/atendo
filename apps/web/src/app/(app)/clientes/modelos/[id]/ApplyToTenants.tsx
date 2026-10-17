@@ -5,7 +5,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
-import { useRolloutTenantTemplate, useTenants, type TemplateRolloutResult, type TemplateTag } from '@/lib/hooks';
+import { useRolloutTenantTemplate, useTenants, type TemplateRolloutResult, type TemplateSettings, type TemplateTag } from '@/lib/hooks';
 
 /**
  * "Aplicar aos clientes" (docs/20-modelos-de-perfil.md → Aplicar aos clientes).
@@ -14,7 +14,7 @@ import { useRolloutTenantTemplate, useTenants, type TemplateRolloutResult, type 
  * Comprou / Não comprou, tags que faltam) para quem já existe. Sempre passa pela prévia: o dono
  * vê cliente por cliente o que muda antes de gravar.
  */
-export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags }: {
+export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags, settings }: {
   open: boolean;
   onClose: () => void;
   templateId: string;
@@ -22,6 +22,8 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags 
   profiles: string[];
   /** tags efetivas do modelo salvo */
   tags: TemplateTag[];
+  /** configurações de atendimento do modelo salvo */
+  settings?: TemplateSettings;
 }) {
   const tenants = useTenants();
   const rollout = useRolloutTenantTemplate();
@@ -31,6 +33,8 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags 
   const [motivos, setMotivos] = useState(false);
   const [substituir, setSubstituir] = useState(false);
   const [comTags, setComTags] = useState(false);
+  const [comAjustes, setComAjustes] = useState(false);
+  const resumoAjustes = settings ? resumoSettings(settings) : '';
   const [todos, setTodos] = useState(true);
   const [escolhidos, setEscolhidos] = useState<string[]>([]);
   const [q, setQ] = useState('');
@@ -48,8 +52,9 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags 
     ...(perfis.length && { profiles: perfis }),
     ...(motivos && { closeReasons: true, replaceCloseReasons: substituir }),
     ...(comTags && { tags: true }),
+    ...(comAjustes && { settings: true }),
   });
-  const algo = perfis.length > 0 || motivos || comTags;
+  const algo = perfis.length > 0 || motivos || comTags || comAjustes;
   const alvo = todos ? ativos.length : escolhidos.length;
   // mudou a escolha: a prévia antiga não vale mais
   const mexer = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setPrevia(null); };
@@ -104,6 +109,11 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags 
               Tags que faltam <span className="text-muted">— cria as {tagsModelo.length} tags do modelo que o cliente não tem (as dele não mudam)</span>
             </Check>
           </div>
+          <div className="rounded-xl border border-line p-3">
+            <Check checked={comAjustes} disabled={!resumoAjustes} onChange={mexer(setComAjustes)}>
+              Configurações de atendimento <span className="text-muted">— {resumoAjustes || 'o modelo não define (o cliente fica como está)'}</span>
+            </Check>
+          </div>
         </section>
 
         <section className="space-y-2">
@@ -144,6 +154,7 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags 
                   <Linha rotulo="Motivos reativados" itens={r.closeReasons.reactivated} />
                   <Linha rotulo="Motivos desativados" itens={r.closeReasons.deactivated} perigo />
                   <Linha rotulo="Tags criadas" itens={r.tags.created} />
+                  <Linha rotulo="Configurações" itens={r.settings?.changed ?? []} />
                 </li>
               ))}
             </ul>
@@ -162,7 +173,16 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags 
 }
 
 const temMudanca = (r: TemplateRolloutResult) =>
-  [r.profiles.created, r.profiles.updated, r.closeReasons.created, r.closeReasons.updated, r.closeReasons.reactivated, r.closeReasons.deactivated, r.tags.created].some((l) => l.length > 0);
+  [r.profiles.created, r.profiles.updated, r.closeReasons.created, r.closeReasons.updated, r.closeReasons.reactivated, r.closeReasons.deactivated, r.tags.created, r.settings?.changed ?? []].some((l) => l.length > 0);
+
+/** "sem venda · assinatura obrigatória · Resolvido / Não resolvido" — o que o modelo define */
+export function resumoSettings(s: TemplateSettings) {
+  return [
+    s.salesEnabled !== undefined && (s.salesEnabled ? 'encerramento com venda' : 'encerramento sem venda'),
+    s.requireSignature !== undefined && (s.requireSignature ? 'assinatura obrigatória' : 'assinatura opcional'),
+    (s.wonLabel || s.lostLabel) && `resultados “${s.wonLabel ?? 'Comprou'}” / “${s.lostLabel ?? 'Não comprou'}”`,
+  ].filter(Boolean).join(' · ');
+}
 
 function Linha({ rotulo, itens, perigo }: { rotulo: string; itens: string[]; perigo?: boolean }) {
   if (!itens.length) return null;
