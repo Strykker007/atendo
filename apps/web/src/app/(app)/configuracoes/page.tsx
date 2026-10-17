@@ -21,7 +21,7 @@ import { TransferSection } from '@/components/settings/TransferSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
 import Link from 'next/link';
-import { Smartphone } from 'lucide-react';
+import { BellOff, MessagesSquare, Smartphone } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe } from '@/lib/hooks';
 
 type Aba = 'conta' | 'empresa' | 'atendimento';
@@ -49,8 +49,10 @@ export default function ConfiguracoesPage() {
   const podeEquipe = useCan('team.manage');
   // a lista é de todos (aparece nos menus de variável); criar/editar/excluir é de quem tem a permissão
   const podeVariaveis = useCan('variables.manage');
+  // ler as conversas do chat interno da equipe (docs/chat-interno.md)
+  const podeAuditar = useCan('internal_chat.audit');
 
-  const temEmpresa = !isOwner && (podeNumeros || podeConfigurar || podeEquipe || podeVariaveis);
+  const temEmpresa = !isOwner && (podeNumeros || podeConfigurar || podeEquipe || podeVariaveis || podeAuditar);
   const temAtendimento = !isOwner && podeConfigurar;
   const visiveis = ABAS.filter((a) => a.id === 'conta' || (a.id === 'empresa' && temEmpresa) || (a.id === 'atendimento' && temAtendimento));
 
@@ -95,6 +97,9 @@ export default function ConfiguracoesPage() {
             {podeVariaveis && <GlobalVariablesSection />}
             {podeConfigurar && <PixGatewaySection />}
             {podeConfigurar && <PublicPagesSection />}
+            {podeAuditar && (
+              <LinkSection href="/configuracoes/chat-interno" icon={<MessagesSquare size={20} />} title="Auditoria do chat interno" text="Leia qualquer conversa do chat interno da equipe. O histórico é permanente: ninguém apaga nem edita mensagens." action="Abrir auditoria" />
+            )}
           </>
         )}
         {atual === 'atendimento' && (
@@ -104,6 +109,7 @@ export default function ConfiguracoesPage() {
             <SignatureSection />
             <TransferSection />
             <ClosingSection />
+            <LinkSection href="/configuracoes/contatos-isentos" icon={<BellOff size={20} />} title="Contatos isentos de ticket" text="Números que nunca abrem atendimento (diretoria, fornecedores): ficam na aba Livres e fora dos relatórios." action="Gerenciar lista" />
             <DefaultFlowsSection />
           </>
         )}
@@ -243,6 +249,20 @@ function NumbersSection() {
         <Link href="/configuracoes/grupos" className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-field">Grupos autorizados</Link>
         <Link href="/numeros" className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-field">Gerenciar números</Link>
       </div>
+    </section>
+  );
+}
+
+/** Cartão de atalho para uma tela própria de configuração. */
+function LinkSection({ href, icon, title, text, action }: { href: string; icon: React.ReactNode; title: string; text: string; action: string }) {
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-5 flex flex-wrap items-center gap-4">
+      <div className="w-10 h-10 rounded-xl bg-accent-soft text-accent grid place-items-center shrink-0">{icon}</div>
+      <div className="flex-1 min-w-48">
+        <h2 className="font-display font-semibold text-ink">{title}</h2>
+        <p className="text-sm text-muted">{text}</p>
+      </div>
+      <Link href={href} className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-field">{action}</Link>
     </section>
   );
 }

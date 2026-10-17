@@ -93,6 +93,8 @@ model Tenant {
   salesGoals          SalesGoal[]
   budgets             Budget[]
   secureMedia         SecureMedia[]
+  ignoredContacts     IgnoredContact[]
+  internalChats       InternalChat[]
   paymentGateway      PaymentGateway?
   @@map("tenants")
 }
@@ -162,6 +164,8 @@ model User {
 
   scheduledMessages ScheduledMessage[]
   budgets           Budget[]
+  internalChats     InternalChatMember[]
+  internalMessages  InternalMessage[]
   @@index([tenantId])
   @@index([profileId])
   @@map("users")
@@ -914,6 +918,9 @@ model Conversation {
   /// período da faixa de horário cuja resposta já foi enviada (`<faixa>@<início>`, ver docs/horarios.md):
   /// a resposta de Fechado/faixa especial sai uma vez por conversa a cada período
   scheduleNoticeKey String?
+  /// Contato na lista de isentos (docs/contatos-isentos.md): chat livre, sem ticket. Não entra na
+  /// fila, não reabre atendimento, não aciona automação e fica fora de todos os relatórios.
+  ticketExempt      Boolean   @default(false)
 
   /// UMA conversa por contato em cada número. O que começa e termina é o atendimento
   /// (ver `conversation_events`); a conversa é a linha do tempo com a pessoa, como no WhatsApp.
@@ -932,6 +939,7 @@ model Conversation {
   @@index([tenantId, createdAt])
   @@index([tenantId, departmentId, status])
   @@index([numberId, contactId])
+  @@index([tenantId, ticketExempt, lastMessageAt(sort: Desc)])
   aiUsage   AiUsage[]
 
   @@map("conversations")
@@ -2251,4 +2259,80 @@ model SecureMedia {
 
   @@index([conversationId, createdAt])
   @@map("secure_media")
+}
+
+/// Telefones que nunca geram ticket (docs/contatos-isentos.md): a mensagem entra como chat livre
+/// (aba "Livres"), sem fila, sem automação e fora dos relatórios de desempenho.
+model IgnoredContact {
+  id          String   @id @default(uuid())
+  tenantId    String
+  /// só dígitos, com DDI (o nono dígito é conferido nas duas formas — phone-variants.ts)
+  phone       String
+  /// apelido para a lista (ex.: "Fornecedor X", "Diretoria")
+  label       String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, phone])
+  @@map("ignored_contacts")
+}
+
+/// Chat interno da equipe (docs/chat-interno.md): conversa direta (dois membros) ou grupo.
+/// Nada daqui vai ao WhatsApp nem passa pelo ledger de uso. Nunca é apagado — é auditável.
+model InternalChat {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  isGroup            Boolean   @default(false)
+  /// nome do grupo; conversa direta usa o nome do outro membro
+  name               String?
+  /// conversa direta: "<menor userId>:<maior userId>" — uma só por par
+  directKey          String?
+  createdById        String?
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members  InternalChatMember[]
+  messages InternalMessage[]
+
+  @@unique([tenantId, directKey])
+  @@index([tenantId, lastMessageAt(sort: Desc)])
+  @@map("internal_chats")
+}
+
+model InternalChatMember {
+  chatId     String
+  userId     String
+  /// até onde a pessoa leu (badge de não lidas)
+  lastReadAt DateTime?
+  joinedAt   DateTime  @default(now())
+
+  chat InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([userId])
+  @@map("internal_chat_members")
+}
+
+model InternalMessage {
+  id         String   @id @default(uuid())
+  tenantId   String
+  chatId     String
+  authorId   String?
+  /// nome gravado no envio: a auditoria continua legível depois que o usuário sai
+  authorName String
+  text       String
+  createdAt  DateTime @default(now())
+
+  chat   InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  author User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([chatId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("internal_messages")
 }

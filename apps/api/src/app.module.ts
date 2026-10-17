@@ -36,6 +36,8 @@ import { CompaniesModule } from './modules/companies/companies.module';
 import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
 import { NoticesModule } from './modules/notices/notices.module';
 import { MonitorModule } from './modules/monitor/monitor.module';
+import { IgnoredContactsModule } from './modules/ignored-contacts/ignored-contacts.module';
+import { InternalChatModule } from './modules/internal-chat/internal-chat.module';
 
 @Module({
   imports: [
@@ -73,6 +75,8 @@ import { MonitorModule } from './modules/monitor/monitor.module';
     AiModule,
     NoticesModule,
     MonitorModule,
+    IgnoredContactsModule,
+    InternalChatModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -26,7 +26,7 @@ senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 |---|---|
 | Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.close_internal`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit`, `contacts.import_export` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `variables.manage`, `agenda.manage`, `campaigns.manage` |
-| Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage` |
+| Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage`, `internal_chat.audit` |
 | Conta | `numbers.manage`, `billing.manage` |
 
 `DEFAULT_PERMISSIONS` reproduz **exatamente** o acesso que cada papel já tinha antes dos
@@ -47,6 +47,8 @@ editados (migration `global_variables`) — ver [Variáveis](variaveis.md).
 perfis padrão Gerente e Administrador não editados (migration `close_internal_audit`); o atendente
 fica sem, para não "limpar" do relatório o atendimento demorado ou perdido — ver
 [Encerramento interno](06-modelo-de-dados.md#encerramento-interno).
+`internal_chat.audit` (ler qualquer conversa do chat interno) entrou só no perfil padrão
+Administrador não editado (migration `ignored_contacts_internal_chat`) — ver [Chat interno](chat-interno.md).
 
 ## Como é aplicado
 

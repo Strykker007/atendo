@@ -602,17 +602,24 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           </div>
           )}
         </div>
-        <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
-          <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
-        </span>
+        {conv.ticketExempt ? (
+          // contato isento: chat livre, sem fila, sem dono e fora dos relatórios (docs/contatos-isentos.md)
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted" title="Contato isento de ticket: não entra na fila nem nos relatórios">
+            <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre · sem ticket
+          </span>
+        ) : (
+          <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
+            <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
+          </span>
+        )}
         {/* Encerrar é a ação que fecha o atendimento (e alimenta o relatório de vendas): verde, com
             texto sempre visível e a PRIMEIRA das ações — no fim da fila, ela ia para a segunda linha
             ou ficava atrás do painel da direita e o atendente não achava */}
-        {conv.status !== 'closed' ? (
+        {conv.status !== 'closed' ? (conv.ticketExempt ? null : (
           <Button size="sm" variant="success" className="shrink-0" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
             Encerrar
           </Button>
-        ) : (
+        )) : (
           <Button size="sm" variant="ghost" className="shrink-0" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Conversa reaberta'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Reabrir">
             Reabrir
           </Button>

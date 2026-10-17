@@ -14,6 +14,7 @@ import { playMessageSound, unlockMessageSound } from '../message-sound';
 import { useUI } from '../store';
 import { toast } from '@/components/ui/Toast';
 import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
+import { upsertInternalMessage, type InternalMessage } from './chat-interno';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -126,11 +127,13 @@ export function useRealtime() {
       const next: Typing = e.state === 'paused' ? null : { state: e.state, at: Date.now() };
       qc.setQueryData<Typing>(['typing', e.conversationId], next);
     });
-    socket.on('conversation', (c: { id: string; status?: ConversationStatus }) => {
+    socket.on('conversation', (c: { id: string; status?: ConversationStatus; ticketExempt?: boolean }) => {
       // encerrada (por outro atendente, pelo robô ou pelo sistema): sai na hora das listas de outro status
       if (c.status === 'closed') {
         for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
-          if ((key[1] as { status?: ConversationStatus } | undefined)?.status === 'closed') continue;
+          const aba = (key[1] as { status?: string } | undefined)?.status;
+          // aba "Livres" mostra a conversa livre em qualquer status
+          if (aba === 'closed' || (aba === 'free' && c.ticketExempt)) continue;
           qc.setQueryData<Conversation[]>(key, (old) => old?.filter((x) => x.id !== c.id));
         }
       }
@@ -150,6 +153,13 @@ export function useRealtime() {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       receiveTransferAlert(e);
     });
+    // chat interno da equipe (sala só dos membros): entra na conversa e toca para quem não escreveu
+    socket.on('internal_message', (m: InternalMessage) => {
+      upsertInternalMessage(qc, m);
+      const eu = qc.getQueryData<{ id: string }>(['me'])?.id;
+      if (m.authorId !== eu && !useUI.getState().soundMuted) playMessageSound();
+    });
+    socket.on('internal_chat', () => { qc.invalidateQueries({ queryKey: ['internal-chats'] }); });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
     socket.on('campaign', (e: { id: string; status: string; name?: string; alert?: string }) => {

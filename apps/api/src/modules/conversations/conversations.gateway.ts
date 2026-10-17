@@ -147,6 +147,18 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
     this.to(`user:${tenantId}:${userId}`).emit('transfer_alert', event);
   }
 
+  /**
+   * Chat interno da equipe (docs/chat-interno.md): vai só para a sala de cada membro — o resto do
+   * cliente não recebe nem o aviso de que a conversa existe.
+   */
+  emitInternalMessage(tenantId: string, userIds: string[], message: unknown) {
+    for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('internal_message', message);
+  }
+  /** Conversa interna criada/renomeada/lida: a lista do widget recarrega. */
+  emitInternalChat(tenantId: string, userIds: string[], chatId: string) {
+    for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('internal_chat', { chatId });
+  }
+
   emitConversationDeleted(tenantId: string, conversationId: string) {
     this.room(tenantId).emit('conversation_deleted', { conversationId });
   }

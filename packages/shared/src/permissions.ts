@@ -45,6 +45,9 @@ export const PERMISSIONS = {
   'team.manage': 'Convidar, editar e desativar membros da equipe',
   'profiles.manage': 'Criar e editar perfis de acesso',
   'settings.manage': 'Mudar horário de funcionamento e fluxos padrão',
+  // ler conversas do chat interno das quais a pessoa não participa (docs/chat-interno.md):
+  // só o administrador vem com ela — gerente que precisa auditar recebe por perfil
+  'internal_chat.audit': 'Auditar o chat interno da equipe (ler todas as conversas)',
   'numbers.manage': 'Conectar e configurar números de WhatsApp',
   'billing.manage': 'Ver e mudar o plano, acessar faturas',
 } as const;
@@ -57,7 +60,7 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
   { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.delete_conversation', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit', 'contacts.import_export'] },
   { label: 'Conteúdo', items: ['tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage'] },
-  { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage'] },
+  { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage', 'internal_chat.audit'] },
   { label: 'Conta', items: ['numbers.manage', 'billing.manage'] },
 ];
 

@@ -207,6 +207,11 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/webhooks/stripe` | — | Eventos Stripe (assinatura `stripe-signature`) |
 | POST | `/webhooks/asaas` | — | Eventos Asaas (header `asaas-access-token` = `ASAAS_WEBHOOK_TOKEN`; 403 se não bater) |
 
+### Contatos isentos de ticket e chat interno
+
+Rotas em [Contatos isentos](contatos-isentos.md#api) (`/ignored-contacts`, `settings.manage`; `GET /conversations?free=1` = aba Livres) e
+[Chat interno](chat-interno.md#api) (`/internal-chat/*`; auditoria com `internal_chat.audit`).
+
 ### Contatos: importar e exportar (`contacts.import_export`)
 
 | Método | Rota | Quem | Descrição |

@@ -35,3 +35,5 @@ export * from './hooks/pesquisas';
 export * from './hooks/orcamentos';
 export * from './hooks/pagamentos';
 export * from './hooks/contatos';
+export * from './hooks/isentos';
+export * from './hooks/chat-interno';

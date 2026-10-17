@@ -65,6 +65,8 @@ const conversaNoEscopo = (col: Prisma.Sql, numberIds: string[]) => Prisma.sql`${
  * dele (`targetId` = dono, gravado no encerramento automático). Sem isto, quem usa fluxo que
  * fecha a conversa via "Mudar status" sumia do próprio filtro. O ranking continua só pelo ator.
  */
+/** Conversa de contato isento de ticket não entra em relatório (docs/contatos-isentos.md). */
+const semIsento = (conversationId: Prisma.Sql) => Prisma.sql`not exists (select 1 from conversations cx where cx.id = ${conversationId} and cx."ticketExempt")`;
 const doConsultor = (agentId: string) => Prisma.sql`(e."actorId" = ${agentId} or (e."actorId" is null and e."targetId" = ${agentId}))`;
 
 const SalesDetailsQuery = z.object({
@@ -157,6 +159,8 @@ class ReportsController {
     // conversa: tem a tag / está com o consultor
     const conv: Prisma.ConversationWhereInput = {
       tenantId: t,
+      // contato isento de ticket não é atendimento (docs/contatos-isentos.md)
+      ticketExempt: false,
       ...(filtro.tagIds && { tags: { some: { tagId: { in: filtro.tagIds } } } }),
       ...(filtro.agentId && { assigneeId: filtro.agentId }),
       ...(nums && { numberId: { in: nums } }),
@@ -170,7 +174,7 @@ class ReportsController {
       createdAt: { gte: from, lt: to },
       ...(filtro.tagIds && { OR: [{ tagIds: { hasSome: filtro.tagIds } }, { conversation: { tags: { some: { tagId: { in: filtro.tagIds } } } } }] }),
       ...(filtro.agentId && { AND: [{ OR: [{ actorId: filtro.agentId }, { actorId: null, targetId: filtro.agentId }] }] }),
-      ...(nums && { conversation: { numberId: { in: nums } } }),
+      conversation: { ticketExempt: false, ...(nums && { numberId: { in: nums } }) },
     };
     const [closed, waitingNow, inProgressNow, msgsIn, msgsOut, firstResp, byDay, byAgent, byOrigin, byCampaign, byTag, byStatus, lost] = await this.load.all([
       // atendimentos ENCERRADOS no período (um encerramento = um atendimento), não conversas
@@ -283,7 +287,7 @@ class ReportsController {
       type: 'closed',
       ignoreInReports: false,
       createdAt: { gte: from, lt: to },
-      conversation: { numberId: { in: nums } },
+      conversation: { numberId: { in: nums }, ticketExempt: false },
       ...(filtro.tagIds && { OR: [{ tagIds: { hasSome: filtro.tagIds } }, { conversation: { tags: { some: { tagId: { in: filtro.tagIds } } } } }] }),
       ...(filtro.agentId && { AND: [{ OR: [{ actorId: filtro.agentId }, { actorId: null, targetId: filtro.agentId }] }] }),
     };
@@ -291,7 +295,7 @@ class ReportsController {
       () => this.query(t, { ...base, metric: 'conversations', groupBy: 'month' }, nums),
       () => this.prisma.conversationEvent.count({ where: fechou }),
       () => this.prisma.conversationEvent.count({ where: { ...fechou, outcome: 'lost' } }),
-      () => this.prisma.conversation.count({ where: { tenantId: t, numberId: { in: nums }, status: 'waiting', ...(filtro.agentId && { assigneeId: filtro.agentId }) } }),
+      () => this.prisma.conversation.count({ where: { tenantId: t, numberId: { in: nums }, ticketExempt: false, status: 'waiting', ...(filtro.agentId && { assigneeId: filtro.agentId }) } }),
       () => this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }, nums),
       () => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number }[]>(vendasPorConsultorSql(t, from, to, filtro.tagIds ? this.eventoTemTag(filtro.tagIds) : undefined, nums)),
     ]);
@@ -327,7 +331,7 @@ class ReportsController {
     assertReportRange(from, to);
     const like = (v: string) => `%${v.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     const digits = (v: string) => v.replace(/\D/g, '');
-    const conds: Prisma.Sql[] = [Prisma.sql`e."tenantId" = ${u.tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
+    const conds: Prisma.Sql[] = [Prisma.sql`e."tenantId" = ${u.tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`not cv."ticketExempt"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (f.outcome) conds.push(Prisma.sql`e.outcome = ${f.outcome}::"ConversationOutcome"`);
     if (f.tagIds?.length) conds.push(Prisma.sql`(e."tagIds" || e."tagSnapshot") && ARRAY[${Prisma.join(f.tagIds)}]::text[]`);
     if (f.closeReasonId) conds.push(Prisma.sql`e."closeReasonId" = ${f.closeReasonId}`);
@@ -508,7 +512,7 @@ class ReportsController {
 
   private async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[], weights = normalizeRankingWeights(null), nums?: string[]) {
     const f = { tagIds };
-    const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."actorId" is not null`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
+    const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."actorId" is not null`, Prisma.sql`not c."ticketExempt"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (f.tagIds?.length) conds.push(this.eventoTemTag(f.tagIds));
     if (nums) conds.push(Prisma.sql`c."numberId" in (${Prisma.join(nums)})`);
     const rows = await this.load.run(() => this.prisma.$queryRaw<{ userId: string; name: string | null; closed: number; won: number; revenue: number | null; tmaMin: number | null }[]>(Prisma.sql`
@@ -652,7 +656,7 @@ class ReportsController {
    * cai no texto gravado (sem o sufixo "encerrado em massa").
    */
   private async lostReasons(tenantId: string, from: Date, to: Date, filtro: Filtro) {
-    const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`e.outcome = 'lost'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
+    const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`e.outcome = 'lost'`, Prisma.sql`not e."ignoreInReports"`, semIsento(Prisma.sql`e."conversationId"`), Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (filtro.agentId) conds.push(doConsultor(filtro.agentId));
     if (filtro.tagIds) conds.push(this.eventoTemTag(filtro.tagIds));
     if (filtro.numberIds) conds.push(conversaNoEscopo(Prisma.sql`e."conversationId"`, filtro.numberIds));
@@ -700,7 +704,8 @@ class ReportsController {
    *    por quem encerrou e com as tags escolhidas naquele encerramento;
    *  - `avg_first_response_min` = conversas novas no período (tempo até a 1ª resposta).
    * Atendimento encerrado como interno (`ignoreInReports`) fica de fora de todas, menos das
-   * contagens de mensagens.
+   * contagens de mensagens. Conversa de contato isento de ticket (`ticketExempt`) fica de fora
+   * de todas, inclusive das mensagens (docs/contatos-isentos.md).
    */
   private async query(tenantId: string, d: ReportDefinition, numberIds?: string[]): Promise<{ label: string; value: number }[]> {
     const porEncerramento = ['closed', 'revenue', 'won', 'lost', 'win_rate'].includes(d.metric);
@@ -741,7 +746,7 @@ class ReportsController {
              / count(distinct e.id) filter (where e.outcome <> 'none') end`,
     }[d.metric];
 
-    const filters: Prisma.Sql[] = [Prisma.sql`c."tenantId" = ${tenantId}`];
+    const filters: Prisma.Sql[] = [Prisma.sql`c."tenantId" = ${tenantId}`, Prisma.sql`not c."ticketExempt"`];
     if (porEncerramento) filters.push(Prisma.sql`e."createdAt" >= ${d.from}`, Prisma.sql`e."createdAt" < ${d.to}`);
     else if (usaMensagens) filters.push(Prisma.sql`m."createdAt" >= ${d.from}`, Prisma.sql`m."createdAt" < ${d.to}`);
     else if (!porInicio) filters.push(Prisma.sql`c."createdAt" >= ${d.from}`, Prisma.sql`c."createdAt" < ${d.to}`, Prisma.sql`not ${encerradoInterno(Prisma.sql`c.id`, Prisma.sql`c."createdAt"`)}`);

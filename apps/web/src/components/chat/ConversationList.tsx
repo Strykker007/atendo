@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
-import { useUI } from '@/lib/store';
+import { useUI, type ConversationTab } from '@/lib/store';
 import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { Avatar } from './Avatar';
@@ -28,6 +28,8 @@ export const STATUS_META: Record<ConversationStatus, { label: string; short: str
 };
 // padrão de mercado: o que está comigo primeiro, depois a fila, depois o histórico
 const ORDER: ConversationStatus[] = ['in_progress', 'waiting', 'closed'];
+/** aba "Livres": contatos isentos de ticket (docs/contatos-isentos.md) — só aparece quando há algum */
+const FREE_META = { label: 'Livres (sem ticket)', short: 'Livres', color: 'text-muted', soft: 'bg-field', bar: 'bg-faint' };
 
 /**
  * Relógio da lista: um intervalo só, no pai, em vez de um por linha.
@@ -78,6 +80,9 @@ export function ConversationList() {
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
   const [iniciando, setIniciando] = useState(false);
+  // "Livres" só aparece quando existe conversa livre (ou a aba já está aberta)
+  const abas: ConversationTab[] = counts.data?.free || status === 'free' ? [...ORDER, 'free'] : ORDER;
+  const abaMeta = status === 'free' ? FREE_META : STATUS_META[status];
   const filtroLista = { status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome };
   const conversations = useConversations(filtroLista);
   // rolou até o fim: páginas seguintes (a primeira é a que o tempo real atualiza)
@@ -116,7 +121,7 @@ export function ConversationList() {
     : null;
   // encerrada não fica fixada fora de "Encerradas": encerrar é sair da fila, não uma resposta
   // que muda de aba — senão ela seguia em "Em atendimento" até trocar de conversa ou dar F5
-  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') ? fixadaAtual : null;
+  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') && !!fixadaAtual.ticketExempt === (status === 'free') ? fixadaAtual : null;
   const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
@@ -179,9 +184,9 @@ export function ConversationList() {
       {/* Filtro principal com contadores; ao lado, o agrupamento por atendente */}
       <div className="px-2.5 pt-2 flex items-center gap-2">
         {/* gap entre as abas e altura maior: coladas, as três pareciam um bloco só */}
-        <div className="flex-1 min-w-0 grid grid-cols-3 gap-1 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
-          {ORDER.map((s) => {
-            const m = STATUS_META[s];
+        <div className={cn('flex-1 min-w-0 grid gap-1 rounded-lg bg-field p-1 text-[11.5px] font-semibold', abas.length === 4 ? 'grid-cols-4' : 'grid-cols-3')}>
+          {abas.map((s) => {
+            const m = s === 'free' ? FREE_META : STATUS_META[s];
             const n = counts.data?.[s];
             const on = status === s;
             // mesmo rótulo para todos os perfis (atendente comum continua vendo só as dele)
@@ -346,8 +351,8 @@ export function ConversationList() {
         {conversations.isFetching && !conversations.isLoading && <div className="h-0.5 bg-accent/40 animate-pulse" />}
         {conversations.data?.length === 0 && !fixadaFora && (
           <div className="p-8 text-center">
-            <div className={cn('mx-auto w-10 h-10 rounded-full grid place-items-center mb-2', STATUS_META[status].soft, STATUS_META[status].color)}>0</div>
-            <p className="text-sm text-muted">Nenhuma conversa em <b className="text-ink">{STATUS_META[status].short.toLowerCase()}</b>.</p>
+            <div className={cn('mx-auto w-10 h-10 rounded-full grid place-items-center mb-2', abaMeta.soft, abaMeta.color)}>0</div>
+            <p className="text-sm text-muted">Nenhuma conversa em <b className="text-ink">{abaMeta.short.toLowerCase()}</b>.</p>
           </div>
         )}
         {(groupByAssignee ? agruparPorAtendente(linhas) : [{ key: '', nome: '', itens: linhas, naoLidas: 0 }]).map((g) => {

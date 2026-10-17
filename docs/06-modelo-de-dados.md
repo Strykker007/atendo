@@ -47,6 +47,10 @@ tenant_templates (global) ── tenants.templateId
 - `sendLimits` — JSON `Partial<SendLimits>`: limites da fila de envio que esta conexão sobrescreveu (por minuto, intervalo/rajada por conversa, expiração); nulo = padrão do provider. Ver [Envio](envio.md).
 - `color` — cor do canal (`#rrggbb`, padrão `#64748b`). Só visual: identifica o número no selo da lista de conversas e no cabeçalho do chat. A conversa já pertence a um número (`conversations.numberId`) e a resposta sai sempre por ele.
 
+**ignored_contacts** — telefones isentos de ticket por cliente (`phone` só dígitos, único por tenant); a conversa desses contatos fica com `conversations.ticketExempt = true` (chat livre, fora da fila e dos relatórios). Ver [Contatos isentos](contatos-isentos.md).
+
+**internal_chats** / **internal_chat_members** / **internal_messages** — chat interno da equipe (direto ou grupo), histórico permanente e auditável por `internal_chat.audit`. Ver [Chat interno](chat-interno.md).
+
 **whatsapp_groups** / **campaign_group_targets** — lista branca de grupos por número (opt-in estrito) e alvos de grupo da transmissão. Grupo não é contato nem tem conversa; ver [Grupos restritos](grupos.md).
 
 **contacts** — telefone E.164 único por tenant. Nome vem do `pushName`/profile do WhatsApp.

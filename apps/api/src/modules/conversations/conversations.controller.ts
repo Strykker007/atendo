@@ -22,6 +22,8 @@ import type { SetPrimaryTagInput } from '@atendo/shared';
 
 class ListDto {
   @IsOptional() @IsEnum(ConversationStatus) status?: ConversationStatus;
+  /** aba "Livres": conversas de contatos isentos de ticket (ignora `status`) */
+  @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() free?: boolean;
   @IsOptional() @IsUUID() numberId?: string;
   /** id do departamento ou `none` (só as sem departamento) */
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;

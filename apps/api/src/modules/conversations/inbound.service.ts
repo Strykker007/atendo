@@ -17,6 +17,7 @@ import { decidirEntrada, ehConfirmacao, naCarencia, voltandoDepoisDeEncerrado } 
 import { agendaParaRestaurar, escolherDaAgenda, normalizeContactName, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
+import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
 
 /**
  * Tudo que **entra** pelo provider: mensagem recebida, mensagem digitada no celular, confirmação
@@ -118,17 +119,25 @@ export class InboundService {
     // satisfação do encerramento) fica de fora: aquela resposta é dele.
     // resposta da pesquisa de satisfação do encerramento: entra no histórico sem reabrir
     // (docs/pesquisa-de-satisfacao.md). Não sendo resposta, a pesquisa sai do caminho e segue normal.
-    const pesquisa = decisao.acao === 'reabrir' ? await this.surveys.claim(conversation!.id, { type: msg.type, text: msg.text, interactiveReplyId: msg.interactiveReplyId }, msg.timestamp) : null;
-    const quieta = !!pesquisa || (decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
+    // contato isento (docs/contatos-isentos.md): chat livre — não reabre, não entra na fila,
+    // não marca espera e não aciona automação (o `quiet` já cobre tudo isso)
+    const isento = await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    const pesquisa = !isento && decisao.acao === 'reabrir' ? await this.surveys.claim(conversation!.id, { type: msg.type, text: msg.text, interactiveReplyId: msg.interactiveReplyId }, msg.timestamp) : null;
+    const quieta = isento || !!pesquisa || (decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
       && !(await this.prisma.flowRun.findFirst({ where: { conversationId: conversation!.id, status: { in: ['running', 'waiting'] } }, select: { id: true } })));
     if (decisao.acao === 'reabrir' && !quieta) {
       // atendimento novo na mesma conversa: volta para a fila, sem dono e sem o desfecho do
       // atendimento anterior — aquele já está congelado no histórico (conversation_events)
       conversation = await this.conversations.setStatusSystem(conversation!.id, 'waiting');
     }
+    if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento);
+    if (conversation && isento && conversation.status !== 'in_progress') {
+      // conversa livre fica sempre "aberta" e sem dono: qualquer um da equipe responde
+      conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
+    }
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
-        data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
+        data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: isento ? 'in_progress' : 'waiting', ticketExempt: isento, origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
       });
       if (origin === 'ad') await this.autoTagAd(conversation.id, number.tenantId, msg.referral?.headline);
     } else if (msg.referral && conversation.origin === 'organic') {
@@ -230,9 +239,13 @@ export class InboundService {
     // está atendendo é quem escreveu do celular, então vai direto para "em atendimento".
     // Exceção: a despedida pelo celular logo depois de encerrar ("eu que agradeço",
     // "atendimento finalizado ✅") entra no histórico sem reabrir (carência, reopen.ts).
-    if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, 'in_progress');
+    // contato isento: chat livre, sem reabrir atendimento (docs/contatos-isentos.md)
+    const isento = await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento);
+    if (isento && conversation && conversation.status !== 'in_progress') conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
+    else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, 'in_progress');
     conversation ??= await this.prisma.conversation.create({
-      data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'in_progress' },
+      data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'in_progress', ticketExempt: isento },
     });
 
     const message = await this.prisma.message.create({
@@ -420,6 +433,20 @@ export class InboundService {
     if (!m) return;
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text: e.text, editedAt: new Date() }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(number.tenantId, this.conversations.present(updated));
+  }
+
+  /**
+   * A lista de isentos mudou desde a última mensagem (a tela já marca as conversas existentes,
+   * isto cobre corrida e lista editada direto no banco). Entrando: sai da fila e de quem atendia.
+   * Saindo: a conversa livre aberta (sem dono) volta para a fila como atendimento comum.
+   */
+  private aplicarIsencao(conv: Conversation, isento: boolean) {
+    return this.prisma.conversation.update({
+      where: { id: conv.id },
+      data: isento
+        ? { ticketExempt: true, assigneeId: null, awaitingSince: null }
+        : { ticketExempt: false, ...(conv.status === 'in_progress' && !conv.assigneeId && { status: 'waiting' as const }) },
+    });
   }
 
   /**

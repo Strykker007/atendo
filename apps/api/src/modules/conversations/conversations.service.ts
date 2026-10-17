@@ -191,7 +191,7 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
+    q: { status?: ConversationStatus; free?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
@@ -201,12 +201,14 @@ export class ConversationsService {
     // abaixo também usa OR, e dois OR no mesmo nível se sobrescreveriam
     const dept = departmentWhere(viewer, q.departmentId);
     const ownership: Prisma.ConversationWhereInput =
-      q.assigneeId && isAdmin ? { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
+      q.free ? {} : q.assigneeId && isAdmin ? { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
       number: { deletedAt: null },
-      ...(q.status && { status: q.status }),
+      // aba "Livres": só os contatos isentos de ticket, em qualquer status. As abas de atendimento
+      // nunca mostram conversa livre (docs/contatos-isentos.md)
+      ...(q.free ? { ticketExempt: true } : { ticketExempt: false, ...(q.status && { status: q.status }) }),
       ...(q.origin && { origin: q.origin }),
       ...ownership,
       // o número pedido é interseccionado com o escopo do usuário; `null` = pediu um número
@@ -229,7 +231,7 @@ export class ConversationsService {
       // "Encerradas": quem acabou de encerrar primeiro (`closedAt`). Pela última mensagem, a recém-
       // encerrada podia cair abaixo das 50 primeiras e só "aparecia" depois de outra mensagem
       orderBy:
-        q.status === 'closed'
+        q.status === 'closed' && !q.free
           ? [{ closedAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
           : q.sort === 'waiting'
           ? [{ awaitingSince: { sort: 'asc', nulls: 'last' } }, { lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]
@@ -247,15 +249,18 @@ export class ConversationsService {
   async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string) {
     const scoped = narrowTo(viewer, numberId);
     const dept = departmentWhere(viewer, departmentId);
-    const base: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
-    const [waiting, closed, mine, all] = await Promise.all([
+    const escopo: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
+    // conversa livre (contato isento) não é fila: conta só na aba "Livres"
+    const base: Prisma.ConversationWhereInput = { ...escopo, ticketExempt: false };
+    const [waiting, closed, mine, all, free] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'in_progress', assigneeId: viewer.id } }),
       this.prisma.conversation.count({ where: { ...base, status: 'in_progress' } }),
+      this.prisma.conversation.count({ where: { ...escopo, ticketExempt: true } }),
     ]);
     // atendente comum conta só as suas em atendimento; admin conta todas
-    return { waiting, in_progress: may(viewer, 'conversations.view_all') ? all : mine, closed, in_progress_mine: mine, in_progress_all: all };
+    return { waiting, in_progress: may(viewer, 'conversations.view_all') ? all : mine, closed, in_progress_mine: mine, in_progress_all: all, free };
   }
 
   /**
@@ -758,7 +763,8 @@ export class ConversationsService {
     // Responder = assumir. Atômico: se outra atendente assumiu no meio tempo, falha com o nome dela.
     // Conversa de OUTRA pessoa: ninguém (nem admin) responde ao cliente por ela — admin/gerente usa
     // nota interna (cadeado). Para atender, transfere para si.
-    if (conv.assigneeId !== authorId) {
+    // Conversa livre (contato isento, docs/contatos-isentos.md) não tem dono: responder não assume.
+    if (conv.assigneeId !== authorId && !conv.ticketExempt) {
       const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, OR: [{ assigneeId: null }, { assigneeId: authorId }] }, data: { assigneeId: authorId, status: 'in_progress' } });
       if (r.count === 0) {
         const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
