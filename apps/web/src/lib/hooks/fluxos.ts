@@ -63,7 +63,7 @@ export const usePauseBot = () => { const qc = useQueryClient(); return useMutati
 export const useResumeBot = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api(`/conversations/${conversationId}/bot/resume`, { method: 'POST' }), onSuccess: (_, id) => { qc.refetchQueries({ queryKey: ['active-run', id] }); invConv(qc, id); qc.invalidateQueries({ queryKey: ['conversation-events', id] }); } }); };
 /** Cancelar: encerra o fluxo (pausado ou não) e libera a automação da conversa. */
 export const useCancelFlow = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ stopped: boolean }>(`/conversations/${conversationId}/flow/cancel`, { method: 'POST' }), onSuccess: (_, id) => { qc.refetchQueries({ queryKey: ['active-run', id] }); invConv(qc, id); qc.invalidateQueries({ queryKey: ['conversation-events', id] }); } }); };
-export const useActiveRun = (conversationId: string | null) => useQuery({ queryKey: ['active-run', conversationId], enabled: !!conversationId, queryFn: () => api<ActiveRun | null>(`/conversations/${conversationId}/flow`), refetchInterval: 15_000 });
+export const useActiveRun = (conversationId: string | null) => useQuery({ queryKey: ['active-run', conversationId], enabled: !!conversationId, queryFn: () => api<ActiveRun | null>(`/conversations/${conversationId}/flow`), refetchInterval: 60_000 });
 /** O plano inclui a funcionalidade? (usa /billing/usage já em cache) */
 export const useHasFeature = (feature: string) => { const u = useUsage(); return { has: !!u.data?.limits?.features?.includes(feature as PlanFeature), loading: u.isLoading }; };
 
