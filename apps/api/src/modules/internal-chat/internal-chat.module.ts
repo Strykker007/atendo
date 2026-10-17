@@ -4,7 +4,8 @@ import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsISO8601, IsNotEmpty, IsOptional
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
+import { Roles, RolesGuard } from '../auth/roles.guard';
+import { NoTenantOk } from '../auth/tenant.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
@@ -43,6 +44,44 @@ const MESSAGE_INCLUDE = { replyTo: { select: { id: true, authorId: true, authorN
 
 type ChatRow = Prisma.InternalChatGetPayload<{ include: { members: { select: typeof MEMBER_SELECT } } }>;
 
+/** chave do canal de suporte: um por cliente (único em `(tenantId, directKey)`) */
+const SUPPORT_KEY = 'support';
+
+/** Canal de suporte do cliente — criado na primeira vez que alguém (equipe ou dono) abre. */
+function ensureSupportChat(prisma: PrismaService, tenantId: string) {
+  return prisma.internalChat.upsert({
+    where: { tenantId_directKey: { tenantId, directKey: SUPPORT_KEY } },
+    create: { tenantId, directKey: SUPPORT_KEY, isSupport: true, name: 'Suporte' },
+    update: {},
+  });
+}
+
+/**
+ * Envio no canal de suporte (dos dois lados). Leitura de quem escreve fica em
+ * `internal_chat_members` — linha criada sob demanda: a equipe toda participa sem ser cadastrada.
+ */
+async function sendSupport(prisma: PrismaService, gateway: ConversationsGateway, chat: { id: string; tenantId: string }, author: { id: string; name: string }, dto: { text: string; replyToId?: string }, fromSupport: boolean) {
+  const text = dto.text.trim();
+  if (!text) throw new BadRequestException('Mensagem vazia.');
+  if (dto.replyToId && !(await prisma.internalMessage.findFirst({ where: { id: dto.replyToId, chatId: chat.id }, select: { id: true } }))) {
+    throw new BadRequestException('A mensagem respondida não é desta conversa.');
+  }
+  const agora = new Date();
+  const [message] = await prisma.$transaction([
+    prisma.internalMessage.create({ data: { tenantId: chat.tenantId, chatId: chat.id, authorId: author.id, authorName: author.name, text, fromSupport, replyToId: dto.replyToId ?? null, createdAt: agora }, include: MESSAGE_INCLUDE }),
+    prisma.internalChat.update({ where: { id: chat.id }, data: { lastMessageAt: agora, lastMessagePreview: `${fromSupport ? 'Suporte' : author.name}: ${text}`.slice(0, 140) } }),
+    prisma.internalChatMember.upsert({ where: { chatId_userId: { chatId: chat.id, userId: author.id } }, create: { chatId: chat.id, userId: author.id, lastReadAt: agora }, update: { lastReadAt: agora } }),
+  ]);
+  gateway.emitSupportMessage(chat.tenantId, message);
+  return message;
+}
+
+/** Marca o canal de suporte como lido por esta pessoa (linha criada sob demanda). */
+function readSupport(prisma: PrismaService, chatId: string, userId: string) {
+  const agora = new Date();
+  return prisma.internalChatMember.upsert({ where: { chatId_userId: { chatId, userId } }, create: { chatId, userId, lastReadAt: agora }, update: { lastReadAt: agora } });
+}
+
 /**
  * Chat interno da equipe (docs/chat-interno.md): conversa direta ou em grupo entre membros do
  * mesmo cliente. Fica no banco para sempre — não há apagar nem editar — e quem tem
@@ -71,8 +110,10 @@ class InternalChatController {
   /** Minhas conversas, mais recentes primeiro, com as não lidas. */
   @Get('chats')
   async chats(@CurrentUser() u: AuthUser) {
+    // o canal de suporte existe sempre e fica fixado no topo (docs/chat-interno.md#suporte)
+    await ensureSupportChat(this.prisma, u.tenantId);
     const rows = await this.prisma.internalChat.findMany({
-      where: { tenantId: u.tenantId, deletedAt: null, members: { some: { userId: u.id } } },
+      where: { tenantId: u.tenantId, deletedAt: null, OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] },
       include: { members: { select: MEMBER_SELECT } },
       orderBy: [{ lastMessageAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       take: 100,
@@ -81,14 +122,16 @@ class InternalChatController {
       ? await this.prisma.$queryRaw<{ chatId: string; n: number }[]>(Prisma.sql`
           select m."chatId", count(*)::int as n
           from internal_messages m
-          join internal_chat_members cm on cm."chatId" = m."chatId" and cm."userId" = ${u.id}
+          left join internal_chat_members cm on cm."chatId" = m."chatId" and cm."userId" = ${u.id}
           where m."tenantId" = ${u.tenantId} and m."chatId" in (${Prisma.join(rows.map((r) => r.id))})
             and (cm."lastReadAt" is null or m."createdAt" > cm."lastReadAt")
             and m."authorId" is distinct from ${u.id}
           group by 1`)
       : [];
     const unread = new Map(naoLidas.map((r) => [r.chatId, Number(r.n)]));
-    return rows.map((c) => ({ ...this.present(c, u.id), unread: unread.get(c.id) ?? 0 }));
+    return rows
+      .map((c) => ({ ...this.present(c, u.id), unread: unread.get(c.id) ?? 0 }))
+      .sort((a, b) => Number(b.isSupport) - Number(a.isSupport));
   }
 
   /**
@@ -134,6 +177,7 @@ class InternalChatController {
   async send(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SendDto) {
     const chat = await this.chatOf(u, id);
     const author = await this.assertMember(u);
+    if (chat.isSupport) return sendSupport(this.prisma, this.gateway, chat, { id: u.id, name: author.name }, dto, false);
     const text = dto.text.trim();
     if (!text) throw new BadRequestException('Mensagem vazia.');
     // citação só de mensagem desta conversa (id de outra conversa vazaria o conteúdo dela)
@@ -153,8 +197,9 @@ class InternalChatController {
 
   @Post('chats/:id/read')
   async read(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    await this.chatOf(u, id);
-    await this.prisma.internalChatMember.update({ where: { chatId_userId: { chatId: id, userId: u.id } }, data: { lastReadAt: new Date() } });
+    const chat = await this.chatOf(u, id);
+    if (chat.isSupport) await readSupport(this.prisma, id, u.id);
+    else await this.prisma.internalChatMember.update({ where: { chatId_userId: { chatId: id, userId: u.id } }, data: { lastReadAt: new Date() } });
     this.gateway.emitInternalChat(u.tenantId, [u.id], id);
     return { ok: true };
   }
@@ -251,9 +296,12 @@ class InternalChatController {
     return rows.reverse();
   }
 
-  /** Conversa de que a pessoa participa — quem não é membro recebe 404 (nem sabe que existe). */
+  /**
+   * Conversa de que a pessoa participa — quem não é membro recebe 404 (nem sabe que existe).
+   * O canal de suporte é da equipe inteira do cliente.
+   */
   private async chatOf(u: AuthUser, id: string) {
-    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, deletedAt: null, members: { some: { userId: u.id } } }, include: { members: { select: { userId: true } } } });
+    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, deletedAt: null, OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] }, include: { members: { select: { userId: true } } } });
     if (!chat) throw new NotFoundException('Conversa não encontrada');
     return chat;
   }
@@ -291,17 +339,108 @@ class InternalChatController {
     return me;
   }
 
-  /** Direta: nome = o outro membro (para quem audita, os dois). */
+  /** Direta: nome = o outro membro (para quem audita, os dois). Suporte: sem lista de membros. */
   private present(c: ChatRow, viewerId: string | null) {
-    const members = c.members.map((m) => ({ id: m.user.id, name: m.user.name, active: m.user.isActive }));
+    const members = c.isSupport ? [] : c.members.map((m) => ({ id: m.user.id, name: m.user.name, active: m.user.isActive }));
     const outros = members.filter((m) => m.id !== viewerId);
-    const name = c.isGroup ? c.name ?? 'Grupo' : viewerId ? outros[0]?.name ?? 'Conversa' : members.map((m) => m.name).join(' · ');
-    return { id: c.id, isGroup: c.isGroup, name, members, createdById: c.createdById, deletedAt: c.deletedAt, lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview };
+    const name = c.isSupport ? 'Suporte' : c.isGroup ? c.name ?? 'Grupo' : viewerId ? outros[0]?.name ?? 'Conversa' : members.map((m) => m.name).join(' · ');
+    return { id: c.id, isGroup: c.isGroup, isSupport: c.isSupport, name, members, createdById: c.createdById, deletedAt: c.deletedAt, lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview };
+  }
+}
+
+/**
+ * Lado do dono do sistema no canal de suporte (docs/chat-interno.md#suporte): um canal por
+ * cliente, todos numa lista só. Mensagem daqui sai marcada `fromSupport` e chega à equipe
+ * inteira do cliente; a do cliente chega ao vivo na sala `owners` (`support_message`).
+ */
+@Controller('super-admin/support')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@NoTenantOk()
+@Roles('super_admin')
+class SupportController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: ConversationsGateway,
+  ) {}
+
+  /** Clientes para iniciar contato (ativos primeiro). */
+  @Get('tenants')
+  tenants() {
+    return this.prisma.tenant.findMany({ select: { id: true, name: true, isActive: true }, orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
+  }
+
+  /** Canais com mensagem, mais recentes primeiro, com as não lidas por mim. */
+  @Get('chats')
+  async chats(@CurrentUser() u: AuthUser) {
+    const rows = await this.prisma.internalChat.findMany({
+      where: { isSupport: true, lastMessageAt: { not: null } },
+      select: { id: true, tenantId: true, lastMessageAt: true, lastMessagePreview: true, tenant: { select: { name: true } } },
+      orderBy: { lastMessageAt: 'desc' },
+      take: 200,
+    });
+    const naoLidas = rows.length
+      ? await this.prisma.$queryRaw<{ chatId: string; n: number }[]>(Prisma.sql`
+          select m."chatId", count(*)::int as n
+          from internal_messages m
+          left join internal_chat_members cm on cm."chatId" = m."chatId" and cm."userId" = ${u.id}
+          where m."chatId" in (${Prisma.join(rows.map((r) => r.id))}) and not m."fromSupport"
+            and (cm."lastReadAt" is null or m."createdAt" > cm."lastReadAt")
+          group by 1`)
+      : [];
+    const unread = new Map(naoLidas.map((r) => [r.chatId, Number(r.n)]));
+    return rows.map((c) => this.present(c, unread.get(c.id) ?? 0));
+  }
+
+  /** Abre (ou cria) o canal de um cliente — para o suporte puxar a conversa. */
+  @Post('tenants/:tenantId/chat')
+  async open(@Param('tenantId', ParseUUIDPipe) tenantId: string) {
+    const t = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
+    if (!t) throw new NotFoundException('Cliente não encontrado');
+    const c = await ensureSupportChat(this.prisma, tenantId);
+    const row = await this.prisma.internalChat.findUniqueOrThrow({ where: { id: c.id }, select: { id: true, tenantId: true, lastMessageAt: true, lastMessagePreview: true, tenant: { select: { name: true } } } });
+    return this.present(row, 0);
+  }
+
+  @Get('chats/:id/messages')
+  async messages(@Param('id', ParseUUIDPipe) id: string, @Query() q: PageQuery) {
+    await this.chat(id);
+    const rows = await this.prisma.internalMessage.findMany({
+      where: { chatId: id, ...(q.before && { createdAt: { lt: new Date(q.before) } }) },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: PAGE,
+      include: MESSAGE_INCLUDE,
+    });
+    return rows.reverse();
+  }
+
+  @Post('chats/:id/messages')
+  async send(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SendDto) {
+    const chat = await this.chat(id);
+    const me = await this.prisma.user.findUniqueOrThrow({ where: { id: u.impersonatorId ?? u.id }, select: { id: true, name: true } });
+    return sendSupport(this.prisma, this.gateway, chat, me, dto, true);
+  }
+
+  @Post('chats/:id/read')
+  async read(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    await this.chat(id);
+    await readSupport(this.prisma, id, u.impersonatorId ?? u.id);
+    return { ok: true };
+  }
+
+  private async chat(id: string) {
+    const chat = await this.prisma.internalChat.findFirst({ where: { id, isSupport: true }, select: { id: true, tenantId: true } });
+    if (!chat) throw new NotFoundException('Canal não encontrado');
+    return chat;
+  }
+
+  /** Mesmo formato da lista do chat da equipe: o widget reaproveita a tela. */
+  private present(c: { id: string; tenantId: string; lastMessageAt: Date | null; lastMessagePreview: string | null; tenant: { name: string } }, unread: number) {
+    return { id: c.id, tenantId: c.tenantId, isGroup: false, isSupport: true, name: c.tenant.name, members: [], createdById: null, lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview, unread };
   }
 }
 
 @Module({
   imports: [AuthModule, ConversationsModule],
-  controllers: [InternalChatController],
+  controllers: [InternalChatController, SupportController],
 })
 export class InternalChatModule {}

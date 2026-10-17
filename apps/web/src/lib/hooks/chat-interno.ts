@@ -1,5 +1,5 @@
 'use client';
-/** Chat interno da equipe — docs/chat-interno.md. */
+/** Chat interno da equipe e canal de suporte do sistema — docs/chat-interno.md. */
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { api } from '../api';
 
@@ -8,6 +8,9 @@ export interface InternalChatMember { id: string; name: string; active: boolean 
 export interface InternalChat {
   id: string;
   isGroup: boolean;
+  /** canal com o suporte do sistema (um por cliente); no lado do dono, `name` = nome do cliente */
+  isSupport?: boolean;
+  tenantId?: string;
   /** grupo: o nome dado; direta: o outro membro (na auditoria, os dois) */
   name: string;
   members: InternalChatMember[];
@@ -26,12 +29,23 @@ export interface InternalMessage {
   id: string; chatId: string; authorId: string | null; authorName: string; text: string; createdAt: string;
   /** aviso do sistema ("Ana adicionou Bruno") */
   system?: boolean;
+  /** escrita pelo suporte do sistema */
+  fromSupport?: boolean;
   replyToId?: string | null;
   /** trecho da mensagem respondida; null = ela não existe mais */
   replyTo?: { id: string; authorId: string | null; authorName: string; text: string; system: boolean } | null;
 }
 
 const PAGE = 50;
+
+/**
+ * De que lado da conversa a tela está: `team` = equipe do cliente (inclui o canal de suporte do
+ * cliente); `support` = dono do sistema atendendo os canais de suporte de todos os clientes.
+ * A tela de conversa é a mesma; muda só a rota e a lista que recarrega.
+ */
+export type ChatScope = 'team' | 'support';
+const BASE: Record<ChatScope, string> = { team: '/internal-chat/chats', support: '/super-admin/support/chats' };
+const LIST_KEY: Record<ChatScope, string> = { team: 'internal-chats', support: 'support-chats' };
 
 export const useInternalUsers = (enabled = true) =>
   useQuery({ queryKey: ['internal-users'], enabled, queryFn: () => api<InternalUser[]>('/internal-chat/users'), refetchInterval: 30_000 });
@@ -49,7 +63,7 @@ function useMessagesOf(base: string, key: string, chatId: string | null) {
     getNextPageParam: (last) => (last.length >= PAGE ? last[0].createdAt : null),
   });
 }
-export const useInternalMessages = (chatId: string | null) => useMessagesOf('/internal-chat/chats', 'internal-messages', chatId);
+export const useInternalMessages = (chatId: string | null, scope: ChatScope = 'team') => useMessagesOf(BASE[scope], 'internal-messages', chatId);
 export const useAuditInternalMessages = (chatId: string | null) => useMessagesOf('/internal-chat/audit/chats', 'internal-audit-messages', chatId);
 
 /** Páginas (mais nova primeiro) → lista cronológica. */
@@ -64,6 +78,7 @@ export function upsertInternalMessage(qc: ReturnType<typeof useQueryClient>, m: 
     return { ...old, pages: [[...first, m], ...rest] };
   });
   qc.invalidateQueries({ queryKey: ['internal-chats'] });
+  qc.invalidateQueries({ queryKey: ['support-chats'] });
 }
 
 export const useCreateInternalChat = () => {
@@ -74,19 +89,19 @@ export const useCreateInternalChat = () => {
   });
 };
 
-export const useSendInternalMessage = (chatId: string | null) => {
+export const useSendInternalMessage = (chatId: string | null, scope: ChatScope = 'team') => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { text: string; replyToId?: string }) => api<InternalMessage>(`/internal-chat/chats/${chatId}/messages`, { method: 'POST', body: JSON.stringify(body) }),
+    mutationFn: (body: { text: string; replyToId?: string }) => api<InternalMessage>(`${BASE[scope]}/${chatId}/messages`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: (m) => upsertInternalMessage(qc, m),
   });
 };
 
-export const useMarkInternalRead = () => {
+export const useMarkInternalRead = (scope: ChatScope = 'team') => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (chatId: string) => api<{ ok: boolean }>(`/internal-chat/chats/${chatId}/read`, { method: 'POST' }),
-    onMutate: (chatId) => qc.setQueryData<InternalChat[]>(['internal-chats'], (old) => old?.map((c) => (c.id === chatId ? { ...c, unread: 0 } : c))),
+    mutationFn: (chatId: string) => api<{ ok: boolean }>(`${BASE[scope]}/${chatId}/read`, { method: 'POST' }),
+    onMutate: (chatId) => qc.setQueryData<InternalChat[]>([LIST_KEY[scope]], (old) => old?.map((c) => (c.id === chatId ? { ...c, unread: 0 } : c))),
   });
 };
 
@@ -114,4 +129,23 @@ export const useRenameInternalChat = (chatId: string) => {
 export const useDeleteInternalChat = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (chatId: string) => api<{ ok: boolean }>(`/internal-chat/chats/${chatId}`, { method: 'DELETE' }), onSuccess: invChats(qc) });
+};
+
+// ---- canal de suporte: lado do dono do sistema (docs/chat-interno.md#suporte) ----
+export interface SupportTenant { id: string; name: string; isActive: boolean }
+
+/** Canais de suporte com mensagem, de todos os clientes, com as não lidas. */
+export const useSupportChats = (enabled = true) =>
+  useQuery({ queryKey: ['support-chats'], enabled, queryFn: () => api<InternalChat[]>('/super-admin/support/chats'), refetchInterval: 60_000 });
+
+export const useSupportTenants = (enabled = true) =>
+  useQuery({ queryKey: ['support-tenants'], enabled, queryFn: () => api<SupportTenant[]>('/super-admin/support/tenants'), staleTime: 5 * 60_000 });
+
+/** Abre (ou cria) o canal de um cliente — o suporte puxando a conversa. */
+export const useOpenSupportChat = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (tenantId: string) => api<InternalChat>(`/super-admin/support/tenants/${tenantId}/chat`, { method: 'POST' }),
+    onSuccess: (c) => qc.setQueryData<InternalChat[]>(['support-chats'], (old) => (old?.some((x) => x.id === c.id) ? old : [c, ...(old ?? [])])),
+  });
 };

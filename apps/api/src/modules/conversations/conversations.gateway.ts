@@ -154,6 +154,18 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   emitInternalMessage(tenantId: string, userIds: string[], message: unknown) {
     for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('internal_message', message);
   }
+  /**
+   * Canal de suporte (docs/chat-interno.md#suporte): a equipe inteira do cliente recebe (sala do
+   * cliente) e o dono do sistema também (sala `owners`), em qualquer tela.
+   */
+  emitSupportMessage(tenantId: string, message: unknown) {
+    this.room(tenantId).emit('internal_message', message);
+    this.to(OWNERS_ROOM).emit('support_message', message);
+  }
+  emitSupportChat(tenantId: string, chatId: string) {
+    this.room(tenantId).emit('internal_chat', { chatId });
+    this.to(OWNERS_ROOM).emit('support_chat', { chatId });
+  }
   /** Conversa interna criada/renomeada/lida: a lista do widget recarrega. */
   emitInternalChat(tenantId: string, userIds: string[], chatId: string) {
     for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('internal_chat', { chatId });

@@ -160,6 +160,12 @@ export function useRealtime() {
       if (m.authorId !== eu && !useUI.getState().soundMuted) playMessageSound();
     });
     socket.on('internal_chat', () => { qc.invalidateQueries({ queryKey: ['internal-chats'] }); });
+    // canal de suporte, lado do dono (sala `owners`): mensagem de qualquer cliente
+    socket.on('support_message', (m: InternalMessage & { fromSupport?: boolean }) => {
+      upsertInternalMessage(qc, m);
+      if (!m.fromSupport && !useUI.getState().soundMuted) playMessageSound();
+    });
+    socket.on('support_chat', () => { qc.invalidateQueries({ queryKey: ['support-chats'] }); });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
     socket.on('campaign', (e: { id: string; status: string; name?: string; alert?: string }) => {

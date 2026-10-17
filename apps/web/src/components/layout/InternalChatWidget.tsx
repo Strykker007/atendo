@@ -2,13 +2,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ArrowLeft, Check, ChevronDown, ChevronUp, LogOut, Plus, Reply, Send, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronUp, Headset, LogOut, Plus, Reply, Send, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import {
   internalMessagesInOrder, useAddInternalMembers, useCan, useCreateInternalChat, useDeleteInternalChat, useInternalChats, useInternalMessages, useInternalUsers, useMarkInternalRead, useMe,
-  useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage,
-  type InternalChat, type InternalMessage, type InternalUser,
+  useOpenSupportChat, useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage, useSupportChats, useSupportTenants,
+  type ChatScope, type InternalChat, type InternalMessage, type InternalUser,
 } from '@/lib/hooks';
 
 /**
@@ -66,16 +66,25 @@ function useViewport() {
  * continua aberto (e na mesma conversa) ao trocar de página. Arrasta pelo cabeçalho ou pelo
  * botão redondo e, ao soltar, gruda na lateral mais próxima na altura em que foi solto. A janela
  * aberta é sempre encaixada inteira na tela: abre para cima quando o botão está na metade de
- * baixo e para baixo na metade de cima. O dono do sistema "entrando como" não é da equipe:
- * não vê o widget (audita pela tela de auditoria).
+ * baixo e para baixo na metade de cima.
+ *
+ * Dois modos: a equipe do cliente vê as conversas dela + o canal **Suporte** fixado no topo; o
+ * dono do sistema (logado como ele mesmo) vê os canais de suporte de todos os clientes
+ * (docs/chat-interno.md#suporte). "Entrando como" um cliente, o dono não vê o widget.
  */
 export function InternalChatWidget() {
   const me = useMe();
-  const habilitado = !!me.data?.tenantId && me.data.role !== 'super_admin' && !me.data.impersonatorId;
+  const ehDono = me.data?.role === 'super_admin' && !me.data.impersonatorId;
+  const ehEquipe = !!me.data?.tenantId && me.data.role !== 'super_admin' && !me.data.impersonatorId;
+  const habilitado = ehDono || ehEquipe;
+  const scope: ChatScope = ehDono ? 'support' : 'team';
+  const titulo = ehDono ? 'Suporte aos clientes' : 'Chat da equipe';
   const { open, minimized, side, y, chatId, set } = useWidget();
-  const chats = useInternalChats(habilitado);
+  const chatsEquipe = useInternalChats(ehEquipe);
+  const chatsSuporte = useSupportChats(ehDono);
+  const chats = ehDono ? chatsSuporte : chatsEquipe;
   const naoLidas = (chats.data ?? []).reduce((a, c) => a + (c.unread ?? 0), 0);
-  const equipe = useInternalUsers(habilitado);
+  const equipe = useInternalUsers(ehEquipe);
   const online = (equipe.data ?? []).filter((u) => u.online);
   const vp = useViewport();
 
@@ -130,6 +139,8 @@ export function InternalChatWidget() {
     return (
       <div className="fixed z-[65] touch-none" style={estilo}>
         <Launcher
+          titulo={titulo}
+          dono={ehDono}
           naoLidas={naoLidas}
           online={online}
           side={side}
@@ -159,14 +170,18 @@ export function InternalChatWidget() {
           <button data-no-drag type="button" onClick={() => set({ chatId: null })} className="p-1 rounded hover:bg-white/10" aria-label="Voltar"><ArrowLeft size={15} /></button>
         )}
         <ChatGlyph size={18} className="shrink-0" />
-        <span className="flex-1 min-w-0 truncate text-sm font-semibold">{aberta && !minimized ? aberta.name : 'Chat da equipe'}</span>
+        <span className="flex-1 min-w-0 truncate text-sm font-semibold">{aberta && !minimized ? aberta.name : titulo}</span>
         {naoLidas > 0 && minimized && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-[10px] font-bold grid place-items-center tnum">{naoLidas}</span>}
         <button data-no-drag type="button" onClick={() => set({ minimized: !minimized })} className="p-1 rounded hover:bg-white/10" aria-label={minimized ? 'Expandir' : 'Minimizar'}>
           {minimized ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </button>
         <button data-no-drag type="button" onClick={() => set({ open: false })} className="p-1 rounded hover:bg-white/10" aria-label="Fechar"><X size={15} /></button>
       </div>
-      {!minimized && (aberta ? <ChatView chat={aberta} meId={me.data!.id} onLeave={() => set({ chatId: null })} /> : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
+      {!minimized && (aberta
+        ? <ChatView chat={aberta} meId={me.data!.id} scope={scope} onLeave={() => set({ chatId: null })} />
+        : ehDono
+          ? <OwnerHome chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />
+          : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
     </div>
   );
 }
@@ -195,7 +210,10 @@ const MAX_ROSTOS = 3;
  * selo de não lidas com pulso; ponto verde quando há colega online. Ao passar o mouse, uma
  * etiqueta desliza para dentro da tela com quem está online agora (rostos sobrepostos).
  */
-function Launcher({ naoLidas, online, side, arrastando, onOpen, ...ponteiro }: {
+function Launcher({ titulo, dono, naoLidas, online, side, arrastando, onOpen, ...ponteiro }: {
+  titulo: string;
+  /** dono do sistema: a etiqueta fala de clientes, não de colegas online */
+  dono: boolean;
   naoLidas: number;
   online: InternalUser[];
   side: 'left' | 'right';
@@ -220,12 +238,14 @@ function Launcher({ naoLidas, online, side, arrastando, onOpen, ...ponteiro }: {
           'ring-1 ring-white/10 transition-transform duration-200 ease-out motion-reduce:transition-none',
           arrastando ? 'cursor-grabbing scale-105 rotate-3' : 'cursor-pointer hover:-translate-y-0.5 hover:scale-[1.04] active:scale-95',
         )}
-        title="Chat da equipe (arraste para mudar de lado)"
-        aria-label={`Abrir chat da equipe${naoLidas ? ` — ${naoLidas} não lida(s)` : ''}`}
+        title={`${titulo} (arraste para mudar de lado)`}
+        aria-label={`Abrir ${titulo.toLowerCase()}${naoLidas ? ` — ${naoLidas} não lida(s)` : ''}`}
       >
         {/* brilho de vidro na metade de cima */}
         <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[20px] bg-[radial-gradient(120%_85%_at_25%_0%,rgb(255_255_255/0.38),transparent_58%)]" />
-        <ChatGlyph size={34} vivo={naoLidas > 0} className="relative drop-shadow-[0_1px_1px_rgb(0_0_0/0.2)]" />
+        {dono
+          ? <Headset size={26} strokeWidth={2.2} className="relative drop-shadow-[0_1px_1px_rgb(0_0_0/0.2)]" />
+          : <ChatGlyph size={34} vivo={naoLidas > 0} className="relative drop-shadow-[0_1px_1px_rgb(0_0_0/0.2)]" />}
 
         {naoLidas > 0 && (
           <span className="absolute -top-1.5 -right-1.5">
@@ -258,15 +278,84 @@ function Launcher({ naoLidas, online, side, arrastando, onOpen, ...ponteiro }: {
               </div>
             )}
             <div className="leading-tight">
-              <p className="text-[13px] font-semibold text-ink">Chat da equipe</p>
+              <p className="text-[13px] font-semibold text-ink">{titulo}</p>
               <p className="text-[11.5px] text-muted">
-                {online.length ? <><span className="inline-block w-1.5 h-1.5 rounded-full bg-ok mr-1 align-middle" />{online.length} online agora</> : 'Ninguém online agora'}
-                {naoLidas > 0 && <span className="text-danger font-semibold"> · {naoLidas} nova{naoLidas > 1 ? 's' : ''}</span>}
+                {dono ? (naoLidas ? '' : 'Nenhuma mensagem nova') : online.length ? <><span className="inline-block w-1.5 h-1.5 rounded-full bg-ok mr-1 align-middle" />{online.length} online agora</> : 'Ninguém online agora'}
+                {naoLidas > 0 && <span className="text-danger font-semibold">{dono ? '' : ' · '}{naoLidas} nova{naoLidas > 1 ? 's' : ''}</span>}
               </p>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Dono do sistema: canais de suporte com mensagem (não lidas primeiro na atenção) e a lista de
+ * clientes para puxar conversa com quem ainda não escreveu.
+ */
+function OwnerHome({ chats, loading, onOpen }: { chats: InternalChat[]; loading: boolean; onOpen: (id: string) => void }) {
+  const [aba, setAba] = useState<'chats' | 'clientes'>('chats');
+  const [busca, setBusca] = useState('');
+  const tenants = useSupportTenants(aba === 'clientes');
+  const abrir = useOpenSupportChat();
+  const termo = busca.trim().toLowerCase();
+  const lista = (tenants.data ?? []).filter((t) => !termo || t.name.toLowerCase().includes(termo));
+
+  async function falarCom(tenantId: string) {
+    try { const c = await abrir.mutateAsync(tenantId); onOpen(c.id); } catch (err) { toast.err(err); }
+  }
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="grid grid-cols-2 gap-1 m-2 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
+        {([['chats', 'Conversas'], ['clientes', 'Clientes']] as const).map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setAba(id)} className={cn('rounded-md py-1.5', aba === id ? 'bg-side text-white' : 'text-muted hover:text-ink')}>{label}</button>
+        ))}
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+        {aba === 'chats' && (
+          loading ? <p className="p-4 text-sm text-faint">Carregando…</p> : !chats.length ? (
+            <p className="p-4 text-sm text-muted">Nenhum cliente escreveu ainda. Para puxar conversa, escolha em <b>Clientes</b>.</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {chats.map((c) => (
+                <li key={c.id}>
+                  <button type="button" onClick={() => onOpen(c.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
+                    <span className="w-8 h-8 rounded-[11px] bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold shrink-0">{iniciais(c.name)}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="flex items-center gap-1"><span className="truncate text-sm font-medium text-ink">{c.name}</span>{c.lastMessageAt && <span className="ml-auto text-[10.5px] text-faint shrink-0">{hora(c.lastMessageAt)}</span>}</span>
+                      <span className={cn('block truncate text-[12px]', c.unread ? 'text-ink font-medium' : 'text-muted')}>{c.lastMessagePreview ?? 'Sem mensagens'}</span>
+                    </span>
+                    {!!c.unread && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-white text-[10px] font-bold grid place-items-center tnum">{c.unread}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+        {aba === 'clientes' && (
+          <>
+            <div className="px-2 pb-2">
+              <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar cliente" aria-label="Buscar cliente" className="w-full rounded-lg border border-line bg-panel px-2.5 py-1.5 text-sm text-ink placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent/40" />
+            </div>
+            {tenants.isLoading ? <p className="p-4 text-sm text-faint">Carregando…</p> : (
+              <ul className="divide-y divide-line">
+                {lista.map((t) => (
+                  <li key={t.id}>
+                    <button type="button" disabled={abrir.isPending} onClick={() => void falarCom(t.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
+                      <span className="w-8 h-8 rounded-[11px] bg-field text-muted grid place-items-center text-[11px] font-bold shrink-0">{iniciais(t.name)}</span>
+                      <span className="flex-1 min-w-0 truncate text-sm text-ink">{t.name}</span>
+                      {!t.isActive && <span className="text-[10.5px] text-faint">inativo</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -303,7 +392,9 @@ function Home({ chats, loading, onOpen }: { chats: InternalChat[]; loading: bool
               {chats.map((c) => (
                 <li key={c.id}>
                   <button type="button" onClick={() => onOpen(c.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
-                    <span className="w-8 h-8 rounded-full bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold shrink-0">{c.isGroup ? <Users size={14} /> : iniciais(c.name)}</span>
+                    {c.isSupport
+                      ? <span className="w-8 h-8 rounded-[11px] bg-gradient-to-br from-accent to-accent-hover text-white grid place-items-center shrink-0 shadow-sm"><Headset size={15} /></span>
+                      : <span className="w-8 h-8 rounded-full bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold shrink-0">{c.isGroup ? <Users size={14} /> : iniciais(c.name)}</span>}
                     <span className="flex-1 min-w-0">
                       <span className="flex items-center gap-1"><span className="truncate text-sm font-medium text-ink">{c.name}</span>{c.lastMessageAt && <span className="ml-auto text-[10.5px] text-faint shrink-0">{hora(c.lastMessageAt)}</span>}</span>
                       <span className="block truncate text-[12px] text-muted">{c.lastMessagePreview ?? (c.isGroup ? `${c.members.length} membros` : 'Sem mensagens')}</span>
@@ -362,11 +453,13 @@ function Home({ chats, loading, onOpen }: { chats: InternalChat[]; loading: bool
  * Responder como no WhatsApp: botão no balão (ou duplo clique) cita a mensagem; clicar na
  * citação leva até a original. Grupo: botão de membros abre o painel do grupo.
  */
-function ChatView({ chat, meId, onLeave }: { chat: InternalChat; meId: string; onLeave: () => void }) {
-  const msgs = useInternalMessages(chat.id);
+function ChatView({ chat, meId, scope, onLeave }: { chat: InternalChat; meId: string; scope: ChatScope; onLeave: () => void }) {
+  const msgs = useInternalMessages(chat.id, scope);
   const lista = useMemo(() => internalMessagesInOrder(msgs.data), [msgs.data]);
-  const send = useSendInternalMessage(chat.id);
-  const read = useMarkInternalRead();
+  const send = useSendInternalMessage(chat.id, scope);
+  const read = useMarkInternalRead(scope);
+  // canal de suporte: várias pessoas do cliente de um lado, o suporte do outro — mostra quem escreveu
+  const mostraAutor = chat.isGroup || !!chat.isSupport;
   const [texto, setTexto] = useState('');
   const [respondendo, setRespondendo] = useState<InternalMessage | null>(null);
   const [painel, setPainel] = useState(false);
@@ -407,6 +500,12 @@ function ChatView({ chat, meId, onLeave }: { chat: InternalChat; meId: string; o
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
+      {chat.isSupport && (
+        <p className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] text-muted border-b border-line bg-accent-soft/40">
+          <Headset size={13} className="shrink-0 text-accent" />
+          {scope === 'support' ? 'Canal de suporte deste cliente — a equipe toda dele lê.' : 'Canal direto com o suporte do sistema — toda a sua equipe vê.'}
+        </p>
+      )}
       {chat.isGroup && (
         <button type="button" onClick={() => setPainel(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] text-muted border-b border-line hover:bg-field text-left" title="Membros e opções do grupo">
           <Users size={13} className="shrink-0" />
@@ -428,7 +527,12 @@ function ChatView({ chat, meId, onLeave }: { chat: InternalChat; meId: string; o
           return (
             <div key={m.id} className={cn('group flex items-center gap-1 max-w-[88%]', minha ? 'ml-auto flex-row-reverse' : '')}>
               <div className={cn('flex flex-col min-w-0', minha ? 'items-end' : 'items-start')}>
-                {chat.isGroup && !minha && <span className="text-[10.5px] text-muted px-1">{m.authorName}</span>}
+                {mostraAutor && !minha && (
+                  <span className="flex items-center gap-1 text-[10.5px] text-muted px-1">
+                    {m.authorName}
+                    {m.fromSupport && <span className="rounded-full bg-accent px-1.5 text-[9.5px] font-semibold text-white">Suporte</span>}
+                  </span>
+                )}
                 <div id={`im-${m.id}`} onDoubleClick={() => responder(m)} className={cn('rounded-2xl px-3 py-1.5 text-sm whitespace-pre-wrap break-words transition-shadow', minha ? 'bg-accent text-white rounded-br-sm' : 'bg-field text-ink rounded-bl-sm')}>
                   {m.replyToId && (
                     <button

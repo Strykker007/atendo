@@ -2285,6 +2285,9 @@ model InternalChat {
   id                 String    @id @default(uuid())
   tenantId           String
   isGroup            Boolean   @default(false)
+  /// canal com o suporte do sistema (docs/chat-interno.md#suporte): um por cliente
+  /// (`directKey = "support"`), aberto a toda a equipe do cliente e ao dono do sistema
+  isSupport          Boolean   @default(false)
   /// nome do grupo; conversa direta usa o nome do outro membro
   name               String?
   /// conversa direta: "<menor userId>:<maior userId>" — uma só por par
@@ -2334,6 +2337,8 @@ model InternalMessage {
   replyToId  String?
   /// aviso do sistema no histórico ("Ana adicionou Bruno"): registro de quem mexeu no grupo
   system     Boolean  @default(false)
+  /// escrita pelo suporte do sistema (dono), no canal de suporte do cliente
+  fromSupport Boolean @default(false)
   createdAt  DateTime @default(now())
 
   chat    InternalChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)

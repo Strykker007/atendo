@@ -22,6 +22,24 @@ ledger de uso. O histórico é **permanente e auditável** — não existe apaga
 | Quem é removido perde o acesso na hora (404) e o histórico anterior continua na auditoria | `removeMember` |
 | "Online agora" = está com o painel aberto (sockets conectados, mesmo mecanismo do monitor do dono) | `GET /internal-chat/users` |
 
+## Suporte
+
+Canal direto entre o cliente e o **suporte do sistema** (o dono, `super_admin`), dentro do mesmo chat.
+
+| Regra | Onde |
+|---|---|
+| **Um canal por cliente** (`isSupport = true`, `directKey = "support"`), criado na primeira vez que a equipe abre o chat ou que o dono puxa conversa | `ensureSupportChat` |
+| Do lado do cliente, o canal é da **equipe inteira**: todo usuário ativo lê e escreve, sem cadastro de membro. Fica **fixado no topo** da lista, com o selo de headset. Não tem membros para gerenciar nem dá para apagar | `chats`, `chatOf` |
+| Leitura (não lidas) por pessoa: linha em `internal_chat_members` criada sob demanda, dos dois lados | `readSupport` |
+| Mensagem do dono sai marcada `fromSupport` (selo **Suporte** no balão) e assinada com o nome dele | `sendSupport` |
+| Tempo real: mensagem do canal vai para a **sala do cliente** (`internal_message`) e para a sala **`owners`** (`support_message`), em qualquer tela dos dois lados | `ConversationsGateway.emitSupportMessage` |
+| Resposta com citação funciona igual ao resto do chat. O canal aparece na auditoria do cliente como "Suporte" | — |
+
+**Dono do sistema**: logado como ele mesmo, o widget aparece em modo **Suporte aos clientes**
+(ícone de headset): aba **Conversas** (canais com mensagem, mais recentes primeiro, com não
+lidas) e aba **Clientes** (busca; clicar abre ou cria o canal para puxar conversa). "Entrando
+como" um cliente, o widget não aparece.
+
 ## Auditoria
 
 Permissão **`internal_chat.audit`** (grupo Gestão). Por padrão só o perfil **Administrador** tem —
@@ -61,11 +79,11 @@ por isso continua aberto e na mesma conversa ao trocar de página.
 
 ## Dados
 
-- `internal_chats` — `{tenantId, isGroup, name, directKey, createdById, lastMessageAt, lastMessagePreview, deletedAt, deletedById}`.
+- `internal_chats` — `{tenantId, isGroup, name, directKey, createdById, lastMessageAt, lastMessagePreview, deletedAt, deletedById, isSupport}`.
 - `internal_chat_members` — `{chatId, userId, lastReadAt, joinedAt}`, chave `(chatId, userId)`.
-- `internal_messages` — `{tenantId, chatId, authorId, authorName, text, replyToId, system, createdAt}`, índices `(chatId, createdAt)` e `(tenantId, createdAt)`.
+- `internal_messages` — `{tenantId, chatId, authorId, authorName, text, replyToId, system, fromSupport, createdAt}`, índices `(chatId, createdAt)` e `(tenantId, createdAt)`.
 
-Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_internal_chat_groups` (resposta, avisos, grupo apagado).
+Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_internal_chat_groups` (resposta, avisos, grupo apagado), `20270101000000_support_channel` (canal de suporte).
 
 ## API
 
@@ -81,5 +99,11 @@ Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_in
 | PATCH | `/internal-chat/chats/:id` | quem criou / `team.manage` | `{name}` — renomeia |
 | DELETE | `/internal-chat/chats/:id` | quem criou / `team.manage` | Apaga o grupo (some para os membros; fica na auditoria) |
 | POST | `/internal-chat/chats/:id/read` | membro | Marca como lida |
+| GET | `/super-admin/support/tenants` | super_admin | Clientes para puxar conversa |
+| GET | `/super-admin/support/chats` | super_admin | Canais de suporte com mensagem, com `unread` (do cliente, não lidas por você) |
+| POST | `/super-admin/support/tenants/:tenantId/chat` | super_admin | Abre (ou cria) o canal do cliente |
+| GET | `/super-admin/support/chats/:id/messages?before=` | super_admin | Histórico do canal |
+| POST | `/super-admin/support/chats/:id/messages` | super_admin | `{text, replyToId?}` — sai como `fromSupport` |
+| POST | `/super-admin/support/chats/:id/read` | super_admin | Marca como lido |
 | GET | `/internal-chat/audit/chats?userId=` | `internal_chat.audit` | Todas as conversas do cliente, com contagem de mensagens |
 | GET | `/internal-chat/audit/chats/:id/messages?before=` | `internal_chat.audit` | Histórico de qualquer conversa do cliente |
