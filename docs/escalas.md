@@ -64,6 +64,42 @@ um erro: "Agora está fora do horário da sua escala…", com **Solicitar acesso
 4. O popup confere a resposta a cada 10 s enquanto aberto: aprovado mostra "autorizou seu acesso
    até hoje às 22:00" e **Entrar agora** (refaz o login com a senha já digitada); recusado avisa.
 
+## Fim de turno
+
+Quando o turno (ou a liberação) acaba com a pessoa logada, a sessão **não cai**: entra no modo
+fim de turno.
+
+- **Antes**: avisos com som 15 e 5 min antes do fim ("vá concluindo ou devolva seus atendimentos").
+- **Na hora**, a tela inteira trava (`components/layout/ShiftEndScreen.tsx`) com:
+  - o **resumo do turno** (atendimentos assumidos, encerrados, transferidos — eventos desde o início do turno);
+  - **Devolver N para a fila**: os atendimentos abertos com a pessoa voltam para Aguardando
+    (`POST /me/shift/handoff`, pelo mesmo `release` do chat — fica no histórico), para o cliente
+    não ficar preso com quem foi embora;
+  - **Preciso de mais tempo**: o mesmo pedido de autorização do login; aprovado, destrava sozinho
+    (socket `shift_unlocked`) e o painel recarrega;
+  - **Sair agora** e a contagem regressiva: passados `HANDOFF_MS` (30 min) sem liberação, a sessão encerra.
+
+**Segurança — quem decide é a API, não a tela:**
+
+| Camada | Como trava |
+|---|---|
+| Token | `shiftEndsAt` (fim do turno ou da liberação, o que for maior; conta temporária: o vencimento) e, na passagem, `locked` + `lockedUntil`. O token travado não vive além da passagem |
+| `JwtAuthGuard` | Passou de `shiftEndsAt` ou `locked` → `403 SHIFT_ENDED` em toda rota, menos as `@ShiftLockOk` (`GET /auth/me`, `/me/shift`). Pela hora no token: zero consulta ao banco |
+| Socket | Travado não entra na sala do cliente (não recebe mensagem nenhuma); ainda no turno, sai sozinho na hora exata (`shift_ended`). Continua só na sala da pessoa, para o aviso de destrave |
+| Refresh | Reavalia escala e liberações no banco: no turno → token novo; acabou há < 30 min → token travado (passagem); depois disso → `403 FOR_OUT_OF_SCHEDULE` e a sessão acaba |
+| Navegador | Travado, `api()` nem dispara pedidos fora das rotas de passagem (`allowedWhileLocked`) |
+
+### Corte imediato
+
+O token carrega a hora do fim — então uma mudança do gestor no meio do turno precisa valer
+**na hora**, não quando o token vencer (até 15 min). Por isso, ao **encerrar uma liberação**,
+**trocar a escala** de alguém, **editar uma escala**, **encerrar um acesso temporário** ou
+**desativar** alguém na Equipe, a API grava `shift:cut:<userId>` no Redis (1 h) e manda os sockets
+da pessoa saírem da sala do cliente (`emitShiftLocked`). Todo token emitido antes do corte
+(`iatMs`) passa a valer como travado; a tela renova, e a renovação reavalia no banco — se a pessoa
+ainda está no turno, destrava em instantes; se não, fica na passagem (ou cai, se desativada).
+Custo: um `GET` no Redis por requisição, só para atendente/gerente (admin e dono nunca).
+
 ## Liberação excepcional (`schedule_overrides`)
 
 `userId`, `validFrom` (agora), `validUntil` (agora + 1…72h), `approvedById` (quem liberou; null
@@ -103,6 +139,8 @@ Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — meno
 | POST | `/auth/access-requests/approvers` | **Sem sessão**, `{token}` (o `requestToken` do login): quem pode aprovar |
 | POST | `/auth/access-requests` | **Sem sessão**, `{token, reason, approverId?}` — cria/atualiza o pedido pendente |
 | POST | `/auth/access-requests/status` | **Sem sessão**, `{token}` — situação do último pedido (`validUntil` quando aprovado) |
+| GET | `/me/shift` | **Qualquer logado, também travado**: resumo do turno, atendimentos abertos, `requestToken` para pedir mais tempo |
+| POST | `/me/shift/handoff` | **Também travado**: devolve para a fila os atendimentos abertos com a pessoa |
 | GET | `/work-schedules/access-requests` | Pedidos pendentes |
 | POST | `/work-schedules/access-requests/:id/approve` | `{validUntil}` (ISO, até 7 dias) — cria a liberação |
 | POST | `/work-schedules/access-requests/:id/deny` | Recusa |

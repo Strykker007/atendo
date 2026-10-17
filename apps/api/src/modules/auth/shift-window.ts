@@ -81,3 +81,64 @@ export function isWithinShift(rule: ShiftRule, now: LocalMoment): boolean {
   }
   return false;
 }
+
+/** Turno em minutos locais absolutos (dia × 1440 + minuto), para converter em instante no fuso. */
+export interface ShiftSpan {
+  start: number;
+  end: number;
+}
+
+/**
+ * Turno que está valendo agora (contando a tolerância antes do início) — ou null fora dele.
+ * É o que dá a hora exata em que a sessão trava (`shiftEndsAt` no token).
+ */
+export function currentShift(rule: ShiftRule, now: LocalMoment): ShiftSpan | null {
+  const start = hmToMinutes(rule.startTime);
+  const duration = shiftDuration(rule);
+  const tol = Math.max(0, rule.toleranceMinutes);
+  const today = dayIndex(now.ymd);
+  const t = today * DAY + now.minute;
+  if (isCyclic(rule)) {
+    if (!rule.anchorDate) return null;
+    const cycle = duration + rule.restHours * 60;
+    const anchor = dayIndex(rule.anchorDate) * DAY + start;
+    const s = anchor + Math.floor((t - anchor + tol) / cycle) * cycle;
+    return t >= s - tol && t < s + duration ? { start: s, end: s + duration } : null;
+  }
+  for (const day of [today - 1, today, today + 1]) {
+    if (!rule.workDays.includes(weekdayOf(day))) continue;
+    const s = day * DAY + start;
+    if (t >= s - tol && t < s + duration) return { start: s, end: s + duration };
+  }
+  return null;
+}
+
+/** Último turno que já terminou (até 8 dias para trás); null = nenhum. Define a janela de passagem. */
+export function lastShift(rule: ShiftRule, now: LocalMoment): ShiftSpan | null {
+  const start = hmToMinutes(rule.startTime);
+  const duration = shiftDuration(rule);
+  const today = dayIndex(now.ymd);
+  const t = today * DAY + now.minute;
+  if (isCyclic(rule)) {
+    if (!rule.anchorDate) return null;
+    const cycle = duration + rule.restHours * 60;
+    const anchor = dayIndex(rule.anchorDate) * DAY + start;
+    let s = anchor + Math.floor((t - anchor) / cycle) * cycle;
+    if (s + duration > t) s -= cycle;
+    return { start: s, end: s + duration };
+  }
+  for (let day = today; day >= today - 8; day--) {
+    if (!rule.workDays.includes(weekdayOf(day))) continue;
+    const s = day * DAY + start;
+    if (s + duration <= t) return { start: s, end: s + duration };
+  }
+  return null;
+}
+
+/** Minutos locais absolutos → data `AAAA-MM-DD` + "HH:MM" (para `localToUtc`). */
+export function splitLocal(abs: number): { ymd: string; hm: string } {
+  const day = Math.floor(abs / DAY);
+  const m = mod(abs, DAY);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return { ymd: new Date(day * 86_400_000).toISOString().slice(0, 10), hm: `${pad(Math.floor(m / 60))}:${pad(m % 60)}` };
+}

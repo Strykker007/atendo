@@ -7,7 +7,7 @@ import { env } from '../../config/env';
 import { MailService } from '../../common/mail/mail.service';
 import type { AuthTokenKind } from '@prisma/client';
 import { refreshAcceptable } from './refresh-grace';
-import { ShiftAccessService } from './shift-access.service';
+import { ShiftAccessService, type SessionWindow } from './shift-access.service';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const ttlMs = (ttl: string) => {
@@ -146,11 +146,11 @@ Seu login será: ${user.email}`,
     // conta temporária vencida fica inativa: com a senha certa, explica o motivo em vez de "credenciais inválidas"
     if (!user || !ok || !(user.isActive || user.isTemporary)) throw new UnauthorizedException('Credenciais inválidas');
     // validade da conta temporária + escala de trabalho: fora do turno (e sem liberação de plantão) não entra — docs/escalas.md
-    await this.shift.assertCanAccess(user);
+    const janela = await this.shift.sessionWindow(user, 'login');
     if (!user.isActive) throw new UnauthorizedException('Credenciais inválidas');
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    return this.issue(user, meta);
+    return this.issue(user, meta, janela);
   }
 
   async refresh(refreshToken: string, meta: { userAgent?: string; ip?: string }) {
@@ -158,21 +158,31 @@ Seu login será: ${user.email}`,
     // revogado há poucos segundos ainda passa: é a corrida de duas abas renovando juntas,
     // não um token vazado (ver refresh-grace.ts)
     if (!row || !refreshAcceptable(row)) throw new UnauthorizedException('Refresh inválido');
-    // saiu do turno ou a conta temporária venceu: a sessão para aqui (o token não é rotacionado)
-    await this.shift.assertCanAccess(row.user);
+    // turno acabou há pouco: token TRAVADO (modo fim de turno). Acabou faz tempo ou a conta
+    // temporária venceu: a sessão para aqui (o token não é rotacionado) — docs/escalas.md#fim-de-turno
+    const janela = await this.shift.sessionWindow(row.user, 'refresh');
     // rotação: revoga o antigo e emite novo par
     if (!row.revokedAt) await this.prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
-    return this.issue(row.user, meta);
+    return this.issue(row.user, meta, janela);
   }
 
   async logout(refreshToken: string) {
     await this.prisma.refreshToken.updateMany({ where: { tokenHash: sha256(refreshToken) }, data: { revokedAt: new Date() } });
   }
 
-  private async issue(user: { id: string; tenantId: string | null; role: string; email: string; name: string }, meta: { userAgent?: string; ip?: string }) {
+  private async issue(user: { id: string; tenantId: string | null; role: string; email: string; name: string }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow) {
+    // Fim de turno viaja no token: o JwtAuthGuard trava as ações sem consultar o banco a cada
+    // requisição. `shiftEndsAt` = a partir de quando trava; `locked` = já nasce travado (passagem)
+    const sec = (d: Date) => Math.floor(d.getTime() / 1000);
+    const shift = janela?.lockedUntil
+      ? { shiftEndsAt: sec(janela.shiftEndsAt ?? new Date()), locked: true, lockedUntil: sec(janela.lockedUntil) }
+      : janela?.shiftEndsAt ? { shiftEndsAt: sec(janela.shiftEndsAt) } : {};
+    // travado: o token não vive além da janela de passagem
+    const ttl = janela?.lockedUntil ? Math.max(30, Math.min(ttlMs(env.JWT_ACCESS_TTL), janela.lockedUntil.getTime() - Date.now()) / 1000 | 0) : (env.JWT_ACCESS_TTL as any);
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, tenantId: user.tenantId, role: user.role, email: user.email, name: user.name },
-      { secret: env.JWT_ACCESS_SECRET, expiresIn: env.JWT_ACCESS_TTL as any },
+      // `iatMs`: o corte de sessão (cutSessions) compara em milissegundos — `iat` do JWT é em segundos
+      { sub: user.id, tenantId: user.tenantId, role: user.role, email: user.email, name: user.name, iatMs: Date.now(), ...shift },
+      { secret: env.JWT_ACCESS_SECRET, expiresIn: ttl },
     );
     const refreshToken = randomBytes(48).toString('base64url');
     await this.prisma.refreshToken.create({

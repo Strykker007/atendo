@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWithinShift, shiftDuration, weekdayOf, dayIndex, type ShiftRule } from '../src/modules/auth/shift-window';
+import { currentShift, dayIndex, isWithinShift, lastShift, shiftDuration, splitLocal, weekdayOf, type ShiftRule } from '../src/modules/auth/shift-window';
 
 const at = (ymd: string, hm: string) => {
   const [h, m] = hm.split(':').map(Number);
@@ -52,5 +52,29 @@ describe('isWithinShift', () => {
 
   it('escala por ciclo sem âncora nunca libera', () => {
     expect(isWithinShift({ ...plantao, anchorDate: null }, at('2026-10-19', '20:00'))).toBe(false);
+  });
+});
+
+describe('currentShift / lastShift', () => {
+  const m = (ymd: string, hm: string) => dayIndex(ymd) * 1440 + Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3));
+
+  it('comercial: turno de hoje e o fim exato', () => {
+    expect(currentShift(comercial, at('2026-10-19', '10:00'))).toEqual({ start: m('2026-10-19', '08:00'), end: m('2026-10-19', '17:48') });
+    expect(currentShift(comercial, at('2026-10-19', '18:00'))).toBeNull();
+    expect(lastShift(comercial, at('2026-10-19', '18:00'))?.end).toBe(m('2026-10-19', '17:48'));
+  });
+
+  it('comercial: segunda de manhã, o último turno foi sexta', () => {
+    expect(lastShift(comercial, at('2026-10-19', '07:00'))?.end).toBe(m('2026-10-16', '17:48'));
+  });
+
+  it('12x36: turno da noite e o anterior', () => {
+    expect(currentShift(plantao, at('2026-10-20', '02:00'))).toEqual({ start: m('2026-10-19', '19:00'), end: m('2026-10-20', '07:00') });
+    expect(lastShift(plantao, at('2026-10-20', '08:00'))?.end).toBe(m('2026-10-20', '07:00'));
+    expect(lastShift(plantao, at('2026-10-21', '20:00'))?.end).toBe(m('2026-10-20', '07:00'));
+  });
+
+  it('splitLocal volta para data e hora', () => {
+    expect(splitLocal(m('2026-10-20', '07:05'))).toEqual({ ymd: '2026-10-20', hm: '07:05' });
   });
 });

@@ -16,6 +16,7 @@ import { toast } from '@/components/ui/Toast';
 import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
 import { upsertInternalMessage, type InternalMessage } from './chat-interno';
 import { create } from 'zustand';
+import { markShiftLocked, useShiftSession } from '../shift-session';
 
 /**
  * Estado do socket do tempo real, para a faixa "reconectando" (components/layout/RealtimeBanner).
@@ -95,6 +96,9 @@ export function useRealtime() {
   // entregue, lido) não chegavam. Renovação do mesmo cliente não reconecta.
   const [sala, setSala] = useState(() => salaDoToken(getAccessToken()));
   useEffect(() => { const fora = onAccessToken((t) => setSala(salaDoToken(t))); return () => { fora(); }; }, []);
+  // turno encerrado/destravado reconecta: travado, o servidor deixa o socket fora da sala do
+  // cliente (sem mensagens para quem já saiu); destravado, volta a entrar
+  const travado = useShiftSession((s) => s.locked);
   useEffect(() => unlockMessageSound(), []);
   useEffect(() => {
     if (!getAccessToken()) return;
@@ -248,6 +252,11 @@ export function useRealtime() {
       toast.warn(`${e.userName} pediu autorização para entrar fora da escala${e.reason ? `: "${e.reason}"` : ''}. Responda em Escalas e plantões.`);
       if (!useUI.getState().soundMuted) playMessageSound();
     });
+    // fim de turno (docs/escalas.md#fim-de-turno): gestor encerrou a liberação / trocou a escala, ou
+    // chegou a hora. Trava a tela já e renova: a API decide se é passagem de turno ou se ainda vale
+    socket.on('shift_ended', () => { markShiftLocked(); void refresh(); });
+    // liberação aprovada enquanto a tela de fim de turno estava aberta: renova e destrava
+    socket.on('shift_unlocked', () => { void refresh(); });
     socket.on('support_chat', () => { qc.invalidateQueries({ queryKey: ['support-chats'] }); });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
@@ -284,7 +293,7 @@ export function useRealtime() {
       socket.disconnect();
       status({ downSince: null });
     };
-  }, [qc, sala]);
+  }, [qc, sala, travado]);
 }
 
 /** Cliente do token (sem validar — só decide se o socket precisa reconectar). `null` = sem token. */

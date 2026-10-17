@@ -282,7 +282,7 @@ Formato padrão do Nest: `{ statusCode, message, error }`. Códigos relevantes:
 |---|---|
 | 400 | Validação (campo inválido/desconhecido), janela 24h expirada, conversa encerrada, número desconectado |
 | 401 | Token ausente/expirado, webhook não autenticado |
-| 403 | Role insuficiente, limite do plano, assinatura suspensa, transferir/devolver conversa que não é sua; login/refresh fora da escala (`code: FOR_OUT_OF_SCHEDULE`) ou de conta temporária vencida (`code: ACCOUNT_EXPIRED`) — ver [Escalas](escalas.md) |
+| 403 | `code: SHIFT_ENDED` = sessão no modo fim de turno ([Escalas](escalas.md#fim-de-turno)); role insuficiente, limite do plano, assinatura suspensa, transferir/devolver conversa que não é sua; login/refresh fora da escala (`code: FOR_OUT_OF_SCHEDULE`) ou de conta temporária vencida (`code: ACCOUNT_EXPIRED`) — ver [Escalas](escalas.md) |
 | 409 | Outra atendente já assumiu a conversa |
 | 404 | Recurso de outro tenant ou inexistente (nunca revelamos qual) |
 | 429 | Throttling |

@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { PermissionsService } from '../auth/permissions.service';
+import { ShiftAccessService } from '../auth/shift-access.service';
 import { ProfilesController } from './profiles.controller';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -126,6 +127,7 @@ class TenantsController {
     private readonly provisioning: TenantProvisioningService,
     private readonly promotions: PromotionsService,
     private readonly ledger: DiscountLedgerService,
+    private readonly shift: ShiftAccessService,
   ) {}
 
   @Get()
@@ -355,6 +357,8 @@ class TenantsController {
     // Depois do update: se a edição for recusada, ninguém é deslogado à toa
     if (password || dto.isActive === false || dto.email !== undefined || dto.role !== undefined) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+      // desativado: o access token já emitido para de valer agora, não daqui a 15 min
+      if (dto.isActive === false) await this.shift.cutSessions([id]);
     }
 
     if (numberIds) {

@@ -130,6 +130,8 @@ export class AccessRequestsController {
       return o;
     });
     this.gateway.emitAccessRequest(u.tenantId, [], { id, decided: true });
+    // a pessoa pode estar com a tela de fim de turno aberta: destrava na hora
+    this.gateway.emitShiftUnlocked(u.tenantId, req.userId);
     return { ok: true, validUntil: override.validUntil };
   }
 

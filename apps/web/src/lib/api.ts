@@ -1,5 +1,6 @@
 'use client';
 import { useUI } from './store';
+import { allowedWhileLocked, applyShiftToken, markShiftLocked, useShiftSession } from './shift-session';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 let accessToken: string | null = null;
@@ -21,6 +22,8 @@ export const onAccessToken = (fn: (t: string | null) => void) => {
 export const setAccessToken = (t: string | null) => {
   const mudou = accessToken !== t;
   accessToken = t;
+  // fim de turno viaja no token (docs/escalas.md#fim-de-turno)
+  if (mudou) applyShiftToken(t);
   if (mudou) for (const fn of ouvintes) fn(t);
 };
 
@@ -117,6 +120,8 @@ export const ACCESS_BLOCK_MESSAGES: Record<string, string> = {
  * precisar lembrar de passar o filtro (docs/empresas.md).
  */
 export async function api<T = unknown>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  // turno encerrado: só as rotas de passagem saem do navegador (a API recusaria as outras)
+  if (useShiftSession.getState().locked && !allowedWhileLocked(path)) throw new ApiError('Seu turno terminou.', 403, 'SHIFT_ENDED');
   const companyId = useUI.getState().companyId;
   // FormData (upload): o navegador põe o Content-Type com o boundary
   const json = !(init.body instanceof FormData);
@@ -132,6 +137,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}, ret
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    if (res.status === 403 && body.code === 'SHIFT_ENDED') markShiftLocked();
     throw new ApiError(body.message ?? `Erro ${res.status}`, res.status, body.code, body);
   }
   // corpo vazio (204, ou o Nest devolvendo `null`) vira null em vez de erro de JSON

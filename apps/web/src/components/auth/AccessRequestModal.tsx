@@ -21,8 +21,9 @@ const quando = (iso: string) => {
  * jargão, deixa pedir autorização a um gestor com o motivo e acompanha a resposta. Aprovado,
  * "Entrar agora" refaz o login com a senha que já está no formulário.
  */
-export function AccessRequestModal({ token, userName, onClose, onRetry }: { token: string; userName?: string; onClose: () => void; onRetry: () => void }) {
-  const [etapa, setEtapa] = useState<'aviso' | 'pedido' | 'enviado'>('aviso');
+/** `skipIntro`: aberto pela tela de fim de turno, vai direto ao pedido (o aviso já está na tela). */
+export function AccessRequestModal({ token, userName, onClose, onRetry, skipIntro, retryLabel = 'Entrar agora' }: { token: string; userName?: string; onClose: () => void; onRetry: () => void; skipIntro?: boolean; retryLabel?: string }) {
+  const [etapa, setEtapa] = useState<'aviso' | 'pedido' | 'enviado'>(skipIntro ? 'pedido' : 'aviso');
   const [aprovadores, setAprovadores] = useState<Approver[] | null>(null);
   const [approverId, setApproverId] = useState('');
   const [reason, setReason] = useState('');
@@ -58,7 +59,7 @@ export function AccessRequestModal({ token, userName, onClose, onRetry }: { toke
   const destino = approverId ? aprovadores?.find((a) => a.id === approverId)?.name : null;
 
   return (
-    <Modal open onClose={onClose} title={etapa === 'enviado' ? 'Pedido de autorização' : 'Fora do seu horário'} width="max-w-md">
+    <Modal open onClose={onClose} title={etapa === 'enviado' ? 'Pedido de autorização' : skipIntro ? 'Pedir mais tempo' : 'Fora do seu horário'} width="max-w-md">
       {etapa === 'aviso' && (
         <div className="space-y-4">
           <div className="flex items-start gap-3">
@@ -125,7 +126,7 @@ export function AccessRequestModal({ token, userName, onClose, onRetry }: { toke
           )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Fechar</Button>
-            {situacao.status === 'approved' && <Button onClick={onRetry}>Entrar agora</Button>}
+            {situacao.status === 'approved' && <Button onClick={onRetry}>{retryLabel}</Button>}
           </div>
         </div>
       )}

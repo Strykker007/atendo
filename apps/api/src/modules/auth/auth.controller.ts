@@ -3,7 +3,7 @@ import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { JwtAuthGuard, ShiftLockOk } from './jwt-auth.guard';
 import { CurrentUser, type AuthUser } from './current-user.decorator';
 import { NoTenantOk } from './tenant.guard';
 import { env } from '../../config/env';
@@ -114,6 +114,7 @@ export class AuthController {
 
   @Get('me')
   @NoTenantOk()
+  @ShiftLockOk()
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthUser) {
     return user;

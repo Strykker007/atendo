@@ -20,6 +20,8 @@ import { TenantsModule } from '../tenants/tenants.module';
 import { TenantProvisioningService } from '../tenants/tenant-provisioning.service';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { AccessRequestsController, PublicAccessRequestsController } from './access-requests.controller';
+import { ShiftController } from './shift.controller';
+import { ConversationsGateway } from '../conversations/conversations.gateway';
 
 const QUEUE_WORK_SCHEDULES = 'work-schedules';
 const TYPES = ['FIXED_12X36', 'COMMERCIAL_44H', 'CUSTOM'] as const;
@@ -93,7 +95,17 @@ const scheduleSelect = { id: true, name: true, type: true, startTime: true, endT
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermission('team.manage')
 class WorkSchedulesController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: ConversationsGateway,
+    private readonly shift: ShiftAccessService,
+  ) {}
+
+  /** Mudou a regra de quem já está logado: corta agora (a renovação reavalia — docs/escalas.md#corte-imediato). */
+  private async cortar(tenantId: string, userIds: string[]) {
+    await this.shift.cutSessions(userIds);
+    for (const id of userIds) this.gateway.emitShiftLocked(tenantId, id);
+  }
 
   @Get()
   list(@CurrentUser() u: AuthUser) {
@@ -110,7 +122,10 @@ class WorkSchedulesController {
     const cur = await this.prisma.workSchedule.findFirst({ where: { id, tenantId: u.tenantId } });
     if (!cur) throw new NotFoundException('Escala não encontrada.');
     const merged = { name: cur.name, type: cur.type, startTime: cur.startTime, endTime: cur.endTime, workDays: cur.workDays, restHours: cur.restHours, anchorDate: cur.anchorDate, toleranceMinutes: cur.toleranceMinutes, ...dto };
-    return this.prisma.workSchedule.update({ where: { id }, data: cleanSchedule(merged), select: scheduleSelect });
+    const updated = await this.prisma.workSchedule.update({ where: { id }, data: cleanSchedule(merged), select: scheduleSelect });
+    // horário mudou: quem está nesta escala é reavaliado na hora
+    await this.cortar(u.tenantId, updated.users.map((x) => x.id));
+    return updated;
   }
 
   /** Apagar a escala solta os colaboradores (ficam sem trava de horário). */
@@ -170,17 +185,23 @@ class WorkSchedulesController {
     const now = new Date();
     // impersonação: o dono não é usuário do tenant, a liberação fica sem aprovador
     const approver = u.impersonatorId ? null : u.id;
-    return this.prisma.scheduleOverride.create({
+    const created = await this.prisma.scheduleOverride.create({
       data: { tenantId: u.tenantId, userId: target.id, validFrom: now, validUntil: new Date(now.getTime() + dto.hours * 3_600_000), approvedById: approver, reason: dto.reason?.trim() || null },
       select: { id: true, validFrom: true, validUntil: true, reason: true },
     });
+    // quem está na tela de fim de turno destrava na hora
+    this.gateway.emitShiftUnlocked(u.tenantId, target.id);
+    return created;
   }
 
   /** Encerra a liberação antes do fim. A sessão aberta cai na próxima renovação do token. */
   @Delete('overrides/:id')
   async revokeOverride(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const { count } = await this.prisma.scheduleOverride.updateMany({ where: { id, tenantId: u.tenantId, revokedAt: null }, data: { revokedAt: new Date() } });
-    if (!count) throw new NotFoundException('Liberação não encontrada.');
+    const o = await this.prisma.scheduleOverride.findFirst({ where: { id, tenantId: u.tenantId, revokedAt: null }, select: { id: true, userId: true } });
+    if (!o) throw new NotFoundException('Liberação não encontrada.');
+    await this.prisma.scheduleOverride.update({ where: { id }, data: { revokedAt: new Date() } });
+    // encerrou o plantão: trava AGORA (antes, o token já emitido seguia liberado por até 15 min)
+    await this.cortar(u.tenantId, [o.userId]);
     return { ok: true };
   }
 }
@@ -195,6 +216,7 @@ class UsersScheduleController {
     private readonly auth: AuthService,
     private readonly shift: ShiftAccessService,
     private readonly provisioning: TenantProvisioningService,
+    private readonly gateway: ConversationsGateway,
   ) {}
 
   /** Associa (ou tira) a escala de um colaborador. Gerente só mexe em atendentes, como na equipe. */
@@ -207,6 +229,9 @@ class UsersScheduleController {
     const roles = u.role === 'manager' ? ['agent' as const] : ['agent' as const, 'manager' as const];
     const { count } = await this.prisma.user.updateMany({ where: { id, tenantId: u.tenantId, role: { in: roles } }, data: { scheduleId: dto.scheduleId ?? null } });
     if (!count) throw new BadRequestException('Este colaborador não pode receber escala (admins nunca são travados por horário).');
+    // escala nova pode deixar a pessoa fora do turno: reavalia já
+    await this.shift.cutSessions([id]);
+    this.gateway.emitShiftLocked(u.tenantId, id);
     return { ok: true };
   }
 
@@ -264,6 +289,8 @@ class UsersScheduleController {
     const target = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, isTemporary: true, expiredAt: null }, select: { id: true } });
     if (!target) throw new NotFoundException('Acesso temporário não encontrado ou já expirado.');
     await this.shift.expire(target.id);
+    await this.shift.cutSessions([target.id]);
+    this.gateway.emitShiftLocked(u.tenantId, target.id);
     return { ok: true };
   }
 }
@@ -295,7 +322,7 @@ class WorkSchedulesProcessor extends TrackedWorkerHost {
     TenantsModule,
     ConversationsModule,
   ],
-  controllers: [WorkSchedulesController, UsersScheduleController, AccessRequestsController, PublicAccessRequestsController],
+  controllers: [WorkSchedulesController, UsersScheduleController, AccessRequestsController, PublicAccessRequestsController, ShiftController],
   providers: [WorkSchedulesScheduler, WorkSchedulesProcessor],
 })
 export class WorkSchedulesModule {}
