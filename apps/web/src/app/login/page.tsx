@@ -2,7 +2,7 @@
 import { MarcaHorizontal } from '@/components/ui/Marca';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, setAccessToken, SESSION_EXPIRED_MESSAGE } from '@/lib/api';
+import { ACCESS_BLOCK_MESSAGES, api, setAccessToken, SESSION_EXPIRED_MESSAGE } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 
 export default function LoginPage() {
@@ -13,7 +13,13 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   // a sessão caiu no meio do uso (ver sessionExpired em lib/api.ts): explica e volta para lá
-  useEffect(() => { if (new URLSearchParams(location.search).get('expirou')) setAviso(SESSION_EXPIRED_MESSAGE); }, []);
+  // ou a renovação foi recusada por escala/validade (docs/escalas.md): diz o motivo
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    const bloqueio = q.get('bloqueio');
+    if (bloqueio) setAviso(ACCESS_BLOCK_MESSAGES[bloqueio] ?? SESSION_EXPIRED_MESSAGE);
+    else if (q.get('expirou')) setAviso(SESSION_EXPIRED_MESSAGE);
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

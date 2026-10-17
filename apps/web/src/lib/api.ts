@@ -45,8 +45,15 @@ export function refresh(): Promise<boolean> {
   return inFlight;
 }
 
+/**
+ * Por que a última renovação foi recusada com 403 (fora da escala, acesso temporário vencido —
+ * docs/escalas.md). Vai para o login, que explica o motivo em vez de "sessão expirada".
+ */
+let refreshBlock: string | null = null;
+
 async function doRefresh(): Promise<boolean> {
   const r = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
+  if (r.status === 403) refreshBlock = (await r.json().catch(() => ({}))).code ?? null;
   if (!r.ok) return false;
   // pelo setter: o socket do tempo real precisa saber do token novo
   setAccessToken((await r.json()).accessToken);
@@ -79,10 +86,18 @@ function sessionExpired() {
   setAccessToken(null);
   impersonation.set(null);
   const volta = location.pathname + location.search;
-  location.href = `/login?expirou=1&next=${encodeURIComponent(volta)}`;
+  location.href = refreshBlock
+    ? `/login?bloqueio=${encodeURIComponent(refreshBlock)}&next=${encodeURIComponent(volta)}`
+    : `/login?expirou=1&next=${encodeURIComponent(volta)}`;
 }
 
 export const SESSION_EXPIRED_MESSAGE = 'Sua sessão expirou. Entre novamente para continuar.';
+
+/** Mensagens dos bloqueios de acesso (docs/escalas.md), pelo `code` que a API devolve. */
+export const ACCESS_BLOCK_MESSAGES: Record<string, string> = {
+  FOR_OUT_OF_SCHEDULE: 'FOR_OUT_OF_SCHEDULE: Acesso bloqueado. Solicite autorização de plantão ao gestor.',
+  ACCOUNT_EXPIRED: 'Este acesso temporário expirou. Peça um novo ao gestor.',
+};
 
 /**
  * fetch com Bearer + refresh automático em 401 (uma tentativa).

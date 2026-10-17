@@ -10,5 +10,13 @@ const config: NextConfig = {
   // build enxuto para Docker (copia só o necessário para rodar)
   output: 'standalone',
   outputFileTracingRoot: path.join(__dirname, '../../'),
+  // escalas (docs/escalas.md): as rotas do app são em português; os nomes em inglês da especificação continuam funcionando
+  async redirects() {
+    return [
+      { source: '/settings/schedules', destination: '/configuracoes/escalas', permanent: false },
+      { source: '/schedules/approvals', destination: '/escalas/aprovacoes', permanent: false },
+      { source: '/escalas', destination: '/escalas/aprovacoes', permanent: false },
+    ];
+  },
 };
 export default config;

@@ -33,6 +33,8 @@ tenant_templates (global) ── tenants.templateId
 
 **departments** / **user_departments** — departamentos do cliente (nome único, cor, ativo) e quem participa (N:N; sem linha = sem restrição). `conversations.departmentId` opcional (`SetNull` ao excluir). Ver [Departamentos](departamentos.md).
 
+**work_schedules** / **schedule_overrides** — escalas de trabalho do cliente (`type` `FIXED_12X36`|`COMMERCIAL_44H`|`CUSTOM`, `startTime`/`endTime` "HH:MM" locais, `workDays`, `restHours`, `anchorDate`, `toleranceMinutes`) e liberações excepcionais de plantão (`userId`, `validFrom`, `validUntil`, `approvedById`, `reason`, `revokedAt`). Em `users`: `scheduleId` (SetNull ao apagar a escala), `isTemporary`, `accessExpiresAt`, `expiredAt`, `temporaryCreatedById` — migração `20270103000000_work_schedules`. Ver [Escalas](escalas.md).
+
 **refresh_tokens** — só o hash SHA-256 do token; `revokedAt` permite logout e rotação. Guardamos `userAgent`/`ip` para auditoria.
 
 ### WhatsApp
@@ -152,6 +154,7 @@ atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`).
 | SubscriptionStatus | trialing, active, past_due, suspended, canceled |
 | InvoiceStatus | draft, open, paid, failed, void |
 | BillingType | INDIVIDUAL, CONSOLIDATED_GROUP (em `tenants` e `companies` — [empresas.md#cobrança](empresas.md#cobrança)) |
+| WorkScheduleType | FIXED_12X36, COMMERCIAL_44H, CUSTOM ([escalas.md](escalas.md)) |
 
 Os mesmos enums existem em `packages/shared/src/enums.ts` para o front. Ao mudar um, mude nos dois.
 

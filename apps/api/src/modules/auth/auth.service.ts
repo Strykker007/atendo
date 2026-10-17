@@ -7,6 +7,7 @@ import { env } from '../../config/env';
 import { MailService } from '../../common/mail/mail.service';
 import type { AuthTokenKind } from '@prisma/client';
 import { refreshAcceptable } from './refresh-grace';
+import { ShiftAccessService } from './shift-access.service';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const ttlMs = (ttl: string) => {
@@ -22,6 +23,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly mail: MailService,
+    private readonly shift: ShiftAccessService,
   ) {}
 
   // ---------- tokens de uso único (esqueci a senha, convite) ----------
@@ -141,7 +143,11 @@ Seu login será: ${user.email}`,
     // argon2.verify em hash fake evita timing attack de enumeração de e-mail
     const ok = user ? await argon2.verify(user.passwordHash, password) : (await argon2.hash(password), false);
     if (user?.invitedAt && !user.passwordSetAt) throw new UnauthorizedException('Você ainda não definiu sua senha. Use o link do convite recebido por e-mail.');
-    if (!user || !ok || !user.isActive) throw new UnauthorizedException('Credenciais inválidas');
+    // conta temporária vencida fica inativa: com a senha certa, explica o motivo em vez de "credenciais inválidas"
+    if (!user || !ok || !(user.isActive || user.isTemporary)) throw new UnauthorizedException('Credenciais inválidas');
+    // validade da conta temporária + escala de trabalho: fora do turno (e sem liberação de plantão) não entra — docs/escalas.md
+    await this.shift.assertCanAccess(user);
+    if (!user.isActive) throw new UnauthorizedException('Credenciais inválidas');
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     return this.issue(user, meta);
@@ -152,6 +158,8 @@ Seu login será: ${user.email}`,
     // revogado há poucos segundos ainda passa: é a corrida de duas abas renovando juntas,
     // não um token vazado (ver refresh-grace.ts)
     if (!row || !refreshAcceptable(row)) throw new UnauthorizedException('Refresh inválido');
+    // saiu do turno ou a conta temporária venceu: a sessão para aqui (o token não é rotacionado)
+    await this.shift.assertCanAccess(row.user);
     // rotação: revoga o antigo e emite novo par
     if (!row.revokedAt) await this.prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
     return this.issue(row.user, meta);

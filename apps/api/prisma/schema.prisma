@@ -53,6 +53,8 @@ model Tenant {
 
   template      TenantTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   users         User[]
+  workSchedules     WorkSchedule[]
+  scheduleOverrides ScheduleOverride[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
   contactAttributes ContactAttribute[]
@@ -166,9 +168,87 @@ model User {
   budgets           Budget[]
   internalChats     InternalChatMember[]
   internalMessages  InternalMessage[]
+
+  // ---- escalas de trabalho e acessos temporários (docs/escalas.md) ----
+  /// escala do colaborador: com escala, login e refresh só passam dentro do turno (ou com liberação)
+  scheduleId      String?
+  schedule        WorkSchedule?      @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  /// conta provisória (plantonista/freelancer) gerada em POST /users/temporary
+  isTemporary     Boolean            @default(false)
+  /// fim da validade da conta provisória: passou daqui, a conta expira e não entra mais
+  accessExpiresAt DateTime?
+  /// quando a conta provisória expirou (status EXPIRED); null = ainda valendo
+  expiredAt       DateTime?
+  scheduleOverrides ScheduleOverride[] @relation("overrideUser")
+  approvedOverrides ScheduleOverride[] @relation("overrideApprover")
+  createdTemporaryUsers User[]         @relation("temporaryCreator")
+  temporaryCreatedById  String?
+  temporaryCreatedBy    User?          @relation("temporaryCreator", fields: [temporaryCreatedById], references: [id], onDelete: SetNull)
+
   @@index([tenantId])
   @@index([profileId])
+  @@index([scheduleId])
+  @@index([accessExpiresAt])
   @@map("users")
+}
+
+enum WorkScheduleType {
+  /// 12h de trabalho, 36h de descanso (ciclo de 48h ancorado em `anchorDate`)
+  FIXED_12X36
+  /// comercial 44h: mesmo horário nos dias marcados
+  COMMERCIAL_44H
+  /// horário livre definido pelo admin (dias + faixa, ou ciclo trabalho/descanso)
+  CUSTOM
+}
+
+/// Modelo de escala do tenant (docs/escalas.md). Horários em hora local, no fuso de `TenantSettings`.
+model WorkSchedule {
+  id        String           @id @default(uuid())
+  tenantId  String
+  name      String
+  type      WorkScheduleType
+  /// "HH:MM" — início do turno
+  startTime String
+  /// "HH:MM" — fim do turno; menor ou igual ao início = vira a meia-noite
+  endTime   String
+  /// dias da semana em que o turno COMEÇA (0 = domingo … 6 = sábado). Ignorado em escala por ciclo
+  workDays  Int[]            @default([])
+  /// descanso entre turnos. > 0 = escala por ciclo (trabalho + descanso), ancorada em `anchorDate`
+  restHours Int              @default(0)
+  /// "AAAA-MM-DD": um dia em que o turno começa — referência do ciclo (12x36 e CUSTOM por ciclo)
+  anchorDate String?
+  /// minutos antes do início em que o login já é aceito
+  toleranceMinutes Int       @default(15)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users  User[]
+
+  @@index([tenantId])
+  @@map("work_schedules")
+}
+
+/// Liberação excepcional de plantão: deixa o colaborador entrar fora da escala entre `validFrom` e `validUntil`.
+model ScheduleOverride {
+  id           String    @id @default(uuid())
+  tenantId     String
+  userId       String
+  validFrom    DateTime
+  validUntil   DateTime
+  approvedById String?
+  reason       String?
+  /// liberação encerrada antes do fim pelo gestor
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User   @relation("overrideUser", fields: [userId], references: [id], onDelete: Cascade)
+  approvedBy User?  @relation("overrideApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, validUntil])
+  @@index([userId, validUntil])
+  @@map("schedule_overrides")
 }
 
 /// Quais números o usuário opera. **Sem nenhuma linha = opera todos** — é o estado de quem

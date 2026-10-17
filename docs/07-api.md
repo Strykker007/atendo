@@ -212,6 +212,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 Rotas em [Contatos isentos](contatos-isentos.md#api) (`/ignored-contacts`, `settings.manage`; `GET /conversations?free=1` = aba Livres) e
 [Chat interno](chat-interno.md#api) (`/internal-chat/*`; auditoria com `internal_chat.audit`).
 
+### Escalas, plantões e acessos temporários (`team.manage`)
+
+Rotas em [Escalas](escalas.md#api): `/work-schedules`, `/work-schedules/team`, `/work-schedules/overrides`, `PATCH /users/:id/schedule` e `/users/temporary`. Login e refresh devolvem `403` com `code` `FOR_OUT_OF_SCHEDULE` (fora da escala, sem liberação) ou `ACCOUNT_EXPIRED` (conta temporária vencida).
+
 ### Contatos: importar e exportar (`contacts.import_export`)
 
 | Método | Rota | Quem | Descrição |
@@ -278,7 +282,7 @@ Formato padrão do Nest: `{ statusCode, message, error }`. Códigos relevantes:
 |---|---|
 | 400 | Validação (campo inválido/desconhecido), janela 24h expirada, conversa encerrada, número desconectado |
 | 401 | Token ausente/expirado, webhook não autenticado |
-| 403 | Role insuficiente, limite do plano, assinatura suspensa, transferir/devolver conversa que não é sua |
+| 403 | Role insuficiente, limite do plano, assinatura suspensa, transferir/devolver conversa que não é sua; login/refresh fora da escala (`code: FOR_OUT_OF_SCHEDULE`) ou de conta temporária vencida (`code: ACCOUNT_EXPIRED`) — ver [Escalas](escalas.md) |
 | 409 | Outra atendente já assumiu a conversa |
 | 404 | Recurso de outro tenant ou inexistente (nunca revelamos qual) |
 | 429 | Throttling |

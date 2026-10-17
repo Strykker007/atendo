@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -41,6 +41,7 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: 'settings.manage', feature: 'satisfaction_surveys' },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: 'reports.view' },
   { href: '/equipe', label: 'Equipe', icon: Users, need: 'team.manage' },
+  { href: '/escalas/aprovacoes', label: 'Escalas e plantões', icon: CalendarClock, need: 'team.manage' },
   { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: 'billing.manage' },
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
