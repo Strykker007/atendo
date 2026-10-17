@@ -11,88 +11,130 @@ import {
 } from '@/lib/hooks';
 
 /**
- * Estado do widget, por navegador: aberto/minimizado, posição arrastada e conversa aberta.
+/**
+ * Estado do widget, por navegador: aberto/minimizado, canto onde está preso e conversa aberta.
  * Fica fora do `useUI` para não misturar com a tela de conversas.
  */
 interface WidgetState {
   open: boolean;
   minimized: boolean;
-  /** canto superior esquerdo arrastado; null = canto inferior direito padrão */
-  pos: { x: number; y: number } | null;
+  /** lateral em que o widget fica preso (trava magnética) */
+  side: 'left' | 'right';
+  /** altura do ponto de ancoragem (centro do botão redondo), em px; null = embaixo */
+  y: number | null;
   chatId: string | null;
   set: (p: Partial<Omit<WidgetState, 'set'>>) => void;
 }
 const useWidget = create<WidgetState>()(persist(
-  (set) => ({ open: false, minimized: false, pos: null, chatId: null, set: (p) => set(p) }),
-  { name: 'atendo-chat-interno', partialize: (s) => ({ open: s.open, minimized: s.minimized, pos: s.pos, chatId: s.chatId }) },
+  (set) => ({ open: false, minimized: false, side: 'right', y: null, chatId: null, set: (p) => set(p) }),
+  {
+    name: 'atendo-chat-interno',
+    // v1: a posição livre (`pos`) virou lado + altura — a antiga é descartada
+    version: 1,
+    migrate: (s) => ({ ...(s as object), side: 'right', y: null }) as unknown as WidgetState,
+    partialize: (s) => ({ open: s.open, minimized: s.minimized, side: s.side, y: s.y, chatId: s.chatId }),
+  },
 ));
 
 const W = 340;
 const H = 480;
+/** distância mínima da borda da tela */
+const M = 12;
+const BOLHA = 48;
+const BARRA = 42;
+/** abaixo disto é clique, não arrasto (trackpad sempre mexe um pouco ao clicar) */
+const LIMIAR = 5;
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), Math.max(min, max));
 const iniciais = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('');
 const hora = (d: string) => new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
+/** Tamanho da janela, atualizado ao redimensionar: o widget nunca fica fora da tela. */
+function useViewport() {
+  const [vp, setVp] = useState(() => (typeof window === 'undefined' ? { w: 1280, h: 800 } : { w: window.innerWidth, h: window.innerHeight }));
+  useEffect(() => {
+    const f = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    f();
+    window.addEventListener('resize', f);
+    return () => window.removeEventListener('resize', f);
+  }, []);
+  return vp;
+}
+
 /**
  * Chat interno da equipe (docs/chat-interno.md): widget flutuante montado no shell, então
- * continua aberto (e na mesma conversa) ao trocar de página. Arrasta pelo cabeçalho, minimiza
- * para a barra e fecha para o botão redondo. O dono do sistema "entrando como" não é da equipe:
+ * continua aberto (e na mesma conversa) ao trocar de página. Arrasta pelo cabeçalho ou pelo
+ * botão redondo e, ao soltar, gruda na lateral mais próxima na altura em que foi solto. A janela
+ * aberta é sempre encaixada inteira na tela: abre para cima quando o botão está na metade de
+ * baixo e para baixo na metade de cima. O dono do sistema "entrando como" não é da equipe:
  * não vê o widget (audita pela tela de auditoria).
  */
 export function InternalChatWidget() {
   const me = useMe();
   const habilitado = !!me.data?.tenantId && me.data.role !== 'super_admin' && !me.data.impersonatorId;
-  const { open, minimized, pos, chatId, set } = useWidget();
+  const { open, minimized, side, y, chatId, set } = useWidget();
   const chats = useInternalChats(habilitado);
   const naoLidas = (chats.data ?? []).reduce((a, c) => a + (c.unread ?? 0), 0);
+  const vp = useViewport();
 
-  // arrastar pelo cabeçalho (ou pelo botão redondo): posição presa à janela
-  const arrasto = useRef<{ dx: number; dy: number; moveu: boolean } | null>(null);
-  const caixa = useRef<HTMLDivElement>(null);
+  // tamanho do que está na tela: botão, barra minimizada ou janela (limitada ao tamanho da tela)
+  const w = !open ? BOLHA : Math.min(W, vp.w - 2 * M);
+  const h = !open ? BOLHA : minimized ? BARRA : Math.min(H, vp.h - 2 * M);
+  // posição encaixada: lateral escolhida + altura da âncora, sempre dentro da tela
+  const ancora = clamp(y ?? vp.h - M - BOLHA / 2, M + BOLHA / 2, vp.h - M - BOLHA / 2);
+  const naMetadeDeBaixo = ancora > vp.h / 2;
+  const encaixe = {
+    left: side === 'left' ? M : vp.w - w - M,
+    top: clamp(naMetadeDeBaixo ? ancora + BOLHA / 2 - h : ancora - BOLHA / 2, M, vp.h - h - M),
+  };
+
+  // arrasto: posição livre enquanto segura; ao soltar, trava na lateral mais próxima
+  const [livre, setLivre] = useState<{ left: number; top: number } | null>(null);
+  const arrasto = useRef<{ dx: number; dy: number; x0: number; y0: number; moveu: boolean } | null>(null);
   function iniciarArrasto(e: React.PointerEvent) {
-    if ((e.target as HTMLElement).closest('[data-no-drag]')) return;
-    const r = caixa.current?.getBoundingClientRect();
-    if (!r) return;
-    arrasto.current = { dx: e.clientX - r.left, dy: e.clientY - r.top, moveu: false };
+    if (e.button !== 0 || (e.target as HTMLElement).closest('[data-no-drag]')) return;
+    arrasto.current = { dx: e.clientX - encaixe.left, dy: e.clientY - encaixe.top, x0: e.clientX, y0: e.clientY, moveu: false };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
   function mover(e: React.PointerEvent) {
     const a = arrasto.current;
-    const r = caixa.current?.getBoundingClientRect();
-    if (!a || !r) return;
+    if (!a) return;
+    if (!a.moveu && Math.hypot(e.clientX - a.x0, e.clientY - a.y0) < LIMIAR) return;
     a.moveu = true;
-    set({ pos: { x: clamp(e.clientX - a.dx, 8, window.innerWidth - r.width - 8), y: clamp(e.clientY - a.dy, 8, window.innerHeight - r.height - 8) } });
+    setLivre({ left: clamp(e.clientX - a.dx, M, vp.w - w - M), top: clamp(e.clientY - a.dy, M, vp.h - h - M) });
   }
+  /** Solta: devolve se foi arrasto (true) ou clique (false). */
   function soltar() {
-    const moveu = arrasto.current?.moveu;
+    const a = arrasto.current;
     arrasto.current = null;
-    return moveu;
+    if (!a?.moveu || !livre) { setLivre(null); return false; }
+    const centroY = livre.top + h / 2;
+    set({
+      side: livre.left + w / 2 < vp.w / 2 ? 'left' : 'right',
+      // a âncora fica na borda do widget voltada para o lado da tela onde ele foi solto
+      y: centroY > vp.h / 2 ? livre.top + h - BOLHA / 2 : livre.top + BOLHA / 2,
+    });
+    setLivre(null);
+    return true;
   }
-  // janela encolheu: o widget não pode ficar fora da tela
-  useEffect(() => {
-    const ajustar = () => {
-      const r = caixa.current?.getBoundingClientRect();
-      const p = useWidget.getState().pos;
-      if (!r || !p) return;
-      useWidget.getState().set({ pos: { x: clamp(p.x, 8, window.innerWidth - r.width - 8), y: clamp(p.y, 8, window.innerHeight - r.height - 8) } });
-    };
-    window.addEventListener('resize', ajustar);
-    return () => window.removeEventListener('resize', ajustar);
-  }, []);
+  const cancelar = () => { arrasto.current = null; setLivre(null); };
 
   if (!habilitado) return null;
-  const estilo: React.CSSProperties = pos ? { left: pos.x, top: pos.y } : { right: 20, bottom: 20 };
+  const pos = livre ?? encaixe;
+  // anima só o encaixe; durante o arrasto acompanha o ponteiro sem atraso
+  const estilo: React.CSSProperties = { left: pos.left, top: pos.top, transition: livre ? 'none' : 'left .2s ease, top .2s ease' };
 
   if (!open) {
     return (
-      <div ref={caixa} className="fixed z-[60] touch-none" style={estilo}>
+      <div className="fixed z-[65] touch-none" style={estilo}>
         <button
           type="button"
           onPointerDown={iniciarArrasto}
           onPointerMove={mover}
           onPointerUp={() => { if (!soltar()) set({ open: true, minimized: false }); }}
-          className="relative grid place-items-center w-12 h-12 rounded-full bg-accent text-white shadow-xl hover:opacity-95"
-          title="Chat interno da equipe"
+          onPointerCancel={cancelar}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set({ open: true, minimized: false }); } }}
+          className={cn('relative grid place-items-center w-12 h-12 rounded-full bg-accent text-white shadow-xl hover:opacity-95', livre ? 'cursor-grabbing' : 'cursor-pointer')}
+          title="Chat interno da equipe (arraste para mudar de canto)"
           aria-label="Abrir chat interno"
         >
           <MessagesSquare size={20} />
@@ -104,12 +146,14 @@ export function InternalChatWidget() {
 
   const aberta = chats.data?.find((c) => c.id === chatId) ?? null;
   return (
-    <div ref={caixa} className="fixed z-[60] flex flex-col rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden" style={{ ...estilo, width: W, maxWidth: 'calc(100vw - 16px)', height: minimized ? undefined : H, maxHeight: 'calc(100vh - 16px)' }} role="dialog" aria-label="Chat interno">
+    <div className="fixed z-[65] flex flex-col rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden" style={{ ...estilo, width: w, height: h }} role="dialog" aria-label="Chat interno">
       <div
-        className="flex items-center gap-2 px-3 py-2 bg-side text-white cursor-move select-none touch-none"
+        className={cn('flex items-center gap-2 px-3 bg-side text-white select-none touch-none shrink-0', livre ? 'cursor-grabbing' : 'cursor-grab')}
+        style={{ height: BARRA }}
         onPointerDown={iniciarArrasto}
         onPointerMove={mover}
         onPointerUp={() => { soltar(); }}
+        onPointerCancel={cancelar}
       >
         {aberta && !minimized && (
           <button data-no-drag type="button" onClick={() => set({ chatId: null })} className="p-1 rounded hover:bg-white/10" aria-label="Voltar"><ArrowLeft size={15} /></button>

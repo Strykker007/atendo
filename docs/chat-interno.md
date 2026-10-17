@@ -30,10 +30,19 @@ o histórico completo. Ler pela auditoria não marca como lida para os membros.
 `components/layout/InternalChatWidget.tsx`, montado no shell autenticado (`app/(app)/layout.tsx`) —
 por isso continua aberto e na mesma conversa ao trocar de página.
 
-- Fechado: botão redondo com o total de não lidas. Arrasta pelo próprio botão.
+- Fechado: botão redondo com o total de não lidas. Arrasta pelo próprio botão; movimento abaixo
+  de 5 px conta como clique (trackpad sempre mexe um pouco ao clicar — antes isso virava arrasto e
+  o chat não abria).
+- **Trava magnética**: ao soltar (botão, barra ou janela), o widget gruda na lateral mais próxima
+  (esquerda/direita), na altura em que foi solto, com animação curta.
+- **Sempre inteiro na tela**: a janela abre a partir da lateral travada — para cima quando o botão
+  está na metade de baixo da tela, para baixo na metade de cima — e é limitada ao tamanho da tela
+  (margem de 12 px). Redimensionar a janela do navegador reencaixa na hora.
 - Aberto: abas **Conversas**, **Equipe** (online primeiro; clicar abre a conversa direta) e
   **Novo grupo** (marcar pessoas + nome). Arrasta pelo cabeçalho; minimiza para a barra.
-- Posição, aberto/minimizado e conversa aberta ficam no navegador (`localStorage`, `atendo-chat-interno`).
+- Fica acima de modais e toasts (`z-[65]`); só os avisos do topo (`z-[70]`) passam por cima.
+- Lateral, altura, aberto/minimizado e conversa aberta ficam no navegador (`localStorage`,
+  `atendo-chat-interno`, versão 1 — a posição livre antiga é descartada).
 - Som de mensagem nova do chat respeita o "som desligado" das conversas.
 
 ## Dados
