@@ -15,6 +15,7 @@
 | [Fluxos — referência técnica](fluxos.md) | Dev | Arquitetura editor/motor, como criar um bloco, status dos blocos do construtor |
 | [Envio — fila, ordem e ritmo](envio.md) | Dev / Operação | Fila única, ordem por conversa, limites por conexão, retry, reconexão, respostas rápidas e valores padrão |
 | [Empresas e unidades](empresas.md) | Dev / Cliente | Matriz e filiais: números por empresa, quem opera cada uma, seletor do menu e limite do plano |
+| [Grupos restritos](grupos.md) | Dev / Cliente | Opt-in estrito de grupos do WhatsApp: descarte no webhook, grupos só como destino de transmissão, travas antiban |
 | [Departamentos](departamentos.md) | Dev / Cliente | Departamentos, quem vê qual fila, transferência entre departamentos e integração com o Distribuidor/Ação |
 | [Editar mensagem enviada](editar-mensagens.md) | Dev / Cliente | Permissão `conversations.edit_message`, prazo de 15 min do WhatsApp, Evolution × Meta, auditoria do texto anterior |
 | [Apagar mensagem e limpar histórico](apagar-mensagens.md) | Dev / Cliente | Quem pode apagar, apagar para todos (Evolution) × só no painel (Meta), registro de auditoria e conteúdo original |

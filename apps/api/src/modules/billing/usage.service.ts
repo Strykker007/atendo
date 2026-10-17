@@ -60,7 +60,8 @@ export class UsageService {
   async record(input: {
     tenantId: string;
     numberId: string;
-    messageId: string;
+    /** `null` só no envio para grupo (docs/grupos.md): não há linha em `messages` — a idempotência fica com quem chama */
+    messageId: string | null;
     provider: ProviderKind;
     direction: MessageDirection;
     billingCategory: BillingCategory;
@@ -68,8 +69,10 @@ export class UsageService {
     contactId?: string;
   }) {
     // Idempotente: uma mensagem só entra no ledger uma vez (retry/reenvio não pode contar de novo)
-    const exists = await this.prisma.messageUsage.findUnique({ where: { messageId: input.messageId }, select: { id: true } });
-    if (exists) return;
+    if (input.messageId) {
+      const exists = await this.prisma.messageUsage.findUnique({ where: { messageId: input.messageId }, select: { id: true } });
+      if (exists) return;
+    }
     const providerCost = await this.pricing.unitCost(input.provider, input.billingCategory);
     // campos explícitos de propósito: espalhar `...input` quebra o ledger inteiro assim que
     // este método ganha um parâmetro que não é coluna da tabela

@@ -28,6 +28,8 @@ export interface Audience {
   contactIds?: string[];
   /** telefones importados (soma; viram contatos ao criar a transmissão) */
   phones?: string[];
+  /** grupos autorizados do número (docs/grupos.md) — não são contatos: viram `campaign_group_targets` */
+  groupIds?: string[];
 }
 
 /** "(11) 99999-8888" → "5511999998888"; sem DDI assume Brasil. Inválido → null. */
@@ -146,6 +148,6 @@ export class SegmentationService {
 
   /** Para validar o DTO: há algum critério? */
   isEmpty(a: Audience) {
-    return !this.temFiltro(a) && !a.all && !a.contactIds?.length && !a.phones?.length;
+    return !this.temFiltro(a) && !a.all && !a.contactIds?.length && !a.phones?.length && !a.groupIds?.length;
   }
 }

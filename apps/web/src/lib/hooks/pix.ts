@@ -23,3 +23,15 @@ export const useDeletePixKey = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`${BASE}/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: KEY }) });
 };
+/** Ordem das chaves (setas): a lista nova vai direto para o cache; recusou, recarrega do servidor. */
+export const useReorderPixKeys = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (list: PixKey[]) => api(`${BASE}/reorder`, { method: 'PATCH', body: JSON.stringify({ ids: list.map((k) => k.id) }) }),
+    onMutate: async (list) => {
+      await qc.cancelQueries({ queryKey: KEY });
+      qc.setQueryData<PixKey[]>(KEY, list.map((k, position) => ({ ...k, position })));
+    },
+    onError: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+};

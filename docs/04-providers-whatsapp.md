@@ -153,7 +153,7 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 
 | Evento | O que fazemos |
 |---|---|
-| `messages.upsert` | Mensagens de contatos e do celular do cliente (`fromMe`), reações e edições; ignora grupos `@g.us`. Tipos: ver [Tipos de mensagem recebida](#tipos-de-mensagem-recebida) |
+| `messages.upsert` | Mensagens de contatos e do celular do cliente (`fromMe`), reações e edições. Grupos `@g.us` nem chegam à fila: `stripGroupEvents` os tira no controller ([Grupos restritos](grupos.md)). Tipos: ver [Tipos de mensagem recebida](#tipos-de-mensagem-recebida) |
 | `messages.edited` | Edição de mensagem (ver tabela de tipos) |
 | `contacts.upsert` / `contacts.update` | Nome da agenda do celular → `contacts.name` com origem `agenda` (ver [De onde vem o nome do contato](#de-onde-vem-o-nome-do-contato-contactsnamesource)). Enfileirados com 30 s de atraso |
 | `messages.update` | Status (texto ou número do Baileys): `SERVER_ACK`/2→sent, `DELIVERY_ACK`/3→delivered, `READ`/4 e `PLAYED`/5 (áudio ouvido)→read, `ERROR`/0→failed. `InboundService.applyStatus` não deixa regredir (e ignora falha tardia de algo já entregue) e reemite a mensagem pelo evento `message` do socket |

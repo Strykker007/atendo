@@ -6,6 +6,7 @@ import { ProviderRegistry } from './providers/provider.registry';
 import { NumbersService } from './numbers.service';
 import { NumbersController } from './numbers.controller';
 import { WebhooksController } from './webhooks.controller';
+import { GroupsController } from './groups.controller';
 import { InboundProcessor } from './inbound.processor';
 import { OutboundProcessor } from './outbound.processor';
 import { QUEUE_INBOUND, QUEUE_OUTBOUND } from './queues';
@@ -35,7 +36,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
     forwardRef(() => FlowsModule),
     forwardRef(() => SchedulingModule),
   ],
-  controllers: [NumbersController, WebhooksController],
+  controllers: [NumbersController, WebhooksController, GroupsController],
   providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor, ContactsSyncScheduler, ContactsSyncProcessor, HistorySyncService, HistoryMediaProcessor, SendPacer],
   exports: [ProviderRegistry, NumbersService, HistorySyncService, SendPacer, BullModule],
 })

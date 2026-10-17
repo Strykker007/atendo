@@ -10,6 +10,7 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { assertOwnMedia, contentItemErrors } from '../flows/flow-validation';
 import { TenantSettingsService } from './tenant-settings.service';
 import { SchedulesService } from './schedules.service';
+import { DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFER_TEXT } from '../conversations/transfer-message';
 
 const isTimezone = (tz: string) => {
   try {
@@ -55,6 +56,10 @@ class SettingsDto {
   @IsOptional() @IsString() @MaxLength(500) secureMediaText?: string | null;
   /** logo das páginas públicas: chave do upload do painel; null = a marca do painel */
   @IsOptional() @IsString() @MaxLength(300) publicLogoKey?: string | null;
+  /** mensagem ao cliente na transferência; textos vazios/null = os padrões (transfer-message.ts) */
+  @IsOptional() @IsBoolean() transferMessageEnabled?: boolean;
+  @IsOptional() @IsString() @MaxLength(500) transferMessageText?: string | null;
+  @IsOptional() @IsString() @MaxLength(500) departmentTransferMessageText?: string | null;
 }
 class ScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(60) name?: string;
@@ -87,7 +92,7 @@ export class TenantSettingsController {
   @Get()
   async get(@CurrentUser() u: AuthUser) {
     const [s, now] = await Promise.all([this.settings.get(u.tenantId), this.schedules.now(u.tenantId)]);
-    return { ...s, publicLogoUrl: s.publicLogoKey ? this.storage.signedUrl(s.publicLogoKey) : null, isOpenNow: now.open, currentBand: now.band.name, nextOpenLabel: now.nextOpenLabel };
+    return { ...s, publicLogoUrl: s.publicLogoKey ? this.storage.signedUrl(s.publicLogoKey) : null, isOpenNow: now.open, currentBand: now.band.name, nextOpenLabel: now.nextOpenLabel, transferDefaults: { agent: DEFAULT_TRANSFER_TEXT, department: DEFAULT_DEPARTMENT_TRANSFER_TEXT } };
   }
 
   @Patch()

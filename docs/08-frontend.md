@@ -136,6 +136,8 @@ Cores de **tag** são escolhidas pelo usuário (hex no banco) e aplicadas com `c
 
 Em **/respostas** e em **/fluxos** há seleção múltipla (checkbox por item, por pasta nas respostas, e "selecionar todos") com **Duplicar** e **Exportar selecionados** — um arquivo só —, além de duplicar/exportar um item pelos ícones da linha e **Importar** no cabeçalho (aceita o arquivo individual ou o lote). Os dois módulos usam o mesmo formato e comportamento; ver [10](10-fluxos-de-automacao.md#replicar-um-fluxo) e [07](07-api.md).
 
+Em **/respostas** a ordem é manual: pastas e respostas se reordenam arrastando pela alça ou pelas **setas ↑↓** de cada linha (uma posição por clique — funciona no celular e pelo teclado); as **Chaves Pix** da mesma tela têm as setas. A ordem é a mesma do painel do chat.
+
 Em **/respostas** as pastas também abrem e fecham, e o que fica guardado são as **fechadas**. O painel do chat segue a mesma regra (`pastas-respostas-fechadas`): as pastas **nascem abertas** (pasta nova também) e só fica fechada a que o atendente fechou — antes nasciam fechadas e cada sessão começava com um clique a mais por pasta.
 
 **Chaves Pix** (`components/settings/PixKeysSection`, no fim de /respostas; editar exige `quick_replies.manage`): título ("Pix Matriz - CNPJ"), tipo (CPF, CNPJ, e-mail, telefone, aleatória), chave e nome do recebedor (vazio = título). No painel do chat viram a pasta **Pix**; clicar envia na hora (`pixKeyId` no `POST /conversations/:id/messages`) e sai como texto (título, tipo e chave); com `EVOLUTION_PIX_BUTTON` ligado, sai como cartão **Copiar chave Pix** e a bolha mostra o cartão. Fora do modo de responder, entra no campo como texto.

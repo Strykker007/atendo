@@ -18,6 +18,8 @@ export interface CampaignAudience {
   agentId?: string;
   contactIds?: string[];
   phones?: string[];
+  /** grupos autorizados (docs/grupos.md) — só QR Code */
+  groupIds?: string[];
 }
 export interface CampaignStats { total: number; pending: number; sent: number; delivered: number; read: number; failed: number; skipped: number }
 export type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'paused' | 'done' | 'canceled';
@@ -48,7 +50,7 @@ export interface CampaignDetail extends Campaign {
   daily: { sent: number; limit: number | null };
   problemas: { contato: string; status: string; motivo: string | null }[];
 }
-export interface AudiencePreview { total: number; novos: number; invalidos: number; optOut: number; excedeu: boolean; max: number }
+export interface AudiencePreview { total: number; novos: number; invalidos: number; optOut: number; excedeu: boolean; max: number; /** grupos autorizados escolhidos */ groups?: number }
 export interface NewCampaign {
   name: string;
   numberId: string;

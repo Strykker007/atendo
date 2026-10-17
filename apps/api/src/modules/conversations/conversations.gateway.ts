@@ -24,6 +24,14 @@ export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role 
  * que caiu lá (mensagem recebida, status do envio) sumia em silêncio. Nesse caso publicamos
  * direto no Redis; o `RedisIoAdapter` da API entrega aos sockets da sala.
  */
+/** Aviso de transferência para quem recebeu o atendimento (docs/08-frontend.md#transferência). */
+export interface TransferAlert {
+  conversationId: string;
+  contactName: string;
+  /** quem transferiu; null = automação */
+  byName: string | null;
+}
+
 @Injectable()
 @WebSocketGateway({ cors: { origin: webOrigins, credentials: true } })
 export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
@@ -40,6 +48,8 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
       // presença (monitor do dono): quem está com o painel aberto. O dono "entrando como" não conta
       client.data = { userId: payload.sub, tenantId: payload.tenantId ?? null, owner: isOwner(payload) };
       if (payload.tenantId) await client.join(`tenant:${payload.tenantId}`);
+      // sala da pessoa: avisos só dela (ex.: atendimento transferido para ela)
+      if (payload.tenantId && payload.sub) await client.join(`user:${payload.tenantId}:${payload.sub}`);
       if (payload.role === 'super_admin' && !payload.impersonatorId) await client.join(OWNERS_ROOM);
       // sala dos clientes logados: avisos globais do sistema. O dono é quem escreve o aviso —
       // não recebe de volta, nem quando está "entrando como" um cliente.
@@ -129,6 +139,14 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
     this.room(tenantId).emit('budgets', { conversationId, ...(paid && { paid }) });
   }
   /** Conversa excluída: o painel tira da lista e fecha se estiver aberta. */
+  /**
+   * Atendimento transferido para uma pessoa: só a tela dela recebe (alerta em destaque + som).
+   * A sala inclui o cliente: o mesmo usuário "entrando como" outro cliente não recebe daqui.
+   */
+  emitTransferAlert(tenantId: string, userId: string, event: TransferAlert) {
+    this.to(`user:${tenantId}:${userId}`).emit('transfer_alert', event);
+  }
+
   emitConversationDeleted(tenantId: string, conversationId: string) {
     this.room(tenantId).emit('conversation_deleted', { conversationId });
   }

@@ -10,6 +10,7 @@ import { InterpolationService } from '../../common/interpolation/interpolation.s
 import { CampaignsService, type CampaignTemplate } from './campaigns.service';
 import { afterBatch, decideDispatch, eligible, failureStreak, FAILURE_STREAK, qrDelay, type CampaignStatus } from './dispatch';
 import { QUEUE_CAMPAIGN, type CampaignJob } from './queues';
+import { GroupSender } from './group-sender';
 
 type MediaType = 'image' | 'document' | 'audio' | 'video';
 
@@ -34,6 +35,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     private readonly conversations: ConversationsService,
     private readonly numbers: NumbersService,
     private readonly interpolation: InterpolationService,
+    private readonly groups: GroupSender,
   ) {
     super(QUEUE_CAMPAIGN);
   }
@@ -47,7 +49,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     enrichContext({ tenantId: campaign.tenantId });
     const qr = campaign.number.provider !== 'meta';
 
-    const pending = await this.prisma.campaignTarget.count({ where: { campaignId: campaign.id, status: 'pending' } });
+    const pending = await this.pendentes(campaign.id);
     const [isOpen, dailyRemaining] = await Promise.all([
       campaign.businessHoursOnly ? this.campaigns.isOpen(campaign.tenantId, campaign.numberId) : Promise.resolve(true),
       this.campaigns.dailyRemaining(campaign.numberId),
@@ -133,12 +135,58 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
       }
     }
 
+    // grupos autorizados (docs/grupos.md) vêm depois dos contatos, no mesmo ritmo e com as mesmas travas
+    const vagas = decision.take - targets.length;
+    if (vagas > 0) {
+      const espera = await this.enviarGrupos(campaign, vagas);
+      if (espera) {
+        this.campaigns.emitProgress(campaign.tenantId, campaign.id);
+        this.log.debug(`Campanha ${campaign.id}: grupo aguardando (${espera.reason}) — ${Math.round(espera.retryInMs / 1000)}s`);
+        return this.campaigns.enqueue(campaign.id, Math.max(espera.retryInMs, qr ? qrDelay() : 0));
+      }
+    }
+
     this.campaigns.emitProgress(campaign.tenantId, campaign.id);
-    const restante = await this.prisma.campaignTarget.count({ where: { campaignId: campaign.id, status: 'pending' } });
+    const restante = await this.pendentes(campaign.id);
     const next = afterBatch(restante);
     if (next.action === 'done') return this.finish(campaign.tenantId, campaign.id);
     // QR: o próximo daqui a 20–60 s; Meta: próximo lote no intervalo normal
     return this.campaigns.enqueue(campaign.id, qr ? qrDelay() : next.retryInMs);
+  }
+
+  /** Alvos ainda não processados: contatos + grupos. */
+  private async pendentes(campaignId: string) {
+    const [contatos, grupos] = await Promise.all([
+      this.prisma.campaignTarget.count({ where: { campaignId, status: 'pending' } }),
+      this.prisma.campaignGroupTarget.count({ where: { campaignId, status: 'pending' } }),
+    ]);
+    return contatos + grupos;
+  }
+
+  /**
+   * Envia aos grupos pendentes (até `take`). Devolve a espera quando uma trava antiban pediu
+   * para aguardar — o alvo continua pendente e a campanha volta à fila.
+   */
+  private async enviarGrupos(campaign: { id: string; tenantId: string; numberId: string; text: string; mediaKey: string | null; mediaType: string | null; mediaName: string | null }, take: number) {
+    const alvos = await this.prisma.campaignGroupTarget.findMany({
+      where: { campaignId: campaign.id, status: 'pending' },
+      take,
+      include: { group: { select: { id: true, jid: true, authorized: true } } },
+    });
+    // texto vai sem dados de contato: num grupo não há "primeiro nome" de quem lê ({{contact.*}} sai vazio)
+    const vars = campaign.text ? await this.interpolation.context(campaign.tenantId, { id: '', name: null, phone: '' }) : null;
+    const text = campaign.text && vars ? interpolate(campaign.text, vars) : undefined;
+    for (const target of alvos) {
+      const media = campaign.mediaKey ? { key: campaign.mediaKey, type: (campaign.mediaType ?? 'document') as MediaType, name: campaign.mediaName ?? undefined } : undefined;
+      const r = await this.groups.send({ tenantId: campaign.tenantId, numberId: campaign.numberId, target, text, media });
+      if (r.status === 'wait') return r;
+      await this.prisma.campaignGroupTarget.update({
+        where: { id: target.id },
+        data: r.status === 'sent' ? { status: 'sent', externalId: r.externalId, sentAt: new Date(), error: null } : { status: 'failed', error: r.error, sentAt: new Date() },
+      });
+      if (r.status === 'failed') this.log.warn(`Campanha ${campaign.id}: falha no grupo ${target.group.id} — ${r.error}`);
+    }
+    return null;
   }
 
   /**
@@ -150,11 +198,21 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
       where: { campaignId, status: { in: ['sent', 'failed'] }, sentAt: { not: null } },
       orderBy: { sentAt: 'desc' },
       take: FAILURE_STREAK,
-      select: { status: true, messageId: true },
+      select: { status: true, messageId: true, sentAt: true },
     });
     const ids = ultimos.map((t) => t.messageId).filter((x): x is string => !!x);
     const falhas = new Set((await this.prisma.message.findMany({ where: { id: { in: ids }, status: 'failed' }, select: { id: true } })).map((m) => m.id));
-    return ultimos.map((t) => (t.status === 'failed' || (t.messageId && falhas.has(t.messageId)) ? 'failed' : 'ok'));
+    const grupos = await this.prisma.campaignGroupTarget.findMany({
+      where: { campaignId, status: { in: ['sent', 'failed'] }, sentAt: { not: null } },
+      orderBy: { sentAt: 'desc' },
+      take: FAILURE_STREAK,
+      select: { status: true, sentAt: true },
+    });
+    // contatos e grupos na mesma linha do tempo: 3 falhas seguidas em qualquer mistura param tudo
+    return [
+      ...ultimos.map((t) => ({ at: t.sentAt!.getTime(), r: (t.status === 'failed' || (t.messageId && falhas.has(t.messageId)) ? 'failed' : 'ok') as 'ok' | 'failed' })),
+      ...grupos.map((g) => ({ at: g.sentAt!.getTime(), r: g.status === 'failed' ? ('failed' as const) : ('ok' as const) })),
+    ].sort((a, b) => b.at - a.at).slice(0, FAILURE_STREAK).map((x) => x.r);
   }
 
   /** Última mensagem recebida deste contato neste número — base da janela de 24h da Meta. */

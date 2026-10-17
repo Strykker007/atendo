@@ -12,6 +12,7 @@ import { NavigationProgress } from '@/components/layout/NavigationProgress';
 import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
 import { VersionWatcher } from '@/components/layout/VersionWatcher';
 import { NoticePopups } from '@/components/layout/SystemNotices';
+import { TransferAlerts } from '@/components/layout/TransferAlert';
 
 /** Shell autenticado: menu lateral + área do módulo. */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -66,6 +67,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       </div>
       <Toaster />
       <NoticePopups />
+      <TransferAlerts />
       <VersionWatcher />
     </div>
   );

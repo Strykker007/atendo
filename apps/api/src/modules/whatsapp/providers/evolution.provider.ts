@@ -408,6 +408,12 @@ export class EvolutionProvider implements WhatsAppProvider {
     return out;
   }
 
+  /** Grupos da instância (`GET /group/fetchAllGroups`), sem participantes — só o necessário para a lista. */
+  async listGroups(ctx: NumberContext) {
+    const rows = await this.api<any[]>(`/group/fetchAllGroups/${this.instance(ctx)}?getParticipants=false`, undefined, this.shard(ctx));
+    return parseGroupList(rows);
+  }
+
   /** Nome guardado pela Evolution para o contato (`POST /chat/findContacts`). */
   async contactName(ctx: NumberContext, phone: string) {
     const rows = await this.api<any[]>(`/chat/findContacts/${this.instance(ctx)}`, {
@@ -618,7 +624,19 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 }
 
-/** A Evolution manda o próprio número (ou nada) quando o contato não tem nome. */
+/** Resposta do `fetchAllGroups` → só grupos válidos (`@g.us`), sem repetição. */
+export function parseGroupList(rows: unknown): { jid: string; name: string; size: number }[] {
+  const out = new Map<string, { jid: string; name: string; size: number }>();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const jid = String((r as any)?.id ?? '');
+    if (!jid.endsWith('@g.us')) continue;
+    const name = typeof (r as any)?.subject === 'string' && (r as any).subject.trim() ? (r as any).subject.trim() : jid.replace(/@.*$/, '');
+    const size = Number((r as any)?.size ?? (r as any)?.participants?.length ?? 0);
+    out.set(jid, { jid, name: name.slice(0, 120), size: Number.isFinite(size) ? size : 0 });
+  }
+  return [...out.values()];
+}
+
 /**
  * Registro do histórico que vira bolha: o mesmo filtro do `messages.upsert`, sem os desvios —
  * reação e edição de mensagem antiga são descartadas em vez de aplicadas.

@@ -13,6 +13,7 @@ import { receiveSystemNotice, type SystemNotice } from './avisos';
 import { playMessageSound, unlockMessageSound } from '../message-sound';
 import { useUI } from '../store';
 import { toast } from '@/components/ui/Toast';
+import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -144,6 +145,11 @@ export function useRealtime() {
     });
     // aviso global do dono do sistema: popup no topo + sino
     socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
+    // atendimento transferido para MIM (sala só minha): alarme + aviso em destaque
+    socket.on('transfer_alert', (e: TransferAlertEvent) => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      receiveTransferAlert(e);
+    });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
     socket.on('campaign', (e: { id: string; status: string; name?: string; alert?: string }) => {

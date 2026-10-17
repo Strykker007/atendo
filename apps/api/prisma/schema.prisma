@@ -76,6 +76,7 @@ model Tenant {
   schedules     BusinessSchedule[]
   accessProfiles AccessProfile[]
   campaigns     Campaign[]
+  whatsappGroups WhatsAppGroup[]
   conversationEvents ConversationEvent[]
   sales         Sale[]
   departments   Department[]
@@ -382,6 +383,12 @@ model TenantSettings {
   /// qualquer mensagem que não casou com palavra-chave, após o período de inatividade
   defaultFlowId String?
   defaultFlowInactivityHours Int @default(24)
+  /// mensagem automática ao cliente quando o atendimento é transferido (conversations/transfer-message.ts)
+  transferMessageEnabled Boolean @default(false)
+  /// texto da transferência para uma pessoa, com {{atendente}}; null = o padrão
+  transferMessageText String?
+  /// texto da transferência para um departamento, com {{departamento}}; null = o padrão
+  departmentTransferMessageText String?
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -497,6 +504,7 @@ model WhatsAppNumber {
   users         UserNumber[]
   campaigns     Campaign[]
   phonebook     PhonebookEntry[]
+  groups        WhatsAppGroup[]
 
   @@unique([provider, externalId])
   @@unique([tenantId, phone])
@@ -1937,6 +1945,55 @@ enum CampaignStatus {
   canceled
 }
 
+/// Grupo do WhatsApp (QR/Evolution) que o admin liberou como DESTINO de transmissão
+/// (docs/grupos.md). Opt-in estrito: grupo fora desta lista (ou com `authorized = false`) não
+/// existe para o sistema. Nenhum grupo abre conversa — o webhook descarta toda mensagem `@g.us`.
+model WhatsAppGroup {
+  id         String   @id @default(uuid())
+  tenantId   String
+  numberId   String
+  /// id do grupo no WhatsApp, com o sufixo (`1203630...@g.us`)
+  jid        String
+  name       String
+  /// participantes na última listagem (só informativo)
+  size       Int      @default(0)
+  /// marcado pelo admin: pode receber transmissão
+  authorized Boolean  @default(false)
+  authorizedAt   DateTime?
+  authorizedById String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  number  WhatsAppNumber        @relation(fields: [numberId], references: [id], onDelete: Cascade)
+  targets CampaignGroupTarget[]
+
+  @@unique([numberId, jid])
+  @@index([tenantId, authorized])
+  @@map("whatsapp_groups")
+}
+
+/// Grupo autorizado como alvo de uma transmissão. Separado de `campaign_targets` de propósito:
+/// grupo não é contato e não tem conversa — sai direto pelo provider, com as mesmas travas
+/// antiban da fila de saída (campaigns/group-sender.ts).
+model CampaignGroupTarget {
+  id         String               @id @default(uuid())
+  campaignId String
+  groupId    String
+  status     CampaignTargetStatus @default(pending)
+  /// id da mensagem no WhatsApp (não há linha em `messages`)
+  externalId String?
+  error      String?
+  sentAt     DateTime?
+
+  campaign Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  group    WhatsAppGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, groupId])
+  @@index([campaignId, status])
+  @@map("campaign_group_targets")
+}
+
 enum CampaignTargetStatus {
   pending
   sent
@@ -1980,6 +2037,7 @@ model Campaign {
   tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   number  WhatsAppNumber   @relation(fields: [numberId], references: [id], onDelete: Cascade)
   targets CampaignTarget[]
+  groupTargets CampaignGroupTarget[]
 
   @@index([tenantId, status])
   @@map("campaigns")

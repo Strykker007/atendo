@@ -10,6 +10,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { TagsModule } from './modules/tags/tags.module';
 import { ContactAttributesModule } from './modules/contact-attributes/contact-attributes.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
 import { GlobalVariablesModule } from './modules/global-variables/global-variables.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
 import { PixKeysModule } from './modules/pix-keys/pix-keys.module';
@@ -48,6 +49,7 @@ import { MonitorModule } from './modules/monitor/monitor.module';
     ConversationsModule,
     TagsModule,
     ContactAttributesModule,
+    ContactsModule,
     GlobalVariablesModule,
     DepartmentsModule,
     CompaniesModule,

@@ -21,6 +21,18 @@ Serviço e profissional são **obrigatórios** em toda marcação (dá duração
 
 Todas usam a mesma disponibilidade: dentro dos horários de trabalho, passo = intervalo configurado, cabe a duração do serviço, sem colisão com agendamentos ativos, nunca no passado. O conflito também é checado **na gravação** (duas pessoas escolhendo o mesmo horário → a segunda recebe "acabou de ser ocupado").
 
+## Excluir
+
+Lixeira em *Agenda → Profissionais e serviços* (`scheduling/deletion.ts`). Antes de excluir a tela mostra quantos agendamentos existem (`GET …/:id/usage`):
+
+| Situação | O que acontece |
+| --- | --- |
+| Agendamento futuro marcado/confirmado | **Recusa** (`409 has_future`): cancele ou remarque antes — ou só desative. O cliente nunca perde o horário sem aviso |
+| Só histórico (passados, cancelados, faltas) | Pede confirmação explícita (`409 has_history` sem `?withHistory=true`): o histórico é apagado junto e some da ficha do cliente. A tela oferece **Desativar** como alternativa, que preserva tudo |
+| Nunca usado | Exclui direto |
+
+Profissional: horários de trabalho e agendamentos caem em cascata. Serviço: os agendamentos são apagados na mesma transação (a relação não tem cascata). `clientReminderMinutes` é normalizado na gravação (sem repetidos, só inteiros positivos, maior antecedência primeiro, até 6).
+
 ## Lembretes (job a cada minuto, `RemindersProcessor`)
 
 | Para | Quando | Texto |
@@ -47,7 +59,7 @@ O aviso ao profissional vai pelo número da barbearia para o WhatsApp dele (`sen
 ## Telas
 
 - **Agenda** — dia por profissional, navegação por dia/semana com contagem, filtro por profissional. Cada horário: status, serviço, obs., "🤖 pelo WhatsApp", "pediu remarcação"; ações **Atendido / Faltou** (após o horário), **Remarcar**, **Cancelar**, **Conversa**.
-- **Agenda → Profissionais e serviços** — CRUD (desativar preserva histórico), horários por dia com múltiplos intervalos, preferências de lembretes e, quando o número que envia é da API oficial, o **template do lembrete** (seletor com as variáveis do agendamento).
+- **Agenda → Profissionais e serviços** — CRUD (desativar = "Ativo" na edição, preserva histórico; a lixeira é a [exclusão definitiva](#excluir)), lembretes ao cliente escolhidos por chips ("1 dia antes", "2 horas antes"… — sem digitar minutos; valor antigo fora da lista continua aparecendo e pode ser desmarcado), aviso ao profissional numa lista ("Não avisar", "15 min antes"…), horários por dia com múltiplos intervalos, preferências de lembretes e, quando o número que envia é da API oficial, o **template do lembrete** (seletor com as variáveis do agendamento).
 - **Chat** — botão *Agendar* e ficha "💈 3 visitas · última 02/09 · Próximo: seg. 21/09 09:00 · Corte com Carlos ✅".
 
 ## API (`/scheduling/*`, exige feature)
@@ -55,8 +67,9 @@ O aviso ao profissional vai pelo número da barbearia para o WhatsApp dele (`sen
 | Método | Rota | Descrição |
 |---|---|---|
 | GET/PATCH | `settings` | Preferências. `reminderTemplate: { name, language, header?, body? } \| null` (null remove) — ver acima |
-| GET/POST/PATCH/DELETE | `professionals[/:id]` | `hours: [{weekday, start, end}]` substitui todos; DELETE = desativa |
-| GET/POST/PATCH/DELETE | `services[/:id]` | |
+| GET/POST/PATCH/DELETE | `professionals[/:id]` | `hours: [{weekday, start, end}]` substitui todos; DELETE = exclusão definitiva ([regras](#excluir)), `?withHistory=true` confirma apagar o histórico; desativar = PATCH `isActive: false` |
+| GET/POST/PATCH/DELETE | `services[/:id]` | DELETE igual ao do profissional |
+| GET | `professionals/:id/usage`, `services/:id/usage` | `{ future, past }` — agendamentos futuros ativos × histórico, mostrado antes de excluir |
 | GET | `availability?professionalId&serviceId&from&days` | `[{startAt, endAt, label}]` |
 | GET | `appointments?from&to&professionalId&contactId` | |
 | POST | `appointments` | `{professionalId, serviceId, contactId, startAt, conversationId?, notes?}` — 409 em conflito |

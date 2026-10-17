@@ -49,8 +49,21 @@ export class CampaignsService {
   ) {}
 
   /** Quantos contatos o disparo atingiria — mostrado antes de criar, para não haver surpresa. */
-  preview(tenantId: string, a: Audience) {
-    return this.segmentation.preview(tenantId, a);
+  async preview(tenantId: string, a: Audience) {
+    const [contatos, grupos] = await Promise.all([
+      this.segmentation.preview(tenantId, a),
+      a.groupIds?.length ? this.prisma.whatsAppGroup.count({ where: { tenantId, id: { in: a.groupIds }, authorized: true } }) : Promise.resolve(0),
+    ]);
+    return { ...contatos, groups: grupos };
+  }
+
+  /** Grupos escolhidos: só os autorizados, do tenant e do número da transmissão (docs/grupos.md). */
+  private async gruposDoPublico(tenantId: string, number: { id: string; provider: string }, ids?: string[]) {
+    if (!ids?.length) return [];
+    if (number.provider === 'meta') throw new BadRequestException('A API oficial não envia para grupos — use um número conectado por QR Code.');
+    const rows = await this.prisma.whatsAppGroup.findMany({ where: { tenantId, numberId: number.id, id: { in: ids }, authorized: true }, select: { id: true } });
+    if (rows.length !== new Set(ids).size) throw new BadRequestException('Algum grupo escolhido não está autorizado neste número. Autorize em Configurações → Grupos.');
+    return rows.map((r) => r.id);
   }
 
   /**
@@ -78,8 +91,9 @@ export class CampaignsService {
     }
     if (dto.mediaKey && !dto.mediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException('Anexo inválido');
 
+    const groups = await this.gruposDoPublico(tenantId, number, dto.audience.groupIds);
     const contacts = await this.segmentation.resolve(tenantId, dto.audience);
-    if (!contacts.length) throw new BadRequestException('Nenhum contato nesta seleção (descadastrados e números sem WhatsApp ficam de fora).');
+    if (!contacts.length && !groups.length) throw new BadRequestException('Nenhum contato nesta seleção (descadastrados e números sem WhatsApp ficam de fora).');
 
     const campaign = await this.prisma.campaign.create({
       data: {
@@ -97,10 +111,11 @@ export class CampaignsService {
         audience: dto.audience as unknown as Prisma.InputJsonValue,
         createdById: userId,
         targets: { createMany: { data: contacts.map((contactId) => ({ contactId })) } },
+        groupTargets: { createMany: { data: groups.map((groupId) => ({ groupId })) } },
       },
-      include: { _count: { select: { targets: true } } },
+      include: { _count: { select: { targets: true, groupTargets: true } } },
     });
-    this.log.log(`Campanha "${campaign.name}" criada com ${campaign._count.targets} alvos`, { campaignId: campaign.id });
+    this.log.log(`Campanha "${campaign.name}" criada com ${campaign._count.targets} contatos e ${campaign._count.groupTargets} grupos`, { campaignId: campaign.id });
     return campaign;
   }
 
@@ -175,8 +190,11 @@ export class CampaignsService {
         count(*) filter (where m.status = 'read')::int as read,
         count(*) filter (where t.status = 'failed' or m.status = 'failed')::int as failed,
         count(*) filter (where t.status = 'skipped')::int as skipped
-      from campaign_targets t left join messages m on m.id = t."messageId"
-      where t."campaignId" in (${Prisma.join(campaignIds)})
+      from (
+        select "campaignId", status, "messageId" from campaign_targets where "campaignId" in (${Prisma.join(campaignIds)})
+        -- grupos (docs/grupos.md): sem linha em messages, então "enviado" é o máximo que se sabe
+        union all select "campaignId", status, null from campaign_group_targets where "campaignId" in (${Prisma.join(campaignIds)})
+      ) t left join messages m on m.id = t."messageId"
       group by 1
     `);
     return new Map(rows.map((r) => [r.id, { total: r.total, pending: r.pending, sent: r.sent, delivered: r.delivered, read: r.read, failed: r.failed, skipped: r.skipped }]));
@@ -203,6 +221,10 @@ export class CampaignsService {
         select coalesce(c.name, c.phone) as contato, case when m.status = 'failed' then 'failed' else t.status::text end as status, coalesce(t.error, m.error) as motivo
         from campaign_targets t join contacts c on c.id = t."contactId" left join messages m on m.id = t."messageId"
         where t."campaignId" = ${id} and (t.status in ('failed', 'skipped') or m.status = 'failed')
+        union all
+        select 'Grupo ' || g.name as contato, gt.status::text as status, gt.error as motivo
+        from campaign_group_targets gt join whatsapp_groups g on g.id = gt."groupId"
+        where gt."campaignId" = ${id} and gt.status in ('failed', 'skipped')
         limit 50
       `),
       this.dailyUsage(campaign.number.id),
@@ -221,7 +243,13 @@ export class CampaignsService {
    */
   async dailyUsage(numberId: string) {
     const number = await this.prisma.whatsAppNumber.findUniqueOrThrow({ where: { id: numberId }, select: { provider: true, campaignDailyLimit: true } });
-    const sent = await this.prisma.campaignTarget.count({ where: { campaign: { numberId }, sentAt: { gte: new Date(Date.now() - QR_WINDOW_MS) }, status: { in: ['sent', 'failed'] } } });
+    const desde = new Date(Date.now() - QR_WINDOW_MS);
+    const [contatos, grupos] = await Promise.all([
+      this.prisma.campaignTarget.count({ where: { campaign: { numberId }, sentAt: { gte: desde }, status: { in: ['sent', 'failed'] } } }),
+      // envio para grupo conta no mesmo teto de transmissão do número
+      this.prisma.campaignGroupTarget.count({ where: { campaign: { numberId }, sentAt: { gte: desde }, status: { in: ['sent', 'failed'] } } }),
+    ]);
+    const sent = contatos + grupos;
     return { sent, limit: number.provider === 'meta' ? null : number.campaignDailyLimit };
   }
 

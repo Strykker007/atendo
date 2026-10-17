@@ -17,6 +17,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { CampaignsService, type Audience } from './campaigns.service';
 import { CampaignProcessor } from './campaign.processor';
+import { GroupSender } from './group-sender';
 import { QUEUE_CAMPAIGN } from './queues';
 
 class AudienceDto implements Audience {
@@ -30,6 +31,8 @@ class AudienceDto implements Audience {
   @IsOptional() @IsArray() @ArrayMaxSize(AUDIENCE_MAX) @IsUUID('4', { each: true }) contactIds?: string[];
   /** telefones colados/importados (um por item) */
   @IsOptional() @IsArray() @ArrayMaxSize(AUDIENCE_MAX) @IsString({ each: true }) @MaxLength(40, { each: true }) phones?: string[];
+  /** grupos autorizados (docs/grupos.md) — só QR Code, só do número da transmissão */
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @IsUUID('4', { each: true }) groupIds?: string[];
 }
 class CreateCampaignDto {
   @IsString() @MaxLength(80) name: string;
@@ -101,7 +104,7 @@ class CampaignsController {
 @Module({
   imports: [AuthModule, BillingModule, TenantsModule, WhatsAppModule, ConversationsModule, BullModule.registerQueue({ name: QUEUE_CAMPAIGN })],
   controllers: [CampaignsController],
-  providers: [CampaignsService, SegmentationService, CampaignProcessor],
+  providers: [CampaignsService, SegmentationService, CampaignProcessor, GroupSender],
   exports: [CampaignsService],
 })
 export class CampaignsModule {}

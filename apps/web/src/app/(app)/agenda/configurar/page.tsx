@@ -7,13 +7,26 @@ import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
-import { ConfirmDialog } from '@/components/ui/Confirm';
 import { PhoneInput, formatPhone } from '@/components/ui/PhoneInput';
 import { toast } from '@/components/ui/Toast';
-import { useProfessionals, useServices, useSaveProfessional, useDeleteProfessional, useSaveService, useDeleteService, useSchedulingSettings, useUpdateSchedulingSettings, useNumbers, type Professional, type ServiceItem, type WorkingHour } from '@/lib/hooks';
+import { useProfessionals, useServices, useSaveProfessional, useDeleteProfessional, useSaveService, useDeleteService, useSchedulingSettings, useUpdateSchedulingSettings, useSchedulingUsage, useNumbers, type Professional, type ServiceItem, type WorkingHour } from '@/lib/hooks';
 
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const PALETTE = ['#2f5bea', '#d9730d', '#158f6e', '#7c5cff', '#b5872a', '#c2357f'];
+/** Antecedências oferecidas para os lembretes (minutos antes do horário). */
+const REMINDER_PRESETS = [15, 30, 60, 120, 180, 360, 720, 1440, 2880, 4320, 10080];
+const PRO_PRESETS = [0, 5, 10, 15, 30, 60, 120];
+
+/** 1440 → "1 dia antes", 120 → "2 horas antes", 90 → "1h30 antes". */
+function reminderLabel(min: number) {
+  if (min <= 0) return 'Não avisar';
+  if (min % 10080 === 0) return `${min / 10080} semana${min / 10080 > 1 ? 's' : ''} antes`;
+  if (min % 1440 === 0) return `${min / 1440} dia${min / 1440 > 1 ? 's' : ''} antes`;
+  if (min % 60 === 0) return `${min / 60} hora${min / 60 > 1 ? 's' : ''} antes`;
+  if (min > 60) return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')} antes`;
+  return `${min} min antes`;
+}
+
 const DEFAULT_HOURS: WorkingHour[] = [1, 2, 3, 4, 5].flatMap((w) => [{ weekday: w, start: '09:00', end: '12:00' }, { weekday: w, start: '13:00', end: '18:00' }]).concat([{ weekday: 6, start: '09:00', end: '14:00' }]);
 
 export default function ConfigurarAgendaPage() {
@@ -26,7 +39,7 @@ export default function ConfigurarAgendaPage() {
   const saveSvc = useSaveService(); const delSvc = useDeleteService();
   const [proModal, setProModal] = useState<Partial<Professional> | null>(null);
   const [svcModal, setSvcModal] = useState<Partial<ServiceItem> | null>(null);
-  const [confirm, setConfirm] = useState<{ kind: 'pro' | 'svc'; id: string; name: string } | null>(null);
+  const [confirm, setConfirm] = useState<DeleteTarget | null>(null);
   // número que manda os lembretes (o escolhido ou o primeiro conectado, como no servidor): se for
   // a API oficial, quem não escreveu nas últimas 24h só recebe por template
   const envia = numbers.data?.find((n) => n.id === settings.data?.numberId) ?? numbers.data?.find((n) => n.isActive && n.status === 'connected');
@@ -46,7 +59,7 @@ export default function ConfigurarAgendaPage() {
                 <span className="w-3 h-3 rounded-full shrink-0" style={{ background: p.color }} />
                 <div className="min-w-0 flex-1"><div className="text-sm font-medium text-ink">{p.name}{!p.isActive && <span className="text-xs text-muted"> · inativo</span>}</div><div className="text-xs text-muted">{p.phone ? `WhatsApp ${formatPhone(p.phone)}` : <span className="text-warn">sem WhatsApp — não recebe o aviso do próximo cliente</span>} · {new Set(p.hours.map((h) => h.weekday)).size} dias/semana</div></div>
                 <button onClick={() => setProModal(p)} className="text-faint hover:text-ink p-1"><Pencil size={15} /></button>
-                {p.isActive && <button onClick={() => setConfirm({ kind: 'pro', id: p.id, name: p.name })} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
+                <button title="Excluir" onClick={() => setConfirm({ kind: 'pro', id: p.id, name: p.name, isActive: p.isActive })} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
               </li>
             ))}
             {pros.data?.length === 0 && <li className="px-4 py-6 text-sm text-muted text-center">Nenhum profissional ainda.</li>}
@@ -61,7 +74,7 @@ export default function ConfigurarAgendaPage() {
               <li key={s.id} className={cn('px-4 py-3 flex items-center gap-3', !s.isActive && 'opacity-50')}>
                 <div className="min-w-0 flex-1"><div className="text-sm font-medium text-ink">{s.name}{!s.isActive && <span className="text-xs text-muted"> · inativo</span>}</div><div className="text-xs text-muted tnum">{s.durationMin} min{Number(s.price) ? ` · R$ ${Number(s.price).toFixed(2)}` : ''}</div></div>
                 <button onClick={() => setSvcModal(s)} className="text-faint hover:text-ink p-1"><Pencil size={15} /></button>
-                {s.isActive && <button onClick={() => setConfirm({ kind: 'svc', id: s.id, name: s.name })} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
+                <button title="Excluir" onClick={() => setConfirm({ kind: 'svc', id: s.id, name: s.name, isActive: s.isActive })} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
               </li>
             ))}
             {services.data?.length === 0 && <li className="px-4 py-6 text-sm text-muted text-center">Nenhum serviço ainda.</li>}
@@ -74,19 +87,71 @@ export default function ConfigurarAgendaPage() {
         <section className="rounded-2xl bg-panel border border-line p-4 space-y-3">
           <div className="flex items-center gap-2"><Bell size={16} className="text-muted" /><span className="font-display font-semibold text-ink">Lembretes e horários</span></div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <Field label="Aviso ao profissional" hint="minutos antes do horário"><input type="number" min={0} className={inputCls} defaultValue={settings.data.proReminderMinutes} onBlur={(e) => saveSettings.mutateAsync({ proReminderMinutes: Number(e.target.value) }).then(() => toast.ok('Salvo')).catch(toast.err)} /></Field>
-            <Field label="Lembretes ao cliente" hint="minutos antes, separados por vírgula (1440 = véspera)"><input className={inputCls} defaultValue={settings.data.clientReminderMinutes.join(', ')} onBlur={(e) => saveSettings.mutateAsync({ clientReminderMinutes: e.target.value.split(',').map((x) => Number(x.trim())).filter((n) => n > 0) }).then(() => toast.ok('Salvo')).catch(toast.err)} /></Field>
+            <Field label="Aviso ao profissional" hint="quando avisar quem vai atender"><select className={inputCls} value={settings.data.proReminderMinutes} onChange={(e) => saveSettings.mutateAsync({ proReminderMinutes: Number(e.target.value) }).then(() => toast.ok('Salvo')).catch(toast.err)}>{[...new Set([...PRO_PRESETS, settings.data.proReminderMinutes])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{reminderLabel(m)}</option>)}</select></Field>
+            
             <Field label="Intervalo dos horários" hint="minutos"><input type="number" min={5} step={5} className={inputCls} defaultValue={settings.data.slotMinutes} onBlur={(e) => saveSettings.mutateAsync({ slotMinutes: Number(e.target.value) }).then(() => toast.ok('Salvo')).catch(toast.err)} /></Field>
             <Field label="Número que envia" hint="lembretes e avisos"><select className={inputCls} value={settings.data.numberId ?? ''} onChange={(e) => saveSettings.mutateAsync({ numberId: e.target.value || undefined }).then(() => toast.ok('Salvo')).catch(toast.err)}><option value="">Primeiro conectado</option>{numbers.data?.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}</select></Field>
           </div>
+          <ReminderPicker value={settings.data.clientReminderMinutes} pending={saveSettings.isPending} onChange={(clientReminderMinutes) => saveSettings.mutateAsync({ clientReminderMinutes }).then(() => toast.ok('Salvo')).catch(toast.err)} />
           {lembreteMeta && <ReminderTemplate key={lembreteMeta.id} numberId={lembreteMeta.id} saved={settings.data.reminderTemplate ?? null} />}
         </section>
       )}
 
       <ProfessionalModal value={proModal} onClose={() => setProModal(null)} onSave={(p) => savePro.mutateAsync({ id: p.id, name: p.name, phone: p.phone ?? undefined, color: p.color, isActive: p.isActive, hours: p.hours.map((h) => ({ weekday: h.weekday, start: h.start, end: h.end })) }).then(() => { toast.ok('Profissional salvo'); setProModal(null); }).catch(toast.err)} pending={savePro.isPending} />
       <ServiceModal value={svcModal} onClose={() => setSvcModal(null)} onSave={(s) => saveSvc.mutateAsync({ id: s.id, name: s.name, durationMin: s.durationMin, price: s.price, isActive: s.isActive }).then(() => { toast.ok('Serviço salvo'); setSvcModal(null); }).catch(toast.err)} pending={saveSvc.isPending} />
-      <ConfirmDialog open={!!confirm} onClose={() => setConfirm(null)} title={confirm?.kind === 'pro' ? 'Desativar profissional' : 'Desativar serviço'} danger confirmLabel="Desativar" text={`"${confirm?.name}" deixa de aparecer para novos agendamentos. O histórico é mantido.`} onConfirm={async () => { if (!confirm) return; try { await (confirm.kind === 'pro' ? delPro : delSvc).mutateAsync(confirm.id); toast.ok('Desativado'); } catch (err) { toast.err(err); throw err; } }} />
+      <DeleteDialog target={confirm} onClose={() => setConfirm(null)} onDelete={(withHistory) => (confirm!.kind === 'pro' ? delPro : delSvc).mutateAsync({ id: confirm!.id, withHistory }).then(() => { toast.ok('Excluído'); setConfirm(null); }).catch(toast.err)} onDeactivate={() => (confirm!.kind === 'pro' ? savePro.mutateAsync({ id: confirm!.id, isActive: false }) : saveSvc.mutateAsync({ id: confirm!.id, isActive: false })).then(() => { toast.ok('Desativado'); setConfirm(null); }).catch(toast.err)} />
     </PageShell>
+  );
+}
+
+/** Lembretes ao cliente: marca as antecedências em vez de digitar minutos. */
+function ReminderPicker({ value, onChange, pending }: { value: number[]; onChange: (v: number[]) => void; pending: boolean }) {
+  // valor antigo fora das opções (digitado na versão anterior) continua aparecendo e pode ser desmarcado
+  const options = [...new Set([...REMINDER_PRESETS, ...value])].sort((a, b) => b - a);
+  const toggle = (m: number) => onChange(value.includes(m) ? value.filter((x) => x !== m) : [...value, m]);
+  return (
+    <div className="space-y-1.5">
+      <div className="text-sm font-medium text-ink">Lembretes ao cliente</div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((m) => {
+          const on = value.includes(m);
+          return <button key={m} type="button" disabled={pending} onClick={() => toggle(m)} aria-pressed={on} className={cn('rounded-full border px-3 py-1 text-xs transition', on ? 'border-accent bg-accent-soft text-accent-ink font-medium' : 'border-line text-muted hover:text-ink hover:border-ink/30')}>{reminderLabel(m)}</button>;
+        })}
+      </div>
+      <p className="text-xs text-muted">{value.length ? `O cliente recebe ${value.length} lembrete${value.length > 1 ? 's' : ''}.` : 'Nenhum lembrete: o cliente não é avisado antes do horário.'}</p>
+    </div>
+  );
+}
+
+type DeleteTarget = { kind: 'pro' | 'svc'; id: string; name: string; isActive: boolean };
+
+/**
+ * Exclusão definitiva (docs/13-agendamento.md#excluir): com agendamento futuro não deixa; com só
+ * histórico avisa que ele some junto e oferece desativar, que preserva tudo.
+ */
+function DeleteDialog({ target, onClose, onDelete, onDeactivate }: { target: DeleteTarget | null; onClose: () => void; onDelete: (withHistory: boolean) => Promise<unknown>; onDeactivate: () => Promise<unknown> }) {
+  const usage = useSchedulingUsage(target?.kind === 'pro' ? 'professionals' : 'services', target?.id ?? null);
+  const [busy, setBusy] = useState(false);
+  const run = (fn: () => Promise<unknown>) => { setBusy(true); fn().finally(() => setBusy(false)); };
+  const u = usage.data;
+  const what = target?.kind === 'pro' ? 'profissional' : 'serviço';
+  return (
+    <Modal open={!!target} onClose={busy ? () => undefined : onClose} title={`Excluir ${what}`} width="max-w-sm">
+      {!u ? <p className="text-sm text-muted">Conferindo os agendamentos…</p> : (
+        <p className="text-sm text-muted">
+          {u.future > 0
+            ? <><b className="text-ink">"{target?.name}"</b> tem {u.future} agendamento{u.future > 1 ? 's' : ''} futuro{u.future > 1 ? 's' : ''}. Cancele ou remarque antes de excluir — ou desative para não receber novos.</>
+            : u.past > 0
+              ? <><b className="text-ink">"{target?.name}"</b> tem {u.past} agendamento{u.past > 1 ? 's' : ''} no histórico. Excluir apaga esse histórico junto (some também da ficha dos clientes). Para só tirar da agenda e guardar o histórico, desative.</>
+              : <><b className="text-ink">"{target?.name}"</b> nunca foi usado em agendamentos e será excluído definitivamente.</>}
+        </p>
+      )}
+      <div className="flex flex-wrap justify-end gap-2 pt-5">
+        <Button variant="ghost" onClick={onClose} disabled={busy}>Voltar</Button>
+        {u && (u.future > 0 || u.past > 0) && target?.isActive && <Button variant="ghost" loading={busy} onClick={() => run(onDeactivate)}>Desativar</Button>}
+        {u && u.future === 0 && <Button variant="danger" loading={busy} onClick={() => run(() => onDelete(u.past > 0))}>{u.past > 0 ? 'Excluir com histórico' : 'Excluir'}</Button>}
+      </div>
+    </Modal>
   );
 }
 

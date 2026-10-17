@@ -31,10 +31,13 @@ export interface TenantSettings {
   secureMediaText: string | null;
   /** logo das páginas públicas (foto protegida, orçamento): chave e URL assinada; null = marca do painel */
   publicLogoKey: string | null; publicLogoUrl: string | null;
+  /** mensagem automática ao cliente na transferência; textos null = os padrões (`transferDefaults`) */
+  transferMessageEnabled: boolean; transferMessageText: string | null; departmentTransferMessageText: string | null;
+  transferDefaults: { agent: string; department: string };
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'requireSignature' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'requireSignature' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

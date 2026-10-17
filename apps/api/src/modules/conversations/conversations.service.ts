@@ -27,6 +27,7 @@ import { spin } from './spin';
 import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, hasColdSlot, isWarm } from './cold-send';
 import { RedisService } from '../../common/redis/redis.service';
 import { conflictMap, resolveConflicts } from '../tags/conflicts';
+import { buildTransferMessage, DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFER_TEXT, type TransferVars } from './transfer-message';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -288,7 +289,30 @@ export class ConversationsService {
     const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: target.id, status: conv.status === 'closed' ? 'closed' : 'in_progress' } });
     await this.registrar({ tenantId, conversationId: id, type: 'transferred', actorId: by.id, targetId: target.id, fromStatus: conv.status, toStatus: updated.status });
     this.gateway.emitConversation(tenantId, updated);
+    if (conv.assigneeId !== target.id) {
+      // alerta (som + destaque) só na tela de quem recebeu — e não em quem transferiu para si mesmo
+      if (target.id !== by.id) {
+        const contact = await this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { name: true, phone: true } });
+        const autor = await this.prisma.user.findUnique({ where: { id: by.id }, select: { name: true } });
+        this.gateway.emitTransferAlert(tenantId, target.id, { conversationId: id, contactName: contact?.name || contact?.phone || 'Cliente', byName: autor?.name ?? null });
+      }
+      if (updated.status !== 'closed') await this.sendTransferNotice(tenantId, id, { agentName: target.name });
+    }
     return updated;
+  }
+
+  /**
+   * Mensagem automática ao cliente na transferência (Configurações → Transferência). Sai pela
+   * fila de saída como mensagem do sistema (quota, janela de 24h da Meta, ledger). Nunca derruba
+   * a transferência: número desconectado, fora da janela da Meta ou descadastro só pulam o aviso.
+   */
+  private async sendTransferNotice(tenantId: string, conversationId: string, vars: TransferVars) {
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { transferMessageEnabled: true, transferMessageText: true, departmentTransferMessageText: true } });
+    if (!s?.transferMessageEnabled) return;
+    const department = vars.departmentName !== undefined;
+    const text = buildTransferMessage(department ? (s.departmentTransferMessageText ?? DEFAULT_DEPARTMENT_TRANSFER_TEXT) : (s.transferMessageText ?? DEFAULT_TRANSFER_TEXT), vars);
+    if (!text) return;
+    await this.sendAsSystem(conversationId, text).catch((err) => this.log.warn(`aviso de transferência não enviado (${conversationId}): ${err instanceof Error ? err.message : err}`));
   }
 
   /**
@@ -314,6 +338,8 @@ export class ConversationsService {
     });
     await this.registrar({ tenantId, conversationId: id, type: 'department_changed', actorId: by.id, fromStatus: conv.status, toStatus: updated.status, reason: departmentChangeReason(conv.department?.name, target?.name) });
     this.gateway.emitConversation(tenantId, updated);
+    // tirar de departamento não é transferência para alguém: sem aviso ao cliente
+    if (target && updated.status !== 'closed') await this.sendTransferNotice(tenantId, id, { departmentName: target.name });
     return this.one(tenantId, id);
   }
 

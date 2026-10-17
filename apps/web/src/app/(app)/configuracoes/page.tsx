@@ -17,6 +17,7 @@ import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
 import { ClosingSection } from '@/components/settings/ClosingSection';
 import { SignatureSection } from '@/components/settings/SignatureSection';
+import { TransferSection } from '@/components/settings/TransferSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
 import Link from 'next/link';
@@ -101,6 +102,7 @@ export default function ConfiguracoesPage() {
             <ScheduleSection />
             <WelcomeSection />
             <SignatureSection />
+            <TransferSection />
             <ClosingSection />
             <DefaultFlowsSection />
           </>
@@ -164,9 +166,11 @@ function NotificationsSection() {
         </button>
         <span className="text-sm text-ink flex items-center gap-1.5 flex-1">
           {soundMuted ? <VolumeX size={15} className="text-muted" /> : <Volume2 size={15} className="text-accent-ink" />}
-          Som ao chegar mensagem {soundMuted ? <span className="text-muted">(desligado)</span> : null}
+          Som ao chegar mensagem e alarme de transferência {soundMuted ? <span className="text-muted">(desligado)</span> : null}
         </span>
-        <Button size="sm" variant="ghost" onClick={() => void previewMessageSound()} disabled={soundMuted}>Testar som</Button>
+        {/* o teste toca mesmo com o som desligado: é justamente para conferir o volume antes de ligar */}
+        <Button size="sm" variant="ghost" onClick={() => previewMessageSound('message')}>Testar som</Button>
+        <Button size="sm" variant="ghost" onClick={() => previewMessageSound('alarm')}>Testar alarme de transferência</Button>
       </div>
     </section>
   );
@@ -235,7 +239,10 @@ function NumbersSection() {
           {total === 0 ? 'Nenhum número cadastrado ainda.' : `${total} cadastrado(s) · ${conectados} conectado(s).`} Conectar, trocar de provider e proteger o ritmo de envio.
         </p>
       </div>
-      <Link href="/numeros" className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-field">Gerenciar números</Link>
+      <div className="flex flex-wrap gap-2">
+        <Link href="/configuracoes/grupos" className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-field">Grupos autorizados</Link>
+        <Link href="/numeros" className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-field">Gerenciar números</Link>
+      </div>
     </section>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Paperclip, X, Users, ShieldAlert, Loader2 } from 'lucide-react';
+import { Paperclip, X, Users, UsersRound, ShieldAlert, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -8,7 +8,7 @@ import { toast } from '@/components/ui/Toast';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { TemplateFields, useTemplateChoice } from '@/components/chat/TemplateFields';
 import {
-  uploadFile, mediaTypeOf, useAgents, useNumbers, useTags, useAudiencePreview, useCreateCampaign, useStartCampaign, useOutcomeLabels,
+  uploadFile, mediaTypeOf, useAgents, useNumbers, useTags, useAudiencePreview, useCreateCampaign, useStartCampaign, useOutcomeLabels, useGroups,
   type CampaignAudience, type Upload,
 } from '@/lib/hooks';
 import { QrRiskModal } from './QrRiskModal';
@@ -51,6 +51,7 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
   const [lastOutcome, setLastOutcome] = useState<'' | 'won' | 'lost'>('');
   const [agentId, setAgentId] = useState('');
   const [telefones, setTelefones] = useState('');
+  const [groupIds, setGroupIds] = useState<string[]>([]);
   const [riscoAberto, setRiscoAberto] = useState(false);
 
   const conectados = (numbers.data ?? []).filter((n) => n.isActive && n.status === 'connected');
@@ -58,6 +59,11 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
   const number = conectados.find((n) => n.id === numberId);
   const oficial = number?.provider === 'meta';
   const choice = useTemplateChoice(numberId || null, !!oficial);
+  // grupos autorizados do número (docs/grupos.md): só QR Code
+  const grupos = useGroups(numberId || undefined, !!number && !oficial);
+  const gruposAutorizados = oficial ? [] : (grupos.data ?? []).filter((g) => g.authorized);
+  // trocou de número: grupo escolhido é do número anterior
+  useEffect(() => { setGroupIds([]); }, [numberId]);
 
   const deIso = periodo === 'custom' ? de : diasAtras(periodo as number);
   const ateIso = periodo === 'custom' ? ate : iso(new Date());
@@ -71,8 +77,9 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
       ...(usaPeriodo && { closingFrom: new Date(`${deIso}T00:00:00`).toISOString(), closingTo: new Date(new Date(`${ateIso}T00:00:00`).getTime() + 86_400_000).toISOString() }),
     }),
     ...(telefonesDe(telefones).length && { phones: telefonesDe(telefones) }),
+    ...(groupIds.length && !oficial && { groupIds }),
   };
-  const temPublico = todos || tagIds.length > 0 || closingTagIds.length > 0 || !!lastOutcome || !!agentId || telefonesDe(telefones).length > 0;
+  const temPublico = todos || tagIds.length > 0 || closingTagIds.length > 0 || !!lastOutcome || !!agentId || telefonesDe(telefones).length > 0 || (!oficial && groupIds.length > 0);
   // espera parar de mexer antes de contar
   const [publicoAtual, setPublicoAtual] = useState(audience);
   const chave = JSON.stringify(audience);
@@ -82,10 +89,11 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
 
   const tagsEncerramento = (tags.data ?? []).filter((t) => t.showOnWon || t.showOnLost);
   const teto = oficial ? null : number?.campaignDailyLimit ?? 200;
-  const dias = p && teto ? Math.ceil(p.total / Math.max(1, teto)) : null;
+  const totalGrupos = p?.groups ?? 0;
+  const dias = p && teto ? Math.ceil((p.total + totalGrupos) / Math.max(1, teto)) : null;
 
   const mensagemOk = oficial ? choice.valid : !!text.trim() || !!anexo;
-  const podeCriar = !!name.trim() && !!number && mensagemOk && temPublico && !!p && p.total > 0 && !p.excedeu && (quando === 'agora' || !!startAt);
+  const podeCriar = !!name.trim() && !!number && mensagemOk && temPublico && !!p && p.total + totalGrupos > 0 && !p.excedeu && (quando === 'agora' || !!startAt);
 
   async function anexar(f: File) {
     setSubindo(true);
@@ -236,12 +244,33 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
             <textarea className={cn(inputCls, 'resize-none font-mono text-[12.5px]')} rows={2} value={telefones} onChange={(e) => setTelefones(e.target.value)} placeholder={'(11) 99999-8888\n11 98888-7777'} />
           </div>
 
+          {number && !oficial && (
+            <div className={sec}>
+              <span className="flex items-center gap-1.5 text-[12.5px] text-muted"><UsersRound size={13} /> E também estes grupos autorizados</span>
+              {gruposAutorizados.length === 0 ? (
+                <span className="block text-[12px] text-faint">Nenhum grupo autorizado neste número. Autorize em Configurações → Grupos autorizados.</span>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {gruposAutorizados.map((g) => {
+                    const on = groupIds.includes(g.id);
+                    return (
+                      <button key={g.id} type="button" aria-pressed={on} onClick={() => setGroupIds((l) => (on ? l.filter((x) => x !== g.id) : [...l, g.id]))}
+                        className={cn('rounded-full border px-2.5 py-0.5 text-[12px]', on ? 'border-accent bg-accent-soft text-accent-ink font-medium' : 'border-line text-muted hover:text-ink')}>
+                        {g.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-[12.5px]">
             {!temPublico && <span className="text-muted">Escolha ao menos um critério (ou “Todos os contatos”).</span>}
             {temPublico && !p && <span className="text-muted inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Contando…</span>}
             {p && (
               <>
-                <span className={cn('font-semibold', p.excedeu ? 'text-danger' : 'text-ink')}><span className="tnum">{p.total.toLocaleString('pt-BR')}</span> contato(s) vão receber</span>
+                <span className={cn('font-semibold', p.excedeu ? 'text-danger' : 'text-ink')}><span className="tnum">{p.total.toLocaleString('pt-BR')}</span> contato(s){totalGrupos > 0 ? ` e ${totalGrupos} grupo(s)` : ''} vão receber</span>
                 {p.novos > 0 && <span className="text-muted">{p.novos} telefone(s) novo(s) viram contato</span>}
                 {p.invalidos > 0 && <span className="text-warn-ink">{p.invalidos} telefone(s) inválido(s) ignorado(s)</span>}
                 {p.optOut > 0 && <span className="text-muted">{p.optOut} descadastrado(s) fora</span>}
