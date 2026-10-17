@@ -71,7 +71,7 @@ export class TenantProvisioningService {
       assertOwnFlowMedia(tenantId, b.definition);
       const name = uniqueName(b.name, taken);
       taken.push(name);
-      await tx.flow.create({ data: { tenantId, name, description: b.description, isActive: false, trigger: b.trigger as object, definition: b.definition as object } });
+      await tx.flow.create({ data: { tenantId, name, position: taken.length - 1, description: b.description, isActive: false, trigger: b.trigger as object, definition: b.definition as object } });
     }
   }
 

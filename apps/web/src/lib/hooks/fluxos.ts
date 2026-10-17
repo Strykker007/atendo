@@ -10,7 +10,7 @@ import { invConv, useUsage } from './core';
 import type { Company } from './empresas';
 
 // ---- Fluxos de automação ----
-export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
+export interface FlowSummary { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; /** ordem da lista (arrastar) */ position: number; trigger: FlowTrigger; updatedAt: string; _count: { runs: number } }
 /** `mediaUrls`: link assinado de cada anexo do Conteúdo (só na leitura de um fluxo). */
 export interface Flow { id: string; name: string; description: string | null; isActive: boolean; showInChat: boolean; trigger: FlowTrigger; definition: FlowDefinition; updatedAt: string; mediaUrls?: Record<string, string>; /** optimistic locking: mandar no PATCH do editor */ version: number }
 /** `paused` = congelado pelo atendente; `pausedFrom` é para onde volta ao continuar. */
@@ -21,6 +21,21 @@ export const useFlows = () => useQuery({ queryKey: ['flows'], queryFn: () => api
 export const useFlow = (id: string | null) => useQuery({ queryKey: ['flow', id], enabled: !!id && id !== 'novo', queryFn: () => api<Flow>(`/flows/${id}`) });
 export const useFlowRuns = (id: string | null) => useQuery({ queryKey: ['flow-runs', id], enabled: !!id && id !== 'novo', queryFn: () => api<FlowRuns>(`/flows/${id}/runs`) });
 const invFlows = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['flows'] }); qc.invalidateQueries({ queryKey: ['flow'] }); };
+/**
+ * Ordem da lista por arraste: a lista já reordenada vai direto para o cache (não "pula de volta"
+ * enquanto a API responde) e só os ids vão para a API. Recusou, recarrega do servidor.
+ */
+export const useReorderFlows = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (list: FlowSummary[]) => api('/flows/reorder', { method: 'PATCH', body: JSON.stringify({ ids: list.map((f) => f.id) }) }),
+    onMutate: async (list) => {
+      await qc.cancelQueries({ queryKey: ['flows'] });
+      qc.setQueryData<FlowSummary[]>(['flows'], list.map((f, position) => ({ ...f, position })));
+    },
+    onError: () => qc.invalidateQueries({ queryKey: ['flows'] }),
+  });
+};
 /** Resultado do "Testar" do bloco API externa (`POST /flows/test-http`). */
 export interface HttpTestResult {
   ok: boolean;
