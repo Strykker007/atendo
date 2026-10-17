@@ -76,7 +76,7 @@ export class NumbersController {
   async list(@CurrentUser() user: AuthUser) {
     const rows = await this.prisma.whatsAppNumber.findMany({
       where: { tenantId: user.tenantId, deletedAt: null },
-      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, syncStartedAt: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });
     // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts).

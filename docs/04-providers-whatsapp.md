@@ -117,6 +117,15 @@ A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (t�
 - `DATABASE_CONNECTION_URI` da Evolution com `connection_limit=40&pool_timeout=30` (o Postgres dela aceita 100);
 - `NumbersService.claimRestart`: no máximo um restart automático por número a cada 2 min entre todos os workers — antes era um por envio falho, e com o restart que recria o socket isso abriria sockets duplicados.
 
+### Sincronização ao reconectar
+
+Quando o número volta a `connected` vindo de outro status (QR lido de novo, sessão restabelecida),
+o WhatsApp entrega **em lotes** as mensagens que chegaram enquanto ele estava fora — pode levar
+minutos, e não há evento de "terminou". `numberConnectionChanged` grava `whatsapp_numbers.syncStartedAt`
+e o painel mostra por **10 minutos** (`NUMBER_SYNC_NOTICE_MS`, `components/numbers/NumberSyncNotice.tsx`)
+a faixa "sincronizando as mensagens recebidas enquanto estava fora" em todas as telas (dá para
+fechar) e o selo no card em Números. As mensagens entram normalmente pelo webhook, uma a uma.
+
 ### Parou de receber (envia, mas nada chega)
 
 As chaves que decifram o que **chega** podem corromper sem derrubar a sessão: o envio segue, a tela

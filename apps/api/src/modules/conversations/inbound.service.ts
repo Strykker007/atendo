@@ -621,7 +621,10 @@ export class InboundService {
     // telefone continua a contagem; recomeça se o WhatsApp derrubou o número ou se é outro
     // telefone (warmupStartOnPair). Reinício de servidor ou oscilação de rede não mexem nele.
     const recomeco = c.status === 'connected' && number.status === 'pending_qr' ? warmupStartOnPair(number, c.phone) : null;
-    const warmup: { warmupStartedAt?: Date; sessionStartedAt?: Date } = recomeco ? { sessionStartedAt: recomeco } : {};
+    const warmup: { warmupStartedAt?: Date; sessionStartedAt?: Date; syncStartedAt?: Date } = recomeco ? { sessionStartedAt: recomeco } : {};
+    // voltou a conectar: o WhatsApp entrega em lotes o que chegou enquanto estava fora, e demora.
+    // O painel avisa "sincronizando" por alguns minutos a partir daqui (NUMBER_SYNC_NOTICE_MS no front)
+    if (c.status === 'connected' && number.status !== 'connected') warmup.syncStartedAt = new Date();
     await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido, ...(phone && { phone }) } }).catch(async (err) => {
       // conflito de unique (tenantId, phone): mantém o telefone antigo, só atualiza status
       if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido } });

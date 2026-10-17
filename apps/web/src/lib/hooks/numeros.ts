@@ -15,6 +15,13 @@ import { useUI } from '../store';
 import { toast } from '@/components/ui/Toast';
 import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
 import { upsertInternalMessage, type InternalMessage } from './chat-interno';
+import { create } from 'zustand';
+
+/**
+ * Estado do socket do tempo real, para a faixa "reconectando" (components/layout/RealtimeBanner).
+ * `downSince` = desde quando está fora; null = conectado (ou ainda não tentou).
+ */
+export const useRealtimeStatus = create<{ downSince: number | null }>(() => ({ downSince: null }));
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -72,6 +79,13 @@ export const useRestartNumber = () => {
 /** QR code mais recente por número, alimentado pelo socket (evento `number`). */
 export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-qr', id], enabled: false, queryFn: () => null as string | null });
 
+/**
+ * Tudo que o socket mantém atualizado. Na volta de uma queda, o que foi emitido enquanto o socket
+ * estava fora não chega nunca — recarrega tudo de uma vez (é o que antes só acontecia trocando de
+ * tela, ex.: abrir o Kanban).
+ */
+const REALTIME_KEYS = ['conversations', 'conversation-counts', 'conversation', 'messages', 'kanban', 'numbers', 'internal-chats', 'internal-messages', 'support-chats', 'scheduled-messages-all', 'budgets-all'];
+
 /** Tempo real: aplica eventos do socket direto no cache do react-query. */
 export function useRealtime() {
   const qc = useQueryClient();
@@ -123,11 +137,49 @@ export function useRealtime() {
     };
     // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
     const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: (cb) => cb({ token: getAccessToken() }), withCredentials: true, reconnectionDelayMax: 5000 });
-    // token vencido na reconexão (aba parada, notebook que dormiu): o servidor derruba o socket e o
-    // socket.io NÃO tenta de novo sozinho nesse caso — o tempo real morria calado. Renova e reconecta.
-    socket.on('disconnect', async (reason) => {
-      if (reason === 'io server disconnect' && (await refresh())) socket.connect();
+    let encerrado = false;
+    let jaConectou = false;
+    const status = useRealtimeStatus.setState;
+    socket.on('connect', () => {
+      status({ downSince: null });
+      // reconexão: busca o que chegou enquanto estava fora (mensagens, listas, kanban, números)
+      if (jaConectou) for (const key of REALTIME_KEYS) qc.invalidateQueries({ queryKey: [key] });
+      jaConectou = true;
     });
+    // Token vencido na reconexão (aba parada, notebook que dormiu, API reiniciada): o servidor
+    // derruba o socket e o socket.io NÃO tenta de novo sozinho nesse caso. Antes era UMA tentativa
+    // de renovar: se o refresh falhasse naquele instante (API subindo, rede oscilando), o tempo real
+    // morria calado até trocar de tela. Agora insiste com espera crescente até voltar.
+    let religando = false;
+    async function religar() {
+      if (religando || encerrado) return;
+      religando = true;
+      try {
+        for (let espera = 2000; !encerrado && !socket.connected; espera = Math.min(espera * 2, 30_000)) {
+          // `false` também é API fora do ar (502 no deploy): continua tentando. Sessão encerrada de
+          // vez cai no login pelo próximo pedido à API (sessionExpired em lib/api.ts)
+          const ok = await refresh().catch(() => false);
+          if (ok) { socket.connect(); return; }
+          await new Promise((r) => setTimeout(r, espera));
+        }
+      } finally { religando = false; }
+    }
+    socket.on('disconnect', (reason) => {
+      if (!encerrado) status({ downSince: useRealtimeStatus.getState().downSince ?? Date.now() });
+      if (reason === 'io server disconnect') void religar();
+    });
+    // recusado no handshake (`socket.active` false = o socket.io desistiu): mesma recuperação
+    socket.on('connect_error', () => {
+      status({ downSince: useRealtimeStatus.getState().downSince ?? Date.now() });
+      if (!socket.active) void religar();
+    });
+    // rede voltou / aba voltou a ficar visível / vigia a cada 20 s: socket parado sem ninguém
+    // tentando = reconecta. Notebook que dormiu às vezes não dispara evento nenhum.
+    const conferir = () => { if (!encerrado && !socket.connected && !socket.active) void religar(); };
+    const aoVoltar = () => { if (document.visibilityState === 'visible') conferir(); };
+    window.addEventListener('online', conferir);
+    document.addEventListener('visibilitychange', aoVoltar);
+    const vigia = setInterval(conferir, 20_000);
     socket.on('message', (m: Message) => {
       const nova = m.direction === 'in' && !tocadas.has(m.id);
       upsertMessageInCache(qc, m);
@@ -207,8 +259,13 @@ export function useRealtime() {
     socket.on('tenant_number', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
     socket.on('tenant_presence', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
     return () => {
+      encerrado = true;
       if (listasTimer) clearTimeout(listasTimer);
+      clearInterval(vigia);
+      window.removeEventListener('online', conferir);
+      document.removeEventListener('visibilitychange', aoVoltar);
       socket.disconnect();
+      status({ downSince: null });
     };
   }, [qc, sala]);
 }

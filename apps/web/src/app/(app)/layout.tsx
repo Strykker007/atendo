@@ -7,6 +7,8 @@ import { useRealtime } from '@/lib/hooks';
 import { UsageBanner } from '@/components/layout/UsageBanner';
 import { WaRemovedBanner } from '@/components/numbers/WaRemovedNotice';
 import { ReceiveStalledBanner } from '@/components/numbers/ReceiveStalledNotice';
+import { NumberSyncBanner } from '@/components/numbers/NumberSyncNotice';
+import { RealtimeBanner } from '@/components/layout/RealtimeBanner';
 import { Toaster } from '@/components/ui/Toast';
 import { NavigationProgress } from '@/components/layout/NavigationProgress';
 import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
@@ -66,6 +68,8 @@ function Shell({ children }: { children: React.ReactNode }) {
         <UsageBanner />
         <WaRemovedBanner />
         <ReceiveStalledBanner />
+        <NumberSyncBanner />
+        <RealtimeBanner />
         <div key={pathname} className="flex-1 min-h-0 flex animate-fade-in">{children}</div>
       </div>
       <Toaster />

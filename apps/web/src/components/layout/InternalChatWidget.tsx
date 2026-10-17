@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import {
   internalMessagesInOrder, useAddInternalMembers, useCan, useCreateInternalChat, useDeleteInternalChat, useInternalChats, useInternalMessages, useInternalUsers, useMarkInternalRead, useMe,
-  useOpenSupportChat, useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage, useSupportChats, useSupportTenants,
-  type ChatScope, type InternalChat, type InternalMessage, type InternalUser,
+  useOpenSupportChat, useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage, useSupportChats, useSupportCounts, useSupportTenants, useSupportTicketAction,
+  type ChatScope, type InternalChat, type InternalMessage, type InternalUser, type SupportTicket, type SupportView,
 } from '@/lib/hooks';
 
 /**
@@ -84,7 +84,8 @@ export function InternalChatWidget() {
   const titulo = ehDono ? 'Suporte aos clientes' : entrandoComo ? 'Suporte a este cliente' : 'Chat da equipe';
   const { open, minimized, side, y, chatId: chatSalvo, set } = useWidget();
   const chatsEquipe = useInternalChats(ehEquipe || entrandoComo);
-  const chatsSuporte = useSupportChats(ehDono);
+  // `all` = todo canal com mensagem: é onde a conversa aberta é encontrada (as abas da fila são recortes)
+  const chatsSuporte = useSupportChats('all', ehDono);
   const chats = ehDono ? chatsSuporte : chatsEquipe;
   const naoLidas = (chats.data ?? []).reduce((a, c) => a + (c.unread ?? 0), 0);
   const equipe = useInternalUsers(ehEquipe);
@@ -192,7 +193,7 @@ export function InternalChatWidget() {
       {!minimized && (aberta
         ? <ChatView chat={aberta} meId={me.data!.id} scope={entrandoComo ? 'support' : scope} api={entrandoComo ? 'team' : scope} onLeave={() => set({ chatId: null })} />
         : ehDono
-          ? <OwnerHome chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />
+          ? <OwnerHome onOpen={(id) => set({ chatId: id })} />
           : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
     </div>
   );
@@ -304,32 +305,55 @@ function Launcher({ titulo, dono, naoLidas, online, side, arrastando, onOpen, ..
 }
 
 /**
- * Dono do sistema: canais de suporte com mensagem (não lidas primeiro na atenção) e a lista de
- * clientes para puxar conversa com quem ainda não escreveu.
+ * Dono do sistema: a fila de suporte (docs/chat-interno.md#fila-de-suporte). O canal de cada
+ * cliente nunca some, então a lista não pode ser "todos os canais": as abas mostram só o que
+ * pede ação — **Fila** (ninguém assumiu, na ordem de chegada), **Meus** (comigo), **Ativos**
+ * (fila + em andamento de qualquer um do suporte) e **Encerrados** (7 dias). **Clientes** puxa
+ * conversa com quem ainda não escreveu.
  */
-function OwnerHome({ chats, loading, onOpen }: { chats: InternalChat[]; loading: boolean; onOpen: (id: string) => void }) {
-  const [aba, setAba] = useState<'chats' | 'clientes'>('chats');
+type OwnerTab = Exclude<SupportView, 'all'> | 'clientes';
+function OwnerHome({ onOpen }: { onOpen: (id: string) => void }) {
+  const [aba, setAba] = useState<OwnerTab>('queue');
   const [busca, setBusca] = useState('');
+  const counts = useSupportCounts();
+  const lista = useSupportChats(aba === 'clientes' ? 'all' : aba, aba !== 'clientes');
   const tenants = useSupportTenants(aba === 'clientes');
   const abrir = useOpenSupportChat();
   const termo = busca.trim().toLowerCase();
-  const lista = (tenants.data ?? []).filter((t) => !termo || t.name.toLowerCase().includes(termo));
+  const clientes = (tenants.data ?? []).filter((t) => !termo || t.name.toLowerCase().includes(termo));
+  const chats = lista.data ?? [];
 
   async function falarCom(tenantId: string) {
     try { const c = await abrir.mutateAsync(tenantId); onOpen(c.id); } catch (err) { toast.err(err); }
   }
 
+  const ABAS: [OwnerTab, string, number | undefined][] = [
+    ['queue', 'Fila', counts.data?.queue],
+    ['mine', 'Meus', counts.data?.mine],
+    ['active', 'Ativos', counts.data?.active],
+    ['resolved', 'Encerrados', undefined],
+    ['clientes', 'Clientes', undefined],
+  ];
+  const VAZIO: Record<Exclude<OwnerTab, 'clientes'>, string> = {
+    queue: 'Fila vazia: ninguém esperando atendimento.',
+    mine: 'Nenhum atendimento com você agora. Assuma um na Fila.',
+    active: 'Nenhum atendimento em aberto.',
+    resolved: 'Nenhum atendimento encerrado nos últimos 7 dias.',
+  };
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="grid grid-cols-2 gap-1 m-2 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
-        {([['chats', 'Conversas'], ['clientes', 'Clientes']] as const).map(([id, label]) => (
-          <button key={id} type="button" onClick={() => setAba(id)} className={cn('rounded-md py-1.5', aba === id ? 'bg-side text-white' : 'text-muted hover:text-ink')}>{label}</button>
+      <div className="grid grid-cols-5 gap-0.5 m-2 rounded-lg bg-field p-1 text-[10.5px] font-semibold">
+        {ABAS.map(([id, label, n]) => (
+          <button key={id} type="button" onClick={() => setAba(id)} className={cn('rounded-md py-1.5 px-0.5 truncate', aba === id ? 'bg-side text-white' : 'text-muted hover:text-ink')}>
+            {label}{!!n && <span className={cn('ml-0.5 tnum', id === 'queue' && aba !== id && 'text-danger')}>{n}</span>}
+          </button>
         ))}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        {aba === 'chats' && (
-          loading ? <p className="p-4 text-sm text-faint">Carregando…</p> : !chats.length ? (
-            <p className="p-4 text-sm text-muted">Nenhum cliente escreveu ainda. Para puxar conversa, escolha em <b>Clientes</b>.</p>
+        {aba !== 'clientes' && (
+          lista.isLoading ? <p className="p-4 text-sm text-faint">Carregando…</p> : !chats.length ? (
+            <p className="p-4 text-sm text-muted">{VAZIO[aba]}{aba === 'queue' && <> Para puxar conversa, escolha em <b>Clientes</b>.</>}</p>
           ) : (
             <ul className="divide-y divide-line">
               {chats.map((c) => (
@@ -337,8 +361,17 @@ function OwnerHome({ chats, loading, onOpen }: { chats: InternalChat[]; loading:
                   <button type="button" onClick={() => onOpen(c.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
                     <span className="w-8 h-8 rounded-[11px] bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold shrink-0">{iniciais(c.name)}</span>
                     <span className="flex-1 min-w-0">
-                      <span className="flex items-center gap-1"><span className="truncate text-sm font-medium text-ink">{c.name}</span>{c.lastMessageAt && <span className="ml-auto text-[10.5px] text-faint shrink-0">{hora(c.lastMessageAt)}</span>}</span>
+                      <span className="flex items-center gap-1">
+                        <span className="truncate text-sm font-medium text-ink">{c.name}</span>
+                        {c.ticket && <span className="text-[10.5px] text-faint shrink-0">#{c.ticket.number}</span>}
+                        {c.ticket && aba !== 'resolved'
+                          ? <span className={cn('ml-auto text-[10.5px] shrink-0', c.ticket.status === 'open' ? 'text-danger font-semibold' : 'text-faint')} title="Esperando desde">{espera(c.ticket.openedAt)}</span>
+                          : c.lastMessageAt && <span className="ml-auto text-[10.5px] text-faint shrink-0">{hora(c.lastMessageAt)}</span>}
+                      </span>
                       <span className={cn('block truncate text-[12px]', c.unread ? 'text-ink font-medium' : 'text-muted')}>{c.lastMessagePreview ?? 'Sem mensagens'}</span>
+                      {c.ticket?.assigneeName && aba !== 'mine' && (
+                        <span className="block truncate text-[10.5px] text-faint">{c.ticket.status === 'resolved' ? `Encerrado por ${c.ticket.resolvedByName ?? c.ticket.assigneeName}` : `Com ${c.ticket.assigneeName}`}</span>
+                      )}
                     </span>
                     {!!c.unread && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-white text-[10px] font-bold grid place-items-center tnum">{c.unread}</span>}
                   </button>
@@ -354,7 +387,7 @@ function OwnerHome({ chats, loading, onOpen }: { chats: InternalChat[]; loading:
             </div>
             {tenants.isLoading ? <p className="p-4 text-sm text-faint">Carregando…</p> : (
               <ul className="divide-y divide-line">
-                {lista.map((t) => (
+                {clientes.map((t) => (
                   <li key={t.id}>
                     <button type="button" disabled={abrir.isPending} onClick={() => void falarCom(t.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
                       <span className="w-8 h-8 rounded-[11px] bg-field text-muted grid place-items-center text-[11px] font-bold shrink-0">{iniciais(t.name)}</span>
@@ -368,6 +401,46 @@ function OwnerHome({ chats, loading, onOpen }: { chats: InternalChat[]; loading:
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** "agora", "12 min", "3 h", "2 d" — há quanto tempo o atendimento espera. */
+function espera(iso: string) {
+  const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+  if (min < 1) return 'agora';
+  if (min < 60) return `${min} min`;
+  if (min < 48 * 60) return `${Math.floor(min / 60)} h`;
+  return `${Math.floor(min / 1440)} d`;
+}
+
+/**
+ * Faixa do canal de suporte com o atendimento. Cliente: se está na fila (e a posição) ou com
+ * quem. Suporte (logado como ele mesmo): assumir, devolver à fila e encerrar.
+ */
+function SupportTicketBar({ ticket, owner, actions, meId }: { ticket: SupportTicket | null | undefined; owner: boolean; actions: boolean; meId: string }) {
+  const acao = useSupportTicketAction();
+  const run = (action: 'assign' | 'release' | 'resolve', ok: string) => {
+    if (!ticket) return;
+    acao.mutate({ id: ticket.id, action }, { onSuccess: () => toast.ok(ok), onError: (err) => toast.err(err) });
+  };
+  const ativo = ticket && ticket.status !== 'resolved' ? ticket : null;
+  const texto = !ativo
+    ? owner ? 'Sem atendimento aberto. Responder abre um, já com você.' : 'Canal direto com o suporte do sistema — toda a sua equipe vê.'
+    : ativo.status === 'open'
+      ? owner ? `#${ativo.number} na fila há ${espera(ativo.openedAt)}` : `Atendimento #${ativo.number} na fila${ativo.position ? ` — posição ${ativo.position}` : ''}. Já já alguém do suporte responde.`
+      : owner ? `#${ativo.number} com ${ativo.assigneeId === meId ? 'você' : ativo.assigneeName ?? 'o suporte'}` : `Atendimento #${ativo.number} em andamento com ${ativo.assigneeName ?? 'o suporte'}.`;
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] text-muted border-b border-line bg-accent-soft/40">
+      <Headset size={13} className="shrink-0 text-accent" />
+      <span className="flex-1 min-w-0 truncate" title={texto}>{texto}</span>
+      {actions && ativo && (
+        <span className="flex gap-1 shrink-0">
+          {ativo.assigneeId !== meId && <button type="button" disabled={acao.isPending} onClick={() => run('assign', 'Atendimento com você.')} className="rounded px-1.5 py-0.5 bg-accent text-white font-semibold hover:bg-accent-hover">Assumir</button>}
+          {ativo.status === 'in_progress' && <button type="button" disabled={acao.isPending} onClick={() => run('release', 'Devolvido para a fila.')} className="rounded px-1.5 py-0.5 border border-line hover:bg-field" title="Devolver para a fila">Fila</button>}
+          <button type="button" disabled={acao.isPending} onClick={() => run('resolve', 'Atendimento encerrado.')} className="rounded px-1.5 py-0.5 border border-line hover:bg-field text-ok font-semibold">Encerrar</button>
+        </span>
+      )}
     </div>
   );
 }
@@ -513,12 +586,8 @@ function ChatView({ chat, meId, scope, api = scope, onLeave }: { chat: InternalC
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {chat.isSupport && (
-        <p className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] text-muted border-b border-line bg-accent-soft/40">
-          <Headset size={13} className="shrink-0 text-accent" />
-          {scope === 'support' ? 'Canal de suporte deste cliente — a equipe toda dele lê.' : 'Canal direto com o suporte do sistema — toda a sua equipe vê.'}
-        </p>
-      )}
+      {/* suporte: atendimento da fila; ações só para o dono logado como ele mesmo (as rotas são de super_admin; entrando como, só o status) */}
+      {chat.isSupport && <SupportTicketBar ticket={chat.ticket} owner={scope === 'support'} actions={api === 'support'} meId={meId} />}
       {chat.isGroup && (
         <button type="button" onClick={() => setPainel(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] text-muted border-b border-line hover:bg-field text-left" title="Membros e opções do grupo">
           <Users size={13} className="shrink-0" />

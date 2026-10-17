@@ -53,6 +53,8 @@ tenant_templates (global) ── tenants.templateId
 
 **internal_chats** / **internal_chat_members** / **internal_messages** — chat interno da equipe (direto ou grupo), histórico permanente e auditável por `internal_chat.audit`. Ver [Chat interno](chat-interno.md).
 
+**support_tickets** — atendimentos da fila de suporte (um ativo por canal de suporte): `number` sequencial (#123), `status` (`open`|`in_progress`|`resolved`), responsável (`assigneeId`/`assigneeName`), `openedAt`, `firstResponseAt`, `resolvedAt`. `whatsapp_numbers.syncStartedAt` = quando o número reconectou (aviso de sincronização). Migração `20270104000000_support_tickets_number_sync`. Ver [Fila de suporte](chat-interno.md#fila-de-suporte).
+
 **whatsapp_groups** / **campaign_group_targets** — lista branca de grupos por número (opt-in estrito) e alvos de grupo da transmissão. Grupo não é contato nem tem conversa; ver [Grupos restritos](grupos.md).
 
 **contacts** — telefone E.164 único por tenant. Nome vem do `pushName`/profile do WhatsApp.
@@ -155,6 +157,7 @@ atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`).
 | InvoiceStatus | draft, open, paid, failed, void |
 | BillingType | INDIVIDUAL, CONSOLIDATED_GROUP (em `tenants` e `companies` — [empresas.md#cobrança](empresas.md#cobrança)) |
 | WorkScheduleType | FIXED_12X36, COMMERCIAL_44H, CUSTOM ([escalas.md](escalas.md)) |
+| SupportTicketStatus | open, in_progress, resolved ([chat-interno.md#fila-de-suporte](chat-interno.md#fila-de-suporte)) |
 
 Os mesmos enums existem em `packages/shared/src/enums.ts` para o front. Ao mudar um, mude nos dois.
 

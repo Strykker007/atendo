@@ -54,6 +54,7 @@ model Tenant {
   template      TenantTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   users         User[]
   workSchedules     WorkSchedule[]
+  supportTickets    SupportTicket[]
   scheduleOverrides ScheduleOverride[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
@@ -567,6 +568,9 @@ model WhatsAppNumber {
   /// conectado, mas parou de receber: envia e nada volta (nem confirmação de entrega) — chaves de
   /// recebimento corrompidas na Evolution. Marcado/limpo pelo health check (whatsapp/receive-stall.ts)
   receiveStalledAt DateTime?
+  /// reconectou agora (QR lido, sessão voltou): o WhatsApp entrega as mensagens de quando estava
+  /// fora em lotes, e isso demora. O painel mostra "sincronizando" por alguns minutos (docs/04-providers-whatsapp.md#sincronização)
+  syncStartedAt  DateTime?
   isActive       Boolean      @default(true)
   /// Excluído pelo cliente. O registro fica (e com ele conversas, mensagens e agenda): recadastrar
   /// o MESMO telefone na MESMA conta revive este número com o histórico. `externalId` vira
@@ -2387,6 +2391,7 @@ model InternalChat {
   tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   members  InternalChatMember[]
   messages InternalMessage[]
+  supportTickets SupportTicket[]
 
   @@unique([tenantId, directKey])
   @@index([tenantId, lastMessageAt(sort: Desc)])
@@ -2432,4 +2437,39 @@ model InternalMessage {
   @@index([chatId, createdAt])
   @@index([tenantId, createdAt])
   @@map("internal_messages")
+}
+
+enum SupportTicketStatus {
+  /// na fila: o cliente escreveu e ninguém do suporte assumiu
+  open
+  /// alguém do suporte assumiu (ou respondeu)
+  in_progress
+  /// encerrado: sai da fila; a próxima mensagem do cliente abre outro
+  resolved
+}
+
+/// Atendimento no canal de suporte (docs/chat-interno.md#fila-de-suporte). O canal é um só por
+/// cliente e não some; o ticket é cada "episódio" dele — é o que vira fila para o suporte.
+model SupportTicket {
+  id              String              @id @default(uuid())
+  /// número sequencial global (#123), para falar do atendimento
+  number          Int                 @unique @default(autoincrement())
+  tenantId        String
+  chatId          String
+  status          SupportTicketStatus @default(open)
+  /// quem do suporte (super_admin) está com o atendimento
+  assigneeId      String?
+  assigneeName    String?
+  openedAt        DateTime            @default(now())
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  resolvedByName  String?
+  updatedAt       DateTime            @updatedAt
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  chat   InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([status, openedAt])
+  @@index([chatId, status])
+  @@map("support_tickets")
 }
