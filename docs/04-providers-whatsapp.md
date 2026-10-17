@@ -95,7 +95,7 @@ Na UI: *Números → Trocar provider*. Endpoint: `PUT /numbers/:id/provider`.
 | Provider | Como sai | Como volta |
 |---|---|---|
 | **Meta** | até 3 opções → **botões**; 4–10 → **lista** (`interactive.type = list`) | `messages[].type = 'interactive'` com `button_reply`/`list_reply` → `InboundMessage.interactiveReplyId` + `text` = título |
-| **Evolution** | texto + **lista numerada** ("1 - Corte", "2 - Barba") — botões não são confiáveis em contas QR desde 2022 (muitos aparelhos não renderizam) | número, ou texto da opção |
+| **Evolution** | Padrão: texto + **lista numerada** ("1 - Corte", "2 - Barba"). Com `EVOLUTION_MENU_BUTTONS=true` (exige a imagem com o [patch do `<biz>`](#versão-da-evolution)) e **até 3 opções**: `POST /message/sendButtons` com botões `{ type: 'reply', displayText, id }` (`menuButtonsPayload`: título = cabeçalho ou 1ª linha, resto na descrição) → botões clicáveis; 400/404 cai na lista numerada. 4+ opções continuam numeradas (a Evolution não tem lista nativeFlow). Desligado por padrão: sem o `<biz>` o WhatsApp entrega e o aparelho não mostra nada — ligar depois de ver num aparelho real | `interactiveResponseMessage`/`buttonsResponseMessage` → id da opção; ou número, ou texto da opção |
 
 O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineService.choose`). Assim o mesmo fluxo funciona nos dois providers e ganha botões de verdade quando o cliente migra para a Meta. No histórico do painel a mensagem interativa aparece como texto + opções numeradas.
 

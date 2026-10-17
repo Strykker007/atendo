@@ -137,8 +137,21 @@ export class EvolutionProvider implements WhatsAppProvider {
       if (err instanceof ProviderSendError && (err.providerStatus === 400 || err.providerStatus === 404)) return null;
       throw err;
     }) : null;
+    // menu com até 3 opções como botões de resposta rápida (nativeFlow quick_reply), só com
+    // EVOLUTION_MENU_BUTTONS — mesmo motivo do Pix: sem o <biz> o aparelho não mostra. Versão que
+    // recusa (400/404) cai na lista numerada; a resposta volta como interactiveResponseMessage
+    const opcoes = m.interactive?.options ?? [];
+    const botoes = !cartaoPix && env.EVOLUTION_MENU_BUTTONS && opcoes.length > 0 && opcoes.length <= 3 ? await this.api<any>(`/message/sendButtons/${name}`, {
+      method: 'POST',
+      body: JSON.stringify({ number: m.to, ...menuButtonsPayload(m), quoted, delay }),
+    }, this.shard(ctx)).catch((err) => {
+      if (err instanceof ProviderSendError && (err.providerStatus === 400 || err.providerStatus === 404)) return null;
+      throw err;
+    }) : null;
     if (cartaoPix) {
       r = cartaoPix;
+    } else if (botoes) {
+      r = botoes;
     } else if (m.type === MessageType.TEXT || m.interactive) {
       // Botões/listas não funcionam de forma confiável em contas QR: vira lista numerada
       const text = m.interactive?.options.length ? `${m.text ?? ''}\n\n${m.interactive.options.map((o, i) => `${i + 1} - ${o.title}`).join('\n')}` : (m.text ?? '');
@@ -622,4 +635,21 @@ export function nomeDeContatoValido(name: string, phone: string): boolean {
   if (!n || n.length > 80) return false;
   const digitos = n.replace(/\D/g, '');
   return !(digitos.length >= 8 && digitos === n.replace(/[\s+()-]/g, '')) && digitos !== phone;
+}
+
+/**
+ * Menu → `POST /message/sendButtons` com botões `reply` (o Baileys monta nativeFlow quick_reply).
+ * O título é o cabeçalho do menu ou a 1ª linha do texto; o resto vai na descrição. Rótulo do
+ * botão até 20 caracteres, como na Meta (o WhatsApp corta maior).
+ */
+export function menuButtonsPayload(m: Pick<OutboundMessage, 'text' | 'interactive'>) {
+  const text = (m.text ?? '').trim();
+  const [primeira, ...resto] = text.split('\n');
+  const header = m.interactive?.header?.trim();
+  return {
+    title: (header || primeira || 'Escolha uma opção').slice(0, 60),
+    description: (header ? text : resto.join('\n').trim()) || undefined,
+    footer: m.interactive?.footer?.slice(0, 60) || undefined,
+    buttons: (m.interactive?.options ?? []).slice(0, 3).map((o) => ({ type: 'reply', displayText: o.title.slice(0, 20), id: o.id.slice(0, 256) })),
+  };
 }
