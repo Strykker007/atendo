@@ -3,6 +3,26 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.5.0 — 2026-10-17
+
+- commit para validar
+- feat(chat-interno): canal de suporte entre o cliente e o dono do sistema
+- feat(ui): botão do chat da equipe redesenhado e menu "Mensagens agendadas"
+- feat(chat-interno): responder mensagem, gerenciar membros e apagar grupo
+- fix(chat-interno): trava magnética nas laterais e janela sempre encaixada na tela
+- feat: contatos isentos de ticket e chat interno da equipe
+- feat: import/export de contatos, transferência com aviso e alarme, teste de som
+- wip: grupos restritos, ajustes da agenda, e-mail da equipe e ordenação (em andamento)
+- feat(modelos): configurações de atendimento no modelo de perfil
+- feat(conversas): excluir a conversa inteira, preservando o ledger de cobrança
+- feat(agendadas): tela com todas as mensagens agendadas, filtros e cancelamento
+- feat(admin): filtrar clientes por presença e conexão dos números
+- feat(fluxos): ordenar a lista de fluxos arrastando
+- feat(fluxos): menu do fluxo como botões clicáveis no QR (Evolution)
+- feat(atendimento): encerramento sem venda e assinatura obrigatória
+- feat(meta): templates com mídia e botões dinâmicos, inscrição na WABA e erros em português
+- perf: painel recarrega menos, mídia com cache, backup de madrugada e teto de CPU no evolution-db
+
 ## 1.4.1 — 2026-10-16
 
 - fix(envio): mensagem do atendente não espera atrás de automática segurada pela proteção
