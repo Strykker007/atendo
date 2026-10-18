@@ -73,8 +73,14 @@ export interface ParsedWebhook {
     phone?: string;
     /** true = estado intermediário (ex.: 'connecting' logo após parear) — não deve derrubar um número conectado */
     transient?: boolean;
-    /** true = o celular removeu o dispositivo / sessão encerrada; precisa de QR novo */
+    /** true = fechamento definitivo (401/402/403/406): sessão encerrada ou conta restrita; precisa de QR novo */
     loggedOut?: boolean;
+    /** estado cru do provider (Evolution: open | connecting | close | refused) */
+    state?: string;
+    /** código do fechamento (Evolution `statusReason`; 200 no open) */
+    statusReason?: number;
+    /** instante do evento no relógio do provider (Evolution `date_time` — hora local com "Z", não UTC) */
+    at?: string;
   };
 }
 
@@ -119,6 +125,11 @@ export interface WhatsAppProvider {
   /** Reinicia a sessão sem novo pareamento (Evolution: socket zumbi). Opcional. */
   restart?(ctx: NumberContext): Promise<void>;
   getStatus(ctx: NumberContext): Promise<NumberStatus>;
+  /**
+   * A sessão responde? Consulta leve ao WhatsApp pela própria sessão; lança se não responder no
+   * prazo. Só Evolution (session-probe.ts) — a Meta não tem sessão.
+   */
+  probe?(ctx: NumberContext): Promise<void>;
 
   /**
    * `media.data` (Buffer) é preenchido pelo OutboundProcessor a partir do storage —

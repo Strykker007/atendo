@@ -74,7 +74,7 @@ versão do Compose do servidor — fica para depois de conferi-la (`docker compo
 
 `bash scripts/test/deploy-isolation.test.sh` (precisa de Docker local; não fala com servidor) sobe um
 projeto compose falso, com os mesmos nomes, `depends_on`, profile e imagem interpolada da produção, e
-roda **os mesmos comandos** que os scripts geram. 38 verificações, entre elas:
+roda **os mesmos comandos** que os scripts geram. 37 verificações, entre elas:
 
 - deploy comum com app, tag da Evolution e config do Redis mudadas → recria `api` e **não** recria
   nem reinicia `evolution`, `evolution-db`, `postgres` e `redis` (id e horário de início iguais), com

@@ -5,6 +5,8 @@ export const QUEUE_BILLING = 'billing';
 export interface InboundJob {
   provider: 'meta' | 'evolution';
   body: unknown;
+  /** quando o webhook chegou (epoch ms, nosso relógio) — ordem dos connection.update (connection-events.ts) */
+  receivedAt?: number;
 }
 export interface OutboundJob {
   messageId: string;

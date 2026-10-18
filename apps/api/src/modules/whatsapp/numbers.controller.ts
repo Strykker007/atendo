@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Logger, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpException, HttpStatus, Logger, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ProviderRegistry } from './providers/provider.registry';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
@@ -272,6 +272,11 @@ export class NumbersController {
     const provider = this.registry.get(n.provider);
     if (!provider.restart) throw new BadRequestException('Este tipo de conexão não tem reinício.');
     if (n.status !== 'connected') throw new BadRequestException('O número não está conectado — use Conectar (QR).');
+    // mesma vaga do restart automático (OutboundProcessor): dois restarts juntos criam dois sockets
+    // para a mesma sessão, e o WhatsApp derruba um deles (440) — docs/28
+    if (!(await this.numbers.claimRestart(n.id))) {
+      throw new HttpException('Esta conexão já foi reiniciada há pouco (pelo painel ou automaticamente). Aguarde 2 minutos antes de reiniciar de novo.', HttpStatus.TOO_MANY_REQUESTS);
+    }
     await provider.restart(await this.numbers.context(n.id));
     this.log.log(`Número ${n.label} (${n.phone}) reiniciado por ${user.id}`);
     return { ok: true };

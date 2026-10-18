@@ -115,7 +115,7 @@ A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (t�
 **Por que o restart não resolvia** (Drogaria Pontual, 13/10/2026: ~1h20 sem enviar nem receber, 6 envios falhos): logo depois de ler o QR, a instância sincronizava ~1.000 contatos; o pool do Prisma da Evolution (padrão 9 conexões para 34 instâncias) esgotou (`P2024` / `deadlock detected`) e a reconexão pedida pelo WhatsApp (`stream:error 515`) nasceu morta com o estado `open`. O restart da 2.3.7 fecha o socket (já fechado: o `end()` do Baileys sai em `if (closed) return`, sem evento de close) e chama o connect, que vê `open` e não faz nada — dezenas de restarts sem efeito. Correções:
 - `infra/evolution/patch-evolution-restart.mjs`: depois de fechar, se em 3 s nenhum socket novo apareceu, o restart cria um com as credenciais salvas (sem QR); "Socket novo" é outro objeto em `client` — o zumbi mantém `ws.isOpen` verdadeiro, e a 1ª versão (que olhava só isso) não reconectava (Drog. Kelly I, 17/10/2026). Mudou o patch: **rebuild da imagem da Evolution e restart do container**, que reconecta todos os números — fazer de madrugada.
 - `DATABASE_CONNECTION_URI` da Evolution com `connection_limit=40&pool_timeout=30` (o Postgres dela aceita 100);
-- `NumbersService.claimRestart`: no máximo um restart automático por número a cada 2 min entre todos os workers — antes era um por envio falho, e com o restart que recria o socket isso abriria sockets duplicados.
+- `NumbersService.claimRestart`: no máximo um restart por número a cada 2 min entre todos os workers — automático **ou pelo painel** (`POST /numbers/:id/restart` responde 429 dentro da janela, [28](28-estabilizacao-conexao.md)). Antes era um por envio falho, e o manual não tinha trava; com o restart que recria o socket isso abriria sockets duplicados.
 
 ### Sincronização ao reconectar
 
@@ -180,7 +180,7 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 | `messages.edited` | Edição de mensagem (ver tabela de tipos) |
 | `contacts.upsert` / `contacts.update` | Nome da agenda do celular → `contacts.name` com origem `agenda` (ver [De onde vem o nome do contato](#de-onde-vem-o-nome-do-contato-contactsnamesource)). Enfileirados com 30 s de atraso |
 | `messages.update` | Status (texto ou número do Baileys): `SERVER_ACK`/2→sent, `DELIVERY_ACK`/3→delivered, `READ`/4 e `PLAYED`/5 (áudio ouvido)→read, `ERROR`/0→failed. `InboundService.applyStatus` não deixa regredir (e ignora falha tardia de algo já entregue) e reemite a mensagem pelo evento `message` do socket |
-| `connection.update` | `open`→connected; `connecting` é **transitório** (o WhatsApp reinicia o socket logo após parear) e não derruba um número já conectado; `close` com `statusReason 401`→ deslogado pelo celular (dispositivo removido). Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone é corrigido |
+| `connection.update` | `open`→connected; `connecting` é **transitório** (o WhatsApp reinicia o socket logo após parear) e não derruba um número já conectado; `close` com `statusReason` **401/402/403/406** → fechamento definitivo (a Evolution não reconecta e apaga as credenciais: aparelho removido ou conta restrita). Todo evento é registrado e o atrasado não sobrescreve o mais novo ([28](28-estabilizacao-conexao.md)). Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone é corrigido |
 | `qrcode.updated` | QR novo → painel atualiza pelo socket |
 | `presence.update` | "Digitando…"/"gravando áudio…" do contato (`composing`/`recording`; o resto vira `paused`). Não grava nada: acha a conversa do contato no número e emite `typing` no socket. Exige `WEBHOOK_EVENTS_PRESENCE_UPDATE=true` no compose **e** assinatura: o WhatsApp só manda o "digitando" de quem você assinou (`presenceSubscribe`), e a Evolution só assina nos chatbots dela. Por isso `POST /conversations/:id/read` (abrir a conversa) chama `NumbersService.subscribePresence` → `POST /chat/sendPresence` com `presence: 'paused'` (assina sem o contato ver nada), no máximo uma vez a cada 2 min por contato. A assinatura cai quando a sessão da Evolution reconecta; reabrir a conversa assina de novo. Grupos ignorados. **Meta não tem equivalente** — a Cloud API não avisa quando o contato digita, então números oficiais nunca mostram o indicador |
 
@@ -303,7 +303,7 @@ antigos removidos **antes** de ler o QR. Não fica gravado; serve para obrigar a
 Não usado: a instância sai pelo IP do servidor. Avaliar proxy brasileiro (Evolution `/proxy/set`
 por instância) só se o servidor estiver fora do Brasil.
 
-### Quando o WhatsApp derruba o número (`401 device_removed`)
+### Quando o WhatsApp derruba o número (`401 device_removed`, `403`, `402`, `406`)
 
 O WhatsApp pode encerrar sozinho a sessão do "aparelho conectado" (a Evolution): o
 `connection.update` chega com `state: close` e `statusReason: 401` (`stream:error` `conflict
@@ -313,7 +313,8 @@ motivou isto: Drogaria Total, duas quedas em 17 h no primeiro dia de uso, recone
 depois da segunda — e a conta terminou restrita, com o padrão de envio saudável (≈ tantas
 enviadas quanto recebidas, sem campanha).
 
-- **Detecção** (`InboundService.numberConnectionChanged`): 401 com o número **conectado** grava
+- **Detecção** (`InboundService.numberConnectionChanged`): fechamento definitivo — 401, ou 402/403/406
+  (conta restrita/banida, antes tratados como desconexão comum, sem pausa) — com o número **conectado** grava
   `waRemovedAt`, `waRemovedCount` e `reconnectBlockedUntil` (`whatsapp/number-removal.ts`,
   migração `20261029000600_number_wa_removed`). O "Desconectar"/"Excluir" do painel marca
   `disconnected` **antes** do logout, então o 401 do próprio logout não conta como queda.

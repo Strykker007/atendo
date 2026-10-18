@@ -16,6 +16,7 @@ import { SurveyRunnerService, type SurveyClaim } from '../satisfaction/survey-ru
 import { decidirEntrada, ehConfirmacao, naCarencia, voltandoDepoisDeEncerrado } from './reopen';
 import { agendaParaRestaurar, escolherDaAgenda, normalizeContactName, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
+import { DEFINITIVE_CLOSE } from '../whatsapp/connection-events';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
 import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
 
@@ -606,14 +607,15 @@ export class InboundService {
     if (conversation) this.gateway.emitTyping(number.tenantId, { conversationId: conversation.id, state: p.state });
   }
 
-  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean }) {
+  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean; statusReason?: number }) {
     // Logo após parear, o WhatsApp reinicia o socket ('connecting'): é sincronização, não queda.
     // Um número já conectado não regride por causa disso.
     if (c.transient && number.status === 'connected') return;
-    // 401 com o número CONECTADO = o WhatsApp (ou alguém no celular) removeu o aparelho. O
+    // Fechamento definitivo (401/402/403/406, connection-events.ts) com o número CONECTADO = o
+    // WhatsApp (ou alguém no celular) removeu o aparelho ou restringiu a conta. O
     // "Desconectar" do painel marca `disconnected` antes de chamar o provider, então não cai aqui.
     const removido = c.loggedOut && number.status === 'connected' ? planRemoval(number, new Date()) : null;
-    if (removido) this.log.warn(`Número ${number.label} (${number.phone}) removido pelo WhatsApp (401 device_removed) — queda ${removido.waRemovedCount} em 24h, reconexão em pausa até ${removido.reconnectBlockedUntil.toISOString()}`);
+    if (removido) this.log.warn(`Número ${number.label} (${number.phone}) removido pelo WhatsApp (${c.statusReason ?? 401}: ${DEFINITIVE_CLOSE[c.statusReason ?? 401] ?? 'fechamento definitivo'}) — queda ${removido.waRemovedCount} em 24h, reconexão em pausa até ${removido.reconnectBlockedUntil.toISOString()}`);
     // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
     const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
     // Aquecimento desligado (a pedido): número novo não começa mais com teto de envios por dia.
