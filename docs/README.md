@@ -47,5 +47,6 @@
 | [23 — Evolution: desempenho](23-evolution-desempenho.md) | Ops | Incidente de CPU de 16/10/2026: índices no banco da Evolution, teto do histórico, manutenção de `shared_buffers` e limite de CPU |
 | [24 — Auditoria da Evolution](24-auditoria-evolution.md) | Dev / Ops / Negócio | Banimentos, desconexões e webhooks travando: causas confirmadas no código da Evolution 2.3.7, correções priorizadas e alternativas (base segue no QR; Cloud API só por cliente) |
 | [25 — Atualização da Evolution e CVE-2026-48063](25-estrategia-atualizacao-evolution.md) | Dev / Ops | 2.3.7 × 2.4.0-rc2 × develop, Baileys rc.9→rc14, backport da CVE, matriz de risco, testes e piloto (proposta aguardando autorização) |
+| [26 — Backport da CVE-2026-48063](26-backport-cve-2026-48063.md) | Dev / Ops | Patches no build da Evolution 2.3.7 (Baileys rc.9), testes de regressão, evidências, deploy e rollback |
 
 Convenção: código em inglês, comentários e documentação em português.

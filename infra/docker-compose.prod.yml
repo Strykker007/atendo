@@ -98,7 +98,7 @@ services:
     # v2.3.7 + patch do nó <biz> no Baileys (infra/evolution): sem ele os botões nativos (Pix
     # "Copiar chave Pix") são entregues mas o celular não mostra. A versão base fica no Dockerfile.
     build: ./evolution
-    image: atendo/evolution-api:v2.3.7-biz
+    image: atendo/evolution-api:v2.3.7-atendo.2
     restart: unless-stopped
     # só prioridade, sem teto: ela recebe as mensagens de todos os números, e um teto atrasaria
     # mensagem chegando

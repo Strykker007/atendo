@@ -1,6 +1,6 @@
 # 25 — Estratégia de atualização da Evolution / Baileys e CVE-2026-48063 (18/10/2026)
 
-**Status: proposta, aguardando autorização.** Nada foi alterado em produção, nenhuma dependência
+**Status: alternativa A aprovada em 18/10/2026; etapa 1 (CVE) implementada — ver [26](26-backport-cve-2026-48063.md).** Nada foi alterado em produção, nenhuma dependência
 foi atualizada e nenhuma instância foi reiniciada. Base: repositório
 `evolution-foundation/evolution-api` (o antigo `EvolutionAPI/evolution-api` redireciona para ele;
 refs idênticas), `WhiskeySockets/Baileys`, `WhiskeySockets/libsignal-node` e os pacotes npm

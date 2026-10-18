@@ -331,7 +331,7 @@ enviadas quanto recebidas, sem campanha).
 
 A imagem é **fixa**: `infra/evolution/Dockerfile` parte de `evoapicloud/evolution-api:v2.3.7`
 (amd64 e arm64) e os dois `infra/docker-compose*.yml` fazem `build: ./evolution`
-(`atendo/evolution-api:v2.3.7-biz`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
+(`atendo/evolution-api:v2.3.7-atendo.2`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
 sem teste — e é ele que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número
 de teste, depois trocar o `FROM` e fazer o deploy (`docker compose … up -d --build evolution`).
 
@@ -340,6 +340,11 @@ manda `interactiveMessage` sem o nó `<biz>` que o WhatsApp exige para botões n
 volta `delivered` e o aparelho não mostra nada. O patch acrescenta o nó no `relayMessage`
 (`native_flow_name="payment_info"` para Pix; `native_flow v=9 mixed` para copiar/link/ligar).
 Se a âncora mudar numa versão nova, o build falha de propósito.
+
+**Patches de segurança** ([26](26-backport-cve-2026-48063.md)): backport da CVE-2026-48063 no Baileys
+(`patch-baileys-cve-2026-48063.mjs`) e gatilhos de texto `requestPlaceholder`/`onDemandHistSync` só
+pelo próprio celular (`patch-evolution-placeholder-triggers.mjs`). Os testes de
+`infra/evolution/verify-patches.test.mjs` rodam no build: se falharem, a imagem não é gerada.
 
 ## Mensagem enviada pelo celular do cliente
 
