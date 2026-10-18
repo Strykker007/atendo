@@ -54,7 +54,7 @@ bash scripts/deploy-evolution.sh ubuntu@IP rollback   # volta para a imagem ante
 
 - `profiles: ["evolution"]` no serviço `evolution`: um `docker compose up -d` digitado à mão, sem nome
   de serviço, **ignora** a Evolution. Os comandos que precisam dela levam `--profile evolution`.
-- `image: ${EVOLUTION_IMAGE:-atendo/evolution-api:v2.3.7-atendo.2}`: o padrão é a imagem do repositório;
+- `image: ${EVOLUTION_IMAGE:-atendo/evolution-api:v2.3.7-atendo.3}`: o padrão é a imagem do repositório;
   a variável só existe para o rollback.
 - Compose de desenvolvimento (`infra/docker-compose.yml`) **não mudou**: `pnpm infra:up` sobe tudo.
 

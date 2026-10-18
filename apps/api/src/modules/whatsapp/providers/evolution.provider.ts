@@ -558,6 +558,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         out.connection = {
           externalNumberId, status: this.mapConnection(data?.state), phone, transient: data?.state === 'connecting', loggedOut,
           state: typeof data?.state === 'string' ? data.state : undefined, statusReason, at: typeof body?.date_time === 'string' ? body.date_time : undefined,
+          order: connectionOrder(data),
         };
         break;
       }
@@ -684,6 +685,15 @@ export function evolutionFetchError(err: unknown, path: string, timeoutMs: numbe
   const code = (err as { cause?: { code?: string } })?.cause?.code;
   if (code && /^(ECONNREFUSED|ENOTFOUND|EAI_AGAIN)$/.test(code)) return new Error(`Evolution indisponível (${code}) em ${rota}`);
   return err instanceof Error ? err : new Error(String(err));
+}
+
+/** Carimbo da guarda de conexão (atendoBoot/atendoSeq inteiros positivos); imagem sem a guarda → undefined. */
+export function connectionOrder(data: any): { boot: number; seq: number; gen?: number } | undefined {
+  const boot = Number(data?.atendoBoot);
+  const seq = Number(data?.atendoSeq);
+  if (!Number.isSafeInteger(boot) || !Number.isSafeInteger(seq) || boot <= 0 || seq <= 0) return undefined;
+  const gen = Number(data?.atendoGen);
+  return { boot, seq, ...(Number.isSafeInteger(gen) && gen >= 0 ? { gen } : {}) };
 }
 
 /** Resposta do `fetchAllGroups` → só grupos válidos (`@g.us`), sem repetição. */

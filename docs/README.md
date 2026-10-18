@@ -50,5 +50,6 @@
 | [26 — Backport da CVE-2026-48063](26-backport-cve-2026-48063.md) | Dev / Ops | Patches no build da Evolution 2.3.7 (Baileys rc.9), testes de regressão, evidências, deploy e rollback |
 | [27 — Deploy isolado da Evolution](27-deploy-evolution.md) | Ops | Deploy comum não recria Evolution/Postgres/Redis; `deploy-evolution.sh` (build, up, rollback) e testes |
 | [28 — Estabilização da conexão](28-estabilizacao-conexao.md) | Dev / Ops | Etapas dos P0/P1: prazos na Evolution, restart com trava, 401/402/403/406, registro e ordem do connection.update, sonda de sessão zumbi |
+| [29 — Reconexão na Evolution](29-reconexao-evolution.md) | Dev / Ops | Guarda de conexão na 2.3.7: uma conexão por instância, gerações de socket, backoff com jitter, 440 sem disputa, medições antes/depois e piloto |
 
 Convenção: código em inglês, comentários e documentação em português.

@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import Redis from 'ioredis';
 import { NumberStatus } from '@atendo/shared';
 import {
+  connectionOrder,
   EVOLUTION_MEDIA_TIMEOUT_MS,
   EVOLUTION_TIMEOUT_MS,
   EvolutionProvider,
@@ -11,7 +12,7 @@ import {
   evolutionTimeoutMs,
 } from '../src/modules/whatsapp/providers/evolution.provider';
 import { isTransientSendError, ProviderTimeoutError } from '../src/modules/whatsapp/providers/provider-error';
-import { connKeys, eventTime, isDefinitiveClose, MAX_EVENT_LAG_MS, ORDER_LUA, orderDecision } from '../src/modules/whatsapp/connection-events';
+import { BOOT_SWITCH_WINDOW_MS, connKeys, eventTime, isDefinitiveClose, ORDER_LUA, ORDER_SEQ_LUA, orderDecision, parseStoredOrder } from '../src/modules/whatsapp/connection-events';
 import { nextProbeState, PROBE_AFTER_SILENCE_MS, shouldProbe } from '../src/modules/whatsapp/session-probe';
 
 const provider = new EvolutionProvider();
@@ -110,10 +111,43 @@ describe('ordem dos connection.update', () => {
     expect(orderDecision({ at: t('2026-10-18T09:00:00Z'), lastAt: null }).apply).toBe(true);
   });
 
-  it('diferença maior que a janela de retentativa = relógio da Evolution voltou: aplica', () => {
+  it('sem carimbo, date_time mais velho NUNCA sobrescreve (sem atalho por diferença de horário)', () => {
     const last = t('2026-10-18T12:00:00Z');
-    expect(orderDecision({ at: last - MAX_EVENT_LAG_MS, lastAt: last }).apply).toBe(false);
-    expect(orderDecision({ at: last - MAX_EVENT_LAG_MS - 1, lastAt: last }).apply).toBe(true);
+    expect(orderDecision({ at: last - 10 * 3_600_000, lastAt: last })).toEqual({ apply: false, reason: 'older_than_last' });
+  });
+
+  // carimbo da guarda de conexão (docs/29)
+  const o = (boot: number, seq: number) => ({ boot, seq });
+  it('com carimbo: (boot, seq) estritamente crescente; igual é retentativa duplicada', () => {
+    expect(orderDecision({ order: o(5, 10), lastOrder: o(5, 9), at: null, lastAt: null }).apply).toBe(true);
+    expect(orderDecision({ order: o(5, 9), lastOrder: o(5, 10), at: null, lastAt: null })).toEqual({ apply: false, reason: 'older_than_last' });
+    expect(orderDecision({ order: o(5, 10), lastOrder: o(5, 10), at: null, lastAt: null })).toEqual({ apply: false, reason: 'duplicate' });
+    expect(orderDecision({ order: o(6, 1), lastOrder: o(5, 900), at: null, lastAt: null }).apply).toBe(true); // processo novo
+  });
+
+  it('com carimbo, o date_time não importa (relógio da Evolution pode estar errado)', () => {
+    expect(orderDecision({ order: o(5, 11), lastOrder: o(5, 10), at: 1, lastAt: 9_999_999 }).apply).toBe(true);
+  });
+
+  it('boot anterior: atrasado enquanto o processo antigo podia estar vivo; depois, contador recomeçado', () => {
+    const seenAt = 1_000_000;
+    const last = { ...o(9, 3), seenAt };
+    expect(orderDecision({ order: o(8, 50), lastOrder: last, at: null, lastAt: null, receivedAt: seenAt + 60_000 })).toEqual({ apply: false, reason: 'older_than_last' });
+    expect(orderDecision({ order: o(1, 1), lastOrder: last, at: null, lastAt: null, receivedAt: seenAt + BOOT_SWITCH_WINDOW_MS + 1 })).toEqual({ apply: true, reason: 'boot_reset' });
+  });
+
+  it('parser lê o carimbo; sem ele (imagem antiga) cai no date_time', () => {
+    expect(connectionOrder({ atendoBoot: 1760000000, atendoSeq: 42, atendoGen: 3 })).toEqual({ boot: 1760000000, seq: 42, gen: 3 });
+    expect(connectionOrder({ state: 'open' })).toBeUndefined();
+    expect(connectionOrder({ atendoBoot: 'x', atendoSeq: 1 })).toBeUndefined();
+    expect(connectionOrder({ atendoBoot: 1, atendoSeq: -1 })).toBeUndefined();
+    const c = provider.parseWebhook({ event: 'connection.update', instance: INSTANCE, data: { state: 'open', statusReason: 200, atendoBoot: 7, atendoSeq: 9, atendoGen: 2 } }).connection!;
+    expect(c.order).toEqual({ boot: 7, seq: 9, gen: 2 });
+  });
+
+  it('parseStoredOrder', () => {
+    expect(parseStoredOrder('7:9:123')).toEqual({ boot: 7, seq: 9, seenAt: 123 });
+    expect(parseStoredOrder('')).toBeNull();
   });
 
   it('sem date_time aplica (como antes), marcando o motivo', () => {
@@ -128,24 +162,37 @@ describe('ordem dos connection.update', () => {
   });
 
   // Lua real: só com REDIS_TEST_URL (os testes não sobem Redis — test/setup.ts)
-  it.skipIf(!process.env.REDIS_TEST_URL)('script Lua: compara e grava num passo só', async () => {
+  it.skipIf(!process.env.REDIS_TEST_URL)('Lua do date_time: estrito, sem atalho', async () => {
     const r = new Redis(process.env.REDIS_TEST_URL!);
     const k = connKeys.lastAt(`teste-${Date.now()}`);
     try {
-      const lag = MAX_EVENT_LAG_MS;
-      const base = 10 * lag;
-      expect(await r.eval(ORDER_LUA, 1, k, base, 60, lag)).toEqual([1, '']);
-      expect(await r.eval(ORDER_LUA, 1, k, base - 1000, 60, lag)).toEqual([0, String(base)]); // atrasado
-      expect(await r.get(k)).toBe(String(base));
-      expect(await r.eval(ORDER_LUA, 1, k, base, 60, lag)).toEqual([1, String(base)]); // empate aplica
-      expect(await r.eval(ORDER_LUA, 1, k, base + 1000, 60, lag)).toEqual([1, String(base)]);
-      expect(await r.eval(ORDER_LUA, 1, k, base - 2 * lag, 60, lag)).toEqual([1, String(base + 1000)]); // relógio voltou
-      expect(await r.get(k)).toBe(String(base - 2 * lag));
+      expect(await r.eval(ORDER_LUA, 1, k, 5_000_000, 60)).toEqual([1, '']);
+      expect(await r.eval(ORDER_LUA, 1, k, 4_000_000, 60)).toEqual([0, '5000000']);
+      expect(await r.eval(ORDER_LUA, 1, k, 1, 60)).toEqual([0, '5000000']); // muito mais velho também não
+      expect(await r.eval(ORDER_LUA, 1, k, 5_000_000, 60)).toEqual([1, '5000000']); // empate aplica
       expect(await r.ttl(k)).toBeGreaterThan(0);
-    } finally {
-      await r.del(k);
-      r.disconnect();
-    }
+    } finally { await r.del(k); r.disconnect(); }
+  });
+
+  it.skipIf(!process.env.REDIS_TEST_URL)('Lua do carimbo: mesma regra da função pura', async () => {
+    const r = new Redis(process.env.REDIS_TEST_URL!);
+    const k = connKeys.lastOrder(`teste-${Date.now()}`);
+    const W = BOOT_SWITCH_WINDOW_MS;
+    const ev = (boot: number, seq: number, now: number) => r.eval(ORDER_SEQ_LUA, 1, k, boot, seq, now, 60, W);
+    try {
+      expect(await ev(9, 3, 1_000)).toEqual([1, '']);
+      expect(await r.get(k)).toBe('9:3:1000');
+      expect(await ev(9, 3, 2_000)).toEqual([0, '9:3:1000']); // duplicata
+      expect(await ev(9, 2, 2_000)).toEqual([0, '9:3:1000']); // atrasado
+      expect(await ev(9, 4, 3_000)).toEqual([1, '9:3:1000']);
+      expect(await r.get(k)).toBe('9:4:1000'); // seenAt é de quando o boot apareceu
+      expect(await ev(8, 99, 1_000 + W)).toEqual([0, '9:4:1000']); // boot velho dentro da janela (conta do seenAt)
+      expect(await ev(10, 1, 5_000)).toEqual([1, '9:4:1000']); // processo novo
+      expect(await r.get(k)).toBe('10:1:5000');
+      expect(await ev(1, 1, 5_000 + W + 1)).toEqual([1, '10:1:5000']); // contador recomeçou
+      expect(await r.get(k)).toBe(`1:1:${5_000 + W + 1}`);
+      expect(await r.ttl(k)).toBeGreaterThan(0);
+    } finally { await r.del(k); r.disconnect(); }
   });
 });
 

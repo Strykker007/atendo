@@ -103,6 +103,28 @@ test('patches aplicados uma vez e trechos originais removidos', () => {
   }
 });
 
+test('guarda de conexão carregada no topo e pontos de chamada no lugar (main.js e main.mjs)', () => {
+  const calls = { connect: 2, retire: 1, adopt: 1, filterStale: 1, stamp: 1, onClose: 1, onDefinitiveClose: 1, onOpen: 1, cancel: 2, restart: 1 };
+  for (const f of ['main.js', 'main.mjs']) {
+    const src = readFileSync(`${DIST}/${f}`, 'utf8');
+    assert.ok(src.startsWith(f === 'main.js' ? 'require("' : 'import "'), `${f} carrega a guarda antes do bundle`);
+    assert.equal(count(src, '/*atendo-connection*/'), 1);
+    for (const [fn, n] of Object.entries(calls)) assert.equal(count(src, `globalThis.__atendoConn.${fn}(`), n, `${f}: ${fn}`);
+    // a reconexão imediata da 2.3.7 não pode sobrar
+    assert.equal(count(src, '.includes(i)?await this.connectToWhatsapp(this.phoneNumber):'), 0, `${f}: reconexão imediata`);
+    assert.equal(count(src, 'async __atendoConnect(e){try{return this.loadChatwoot()'), 1);
+  }
+});
+
+test('guarda de conexão define globalThis.__atendoConn', async () => {
+  const guard = process.env.ATENDO_GUARD_PATH ?? '/evolution/atendo/connection-guard.cjs';
+  const { createRequire } = await import('node:module');
+  createRequire(import.meta.url)(guard);
+  for (const fn of ['connect', 'restart', 'retire', 'adopt', 'filterStale', 'stamp', 'onClose', 'onOpen', 'onDefinitiveClose', 'cancel']) {
+    assert.equal(typeof globalThis.__atendoConn[fn], 'function', fn);
+  }
+});
+
 test('bundles da Evolution continuam válidos (node --check)', () => {
   for (const f of ['main.js', 'main.mjs']) {
     const r = spawnSync(process.execPath, ['--check', `${DIST}/${f}`], { encoding: 'utf8' });

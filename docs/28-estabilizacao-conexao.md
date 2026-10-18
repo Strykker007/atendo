@@ -7,7 +7,7 @@ Etapas independentes, cada uma com seus testes e rollback. Referências: [24](24
 |---|---|---|
 | 1 | Deploy comum não reconstrói nem reinicia a Evolution | ✅ implementada — doc 27 |
 | 2 | Gerenciamento de conexões no Atendo (este doc) | ✅ implementada, sem deploy |
-| 3 | Reconexão na Evolution (exclusividade, backoff) | aguardando autorização |
+| 3 | Reconexão na Evolution (exclusividade, backoff) — e revisão da ordem do 2.5 | ✅ implementada, sem deploy — doc 29 |
 | 4 | Webhooks (eventos, timeouts) | pendente |
 | 5 | Redis próprio da Evolution (plano) | pendente |
 
@@ -77,22 +77,34 @@ docker exec atendo-prod-redis-1 redis-cli LRANGE wa:conn:log:<numberId> 0 20
 ### 2.5 Evento atrasado não sobrescreve o mais novo
 
 A fila de entrada roda em paralelo (20 jobs) e a Evolution repete webhook falho por ~25 min, então
-um `open` velho podia chegar depois de um `close`. Regra (`orderDecision`, mais o Lua `ORDER_LUA`
-que compara e grava num passo só):
+um `open` velho podia chegar depois de um `close`. **Revisado na etapa 3** (doc 29): a 1ª versão
+tinha um atalho que aplicava evento com `date_time` mais de 35 min mais velho ("o relógio voltou"),
+e com ele um evento obsoleto podia sobrescrever o estado. Regra atual (`orderDecision`, mais os Lua
+`ORDER_SEQ_LUA` e `ORDER_LUA`, que comparam e gravam num passo só):
 
-- **Último aplicado:** guarda o `date_time` do último evento aplicado por número
-  (`wa:conn:at:<id>`). Evento com `date_time` menor é ignorado. Empate aplica.
-- **O `date_time` da 2.3.7 é a hora local com "Z", não UTC:** só se compara com outro `date_time`
-  dela.
-- **Relógio que voltou:** diferença maior que 35 min (`MAX_EVENT_LAG_MS`, acima da janela de
-  retentativa) não é atraso, é o relógio da Evolution que voltou. Aplica e recomeça.
-- **Correção do health check:** quando o health check corrige o status lendo o estado real, grava a
-  hora (`wa:conn:hc:<id>`). Webhook que **chegou** antes disso (`receivedAt`, nosso relógio, gravado
-  no controller) é ignorado.
-- **Sem `date_time` ou Redis fora do ar:** aplica, como antes.
+1. **Correção do health check:** quando o health check corrige o status lendo o estado real, grava
+   a hora (`wa:conn:hc:<id>`). Webhook que **chegou** antes disso (`receivedAt`, nosso relógio,
+   gravado no controller) é ignorado.
+2. **Carimbo da guarda de conexão** (imagem `v2.3.7-atendo.3`+): `atendoBoot` (cresce a cada
+   início do processo da Evolution; arquivo no volume + piso no relógio), `atendoSeq` (cresce a cada
+   mudança de estado no processo) e `atendoGen` (geração do socket).
+   - Ordem total por `(boot, seq)`, sem depender de relógio. Igual = retentativa duplicada,
+     ignorada. Menor = atrasado, ignorado.
+   - **Boot menor:** só é atrasado nos 40 min depois de o boot atual aparecer
+     (`BOOT_SWITCH_WINDOW_MS`), porque as retentativas da Evolution morrem com o processo antigo.
+     Depois disso, é o contador que recomeçou (volume perdido): aplica e recomeça (`boot_reset`).
+   - Referência em `wa:conn:ord:<id>` = `boot:seq:quando-o-boot-apareceu`.
+3. **Sem carimbo** (imagem antiga, durante a transição): `date_time` estrito. Mais velho nunca
+   sobrescreve, sem atalho. O `date_time` da 2.3.7 é a hora local com "Z" (conferido no webhook
+   real: 13:21 "Z" às 16:21 UTC) e só se compara com outro `date_time` dela.
+   - **Reconciliação:** a correção do health check também **zera** esta referência
+     (`wa:conn:at:<id>`). Se o relógio da Evolution voltar, os eventos seguintes não ficam presos
+     atrás de um horário do futuro por mais de um ciclo (5 min).
+4. **Sem carimbo nem `date_time`, ou Redis fora do ar:** aplica, como antes.
 
-**Limite:** um webhook velho, repetido pela Evolution depois do health check e sem nenhum evento
-mais novo aplicado, ainda passa. O próximo health check (≤ 5 min) corrige.
+**Limite:** sem carimbo, um webhook velho repetido pela Evolution depois do health check, sem
+nenhum evento mais novo aplicado, ainda passa. Com o carimbo esse caso some: o `seq` dele é menor
+que o do último aplicado.
 
 ### 2.6 Sessão "conectada" mas inoperante — sonda
 
@@ -123,7 +135,7 @@ travada (15 s por chamada), o ciclo passaria dos 5 min.
 | `whatsapp/providers/evolution.provider.ts` | prazos, `evolutionFetchError`, `probe()`, códigos definitivos e `at`/`statusReason` no parser |
 | `whatsapp/providers/provider-error.ts` | `ProviderTimeoutError` (504, nunca transitório) |
 | `whatsapp/providers/provider.interface.ts` | `connection.state/statusReason/at`, `probe?` |
-| `whatsapp/connection-events.ts` | **novo** — códigos, ordem, registro |
+| `whatsapp/connection-events.ts` | **novo** — códigos, ordem (carimbo + date_time, etapa 3), registro |
 | `whatsapp/session-probe.ts` | **novo** — sonda e estado |
 | `whatsapp/health.scheduler.ts` | paralelo (5), marca correção, roda a sonda |
 | `whatsapp/inbound.processor.ts`, `webhooks.controller.ts`, `queues.ts` | `receivedAt` no job; registra e filtra `connection.update` |

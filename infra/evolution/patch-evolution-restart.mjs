@@ -1,23 +1,22 @@
 // Patch do restart de instância da Evolution 2.3.7 (POST /instance/restart/:name).
 //
 // O original fecha o socket e chama o "connect" do controller — que, vendo o estado ainda
-// "open", não faz nada. Com socket zumbi (morto por baixo, estado "open": aconteceu quando a
-// reconexão pedida pelo WhatsApp, stream 515, falhou no meio) o `end()` do Baileys também não
-// faz nada (`if (closed) return`), então nenhum evento de "close" dispara a reconexão: o número
-// fica "conectado" sem enviar nem receber, e restart nenhum resolve (Drogaria Pontual, 2026-10-13).
+// "open", não faz nada. Com socket zumbi (morto por baixo, estado "open"), o `end()` do Baileys
+// também não faz nada (`if (closed) return`): o número fica "conectado" sem enviar nem receber,
+// e restart nenhum resolve (Drogaria Pontual, 2026-10-13; Drog. Kelly I, 17/10/2026).
 //
-// Aqui, depois de fechar, espera a reconexão normal; se nenhum socket novo apareceu, cria um
-// com as credenciais salvas (sem QR). Socket vivo segue o caminho de antes (o evento reconecta).
-//
-// "Socket novo" = OUTRO objeto em `client`. A 1ª versão olhava só `ws.isOpen`, e o zumbi continua
-// com `isOpen` verdadeiro: o restart fechava, esperava, via "aberto" e não fazia nada (Drog. Kelly I,
-// 17/10/2026 — dois restarts, nenhum evento, só o QR resolveu).
+// Desde a etapa 3 (docs/29-reconexao-evolution.md) o restart delega à guarda de conexão
+// (atendo/connection-guard.cjs, carregada por patch-evolution-connection.mjs): ela aposenta o
+// socket atual — o close dele não dispara outra reconexão —, cria UM socket novo com as
+// credenciais salvas (sem QR) e junta restarts simultâneos numa operação só. A versão anterior
+// esperava 3 s e criava outro socket se o objeto não tivesse mudado, e podia correr junto com a
+// reconexão da própria Evolution (dois sockets → 440).
 // Falha o build se não achar o trecho: versão nova pede revisão.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const FILES = ['/evolution/dist/main.js', '/evolution/dist/main.mjs'];
 const ORIGINAL = 'e.client?.ws?.close(),e.client?.end(new Error("restart")),await this.connectToWhatsapp({instanceName:s})';
-const PATCHED = 'e.__atendoAntes=e.client,e.client?.ws?.close(),e.client?.end(new Error("restart")),await new Promise(o=>setTimeout(o,3e3)),(e.client!==e.__atendoAntes&&(e.client?.ws?.isOpen||e.client?.ws?.isConnecting)||await e.connectToWhatsapp(e.phoneNumber)),await new Promise(o=>setTimeout(o,2e3)),await this.connectionState({instanceName:s})/*atendo-restart*/';
+const PATCHED = 'await globalThis.__atendoConn.restart(e),await new Promise(o=>setTimeout(o,2e3)),await this.connectionState({instanceName:s})/*atendo-restart*/';
 
 for (const file of FILES) {
   let src = readFileSync(file, 'utf8');

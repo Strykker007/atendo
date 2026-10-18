@@ -81,6 +81,8 @@ export interface ParsedWebhook {
     statusReason?: number;
     /** instante do evento no relógio do provider (Evolution `date_time` — hora local com "Z", não UTC) */
     at?: string;
+    /** carimbo de ordem da guarda de conexão da Evolution (atendoBoot/atendoSeq/atendoGen; docs/29) */
+    order?: { boot: number; seq: number; gen?: number };
   };
 }
 
