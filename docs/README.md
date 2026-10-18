@@ -46,5 +46,6 @@
 | [22 — Agente de IA](22-agente-ia.md) | Dev / Produto | Plano: agente que atende e negocia com ferramentas e limites, e onde mais a IA entra no produto |
 | [23 — Evolution: desempenho](23-evolution-desempenho.md) | Ops | Incidente de CPU de 16/10/2026: índices no banco da Evolution, teto do histórico, manutenção de `shared_buffers` e limite de CPU |
 | [24 — Auditoria da Evolution](24-auditoria-evolution.md) | Dev / Ops / Negócio | Banimentos, desconexões e webhooks travando: causas confirmadas no código da Evolution 2.3.7, correções priorizadas e alternativas (base segue no QR; Cloud API só por cliente) |
+| [25 — Atualização da Evolution e CVE-2026-48063](25-estrategia-atualizacao-evolution.md) | Dev / Ops | 2.3.7 × 2.4.0-rc2 × develop, Baileys rc.9→rc14, backport da CVE, matriz de risco, testes e piloto (proposta aguardando autorização) |
 
 Convenção: código em inglês, comentários e documentação em português.

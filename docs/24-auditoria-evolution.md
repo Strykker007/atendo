@@ -249,7 +249,7 @@ tempo da seção 8.3. Sem ela, qualquer atribuição (inclusive à Evolution) é
     acima do aceitável.
 17. Medir **event loop lag** e memória da Evolution; com ~100 números, shard (`EvolutionProvider.shard`).
 
-Atualização de versão: **ficar na 2.3.7**. Reavaliar quando houver tag estável (não `-rc`) que
+Atualização de versão: **ficar na 2.3.7** (análise completa e CVE-2026-48063 do Baileys rc.9 em [25](25-estrategia-atualizacao-evolution.md)). Reavaliar quando houver tag estável (não `-rc`) que
 traga Baileys mais novo **e** sem a regressão do 408, testada num número de homologação.
 
 ---
