@@ -1,5 +1,6 @@
 #!/bin/bash
-# Envia o código para o servidor e sobe a stack de produção — e numera a versão.
+# Envia o código para o servidor e sobe a APLICAÇÃO de produção — e numera a versão.
+# Não toca na Evolution, no banco dela, no Postgres nem no Redis (docs/27-deploy-evolution.md).
 #
 # Uso: bash scripts/deploy.sh ubuntu@IP [correcao|recurso|grande|mesma] [caminho-da-chave]
 #
@@ -16,6 +17,8 @@
 # só no servidor. Rodar duas vezes é seguro.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=lib/prod-compose.sh
+source scripts/lib/prod-compose.sh
 
 HOST=${1:?informe o destino, ex.: bash scripts/deploy.sh ubuntu@1.2.3.4}
 
@@ -102,15 +105,22 @@ rsync -az --delete -e "$SSH" \
 # "saiu versão nova, atualize" (e o que o rodapé do menu mostra). `1.4.2+abc1234`: o número e o
 # commit — redeploy da mesma versão também muda o valor, e o aviso aparece.
 VERSION="$NEW+$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
-echo "▶ Subindo a stack (versão $VERSION)…"
+# Só a aplicação (APP_SERVICES em scripts/lib/prod-compose.sh), com --no-deps: Evolution, o banco
+# dela, Postgres e Redis não são construídos, recriados nem reiniciados por este script — recriar a
+# Evolution reconecta todos os números. Evolution: scripts/deploy-evolution.sh (docs/27).
+echo "▶ Subindo a aplicação (versão $VERSION): $APP_SERVICES…"
 # shellcheck disable=SC2029
 $SSH "$HOST" "cd ~/atendo \
+  && $(pc_require_running_cmd) \
   && (grep -q '^APP_VERSION=' .env.production || echo 'APP_VERSION=' >> .env.production) \
   && sed -i 's|^APP_VERSION=.*|APP_VERSION=$VERSION|' .env.production \
-  && sudo docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build" 
+  && $(pc_app_up_cmd)"
+# shellcheck disable=SC2029
+$SSH "$HOST" "cd ~/atendo && $(pc_drift_cmd)"
 
 echo "▶ Estado dos serviços:"
-$SSH "$HOST" 'cd ~/atendo && sudo docker compose -f infra/docker-compose.prod.yml --env-file .env.production ps --format "table {{.Service}}\t{{.Status}}"'
+# shellcheck disable=SC2029
+$SSH "$HOST" "cd ~/atendo && $(pc_compose) --profile evolution ps --format 'table {{.Service}}\t{{.Status}}'"
 
 # com o deploy no ar, a versão vai para o GitHub (a tag é o registro do que está em produção)
 # (também no redeploy "mesma": se o push da vez anterior falhou, vai agora)

@@ -333,7 +333,8 @@ A imagem é **fixa**: `infra/evolution/Dockerfile` parte de `evoapicloud/evoluti
 (amd64 e arm64) e os dois `infra/docker-compose*.yml` fazem `build: ./evolution`
 (`atendo/evolution-api:v2.3.7-atendo.2`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
 sem teste — e é ele que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número
-de teste, depois trocar o `FROM` e fazer o deploy (`docker compose … up -d --build evolution`).
+de teste, depois trocar o `FROM` e fazer o deploy **próprio da Evolution** (`scripts/deploy-evolution.sh`,
+[27](27-deploy-evolution.md)) — o deploy comum não reconstrói nem reinicia a Evolution.
 
 **Patch do nó `<biz>`** (`infra/evolution/patch-baileys-biz.mjs`): o Baileys da imagem (7.0.0-rc.9)
 manda `interactiveMessage` sem o nó `<biz>` que o WhatsApp exige para botões nativos — a mensagem

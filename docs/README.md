@@ -48,5 +48,6 @@
 | [24 — Auditoria da Evolution](24-auditoria-evolution.md) | Dev / Ops / Negócio | Banimentos, desconexões e webhooks travando: causas confirmadas no código da Evolution 2.3.7, correções priorizadas e alternativas (base segue no QR; Cloud API só por cliente) |
 | [25 — Atualização da Evolution e CVE-2026-48063](25-estrategia-atualizacao-evolution.md) | Dev / Ops | 2.3.7 × 2.4.0-rc2 × develop, Baileys rc.9→rc14, backport da CVE, matriz de risco, testes e piloto (proposta aguardando autorização) |
 | [26 — Backport da CVE-2026-48063](26-backport-cve-2026-48063.md) | Dev / Ops | Patches no build da Evolution 2.3.7 (Baileys rc.9), testes de regressão, evidências, deploy e rollback |
+| [27 — Deploy isolado da Evolution](27-deploy-evolution.md) | Ops | Deploy comum não recria Evolution/Postgres/Redis; `deploy-evolution.sh` (build, up, rollback) e testes |
 
 Convenção: código em inglês, comentários e documentação em português.

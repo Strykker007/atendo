@@ -154,6 +154,10 @@ do código e o `up` estão em um script só, que roda do seu computador:
 bash scripts/deploy.sh ubuntu@IP_DO_SERVIDOR
 ```
 
+O `deploy.sh` sobe **só a aplicação** (api, worker, web, caddy, backup): Evolution, o banco dela,
+Postgres e Redis não são recriados — a Evolution tem deploy próprio, `scripts/deploy-evolution.sh`
+([27](27-deploy-evolution.md)).
+
 O `deploy.sh` obedece o `.gitignore` e exclui `infra/volumes` e `.env.production`. **Isso
 não é detalhe:** um `rsync` ingênuo leva `infra/volumes/` junto, e o Postgres do servidor
 sobe com o banco de desenvolvimento dentro (autenticação falha, porque a senha é a antiga).
@@ -293,7 +297,7 @@ Sem `BACKUP_REMOTE` o serviço avisa no log a cada execução, de propósito.
 docker compose -f infra/docker-compose.prod.yml --env-file .env.production stop api worker
 docker compose -f infra/docker-compose.prod.yml --env-file .env.production \
   exec backup sh /usr/local/bin/restore.sh /backup/20260929-030000
-docker compose -f infra/docker-compose.prod.yml --env-file .env.production restart evolution
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production --profile evolution restart evolution
 docker compose -f infra/docker-compose.prod.yml --env-file .env.production start api worker
 ```
 
