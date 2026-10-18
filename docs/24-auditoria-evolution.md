@@ -44,11 +44,12 @@ Legenda: ✅ **confirmado** (lido no código/config, o mecanismo existe) · 🟡
    repetido) — este último é hipótese, sem prova de que a Meta o puna.
 3. **Não atualizar para a 2.4.0-rc2**: ✅ ela passou a tratar `408` como queda definitiva e
    **apaga as credenciais** (exige QR) — é exatamente a regressão do PR #2612.
-4. **Recomendação:** (a) agora — **corrigir a instalação** (seção 7, P0), mantendo a 2.3.7 com
-   patches no build; (b) em paralelo — **arquitetura híbrida**, migrando para a **Cloud API
-   oficial** os números com automação, campanha e volume (o adapter `MetaProvider` e a troca de
-   provider já existem); (c) **não** reescrever sobre Baileys nem trocar por outra solução não
-   oficial esperando menos banimento: é o mesmo protocolo e o mesmo risco.
+4. **Decisão (18/10/2026): a base continua no QR.** Poucos clientes aceitam o custo da Cloud API,
+   então não haverá migração geral. Recomendação: **corrigir a instalação** (seção 7, P0 → P1),
+   mantendo a 2.3.7 com patches no build, e apertar as travas de produto que mais pesam em
+   banimento (P2). **Não** reescrever sobre Baileys nem trocar por outra solução não oficial
+   esperando menos banimento: é o mesmo protocolo e o mesmo risco. A Cloud API fica como opção
+   **por cliente**, para quem quiser pagar (seção 11).
 
 ---
 
@@ -330,20 +331,26 @@ Notas qualitativas (Alta/Média/Baixa) baseadas no código e no histórico de in
 
 ## 10. Recomendação
 
-1. **Agora:** opção **A** com os P0 e P1 (patches no build = fork mínimo, opção B só se crescer).
-   Isso ataca a parte de B/C que é nossa e gera os dados que faltam para A.
-2. **Em paralelo:** opção **F (híbrido)**. Migrar primeiro para a Cloud API os números que fazem
-   **campanha, automação de boas-vindas e alto volume** — onde o QR mais bane e onde o oficial
-   custa pouco (resposta na janela é grátis). Manter QR para quem precisa de grupos ou do número
-   pessoal, com o aceite de risco que já existe nas campanhas estendido ao número.
-3. **Não fazer:** C (Baileys próprio) e D (outra não oficial) com o objetivo de reduzir banimento.
-4. **Critério para rever:** se depois dos P0/P1 e de 30 dias de dados os números QR ainda tiverem
-   desconexões frequentes ou banimentos acima do aceitável para o negócio, acelerar a migração
-   para o oficial.
+**Decisão de negócio (18/10/2026): não migrar para a Cloud API.** Poucos clientes aceitam pagar
+o custo, então a base continua no QR. Com isso:
+
+1. **Agora:** opção **A** com os P0 e P1 (patches no build = fork mínimo; opção B só se os
+   patches crescerem). Isso ataca a parte de B/C que é nossa e gera os dados que faltam para A.
+2. **Banimento passa a ser risco permanente da base**, administrado e não eliminado: priorizar os
+   P2 (campanha QR só com opt-in, aquecimento mais conservador) e o diagnóstico por número da
+   seção 8.3 para descobrir o que os números banidos têm em comum.
+3. **Cloud API só por cliente**, para quem pedir e aceitar o custo — o adapter já existe e a
+   troca é por número (`PUT /numbers/:id/provider`). Não é uma migração da base.
+4. **Não fazer:** C (Baileys próprio) e D (outra não oficial) com o objetivo de reduzir banimento.
+5. **Critério para rever:** se depois dos P0/P1 e de 30 dias de dados os banimentos continuarem
+   no patamar atual, reapresentar a Cloud API aos clientes que mais perdem com número banido
+   (custo do banimento × custo do template).
 
 ---
 
-## 11. Estratégia de migração (Cloud API)
+## 11. Migração para a Cloud API (só por cliente, sob demanda)
+
+Não há migração geral planejada (seção 10). Este roteiro vale para o cliente que pedir o oficial.
 
 **Desacoplamento: já existe.** `WhatsAppProvider` (`providers/provider.interface.ts`) com
 `MetaProvider` e `EvolutionProvider`; UI, banco e filas só conhecem `InboundMessage`/`OutboundMessage`;
@@ -367,8 +374,7 @@ O que falta é operacional, não arquitetural:
    - mídias recebidas já estão no nosso storage; as que só existem na Evolution precisam do mesmo
      backfill;
    - `phonebook_entries` (agenda) fica como está, sem atualização futura.
-5. **Corte gradual:** 1 número piloto → clientes de campanha → demais; QR desligado só depois de
-   7 dias sem regressão. Rollback = `PUT /numbers/:id/provider` de volta para `evolution` (exige
+5. **Corte por número:** o QR do cliente só é desligado depois de 7 dias sem regressão no oficial. Rollback = `PUT /numbers/:id/provider` de volta para `evolution` (exige
    QR novo).
 6. **Cobrança:** templates passam a gerar custo no `message_usage` (`BillingCategory`); conferir
    `provider_pricing` contra a tabela oficial antes do piloto.
