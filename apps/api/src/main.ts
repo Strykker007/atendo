@@ -5,6 +5,8 @@ import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { env, webOrigins } from './config/env';
+import { RedisService } from './common/redis/redis.service';
+import { startProcessStats } from './common/observability/process-stats';
 import { RedisIoAdapter } from './common/socket-io.adapter';
 import { AppLogger, rootLogger } from './common/observability/app-logger';
 import { captureError, flushSentry, initSentry } from './common/observability/sentry';
@@ -32,6 +34,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   app.enableShutdownHooks();
 
+  if (env.DIAG_STATS_MS > 0) startProcessStats('api', app.get(RedisService, { strict: false }), env.DIAG_STATS_MS);
   await app.listen(env.API_PORT);
   rootLogger.log(`API em ${env.API_PUBLIC_URL}`, 'Bootstrap', { port: env.API_PORT, logFormat: env.LOG_FORMAT, sentry });
 }

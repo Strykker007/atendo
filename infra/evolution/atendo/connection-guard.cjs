@@ -306,6 +306,28 @@ function createGuard(opts = {}) {
 
 module.exports = { createGuard, DEFAULTS, describeDisconnect };
 
+/**
+ * Memória e atraso do event loop do processo da Evolution, para testes (docs/30-testes-locais.md).
+ * Desligado por padrão: só com ATENDO_STATS_MS > 0.
+ */
+function startProcessStats(intervalMs, log = defaultLog) {
+  const { monitorEventLoopDelay } = require('node:perf_hooks');
+  const h = monitorEventLoopDelay({ resolution: 10 });
+  h.enable();
+  const ms = (ns) => Math.round((ns / 1e6) * 10) / 10;
+  const t = setInterval(() => {
+    const m = process.memoryUsage();
+    log({ evt: 'process.stats', rssMb: Math.round(m.rss / 1048576), heapUsedMb: Math.round(m.heapUsed / 1048576), eventLoopP50Ms: ms(h.percentile(50)), eventLoopP99Ms: ms(h.percentile(99)), eventLoopMaxMs: ms(h.max) });
+    h.reset();
+  }, intervalMs);
+  t.unref();
+  return () => clearInterval(t);
+}
+
+module.exports.startProcessStats = startProcessStats;
+
 if (!globalThis.__atendoConn) {
   globalThis.__atendoConn = createGuard({ bootFile: process.env.ATENDO_BOOT_FILE ?? '/evolution/instances/.atendo-boot' });
+  const statsMs = Number(process.env.ATENDO_STATS_MS ?? 0);
+  if (statsMs > 0) startProcessStats(statsMs);
 }

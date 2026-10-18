@@ -59,6 +59,10 @@ que foi removido (doc 28 › 2.5).
 
 ### Observabilidade
 
+Com `ATENDO_STATS_MS` > 0 (desligado por padrão), a guarda também emite `process.stats` (RSS, heap e
+atraso do event loop) a cada N ms — usado pelo laboratório do [30](30-testes-locais.md).
+
+
 Uma linha JSON por evento no stdout da Evolution:
 
 ```json

@@ -8,6 +8,7 @@ Etapas independentes, cada uma com seus testes e rollback. Referências: [24](24
 | 1 | Deploy comum não reconstrói nem reinicia a Evolution | ✅ implementada — doc 27 |
 | 2 | Gerenciamento de conexões no Atendo (este doc) | ✅ implementada, sem deploy |
 | 3 | Reconexão na Evolution (exclusividade, backoff) — e revisão da ordem do 2.5 | ✅ implementada, sem deploy — doc 29 |
+| — | Testes locais (carga sintética, laboratório, roteiro real) | ✅ ferramentas prontas — doc 30 |
 | 4 | Webhooks (eventos, timeouts) | pendente |
 | 5 | Redis próprio da Evolution (plano) | pendente |
 

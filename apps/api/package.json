@@ -13,7 +13,8 @@
     "prisma": "prisma",
     "stripe:sync": "tsc -p tsconfig.build.json --outDir .scripts-build && node .scripts-build/scripts/stripe-sync.js",
     "quoted:backfill": "tsc -p tsconfig.build.json --outDir .scripts-build && node .scripts-build/scripts/backfill-quoted.js",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "loadtest": "tsx scripts/loadtest.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -51,5 +51,6 @@
 | [27 — Deploy isolado da Evolution](27-deploy-evolution.md) | Ops | Deploy comum não recria Evolution/Postgres/Redis; `deploy-evolution.sh` (build, up, rollback) e testes |
 | [28 — Estabilização da conexão](28-estabilizacao-conexao.md) | Dev / Ops | Etapas dos P0/P1: prazos na Evolution, restart com trava, 401/402/403/406, registro e ordem do connection.update, sonda de sessão zumbi |
 | [29 — Reconexão na Evolution](29-reconexao-evolution.md) | Dev / Ops | Guarda de conexão na 2.3.7: uma conexão por instância, gerações de socket, backoff com jitter, 440 sem disputa, medições antes/depois e piloto |
+| [30 — Testes locais](30-testes-locais.md) | Dev / Ops | `pnpm test:local`: mocks da guarda, carga sintética (100/500/1.000), laboratório de reconexão, roteiro com WhatsApp real e critérios de aprovação da etapa 3 |
 
 Convenção: código em inglês, comentários e documentação em português.
