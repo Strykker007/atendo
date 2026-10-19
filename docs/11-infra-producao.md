@@ -65,7 +65,7 @@ Custo aproximado na Hetzner/Contabo (VPS) para 500 clientes: R$ 1.500–2.500/m�
 ```bash
 cp .env.production.example .env.production   # preencha tudo (segredos com openssl rand)
 # domínios no infra/Caddyfile
-docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production --profile evolution up -d --build   # 1ª subida: a Evolution está num profile (docs/27)
 docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec api node -e "require('child_process').execSync('npx tsx prisma/seed.ts',{stdio:'inherit'})"  # seed inicial (planos, dono)
 ```
 

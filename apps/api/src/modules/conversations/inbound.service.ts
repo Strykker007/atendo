@@ -16,6 +16,7 @@ import { SurveyRunnerService, type SurveyClaim } from '../satisfaction/survey-ru
 import { decidirEntrada, ehConfirmacao, naCarencia, voltandoDepoisDeEncerrado } from './reopen';
 import { agendaParaRestaurar, escolherDaAgenda, normalizeContactName, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
+import { DEFINITIVE_CLOSE } from '../whatsapp/connection-events';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
 import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
 
@@ -84,6 +85,8 @@ export class InboundService {
 
     // digitada no celular do cliente, não no painel: entra como enviada
     if (msg.fromMe) return this.ingestFromDevice(number, msg);
+    // chegou mensagem de cliente: se o número estava marcado "parou de receber", já voltou
+    if (number.receiveStalledAt) await this.voltouAReceber(number.id, number.tenantId);
 
     let contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
       ?? await this.createContact(number, msg.from, msg.contactName);
@@ -394,7 +397,20 @@ export class InboundService {
     if (st.status === 'failed' && (m.status === 'delivered' || m.status === 'read')) return; // já chegou: erro tardio é ruído
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { status: st.status, error: st.error }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(m.conversation.tenantId, this.conversations.present(updated));
+    // confirmação de entrega também é sinal de vida do recebimento
+    if (m.direction === 'out' && m.numberId && (st.status === 'delivered' || st.status === 'read')) await this.voltouAReceber(m.numberId, m.conversation.tenantId);
     if (m.direction === 'in' && st.status === 'read') await this.lidaNoCelular(m.conversationId, m.conversation.tenantId, m.createdAt);
+  }
+
+  /**
+   * Número marcado "parou de receber" (whatsapp/receive-stall.ts) deu sinal de vida: desmarca na
+   * hora, sem esperar o health check de 5 min — o aviso vermelho some assim que resolve.
+   */
+  private async voltouAReceber(numberId: string, tenantId: string) {
+    const res = await this.prisma.whatsAppNumber.updateMany({ where: { id: numberId, receiveStalledAt: { not: null } }, data: { receiveStalledAt: null } });
+    if (!res.count) return;
+    const n = await this.prisma.whatsAppNumber.findUnique({ where: { id: numberId }, select: { id: true, status: true } });
+    if (n) this.gateway.emitNumber(tenantId, n);
   }
 
   /**
@@ -591,14 +607,15 @@ export class InboundService {
     if (conversation) this.gateway.emitTyping(number.tenantId, { conversationId: conversation.id, state: p.state });
   }
 
-  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean }) {
+  async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean; statusReason?: number }) {
     // Logo após parear, o WhatsApp reinicia o socket ('connecting'): é sincronização, não queda.
     // Um número já conectado não regride por causa disso.
     if (c.transient && number.status === 'connected') return;
-    // 401 com o número CONECTADO = o WhatsApp (ou alguém no celular) removeu o aparelho. O
+    // Fechamento definitivo (401/402/403/406, connection-events.ts) com o número CONECTADO = o
+    // WhatsApp (ou alguém no celular) removeu o aparelho ou restringiu a conta. O
     // "Desconectar" do painel marca `disconnected` antes de chamar o provider, então não cai aqui.
     const removido = c.loggedOut && number.status === 'connected' ? planRemoval(number, new Date()) : null;
-    if (removido) this.log.warn(`Número ${number.label} (${number.phone}) removido pelo WhatsApp (401 device_removed) — queda ${removido.waRemovedCount} em 24h, reconexão em pausa até ${removido.reconnectBlockedUntil.toISOString()}`);
+    if (removido) this.log.warn(`Número ${number.label} (${number.phone}) removido pelo WhatsApp (${c.statusReason ?? 401}: ${DEFINITIVE_CLOSE[c.statusReason ?? 401] ?? 'fechamento definitivo'}) — queda ${removido.waRemovedCount} em 24h, reconexão em pausa até ${removido.reconnectBlockedUntil.toISOString()}`);
     // o número que escaneou o QR pode não ser o digitado no cadastro: corrige com o real
     const phone = c.phone && c.phone !== number.phone ? c.phone : undefined;
     // Aquecimento desligado (a pedido): número novo não começa mais com teto de envios por dia.
@@ -606,7 +623,10 @@ export class InboundService {
     // telefone continua a contagem; recomeça se o WhatsApp derrubou o número ou se é outro
     // telefone (warmupStartOnPair). Reinício de servidor ou oscilação de rede não mexem nele.
     const recomeco = c.status === 'connected' && number.status === 'pending_qr' ? warmupStartOnPair(number, c.phone) : null;
-    const warmup: { warmupStartedAt?: Date; sessionStartedAt?: Date } = recomeco ? { sessionStartedAt: recomeco } : {};
+    const warmup: { warmupStartedAt?: Date; sessionStartedAt?: Date; syncStartedAt?: Date } = recomeco ? { sessionStartedAt: recomeco } : {};
+    // voltou a conectar: o WhatsApp entrega em lotes o que chegou enquanto estava fora, e demora.
+    // O painel avisa "sincronizando" por alguns minutos a partir daqui (NUMBER_SYNC_NOTICE_MS no front)
+    if (c.status === 'connected' && number.status !== 'connected') warmup.syncStartedAt = new Date();
     await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido, ...(phone && { phone }) } }).catch(async (err) => {
       // conflito de unique (tenantId, phone): mantém o telefone antigo, só atualiza status
       if (String(err?.code) === 'P2002') await this.prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: c.status, ...warmup, ...removido } });

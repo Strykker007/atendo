@@ -25,6 +25,12 @@ export interface AuthUser {
   ownNumberIds?: string[];
   /** a pessoa é vinculada a empresas específicas (`user_companies`); false = enxerga todas */
   companyRestricted?: boolean;
+  /** modo fim de turno (docs/escalas.md#fim-de-turno): só rotas `@ShiftLockOk` passam */
+  shiftLocked?: boolean;
+  /** epoch (s) do fim do turno/liberação, quando a sessão tem escala */
+  shiftEndsAt?: number;
+  /** epoch (s) em que a passagem acaba e a sessão cai de vez */
+  lockedUntil?: number;
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthUser => {

@@ -26,6 +26,7 @@ class FlowDto {
   @IsOptional() @IsString() @MaxLength(300) description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsBoolean() showInChat?: boolean;
+  @IsOptional() @IsBoolean() showOnClosing?: boolean;
   @IsObject() trigger: FlowTrigger;
   @IsObject() definition: FlowDefinition;
 }
@@ -34,6 +35,7 @@ class UpdateFlowDto {
   @IsOptional() @IsString() @MaxLength(300) description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsBoolean() showInChat?: boolean;
+  @IsOptional() @IsBoolean() showOnClosing?: boolean;
   @IsOptional() @IsObject() trigger?: FlowTrigger;
   @IsOptional() @IsObject() definition?: FlowDefinition;
   /** versão que o editor carregou; diferente da do banco = 409 `flow_version_conflict`. Ausente (interruptor da lista) = sem checagem */
@@ -84,7 +86,7 @@ export class FlowsController {
     return this.prisma.flow.findMany({
       where: { tenantId: u.tenantId },
       orderBy: [{ position: 'asc' }, { name: 'asc' }],
-      select: { id: true, name: true, description: true, isActive: true, showInChat: true, position: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
+      select: { id: true, name: true, description: true, isActive: true, showInChat: true, showOnClosing: true, position: true, trigger: true, updatedAt: true, _count: { select: { runs: true } } },
     });
   }
 
@@ -125,6 +127,7 @@ export class FlowsController {
         isActive: dto.isActive ?? true,
         // padrão pelo gatilho: fluxo que dispara sozinho não precisa de atalho manual no chat
         showInChat: dto.showInChat ?? dto.trigger.type === 'manual',
+        showOnClosing: dto.showOnClosing ?? false,
         trigger: dto.trigger as object,
         definition: dto.definition as object,
       },
@@ -261,7 +264,7 @@ export class FlowsController {
       const name = copyName(f.name, taken);
       taken.push(name);
       created.push(await this.prisma.flow.create({
-        data: { tenantId, name, position: await this.nextPosition(tenantId), description: f.description, isActive: false, showInChat: f.showInChat, trigger: f.trigger as object, definition: f.definition as object },
+        data: { tenantId, name, position: await this.nextPosition(tenantId), description: f.description, isActive: false, showInChat: f.showInChat, showOnClosing: f.showOnClosing, trigger: f.trigger as object, definition: f.definition as object },
       }));
     }
     return created;
@@ -322,7 +325,7 @@ export class FlowsController {
     const items: PortableFlow[] = [];
     const warnings = new Set<string>();
     for (const flow of flows) {
-      const out = flowToPortable({ name: flow.name, description: flow.description, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, { tagNameById, flowNameById });
+      const out = flowToPortable({ name: flow.name, description: flow.description, showOnClosing: flow.showOnClosing, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, { tagNameById, flowNameById });
       items.push(out.portable);
       // num lote, o aviso diz de qual fluxo é
       out.warnings.forEach((w) => warnings.add(flows.length > 1 ? `${flow.name}: ${w}` : w));
@@ -369,7 +372,7 @@ export class FlowsController {
       const name = uniqueName(b.name, taken);
       taken.push(name);
       flows.push(await this.prisma.flow.create({
-        data: { tenantId: u.tenantId, name, position: await this.nextPosition(u.tenantId), description: b.description, isActive: false, trigger: b.trigger as object, definition: b.definition as object },
+        data: { tenantId: u.tenantId, name, position: await this.nextPosition(u.tenantId), description: b.description, isActive: false, showOnClosing: b.showOnClosing, trigger: b.trigger as object, definition: b.definition as object },
       }));
       b.warnings.forEach((w) => warnings.add(built.length > 1 ? `${name}: ${w}` : w));
     }

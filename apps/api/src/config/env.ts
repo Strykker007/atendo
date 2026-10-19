@@ -111,6 +111,8 @@ const schema = z.object({
   /** quem recebe os alertas do orçamento de IA (vírgula separa vários) */
   AI_ALERT_EMAIL: z.string().optional().default(''),
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
+  /** > 0: amostra memória/event loop a cada N ms no Redis (testes de carga locais; docs/30). 0 = desligado */
+  DIAG_STATS_MS: z.coerce.number().int().min(0).default(0),
   /** json = uma linha JSON por evento (produção/agregador); pretty = legível no terminal */
   LOG_FORMAT: z.enum(['json', 'pretty']).default(process.env.NODE_ENV === 'production' ? 'json' : 'pretty'),
   /** vazio = Sentry desligado; o projeto roda igual */

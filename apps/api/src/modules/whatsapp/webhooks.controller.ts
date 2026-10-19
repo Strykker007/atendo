@@ -51,7 +51,7 @@ export class WebhooksController {
     // em paralelo e, sem isso, o pushName passava por nome da agenda
     const ev = (body as { event?: string })?.event;
     const delay = ev === 'contacts.upsert' || ev === 'contacts.update' ? 30_000 : undefined;
-    await this.inbound.add('evolution', { provider: 'evolution', body }, { removeOnComplete: 1000, removeOnFail: 5000, delay });
+    await this.inbound.add('evolution', { provider: 'evolution', body, receivedAt: Date.now() }, { removeOnComplete: 1000, removeOnFail: 5000, delay });
     return { ok: true };
   }
 }

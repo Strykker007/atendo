@@ -113,9 +113,18 @@ O motor aceita a resposta por **id do botão, número ou texto** (`FlowEngineSer
 A Evolution pode dizer `open` enquanto o WebSocket com o WhatsApp já morreu (típico depois de o host dormir). Todo envio devolve `428 Connection Closed`. Tratamento automático: o `OutboundProcessor` detecta a mensagem, chama `provider.restart()` (`POST /instance/restart/:name`) e deixa o retry do BullMQ reenviar. Além disso, um job a cada 5 min (`NumbersHealthProcessor`) confere o status real de cada número no provider e corrige o banco (a UI mostra "desconectado" e o botão de reconectar). Número em `pending_qr` também é conferido, mas só sobe para `connected`: depois de um **Reiniciar** a Evolution pode mandar `connecting` sem o `open` em seguida, e o painel ficava preso em "aguardando QR" com o WhatsApp funcionando. Se nem o restart resolver, reinicie o container (`docker compose restart evolution`) — as sessões ficam no banco da Evolution e reconectam sem QR.
 
 **Por que o restart não resolvia** (Drogaria Pontual, 13/10/2026: ~1h20 sem enviar nem receber, 6 envios falhos): logo depois de ler o QR, a instância sincronizava ~1.000 contatos; o pool do Prisma da Evolution (padrão 9 conexões para 34 instâncias) esgotou (`P2024` / `deadlock detected`) e a reconexão pedida pelo WhatsApp (`stream:error 515`) nasceu morta com o estado `open`. O restart da 2.3.7 fecha o socket (já fechado: o `end()` do Baileys sai em `if (closed) return`, sem evento de close) e chama o connect, que vê `open` e não faz nada — dezenas de restarts sem efeito. Correções:
-- `infra/evolution/patch-evolution-restart.mjs`: depois de fechar, se em 3 s nenhum socket novo apareceu, o restart cria um com as credenciais salvas (sem QR); "Socket novo" é outro objeto em `client` — o zumbi mantém `ws.isOpen` verdadeiro, e a 1ª versão (que olhava só isso) não reconectava (Drog. Kelly I, 17/10/2026). Mudou o patch: **rebuild da imagem da Evolution e restart do container**, que reconecta todos os números — fazer de madrugada.
+- `infra/evolution/patch-evolution-restart.mjs`: desde a etapa 3 delega à **guarda de conexão** ([29](29-reconexao-evolution.md)), que aposenta o socket atual e cria UM novo com as credenciais salvas (sem QR), juntando restarts simultâneos. A versão anterior (abaixo) esperava 3 s e criava outro socket se nenhum tivesse aparecido; "Socket novo" é outro objeto em `client` — o zumbi mantém `ws.isOpen` verdadeiro, e a 1ª versão (que olhava só isso) não reconectava (Drog. Kelly I, 17/10/2026). Mudou o patch: **rebuild da imagem da Evolution e restart do container**, que reconecta todos os números — fazer de madrugada.
 - `DATABASE_CONNECTION_URI` da Evolution com `connection_limit=40&pool_timeout=30` (o Postgres dela aceita 100);
-- `NumbersService.claimRestart`: no máximo um restart automático por número a cada 2 min entre todos os workers — antes era um por envio falho, e com o restart que recria o socket isso abriria sockets duplicados.
+- `NumbersService.claimRestart`: no máximo um restart por número a cada 2 min entre todos os workers — automático **ou pelo painel** (`POST /numbers/:id/restart` responde 429 dentro da janela, [28](28-estabilizacao-conexao.md)). Antes era um por envio falho, e o manual não tinha trava; com o restart que recria o socket isso abriria sockets duplicados.
+
+### Sincronização ao reconectar
+
+Quando o número volta a `connected` vindo de outro status (QR lido de novo, sessão restabelecida),
+o WhatsApp entrega **em lotes** as mensagens que chegaram enquanto ele estava fora — pode levar
+minutos, e não há evento de "terminou". `numberConnectionChanged` grava `whatsapp_numbers.syncStartedAt`
+e o painel mostra por **10 minutos** (`NUMBER_SYNC_NOTICE_MS`, `components/numbers/NumberSyncNotice.tsx`)
+a faixa "sincronizando as mensagens recebidas enquanto estava fora" em todas as telas (dá para
+fechar) e o selo no card em Números. As mensagens entram normalmente pelo webhook, uma a uma.
 
 ### Parou de receber (envia, mas nada chega)
 
@@ -127,19 +136,26 @@ Caso real: Drog. Kelly I, 12/10/2026, um dia sem receber até o cliente notar.
 **Detecção** (`whatsapp/receive-stall.ts`, rodando no health check a cada 5 min): depois do último
 sinal de vida do número (mensagem recebida ou entrega/leitura confirmada) e do último QR lido
 (`sessionStartedAt`), saíram **≥ 3 mensagens para ≥ 2 contatos** há mais de 15 min, e nenhuma foi
-confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`; limpa sozinho quando volta a
-chegar mensagem/confirmação ou quando o QR é lido de novo. Um contato só com o celular desligado não
-marca.
+confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`. Um contato só com o celular
+desligado não marca.
+
+**Desmarcar**: na hora, na primeira mensagem de cliente que chega ou entrega/leitura confirmada
+(`InboundService.voltouAReceber`, emite `number`) — sem esperar o health check. No health check, número
+já marcado **não é reavaliado pelas regras** (isso fazia o aviso sumir e voltar a cada hora): só
+desmarca com sinal de vida depois da marcação ou com QR lido de novo (`sessionStartedAt` novo).
 
 **Segunda regra — silêncio anormal** (para número com pouco envio, onde a de cima demora horas a
 juntar 3 mensagens): nenhum sinal de vida há **60 min** num horário em que, **no mesmo dia da semana
-passada**, o número recebeu **≥ 5 mensagens** na mesma hora (`silenceVsLastWeek`/`isSilentTooLong`).
+passada**, o número recebeu **≥ 5 mensagens** na mesma hora (`silenceVsLastWeek`/`isSilentTooLong`),
+**e** há ao menos **uma enviada sem confirmação** depois do último sinal — silêncio sozinho (loja
+parada, feriado) não acende o aviso.
 Mesmo dia da semana para noite, domingo e loja fechada não virarem alarme; feriado pode dar falso
 positivo (só aviso, limpa quando chegar algo). Caso Drog. Kelly I, 17/10/2026: parou às 11:12; a
 regra antiga marcaria às 13:51, esta às ~12:15.
 
-**Na tela:** faixa vermelha no topo para todos ("parou de receber mensagens") e, em Números, o card
-com o passo a passo:
+**Na tela:** faixa vermelha no topo para todos ("parou de receber mensagens") — o **×** oculta neste
+navegador até uma nova ocorrência (chave `número@receiveStalledAt` em `localStorage`,
+`atendo-aviso-sem-receber`) — e, em Números, o card com o passo a passo:
 1. **Reiniciar conexão** (`POST /numbers/:id/restart` → `POST /instance/restart` da Evolution): fecha e
    reabre a sessão com as mesmas credenciais, sem QR. Resolve conexão travada.
 2. Se continuar sem receber, **Desconectar + Conectar (QR)**: pareamento novo gera chaves novas — é o
@@ -164,7 +180,7 @@ Sem consulta ao banco, sem segredo extra, e uma instância comprometida não afe
 | `messages.edited` | Edição de mensagem (ver tabela de tipos) |
 | `contacts.upsert` / `contacts.update` | Nome da agenda do celular → `contacts.name` com origem `agenda` (ver [De onde vem o nome do contato](#de-onde-vem-o-nome-do-contato-contactsnamesource)). Enfileirados com 30 s de atraso |
 | `messages.update` | Status (texto ou número do Baileys): `SERVER_ACK`/2→sent, `DELIVERY_ACK`/3→delivered, `READ`/4 e `PLAYED`/5 (áudio ouvido)→read, `ERROR`/0→failed. `InboundService.applyStatus` não deixa regredir (e ignora falha tardia de algo já entregue) e reemite a mensagem pelo evento `message` do socket |
-| `connection.update` | `open`→connected; `connecting` é **transitório** (o WhatsApp reinicia o socket logo após parear) e não derruba um número já conectado; `close` com `statusReason 401`→ deslogado pelo celular (dispositivo removido). Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone é corrigido |
+| `connection.update` | `open`→connected; `connecting` é **transitório** (o WhatsApp reinicia o socket logo após parear) e não derruba um número já conectado; `close` com `statusReason` **401/402/403/406** → fechamento definitivo (a Evolution não reconecta e apaga as credenciais: aparelho removido ou conta restrita). Todo evento é registrado e o atrasado não sobrescreve o mais novo ([28](28-estabilizacao-conexao.md)). Traz `wuid` (número real que escaneou): se for diferente do cadastrado, o telefone é corrigido |
 | `qrcode.updated` | QR novo → painel atualiza pelo socket |
 | `presence.update` | "Digitando…"/"gravando áudio…" do contato (`composing`/`recording`; o resto vira `paused`). Não grava nada: acha a conversa do contato no número e emite `typing` no socket. Exige `WEBHOOK_EVENTS_PRESENCE_UPDATE=true` no compose **e** assinatura: o WhatsApp só manda o "digitando" de quem você assinou (`presenceSubscribe`), e a Evolution só assina nos chatbots dela. Por isso `POST /conversations/:id/read` (abrir a conversa) chama `NumbersService.subscribePresence` → `POST /chat/sendPresence` com `presence: 'paused'` (assina sem o contato ver nada), no máximo uma vez a cada 2 min por contato. A assinatura cai quando a sessão da Evolution reconecta; reabrir a conversa assina de novo. Grupos ignorados. **Meta não tem equivalente** — a Cloud API não avisa quando o contato digita, então números oficiais nunca mostram o indicador |
 
@@ -287,7 +303,7 @@ antigos removidos **antes** de ler o QR. Não fica gravado; serve para obrigar a
 Não usado: a instância sai pelo IP do servidor. Avaliar proxy brasileiro (Evolution `/proxy/set`
 por instância) só se o servidor estiver fora do Brasil.
 
-### Quando o WhatsApp derruba o número (`401 device_removed`)
+### Quando o WhatsApp derruba o número (`401 device_removed`, `403`, `402`, `406`)
 
 O WhatsApp pode encerrar sozinho a sessão do "aparelho conectado" (a Evolution): o
 `connection.update` chega com `state: close` e `statusReason: 401` (`stream:error` `conflict
@@ -297,7 +313,8 @@ motivou isto: Drogaria Total, duas quedas em 17 h no primeiro dia de uso, recone
 depois da segunda — e a conta terminou restrita, com o padrão de envio saudável (≈ tantas
 enviadas quanto recebidas, sem campanha).
 
-- **Detecção** (`InboundService.numberConnectionChanged`): 401 com o número **conectado** grava
+- **Detecção** (`InboundService.numberConnectionChanged`): fechamento definitivo — 401, ou 402/403/406
+  (conta restrita/banida, antes tratados como desconexão comum, sem pausa) — com o número **conectado** grava
   `waRemovedAt`, `waRemovedCount` e `reconnectBlockedUntil` (`whatsapp/number-removal.ts`,
   migração `20261029000600_number_wa_removed`). O "Desconectar"/"Excluir" do painel marca
   `disconnected` **antes** do logout, então o 401 do próprio logout não conta como queda.
@@ -315,15 +332,21 @@ enviadas quanto recebidas, sem campanha).
 
 A imagem é **fixa**: `infra/evolution/Dockerfile` parte de `evoapicloud/evolution-api:v2.3.7`
 (amd64 e arm64) e os dois `infra/docker-compose*.yml` fazem `build: ./evolution`
-(`atendo/evolution-api:v2.3.7-biz`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
+(`atendo/evolution-api:v2.3.7-atendo.3`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
 sem teste — e é ele que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número
-de teste, depois trocar o `FROM` e fazer o deploy (`docker compose … up -d --build evolution`).
+de teste, depois trocar o `FROM` e fazer o deploy **próprio da Evolution** (`scripts/deploy-evolution.sh`,
+[27](27-deploy-evolution.md)) — o deploy comum não reconstrói nem reinicia a Evolution.
 
 **Patch do nó `<biz>`** (`infra/evolution/patch-baileys-biz.mjs`): o Baileys da imagem (7.0.0-rc.9)
 manda `interactiveMessage` sem o nó `<biz>` que o WhatsApp exige para botões nativos — a mensagem
 volta `delivered` e o aparelho não mostra nada. O patch acrescenta o nó no `relayMessage`
 (`native_flow_name="payment_info"` para Pix; `native_flow v=9 mixed` para copiar/link/ligar).
 Se a âncora mudar numa versão nova, o build falha de propósito.
+
+**Patches de segurança** ([26](26-backport-cve-2026-48063.md)): backport da CVE-2026-48063 no Baileys
+(`patch-baileys-cve-2026-48063.mjs`) e gatilhos de texto `requestPlaceholder`/`onDemandHistSync` só
+pelo próprio celular (`patch-evolution-placeholder-triggers.mjs`). Os testes de
+`infra/evolution/verify-patches.test.mjs` rodam no build: se falharem, a imagem não é gerada.
 
 ## Mensagem enviada pelo celular do cliente
 

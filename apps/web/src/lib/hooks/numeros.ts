@@ -4,7 +4,7 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api, getAccessToken, onAccessToken, refresh } from '../api';
+import { api, getAccessToken, onAccessToken, refresh, refreshRefused } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TypingEvent, SendLimits } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { Conversation, Message, NumberItem, ProviderConfig, SendDelayProfile, SendingStatus, Typing, invConv, upsertMessageInCache, dropConversationFromCache } from './core';
@@ -15,6 +15,14 @@ import { useUI } from '../store';
 import { toast } from '@/components/ui/Toast';
 import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
 import { upsertInternalMessage, type InternalMessage } from './chat-interno';
+import { create } from 'zustand';
+import { markShiftLocked, useShiftSession } from '../shift-session';
+
+/**
+ * Estado do socket do tempo real, para a faixa "reconectando" (components/layout/RealtimeBanner).
+ * `downSince` = desde quando está fora; null = conectado (ou ainda não tentou).
+ */
+export const useRealtimeStatus = create<{ downSince: number | null }>(() => ({ downSince: null }));
 
 // ---- Números ----
 const invalidateNumbers = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['numbers'] });
@@ -72,6 +80,13 @@ export const useRestartNumber = () => {
 /** QR code mais recente por número, alimentado pelo socket (evento `number`). */
 export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-qr', id], enabled: false, queryFn: () => null as string | null });
 
+/**
+ * Tudo que o socket mantém atualizado. Na volta de uma queda, o que foi emitido enquanto o socket
+ * estava fora não chega nunca — recarrega tudo de uma vez (é o que antes só acontecia trocando de
+ * tela, ex.: abrir o Kanban).
+ */
+const REALTIME_KEYS = ['conversations', 'conversation-counts', 'conversation', 'messages', 'kanban', 'numbers', 'internal-chats', 'internal-messages', 'support-chats', 'scheduled-messages-all', 'budgets-all'];
+
 /** Tempo real: aplica eventos do socket direto no cache do react-query. */
 export function useRealtime() {
   const qc = useQueryClient();
@@ -81,6 +96,9 @@ export function useRealtime() {
   // entregue, lido) não chegavam. Renovação do mesmo cliente não reconecta.
   const [sala, setSala] = useState(() => salaDoToken(getAccessToken()));
   useEffect(() => { const fora = onAccessToken((t) => setSala(salaDoToken(t))); return () => { fora(); }; }, []);
+  // turno encerrado/destravado reconecta: travado, o servidor deixa o socket fora da sala do
+  // cliente (sem mensagens para quem já saiu); destravado, volta a entrar
+  const travado = useShiftSession((s) => s.locked);
   useEffect(() => unlockMessageSound(), []);
   useEffect(() => {
     if (!getAccessToken()) return;
@@ -123,11 +141,58 @@ export function useRealtime() {
     };
     // auth como função: a cada reconexão manda o token ATUAL (o access token expira em 15 min)
     const socket: Socket = io(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000', { auth: (cb) => cb({ token: getAccessToken() }), withCredentials: true, reconnectionDelayMax: 5000 });
-    // token vencido na reconexão (aba parada, notebook que dormiu): o servidor derruba o socket e o
-    // socket.io NÃO tenta de novo sozinho nesse caso — o tempo real morria calado. Renova e reconecta.
-    socket.on('disconnect', async (reason) => {
-      if (reason === 'io server disconnect' && (await refresh())) socket.connect();
+    let encerrado = false;
+    let jaConectou = false;
+    let recuperar: ReturnType<typeof setTimeout> | null = null;
+    const status = useRealtimeStatus.setState;
+    socket.on('connect', () => {
+      status({ downSince: null });
+      // reconexão: busca o que chegou enquanto estava fora (mensagens, listas, kanban, números)
+      // Espalhado em até 5 s: num deploy/reinício da API todos os painéis reconectam juntos, e
+      // recarregar tudo no mesmo segundo seria um pico (a lista de conversas é a consulta mais
+      // pesada). Só recarrega o que está na tela — o resto fica marcado e busca ao abrir.
+      if (jaConectou) {
+        if (recuperar) clearTimeout(recuperar);
+        recuperar = setTimeout(() => { recuperar = null; for (const key of REALTIME_KEYS) qc.invalidateQueries({ queryKey: [key] }); }, Math.random() * 5_000);
+      }
+      jaConectou = true;
     });
+    // Token vencido na reconexão (aba parada, notebook que dormiu, API reiniciada): o servidor
+    // derruba o socket e o socket.io NÃO tenta de novo sozinho nesse caso. Antes era UMA tentativa
+    // de renovar: se o refresh falhasse naquele instante (API subindo, rede oscilando), o tempo real
+    // morria calado até trocar de tela. Agora insiste com espera crescente até voltar.
+    let religando = false;
+    async function religar() {
+      if (religando || encerrado) return;
+      religando = true;
+      try {
+        for (let espera = 2000; !encerrado && !socket.connected; espera = Math.min(espera * 2, 30_000)) {
+          // `false` com 5xx/sem resposta = API fora do ar (deploy): continua tentando, com espera
+          // crescente e um sorteio para os painéis não baterem juntos. 401/403 = sessão encerrada
+          // de vez: para aqui (o próximo pedido à API leva ao login, ver sessionExpired)
+          const ok = await refresh().catch(() => false);
+          if (ok) { socket.connect(); return; }
+          if (refreshRefused()) return;
+          await new Promise((r) => setTimeout(r, espera * (0.75 + Math.random() * 0.5)));
+        }
+      } finally { religando = false; }
+    }
+    socket.on('disconnect', (reason) => {
+      if (!encerrado) status({ downSince: useRealtimeStatus.getState().downSince ?? Date.now() });
+      if (reason === 'io server disconnect') void religar();
+    });
+    // recusado no handshake (`socket.active` false = o socket.io desistiu): mesma recuperação
+    socket.on('connect_error', () => {
+      status({ downSince: useRealtimeStatus.getState().downSince ?? Date.now() });
+      if (!socket.active) void religar();
+    });
+    // rede voltou / aba voltou a ficar visível / vigia a cada 20 s: socket parado sem ninguém
+    // tentando = reconecta. Notebook que dormiu às vezes não dispara evento nenhum.
+    const conferir = () => { if (!encerrado && !socket.connected && !socket.active) void religar(); };
+    const aoVoltar = () => { if (document.visibilityState === 'visible') conferir(); };
+    window.addEventListener('online', conferir);
+    document.addEventListener('visibilitychange', aoVoltar);
+    const vigia = setInterval(conferir, 20_000);
     socket.on('message', (m: Message) => {
       const nova = m.direction === 'in' && !tocadas.has(m.id);
       upsertMessageInCache(qc, m);
@@ -180,6 +245,18 @@ export function useRealtime() {
       upsertInternalMessage(qc, m);
       if (!m.fromSupport && !useUI.getState().soundMuted) playMessageSound();
     });
+    // pedido de autorização de plantão (sala de quem pode aprovar): aviso + som; respondido = só recarrega
+    socket.on('access_request', (e: { id: string; userName?: string; reason?: string; decided?: boolean }) => {
+      qc.invalidateQueries({ queryKey: ['work-schedules'] });
+      if (e.decided || !e.userName) return;
+      toast.warn(`${e.userName} pediu autorização para entrar fora da escala${e.reason ? `: "${e.reason}"` : ''}. Responda em Escalas e plantões.`);
+      if (!useUI.getState().soundMuted) playMessageSound();
+    });
+    // fim de turno (docs/escalas.md#fim-de-turno): gestor encerrou a liberação / trocou a escala, ou
+    // chegou a hora. Trava a tela já e renova: a API decide se é passagem de turno ou se ainda vale
+    socket.on('shift_ended', () => { markShiftLocked(); void refresh(); });
+    // liberação aprovada enquanto a tela de fim de turno estava aberta: renova e destrava
+    socket.on('shift_unlocked', () => { void refresh(); });
     socket.on('support_chat', () => { qc.invalidateQueries({ queryKey: ['support-chats'] }); });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
@@ -207,10 +284,16 @@ export function useRealtime() {
     socket.on('tenant_number', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
     socket.on('tenant_presence', () => qc.invalidateQueries({ queryKey: ['tenants-live'] }));
     return () => {
+      encerrado = true;
       if (listasTimer) clearTimeout(listasTimer);
+      if (recuperar) clearTimeout(recuperar);
+      clearInterval(vigia);
+      window.removeEventListener('online', conferir);
+      document.removeEventListener('visibilitychange', aoVoltar);
       socket.disconnect();
+      status({ downSince: null });
     };
-  }, [qc, sala]);
+  }, [qc, sala, travado]);
 }
 
 /** Cliente do token (sem validar — só decide se o socket precisa reconectar). `null` = sem token. */

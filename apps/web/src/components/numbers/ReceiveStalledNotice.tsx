@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { MessageSquareOff } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { MessageSquareOff, X } from 'lucide-react';
 import { useNumbers, type NumberItem } from '@/lib/hooks';
 
 const hora = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -39,17 +40,36 @@ export function ReceiveStalledCard({ number }: { number: NumberItem }) {
   );
 }
 
-/** Faixa no topo de todas as telas: quem atende precisa saber que mensagens não estão chegando. */
+const OCULTO_KEY = 'atendo-aviso-sem-receber';
+/** ocorrência = número + quando foi marcado: ocultar vale só para esta; uma nova volta a aparecer */
+const ocorrencia = (n: NumberItem) => `${n.id}@${n.receiveStalledAt}`;
+
+/**
+ * Faixa no topo de todas as telas: quem atende precisa saber que mensagens não estão chegando.
+ * Dá para ocultar (neste navegador) até uma nova ocorrência; o passo a passo continua em Números.
+ * Some sozinha quando o número volta a receber (a API desmarca na primeira mensagem que chega).
+ */
 export function ReceiveStalledBanner() {
   const numbers = useNumbers();
-  const parados = (numbers.data ?? []).filter(parouDeReceber);
+  const [ocultos, setOcultos] = useState<string[]>([]);
+  useEffect(() => {
+    try { setOcultos(JSON.parse(localStorage.getItem(OCULTO_KEY) ?? '[]')); } catch { /* storage bloqueado */ }
+  }, []);
+  const parados = (numbers.data ?? []).filter((n) => parouDeReceber(n) && !ocultos.includes(ocorrencia(n)));
   if (!parados.length) return null;
+  const ocultar = () => {
+    // guarda só as ocorrências ainda ativas: a lista não cresce para sempre
+    const novos = (numbers.data ?? []).filter(parouDeReceber).map(ocorrencia);
+    setOcultos(novos);
+    try { localStorage.setItem(OCULTO_KEY, JSON.stringify(novos)); } catch { /* storage bloqueado */ }
+  };
   const nomes = parados.map((n) => `"${n.label}" (+${n.phone})`).join(', ');
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-danger text-white">
       <MessageSquareOff size={16} className="shrink-0" />
       <span className="flex-1">{parados.length > 1 ? 'Os números' : 'O número'} {nomes} {parados.length > 1 ? 'pararam' : 'parou'} de receber mensagens de clientes. É preciso ler o QR de novo.</span>
       <Link href="/numeros" className="underline font-medium whitespace-nowrap">Como resolver</Link>
+      <button type="button" onClick={ocultar} className="p-0.5 rounded hover:bg-white/15" title="Ocultar este aviso (volta se acontecer de novo)" aria-label="Ocultar aviso"><X size={15} /></button>
     </div>
   );
 }

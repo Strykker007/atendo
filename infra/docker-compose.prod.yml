@@ -98,7 +98,11 @@ services:
     # v2.3.7 + patch do nó <biz> no Baileys (infra/evolution): sem ele os botões nativos (Pix
     # "Copiar chave Pix") são entregues mas o celular não mostra. A versão base fica no Dockerfile.
     build: ./evolution
-    image: atendo/evolution-api:v2.3.7-biz
+    # Fora do deploy comum (docs/27-deploy-evolution.md): o profile faz `docker compose up -d` sem
+    # nome de serviço IGNORAR a Evolution — recriar o container reconecta todos os números. Trocar a
+    # imagem só por scripts/deploy-evolution.sh. EVOLUTION_IMAGE só existe para o rollback.
+    profiles: ["evolution"]
+    image: ${EVOLUTION_IMAGE:-atendo/evolution-api:v2.3.7-atendo.3}
     restart: unless-stopped
     # só prioridade, sem teto: ela recebe as mensagens de todos os números, e um teto atrasaria
     # mensagem chegando
@@ -163,12 +167,18 @@ services:
       # ex.: r2:atendo-backups — "r2" é o remoto definido pelas RCLONE_CONFIG_R2_* abaixo
       BACKUP_REMOTE: ${BACKUP_REMOTE:-}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_REMOTE_KEEP_DAYS: ${BACKUP_REMOTE_KEEP_DAYS:-${BACKUP_KEEP_DAYS:-14}}
       BACKUP_AT: ${BACKUP_AT:-03:30}
       # O rclone aceita a configuração por ambiente, o que evita montar um arquivo único:
       # quando o arquivo não existe no host, o Docker cria um DIRETÓRIO no lugar e o envio
       # falha em silêncio. Assim o segredo fica só no .env.production.
       RCLONE_CONFIG_R2_TYPE: s3
       RCLONE_CONFIG_R2_PROVIDER: ${BACKUP_S3_PROVIDER:-Cloudflare}
+      # R2 assina requisições S3 na região lógica "auto". Para tokens restritos a
+      # um bucket, a verificação administrativa (HeadBucket) não é autorizada;
+      # o rclone deve ir direto às operações de objetos.
+      RCLONE_CONFIG_R2_REGION: auto
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
       RCLONE_CONFIG_R2_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
       RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}

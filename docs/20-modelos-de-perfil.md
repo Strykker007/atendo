@@ -73,8 +73,9 @@ Botão **Aplicar aos clientes** no editor do modelo (desabilitado com alteraçã
 modelo **salvo**). O dono escolhe **o que** e **para quem**, vê a **prévia** cliente por cliente e só
 então grava. Partes, todas opcionais:
 
-- **Perfis** (um a um, os que o modelo ajusta): as permissões do modelo substituem as do perfil de
-  mesmo nome no cliente; perfil que não existir é criado (Gerente/Atendente como perfil padrão).
+- **Perfis** (um a um, os que o modelo ajusta): as permissões do modelo substituem as do perfil
+  correspondente no cliente — pelo `systemRole` quando o perfil do modelo é um Gerente/Atendente
+  padrão renomeado (o nome do cliente passa a ser o do modelo), senão pelo nome; perfil que não existir é criado (Gerente/Atendente como perfil padrão).
   Perfil padrão alterado passa a `customized` (o alinhamento ao catálogo não desfaz). Administrador
   nunca muda. O cache de permissões é invalidado na hora.
 - **Motivos de encerramento**: as tags do modelo marcadas Comprou / Não comprou (Comprou e Não

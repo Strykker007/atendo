@@ -21,7 +21,7 @@ import { TransferSection } from '@/components/settings/TransferSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
 import Link from 'next/link';
-import { BellOff, MessagesSquare, Smartphone } from 'lucide-react';
+import { BellOff, CalendarClock, MessagesSquare, Smartphone } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe } from '@/lib/hooks';
 
 type Aba = 'conta' | 'empresa' | 'atendimento';
@@ -94,6 +94,9 @@ export default function ConfiguracoesPage() {
             {podeNumeros && <NumbersSection />}
             {podeConfigurar && <CompaniesSection />}
             {podeEquipe && <DepartmentsSection />}
+            {podeEquipe && (
+              <LinkSection href="/configuracoes/escalas" icon={<CalendarClock size={20} />} title="Escalas de trabalho" text="12x36, comercial 44h ou horário próprio: quem tem escala só entra no sistema dentro do turno." action="Configurar escalas" />
+            )}
             {podeVariaveis && <GlobalVariablesSection />}
             {podeConfigurar && <PixGatewaySection />}
             {podeConfigurar && <PublicPagesSection />}

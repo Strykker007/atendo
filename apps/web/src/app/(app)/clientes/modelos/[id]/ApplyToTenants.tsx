@@ -35,6 +35,7 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
   const [comTags, setComTags] = useState(false);
   const [comAjustes, setComAjustes] = useState(false);
   const resumoAjustes = settings ? resumoSettings(settings) : '';
+  const labels = templateOutcomeLabels(settings);
   const [todos, setTodos] = useState(true);
   const [escolhidos, setEscolhidos] = useState<string[]>([]);
   const [q, setQ] = useState('');
@@ -93,7 +94,7 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
           )}
           <div className="rounded-xl border border-line p-3 space-y-1.5">
             <Check checked={motivos} disabled={!motivosModelo.length} onChange={mexer(setMotivos)}>
-              Motivos de encerramento <span className="text-muted">— {motivosModelo.length ? `${ganhos} em Comprou, ${perdas} em Não comprou` : 'nenhuma tag do modelo marcada Comprou / Não comprou'}</span>
+              Motivos de encerramento <span className="text-muted">— {motivosModelo.length ? `${ganhos} em ${labels.won}, ${perdas} em ${labels.lost}` : `nenhuma tag do modelo marcada ${labels.won} / ${labels.lost}`}</span>
             </Check>
             {motivos && (
               <div className="pl-6 space-y-1">
@@ -177,11 +178,21 @@ const temMudanca = (r: TemplateRolloutResult) =>
 
 /** "sem venda · assinatura obrigatória · Resolvido / Não resolvido" — o que o modelo define */
 export function resumoSettings(s: TemplateSettings) {
+  const labels = templateOutcomeLabels(s);
   return [
     s.salesEnabled !== undefined && (s.salesEnabled ? 'encerramento com venda' : 'encerramento sem venda'),
     s.requireSignature !== undefined && (s.requireSignature ? 'assinatura obrigatória' : 'assinatura opcional'),
-    (s.wonLabel || s.lostLabel) && `resultados “${s.wonLabel ?? 'Comprou'}” / “${s.lostLabel ?? 'Não comprou'}”`,
+    (s.wonLabel || s.lostLabel) && `resultados “${labels.won}” / “${labels.lost}”`,
   ].filter(Boolean).join(' · ');
+}
+
+/** O modelo não tem uma empresa própria: os rótulos vêm da configuração que ele vai aplicar. */
+function templateOutcomeLabels(settings?: TemplateSettings) {
+  const service = settings?.salesEnabled === false;
+  return {
+    won: settings?.wonLabel?.trim() || (service ? 'Resolvido' : 'Comprou'),
+    lost: settings?.lostLabel?.trim() || (service ? 'Não resolvido' : 'Não comprou'),
+  };
 }
 
 function Linha({ rotulo, itens, perigo }: { rotulo: string; itens: string[]; perigo?: boolean }) {

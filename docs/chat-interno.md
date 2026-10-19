@@ -11,7 +11,7 @@ ledger de uso. O histórico é **permanente e auditável** — não existe apaga
 | Conversa **direta**: uma só por par de pessoas (`directKey = "<menor id>:<maior id>"`, único por cliente). Abrir de novo devolve a mesma | `InternalChatController.create` |
 | **Grupo**: nome obrigatório; quem cria entra junto. Membros só da equipe ativa do mesmo cliente | idem |
 | Só membro lê e escreve (quem não é recebe 404 — nem sabe que a conversa existe) | `chatOf` |
-| O dono do sistema "entrando como" o cliente não é da equipe: não usa o chat (403), mas pode auditar | `assertMember` |
+| O dono do sistema "entrando como" o cliente não é da equipe: não vê nem cria conversas da equipe (403/404), mas pode auditar e fala pelo **canal de suporte** daquele cliente | `assertMember`, `chatOf` |
 | Nome do autor gravado na mensagem (`authorName`): a auditoria continua legível depois que a pessoa sai da equipe (`authorId` vira null) | `internal_messages` |
 | Não lidas por pessoa: `internal_chat_members.lastReadAt`. Escrever marca como lido até ali | `send` / `read` |
 | Tempo real: `internal_message` e `internal_chat` vão **só para a sala de cada membro** (`user:<tenant>:<id>`), nunca para a sala do cliente | `ConversationsGateway.emitInternalMessage` |
@@ -37,8 +37,38 @@ Canal direto entre o cliente e o **suporte do sistema** (o dono, `super_admin`),
 
 **Dono do sistema**: logado como ele mesmo, o widget aparece em modo **Suporte aos clientes**
 (ícone de headset): aba **Conversas** (canais com mensagem, mais recentes primeiro, com não
-lidas) e aba **Clientes** (busca; clicar abre ou cria o canal para puxar conversa). "Entrando
-como" um cliente, o widget não aparece.
+lidas) e aba **Clientes** (busca; clicar abre ou cria o canal para puxar conversa).
+
+**"Entrando como" um cliente**: o widget aparece como **Suporte a este cliente**, já aberto no canal
+de suporte dele (sem lista, sem equipe, sem grupos). Usa as rotas `/internal-chat/*` com o token do
+cliente: `GET /chats` devolve só o canal de suporte, `GET /users` devolve vazio, e o envio sai como
+`fromSupport`, assinado com o nome do dono (`impersonatorId`) — igual a responder pelo modo Suporte.
+A leitura (não lidas) é a mesma linha do dono nos dois modos.
+
+### Fila de suporte
+
+O canal de cada cliente é um só e **nunca some** — com muitos clientes, "todos os canais" vira uma
+lista infinita onde quem espera se perde. Cada atendimento dentro do canal é um **ticket**
+(`support_tickets`, numerado `#123`):
+
+| Quando | O que acontece |
+|---|---|
+| Cliente escreve e não há ticket ativo | Abre um ticket `open` — entra na **Fila** |
+| Suporte responde (ou clica **Assumir**) | `in_progress`, com responsável; primeira resposta grava `firstResponseAt` |
+| Suporte puxa conversa sem ticket | Já nasce `in_progress` com quem escreveu |
+| **Fila** (devolver) | Volta para `open`, sem responsável |
+| **Encerrar** | `resolved` + aviso no histórico ("Atendimento #12 encerrado por Ana…"); a próxima mensagem do cliente abre outro |
+
+No máximo um ticket ativo por canal (índice único parcial). Lógica em
+`apps/api/src/modules/internal-chat/support-tickets.ts`, chamada pelo `sendSupport`.
+
+Widget do dono, abas: **Fila** (ninguém assumiu, ordem de chegada, com o tempo de espera em
+vermelho), **Meus**, **Ativos** (fila + em andamento de qualquer um), **Encerrados** (7 dias) e
+**Clientes**. Dentro do canal, a faixa do topo mostra o ticket com **Assumir / Fila / Encerrar**.
+Do lado do cliente, a mesma faixa diz "Atendimento #12 na fila — posição 3" ou "em andamento com
+Ana". Entrando como o cliente, o dono vê o status, sem as ações. A migração
+`20270104000000_support_tickets_number_sync` já põe na fila os canais com mensagem do cliente sem
+resposta do suporte depois dela.
 
 ## Auditoria
 
@@ -67,7 +97,7 @@ por isso continua aberto e na mesma conversa ao trocar de página.
   está na metade de baixo da tela, para baixo na metade de cima — e é limitada ao tamanho da tela
   (margem de 12 px). Redimensionar a janela do navegador reencaixa na hora.
 - Aberto: abas **Conversas**, **Equipe** (online primeiro; clicar abre a conversa direta) e
-  **Novo grupo** (marcar pessoas + nome). Arrasta pelo cabeçalho; minimiza para a barra.
+  **Novo grupo** (marcar pessoas + nome). Arrasta pelo cabeçalho; minimiza para a barra — clicar em qualquer ponto da barra minimizada (sem arrastar) reabre.
 - **Responder**: botão de seta ao passar o mouse no balão (ou duplo clique). A citação aparece
   acima do campo (Esc cancela); no balão, clicar na citação leva até a original.
 - **Grupo**: a faixa de membros no topo da conversa ("Gerenciar") abre o painel do grupo — nome,
@@ -83,7 +113,7 @@ por isso continua aberto e na mesma conversa ao trocar de página.
 - `internal_chat_members` — `{chatId, userId, lastReadAt, joinedAt}`, chave `(chatId, userId)`.
 - `internal_messages` — `{tenantId, chatId, authorId, authorName, text, replyToId, system, fromSupport, createdAt}`, índices `(chatId, createdAt)` e `(tenantId, createdAt)`.
 
-Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_internal_chat_groups` (resposta, avisos, grupo apagado), `20270101000000_support_channel` (canal de suporte).
+Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_internal_chat_groups` (resposta, avisos, grupo apagado), `20270101000000_support_channel` (canal de suporte), `20270104000000_support_tickets_number_sync` (fila de suporte).
 
 ## API
 
@@ -100,7 +130,11 @@ Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_in
 | DELETE | `/internal-chat/chats/:id` | quem criou / `team.manage` | Apaga o grupo (some para os membros; fica na auditoria) |
 | POST | `/internal-chat/chats/:id/read` | membro | Marca como lida |
 | GET | `/super-admin/support/tenants` | super_admin | Clientes para puxar conversa |
-| GET | `/super-admin/support/chats` | super_admin | Canais de suporte com mensagem, com `unread` (do cliente, não lidas por você) |
+| GET | `/super-admin/support/chats?view=` | super_admin | `queue` (fila, ordem de chegada), `mine`, `active`, `resolved` (7 dias) ou `all` (padrão: todo canal com mensagem). Cada item com `unread` e `ticket` |
+| GET | `/super-admin/support/counts` | super_admin | `{queue, mine, active}` — badges das abas |
+| POST | `/super-admin/support/tickets/:id/assign` | super_admin | Assumir (também puxa de outro do suporte) |
+| POST | `/super-admin/support/tickets/:id/release` | super_admin | Devolver para a fila |
+| POST | `/super-admin/support/tickets/:id/resolve` | super_admin | Encerrar (aviso no histórico do cliente) |
 | POST | `/super-admin/support/tenants/:tenantId/chat` | super_admin | Abre (ou cria) o canal do cliente |
 | GET | `/super-admin/support/chats/:id/messages?before=` | super_admin | Histórico do canal |
 | POST | `/super-admin/support/chats/:id/messages` | super_admin | `{text, replyToId?}` — sai como `fromSupport` |

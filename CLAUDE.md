@@ -19,6 +19,15 @@ Monorepo pnpm/Turborepo. `apps/api` (NestJS + Prisma), `apps/web` (Next.js App R
 - Antes de enviar: `UsageService.canSend` (quota) + regra da janela de 24h da Meta.
 - Funcionalidade nova que deve ser cobrada à parte: entra em `PlanLimits.features` + `@RequireFeature('x')` na API + `useHasFeature('x')` no front — nunca um if solto por nome de plano.
 
+### Migrations e schema (obrigatório)
+
+- Ao mudar `apps/api/prisma/schema.prisma`, crie uma **nova** migration. Nunca edite, apague ou renomeie uma migration que possa já ter sido aplicada em produção.
+- O nome/timestamp da nova migration deve ser posterior ao último diretório em `apps/api/prisma/migrations/`. Confira a ordenação antes de concluir.
+- Prefira migrations **aditivas e compatíveis**: criar tabelas/colunas opcionais, índices ou valores novos. A API anterior deve continuar funcionando enquanto a nova versão é validada.
+- Mudanças destrutivas (remover/renomear coluna, restringir `NOT NULL`, apagar ou reinterpretar dados) exigem duas etapas: primeiro adicionar o novo formato e migrar o código/dados; somente numa versão posterior remover o legado. Antes disso, documente backup, validação e retorno.
+- Se uma migration já chegou à produção e houver problema, crie uma migration corretiva. Não reescreva o histórico de migrations aplicado e não tente revertê-lo manualmente sem backup e plano explícito.
+- Atualize a documentação em `docs/` que descreve o dado ou comportamento alterado e informe no handoff o risco de compatibilidade quando houver.
+
 ## Comandos (Apenas para referência do usuário - Claude NÃO deve rodar sozinho)
 - `pnpm typecheck` / `pnpm build` — sempre rodar antes de concluir uma tarefa.
 - `pnpm db:migrate` após alterar `apps/api/prisma/schema.prisma`; `pnpm db:generate` regenera o client.

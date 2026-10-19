@@ -29,7 +29,10 @@ export const isReceiveStalled = (s: { unacked: number; conversations: number }) 
  * as 3 (Drog. Kelly I, 17/10/2026: parou às 11:12, só marcaria às 13:51). Aqui: nenhum sinal de
  * vida há `SILENCE_MS` num horário em que, no MESMO dia da semana passada, o número recebeu
  * pelo menos `SILENCE_MIN_EXPECTED` mensagens. Mesmo dia da semana: noite, domingo e loja
- * fechada não viram alarme. Feriado pode dar falso positivo — é só um aviso, e some sozinho.
+ * fechada não viram alarme. Só vale com pelo menos UMA enviada sem confirmação depois do último
+ * sinal (health.scheduler.ts): silêncio sozinho (loja parada, feriado) não acende o aviso.
+ * Marcado, só desmarca com sinal de vida depois da marcação — mensagem recebida ou entrega
+ * confirmada desmarca na hora (`InboundService.voltouAReceber`).
  */
 export const SILENCE_MS = 60 * 60_000;
 export const SILENCE_MIN_EXPECTED = 5;

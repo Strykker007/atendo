@@ -116,6 +116,10 @@ provider e dados do contato.
 Variáveis: `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE` (0 a 1, deixe 0 até precisar),
 `APP_VERSION` (agrupa erros por release).
 
+### Memória e event loop (opcional)
+
+`DIAG_STATS_MS` > 0 faz a API e o worker gravarem a cada N ms, em `diag:stats:<papel>:<pid>` no Redis, RSS, heap e o atraso do event loop (p50/p99/máx; `common/observability/process-stats.ts`). Desligado por padrão; usado pela carga sintética ([30](30-testes-locais.md)).
+
 ### Saúde
 
 `GET /health` já verifica Postgres e Redis e é o healthcheck do Docker (a cada 15s).

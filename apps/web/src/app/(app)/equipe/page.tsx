@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, KeyRound, Power, Users, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
@@ -69,13 +69,17 @@ export default function EquipePage() {
   const max = usage.data?.limits?.maxAgents;
   const count = usage.data?.used.agents ?? 0;
   const full = max != null && count >= max;
+  const selectableProfiles = (profiles.data ?? []).filter((p) =>
+    p.systemRole !== 'tenant_admin'
+    && (me.data?.role === 'super_admin' || p.permissions.every((permission) => me.data?.permissions?.includes(permission))),
+  );
 
   return (
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Equipe"
-        subtitle={<>Atendentes atendem; gerentes veem tudo, transferem e orientam por nota interna. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {max === null ? `${count} membros (ilimitado)` : `${count}/${max} membros`}.</>}</>}
-        action={isAdmin && <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo atendente</Button>}
+        subtitle={<>Escolha o perfil de acesso de cada pessoa — ele define exatamente o que ela pode fazer. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {max === null ? `${count} membros (ilimitado)` : `${count}/${max} membros`}.</>}</>}
+        action={isAdmin && <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo membro</Button>}
       />
 
       {full && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Limite de atendentes do plano atingido. Desative alguém ou faça upgrade em <b>Plano e uso</b>.</p>}
@@ -193,31 +197,29 @@ export default function EquipePage() {
 
       <AccessProfiles />
 
-      <CreateAgentModal open={creating} onClose={() => setCreating(false)} canCreateManager={me.data?.role !== 'manager'} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ?? null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Atendente criado — mande o link do convite'); } else toast.ok(b.role === 'manager' ? 'Gerente criado' : 'Atendente criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
+      <CreateAgentModal open={creating} onClose={() => setCreating(false)} profiles={selectableProfiles} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ?? null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Membro criado — mande o link do convite'); } else toast.ok('Membro criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
       <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditEmail={!!editing && canEditEmail(editing)} isSelf={editing?.id === me.data?.id} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
   );
 }
 
-function CreateAgentModal({ open, onClose, onSubmit, pending, canCreateManager }: { open: boolean; onClose: () => void; onSubmit: (b: { name: string; email: string; password?: string; role: 'agent' | 'manager' }) => void; pending: boolean; canCreateManager: boolean }) {
-  const [f, setF] = useState<{ name: string; email: string; password: string; role: 'agent' | 'manager' }>({ name: '', email: '', password: '', role: 'agent' });
+function CreateAgentModal({ open, onClose, onSubmit, pending, profiles }: { open: boolean; onClose: () => void; onSubmit: (b: { name: string; email: string; password?: string; profileId?: string }) => void; pending: boolean; profiles: { id: string; name: string; systemRole?: 'tenant_admin' | 'manager' | 'agent' | null }[] }) {
+  const defaultProfileId = profiles.find((p) => p.systemRole === 'agent')?.id ?? profiles[0]?.id ?? '';
+  const [f, setF] = useState({ name: '', email: '', password: '', profileId: '' });
   const [manual, setManual] = useState(false);
+  useEffect(() => {
+    if (open) setF({ name: '', email: '', password: '', profileId: defaultProfileId });
+  }, [open, defaultProfileId]);
   return (
     <Modal open={open} onClose={onClose} title="Novo membro da equipe" width="max-w-sm">
-      <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...f, password: manual ? f.password : undefined }); }} className="space-y-4">
-        {canCreateManager && (
-          <Field label="Papel">
-            <div className="grid grid-cols-2 gap-2">
-              {(['agent', 'manager'] as const).map((r) => (
-                <button type="button" key={r} onClick={() => setF({ ...f, role: r })} className={cn('rounded-lg border px-3 py-2 text-left', f.role === r ? 'border-accent bg-accent-soft' : 'border-line hover:bg-field')}>
-                  <div className="text-sm font-semibold text-ink">{r === 'agent' ? 'Atendente' : 'Gerente'}</div>
-                  <div className="text-[11px] text-muted">{r === 'agent' ? 'Atende as próprias conversas' : 'Vê todas, transfere, orienta por nota interna'}</div>
-                </button>
-              ))}
-            </div>
-          </Field>
-        )}
+      <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...f, profileId: f.profileId || undefined, password: manual ? f.password : undefined }); }} className="space-y-4">
+        <Field label="Perfil de acesso" hint="O perfil define o que esta pessoa pode fazer.">
+          <select className={inputCls} value={f.profileId} onChange={(e) => setF({ ...f, profileId: e.target.value })} required={profiles.length > 0}>
+            {!profiles.length && <option value="">Acesso padrão</option>}
+            {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
         <Field label="Nome"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required autoFocus /></Field>
         <Field label="E-mail"><input type="email" className={inputCls} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></Field>
         <label className="flex items-center gap-2 text-sm text-ink"><input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} /> Definir a senha agora (em vez de enviar convite por e-mail)</label>

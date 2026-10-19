@@ -9,6 +9,7 @@ import type { Conversation, SystemNotice, WhatsAppNumber } from '@prisma/client'
 import type { PresentedMessage } from './conversations.service';
 import type { TypingEvent } from '@atendo/shared';
 import { env, webOrigins } from '../../config/env';
+import { RedisService } from '../../common/redis/redis.service';
 
 const GLOBAL_ROOM = 'global';
 /** Dono do sistema logado como ele mesmo: recebe o status dos números de todos os clientes (monitor). */
@@ -39,17 +40,35 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   private redis?: Redis;
   private emitter?: Emitter;
 
-  constructor(private readonly jwt: JwtService) {}
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly redisCmd: RedisService,
+  ) {}
 
   async handleConnection(client: Socket) {
     try {
       const token = client.handshake.auth?.token as string;
-      const payload = await this.jwt.verifyAsync<{ sub: string; tenantId: string; role: string; impersonatorId?: string }>(token, { secret: env.JWT_ACCESS_SECRET });
+      const payload = await this.jwt.verifyAsync<{ sub: string; tenantId: string; role: string; impersonatorId?: string; shiftEndsAt?: number; locked?: boolean; iatMs?: number }>(token, { secret: env.JWT_ACCESS_SECRET });
+      // corte de sessão (liberação encerrada, escala trocada — ShiftAccessService.cutSessions): token
+      // anterior ao corte reconecta como travado
+      if (!payload.locked && !payload.impersonatorId && (payload.role === 'agent' || payload.role === 'manager')) {
+        const corte = Number(await this.redisCmd.get(`shift:cut:${payload.sub}`)) || 0;
+        if (corte && (payload.iatMs ?? 0) <= corte) payload.locked = true;
+      }
       // presença (monitor do dono): quem está com o painel aberto. O dono "entrando como" não conta
       client.data = { userId: payload.sub, tenantId: payload.tenantId ?? null, owner: isOwner(payload) };
-      if (payload.tenantId) await client.join(`tenant:${payload.tenantId}`);
-      // sala da pessoa: avisos só dela (ex.: atendimento transferido para ela)
+      // sala da pessoa: avisos só dela (transferência, plantão liberado). Fica mesmo com o turno encerrado
       if (payload.tenantId && payload.sub) await client.join(`user:${payload.tenantId}:${payload.sub}`);
+      // Fim de turno (docs/escalas.md#fim-de-turno): sessão travada não entra na sala do cliente —
+      // nada de mensagem nova chegando para quem já saiu. Ainda no turno: sai sozinho na hora exata.
+      const fimMs = payload.locked ? 0 : payload.shiftEndsAt ? payload.shiftEndsAt * 1000 - Date.now() : null;
+      if (fimMs !== null && fimMs <= 0) return;
+      if (payload.tenantId) await client.join(`tenant:${payload.tenantId}`);
+      if (fimMs !== null && payload.tenantId) {
+        const sala = `tenant:${payload.tenantId}`;
+        const t = setTimeout(() => { void client.leave(sala); client.emit('shift_ended', {}); }, Math.min(fimMs, 2 ** 31 - 1));
+        client.once('disconnect', () => clearTimeout(t));
+      }
       if (payload.role === 'super_admin' && !payload.impersonatorId) await client.join(OWNERS_ROOM);
       // sala dos clientes logados: avisos globais do sistema. O dono é quem escreve o aviso —
       // não recebe de volta, nem quando está "entrando como" um cliente.
@@ -165,6 +184,28 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   emitSupportChat(tenantId: string, chatId: string) {
     this.room(tenantId).emit('internal_chat', { chatId });
     this.to(OWNERS_ROOM).emit('support_chat', { chatId });
+  }
+  /**
+   * Pedido de autorização de plantão (docs/escalas.md#pedido-de-autorização): novo pedido vai
+   * para a sala de cada gestor que pode aprovar (aviso + som); `userIds` vazio = respondido,
+   * o cliente inteiro só recarrega a lista.
+   */
+  emitAccessRequest(tenantId: string, userIds: string[], payload: { id: string; userName?: string; reason?: string; decided?: boolean }) {
+    if (!userIds.length) { this.room(tenantId).emit('access_request', payload); return; }
+    for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('access_request', payload);
+  }
+  /**
+   * Acesso cortado agora (liberação encerrada, escala trocada): os sockets da pessoa, em todas as
+   * réplicas, saem da sala do cliente na hora e a tela entra no modo fim de turno.
+   */
+  emitShiftLocked(tenantId: string, userId: string) {
+    const sala = `user:${tenantId}:${userId}`;
+    this.server?.in(sala).socketsLeave(`tenant:${tenantId}`);
+    this.to(sala).emit('shift_ended', {});
+  }
+  /** Liberação de plantão criada para a pessoa: a tela de fim de turno renova o token e destrava. */
+  emitShiftUnlocked(tenantId: string, userId: string) {
+    this.to(`user:${tenantId}:${userId}`).emit('shift_unlocked', {});
   }
   /** Conversa interna criada/renomeada/lida: a lista do widget recarrega. */
   emitInternalChat(tenantId: string, userIds: string[], chatId: string) {

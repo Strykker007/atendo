@@ -8,6 +8,9 @@ set -eu
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 DIR=/backup/$STAMP
 KEEP_DAYS=${BACKUP_KEEP_DAYS:-14}
+# A cópia no servidor precisa caber no disco; no R2 podemos manter mais pontos
+# de recuperação. Sem a variável nova, preserva o comportamento anterior.
+REMOTE_KEEP_DAYS=${BACKUP_REMOTE_KEEP_DAYS:-$KEEP_DAYS}
 mkdir -p "$DIR"
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
@@ -36,7 +39,7 @@ log "tamanho: $(du -sh "$DIR" | cut -f1)"
 if [ -n "${BACKUP_REMOTE:-}" ]; then
   log "enviando para $BACKUP_REMOTE"
   rclone copy "$DIR" "$BACKUP_REMOTE/$STAMP" --transfers 4
-  rclone delete "$BACKUP_REMOTE" --min-age "${KEEP_DAYS}d" --rmdirs || true
+  rclone delete "$BACKUP_REMOTE" --min-age "${REMOTE_KEEP_DAYS}d" --rmdirs || true
 else
   log "AVISO: BACKUP_REMOTE não configurado — backup só no servidor, sem proteção contra perda da máquina"
 fi

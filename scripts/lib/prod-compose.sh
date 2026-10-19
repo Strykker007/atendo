@@ -1,0 +1,60 @@
+# Comandos de docker compose da produção, usados por scripts/deploy.sh e scripts/deploy-evolution.sh.
+# Só MONTAM o texto dos comandos (rodados no servidor via ssh); os testes rodam os mesmos textos num
+# projeto compose falso (scripts/test/deploy-isolation.test.sh). Ver docs/27-deploy-evolution.md.
+#
+# Regra: o deploy comum mexe só na aplicação. Evolution, o banco dela, o Postgres e o Redis guardam
+# estado (sessões do WhatsApp, chaves Signal, filas) — recriar qualquer um é decisão explícita.
+
+# Variáveis só para teste local; em produção ficam os padrões.
+PC_DIR=${PC_DIR:-'~/atendo'}
+PC_FILE=${PC_FILE:-infra/docker-compose.prod.yml}
+PC_ENV=${PC_ENV:-.env.production}
+PC_SUDO=${PC_SUDO-sudo}
+
+# serviços que o deploy comum recria (sem estado próprio)
+APP_SERVICES="api worker web caddy backup"
+# nunca recriados pelo deploy comum
+PROTECTED_SERVICES="postgres redis evolution-db evolution"
+# serviços que precisam estar de pé antes de um deploy comum (com --no-deps ninguém os sobe)
+REQUIRED_RUNNING="postgres redis"
+EVOLUTION_REPO=atendo/evolution-api
+
+pc_dc() { echo "docker compose -f $PC_FILE --env-file $PC_ENV"; }
+pc_compose() { echo "$PC_SUDO $(pc_dc)"; }
+
+# Falha se Postgres/Redis não estiverem rodando: o deploy comum não os cria (instalação nova:
+# docs/27-deploy-evolution.md › Primeira subida).
+pc_require_running_cmd() {
+  local c; c=$(pc_compose)
+  echo "running=\$($c ps --status running --services 2>/dev/null); for s in $REQUIRED_RUNNING; do echo \"\$running\" | grep -qx \"\$s\" || { echo \"✖ \$s não está rodando — o deploy comum não sobe serviços com estado (docs/27)\" >&2; exit 1; }; done"
+}
+
+# Deploy comum: constrói e recria só a aplicação. --no-deps: nada além da lista é criado,
+# recriado ou reiniciado por depends_on.
+pc_app_up_cmd() { echo "$(pc_compose) up -d --build --no-deps $APP_SERVICES"; }
+
+# Aviso (não falha): serviço protegido cuja configuração no compose mudou e só será aplicada com o
+# procedimento dele. Compara o hash da configuração com o do container em execução.
+pc_drift_cmd() {
+  local c; c=$(pc_compose)
+  echo "for s in $PROTECTED_SERVICES; do want=\$($c --profile evolution config --hash \"\$s\" 2>/dev/null | awk '{print \$2}'); id=\$($c --profile evolution ps -q \"\$s\" 2>/dev/null | head -1); [ -n \"\$want\" ] && [ -n \"\$id\" ] || continue; have=\$($PC_SUDO docker inspect -f '{{index .Config.Labels \"com.docker.compose.config-hash\"}}' \"\$id\"); [ \"\$have\" = \"\$want\" ] || echo \"⚠ \$s: configuração no compose difere da que está rodando — NÃO aplicada por este deploy (\$( [ \"\$s\" = evolution ] && echo 'scripts/deploy-evolution.sh' || echo 'procedimento manual, docs/27'))\"; done; true"
+}
+
+# ---- Evolution ----
+
+# imagem que o compose pede (com EVOLUTION_IMAGE do .env.production/ambiente, se houver)
+# (`config --images <serviço>` ignora o serviço e lista todas: lê o bloco da evolution no YAML canônico)
+pc_evo_wanted_cmd() { echo "$(pc_compose) --profile evolution config evolution 2>/dev/null | awk '/^[^ ]/{f=0} /^  [^ ]/{f=0} /^  evolution:\$/{f=1; next} f && /^    image:/{print \$2; exit}'"; }
+# imagem (id) do container rodando
+pc_evo_running_cmd() { echo "id=\$($(pc_compose) --profile evolution ps -q evolution | head -1); [ -n \"\$id\" ] && $PC_SUDO docker inspect -f '{{.Config.Image}} {{.Image}}' \"\$id\" || echo 'nenhum container da evolution'"; }
+# só constrói (os patches e verify-patches.test.mjs rodam no build); não toca no container
+pc_evo_build_cmd() { echo "$(pc_compose) --profile evolution build evolution"; }
+# guarda a imagem em execução como :previous e :before-<data> (rollback)
+pc_evo_snapshot_cmd() {
+  echo "id=\$($(pc_compose) --profile evolution ps -q evolution | head -1); if [ -n \"\$id\" ]; then img=\$($PC_SUDO docker inspect -f '{{.Image}}' \"\$id\"); $PC_SUDO docker tag \"\$img\" $EVOLUTION_REPO:previous && $PC_SUDO docker tag \"\$img\" $EVOLUTION_REPO:before-\$(date +%Y%m%d-%H%M%S) && echo \"▶ imagem atual guardada como $EVOLUTION_REPO:previous (\$img)\"; fi"
+}
+# troca só o container da Evolution: sem build (já feito), sem tocar no banco dela nem no Redis
+pc_evo_up_cmd() { echo "$(pc_compose) --profile evolution up -d --no-deps --no-build evolution"; }
+pc_evo_rollback_cmd() { echo "$PC_SUDO env EVOLUTION_IMAGE=$EVOLUTION_REPO:previous $(pc_dc) --profile evolution up -d --no-deps --no-build --force-recreate evolution"; }
+# a imagem pedida precisa existir no host (senão o compose tentaria baixar do Docker Hub)
+pc_evo_image_exists_cmd() { echo "$PC_SUDO docker image inspect \"$1\" >/dev/null 2>&1"; }

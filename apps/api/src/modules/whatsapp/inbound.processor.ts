@@ -15,6 +15,7 @@ import { isAmbiguousOptOut, isOptOut } from '../campaigns/dispatch';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { shouldRefreshAvatar } from './avatar-refresh';
 import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
+import { ConnectionEventsService } from './connection-events';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
 export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
@@ -28,6 +29,7 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     private readonly scheduling: SchedulingService,
     private readonly prisma: PrismaService,
     private readonly surveys: SurveyRunnerService,
+    private readonly connectionEvents: ConnectionEventsService,
   ) {
     super(QUEUE_INBOUND);
   }
@@ -172,7 +174,10 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
 
     if (parsed.connection) {
       const number = await this.numbers.findByExternal(job.data.provider, parsed.connection.externalNumberId);
-      if (number) await this.inbound.numberConnectionChanged(number, parsed.connection);
+      // todo evento é registrado; o atrasado (mais velho que o último aplicado) não sobrescreve o status
+      if (number && (await this.connectionEvents.record(number, parsed.connection, job.data.receivedAt)).apply) {
+        await this.inbound.numberConnectionChanged(number, parsed.connection);
+      }
     }
   }
 

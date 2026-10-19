@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { PermissionsService } from '../auth/permissions.service';
+import { ShiftAccessService } from '../auth/shift-access.service';
 import { ProfilesController } from './profiles.controller';
 import { NoTenantOk } from '../auth/tenant.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -22,7 +23,7 @@ import { DuesService } from '../billing/dues.service';
 import { PromotionsService } from '../billing/promotions.service';
 import { DiscountLedgerService } from '../billing/discount-ledger.service';
 import { freePeriod } from '../billing/plan-rules';
-import { SYSTEM_PROFILES, TYPING_SPEED_KEYS, countLimit, type PlanLimits, type TypingSpeed } from '@atendo/shared';
+import { TYPING_SPEED_KEYS, countLimit, type Permission, type PlanLimits, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
 import { TenantTemplatesController } from './tenant-templates.controller';
 import { provisionedTags, templateTagConflictPairs, type TemplateContent } from './tenant-template';
@@ -78,6 +79,8 @@ class CreateAgentDto {
   @IsOptional() @IsString() @MinLength(8) password?: string;
   /** agent (padrão) ou manager */
   @IsOptional() @IsIn(['agent', 'manager']) role?: 'agent' | 'manager';
+  /** Perfil escolhido para a pessoa. Ele decide as permissões; o papel técnico é derivado dele. */
+  @IsOptional() @IsUUID() profileId?: string;
 }
 class UpdateAgentDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
@@ -126,6 +129,7 @@ class TenantsController {
     private readonly provisioning: TenantProvisioningService,
     private readonly promotions: PromotionsService,
     private readonly ledger: DiscountLedgerService,
+    private readonly shift: ShiftAccessService,
   ) {}
 
   @Get()
@@ -245,7 +249,7 @@ class TenantsController {
         skipDuplicates: true,
       });
       await this.provisioning.provision(tx, tenant.id, content);
-      const adminProfile = await tx.accessProfile.findFirstOrThrow({ where: { tenantId: tenant.id, isSystem: true, name: SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name }, select: { id: true } });
+      const adminProfile = await tx.accessProfile.findFirstOrThrow({ where: { tenantId: tenant.id, isSystem: true, systemRole: 'tenant_admin' }, select: { id: true } });
       const admin = await tx.user.create({
         data: {
           tenantId: tenant.id, email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash,
@@ -265,7 +269,7 @@ class TenantsController {
   /** Todos podem listar (precisam para transferir); só admin gerencia. */
   @Get('me/agents')
   agents(@CurrentUser() u: AuthUser) {
-    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
+    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, scheduleId: true, isTemporary: true, accessExpiresAt: true, expiredAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
   }
 
   @Post('me/agents')
@@ -273,21 +277,35 @@ class TenantsController {
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxAgents')
   async createAgent(@CurrentUser() u: AuthUser, @Body() dto: CreateAgentDto) {
-    // gerente só cria atendentes; admin cria atendentes e gerentes
-    const role = dto.role === 'manager' && u.role !== 'manager' ? 'manager' : 'agent';
+    // O perfil é o que define o acesso. O papel técnico só preserva compatibilidade com filas
+    // e dados legados: perfil padrão de gerente vira manager; todo outro perfil vira agent.
+    let profileId: string | undefined;
+    let role: 'agent' | 'manager' = dto.role === 'manager' ? 'manager' : 'agent';
+    if (dto.profileId) {
+      const profile = await this.prisma.accessProfile.findFirst({ where: { id: dto.profileId, tenantId: u.tenantId }, select: { id: true, systemRole: true, permissions: true } });
+      if (!profile || profile.systemRole === 'tenant_admin') throw new BadRequestException('Perfil de acesso não encontrado.');
+      if (u.role !== 'super_admin' && profile.permissions.some((permission) => !u.permissions?.includes(permission as Permission))) {
+        throw new BadRequestException('Você não pode atribuir um perfil com permissões que não possui.');
+      }
+      profileId = profile.id;
+      role = profile.systemRole === 'manager' ? 'manager' : 'agent';
+    }
+    // gerente só cria pessoas do nível operacional
+    if (role === 'manager' && u.role === 'manager') throw new BadRequestException('Só o admin da conta pode criar um perfil de gerente.');
     if (!dto.password) {
       const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
       const { user, link } = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: dto.email, name: dto.name, role }, tenant.name);
-      await this.provisioning.linkRoleProfile(u.tenantId, user.id, role);
+      if (profileId) await this.prisma.user.update({ where: { id: user.id }, data: { profileId } });
+      else await this.provisioning.linkRoleProfile(u.tenantId, user.id, role);
       // devolve o link mesmo quando o e-mail saiu: e-mail cai em spam e some
       const invite = link ?? (await this.auth.inviteLink(user.id)).link;
       return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true, inviteLink: invite, emailSent: !!link };
     }
     const created = await this.prisma.user.create({
-      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, passwordHash: await this.auth.hashPassword(dto.password), passwordSetAt: new Date() },
+      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, ...(profileId && { profileId }), passwordHash: await this.auth.hashPassword(dto.password), passwordSetAt: new Date() },
       select: { id: true, name: true, email: true, role: true },
     });
-    await this.provisioning.linkRoleProfile(u.tenantId, created.id, role);
+    if (!profileId) await this.provisioning.linkRoleProfile(u.tenantId, created.id, role);
     return created;
   }
 
@@ -355,6 +373,8 @@ class TenantsController {
     // Depois do update: se a edição for recusada, ninguém é deslogado à toa
     if (password || dto.isActive === false || dto.email !== undefined || dto.role !== undefined) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+      // desativado: o access token já emitido para de valer agora, não daqui a 15 min
+      if (dto.isActive === false) await this.shift.cutSessions([id]);
     }
 
     if (numberIds) {
@@ -379,6 +399,6 @@ class TenantsController {
   imports: [AuthModule, BillingModule],
   controllers: [TenantsController, TenantSettingsController, ProfilesController, TenantTemplatesController],
   providers: [TenantSettingsService, SchedulesService, TenantProvisioningService, TemplateRolloutService],
-  exports: [TenantSettingsService, SchedulesService],
+  exports: [TenantSettingsService, SchedulesService, TenantProvisioningService],
 })
 export class TenantsModule {}
