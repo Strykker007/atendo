@@ -80,7 +80,7 @@ case "$ACTION" in
     confirm
     backup
     remote "$(pc_evo_snapshot_cmd)"
-    echo "▶ Trocando o container da Evolution por $WANTED…"
+    echo "▶ Trocando o container da Evolution por ${WANTED}…"
     remote "$(pc_evo_up_cmd)"
     sleep 30
     status

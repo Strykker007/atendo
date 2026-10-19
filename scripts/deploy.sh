@@ -108,7 +108,7 @@ VERSION="$NEW+$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)
 # Só a aplicação (APP_SERVICES em scripts/lib/prod-compose.sh), com --no-deps: Evolution, o banco
 # dela, Postgres e Redis não são construídos, recriados nem reiniciados por este script — recriar a
 # Evolution reconecta todos os números. Evolution: scripts/deploy-evolution.sh (docs/27).
-echo "▶ Subindo a aplicação (versão $VERSION): $APP_SERVICES…"
+echo "▶ Subindo a aplicação (versão $VERSION): ${APP_SERVICES}…"
 # shellcheck disable=SC2029
 $SSH "$HOST" "cd ~/atendo \
   && $(pc_require_running_cmd) \
