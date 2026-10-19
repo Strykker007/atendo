@@ -77,9 +77,10 @@ atendimentos.
 | Sem perfil → vale o padrão do papel | ninguém perde acesso na migração |
 | Perfil vazio concede **nada** | voltar ao padrão daria mais acesso do que o admin marcou na tela |
 | Ninguém concede o que não tem (`grantable`) | senão quem tem `profiles.manage` cria um perfil com `billing.manage` e vira dono da conta |
-| Perfil padrão não é excluível | o cliente nunca fica sem perfil de referência |
-| Perfil com gente dentro não é excluível | jogaria essas pessoas no padrão do papel sem ninguém perceber |
-| Perfil padrão não é renomeável | é a referência que a tela de Equipe mostra |
+| Administrador não é excluível nem renomeável | é a âncora de recuperação da conta |
+| Gerente/Atendente padrão podem ser renomeados e excluídos | o cliente adapta ao vocabulário dele ("Porteiro", "Supervisor"); a identidade é `systemRole` (`manager`/`agent`), não o nome |
+| Excluir perfil com gente dentro devolve essas pessoas ao padrão do papel | `onDelete: SetNull`; a tela mostra quantas pessoas serão afetadas antes de confirmar |
+| Perfil padrão excluído não volta sozinho | a ausência é escolha do cliente; `GET /profiles` só realinha ao catálogo os que existem |
 
 A tela desabilita as caixas que o editor não pode conceder, mas **a API corta de novo**: a
 tela é conveniência, não segurança.
@@ -88,11 +89,11 @@ tela é conveniência, não segurança.
 
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
-| GET | `/profiles` | — | Lista (cria os padrão na primeira chamada) |
+| GET | `/profiles` | — | Lista (com `systemRole`); realinha ao catálogo os padrão não editados |
 | GET | `/profiles/catalog` | — | Catálogo + permissões de quem pediu |
 | POST | `/profiles` | `profiles.manage` | Cria (filtra por `grantable`) |
 | PATCH | `/profiles/:id` | `profiles.manage` | Edita (filtra por `grantable`) |
-| DELETE | `/profiles/:id` | `profiles.manage` | Exclui (recusa padrão e em uso) |
+| DELETE | `/profiles/:id` | `profiles.manage` | Exclui (recusa só o Administrador) |
 | PATCH | `/tenants/me/agents/:id` | `team.manage` | `profileId` vincula; `""` desvincula. `name`: admin da conta renomeia qualquer pessoa; gerente, só atendentes. `email`/`role` (`agent`\|`manager`): mesma regra de alcance, `role` só pelo admin; revogam as sessões e invalidam o cache de permissões |
 | PATCH | `/auth/me` | — | `{name}`: cada um edita o próprio nome (Configurações → Meu perfil) |
 
@@ -103,8 +104,10 @@ com seletor por pessoa. `useCan('x')` esconde o que a pessoa não pode fazer.
 
 ## Perfis na criação do cliente
 
-`POST /tenants` já cria os três perfis padrão na mesma transação (antes nasciam no primeiro
-acesso à tela). Com um **modelo de perfil**, Gerente/Atendente vêm com a matriz do modelo
+`POST /tenants` já cria os três perfis padrão na mesma transação, cada um com seu `systemRole`
+(migration `20270106000000_access_profile_system_role` preencheu os existentes pelo nome).
+`POST /tenants/me/agents` aceita `profileId`: o perfil define o acesso e o papel técnico é derivado
+dele (perfil padrão de gerente → `manager`; qualquer outro → `agent`). Com um **modelo de perfil**, Gerente/Atendente vêm com a matriz do modelo
 (`customized`) e membros novos entram no perfil do papel — ver [20](20-modelos-de-perfil.md).
 
 ## Próximo passo

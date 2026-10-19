@@ -16,6 +16,8 @@ export const TEMPLATE_VERSION = 1;
 
 export interface TemplateProfile {
   name: string;
+  /** Papel interno de um perfil padrão renomeado. Ausente mantém compatibilidade com modelos antigos. */
+  systemRole?: 'manager' | 'agent';
   description?: string;
   permissions: Permission[];
 }
@@ -137,7 +139,10 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
     // o admin da conta sempre pode tudo: um modelo que tira dele `profiles.manage` deixaria o cliente sem saída
     if (pname === ADMIN_PROFILE) continue;
     if (profiles.some((x) => x.name === pname)) throw new Error(`Perfil "${pname}" repetido.`);
-    profiles.push({ name: pname, ...(str(p.description, 200) && { description: str(p.description, 200) }), permissions: sanitize(p.permissions) });
+    const systemRole = p.systemRole === 'manager' || p.systemRole === 'agent' ? p.systemRole : undefined;
+    if (p.systemRole !== undefined && !systemRole) throw new Error('"systemRole" do perfil deve ser manager ou agent.');
+    if (systemRole && profiles.some((x) => x.systemRole === systemRole)) throw new Error(`Há mais de um perfil padrão para ${systemRole}.`);
+    profiles.push({ name: pname, ...(systemRole && { systemRole }), ...(str(p.description, 200) && { description: str(p.description, 200) }), permissions: sanitize(p.permissions) });
   }
 
   if (o.quickReplies !== undefined && !Array.isArray(o.quickReplies)) throw new Error('"quickReplies" deve ser uma lista.');
@@ -255,11 +260,11 @@ export const provisionedLossReasonColors = (c: TemplateContent | null) => {
 export function provisionedProfiles(content: TemplateContent | null): { name: string; description: string; permissions: Permission[]; isSystem: boolean; customized: boolean; role?: 'tenant_admin' | 'manager' | 'agent' }[] {
   const fromTemplate = new Map((content?.profiles ?? []).map((p) => [p.name, p]));
   const system = SYSTEM_PROFILES.map(({ name, role }) => {
-    const t = role === 'tenant_admin' ? undefined : fromTemplate.get(name);
-    return { name, role, description: t?.description ?? `Perfil padrão de ${name.toLowerCase()}`, permissions: t ? t.permissions : [...DEFAULT_PERMISSIONS[role]], isSystem: true, customized: !!t };
+    const t = role === 'tenant_admin' ? undefined : (content?.profiles ?? []).find((p) => p.systemRole === role) ?? fromTemplate.get(name);
+    return { name: t?.name ?? name, role, description: t?.description ?? `Perfil padrão de ${(t?.name ?? name).toLowerCase()}`, permissions: t ? t.permissions : [...DEFAULT_PERMISSIONS[role]], isSystem: true, customized: !!t };
   });
   const extra = (content?.profiles ?? [])
-    .filter((p) => !SYSTEM_PROFILES.some((s) => s.name === p.name))
+    .filter((p) => !p.systemRole && !SYSTEM_PROFILES.some((s) => s.name === p.name))
     .map((p) => ({ name: p.name, description: p.description ?? '', permissions: p.permissions, isSystem: false, customized: false }));
   return [...system, ...extra];
 }

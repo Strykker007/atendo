@@ -39,7 +39,7 @@ export class ProfilesController {
     return this.prisma.accessProfile.findMany({
       where: { tenantId: u.tenantId },
       orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
-      select: { id: true, name: true, description: true, permissions: true, isSystem: true, customized: true, _count: { select: { users: true } } },
+      select: { id: true, name: true, description: true, permissions: true, isSystem: true, systemRole: true, customized: true, _count: { select: { users: true } } },
     });
   }
 
@@ -59,9 +59,9 @@ export class ProfilesController {
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<ProfileDto>) {
     const current = await this.prisma.accessProfile.findFirst({ where: { id, tenantId: u.tenantId } });
     if (!current) throw new BadRequestException('Perfil não encontrado.');
-    // perfil de sistema pode ter as permissões ajustadas, mas não o nome: ele é a referência
-    // que a tela de equipe mostra, e renomear "Administrador" confundiria mais do que ajuda
-    const name = current.isSystem ? current.name : (dto.name?.trim() ?? current.name);
+    // Administrador continua sendo a âncora da conta. Os outros perfis padrão podem receber
+    // o vocabulário do cliente (Porteiro, Supervisor…), pois a referência técnica é systemRole.
+    const name = current.systemRole === 'tenant_admin' ? current.name : (dto.name?.trim() ?? current.name);
     const permissions = dto.permissions ? grantable({ role: u.role, profilePermissions: u.permissions ?? null }, dto.permissions) : undefined;
 
     const updated = await this.prisma.accessProfile.update({
@@ -78,10 +78,11 @@ export class ProfilesController {
   async remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     const profile = await this.prisma.accessProfile.findFirst({ where: { id, tenantId: u.tenantId }, include: { _count: { select: { users: true } } } });
     if (!profile) throw new BadRequestException('Perfil não encontrado.');
-    if (profile.isSystem) throw new BadRequestException('Os perfis padrão não podem ser excluídos.');
-    // apagar com gente dentro jogaria essas pessoas de volta no padrão do papel sem ninguém
-    // perceber — é exatamente o tipo de mudança de acesso silenciosa que não pode acontecer
-    if (profile._count.users) throw new ConflictException(`${profile._count.users} pessoa(s) usam este perfil. Mova-as antes de excluir.`);
+    // O administrador é a âncora de recuperação da conta. Os demais perfis, inclusive os
+    // padrões que não fazem sentido para este negócio, podem sair.
+    if (profile.systemRole === 'tenant_admin') throw new BadRequestException('O perfil Administrador não pode ser excluído.');
+    // A relação User.profile usa onDelete:SetNull: quem usava o perfil volta ao acesso padrão
+    // do seu papel. A interface informa quantas pessoas serão afetadas antes da confirmação.
     await this.prisma.accessProfile.delete({ where: { id } });
     this.permissions.invalidate();
     return { ok: true };
@@ -98,18 +99,15 @@ export class ProfilesController {
    */
   private async ensureSystemProfiles(tenantId: string) {
     const existentes = await this.prisma.accessProfile.findMany({ where: { tenantId, isSystem: true } });
-    const porNome = new Map(existentes.map((p) => [p.name, p]));
+    const porRole = new Map(existentes.map((p) => [p.systemRole, p]));
 
-    for (const { name, role } of SYSTEM_PROFILES) {
+    for (const { role } of SYSTEM_PROFILES) {
       const esperado = DEFAULT_PERMISSIONS[role] as Permission[];
-      const atual = porNome.get(name);
+      const atual = porRole.get(role);
 
-      if (!atual) {
-        await this.prisma.accessProfile
-          .create({ data: { tenantId, name, isSystem: true, permissions: esperado, description: `Perfil padrão de ${name.toLowerCase()}` } })
-          .catch(() => undefined); // corrida entre duas abas abrindo a tela ao mesmo tempo
-        continue;
-      }
+      // A ausência também é uma escolha: o cliente pode remover os perfis de catálogo que não
+      // usa (por exemplo, Gerente numa portaria). Novos clientes já os recebem no provisionamento.
+      if (!atual) continue;
 
       if (atual.customized) continue;
       const igual = atual.permissions.length === esperado.length && esperado.every((x) => atual.permissions.includes(x));

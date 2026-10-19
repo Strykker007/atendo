@@ -109,21 +109,22 @@ export class TemplateRolloutService {
   }
 
   private async applyProfiles(tx: Prisma.TransactionClient, tenantId: string, profiles: TemplateContent['profiles'], r: RolloutTenantResult, dryRun: boolean) {
-    const existentes = await tx.accessProfile.findMany({ where: { tenantId }, select: { id: true, name: true, permissions: true, isSystem: true } });
+    const existentes = await tx.accessProfile.findMany({ where: { tenantId }, select: { id: true, name: true, permissions: true, isSystem: true, systemRole: true } });
     for (const p of profiles) {
       if (p.name === ADMIN) continue;
-      const atual = existentes.find((e) => e.name === p.name);
+      const atual = p.systemRole ? existentes.find((e) => e.systemRole === p.systemRole) : existentes.find((e) => e.name === p.name);
       if (!atual) {
         // Gerente/Atendente que o cliente ainda não materializou nascem como perfil padrão já ajustado
-        const system = SYSTEM_PROFILES.some((s) => s.name === p.name);
-        if (!dryRun) await tx.accessProfile.create({ data: { tenantId, name: p.name, description: p.description ?? null, permissions: p.permissions, isSystem: system, customized: system } });
+        const system = !!p.systemRole || SYSTEM_PROFILES.some((s) => s.name === p.name);
+        const systemRole = p.systemRole ?? SYSTEM_PROFILES.find((s) => s.name === p.name)?.role;
+        if (!dryRun) await tx.accessProfile.create({ data: { tenantId, name: p.name, description: p.description ?? null, permissions: p.permissions, isSystem: system, systemRole, customized: system } });
         r.profiles.created.push(p.name);
         continue;
       }
       const igual = atual.permissions.length === p.permissions.length && p.permissions.every((x) => atual.permissions.includes(x));
       if (igual) continue;
       // perfil padrão passa a `customized`: senão o alinhamento ao catálogo desfaria a matriz
-      if (!dryRun) await tx.accessProfile.update({ where: { id: atual.id }, data: { permissions: p.permissions, ...(atual.isSystem && { customized: true }) } });
+      if (!dryRun) await tx.accessProfile.update({ where: { id: atual.id }, data: { name: p.systemRole ? p.name : atual.name, permissions: p.permissions, ...(atual.isSystem && { customized: true }) } });
       r.profiles.updated.push(p.name);
     }
   }

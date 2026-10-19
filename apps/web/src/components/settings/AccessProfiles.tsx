@@ -47,7 +47,7 @@ export function AccessProfiles() {
             <div className="min-w-0 flex-1">
               <div className="font-medium text-ink flex items-center gap-1.5">
                 {p.name}
-                {p.isSystem && <span title="Perfil padrão — não pode ser excluído" className="text-faint"><Lock size={12} /></span>}
+                {p.systemRole === 'tenant_admin' && <span title="Perfil essencial da conta — não pode ser excluído" className="text-faint"><Lock size={12} /></span>}
                 <span className="text-xs text-muted font-normal">· {p._count.users} pessoa{p._count.users === 1 ? '' : 's'}</span>
               </div>
               {/* o que o perfil libera, por extenso: a contagem sozinha não responde
@@ -62,7 +62,7 @@ export function AccessProfiles() {
             {canManage && (
               <>
                 <button title="Editar" onClick={() => setEditing(p)} className="text-faint hover:text-accent-ink p-1"><Pencil size={15} /></button>
-                {!p.isSystem && <button title="Excluir" onClick={() => setDeleting(p)} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
+                {p.systemRole !== 'tenant_admin' && <button title="Excluir" onClick={() => setDeleting(p)} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
               </>
             )}
           </div>
@@ -91,7 +91,7 @@ export function AccessProfiles() {
         title="Excluir perfil"
         danger
         confirmLabel="Excluir"
-        text={`"${deleting?.name}" será removido.`}
+        text={deleting?._count.users ? `"${deleting.name}" será removido. ${deleting._count.users} pessoa(s) vinculada(s) voltarão ao acesso padrão do papel.` : `"${deleting?.name}" será removido.`}
         onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Perfil excluído'); } catch (err) { toast.err(err); throw err; } }}
       />
     </section>
@@ -135,11 +135,12 @@ function ProfileModal({ open, profile, canGrant, pending, onClose, onSubmit }: {
             onChange={(e) => setName(e.target.value)}
             required
             maxLength={60}
-            disabled={profile?.isSystem}
+            disabled={profile?.systemRole === 'tenant_admin'}
             placeholder="Atendente líder"
             className="w-full rounded-lg border border-line bg-field px-3 py-2 text-ink disabled:text-muted"
           />
-          {profile?.isSystem && <p className="text-xs text-faint">Perfis padrão não podem ser renomeados, mas as permissões são suas.</p>}
+          {profile?.systemRole === 'tenant_admin' && <p className="text-xs text-faint">O perfil Administrador mantém este nome para identificar a conta.</p>}
+          {profile?.isSystem && profile?.systemRole !== 'tenant_admin' && <p className="text-xs text-faint">Você pode adaptar o nome ao seu negócio; as permissões e o papel interno continuam os mesmos.</p>}
         </div>
 
         <div className="space-y-1">

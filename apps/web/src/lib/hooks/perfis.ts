@@ -9,7 +9,7 @@ import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permi
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 // ---- Perfis de acesso ----
-export interface AccessProfile { id: string; name: string; description: string | null; permissions: Permission[]; isSystem: boolean; _count: { users: number } }
+export interface AccessProfile { id: string; name: string; description: string | null; permissions: Permission[]; isSystem: boolean; systemRole?: 'tenant_admin' | 'manager' | 'agent' | null; _count: { users: number } }
 export const useProfiles = () => useQuery({ queryKey: ['profiles'], queryFn: () => api<AccessProfile[]>('/profiles') });
 const invProfiles = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['profiles'] }); qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['me'] }); };
 export const useCreateProfile = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { name: string; description?: string; permissions: Permission[] }) => api<AccessProfile>('/profiles', { method: 'POST', body: JSON.stringify(b) }), onSuccess: invProfiles(qc) }); };

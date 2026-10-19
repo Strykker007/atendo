@@ -106,7 +106,7 @@ export default function TemplateEditorPage() {
         <QuickRepliesSection items={content.quickReplies} onChange={(quickReplies) => edit({ quickReplies })} />
         <FlowsSection items={content.flows} onChange={(flows) => edit({ flows })} />
         {/* editar grava `tags` e aposenta o formato antigo (lossReasons); "Voltar ao catálogo" tira as duas */}
-        <TagsSection value={content.tags} fallback={content.lossReasons || content.lossReasonColors ? tpl.data.effectiveTags : CATALOGO_TAGS} onChange={(tags) => edit({ tags, lossReasons: undefined, lossReasonColors: undefined })} />
+        <TagsSection value={content.tags} fallback={content.lossReasons || content.lossReasonColors ? tpl.data.effectiveTags : CATALOGO_TAGS} labels={templateOutcomeLabels(content.settings)} onChange={(tags) => edit({ tags, lossReasons: undefined, lossReasonColors: undefined })} />
       </div>
     </PageShell>
   );
@@ -114,6 +114,15 @@ export default function TemplateEditorPage() {
 
 /** nomes sugeridos para atendimento sem venda (condomínio, suporte…) */
 const SERVICE_LABELS = { wonLabel: 'Resolvido', lostLabel: 'Não resolvido' };
+
+/** O modelo ainda não é uma empresa, então os rótulos vêm do próprio rascunho. */
+function templateOutcomeLabels(settings?: TemplateSettings) {
+  const service = settings?.salesEnabled === false;
+  return {
+    won: settings?.wonLabel?.trim() || (service ? SERVICE_LABELS.wonLabel : 'Comprou'),
+    lost: settings?.lostLabel?.trim() || (service ? SERVICE_LABELS.lostLabel : 'Não comprou'),
+  };
+}
 
 /**
  * Configurações → Atendimento com que o cliente nasce: encerramento com ou sem venda, assinatura
@@ -158,17 +167,17 @@ function SettingsSection({ value, onChange }: { value?: TemplateSettings; onChan
 /**
  * Perfis com que o cliente nasce, um cartão por perfil — normalmente Administrador, Gerente e
  * Atendente, mais quantos extras o segmento pedir ("Farmacêutico", "Atendente líder"…).
- * Administrador é sempre tudo; Gerente e Atendente seguem o catálogo do sistema até serem editados.
+ * Administrador é sempre tudo; os dois perfis operacionais seguem o catálogo até serem editados.
  */
 function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; onChange: (p: TemplateProfile[]) => void }) {
-  const [editing, setEditing] = useState<{ original: string | null; name: string; description: string; permissions: Permission[]; system: boolean } | null>(null);
+  const [editing, setEditing] = useState<{ original: string | null; systemRole?: 'manager' | 'agent'; name: string; description: string; permissions: Permission[]; system: boolean } | null>(null);
   const byName = new Map(profiles.map((p) => [p.name, p]));
   const cards = [
     ...FIXED.map((f) => {
-      const t = byName.get(f.name);
-      return { name: f.name, description: t?.description ?? '', permissions: t?.permissions ?? DEFAULT_PERMISSIONS[f.role], system: true, catalog: !t };
+      const t = profiles.find((p) => p.systemRole === f.role) ?? byName.get(f.name);
+      return { name: t?.name ?? f.name, systemRole: f.role as 'manager' | 'agent', description: t?.description ?? '', permissions: t?.permissions ?? DEFAULT_PERMISSIONS[f.role], system: true, catalog: !t };
     }),
-    ...profiles.filter((p) => !FIXED.some((f) => f.name === p.name)).map((p) => ({ name: p.name, description: p.description ?? '', permissions: p.permissions, system: false, catalog: false })),
+    ...profiles.filter((p) => !p.systemRole && !FIXED.some((f) => f.name === p.name)).map((p) => ({ name: p.name, systemRole: undefined, description: p.description ?? '', permissions: p.permissions, system: false, catalog: false })),
   ];
 
   function submit() {
@@ -176,9 +185,10 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
     const name = editing.name.trim();
     if (!name) return toast.err('Informe o nome do perfil.');
     if (name !== editing.original && (name === ADMIN || cards.some((c) => c.name === name))) return toast.err('Já existe um perfil com esse nome.');
-    const p: TemplateProfile = { name, ...(editing.description.trim() && { description: editing.description.trim() }), permissions: editing.permissions };
+    const p: TemplateProfile = { name, ...(editing.systemRole && { systemRole: editing.systemRole }), ...(editing.description.trim() && { description: editing.description.trim() }), permissions: editing.permissions };
     // perfil padrão que ainda seguia o catálogo entra no conteúdo a partir desta edição
-    onChange(editing.original && byName.has(editing.original) ? profiles.map((x) => (x.name === editing.original ? p : x)) : [...profiles, p]);
+    const sameProfile = (x: TemplateProfile) => editing.systemRole ? x.systemRole === editing.systemRole || (!x.systemRole && x.name === editing.original) : x.name === editing.original;
+    onChange(editing.original && profiles.some(sameProfile) ? profiles.map((x) => (sameProfile(x) ? p : x)) : [...profiles, p]);
     setEditing(null);
   }
   const toggle = (perm: Permission) => editing && setEditing({ ...editing, permissions: editing.permissions.includes(perm) ? editing.permissions.filter((x) => x !== perm) : [...editing.permissions, perm] });
@@ -188,7 +198,7 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 className="font-display font-semibold text-ink">Perfis e permissões <span className="text-muted font-normal text-sm">· {cards.length + 1}</span></h2>
-          <p className="text-[12px] text-muted">Os perfis que o cliente novo já recebe, cada um com o que pode fazer. A equipe dele é vinculada a eles (admin → Administrador, gerente → Gerente, atendente → Atendente; os extras, o admin atribui na Equipe).</p>
+          <p className="text-[12px] text-muted">Os perfis que o cliente novo já recebe, cada um com o que pode fazer. Renomeie os dois perfis operacionais para usar o vocabulário do segmento (por exemplo, Porteiro e Supervisor).</p>
         </div>
         <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={() => setEditing({ original: null, name: '', description: '', permissions: [], system: false })}>Novo perfil</Button>
       </div>
@@ -202,12 +212,11 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
           </div>
         </div>
         {cards.map((c) => (
-          <div key={c.name} className="flex items-start gap-3 px-3 py-2.5">
+          <div key={c.systemRole ?? c.name} className="flex items-start gap-3 px-3 py-2.5">
             <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0 bg-accent-soft text-accent-ink"><Shield size={15} /></span>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-ink flex items-center gap-1.5 flex-wrap">
                 {c.name}
-                {c.system && <Lock size={12} className="text-faint" />}
                 {c.catalog && <span className="text-[10.5px] rounded bg-field text-muted px-1.5 py-0.5">padrão do sistema</span>}
                 <span className="text-xs text-muted font-normal">· {c.permissions.length} permiss{c.permissions.length === 1 ? 'ão' : 'ões'}</span>
               </div>
@@ -217,8 +226,8 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
                 {c.permissions.map((perm) => <span key={perm} className="text-[11px] rounded bg-field text-muted px-1.5 py-0.5">{PERMISSIONS[perm]}</span>)}
               </div>
             </div>
-            {c.system && !c.catalog && <button title="Voltar ao padrão do sistema" className="text-faint hover:text-accent-ink p-1" onClick={() => onChange(profiles.filter((p) => p.name !== c.name))}><RotateCcw size={14} /></button>}
-            <button title="Editar" className="text-faint hover:text-accent-ink p-1" onClick={() => setEditing({ original: c.name, name: c.name, description: c.description, permissions: [...c.permissions], system: c.system })}><Pencil size={14} /></button>
+            {c.system && !c.catalog && <button title="Voltar ao padrão do sistema" className="text-faint hover:text-accent-ink p-1" onClick={() => onChange(profiles.filter((p) => p.systemRole !== c.systemRole && p.name !== c.name))}><RotateCcw size={14} /></button>}
+            <button title="Editar" className="text-faint hover:text-accent-ink p-1" onClick={() => setEditing({ original: c.name, systemRole: c.systemRole, name: c.name, description: c.description, permissions: [...c.permissions], system: c.system })}><Pencil size={14} /></button>
             {!c.system && <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => onChange(profiles.filter((p) => p.name !== c.name))}><Trash2 size={14} /></button>}
           </div>
         ))}
@@ -228,8 +237,8 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
         {editing && (
           <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Nome" hint={editing.system ? 'Perfis padrão não são renomeados.' : undefined}>
-                <input className={inputCls} value={editing.name} maxLength={60} required disabled={editing.system} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Farmacêutico" />
+              <Field label="Nome" hint={editing.system ? 'O nome aparece para o cliente; o papel interno continua o mesmo.' : undefined}>
+                <input className={inputCls} value={editing.name} maxLength={60} required onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Porteiro" />
               </Field>
               <Field label="Descrição (opcional)"><input className={inputCls} value={editing.description} maxLength={200} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></Field>
             </div>
@@ -390,7 +399,7 @@ function FlowsSection({ items, onChange }: { items: TemplateFlow[]; onChange: (i
  * recebe as tags de encerramento do catálogo (ou as do formato antigo do modelo); a primeira
  * edição copia essa lista para o modelo.
  */
-function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fallback: TemplateTag[]; onChange: (t: TemplateTag[] | undefined) => void }) {
+function TagsSection({ value, fallback, labels, onChange }: { value?: TemplateTag[]; fallback: TemplateTag[]; labels: { won: string; lost: string }; onChange: (t: TemplateTag[] | undefined) => void }) {
   const list = value ?? fallback;
   const [nomes, setNomes] = useState('');
   const [novaWon, setNovaWon] = useState(false);
@@ -451,7 +460,7 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 className="font-display font-semibold text-ink">Tags</h2>
-          <p className="text-[12px] text-muted">Tags com que o cliente nasce, com cor e etapa do Kanban. As marcadas em Comprou / Não comprou viram os MOTIVOS de encerramento do cliente novo. Arraste para ordenar — é a ordem das colunas do Kanban. {value ? 'Lista própria do modelo.' : 'Usando as tags de encerramento do catálogo — editar copia a lista para o modelo.'}</p>
+          <p className="text-[12px] text-muted">Tags com que o cliente nasce, com cor e etapa do Kanban. As marcadas em {labels.won} / {labels.lost} viram os MOTIVOS de encerramento do cliente novo. Os nomes são definidos acima, em Atendimento. Arraste para ordenar — é a ordem das colunas do Kanban. {value ? 'Lista própria do modelo.' : 'Usando as tags de encerramento do catálogo — editar copia a lista para o modelo.'}</p>
         </div>
         {value && <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => { setSel([]); onChange(undefined); }}>Voltar às do catálogo</Button>}
       </div>
@@ -468,7 +477,7 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
                   <>
                     <div className="fixed inset-0 z-20" onClick={() => setMenuEnc(false)} />
                     <div className="absolute left-0 top-full mt-1 z-30 w-60 rounded-lg border border-line bg-panel p-1.5 shadow-lg text-[12.5px]">
-                      {([['showOnWon', 'Comprou'], ['showOnLost', 'Não comprou']] as const).map(([campo, rotulo]) => (
+                      {([['showOnWon', labels.won], ['showOnLost', labels.lost]] as const).map(([campo, rotulo]) => (
                         <div key={campo} className="flex items-center gap-1 px-1.5 py-1">
                           <span className="flex-1 text-ink font-medium">{rotulo}</span>
                           <button type="button" className="rounded px-2 py-0.5 text-ok hover:bg-ok-soft" onClick={() => { setMenuEnc(false); patch(sel, { [campo]: true }); }}>Mostrar</button>
@@ -498,8 +507,8 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
             <span className="w-5 shrink-0" />
             <span className="flex-1">Tag</span>
             <span className="w-16 text-center">Kanban</span>
-            <span className="w-20 text-center leading-tight">Comprou</span>
-            <span className="w-20 text-center leading-tight">Não comprou</span>
+            <span className="w-20 text-center leading-tight">{labels.won}</span>
+            <span className="w-20 text-center leading-tight">{labels.lost}</span>
             <span className="w-16 text-center leading-tight">Conflita com</span>
             <span className="w-7 shrink-0" />
           </div>
@@ -521,8 +530,8 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
                           </div>
                           <span className="flex-1 min-w-0 truncate"><span className="text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: t.color ?? '#6366f1' }}>{t.name}</span></span>
                           <span className="w-16 flex justify-center">{sw(!!t.isKanban, () => patch([t.name], { isKanban: !t.isKanban }), `${t.name} no Kanban`)}</span>
-                          <span className="w-20 flex justify-center">{sw(!!t.showOnWon, () => patch([t.name], { showOnWon: !t.showOnWon }), `${t.name} ao encerrar como Comprou`)}</span>
-                          <span className="w-20 flex justify-center">{sw(!!t.showOnLost, () => patch([t.name], { showOnLost: !t.showOnLost }), `${t.name} ao encerrar como Não comprou`)}</span>
+                          <span className="w-20 flex justify-center">{sw(!!t.showOnWon, () => patch([t.name], { showOnWon: !t.showOnWon }), `${t.name} ao encerrar como ${labels.won}`)}</span>
+                          <span className="w-20 flex justify-center">{sw(!!t.showOnLost, () => patch([t.name], { showOnLost: !t.showOnLost }), `${t.name} ao encerrar como ${labels.lost}`)}</span>
                           <span className="w-16 flex justify-center">
                             {(() => {
                               const n = opostas(t.name).size;
@@ -554,7 +563,7 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
         return (
           <Modal open onClose={() => setConflitoDe(null)} title={`“${conflitoDe}” conflita com`} width="max-w-md">
             <p className="text-xs text-muted mb-2">No cliente novo, marcar <b>{conflitoDe}</b> tira estas tags (e marcar uma delas tira {conflitoDe}). Só as opostas diretas — nunca em cadeia. Até 20.</p>
-            {aberta && !viraTag(aberta) && <p className="text-xs text-warn-ink bg-warn-soft rounded-lg px-3 py-2 mb-2">Esta tag vira motivo de encerramento no cliente novo (está só em Comprou/Não comprou), então os conflitos dela não valem. Ligue o Kanban para ela continuar tag.</p>}
+            {aberta && !viraTag(aberta) && <p className="text-xs text-warn-ink bg-warn-soft rounded-lg px-3 py-2 mb-2">Esta tag vira motivo de encerramento no cliente novo (está só em {labels.won}/{labels.lost}), então os conflitos dela não valem. Ligue o Kanban para ela continuar tag.</p>}
             <div className="max-h-80 overflow-y-auto divide-y divide-line rounded-lg border border-line">
               {list.filter((t) => t.name !== conflitoDe).map((t) => {
                 const on = ops.has(t.name);
@@ -577,8 +586,8 @@ function TagsSection({ value, fallback, onChange }: { value?: TemplateTag[]; fal
         <textarea className={cn(inputCls, 'resize-none font-mono text-[13px]')} rows={3} value={nomes} onChange={(e) => setNomes(e.target.value)} placeholder={'Adicionar tags — uma por linha (ou separadas por ;)\nReceita vencida\nAchou caro'} aria-label="Nomes das tags a adicionar" />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <span className="text-muted">Aparecem ao encerrar como:</span>
-          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={novaWon} onChange={(e) => setNovaWon(e.target.checked)} /> Comprou</label>
-          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={novaLost} onChange={(e) => setNovaLost(e.target.checked)} /> Não comprou</label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={novaWon} onChange={(e) => setNovaWon(e.target.checked)} /> {labels.won}</label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={novaLost} onChange={(e) => setNovaLost(e.target.checked)} /> {labels.lost}</label>
           <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={novaKanban} onChange={(e) => setNovaKanban(e.target.checked)} /> Viram etapas do Kanban</label>
           <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={add}>Adicionar</Button>
         </div>

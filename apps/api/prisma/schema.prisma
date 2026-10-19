@@ -395,8 +395,11 @@ model AccessProfile {
   description String?
   /// chaves de `Permission` (packages/shared) — lista fechada, validada na API
   permissions String[]
-  /// criado junto com o cliente; não pode ser apagado, para o cliente nunca ficar sem perfil
+  /// criado junto com o cliente; só o Administrador é obrigatório para a conta nunca ficar sem acesso
   isSystem    Boolean  @default(false)
+  /// papel interno do perfil padrão. O nome pode ser adaptado ao negócio do cliente
+  /// (por exemplo, "Porteiro"), sem perder a ligação com manager/agent.
+  systemRole  Role?
   /// perfil padrão que o cliente editou. Enquanto for falso, as permissões acompanham o
   /// catálogo — senão um perfil criado hoje não ganharia as funcionalidades de amanhã.
   customized  Boolean  @default(false)
@@ -407,6 +410,7 @@ model AccessProfile {
   users  User[]
 
   @@unique([tenantId, name])
+  @@unique([tenantId, systemRole])
   @@map("access_profiles")
 }
 

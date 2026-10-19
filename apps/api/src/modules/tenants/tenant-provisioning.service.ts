@@ -42,7 +42,7 @@ export class TenantProvisioningService {
    */
   async provision(tx: Prisma.TransactionClient, tenantId: string, content: TemplateContent | null) {
     await tx.accessProfile.createMany({
-      data: provisionedProfiles(content).map((p) => ({ tenantId, name: p.name, description: p.description || null, permissions: p.permissions, isSystem: p.isSystem, customized: p.customized })),
+      data: provisionedProfiles(content).map((p) => ({ tenantId, name: p.name, description: p.description || null, permissions: p.permissions, isSystem: p.isSystem, systemRole: p.role, customized: p.customized })),
     });
     if (!content) return;
 
@@ -89,7 +89,6 @@ export class TenantProvisioningService {
       this.prisma.closeReason.findMany({ where: { tenantId, isActive: true }, select: { name: true, color: true, outcome: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
       this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true, requireSignature: true, wonLabel: true, lostLabel: true } }),
     ]);
-    const admin = SYSTEM_PROFILES.find((p) => p.role === 'tenant_admin')!.name;
     const warnings = new Set<string>();
     const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
     const flowNameById = Object.fromEntries(flows.map((f) => [f.id, f.name]));
@@ -103,8 +102,8 @@ export class TenantProvisioningService {
     return {
       content: {
         profiles: profiles
-          .filter((p) => p.name !== admin && (!p.isSystem || p.customized))
-          .map((p) => ({ name: p.name, ...(p.description && { description: p.description }), permissions: p.permissions as TemplateContent['profiles'][number]['permissions'] })),
+          .filter((p) => p.systemRole !== 'tenant_admin' && (!p.isSystem || p.customized || p.name !== SYSTEM_PROFILES.find((s) => s.role === p.systemRole)?.name))
+          .map((p) => ({ name: p.name, ...(p.systemRole === 'manager' || p.systemRole === 'agent' ? { systemRole: p.systemRole } : {}), ...(p.description && { description: p.description }), permissions: p.permissions as TemplateContent['profiles'][number]['permissions'] })),
         quickReplies: qr.map((o) => o.portable),
         flows: portableFlows,
         // todas as tags, com cor, Kanban e encerramento (Comprou / Não comprou), na ordem das colunas
@@ -129,8 +128,7 @@ export class TenantProvisioningService {
   async linkRoleProfile(tenantId: string, userId: string, role: 'tenant_admin' | 'manager' | 'agent') {
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { templateId: true } });
     if (!tenant?.templateId) return;
-    const name = SYSTEM_PROFILES.find((p) => p.role === role)?.name;
-    const profile = name && (await this.prisma.accessProfile.findFirst({ where: { tenantId, name, isSystem: true }, select: { id: true } }));
+    const profile = await this.prisma.accessProfile.findFirst({ where: { tenantId, systemRole: role, isSystem: true }, select: { id: true } });
     if (profile) await this.prisma.user.update({ where: { id: userId }, data: { profileId: profile.id } });
   }
 }

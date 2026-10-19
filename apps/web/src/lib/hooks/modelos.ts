@@ -7,7 +7,7 @@ import { api } from '../api';
 export interface TenantTemplateRow { id: string; name: string; description: string | null; isDefault: boolean; updatedAt: string; tenants: number; profiles: number; quickReplies: number; flows: number; tags: number }
 
 /** Conteúdo do modelo (apps/api → tenants/tenant-template.ts). Fluxos vão no formato portável, sem edição aqui. */
-export interface TemplateProfile { name: string; description?: string; permissions: Permission[] }
+export interface TemplateProfile { name: string; /** vínculo interno de Gerente/Atendente quando o rótulo foi adaptado */ systemRole?: 'manager' | 'agent'; description?: string; permissions: Permission[] }
 export interface TemplateQuickReply { atendo: 'quick-reply'; version: number; folder: string; title: string; body: string }
 export interface TemplateFlow { atendo: 'flow'; version: number; name: string; description?: string; /** aparece no modal de encerramento do cliente novo */ showOnClosing?: boolean; trigger: unknown; definition: unknown }
 /** tag com que o cliente nasce — as mesmas opções da tela de Tags */
