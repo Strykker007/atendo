@@ -33,6 +33,8 @@ tenant_templates (global) ── tenants.templateId
 
 **departments** / **user_departments** — departamentos do cliente (nome único, cor, ativo) e quem participa (N:N; sem linha = sem restrição). `conversations.departmentId` opcional (`SetNull` ao excluir). Ver [Departamentos](departamentos.md).
 
+**work_schedules** / **schedule_overrides** — escalas de trabalho do cliente (`type` `FIXED_12X36`|`COMMERCIAL_44H`|`CUSTOM`, `startTime`/`endTime` "HH:MM" locais, `workDays`, `restHours`, `anchorDate`, `toleranceMinutes`) e liberações excepcionais de plantão (`userId`, `validFrom`, `validUntil`, `approvedById`, `reason`, `revokedAt`). Em `users`: `scheduleId` (SetNull ao apagar a escala), `isTemporary`, `accessExpiresAt`, `expiredAt`, `temporaryCreatedById` — migração `20270103000000_work_schedules`. **schedule_access_requests** = pedidos de autorização feitos no login (`reason`, `approverId`, `status` `pending`|`approved`|`denied`, quem decidiu, `overrideId`) — migração `20270105000000_schedule_access_requests`. Ver [Escalas](escalas.md).
+
 **refresh_tokens** — só o hash SHA-256 do token; `revokedAt` permite logout e rotação. Guardamos `userAgent`/`ip` para auditoria.
 
 ### WhatsApp
@@ -50,6 +52,8 @@ tenant_templates (global) ── tenants.templateId
 **ignored_contacts** — telefones isentos de ticket por cliente (`phone` só dígitos, único por tenant); a conversa desses contatos fica com `conversations.ticketExempt = true` (chat livre, fora da fila e dos relatórios). Ver [Contatos isentos](contatos-isentos.md).
 
 **internal_chats** / **internal_chat_members** / **internal_messages** — chat interno da equipe (direto ou grupo), histórico permanente e auditável por `internal_chat.audit`. Ver [Chat interno](chat-interno.md).
+
+**support_tickets** — atendimentos da fila de suporte (um ativo por canal de suporte): `number` sequencial (#123), `status` (`open`|`in_progress`|`resolved`), responsável (`assigneeId`/`assigneeName`), `openedAt`, `firstResponseAt`, `resolvedAt`. `whatsapp_numbers.syncStartedAt` = quando o número reconectou (aviso de sincronização). Migração `20270104000000_support_tickets_number_sync`. Ver [Fila de suporte](chat-interno.md#fila-de-suporte).
 
 **whatsapp_groups** / **campaign_group_targets** — lista branca de grupos por número (opt-in estrito) e alvos de grupo da transmissão. Grupo não é contato nem tem conversa; ver [Grupos restritos](grupos.md).
 
@@ -152,6 +156,9 @@ atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`).
 | SubscriptionStatus | trialing, active, past_due, suspended, canceled |
 | InvoiceStatus | draft, open, paid, failed, void |
 | BillingType | INDIVIDUAL, CONSOLIDATED_GROUP (em `tenants` e `companies` — [empresas.md#cobrança](empresas.md#cobrança)) |
+| WorkScheduleType | FIXED_12X36, COMMERCIAL_44H, CUSTOM ([escalas.md](escalas.md)) |
+| SupportTicketStatus | open, in_progress, resolved ([chat-interno.md#fila-de-suporte](chat-interno.md#fila-de-suporte)) |
+| AccessRequestStatus | pending, approved, denied ([escalas.md#pedido-de-autorização](escalas.md#pedido-de-autorização)) |
 
 Os mesmos enums existem em `packages/shared/src/enums.ts` para o front. Ao mudar um, mude nos dois.
 

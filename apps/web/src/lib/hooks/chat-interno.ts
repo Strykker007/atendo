@@ -5,6 +5,21 @@ import { api } from '../api';
 
 export interface InternalUser { id: string; name: string; email: string; /** painel aberto agora */ online: boolean }
 export interface InternalChatMember { id: string; name: string; active: boolean }
+/** Atendimento no canal de suporte (docs/chat-interno.md#fila-de-suporte). */
+export interface SupportTicket {
+  id: string;
+  /** #123 — sequência global */
+  number: number;
+  status: 'open' | 'in_progress' | 'resolved';
+  assigneeId: string | null;
+  assigneeName: string | null;
+  openedAt: string;
+  firstResponseAt: string | null;
+  resolvedAt: string | null;
+  resolvedByName: string | null;
+  /** lado do cliente: posição na fila (1 = o próximo); null fora da fila */
+  position?: number | null;
+}
 export interface InternalChat {
   id: string;
   isGroup: boolean;
@@ -21,6 +36,8 @@ export interface InternalChat {
   lastMessageAt: string | null;
   lastMessagePreview: string | null;
   unread?: number;
+  /** canal de suporte: atendimento ativo (ou o último, na aba Encerrados); null = nenhum */
+  ticket?: SupportTicket | null;
   /** só na auditoria */
   messages?: number;
   createdAt?: string;
@@ -101,7 +118,8 @@ export const useMarkInternalRead = (scope: ChatScope = 'team') => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (chatId: string) => api<{ ok: boolean }>(`${BASE[scope]}/${chatId}/read`, { method: 'POST' }),
-    onMutate: (chatId) => qc.setQueryData<InternalChat[]>([LIST_KEY[scope]], (old) => old?.map((c) => (c.id === chatId ? { ...c, unread: 0 } : c))),
+    // suporte: a lista existe em vários recortes da fila (['support-chats', view]) — zera em todos
+    onMutate: (chatId) => qc.setQueriesData<InternalChat[]>({ queryKey: [LIST_KEY[scope]] }, (old) => (Array.isArray(old) ? old.map((c) => (c.id === chatId ? { ...c, unread: 0 } : c)) : old)),
   });
 };
 
@@ -134,9 +152,28 @@ export const useDeleteInternalChat = () => {
 // ---- canal de suporte: lado do dono do sistema (docs/chat-interno.md#suporte) ----
 export interface SupportTenant { id: string; name: string; isActive: boolean }
 
-/** Canais de suporte com mensagem, de todos os clientes, com as não lidas. */
-export const useSupportChats = (enabled = true) =>
-  useQuery({ queryKey: ['support-chats'], enabled, queryFn: () => api<InternalChat[]>('/super-admin/support/chats'), refetchInterval: 60_000 });
+/**
+ * Recortes da fila de suporte: `queue` = na fila (ordem de chegada), `mine` = meus em andamento,
+ * `active` = fila + em andamento, `resolved` = encerrados (7 dias), `all` = todo canal com mensagem.
+ */
+export type SupportView = 'queue' | 'mine' | 'active' | 'resolved' | 'all';
+
+/** Canais de suporte de todos os clientes, com as não lidas e o atendimento. */
+export const useSupportChats = (view: SupportView = 'all', enabled = true) =>
+  useQuery({ queryKey: ['support-chats', view], enabled, queryFn: () => api<InternalChat[]>(`/super-admin/support/chats?view=${view}`), refetchInterval: 60_000 });
+
+/** Contadores das abas (mesmo prefixo: recarrega junto com as listas a cada evento do socket). */
+export const useSupportCounts = (enabled = true) =>
+  useQuery({ queryKey: ['support-chats', 'counts'], enabled, queryFn: () => api<{ queue: number; mine: number; active: number }>('/super-admin/support/counts'), refetchInterval: 60_000 });
+
+/** Assumir, devolver à fila ou encerrar um atendimento. */
+export const useSupportTicketAction = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'assign' | 'release' | 'resolve' }) => api<{ ok: boolean }>(`/super-admin/support/tickets/${id}/${action}`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['support-chats'] }),
+  });
+};
 
 export const useSupportTenants = (enabled = true) =>
   useQuery({ queryKey: ['support-tenants'], enabled, queryFn: () => api<SupportTenant[]>('/super-admin/support/tenants'), staleTime: 5 * 60_000 });
@@ -146,6 +183,7 @@ export const useOpenSupportChat = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (tenantId: string) => api<InternalChat>(`/super-admin/support/tenants/${tenantId}/chat`, { method: 'POST' }),
-    onSuccess: (c) => qc.setQueryData<InternalChat[]>(['support-chats'], (old) => (old?.some((x) => x.id === c.id) ? old : [c, ...(old ?? [])])),
+    // canal sem mensagem ainda não está em `all`: entra na hora, para a tela conseguir abrir
+    onSuccess: (c) => qc.setQueryData<InternalChat[]>(['support-chats', 'all'], (old) => (old?.some((x) => x.id === c.id) ? old : [c, ...(old ?? [])])),
   });
 };

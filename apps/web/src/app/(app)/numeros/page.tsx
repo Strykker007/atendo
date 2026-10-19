@@ -15,6 +15,7 @@ import { NUMBER_PALETTE } from '@/components/chat/ChannelBadge';
 import { Modal } from '@/components/ui/Modal';
 import { WaRemovedCard, WaRemovedExplanation } from '@/components/numbers/WaRemovedNotice';
 import { ReceiveStalledCard } from '@/components/numbers/ReceiveStalledNotice';
+import { NumberSyncCard } from '@/components/numbers/NumberSyncNotice';
 import { ApiError } from '@/lib/api';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -165,6 +166,7 @@ export default function NumerosPage() {
 
                 <WaRemovedCard number={n} />
                 <ReceiveStalledCard number={n} />
+                <NumberSyncCard number={n} />
 
                 {/* aquecimento (docs/envio.md#aquecimento): o cliente precisa saber por que a resposta demora */}
                 {n.warmup && n.status === 'connected' && (

@@ -1,5 +1,6 @@
 'use client';
 import { useUI } from './store';
+import { allowedWhileLocked, applyShiftToken, markShiftLocked, useShiftSession } from './shift-session';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 let accessToken: string | null = null;
@@ -21,6 +22,8 @@ export const onAccessToken = (fn: (t: string | null) => void) => {
 export const setAccessToken = (t: string | null) => {
   const mudou = accessToken !== t;
   accessToken = t;
+  // fim de turno viaja no token (docs/escalas.md#fim-de-turno)
+  if (mudou) applyShiftToken(t);
   if (mudou) for (const fn of ouvintes) fn(t);
 };
 
@@ -45,8 +48,24 @@ export function refresh(): Promise<boolean> {
   return inFlight;
 }
 
+/**
+ * Por que a última renovação foi recusada com 403 (fora da escala, acesso temporário vencido —
+ * docs/escalas.md). Vai para o login, que explica o motivo em vez de "sessão expirada".
+ */
+let refreshBlock: string | null = null;
+
+/**
+ * Status HTTP da última renovação (null = nem chegou na API). 401/403 = a sessão acabou de vez:
+ * quem tenta de novo em laço (o socket do tempo real) para de martelar a API.
+ */
+let lastRefreshStatus: number | null = null;
+export const refreshRefused = () => lastRefreshStatus === 401 || lastRefreshStatus === 403;
+
 async function doRefresh(): Promise<boolean> {
+  lastRefreshStatus = null;
   const r = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
+  lastRefreshStatus = r.status;
+  if (r.status === 403) refreshBlock = (await r.json().catch(() => ({}))).code ?? null;
   if (!r.ok) return false;
   // pelo setter: o socket do tempo real precisa saber do token novo
   setAccessToken((await r.json()).accessToken);
@@ -62,7 +81,8 @@ async function doRefresh(): Promise<boolean> {
 
 /** Erro da API com o status HTTP e, quando a API manda, um `code` para a tela reagir sem comparar texto. */
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) {
+  /** `data` = o corpo inteiro do erro (campos extras, ex.: `requestToken` do login fora da escala) */
+  constructor(message: string, readonly status: number, readonly code?: string, readonly data?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -79,10 +99,18 @@ function sessionExpired() {
   setAccessToken(null);
   impersonation.set(null);
   const volta = location.pathname + location.search;
-  location.href = `/login?expirou=1&next=${encodeURIComponent(volta)}`;
+  location.href = refreshBlock
+    ? `/login?bloqueio=${encodeURIComponent(refreshBlock)}&next=${encodeURIComponent(volta)}`
+    : `/login?expirou=1&next=${encodeURIComponent(volta)}`;
 }
 
 export const SESSION_EXPIRED_MESSAGE = 'Sua sessão expirou. Entre novamente para continuar.';
+
+/** Mensagens dos bloqueios de acesso (docs/escalas.md), pelo `code` que a API devolve. */
+export const ACCESS_BLOCK_MESSAGES: Record<string, string> = {
+  FOR_OUT_OF_SCHEDULE: 'Seu horário de trabalho terminou. Se precisar continuar, entre de novo e peça autorização ao seu gestor.',
+  ACCOUNT_EXPIRED: 'Este acesso temporário expirou. Peça um novo ao seu gestor.',
+};
 
 /**
  * fetch com Bearer + refresh automático em 401 (uma tentativa).
@@ -92,6 +120,8 @@ export const SESSION_EXPIRED_MESSAGE = 'Sua sessão expirou. Entre novamente par
  * precisar lembrar de passar o filtro (docs/empresas.md).
  */
 export async function api<T = unknown>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  // turno encerrado: só as rotas de passagem saem do navegador (a API recusaria as outras)
+  if (useShiftSession.getState().locked && !allowedWhileLocked(path)) throw new ApiError('Seu turno terminou.', 403, 'SHIFT_ENDED');
   const companyId = useUI.getState().companyId;
   // FormData (upload): o navegador põe o Content-Type com o boundary
   const json = !(init.body instanceof FormData);
@@ -107,7 +137,8 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}, ret
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.message ?? `Erro ${res.status}`, res.status, body.code);
+    if (res.status === 403 && body.code === 'SHIFT_ENDED') markShiftLocked();
+    throw new ApiError(body.message ?? `Erro ${res.status}`, res.status, body.code, body);
   }
   // corpo vazio (204, ou o Nest devolvendo `null`) vira null em vez de erro de JSON
   const text = await res.text();

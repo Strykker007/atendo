@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException } from '@nestjs/common';
+import { BadRequestException, GatewayTimeoutException, HttpException } from '@nestjs/common';
 
 /**
  * Erro de provider em texto legível. Meta e Evolution devolvem o motivo em formatos
@@ -81,6 +81,15 @@ export class ProviderSendError extends BadRequestException {
 }
 
 /**
+ * O provider não respondeu no prazo. Ambíguo: a operação pode ter sido feita (no envio, a
+ * mensagem pode ter saído). Nunca é transitório — repetir um envio assim duplica a mensagem
+ * para o contato. 504 para quem chama pela API.
+ */
+export class ProviderTimeoutError extends GatewayTimeoutException {
+  readonly ambiguous = true;
+}
+
+/**
  * Códigos da Meta que são temporários mesmo vindo com HTTP 400: limite de taxa
  * (4, 80007, 130429, 131048, 131056) e indisponibilidade (1, 2, 131000, 131016, 133004).
  */
@@ -92,6 +101,8 @@ const META_TRANSIENT_CODES = new Set([1, 2, 4, 80007, 130429, 131000, 131016, 13
  * credencial errada) — a mensagem vira falha na hora, sem gastar tentativas.
  */
 export function isTransientSendError(err: unknown): boolean {
+  // sem resposta no prazo: pode ter saído — repetir duplicaria
+  if (err instanceof ProviderTimeoutError) return false;
   const msg = err instanceof Error ? err.message : String(err);
   if (/connection closed|timed? ?out|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN/i.test(msg)) return true;
   if (err instanceof ProviderSendError) {

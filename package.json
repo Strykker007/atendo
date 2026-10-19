@@ -21,7 +21,8 @@
     "db:migrate:create": "cd apps/api && sh scripts/create-migration.sh",
     "logs": "tail -f .logs/api.log",
     "start:all": "bash scripts/up.sh",
-    "stop:all": "bash scripts/down.sh"
+    "stop:all": "bash scripts/down.sh",
+    "test:local": "bash scripts/test/local.sh"
   },
   "devDependencies": {
     "prettier": "^3.9.8",

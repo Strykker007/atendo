@@ -2,7 +2,8 @@
 import { MarcaHorizontal } from '@/components/ui/Marca';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, setAccessToken, SESSION_EXPIRED_MESSAGE } from '@/lib/api';
+import { ACCESS_BLOCK_MESSAGES, api, ApiError, setAccessToken, SESSION_EXPIRED_MESSAGE } from '@/lib/api';
+import { AccessRequestModal } from '@/components/auth/AccessRequestModal';
 import { Button } from '@/components/ui/Button';
 
 export default function LoginPage() {
@@ -12,11 +13,19 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
+  // barrado pela escala: popup para pedir autorização (docs/escalas.md#pedido-de-autorização)
+  const [bloqueio, setBloqueio] = useState<{ token: string; userName?: string } | null>(null);
   // a sessão caiu no meio do uso (ver sessionExpired em lib/api.ts): explica e volta para lá
-  useEffect(() => { if (new URLSearchParams(location.search).get('expirou')) setAviso(SESSION_EXPIRED_MESSAGE); }, []);
+  // ou a renovação foi recusada por escala/validade (docs/escalas.md): diz o motivo
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    const bloqueio = q.get('bloqueio');
+    if (bloqueio) setAviso(ACCESS_BLOCK_MESSAGES[bloqueio] ?? SESSION_EXPIRED_MESSAGE);
+    else if (q.get('expirou')) setAviso(SESSION_EXPIRED_MESSAGE);
+  }, []);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit(e?: React.FormEvent) {
+    e?.preventDefault();
     setLoading(true);
     setError(null);
     try {
@@ -26,6 +35,10 @@ export default function LoginPage() {
       const next = new URLSearchParams(location.search).get('next');
       router.replace(next && /^\/(?![\/\\])/.test(next) ? next : '/conversas');
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'FOR_OUT_OF_SCHEDULE' && typeof err.data?.requestToken === 'string') {
+        setBloqueio({ token: err.data.requestToken, userName: typeof err.data.userName === 'string' ? err.data.userName : undefined });
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Falha no login');
     } finally {
       setLoading(false);
@@ -52,6 +65,7 @@ export default function LoginPage() {
         <div className="text-right -mt-2"><a href="/esqueci-senha" className="text-xs text-accent-ink hover:underline">Esqueci minha senha</a></div>
         <Button type="submit" className="w-full" loading={loading} loadingText="Entrando…">Entrar</Button>
       </form>
+      {bloqueio && <AccessRequestModal token={bloqueio.token} userName={bloqueio.userName} onClose={() => setBloqueio(null)} onRetry={() => { setBloqueio(null); void submit(); }} />}
     </main>
   );
 }

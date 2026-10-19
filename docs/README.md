@@ -30,6 +30,7 @@
 | [Metas de consultores](metas.md) | Dev / Cliente | Meta mensal por consultor (padrão + individual), atingimento, ritmo esperado, projeção e ranking |
 | [Relatórios sem pico](relatorios-desempenho.md) | Dev / Ops | Limite de consultas simultâneas, cache curto, teto de período e regras para relatório novo |
 | [Pesquisa de satisfação](pesquisa-de-satisfacao.md) | Dev / Cliente | CSAT/NPS no encerramento: escalas, recusa sem insistência, interceptação da resposta, relatório por consultor |
+| [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão e contas temporárias que expiram sozinhas |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
@@ -44,5 +45,12 @@
 | [21 — Site (landing page)](21-site.md) | Dev / Marketing | App `apps/site`: landing pública da VogoChat em domínio próprio, seções, onde editar textos, deploy |
 | [22 — Agente de IA](22-agente-ia.md) | Dev / Produto | Plano: agente que atende e negocia com ferramentas e limites, e onde mais a IA entra no produto |
 | [23 — Evolution: desempenho](23-evolution-desempenho.md) | Ops | Incidente de CPU de 16/10/2026: índices no banco da Evolution, teto do histórico, manutenção de `shared_buffers` e limite de CPU |
+| [24 — Auditoria da Evolution](24-auditoria-evolution.md) | Dev / Ops / Negócio | Banimentos, desconexões e webhooks travando: causas confirmadas no código da Evolution 2.3.7, correções priorizadas e alternativas (base segue no QR; Cloud API só por cliente) |
+| [25 — Atualização da Evolution e CVE-2026-48063](25-estrategia-atualizacao-evolution.md) | Dev / Ops | 2.3.7 × 2.4.0-rc2 × develop, Baileys rc.9→rc14, backport da CVE, matriz de risco, testes e piloto (proposta aguardando autorização) |
+| [26 — Backport da CVE-2026-48063](26-backport-cve-2026-48063.md) | Dev / Ops | Patches no build da Evolution 2.3.7 (Baileys rc.9), testes de regressão, evidências, deploy e rollback |
+| [27 — Deploy isolado da Evolution](27-deploy-evolution.md) | Ops | Deploy comum não recria Evolution/Postgres/Redis; `deploy-evolution.sh` (build, up, rollback) e testes |
+| [28 — Estabilização da conexão](28-estabilizacao-conexao.md) | Dev / Ops | Etapas dos P0/P1: prazos na Evolution, restart com trava, 401/402/403/406, registro e ordem do connection.update, sonda de sessão zumbi |
+| [29 — Reconexão na Evolution](29-reconexao-evolution.md) | Dev / Ops | Guarda de conexão na 2.3.7: uma conexão por instância, gerações de socket, backoff com jitter, 440 sem disputa, medições antes/depois e piloto |
+| [30 — Testes locais](30-testes-locais.md) | Dev / Ops | `pnpm test:local`: mocks da guarda, carga sintética (100/500/1.000), laboratório de reconexão, roteiro com WhatsApp real e critérios de aprovação da etapa 3 |
 
 Convenção: código em inglês, comentários e documentação em português.

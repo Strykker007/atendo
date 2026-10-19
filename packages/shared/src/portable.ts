@@ -90,6 +90,8 @@ export interface PortableFlow {
   version: number;
   name: string;
   description?: string;
+  /** aparece no modal de encerramento do cliente de destino (ausente = não) */
+  showOnClosing?: boolean;
   trigger: FlowTrigger;
   definition: FlowDefinition;
 }
@@ -288,7 +290,7 @@ export function renewFlowIds(def: FlowDefinition, newId: (type: FlowNodeType) =>
 
 /** Prepara o fluxo para sair do cliente. Ver `scrubFlowDefinition` para o que não viaja. */
 export function flowToPortable(
-  flow: { name: string; description?: string | null; trigger: FlowTrigger; definition: FlowDefinition },
+  flow: { name: string; description?: string | null; showOnClosing?: boolean; trigger: FlowTrigger; definition: FlowDefinition },
   names: SourceNames = {},
 ): { portable: PortableFlow; warnings: string[] } {
   const { definition, warnings } = scrubFlowDefinition(flow.definition, names);
@@ -298,7 +300,7 @@ export function flowToPortable(
     warnings.push('O gatilho valia só para alguns números; no destino passa a valer para todos.');
   }
   return {
-    portable: { atendo: 'flow', version: PORTABLE_VERSION, name: flow.name, description: flow.description ?? undefined, trigger, definition },
+    portable: { atendo: 'flow', version: PORTABLE_VERSION, name: flow.name, description: flow.description ?? undefined, ...(flow.showOnClosing && { showOnClosing: true }), trigger, definition },
     warnings: dedupe(warnings),
   };
 }
@@ -308,9 +310,9 @@ export function flowFromPortable(
   portable: PortableFlow,
   tagIdByName: Record<string, string>,
   newId: (type: FlowNodeType) => string,
-): { name: string; description?: string; trigger: FlowTrigger; definition: FlowDefinition; warnings: string[] } {
+): { name: string; description?: string; showOnClosing: boolean; trigger: FlowTrigger; definition: FlowDefinition; warnings: string[] } {
   const { definition, warnings } = restoreFlowDefinition(portable.definition, tagIdByName);
-  return { name: portable.name, description: portable.description, trigger: clone(portable.trigger), definition: renewFlowIds(definition, newId), warnings };
+  return { name: portable.name, description: portable.description, showOnClosing: portable.showOnClosing === true, trigger: clone(portable.trigger), definition: renewFlowIds(definition, newId), warnings };
 }
 
 /**
@@ -326,7 +328,7 @@ export function parsePortableFlow(raw: unknown): PortableFlow {
   const def = o.definition as FlowDefinition | undefined;
   if (!def || !Array.isArray(def.nodes) || !Array.isArray(def.edges)) throw new Error('O desenho do fluxo está corrompido.');
   if (!o.trigger || typeof o.trigger !== 'object') throw new Error('O gatilho do fluxo está corrompido.');
-  return { atendo: 'flow', version: PORTABLE_VERSION, name: o.name.trim().slice(0, 80), description: typeof o.description === 'string' ? o.description.slice(0, 300) : undefined, trigger: o.trigger, definition: def };
+  return { atendo: 'flow', version: PORTABLE_VERSION, name: o.name.trim().slice(0, 80), description: typeof o.description === 'string' ? o.description.slice(0, 300) : undefined, ...(o.showOnClosing === true && { showOnClosing: true }), trigger: o.trigger, definition: def };
 }
 
 /** Arquivo de fluxos: individual ou lote (até 100). */

@@ -9,7 +9,7 @@ import {
   type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
-import { useDepartments, useOutcomeLabels, useSchedules } from '@/lib/hooks';
+import { useAgents, useDepartments, useOutcomeLabels, useSchedules, useTags } from '@/lib/hooks';
 
 /**
  * Categorias da paleta. A cor é da categoria (roxo = estrutura, amarelo/laranja = lógica,
@@ -53,6 +53,21 @@ export const NODE_META: Record<FlowNodeType, { icon: React.ReactNode; color: str
   distributor: { icon: <Users size={13} />, color: BLUE, label: 'Distribuidor', hint: 'Entrega a conversa: rodízio, menos ocupado ou fila' },
   schedule: { icon: <CalendarClock size={13} />, color: BLUE, label: 'Agendar horário', hint: 'Serviço → profissional → horário → confirma' },
 };
+
+/**
+ * Visualização do canvas (botão na barra do editor). `detailed` = card mostra o conteúdo
+ * configurado (texto, opções, regras, etiqueta) sem abrir o painel; `compact` = só cabeçalho e
+ * saídas, para enxergar fluxos grandes. As saídas (bolinhas) ficam nos dois modos.
+ */
+export type FlowViewMode = 'detailed' | 'compact';
+export const FlowViewModeContext = createContext<FlowViewMode>('detailed');
+const useCompact = () => useContext(FlowViewModeContext) === 'compact';
+
+/** Nome da etiqueta pelo id (cards de Condição e Ação). Carregando = undefined. */
+function useTagName() {
+  const tags = useTags();
+  return (id?: string) => (id ? tags.data?.find((t) => t.id === id)?.name ?? (tags.data ? 'etiqueta excluída' : undefined) : undefined);
+}
 
 /** Ações do editor que o próprio card dispara (ele só conhece o id dele). */
 export const FlowNodeActions = createContext<{ duplicate: (id: string) => void; remove: (id: string) => void } | null>(null);
@@ -116,6 +131,21 @@ export function ContentPreview({ item, compact }: { item: ContentItem; compact?:
   );
 }
 
+const MEDIA_LABEL = { image: ['imagem', 'imagens'], video: ['vídeo', 'vídeos'], document: ['documento', 'documentos'], audio: ['áudio', 'áudios'] } as const;
+/** Selos dos anexos do Conteúdo ("2 imagens · 1 áudio"), para ler o card sem abrir. */
+function MediaBadges({ items }: { items: ContentItem[] }) {
+  const counts = (['image', 'video', 'audio', 'document'] as const).map((k) => [k, items.filter((it) => it.kind === k).length] as const).filter(([, n]) => n > 0);
+  if (!counts.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1 px-0.5">
+      {counts.map(([k, n]) => {
+        const Icon = MEDIA_ICON[k];
+        return <span key={k} className="inline-flex items-center gap-1 rounded-full bg-field px-1.5 py-0.5 text-[10px] text-muted"><Icon size={10} /> {n} {MEDIA_LABEL[k][n > 1 ? 1 : 0]}</span>;
+      })}
+    </div>
+  );
+}
+
 const handleCls = '!w-2.5 !h-2.5 !bg-panel !border-2 !border-line-strong hover:!border-accent';
 
 /** Entrada sempre à esquerda: o fluxo corre da esquerda para a direita. */
@@ -144,8 +174,9 @@ function Shell({ type, selected, children, summary, data }: { type: FlowNodeType
   const id = useNodeId();
   const actions = useContext(FlowNodeActions);
   const reconfig = Array.isArray(data?._reconfig) ? (data._reconfig as string[]) : [];
+  const compact = useCompact();
   return (
-    <div className={cn('group rounded-xl border bg-panel shadow-sm min-w-[200px] max-w-[240px] text-left transition-shadow', selected ? 'border-accent ring-2 ring-accent/30' : reconfig.length ? 'border-warn' : 'border-line')}>
+    <div className={cn('group rounded-xl border bg-panel shadow-sm text-left transition-shadow', compact ? 'min-w-[160px] max-w-[190px]' : 'min-w-[200px] max-w-[260px]', selected ? 'border-accent ring-2 ring-accent/30' : reconfig.length ? 'border-warn' : 'border-line')}>
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line">
         <span className={cn('w-5 h-5 rounded-md grid place-items-center', m.color)}>{m.icon}</span>
         <span className="text-[12px] font-semibold text-ink">{m.label}</span>
@@ -165,7 +196,7 @@ function Shell({ type, selected, children, summary, data }: { type: FlowNodeType
           <AlertTriangle size={11} className="mt-0.5 shrink-0" /> Reconfigurar: {reconfig.join(', ')}
         </div>
       )}
-      {summary !== undefined && <div className="px-3 py-2 text-[11.5px] text-muted leading-snug line-clamp-3 whitespace-pre-wrap">{summary || <span className="italic text-faint">clique para configurar</span>}</div>}
+      {summary !== undefined && <div className={cn('px-3 text-[11.5px] text-muted leading-snug whitespace-pre-wrap', compact ? 'py-1 line-clamp-1' : 'py-2 line-clamp-4')}>{summary || <span className="italic text-faint">clique para configurar</span>}</div>}
       {children}
     </div>
   );
@@ -184,6 +215,15 @@ export function MessageNodeView({ data, selected }: P) {
   const items = normalizeContent(data as MessageNode['data']);
   const { providers } = useContext(FlowEditorRefs);
   const warn = items.some((it) => contentWarnings(it, providers).length > 0);
+  if (useCompact()) {
+    const firstText = items.find((it) => it.text)?.text;
+    const media = items.filter((it) => it.kind !== 'text');
+    return (
+      <Shell type="message" data={data} selected={selected} summary={items.length ? `${firstText ?? ''}${media.length ? `${firstText ? ' · ' : ''}📎 ${media.length} anexo(s)` : ''}${items.length > 1 ? ` · ${items.length} msgs` : ''}` : ''}>
+        <In /><Out />
+      </Shell>
+    );
+  }
   return (
     <Shell type="message" data={data} selected={selected}>
       <In />
@@ -196,6 +236,7 @@ export function MessageNodeView({ data, selected }: P) {
           </div>
         ))}
         {items.length > 4 && <div className="px-1 text-[10.5px] text-faint"><Paperclip size={10} className="inline" /> +{items.length - 4} mensagem(ns)</div>}
+        <MediaBadges items={items} />
         {warn && <div className="flex items-start gap-1 rounded px-1.5 py-1 text-[10.5px] bg-warn-soft text-warn-ink"><AlertTriangle size={11} className="mt-0.5 shrink-0" /> Formato com limitação na API oficial (Meta)</div>}
       </div>
       <Out />
@@ -266,7 +307,7 @@ export function MenuNodeView({ data, selected }: P) {
 const WEEKDAY_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
 /** Uma regra em texto curto, para o card e para o cabeçalho da regra no painel. */
-export function ruleSummary(r: ConditionRule): string {
+export function ruleSummary(r: ConditionRule, tagName?: (id?: string) => string | undefined): string {
   const meta = CONDITION_OPERANDS[r.operand];
   const opLabel = meta ? CONDITION_OPS[meta.kind].find((o) => o.op === r.op)?.label ?? r.op : r.op;
   const subject = r.operand === 'var' ? `{{${r.key || '?'}}}`
@@ -277,7 +318,10 @@ export function ruleSummary(r: ConditionRule): string {
   if (r.op === 'empty' || r.op === 'not_empty') return `${subject} ${opLabel}`;
   if (r.op === 'weekday_in') return `${subject}: ${(r.days ?? []).slice().sort().map((d) => WEEKDAY_SHORT[d]).join(', ') || '?'}`;
   if (r.op === 'time_between') return `${subject} entre ${r.from || '?'} e ${r.to || '?'}`;
-  if (r.operand === 'tag') return r.op === 'is_true' ? 'tem a etiqueta' : 'não tem a etiqueta';
+  if (r.operand === 'tag') {
+    const nome = tagName?.(r.tagId);
+    return `${r.op === 'is_true' ? 'tem a etiqueta' : 'não tem a etiqueta'}${nome ? ` "${nome}"` : ''}`;
+  }
   if (r.operand === 'business_hours') return r.op === 'is_true' ? 'dentro do horário de atendimento' : 'fora do horário de atendimento';
   if (r.operand === 'schedule_band') return `faixa ${r.op === 'is_true' ? 'é' : 'não é'} "${r.band === 'closed' ? 'Fechado' : r.band || '?'}"`;
   return `${subject} ${opLabel} "${r.value ?? ''}"`;
@@ -298,6 +342,8 @@ function useMissingBands(branches: ConditionBranch[]): string[] {
 export function ConditionNodeView({ data, selected }: P) {
   const branches = normalizeCondition(data as ConditionNode['data']);
   const missing = useMissingBands(branches);
+  const tagName = useTagName();
+  const compact = useCompact();
   return (
     <Shell type="condition" data={data} selected={selected}>
       <In />
@@ -312,9 +358,11 @@ export function ConditionNodeView({ data, selected }: P) {
           <OutRow key={b.id} id={b.id}>
             <span className="min-w-0 flex-1">
               <span className="block truncate font-semibold">{b.label || '(ramo)'}</span>
-              <span className="block truncate text-[10px] text-muted">
-                {b.rules.length ? b.rules.map(ruleSummary).join(b.match === 'any' ? ' OU ' : ' E ') : 'sem regras'}
-              </span>
+              {!compact && (
+                <span className="block text-[10px] text-muted leading-snug line-clamp-3 break-words" title={b.rules.map((r) => ruleSummary(r, tagName)).join(b.match === 'any' ? ' OU ' : ' E ')}>
+                  {b.rules.length ? `Se ${b.rules.map((r) => ruleSummary(r, tagName)).join(b.match === 'any' ? ' OU ' : ' E ')}` : 'sem regras'}
+                </span>
+              )}
             </span>
           </OutRow>
         ))}
@@ -325,12 +373,16 @@ export function ConditionNodeView({ data, selected }: P) {
 }
 const STATUS_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado' };
 export function ActionNodeView({ data, selected }: P) {
-  const d = data as { kind?: string; scope?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string; outcome?: 'won' | 'lost'; saleValue?: string; surveyId?: string };
+  const d = data as { kind?: string; scope?: string; tagId?: string; agentId?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string; outcome?: 'won' | 'lost'; saleValue?: string; surveyId?: string };
   const departments = useDepartments();
   const outcomeLabels = useOutcomeLabels();
+  const tagName = useTagName();
+  const agents = useAgents();
+  const tag = d.kind === 'add_tag' || d.kind === 'remove_tag' ? tagName(d.tagId) : undefined;
+  const agent = d.kind === 'assign' && d.agentId ? agents.data?.find((a) => a.id === d.agentId)?.name ?? (agents.data ? 'atendente removido' : undefined) : undefined;
   const dept = d.departmentId === DEPARTMENT_NONE ? 'Sem departamento' : departments.data?.find((x) => x.id === d.departmentId)?.name ?? (d.departmentId && departments.data ? 'departamento excluído' : '?');
   const label = d.kind === 'set_status' && d.status === 'closed' ? `Encerrar conversa${d.outcome ? ` · ${outcomeLabels[d.outcome]}${d.outcome === 'won' && d.saleValue ? ` ${d.saleValue}` : ''}` : ''}${d.surveyId ? ' · ⭐ pesquisa' : ''}`
-    : ({ add_tag: 'Aplicar etiqueta', remove_tag: 'Remover etiqueta', assign: 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook', set_department: `Departamento → ${dept}` } as Record<string, string>)[d.kind ?? ''] ?? '';
+    : ({ add_tag: `Aplicar etiqueta${tag ? ` "${tag}"` : ''}`, remove_tag: `Remover etiqueta${tag ? ` "${tag}"` : ''}`, assign: agent ? `Atribuir a ${agent}` : 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook', set_department: `Departamento → ${dept}` } as Record<string, string>)[d.kind ?? ''] ?? '';
   const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : d.kind === 'webhook' ? `${label}${d.url ? `\n${d.method ?? 'POST'} ${d.url}` : ''}` : label + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
   return (
     <Shell type="action" data={data} selected={selected} summary={txt}>

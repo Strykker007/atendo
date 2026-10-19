@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsISO8601, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsIn, IsISO8601, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -10,6 +10,7 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { ACTIVE_TICKET, TICKET_SELECT, activeTicket, queuePosition, ticketOnMessage, type PresentedTicket } from './support-tickets';
 
 class CreateChatDto {
   /** outros membros (quem cria entra sozinho). Um id e sem nome = conversa direta */
@@ -32,6 +33,11 @@ class PageQuery {
   /** mensagens anteriores a este instante (rolar para cima) */
   @IsOptional() @IsISO8601() before?: string;
 }
+/** Recortes da fila de suporte (docs/chat-interno.md#fila-de-suporte). Sem `view` = todos os canais com mensagem. */
+const SUPPORT_VIEWS = ['queue', 'mine', 'active', 'resolved', 'all'] as const;
+class SupportListQuery {
+  @IsOptional() @IsIn(SUPPORT_VIEWS) view?: (typeof SUPPORT_VIEWS)[number];
+}
 class AuditQuery {
   /** só as conversas de que esta pessoa participa */
   @IsOptional() @IsUUID() userId?: string;
@@ -43,6 +49,14 @@ const MEMBER_SELECT = { userId: true, lastReadAt: true, user: { select: { id: tr
 const MESSAGE_INCLUDE = { replyTo: { select: { id: true, authorId: true, authorName: true, text: true, system: true } } } as const;
 
 type ChatRow = Prisma.InternalChatGetPayload<{ include: { members: { select: typeof MEMBER_SELECT } } }>;
+
+type SupportChatRow = { id: string; tenantId: string; lastMessageAt: Date | null; lastMessagePreview: string | null; tenant: { name: string } };
+
+/** Só os campos do atendimento que a tela usa (sem ids internos de canal/cliente). */
+const presentTicket = (t: PresentedTicket) => ({
+  id: t.id, number: t.number, status: t.status, assigneeId: t.assigneeId, assigneeName: t.assigneeName,
+  openedAt: t.openedAt, firstResponseAt: t.firstResponseAt, resolvedAt: t.resolvedAt, resolvedByName: t.resolvedByName,
+});
 
 /** chave do canal de suporte: um por cliente (único em `(tenantId, directKey)`) */
 const SUPPORT_KEY = 'support';
@@ -73,6 +87,8 @@ async function sendSupport(prisma: PrismaService, gateway: ConversationsGateway,
     prisma.internalChatMember.upsert({ where: { chatId_userId: { chatId: chat.id, userId: author.id } }, create: { chatId: chat.id, userId: author.id, lastReadAt: agora }, update: { lastReadAt: agora } }),
   ]);
   gateway.emitSupportMessage(chat.tenantId, message);
+  // fila de suporte: abre o ticket (cliente) ou assume/primeira resposta (suporte)
+  if (await ticketOnMessage(prisma, chat, author, fromSupport, agora)) gateway.emitSupportChat(chat.tenantId, chat.id);
   return message;
 }
 
@@ -99,6 +115,8 @@ class InternalChatController {
   /** Equipe para iniciar conversa: ativos do cliente, com quem está com o painel aberto agora. */
   @Get('users')
   async users(@CurrentUser() u: AuthUser) {
+    // dono "entrando como": não é da equipe, só fala pelo canal de suporte
+    if (u.impersonatorId) return [];
     const [rows, presenca] = await Promise.all([
       this.prisma.user.findMany({ where: { tenantId: u.tenantId, isActive: true, id: { not: u.id } }, select: { id: true, name: true, email: true }, orderBy: { name: 'asc' } }),
       this.gateway.presence(),
@@ -113,7 +131,7 @@ class InternalChatController {
     // o canal de suporte existe sempre e fica fixado no topo (docs/chat-interno.md#suporte)
     await ensureSupportChat(this.prisma, u.tenantId);
     const rows = await this.prisma.internalChat.findMany({
-      where: { tenantId: u.tenantId, deletedAt: null, OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] },
+      where: { tenantId: u.tenantId, deletedAt: null, ...(u.impersonatorId ? { isSupport: true } : { OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] }) },
       include: { members: { select: MEMBER_SELECT } },
       orderBy: [{ lastMessageAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       take: 100,
@@ -129,8 +147,12 @@ class InternalChatController {
           group by 1`)
       : [];
     const unread = new Map(naoLidas.map((r) => [r.chatId, Number(r.n)]));
+    // canal de suporte: o cliente vê se está na fila (e em que posição) ou com quem do suporte
+    const suporte = rows.find((c) => c.isSupport);
+    const t = suporte ? await activeTicket(this.prisma, suporte.id) : null;
+    const ticket = t ? { ...presentTicket(t), position: await queuePosition(this.prisma, t) } : null;
     return rows
-      .map((c) => ({ ...this.present(c, u.id), unread: unread.get(c.id) ?? 0 }))
+      .map((c) => ({ ...this.present(c, u.id), unread: unread.get(c.id) ?? 0, ...(c.isSupport && { ticket }) }))
       .sort((a, b) => Number(b.isSupport) - Number(a.isSupport));
   }
 
@@ -176,6 +198,11 @@ class InternalChatController {
   @Post('chats/:id/messages')
   async send(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SendDto) {
     const chat = await this.chatOf(u, id);
+    // dono "entrando como" o cliente: responde no canal de suporte como Suporte, com o nome dele
+    if (chat.isSupport && u.impersonatorId) {
+      const dono = await this.prisma.user.findUniqueOrThrow({ where: { id: u.impersonatorId }, select: { id: true, name: true } });
+      return sendSupport(this.prisma, this.gateway, chat, dono, dto, true);
+    }
     const author = await this.assertMember(u);
     if (chat.isSupport) return sendSupport(this.prisma, this.gateway, chat, { id: u.id, name: author.name }, dto, false);
     const text = dto.text.trim();
@@ -298,10 +325,10 @@ class InternalChatController {
 
   /**
    * Conversa de que a pessoa participa — quem não é membro recebe 404 (nem sabe que existe).
-   * O canal de suporte é da equipe inteira do cliente.
+   * O canal de suporte é da equipe inteira do cliente — e é o único que o dono "entrando como" vê.
    */
   private async chatOf(u: AuthUser, id: string) {
-    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, deletedAt: null, OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] }, include: { members: { select: { userId: true } } } });
+    const chat = await this.prisma.internalChat.findFirst({ where: { id, tenantId: u.tenantId, deletedAt: null, ...(u.impersonatorId ? { isSupport: true } : { OR: [{ members: { some: { userId: u.id } } }, { isSupport: true }] }) }, include: { members: { select: { userId: true } } } });
     if (!chat) throw new NotFoundException('Conversa não encontrada');
     return chat;
   }
@@ -332,7 +359,7 @@ class InternalChatController {
     return { ...this.present(c, u.id), unread: 0 };
   }
 
-  /** O dono do sistema "entrando como" o cliente não é da equipe: audita, mas não conversa. */
+  /** O dono do sistema "entrando como" o cliente não é da equipe: audita e fala só pelo canal de suporte. */
   private async assertMember(u: AuthUser) {
     const me = await this.prisma.user.findFirst({ where: { id: u.id, tenantId: u.tenantId, isActive: true }, select: { name: true } });
     if (!me || u.impersonatorId) throw new ForbiddenException('Só membros da equipe usam o chat interno.');
@@ -369,26 +396,104 @@ class SupportController {
     return this.prisma.tenant.findMany({ select: { id: true, name: true, isActive: true }, orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
   }
 
-  /** Canais com mensagem, mais recentes primeiro, com as não lidas por mim. */
+  /**
+   * Canais de suporte. `view`: `queue` = fila (na ordem de chegada), `mine` = os meus em
+   * andamento, `active` = fila + em andamento, `resolved` = encerrados nos últimos 7 dias,
+   * `all`/sem view = todo canal com mensagem (mais recentes primeiro). Cada canal vem com o
+   * atendimento ativo (ou o último, em `resolved`) e as não lidas por mim.
+   */
   @Get('chats')
-  async chats(@CurrentUser() u: AuthUser) {
-    const rows = await this.prisma.internalChat.findMany({
-      where: { isSupport: true, lastMessageAt: { not: null } },
-      select: { id: true, tenantId: true, lastMessageAt: true, lastMessagePreview: true, tenant: { select: { name: true } } },
-      orderBy: { lastMessageAt: 'desc' },
-      take: 200,
-    });
-    const naoLidas = rows.length
+  async chats(@CurrentUser() u: AuthUser, @Query() q: SupportListQuery) {
+    const view = q.view ?? 'all';
+    const chatSelect = { id: true, tenantId: true, lastMessageAt: true, lastMessagePreview: true, tenant: { select: { name: true } } } as const;
+    let rows: { chat: SupportChatRow; ticket: PresentedTicket | null }[];
+    if (view === 'all') {
+      const chats = await this.prisma.internalChat.findMany({ where: { isSupport: true, lastMessageAt: { not: null } }, select: chatSelect, orderBy: { lastMessageAt: 'desc' }, take: 200 });
+      const ativos = chats.length ? await this.prisma.supportTicket.findMany({ where: { chatId: { in: chats.map((c) => c.id) }, ...ACTIVE_TICKET }, select: { ...TICKET_SELECT, chatId: true } }) : [];
+      const porChat = new Map(ativos.map((t) => [t.chatId, t]));
+      rows = chats.map((chat) => ({ chat, ticket: porChat.get(chat.id) ?? null }));
+    } else {
+      const where: Prisma.SupportTicketWhereInput =
+        view === 'queue' ? { status: 'open' }
+        : view === 'mine' ? { status: 'in_progress', assigneeId: u.id }
+        : view === 'active' ? ACTIVE_TICKET
+        : { status: 'resolved', resolvedAt: { gte: new Date(Date.now() - 7 * 86_400_000) } };
+      const tickets = await this.prisma.supportTicket.findMany({
+        where,
+        select: { ...TICKET_SELECT, chat: { select: chatSelect } },
+        // fila: quem chegou primeiro é atendido primeiro; encerrados: os mais recentes
+        orderBy: view === 'resolved' ? { resolvedAt: 'desc' } : { openedAt: 'asc' },
+        take: 200,
+      });
+      // encerrados: um canal pode ter vários no período — fica o último
+      const vistos = new Set<string>();
+      rows = tickets.filter((t) => !vistos.has(t.chat.id) && vistos.add(t.chat.id)).map(({ chat, ...ticket }) => ({ chat, ticket }));
+    }
+    const ids = rows.map((r) => r.chat.id);
+    const naoLidas = ids.length
       ? await this.prisma.$queryRaw<{ chatId: string; n: number }[]>(Prisma.sql`
           select m."chatId", count(*)::int as n
           from internal_messages m
           left join internal_chat_members cm on cm."chatId" = m."chatId" and cm."userId" = ${u.id}
-          where m."chatId" in (${Prisma.join(rows.map((r) => r.id))}) and not m."fromSupport"
+          where m."chatId" in (${Prisma.join(ids)}) and not m."fromSupport"
             and (cm."lastReadAt" is null or m."createdAt" > cm."lastReadAt")
           group by 1`)
       : [];
     const unread = new Map(naoLidas.map((r) => [r.chatId, Number(r.n)]));
-    return rows.map((c) => this.present(c, unread.get(c.id) ?? 0));
+    return rows.map((r) => this.present(r.chat, unread.get(r.chat.id) ?? 0, r.ticket));
+  }
+
+  /** Contadores das abas da fila (badge do widget). */
+  @Get('counts')
+  async counts(@CurrentUser() u: AuthUser) {
+    const [queue, mine, active] = await Promise.all([
+      this.prisma.supportTicket.count({ where: { status: 'open' } }),
+      this.prisma.supportTicket.count({ where: { status: 'in_progress', assigneeId: u.id } }),
+      this.prisma.supportTicket.count({ where: ACTIVE_TICKET }),
+    ]);
+    return { queue, mine, active };
+  }
+
+  /** Assumir o atendimento (tira da fila, fica comigo). Também "puxa" de outro do suporte. */
+  @Post('tickets/:id/assign')
+  async assign(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    const me = await this.me(u);
+    const t = await this.ticket(id);
+    if (t.status === 'resolved') throw new BadRequestException('Este atendimento já foi encerrado.');
+    await this.prisma.supportTicket.update({ where: { id }, data: { status: 'in_progress', assigneeId: me.id, assigneeName: me.name } });
+    this.gateway.emitSupportChat(t.tenantId, t.chatId);
+    return { ok: true };
+  }
+
+  /** Devolver para a fila (sem responsável). */
+  @Post('tickets/:id/release')
+  async release(@Param('id', ParseUUIDPipe) id: string) {
+    const t = await this.ticket(id);
+    if (t.status === 'resolved') throw new BadRequestException('Este atendimento já foi encerrado.');
+    await this.prisma.supportTicket.update({ where: { id }, data: { status: 'open', assigneeId: null, assigneeName: null } });
+    this.gateway.emitSupportChat(t.tenantId, t.chatId);
+    return { ok: true };
+  }
+
+  /**
+   * Encerrar: sai da fila e da lista de ativos, com um aviso no histórico para o cliente. O
+   * canal continua (o histórico é permanente); a próxima mensagem do cliente abre outro.
+   */
+  @Post('tickets/:id/resolve')
+  async resolve(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    const me = await this.me(u);
+    const t = await this.ticket(id);
+    if (t.status === 'resolved') return { ok: true };
+    const agora = new Date();
+    const text = `Atendimento #${t.number} encerrado por ${me.name}. Se precisar de algo mais, é só escrever aqui.`;
+    const [, message] = await this.prisma.$transaction([
+      this.prisma.supportTicket.update({ where: { id }, data: { status: 'resolved', resolvedAt: agora, resolvedByName: me.name, ...(!t.assigneeId && { assigneeId: me.id, assigneeName: me.name }) } }),
+      this.prisma.internalMessage.create({ data: { tenantId: t.tenantId, chatId: t.chatId, authorId: me.id, authorName: me.name, text, system: true, fromSupport: true, createdAt: agora }, include: MESSAGE_INCLUDE }),
+      this.prisma.internalChat.update({ where: { id: t.chatId }, data: { lastMessageAt: agora, lastMessagePreview: text.slice(0, 140) } }),
+    ]);
+    this.gateway.emitSupportMessage(t.tenantId, message);
+    this.gateway.emitSupportChat(t.tenantId, t.chatId);
+    return { ok: true };
   }
 
   /** Abre (ou cria) o canal de um cliente — para o suporte puxar a conversa. */
@@ -398,7 +503,7 @@ class SupportController {
     if (!t) throw new NotFoundException('Cliente não encontrado');
     const c = await ensureSupportChat(this.prisma, tenantId);
     const row = await this.prisma.internalChat.findUniqueOrThrow({ where: { id: c.id }, select: { id: true, tenantId: true, lastMessageAt: true, lastMessagePreview: true, tenant: { select: { name: true } } } });
-    return this.present(row, 0);
+    return this.present(row, 0, await activeTicket(this.prisma, c.id));
   }
 
   @Get('chats/:id/messages')
@@ -433,9 +538,19 @@ class SupportController {
     return chat;
   }
 
+  private async ticket(id: string) {
+    const t = await this.prisma.supportTicket.findUnique({ where: { id }, select: { ...TICKET_SELECT, tenantId: true, chatId: true } });
+    if (!t) throw new NotFoundException('Atendimento não encontrado');
+    return t;
+  }
+
+  private me(u: AuthUser) {
+    return this.prisma.user.findUniqueOrThrow({ where: { id: u.impersonatorId ?? u.id }, select: { id: true, name: true } });
+  }
+
   /** Mesmo formato da lista do chat da equipe: o widget reaproveita a tela. */
-  private present(c: { id: string; tenantId: string; lastMessageAt: Date | null; lastMessagePreview: string | null; tenant: { name: string } }, unread: number) {
-    return { id: c.id, tenantId: c.tenantId, isGroup: false, isSupport: true, name: c.tenant.name, members: [], createdById: null, lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview, unread };
+  private present(c: SupportChatRow, unread: number, ticket: PresentedTicket | null = null) {
+    return { id: c.id, tenantId: c.tenantId, isGroup: false, isSupport: true, name: c.tenant.name, members: [], createdById: null, lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview, unread, ticket: ticket && presentTicket(ticket) };
   }
 }
 

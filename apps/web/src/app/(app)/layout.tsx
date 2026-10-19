@@ -2,11 +2,14 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/layout/Sidebar';
-import { api, getAccessToken, setAccessToken } from '@/lib/api';
+import { api, ApiError, getAccessToken, setAccessToken } from '@/lib/api';
 import { useRealtime } from '@/lib/hooks';
 import { UsageBanner } from '@/components/layout/UsageBanner';
 import { WaRemovedBanner } from '@/components/numbers/WaRemovedNotice';
 import { ReceiveStalledBanner } from '@/components/numbers/ReceiveStalledNotice';
+import { NumberSyncBanner } from '@/components/numbers/NumberSyncNotice';
+import { RealtimeBanner } from '@/components/layout/RealtimeBanner';
+import { ShiftEndScreen } from '@/components/layout/ShiftEndScreen';
 import { Toaster } from '@/components/ui/Toast';
 import { NavigationProgress } from '@/components/layout/NavigationProgress';
 import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
@@ -27,8 +30,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         try {
           const r = await api<{ accessToken: string }>('/auth/refresh', { method: 'POST' }, false);
           setAccessToken(r.accessToken);
-        } catch {
-          router.replace('/login');
+        } catch (err) {
+          // fora da escala / acesso temporário vencido (docs/escalas.md): o login explica o motivo
+          const code = err instanceof ApiError && err.status === 403 ? err.code : undefined;
+          router.replace(code ? `/login?bloqueio=${encodeURIComponent(code)}` : '/login');
           return;
         }
       }
@@ -64,9 +69,13 @@ function Shell({ children }: { children: React.ReactNode }) {
         <UsageBanner />
         <WaRemovedBanner />
         <ReceiveStalledBanner />
+        <NumberSyncBanner />
+        <RealtimeBanner />
         <div key={pathname} className="flex-1 min-h-0 flex animate-fade-in">{children}</div>
       </div>
       <Toaster />
+      {/* fim de turno: aviso antes e tela de passagem travada (docs/escalas.md#fim-de-turno) */}
+      <ShiftEndScreen />
       <NoticePopups />
       <TransferAlerts />
       {/* chat interno da equipe: fica no shell para sobreviver à troca de página */}

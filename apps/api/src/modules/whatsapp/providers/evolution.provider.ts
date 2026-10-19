@@ -7,7 +7,8 @@ import { bytesEmBase64, contextoDaCitacao, lerCitacao } from './quoted';
 import { desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
 import type { HistoryPage, HistoryQuery, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { phoneVariants } from '../../conversations/phone-variants';
-import { describeProviderError, ProviderSendError } from './provider-error';
+import { isDefinitiveClose } from '../connection-events';
+import { describeProviderError, ProviderSendError, ProviderTimeoutError } from './provider-error';
 
 /** providerConfig de um número Evolution */
 export interface EvolutionNumberConfig {
@@ -31,12 +32,27 @@ export class EvolutionProvider implements WhatsAppProvider {
   readonly kind = 'evolution' as const;
   private readonly logger = new Logger('EvolutionProvider');
 
-  private async api<T>(path: string, init?: RequestInit, shard?: { baseUrl?: string; apiKey?: string }): Promise<T> {
-    const res = await fetch(`${shard?.baseUrl ?? env.EVOLUTION_BASE_URL}${path}`, {
-      ...init,
-      headers: { apikey: shard?.apiKey ?? env.EVOLUTION_API_KEY, 'Content-Type': 'application/json', ...init?.headers },
-    });
-    const json = (await res.json().catch(() => ({}))) as any;
+  /**
+   * `delayMs`: tempo que a Evolution SEGURA a requisição antes de responder ("digitando…" do
+   * `delay`) — soma-se ao prazo, senão todo envio humanizado estouraria.
+   */
+  private async api<T>(path: string, init?: RequestInit, shard?: { baseUrl?: string; apiKey?: string }, delayMs = 0): Promise<T> {
+    const timeoutMs = evolutionTimeoutMs(path, delayMs);
+    let res: Response;
+    try {
+      res = await fetch(`${shard?.baseUrl ?? env.EVOLUTION_BASE_URL}${path}`, {
+        ...init,
+        headers: { apikey: shard?.apiKey ?? env.EVOLUTION_API_KEY, 'Content-Type': 'application/json', ...init?.headers },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      throw evolutionFetchError(err, path, timeoutMs);
+    }
+    // o prazo vale também para ler o corpo (o signal continua ativo)
+    const json = (await res.json().catch((err) => {
+      if (isAbort(err)) throw evolutionFetchError(err, path, timeoutMs);
+      return {};
+    })) as any;
     if (!res.ok) {
       throw new ProviderSendError(describeProviderError(json?.response?.message ?? json?.message ?? json, `Evolution ${res.status}`), res.status);
     }
@@ -111,6 +127,18 @@ export class EvolutionProvider implements WhatsAppProvider {
     return this.mapConnection(r?.instance?.state);
   }
 
+  /**
+   * Sonda da sessão (session-probe.ts): foto de perfil do próprio número — consulta IQ comum do
+   * WhatsApp Web, sem cache no Baileys. Socket vivo responde em ~1 s (com ou sem foto); zumbi
+   * travado não responde e estoura o prazo de 15 s.
+   */
+  async probe(ctx: NumberContext) {
+    await this.api(`/chat/fetchProfilePictureUrl/${this.instance(ctx)}`, {
+      method: 'POST',
+      body: JSON.stringify({ number: ctx.phone }),
+    }, this.shard(ctx));
+  }
+
   async send(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
     const name = this.instance(ctx);
     let r: any;
@@ -133,7 +161,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         quoted,
         delay,
       }),
-    }, this.shard(ctx)).catch((err) => {
+    }, this.shard(ctx), delay).catch((err) => {
       if (err instanceof ProviderSendError && (err.providerStatus === 400 || err.providerStatus === 404)) return null;
       throw err;
     }) : null;
@@ -144,7 +172,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     const botoes = !cartaoPix && env.EVOLUTION_MENU_BUTTONS && opcoes.length > 0 && opcoes.length <= 3 ? await this.api<any>(`/message/sendButtons/${name}`, {
       method: 'POST',
       body: JSON.stringify({ number: m.to, ...menuButtonsPayload(m), quoted, delay }),
-    }, this.shard(ctx)).catch((err) => {
+    }, this.shard(ctx), delay).catch((err) => {
       if (err instanceof ProviderSendError && (err.providerStatus === 400 || err.providerStatus === 404)) return null;
       throw err;
     }) : null;
@@ -158,13 +186,13 @@ export class EvolutionProvider implements WhatsAppProvider {
       r = await this.api(`/message/sendText/${name}`, {
         method: 'POST',
         body: JSON.stringify({ number: m.to, text, quoted, delay }),
-      }, this.shard(ctx));
+      }, this.shard(ctx), delay);
     } else if (m.type === MessageType.AUDIO && media && m.media?.voice !== false) {
       // áudio como "mensagem de voz" (PTT), igual ao gravado no app
       r = await this.api(`/message/sendWhatsAppAudio/${name}`, {
         method: 'POST',
         body: JSON.stringify({ number: m.to, audio: media.data.toString('base64'), quoted, delay }),
-      }, this.shard(ctx));
+      }, this.shard(ctx), delay);
     } else if (media || m.media) {
       // a Evolution aceita `media` como URL ou base64 — mandamos base64 para não expor o storage
       r = await this.api(`/message/sendMedia/${name}`, {
@@ -180,7 +208,7 @@ export class EvolutionProvider implements WhatsAppProvider {
           quoted,
           delay,
         }),
-      }, this.shard(ctx));
+      }, this.shard(ctx), delay);
     } else {
       throw new BadRequestException(`Tipo não suportado pela Evolution: ${m.type}`);
     }
@@ -233,7 +261,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     }, this.shard(ctx)).catch(() => null);
     if (!r?.profilePictureUrl) return null;
 
-    const res = await fetch(r.profilePictureUrl);
+    const res = await fetch(r.profilePictureUrl, { signal: AbortSignal.timeout(EVOLUTION_MEDIA_TIMEOUT_MS) });
     if (!res.ok) return null;
     const data = Buffer.from(await res.arrayBuffer());
     return { data, mimeType: res.headers.get('content-type') ?? 'image/jpeg', fileName: `${phone}.jpg` };
@@ -387,7 +415,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     await this.api(`/chat/sendPresence/${this.instance(ctx)}`, {
       method: 'POST',
       body: JSON.stringify({ number: phone, presence: state, delay: state === 'paused' ? 0 : ms }),
-    }, this.shard(ctx));
+    }, this.shard(ctx), state === 'paused' ? 0 : ms);
   }
 
   /**
@@ -523,9 +551,15 @@ export class EvolutionProvider implements WhatsAppProvider {
       }
       case 'connection.update': {
         const phone = typeof data?.wuid === 'string' ? data.wuid.replace(/@.*$/, '') : undefined;
-        // statusReason 401 = deslogado pelo celular (device_removed / logged out)
-        const loggedOut = data?.state === 'close' && Number(data?.statusReason) === 401;
-        out.connection = { externalNumberId, status: this.mapConnection(data?.state), phone, transient: data?.state === 'connecting', loggedOut };
+        // 401/402/403/406: a Evolution não reconecta e apaga as credenciais (connection-events.ts)
+        const reason = Number(data?.statusReason);
+        const statusReason = Number.isFinite(reason) ? reason : undefined;
+        const loggedOut = isDefinitiveClose(data?.state, statusReason);
+        out.connection = {
+          externalNumberId, status: this.mapConnection(data?.state), phone, transient: data?.state === 'connecting', loggedOut,
+          state: typeof data?.state === 'string' ? data.state : undefined, statusReason, at: typeof body?.date_time === 'string' ? body.date_time : undefined,
+          order: connectionOrder(data),
+        };
         break;
       }
       case 'presence.update': {
@@ -622,6 +656,44 @@ export class EvolutionProvider implements WhatsAppProvider {
     if (state === 'connecting') return NumberStatus.PENDING_QR;
     return NumberStatus.DISCONNECTED;
   }
+}
+
+/**
+ * Prazo de cada chamada à Evolution. Sem prazo, uma Evolution travada segurava envio, health check
+ * e worker pelo limite do undici (5 min) — e, no envio, o retry vinha depois sem saber se saiu.
+ * Mídia, agenda/grupos inteiros e o restart (o patch espera até ~5 s) ganham prazo maior.
+ */
+export const EVOLUTION_TIMEOUT_MS = 15_000;
+export const EVOLUTION_MEDIA_TIMEOUT_MS = 60_000;
+const ROTAS_LENTAS = /^\/(message\/(sendMedia|sendWhatsAppAudio)|chat\/(getBase64FromMediaMessage|findContacts)|group\/fetchAllGroups|instance\/restart)\//;
+
+export function evolutionTimeoutMs(path: string, delayMs = 0): number {
+  return (ROTAS_LENTAS.test(path) ? EVOLUTION_MEDIA_TIMEOUT_MS : EVOLUTION_TIMEOUT_MS) + Math.max(0, delayMs);
+}
+
+const isAbort = (err: unknown) => err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+
+/**
+ * Traduz a falha do fetch. Prazo estourado vira `ProviderTimeoutError`: a Evolution pode ter feito
+ * a operação (no envio, a mensagem pode ter saído) — quem chama não deve repetir às cegas. Conexão
+ * recusada / DNS antes de enviar qualquer coisa: a requisição não chegou, repetir é seguro
+ * (`isTransientSendError` reconhece o código no texto).
+ */
+export function evolutionFetchError(err: unknown, path: string, timeoutMs: number): Error {
+  const rota = path.split('/').slice(1, 3).join('/');
+  if (isAbort(err)) return new ProviderTimeoutError(`Evolution não respondeu em ${Math.round(timeoutMs / 1000)} s (${rota}) — a operação pode ter sido feita; confira antes de repetir`);
+  const code = (err as { cause?: { code?: string } })?.cause?.code;
+  if (code && /^(ECONNREFUSED|ENOTFOUND|EAI_AGAIN)$/.test(code)) return new Error(`Evolution indisponível (${code}) em ${rota}`);
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/** Carimbo da guarda de conexão (atendoBoot/atendoSeq inteiros positivos); imagem sem a guarda → undefined. */
+export function connectionOrder(data: any): { boot: number; seq: number; gen?: number } | undefined {
+  const boot = Number(data?.atendoBoot);
+  const seq = Number(data?.atendoSeq);
+  if (!Number.isSafeInteger(boot) || !Number.isSafeInteger(seq) || boot <= 0 || seq <= 0) return undefined;
+  const gen = Number(data?.atendoGen);
+  return { boot, seq, ...(Number.isSafeInteger(gen) && gen >= 0 ? { gen } : {}) };
 }
 
 /** Resposta do `fetchAllGroups` → só grupos válidos (`@g.us`), sem repetição. */

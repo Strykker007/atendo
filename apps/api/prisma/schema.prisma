@@ -53,6 +53,10 @@ model Tenant {
 
   template      TenantTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   users         User[]
+  workSchedules     WorkSchedule[]
+  supportTickets    SupportTicket[]
+  scheduleOverrides ScheduleOverride[]
+  scheduleAccessRequests ScheduleAccessRequest[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
   contactAttributes ContactAttribute[]
@@ -166,9 +170,122 @@ model User {
   budgets           Budget[]
   internalChats     InternalChatMember[]
   internalMessages  InternalMessage[]
+
+  // ---- escalas de trabalho e acessos temporários (docs/escalas.md) ----
+  /// escala do colaborador: com escala, login e refresh só passam dentro do turno (ou com liberação)
+  scheduleId      String?
+  schedule        WorkSchedule?      @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  /// conta provisória (plantonista/freelancer) gerada em POST /users/temporary
+  isTemporary     Boolean            @default(false)
+  /// fim da validade da conta provisória: passou daqui, a conta expira e não entra mais
+  accessExpiresAt DateTime?
+  /// quando a conta provisória expirou (status EXPIRED); null = ainda valendo
+  expiredAt       DateTime?
+  scheduleOverrides ScheduleOverride[] @relation("overrideUser")
+  approvedOverrides ScheduleOverride[] @relation("overrideApprover")
+  accessRequests    ScheduleAccessRequest[] @relation("accessRequestUser")
+  accessRequestsToMe ScheduleAccessRequest[] @relation("accessRequestApprover")
+  createdTemporaryUsers User[]         @relation("temporaryCreator")
+  temporaryCreatedById  String?
+  temporaryCreatedBy    User?          @relation("temporaryCreator", fields: [temporaryCreatedById], references: [id], onDelete: SetNull)
+
   @@index([tenantId])
   @@index([profileId])
+  @@index([scheduleId])
+  @@index([accessExpiresAt])
   @@map("users")
+}
+
+enum WorkScheduleType {
+  /// 12h de trabalho, 36h de descanso (ciclo de 48h ancorado em `anchorDate`)
+  FIXED_12X36
+  /// comercial 44h: mesmo horário nos dias marcados
+  COMMERCIAL_44H
+  /// horário livre definido pelo admin (dias + faixa, ou ciclo trabalho/descanso)
+  CUSTOM
+}
+
+/// Modelo de escala do tenant (docs/escalas.md). Horários em hora local, no fuso de `TenantSettings`.
+model WorkSchedule {
+  id        String           @id @default(uuid())
+  tenantId  String
+  name      String
+  type      WorkScheduleType
+  /// "HH:MM" — início do turno
+  startTime String
+  /// "HH:MM" — fim do turno; menor ou igual ao início = vira a meia-noite
+  endTime   String
+  /// dias da semana em que o turno COMEÇA (0 = domingo … 6 = sábado). Ignorado em escala por ciclo
+  workDays  Int[]            @default([])
+  /// descanso entre turnos. > 0 = escala por ciclo (trabalho + descanso), ancorada em `anchorDate`
+  restHours Int              @default(0)
+  /// "AAAA-MM-DD": um dia em que o turno começa — referência do ciclo (12x36 e CUSTOM por ciclo)
+  anchorDate String?
+  /// minutos antes do início em que o login já é aceito
+  toleranceMinutes Int       @default(15)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users  User[]
+
+  @@index([tenantId])
+  @@map("work_schedules")
+}
+
+/// Liberação excepcional de plantão: deixa o colaborador entrar fora da escala entre `validFrom` e `validUntil`.
+model ScheduleOverride {
+  id           String    @id @default(uuid())
+  tenantId     String
+  userId       String
+  validFrom    DateTime
+  validUntil   DateTime
+  approvedById String?
+  reason       String?
+  /// liberação encerrada antes do fim pelo gestor
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User   @relation("overrideUser", fields: [userId], references: [id], onDelete: Cascade)
+  approvedBy User?  @relation("overrideApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, validUntil])
+  @@index([userId, validUntil])
+  @@map("schedule_overrides")
+}
+
+enum AccessRequestStatus {
+  pending
+  approved
+  denied
+}
+
+/// Pedido de autorização de plantão feito na tela de login por quem foi barrado pela escala
+/// (docs/escalas.md#pedido-de-autorização). Aprovado vira uma `ScheduleOverride`.
+model ScheduleAccessRequest {
+  id            String              @id @default(uuid())
+  tenantId      String
+  userId        String
+  /// gestor escolhido para aprovar; null = qualquer um com `team.manage`
+  approverId    String?
+  reason        String
+  status        AccessRequestStatus @default(pending)
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  /// liberação criada na aprovação
+  overrideId    String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User   @relation("accessRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  approver User?  @relation("accessRequestApprover", fields: [approverId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([userId, status])
+  @@map("schedule_access_requests")
 }
 
 /// Quais números o usuário opera. **Sem nenhuma linha = opera todos** — é o estado de quem
@@ -278,8 +395,11 @@ model AccessProfile {
   description String?
   /// chaves de `Permission` (packages/shared) — lista fechada, validada na API
   permissions String[]
-  /// criado junto com o cliente; não pode ser apagado, para o cliente nunca ficar sem perfil
+  /// criado junto com o cliente; só o Administrador é obrigatório para a conta nunca ficar sem acesso
   isSystem    Boolean  @default(false)
+  /// papel interno do perfil padrão. O nome pode ser adaptado ao negócio do cliente
+  /// (por exemplo, "Porteiro"), sem perder a ligação com manager/agent.
+  systemRole  Role?
   /// perfil padrão que o cliente editou. Enquanto for falso, as permissões acompanham o
   /// catálogo — senão um perfil criado hoje não ganharia as funcionalidades de amanhã.
   customized  Boolean  @default(false)
@@ -290,6 +410,7 @@ model AccessProfile {
   users  User[]
 
   @@unique([tenantId, name])
+  @@unique([tenantId, systemRole])
   @@map("access_profiles")
 }
 
@@ -487,6 +608,9 @@ model WhatsAppNumber {
   /// conectado, mas parou de receber: envia e nada volta (nem confirmação de entrega) — chaves de
   /// recebimento corrompidas na Evolution. Marcado/limpo pelo health check (whatsapp/receive-stall.ts)
   receiveStalledAt DateTime?
+  /// reconectou agora (QR lido, sessão voltou): o WhatsApp entrega as mensagens de quando estava
+  /// fora em lotes, e isso demora. O painel mostra "sincronizando" por alguns minutos (docs/04-providers-whatsapp.md#sincronização)
+  syncStartedAt  DateTime?
   isActive       Boolean      @default(true)
   /// Excluído pelo cliente. O registro fica (e com ele conversas, mensagens e agenda): recadastrar
   /// o MESMO telefone na MESMA conta revive este número com o histórico. `externalId` vira
@@ -1318,6 +1442,9 @@ model Flow {
   /// aparece como atalho na aba Fluxos do chat. Fluxo que roda sozinho (nova conversa,
   /// palavra-chave) não precisa estar lá — vira ruído para quem atende.
   showInChat  Boolean  @default(true)
+  /// aparece na lista de fluxos do modal de encerramento (docs/fluxos.md#fluxos-de-encerramento).
+  /// O fluxo padrão de encerramento (`onCloseFlowId`/`wonFlowId`/`lostFlowId`) aparece sempre.
+  showOnClosing Boolean @default(false)
   /// ordem na lista de Fluxos (e nos atalhos do chat), definida arrastando
   position    Int      @default(0)
   /// FlowTrigger (packages/shared)
@@ -2304,6 +2431,7 @@ model InternalChat {
   tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   members  InternalChatMember[]
   messages InternalMessage[]
+  supportTickets SupportTicket[]
 
   @@unique([tenantId, directKey])
   @@index([tenantId, lastMessageAt(sort: Desc)])
@@ -2349,4 +2477,39 @@ model InternalMessage {
   @@index([chatId, createdAt])
   @@index([tenantId, createdAt])
   @@map("internal_messages")
+}
+
+enum SupportTicketStatus {
+  /// na fila: o cliente escreveu e ninguém do suporte assumiu
+  open
+  /// alguém do suporte assumiu (ou respondeu)
+  in_progress
+  /// encerrado: sai da fila; a próxima mensagem do cliente abre outro
+  resolved
+}
+
+/// Atendimento no canal de suporte (docs/chat-interno.md#fila-de-suporte). O canal é um só por
+/// cliente e não some; o ticket é cada "episódio" dele — é o que vira fila para o suporte.
+model SupportTicket {
+  id              String              @id @default(uuid())
+  /// número sequencial global (#123), para falar do atendimento
+  number          Int                 @unique @default(autoincrement())
+  tenantId        String
+  chatId          String
+  status          SupportTicketStatus @default(open)
+  /// quem do suporte (super_admin) está com o atendimento
+  assigneeId      String?
+  assigneeName    String?
+  openedAt        DateTime            @default(now())
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  resolvedByName  String?
+  updatedAt       DateTime            @updatedAt
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  chat   InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([status, openedAt])
+  @@index([chatId, status])
+  @@map("support_tickets")
 }
