@@ -257,6 +257,12 @@ export function useRealtime() {
     socket.on('shift_ended', () => { markShiftLocked(); void refresh(); });
     // liberação aprovada enquanto a tela de fim de turno estava aberta: renova e destrava
     socket.on('shift_unlocked', () => { void refresh(); });
+    // equipe do suporte (sala `owners` / `owner:<id>`): toca para quem não escreveu
+    socket.on('staff_message', (m: InternalMessage) => {
+      upsertInternalMessage(qc, m);
+      const eu = qc.getQueryData<{ id: string }>(['me'])?.id;
+      if (m.authorId !== eu && !useUI.getState().soundMuted) playMessageSound();
+    });
     socket.on('support_chat', () => { qc.invalidateQueries({ queryKey: ['support-chats'] }); });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela

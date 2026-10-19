@@ -69,7 +69,11 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
         const t = setTimeout(() => { void client.leave(sala); client.emit('shift_ended', {}); }, Math.min(fimMs, 2 ** 31 - 1));
         client.once('disconnect', () => clearTimeout(t));
       }
-      if (payload.role === 'super_admin' && !payload.impersonatorId) await client.join(OWNERS_ROOM);
+      if (payload.role === 'super_admin' && !payload.impersonatorId) {
+        await client.join(OWNERS_ROOM);
+        // sala só desta pessoa do suporte: conversa direta do chat da equipe do suporte
+        await client.join(`owner:${payload.sub}`);
+      }
       // sala dos clientes logados: avisos globais do sistema. O dono é quem escreve o aviso —
       // não recebe de volta, nem quando está "entrando como" um cliente.
       if (!isOwner(payload)) await client.join(GLOBAL_ROOM);
@@ -106,6 +110,17 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
       const set = out.get(d.tenantId) ?? new Set<string>();
       set.add(d.userId);
       out.set(d.tenantId, set);
+    }
+    return out;
+  }
+
+  /** Pessoas do suporte (super_admin logado como ele mesmo) com o painel aberto agora. */
+  async ownersOnline(): Promise<Set<string>> {
+    const out = new Set<string>();
+    if (!this.server) return out;
+    for (const s of await this.server.fetchSockets()) {
+      const d = s.data as { userId?: string; tenantId?: string | null; owner?: boolean } | undefined;
+      if (d?.owner && !d.tenantId && d.userId) out.add(d.userId);
     }
     return out;
   }
@@ -180,6 +195,14 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   emitSupportMessage(tenantId: string, message: unknown) {
     this.room(tenantId).emit('internal_message', message);
     this.to(OWNERS_ROOM).emit('support_message', message);
+  }
+  /**
+   * Chat da equipe do suporte (docs/chat-interno.md#equipe-do-suporte): canal da equipe
+   * (`userIds` null) vai para a sala `owners`; direta, só para a sala de cada um dos dois.
+   */
+  emitStaffMessage(userIds: string[] | null, message: unknown) {
+    if (!userIds) { this.to(OWNERS_ROOM).emit('staff_message', message); return; }
+    for (const id of userIds) this.to(`owner:${id}`).emit('staff_message', message);
   }
   emitSupportChat(tenantId: string, chatId: string) {
     this.room(tenantId).emit('internal_chat', { chatId });

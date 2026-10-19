@@ -70,6 +70,26 @@ Ana". Entrando como o cliente, o dono vê o status, sem as ações. A migração
 `20270104000000_support_tickets_number_sync` já põe na fila os canais com mensagem do cliente sem
 resposta do suporte depois dela.
 
+## Equipe do suporte
+
+Os donos do sistema (`super_admin`, sem cliente) não são equipe de nenhum cliente, então não
+cabem no chat interno acima — antes só se falavam abrindo um canal de suporte. O chat da equipe
+do suporte é separado (tabelas `staff_*`, rotas `/super-admin/staff/*`):
+
+| Regra | Onde |
+|---|---|
+| Canal fixo **Equipe do suporte** (`staff_chats.key = "team"`): todo `super_admin` ativo lê e escreve, sem cadastro — quem vira super_admin já entra, quem é desativado sai | `StaffChatController.chatOf` |
+| Conversa **direta** entre dois do suporte: uma por par (`key = "<menor id>:<maior id>"`) | `POST /super-admin/staff/chats` |
+| Não lidas por pessoa: `staff_chat_members.lastReadAt` (no canal da equipe a linha nasce sob demanda) | `send` / `read` |
+| Tempo real: `staff_message` — canal da equipe vai para a sala `owners`; direta, só para `owner:<id>` de cada um | `ConversationsGateway.emitStaffMessage` |
+| "Online agora" = super_admin com o painel aberto logado como ele mesmo | `ConversationsGateway.ownersOnline` |
+| Sem grupos, sem apagar/editar, sem auditoria por cliente (não é dado de cliente) | — |
+
+No widget do dono, o topo alterna **Clientes** (a fila de suporte) e **Equipe do suporte**
+(canal da equipe fixado, conversas diretas e a lista de colegas com online). Não lidas da
+equipe somam no selo do botão. "Entrando como" um cliente, o widget continua só no canal de
+suporte daquele cliente.
+
 ## Auditoria
 
 Permissão **`internal_chat.audit`** (grupo Gestão). Por padrão só o perfil **Administrador** tem —
@@ -113,7 +133,11 @@ por isso continua aberto e na mesma conversa ao trocar de página.
 - `internal_chat_members` — `{chatId, userId, lastReadAt, joinedAt}`, chave `(chatId, userId)`.
 - `internal_messages` — `{tenantId, chatId, authorId, authorName, text, replyToId, system, fromSupport, createdAt}`, índices `(chatId, createdAt)` e `(tenantId, createdAt)`.
 
-Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_internal_chat_groups` (resposta, avisos, grupo apagado), `20270101000000_support_channel` (canal de suporte), `20270104000000_support_tickets_number_sync` (fila de suporte).
+Equipe do suporte: `staff_chats` — `{key (único), lastMessageAt, lastMessagePreview}`;
+`staff_chat_members` — `{chatId, userId, lastReadAt}`; `staff_messages` — `{chatId, authorId,
+authorName, text, replyToId, createdAt}`.
+
+Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_internal_chat_groups` (resposta, avisos, grupo apagado), `20270101000000_support_channel` (canal de suporte), `20270104000000_support_tickets_number_sync` (fila de suporte), `20270107000000_staff_chat` (equipe do suporte).
 
 ## API
 
@@ -139,5 +163,11 @@ Migrações: `20261230000000_ignored_contacts_internal_chat`, `20261231000000_in
 | GET | `/super-admin/support/chats/:id/messages?before=` | super_admin | Histórico do canal |
 | POST | `/super-admin/support/chats/:id/messages` | super_admin | `{text, replyToId?}` — sai como `fromSupport` |
 | POST | `/super-admin/support/chats/:id/read` | super_admin | Marca como lido |
+| GET | `/super-admin/staff/users` | super_admin | Colegas do suporte (menos você), com `online` |
+| GET | `/super-admin/staff/chats` | super_admin | Canal da equipe (primeiro) + suas diretas, com `unread` (`isStaff: true`; canal = `isGroup`) |
+| POST | `/super-admin/staff/chats` | super_admin | `{userId}` — abre (ou reaproveita) a direta |
+| GET | `/super-admin/staff/chats/:id/messages?before=` | super_admin | Histórico |
+| POST | `/super-admin/staff/chats/:id/messages` | super_admin | `{text, replyToId?}` |
+| POST | `/super-admin/staff/chats/:id/read` | super_admin | Marca como lido |
 | GET | `/internal-chat/audit/chats?userId=` | `internal_chat.audit` | Todas as conversas do cliente, com contagem de mensagens |
 | GET | `/internal-chat/audit/chats/:id/messages?before=` | `internal_chat.audit` | Histórico de qualquer conversa do cliente |

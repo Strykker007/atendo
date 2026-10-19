@@ -170,6 +170,8 @@ model User {
   budgets           Budget[]
   internalChats     InternalChatMember[]
   internalMessages  InternalMessage[]
+  staffChats        StaffChatMember[]
+  staffMessages     StaffMessage[]
 
   // ---- escalas de trabalho e acessos temporários (docs/escalas.md) ----
   /// escala do colaborador: com escala, login e refresh só passam dentro do turno (ou com liberação)
@@ -2477,6 +2479,59 @@ model InternalMessage {
   @@index([chatId, createdAt])
   @@index([tenantId, createdAt])
   @@map("internal_messages")
+}
+
+/// Chat da equipe do suporte (docs/chat-interno.md#equipe-do-suporte): entre os donos do sistema
+/// (super_admin), fora de qualquer cliente — por isso não usa `internal_chats`, que é por tenant.
+/// Canal fixo `team` com todo super_admin ativo (quem entra no suporte já participa) + conversa
+/// direta por par. Nada daqui vai ao WhatsApp nem ao ledger de uso.
+model StaffChat {
+  id                 String    @id @default(uuid())
+  /// "team" = canal da equipe inteira; direta = "<menor userId>:<maior userId>" (uma só por par)
+  key                String    @unique
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  createdAt          DateTime  @default(now())
+
+  members  StaffChatMember[]
+  messages StaffMessage[]
+
+  @@map("staff_chats")
+}
+
+/// Membro (direta) ou leitura sob demanda (canal `team`): até onde a pessoa leu.
+model StaffChatMember {
+  chatId     String
+  userId     String
+  lastReadAt DateTime?
+  joinedAt   DateTime  @default(now())
+
+  chat StaffChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([userId])
+  @@map("staff_chat_members")
+}
+
+model StaffMessage {
+  id         String   @id @default(uuid())
+  chatId     String
+  authorId   String?
+  /// nome gravado no envio: o histórico continua legível depois que a pessoa sai
+  authorName String
+  text       String
+  /// resposta a outra mensagem da mesma conversa (citação)
+  replyToId  String?
+  createdAt  DateTime @default(now())
+
+  chat    StaffChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  author  User?          @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  replyTo StaffMessage?  @relation("staffReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies StaffMessage[] @relation("staffReply")
+
+  @@index([chatId, createdAt])
+  @@map("staff_messages")
 }
 
 enum SupportTicketStatus {

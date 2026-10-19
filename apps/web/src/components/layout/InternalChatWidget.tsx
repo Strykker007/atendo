@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import {
   internalMessagesInOrder, useAddInternalMembers, useCan, useCreateInternalChat, useDeleteInternalChat, useInternalChats, useInternalMessages, useInternalUsers, useMarkInternalRead, useMe,
-  useOpenSupportChat, useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage, useSupportChats, useSupportCounts, useSupportTenants, useSupportTicketAction,
+  useOpenStaffChat, useOpenSupportChat, useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage, useSupportChats, useSupportCounts, useStaffChats, useStaffUsers, useSupportTenants, useSupportTicketAction,
   type ChatScope, type InternalChat, type InternalMessage, type InternalUser, type SupportTicket, type SupportView,
 } from '@/lib/hooks';
 
@@ -87,11 +87,14 @@ export function InternalChatWidget() {
   // `all` = todo canal com mensagem: é onde a conversa aberta é encontrada (as abas da fila são recortes)
   const chatsSuporte = useSupportChats('all', ehDono);
   const chats = ehDono ? chatsSuporte : chatsEquipe;
-  const naoLidas = (chats.data ?? []).reduce((a, c) => a + (c.unread ?? 0), 0);
+  // dono: também a equipe do suporte (colegas super_admin) — docs/chat-interno.md#equipe-do-suporte
+  const chatsStaff = useStaffChats(ehDono);
+  const naoLidas = [...(chats.data ?? []), ...(ehDono ? chatsStaff.data ?? [] : [])].reduce((a, c) => a + (c.unread ?? 0), 0);
   const equipe = useInternalUsers(ehEquipe);
+  const colegas = useStaffUsers(ehDono);
   // entrando como: a única conversa é o canal de suporte do cliente, aberto direto
   const chatId = entrandoComo ? chatsEquipe.data?.find((c) => c.isSupport)?.id ?? null : chatSalvo;
-  const online = (equipe.data ?? []).filter((u) => u.online);
+  const online = ((ehDono ? colegas.data : equipe.data) ?? []).filter((u) => u.online);
   const vp = useViewport();
 
   // tamanho do que está na tela: botão, barra minimizada ou janela (limitada ao tamanho da tela)
@@ -161,7 +164,7 @@ export function InternalChatWidget() {
     );
   }
 
-  const aberta = chats.data?.find((c) => c.id === chatId) ?? null;
+  const aberta = chats.data?.find((c) => c.id === chatId) ?? (ehDono ? chatsStaff.data?.find((c) => c.id === chatId) : null) ?? null;
   const voltar = entrandoComo ? null : () => set({ chatId: null });
   return (
     <div className="fixed z-[65] flex flex-col rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden" style={{ ...estilo, width: w, height: h }} role="dialog" aria-label="Chat interno">
@@ -191,9 +194,9 @@ export function InternalChatWidget() {
         <button data-no-drag type="button" onClick={() => set({ open: false })} className="p-1 rounded hover:bg-white/10" aria-label="Fechar"><X size={15} /></button>
       </div>
       {!minimized && (aberta
-        ? <ChatView chat={aberta} meId={me.data!.id} scope={entrandoComo ? 'support' : scope} api={entrandoComo ? 'team' : scope} onLeave={() => set({ chatId: null })} />
+        ? <ChatView chat={aberta} meId={me.data!.id} scope={aberta.isStaff ? 'staff' : entrandoComo ? 'support' : scope} api={aberta.isStaff ? 'staff' : entrandoComo ? 'team' : scope} onLeave={() => set({ chatId: null })} />
         : ehDono
-          ? <OwnerHome onOpen={(id) => set({ chatId: id })} />
+          ? <OwnerHome staff={chatsStaff.data ?? []} onOpen={(id) => set({ chatId: id })} />
           : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
     </div>
   );
@@ -312,7 +315,8 @@ function Launcher({ titulo, dono, naoLidas, online, side, arrastando, onOpen, ..
  * conversa com quem ainda não escreveu.
  */
 type OwnerTab = Exclude<SupportView, 'all'> | 'clientes';
-function OwnerHome({ onOpen }: { onOpen: (id: string) => void }) {
+function OwnerHome({ staff, onOpen }: { staff: InternalChat[]; onOpen: (id: string) => void }) {
+  const [modo, setModo] = useState<'clientes' | 'equipe'>('clientes');
   const [aba, setAba] = useState<OwnerTab>('queue');
   const [busca, setBusca] = useState('');
   const counts = useSupportCounts();
@@ -341,8 +345,23 @@ function OwnerHome({ onOpen }: { onOpen: (id: string) => void }) {
     resolved: 'Nenhum atendimento encerrado nos últimos 7 dias.',
   };
 
+  const naoLidasEquipe = staff.reduce((a, c) => a + (c.unread ?? 0), 0);
+  const MODOS = [['clientes', 'Clientes', Headset, 0], ['equipe', 'Equipe do suporte', Users, naoLidasEquipe]] as const;
+  const seletor = (
+    <div className="flex gap-1 mx-2 mt-2 text-[12px] font-semibold">
+      {MODOS.map(([id, label, Icone, n]) => (
+        <button key={id} type="button" onClick={() => setModo(id)} className={cn('flex-1 flex items-center justify-center gap-1.5 rounded-lg py-1.5 border', modo === id ? 'border-accent text-accent bg-accent-soft' : 'border-line text-muted hover:text-ink')}>
+          <Icone size={13} />{label}
+          {n > 0 && <span className="min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-[10px] font-bold grid place-items-center tnum">{n}</span>}
+        </button>
+      ))}
+    </div>
+  );
+  if (modo === 'equipe') return <div className="flex-1 min-h-0 flex flex-col">{seletor}<StaffHome chats={staff} onOpen={onOpen} /></div>;
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
+      {seletor}
       <div className="grid grid-cols-5 gap-0.5 m-2 rounded-lg bg-field p-1 text-[10.5px] font-semibold">
         {ABAS.map(([id, label, n]) => (
           <button key={id} type="button" onClick={() => setAba(id)} className={cn('rounded-md py-1.5 px-0.5 truncate', aba === id ? 'bg-side text-white' : 'text-muted hover:text-ink')}>
@@ -401,6 +420,59 @@ function OwnerHome({ onOpen }: { onOpen: (id: string) => void }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Equipe do suporte (docs/chat-interno.md#equipe-do-suporte): o canal com todos os super_admins
+ * fixado no topo, as conversas diretas e, embaixo, os colegas (clicar abre a direta).
+ */
+function StaffHome({ chats, onOpen }: { chats: InternalChat[]; onOpen: (id: string) => void }) {
+  const colegas = useStaffUsers(true);
+  const abrir = useOpenStaffChat();
+  async function falarCom(userId: string) {
+    try { const c = await abrir.mutateAsync(userId); onOpen(c.id); } catch (err) { toast.err(err); }
+  }
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin mt-2">
+      <ul className="divide-y divide-line">
+        {chats.map((c) => (
+          <li key={c.id}>
+            <button type="button" onClick={() => onOpen(c.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
+              {c.isGroup
+                ? <span className="w-8 h-8 rounded-[11px] bg-gradient-to-br from-accent to-accent-hover text-white grid place-items-center shrink-0 shadow-sm"><Users size={15} /></span>
+                : <span className="w-8 h-8 rounded-full bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold shrink-0">{iniciais(c.name)}</span>}
+              <span className="flex-1 min-w-0">
+                <span className="flex items-center gap-1"><span className="truncate text-sm font-medium text-ink">{c.name}</span>{c.lastMessageAt && <span className="ml-auto text-[10.5px] text-faint shrink-0">{hora(c.lastMessageAt)}</span>}</span>
+                <span className={cn('block truncate text-[12px]', c.unread ? 'text-ink font-medium' : 'text-muted')}>{c.lastMessagePreview ?? (c.isGroup ? 'Todo o suporte participa' : 'Sem mensagens')}</span>
+              </span>
+              {!!c.unread && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-white text-[10px] font-bold grid place-items-center tnum">{c.unread}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="px-3 pt-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-faint">Colegas</p>
+      {colegas.isLoading ? <p className="px-3 py-2 text-sm text-faint">Carregando…</p> : !colegas.data?.length ? (
+        <p className="px-3 py-2 text-sm text-muted">Ninguém mais no suporte ainda.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {colegas.data.map((u) => (
+            <li key={u.id}>
+              <button type="button" disabled={abrir.isPending} onClick={() => void falarCom(u.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
+                <span className="relative w-8 h-8 rounded-full bg-field text-muted grid place-items-center text-[11px] font-bold shrink-0">
+                  {iniciais(u.name)}
+                  <span className={cn('absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-panel', u.online ? 'bg-ok' : 'bg-faint')} />
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate text-sm text-ink">{u.name}</span>
+                  <span className="block text-[11.5px] text-faint">{u.online ? 'Online agora' : 'Offline'}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -582,13 +654,13 @@ function ChatView({ chat, meId, scope, api = scope, onLeave }: { chat: InternalC
     try { await send.mutateAsync({ text: t, replyToId: citada?.id }); } catch (err) { setTexto(t); setRespondendo(citada); toast.err(err); }
   }
 
-  if (painel && chat.isGroup) return <GroupPanel chat={chat} meId={meId} onBack={() => setPainel(false)} onLeave={onLeave} />;
+  if (painel && chat.isGroup && !chat.isStaff) return <GroupPanel chat={chat} meId={meId} onBack={() => setPainel(false)} onLeave={onLeave} />;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {/* suporte: atendimento da fila; ações só para o dono logado como ele mesmo (as rotas são de super_admin; entrando como, só o status) */}
       {chat.isSupport && <SupportTicketBar ticket={chat.ticket} owner={scope === 'support'} actions={api === 'support'} meId={meId} />}
-      {chat.isGroup && (
+      {chat.isGroup && !chat.isStaff && (
         <button type="button" onClick={() => setPainel(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] text-muted border-b border-line hover:bg-field text-left" title="Membros e opções do grupo">
           <Users size={13} className="shrink-0" />
           <span className="truncate flex-1">{chat.members.map((m) => m.name).join(', ')}</span>
