@@ -188,14 +188,12 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {number && !isMeta && (
-          <p className={cn('rounded-lg px-3 py-2 text-[12.5px]', cotaFria.data && cotaFria.data.used >= cotaFria.data.max ? 'bg-warn-soft text-warn-ink' : 'bg-field text-muted')}>
-            Pela <b>Conexão Web (QR Code)</b>, falar primeiro com quem <b>não escreveu neste número nas últimas 24 horas</b> é a principal causa de bloqueio.
-            Por isso cada número pode chamar até <b>{cotaFria.data?.max ?? 10} contatos assim por dia</b>
-            {cotaFria.data && (cotaFria.data.used >= cotaFria.data.max
-              ? <> — o limite de hoje foi atingido{cotaFria.data.resetsAt ? <>; uma vaga libera em <b>{new Date(cotaFria.data.resetsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></> : null}</>
-              : <> — restam <b>{cotaFria.data.max - cotaFria.data.used}</b></>)}.
-            {' '}Quem escreveu nas últimas 24 horas não conta. Para chamar muitos contatos, use um número Meta Cloud API.
+        {/* só quando trava: o limite de contatos novos do dia (docs/envio.md#envio-frio) acabou */}
+        {number && !isMeta && cotaFria.data && cotaFria.data.used >= cotaFria.data.max && (
+          <p className="rounded-lg px-3 py-2 text-[12.5px] bg-warn-soft text-warn-ink">
+            Este número já iniciou conversa com <b>{cotaFria.data.max} contatos novos</b> hoje
+            {cotaFria.data.resetsAt ? <>; uma vaga libera em <b>{new Date(cotaFria.data.resetsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></> : null}.
+            {' '}Quem escreveu nas últimas 24 horas pode ser chamado normalmente.
           </p>
         )}
         {usandoTemplate && !proativo.loading && !proativo.has && (
