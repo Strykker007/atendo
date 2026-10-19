@@ -3,6 +3,27 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.6.0 — 2026-10-19
+
+- feat(perfis): perfis padrão identificados por systemRole, renomeáveis e excluíveis
+- fix(backup): retenção remota separada da local e rclone compatível com token R2 restrito ao bucket
+- test: testes locais da estabilização — carga sintética, laboratório de reconexão e roteiro com WhatsApp real
+- fix(evolution): guarda de conexão na 2.3.7 — uma conexão por instância, gerações de socket e backoff com jitter
+- fix(whatsapp): prazos nas chamadas à Evolution, restart manual com trava, 402/403/406 como queda e ordem do connection.update
+- fix(deploy): deploy comum não reconstrói nem reinicia a Evolution; deploy próprio com rollback
+- fix(evolution): backport da CVE-2026-48063 no Baileys rc.9 e trava dos gatilhos de placeholder
+- docs: estratégia de atualização da Evolution/Baileys e CVE-2026-48063 (proposta)
+- docs(auditoria): base segue no QR; Cloud API só por cliente
+- docs: auditoria da Evolution API (banimentos, desconexões, webhooks) e plano de migração
+- feat(escalas): modo fim de turno com passagem travada e corte imediato de sessão
+- feat(escalas): popup no login fora da escala com pedido de autorização ao gestor
+- perf(tempo-real): espalha a recarga da reconexão e para de tentar com sessão encerrada
+- feat: fila de suporte com tickets, aviso de sincronização ao reconectar número e tempo real que se recupera sozinho
+- feat(escalas): escalas de trabalho, trava de login por turno e acessos temporários
+- feat(chat-interno): clicar na barra minimizada reabre o chat
+- feat: previews ricos no editor de fluxos, fluxos de encerramento e suporte entrando como cliente
+- fix(web): aspas no JSX quebravam o build (react/no-unescaped-entities)
+
 ## 1.5.0 — 2026-10-17
 
 - commit para validar
