@@ -275,3 +275,157 @@ test('mensagem temporária (EPHEMERAL_SETTING) do contato continua processada', 
   await processMessage(msg(false, { type: T.EPHEMERAL_SETTING, ephemeralExpiration: 86400 }), h.opts);
   assert.ok(!h.dropped());
 });
+
+// ---------- credencial: leitura que falha não vira credencial nova (docs/23 › 9) ----------
+
+/** O trecho patcheado do auth state (main.js), executável com dependências falsas. */
+function credsInit(file) {
+  const src = readFileSync(`${DIST}/${file}`, 'utf8');
+  const start = src.indexOf('let a=await i("creds");/*atendo-creds-read*/');
+  assert.ok(start >= 0, `${file}: patch creds-read`);
+  const end = src.indexOf('await o(a,"creds"))', start) + 'await o(a,"creds"))'.length;
+  const code = src.slice(start, end)
+    .replace(/await ([\w$]+)\.session\.findUnique\(/, 'await __prisma.session.findUnique(')
+    .replace(/a=(\(0,[\w$.]+\.initAuthCreds\)|[\w$]+)\(\)/, 'a=__init()')
+    .replace(/return a\|\|\((.*)\)$/, 'return a||($1,a)');
+  return new Function('i', 'o', '__prisma', '__init', 'p', `return (async()=>{${code}})()`);
+}
+
+function credsDeps({ read = null, row = false, dbDown = false } = {}) {
+  const writes = [];
+  return {
+    writes,
+    i: async () => read,
+    o: async (v, k) => { writes.push([k, v]); },
+    prisma: { session: { findUnique: async () => { if (dbDown) throw new Error('Timed out fetching a new connection'); return row ? { sessionId: 'X' } : null; } } },
+    init: () => ({ fresh: true }),
+  };
+}
+
+for (const file of ['main.js', 'main.mjs']) {
+  test(`creds (${file}): credencial lida é usada e nada é gravado`, async () => {
+    const d = credsDeps({ read: { me: { id: '1@s.whatsapp.net' } } });
+    const creds = await credsInit(file)(d.i, d.o, d.prisma, d.init, 'X');
+    assert.deepEqual(creds, { me: { id: '1@s.whatsapp.net' } });
+    assert.equal(d.writes.length, 0);
+  });
+
+  test(`creds (${file}): sessão existe mas a leitura falhou → erro, nada gravado`, async () => {
+    const d = credsDeps({ read: null, row: true });
+    await assert.rejects(credsInit(file)(d.i, d.o, d.prisma, d.init, 'X'), /não pôde ser lida/);
+    assert.equal(d.writes.length, 0);
+  });
+
+  test(`creds (${file}): banco fora do ar → erro, nada gravado`, async () => {
+    const d = credsDeps({ read: null, dbDown: true });
+    await assert.rejects(credsInit(file)(d.i, d.o, d.prisma, d.init, 'X'), /Timed out/);
+    assert.equal(d.writes.length, 0);
+  });
+
+  test(`creds (${file}): instância nova (sem sessão) cria e grava credencial`, async () => {
+    const d = credsDeps({ read: null, row: false });
+    const creds = await credsInit(file)(d.i, d.o, d.prisma, d.init, 'X');
+    assert.deepEqual(creds, { fresh: true });
+    assert.deepEqual(d.writes, [['creds', { fresh: true }]]);
+  });
+}
+
+// ---------- recebimento: fila com prazo, offline que não morre, NACK (docs/23 › 10) ----------
+
+const RECV = () => readFileSync(`${DIR}/lib/Socket/messages-recv.js`, 'utf8');
+/** Pedaço do messages-recv.js patcheado, de `start` até o fim do bloco que fecha com `end`. */
+function slice(src, start, end) {
+  const a = src.indexOf(start);
+  assert.ok(a >= 0, `trecho: ${start}`);
+  const b = src.indexOf(end, a) + end.length;
+  return src.slice(a, b);
+}
+
+test('recv: patch aplicado uma vez, filas com prazo e logger com o nome da instância', () => {
+  const src = RECV();
+  assert.equal(count(src, '/*atendo-recv*/'), 1);
+  assert.equal(count(src, 'processingMutex.mutex('), 0, 'toda tarefa da fila passa pelo prazo');
+  assert.equal(count(src, "atendoTimed(processingMutex, 'processing',"), 3);
+  assert.equal(count(src, "atendoTimed(retryMutex, 'retry',"), 1);
+  assert.equal(count(src, 'await nodeProcessor(node);'), 1);
+  for (const f of ['main.js', 'main.mjs']) {
+    const dist = readFileSync(`${DIST}/${f}`, 'utf8');
+    assert.equal(count(dist, '/*atendo-baileys-logger*/'), 1, f);
+    assert.equal(count(dist, '.child({instance:this.instanceName})'), 2, f);
+    assert.equal(count(dist, '/*atendo-creds-read*/'), 1, f);
+  }
+});
+
+test('recv: tarefa travada na fila não segura as seguintes', async () => {
+  const { makeMutex } = await mod('lib/Utils/make-mutex.js');
+  const code = slice(RECV(), 'const atendoTimed = ', '}));');
+  const logs = [];
+  const atendoTimed = new Function('logger', 'atendoTaskTimeoutMs', `${code}; return atendoTimed;`)(
+    { error: (o, m) => logs.push([o, m]) }, 50);
+  const mutex = makeMutex();
+  const order = [];
+  atendoTimed(mutex, 'processing', () => new Promise(() => {})); // nunca termina
+  const t0 = Date.now();
+  const v = await atendoTimed(mutex, 'processing', async () => { order.push('segunda'); return 42; });
+  assert.equal(v, 42);
+  assert.deepEqual(order, ['segunda']);
+  assert.ok(Date.now() - t0 >= 45, 'esperou o prazo da travada');
+  assert.equal(logs.length, 1);
+  assert.match(logs[0][1], /tarefa travada/);
+});
+
+test('recv: erro dentro da tarefa continua chegando a quem chamou', async () => {
+  const { makeMutex } = await mod('lib/Utils/make-mutex.js');
+  const code = slice(RECV(), 'const atendoTimed = ', '}));');
+  const atendoTimed = new Function('logger', 'atendoTaskTimeoutMs', `${code}; return atendoTimed;`)({ error: () => {} }, 1000);
+  await assert.rejects(atendoTimed(makeMutex(), 'processing', async () => { throw new Error('falhou'); }), /falhou/);
+});
+
+test('recv: erro em um nó offline não para o processamento dos seguintes', async () => {
+  const code = slice(RECV(), 'const makeOfflineNodeProcessor = () => {', 'return { enqueue };\n    };');
+  const seen = [];
+  const errors = [];
+  const handleMessage = async (n) => { seen.push(n.id); if (n.id === 'veneno') throw new Error('poison'); };
+  const make = new Function('handleMessage', 'handleCall', 'handleReceipt', 'handleNotification', 'ws', 'onUnexpectedError', `${code}; return makeOfflineNodeProcessor;`)(
+    handleMessage, async () => {}, async (n) => { seen.push(n.id); }, async () => {}, { isOpen: true }, (e, where) => errors.push([e.message, where]));
+  const p = make();
+  p.enqueue('message', { id: 'veneno' });
+  p.enqueue('message', { id: 'depois-1' });
+  p.enqueue('receipt', { id: 'depois-2' });
+  await sleep(20);
+  assert.deepEqual(seen, ['veneno', 'depois-1', 'depois-2']);
+  assert.deepEqual(errors, [['poison', '[atendo] processing offline message']]);
+  // a fila continua viva para nós novos
+  p.enqueue('message', { id: 'novo' });
+  await sleep(20);
+  assert.equal(seen.at(-1), 'novo');
+});
+
+/** Invólucro do handleMessage patcheado, com a função original e o ack falsos. */
+function messageWrapper(inner) {
+  const code = slice(RECV(), 'const handleMessage = async (node) => {\n        try {\n            await atendoHandleMessage(node);', '    };');
+  const acks = [];
+  const atendoAcked = new WeakSet();
+  const sendMessageAck = async (node, code) => { atendoAcked.add(node); acks.push([node.attrs.id, code]); };
+  const handleMessage = new Function('atendoHandleMessage', 'atendoAcked', 'sendMessageAck', 'logger', 'binaryNodeToString', 'NACK_REASONS', `${code}; return handleMessage;`)(
+    (n) => inner(n, { atendoAcked, sendMessageAck }), atendoAcked, sendMessageAck, { error: () => {}, warn: () => {} }, () => '<node/>', { UnhandledError: 500 });
+  return { handleMessage, acks };
+}
+
+test('recv: erro antes do processamento manda NACK (o servidor para de reentregar)', async () => {
+  const { handleMessage, acks } = messageWrapper(async () => { throw new Error('decode falhou'); });
+  await handleMessage({ tag: 'message', attrs: { id: 'M1' } });
+  assert.deepEqual(acks, [['M1', 500]]);
+});
+
+test('recv: erro depois do recibo não manda NACK por cima', async () => {
+  const { handleMessage, acks } = messageWrapper(async (node, { atendoAcked }) => { atendoAcked.add(node); throw new Error('upsert falhou'); });
+  await handleMessage({ tag: 'message', attrs: { id: 'M2' } });
+  assert.deepEqual(acks, []);
+});
+
+test('recv: mensagem tratada sem erro não ganha ack extra', async () => {
+  const { handleMessage, acks } = messageWrapper(async () => {});
+  await handleMessage({ tag: 'message', attrs: { id: 'M3' } });
+  assert.deepEqual(acks, []);
+});

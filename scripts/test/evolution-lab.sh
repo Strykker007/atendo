@@ -17,7 +17,7 @@ set -euo pipefail
 SCENARIO=${1:?cenário: dns | timeout | recovery | concurrency | compare}
 SECS=${2:-120}
 N=${3:-1}
-NEW=${EVOLUTION_LAB_IMAGE:-atendo/evolution-api:v2.3.7-atendo.3}
+NEW=${EVOLUTION_LAB_IMAGE:-atendo/evolution-api:v2.3.7-atendo.4}
 OLD=${EVOLUTION_LAB_OLD_IMAGE:-atendo/evolution-api:v2.3.7-atendo.2}
 P=atendo-evo-lab
 OUT=${LAB_OUT:-.reports}

@@ -138,6 +138,9 @@ sinal de vida do número (mensagem recebida ou entrega/leitura confirmada) e do 
 (`sessionStartedAt`), saíram **≥ 3 mensagens para ≥ 2 contatos** há mais de 15 min, e nenhuma foi
 confirmada. Marca `whatsapp_numbers.receiveStalledAt` e emite `number`. Um contato só com o celular
 desligado não marca.
+**Nota interna não é sinal de vida**: ela nasce `delivered` e nunca vai ao WhatsApp — antes contava,
+e uma nota escrita na conversa zerava a detecção (Drogaria Marttins, 19/10/2026: parada desde 11:57,
+nunca marcada por causa de uma nota às 15:22).
 
 **Desmarcar**: na hora, na primeira mensagem de cliente que chega ou entrega/leitura confirmada
 (`InboundService.voltouAReceber`, emite `number`) — sem esperar o health check. No health check, número
@@ -162,6 +165,16 @@ navegador até uma nova ocorrência (chave `número@receiveStalledAt` em `localS
    que resolve chave corrompida, porque o reinício reaproveita as mesmas.
 
 O que chegou enquanto estava parado não volta: a Evolution já descartou.
+
+**Causa encontrada (19/10/2026)** — fila do Baileys 7.0.0-rc.9 que trava, não chave corrompida, na
+maioria dos casos: mensagens, recibos e notificações passam por uma única fila serial sem prazo; o
+processador de mensagens offline morre na primeira exceção; e mensagem que falha fica sem ack, então o
+servidor a reentrega a cada reconexão (por isso reiniciar não resolvia e o QR, que cria aparelho novo,
+resolvia). Gatilho visto nos logs: mensagens `category='peer'` do próprio celular do cliente falhando
+no processamento. Corrigido na imagem `v2.3.7-atendo.4` (`infra/evolution/patch-baileys-recv.mjs`):
+prazo de 120 s por tarefa da fila, loop offline que segue depois de erro e NACK para mensagem que
+falha sem ter recebido recibo. O upstream corrigiu no rc.10 (deadlocks, mutex, ack). Ver
+[23 › 10](23-evolution-desempenho.md).
 
 ### Autenticação do webhook
 
@@ -332,7 +345,7 @@ enviadas quanto recebidas, sem campanha).
 
 A imagem é **fixa**: `infra/evolution/Dockerfile` parte de `evoapicloud/evolution-api:v2.3.7`
 (amd64 e arm64) e os dois `infra/docker-compose*.yml` fazem `build: ./evolution`
-(`atendo/evolution-api:v2.3.7-atendo.3`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
+(`atendo/evolution-api:v2.3.7-atendo.4`). Com `:latest` cada deploy podia trocar o cliente WhatsApp Web
 sem teste — e é ele que o WhatsApp tenta detectar. Para atualizar: testar a nova tag com um número
 de teste, depois trocar o `FROM` e fazer o deploy **próprio da Evolution** (`scripts/deploy-evolution.sh`,
 [27](27-deploy-evolution.md)) — o deploy comum não reconstrói nem reinicia a Evolution.
@@ -347,6 +360,14 @@ Se a âncora mudar numa versão nova, o build falha de propósito.
 (`patch-baileys-cve-2026-48063.mjs`) e gatilhos de texto `requestPlaceholder`/`onDemandHistSync` só
 pelo próprio celular (`patch-evolution-placeholder-triggers.mjs`). Os testes de
 `infra/evolution/verify-patches.test.mjs` rodam no build: se falharem, a imagem não é gerada.
+
+**Patches de estabilidade** (`v2.3.7-atendo.4`, [23 › 9 e 10](23-evolution-desempenho.md)):
+- `patch-evolution-creds-read.mjs`: leitura da credencial que falha (banco sobrecarregado) não vira
+  credencial nova gravada por cima da pareada — o connect falha e a guarda tenta de novo;
+- `patch-baileys-recv.mjs`: recebimento que não trava (fila com prazo, offline que não morre, NACK);
+- `patch-evolution-baileys-logger.mjs`: nome da instância (`instance`) em toda linha de log do Baileys.
+- No compose, `DATABASE_SAVE_IS_ON_WHATSAPP: "false"` desliga o cache `IsOnWhatsapp` que o `.env` da
+  imagem liga (consulta que varria a tabela inteira a cada mensagem).
 
 ## Mensagem enviada pelo celular do cliente
 

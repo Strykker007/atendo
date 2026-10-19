@@ -15,7 +15,7 @@ servidor novo, sem homologação paralela, sem número de cliente.
 | Web | processo Node local | `localhost:3000` | `apps/web` |
 | PostgreSQL do Atendo | container (`infra/docker-compose.yml`) | `localhost:5433` | volume `infra/volumes/postgres` |
 | Redis (BullMQ + cache **e chaves Signal da Evolution**, db 6) | container | `localhost:6379` | volume `infra/volumes/redis` |
-| Evolution API | container, imagem `atendo/evolution-api:v2.3.7-atendo.3` (build de `infra/evolution`) | `localhost:8080` | volume `infra/volumes/evolution` |
+| Evolution API | container, imagem `atendo/evolution-api:v2.3.7-atendo.4` (build de `infra/evolution`) | `localhost:8080` | volume `infra/volumes/evolution` |
 | Postgres da Evolution | container | só na rede do compose | volume `infra/volumes/evolution-db` |
 | Webhooks | Evolution → `http://host.docker.internal:4000/webhooks/evolution` (a API local) | — | compose de dev |
 

@@ -30,7 +30,7 @@ services:
     # v2.3.7 + patch do nó <biz> no Baileys (infra/evolution): sem ele os botões nativos (Pix
     # "Copiar chave Pix") são entregues mas o celular não mostra. A versão base fica no Dockerfile.
     build: ./evolution
-    image: atendo/evolution-api:v2.3.7-atendo.3
+    image: atendo/evolution-api:v2.3.7-atendo.4
     restart: unless-stopped
     depends_on:
       evolution-db: { condition: service_healthy }
@@ -50,6 +50,10 @@ services:
       CACHE_REDIS_URI: redis://redis:6379/6
       CACHE_REDIS_PREFIX_KEY: evolution
       CACHE_LOCAL_ENABLED: "false"
+      # cache "número tem WhatsApp?" da Evolution (tabela IsOnWhatsapp): o .env da imagem liga, e a
+      # consulta faz LIKE '%…%' na tabela inteira a cada mensagem/contato — com 180 mil linhas derrubou
+      # 25 números em 19/10/2026 (docs/23-evolution-desempenho.md › 9). Sem cache, pergunta ao WhatsApp.
+      DATABASE_SAVE_IS_ON_WHATSAPP: "false"
       # Webhook global: a API recebe os eventos de todas as instâncias em uma rota só
       WEBHOOK_GLOBAL_ENABLED: "true"
       WEBHOOK_GLOBAL_URL: http://host.docker.internal:4000/webhooks/evolution
