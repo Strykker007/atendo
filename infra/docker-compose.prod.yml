@@ -167,12 +167,18 @@ services:
       # ex.: r2:atendo-backups — "r2" é o remoto definido pelas RCLONE_CONFIG_R2_* abaixo
       BACKUP_REMOTE: ${BACKUP_REMOTE:-}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_REMOTE_KEEP_DAYS: ${BACKUP_REMOTE_KEEP_DAYS:-${BACKUP_KEEP_DAYS:-14}}
       BACKUP_AT: ${BACKUP_AT:-03:30}
       # O rclone aceita a configuração por ambiente, o que evita montar um arquivo único:
       # quando o arquivo não existe no host, o Docker cria um DIRETÓRIO no lugar e o envio
       # falha em silêncio. Assim o segredo fica só no .env.production.
       RCLONE_CONFIG_R2_TYPE: s3
       RCLONE_CONFIG_R2_PROVIDER: ${BACKUP_S3_PROVIDER:-Cloudflare}
+      # R2 assina requisições S3 na região lógica "auto". Para tokens restritos a
+      # um bucket, a verificação administrativa (HeadBucket) não é autorizada;
+      # o rclone deve ir direto às operações de objetos.
+      RCLONE_CONFIG_R2_REGION: auto
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
       RCLONE_CONFIG_R2_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
       RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
