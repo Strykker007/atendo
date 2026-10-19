@@ -48,7 +48,7 @@ export async function silenceVsLastWeek(prisma: PrismaService, numberId: string,
   const [row] = await prisma.$queryRaw<{ last: Date | null; expected: bigint }[]>(Prisma.sql`
     SELECT
       (SELECT max("createdAt") FROM messages
-        WHERE "numberId" = ${numberId} AND "createdAt" > now() - ${LOOKBACK}::interval AND "createdAt" > ${since}
+        WHERE "numberId" = ${numberId} AND NOT internal AND "createdAt" > now() - ${LOOKBACK}::interval AND "createdAt" > ${since}
           AND (direction = 'in' OR status IN ('delivered', 'read'))) AS last,
       (SELECT count(*) FROM messages
         WHERE "numberId" = ${numberId} AND direction = 'in'
@@ -67,7 +67,9 @@ export async function unackedSinceLastSignal(prisma: PrismaService, numberId: st
     WITH base AS (
       SELECT m.direction, m.status, m."createdAt", m."conversationId"
       FROM messages m JOIN conversations c ON c.id = m."conversationId"
-      WHERE c."numberId" = ${numberId} AND m."createdAt" > now() - ${LOOKBACK}::interval AND m."createdAt" > ${since}
+      -- nota interna nasce `delivered` e nunca vai ao WhatsApp: contá-la como sinal de vida zerava a
+      -- detecção (Drogaria Marttins, 19/10/2026: uma nota às 15:22 escondeu o número parado desde 11:57)
+      WHERE c."numberId" = ${numberId} AND NOT m.internal AND m."createdAt" > now() - ${LOOKBACK}::interval AND m."createdAt" > ${since}
     ), sinal AS (
       SELECT max("createdAt") AS t FROM base WHERE direction = 'in' OR status IN ('delivered', 'read')
     )
