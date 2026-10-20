@@ -79,6 +79,8 @@ const schema = z.object({
   /** token cadastrado no webhook do Asaas; chega no header `asaas-access-token` */
   ASAAS_WEBHOOK_TOKEN: z.string().optional().default(''),
   RESEND_API_KEY: z.string().optional().default(''),
+  /** Brevo (ex-Sendinblue): se preenchida, tem prioridade sobre o Resend */
+  BREVO_API_KEY: z.string().optional().default(''),
   // ---- IA ----
   /** none = IA desligada (o front esconde os recursos) */
   AI_PROVIDER: z.enum(['none', 'anthropic', 'openai']).default('none'),
