@@ -307,6 +307,15 @@ compose — variável de ambiente vence o `.env` da imagem. Exige recriar o cont
 (produção ainda roda `v2.3.7-biz`, sem a guarda de conexão nem o patch da CVE). Depois, apagar a
 `IsOnWhatsapp_bkp_20261019`.
 
+**Hotfix aplicado (19/10, 22:23):** como a `atendo.4` ainda não passou pelo teste com WhatsApp real,
+a variável foi aplicada antes, na **mesma** imagem `v2.3.7-biz`, por um override fora do git
+(`~/atendo/infra/docker-compose.evolution-hotfix.yml`) e `up -d --no-deps --no-build evolution`.
+Antes: backup `/backup/evolution-pre-hotfix-20261019.dump` (926 MB) + `BGSAVE` do Redis; dry-run
+conferido (única diferença: a variável). Resultado: 45 abertas antes, 45 depois; carga 3,4; nenhuma
+consulta ao `IsOnWhatsapp`; um `bad-mac`/428 na Drogam Farma, reconectada sozinha em 4 s. O override
+sai quando a `atendo.4` for implantada pelo `scripts/deploy-evolution.sh` (o compose principal já
+traz a variável; sem o `-f` do override, o compose volta a pedir a imagem do repositório).
+
 **Pareamento perdido (15 números) — defeito da Evolution 2.3.7.** Às 17:19 esses números fecharam
 com código 200 (sem 401) e 3 s depois já emitiam QR: `registered: false`, sem `me` na `Session`. No
 `useMultiFileAuthStatePrisma` da Evolution, a leitura da sessão engole qualquer erro (`catch{return
