@@ -3,6 +3,19 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.6.1 — 2026-10-20
+
+- fix(chat): canal Suporte some do chat interno do cliente — fica só a comunicação da equipe
+- fix(web): abas da lista de conversas sem aperto, Conversas livres nos filtros e contato isento com um clique
+- docs(evolution): resultado do teste com WhatsApp real da v2.3.7-atendo.4
+- fix(whatsapp): crase no comentário SQL fechava o template do Prisma.sql em receive-stall
+- docs(evolution): registra o hotfix do cache IsOnWhatsapp aplicado em 19/10 22:23
+- fix(evolution): imagem atendo.4 — credencial não sobrescrita, recebimento que não trava, cache IsOnWhatsapp desligado
+- fix(whatsapp): nota interna não conta como sinal de vida na detecção de 'parou de receber'
+- fix(web): tira os avisos de proteção contra bloqueio da tela do cliente
+- feat(chat): chat da equipe do suporte entre super_admins
+- fix(deploy): chaves nas variáveis antes de '…' — o bash 3.2 do macOS lia o caractere como parte do nome
+
 ## 1.6.0 — 2026-10-19
 
 - feat(perfis): perfis padrão identificados por systemRole, renomeáveis e excluíveis
