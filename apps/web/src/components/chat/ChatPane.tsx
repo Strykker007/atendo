@@ -1367,21 +1367,21 @@ function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) =
 const labelOf = (t: string) => ({ image: 'imagem', audio: 'áudio', video: 'vídeo', document: 'documento', sticker: 'figurinha', location: 'localização', contact: 'contato' } as Record<string, string>)[t] ?? t;
 
 /**
- * Aviso acima do campo quando o contato não escreve há 24h num número QR: deixa claro, antes do
- * erro, que responder gasta uma das vagas diárias de contato frio (docs/envio.md#envio-frio).
+ * Aviso acima do campo quando o contato não escreve há 24h num número QR e as vagas diárias de
+ * contato frio acabaram (docs/envio.md#envio-frio). Com vaga sobrando, não aparece nada.
  */
 function ColdContactNotice({ numberId }: { numberId: string }) {
   const cota = useColdQuota(numberId);
   if (!cota.data) return null;
   const restam = Math.max(0, cota.data.max - cota.data.used);
+  if (restam) return null;
   const libera = cota.data.resetsAt ? new Date(cota.data.resetsAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
   return (
-    <div className={cn('flex items-start gap-2 rounded-lg px-3 py-2 text-[12.5px]', restam ? 'bg-field text-muted' : 'bg-warn-soft text-warn-ink')}>
+    <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-[12.5px] bg-warn-soft text-warn-ink">
       <Clock size={14} className="shrink-0 mt-0.5" />
       <span>
-        Este contato não escreve neste número há mais de 24 horas. Para proteger o número de bloqueio, ele pode falar primeiro com até <b>{cota.data.max} contatos assim por dia</b>
-        {restam ? <> — restam <b>{restam}</b> hoje. Se você já falou com este contato nas últimas 24 horas, não gasta outra vaga.</> : <> e o limite foi atingido{libera ? <>; uma vaga libera em <b>{libera}</b></> : null}. Se você já falou com este contato hoje, pode continuar.</>}
-        {' '}Quando ele responder, este aviso some.
+        Este número já iniciou conversa com <b>{cota.data.max} contatos novos</b> hoje{libera ? <>; uma vaga libera em <b>{libera}</b></> : null}.
+        {' '}Se você já falou com este contato hoje, pode continuar. Quando ele responder, este aviso some.
       </span>
     </div>
   );

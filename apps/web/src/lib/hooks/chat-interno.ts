@@ -25,6 +25,8 @@ export interface InternalChat {
   isGroup: boolean;
   /** canal com o suporte do sistema (um por cliente); no lado do dono, `name` = nome do cliente */
   isSupport?: boolean;
+  /** chat da equipe do suporte (entre super_admins); `isGroup` = canal da equipe inteira */
+  isStaff?: boolean;
   tenantId?: string;
   /** grupo: o nome dado; direta: o outro membro (na auditoria, os dois) */
   name: string;
@@ -57,12 +59,13 @@ const PAGE = 50;
 
 /**
  * De que lado da conversa a tela está: `team` = equipe do cliente (inclui o canal de suporte do
- * cliente); `support` = dono do sistema atendendo os canais de suporte de todos os clientes.
- * A tela de conversa é a mesma; muda só a rota e a lista que recarrega.
+ * cliente); `support` = dono do sistema atendendo os canais de suporte de todos os clientes;
+ * `staff` = a equipe do suporte entre si. A tela de conversa é a mesma; muda só a rota e a lista
+ * que recarrega.
  */
-export type ChatScope = 'team' | 'support';
-const BASE: Record<ChatScope, string> = { team: '/internal-chat/chats', support: '/super-admin/support/chats' };
-const LIST_KEY: Record<ChatScope, string> = { team: 'internal-chats', support: 'support-chats' };
+export type ChatScope = 'team' | 'support' | 'staff';
+const BASE: Record<ChatScope, string> = { team: '/internal-chat/chats', support: '/super-admin/support/chats', staff: '/super-admin/staff/chats' };
+const LIST_KEY: Record<ChatScope, string> = { team: 'internal-chats', support: 'support-chats', staff: 'staff-chats' };
 
 export const useInternalUsers = (enabled = true) =>
   useQuery({ queryKey: ['internal-users'], enabled, queryFn: () => api<InternalUser[]>('/internal-chat/users'), refetchInterval: 30_000 });
@@ -96,6 +99,7 @@ export function upsertInternalMessage(qc: ReturnType<typeof useQueryClient>, m: 
   });
   qc.invalidateQueries({ queryKey: ['internal-chats'] });
   qc.invalidateQueries({ queryKey: ['support-chats'] });
+  qc.invalidateQueries({ queryKey: ['staff-chats'] });
 }
 
 export const useCreateInternalChat = () => {
@@ -185,5 +189,22 @@ export const useOpenSupportChat = () => {
     mutationFn: (tenantId: string) => api<InternalChat>(`/super-admin/support/tenants/${tenantId}/chat`, { method: 'POST' }),
     // canal sem mensagem ainda não está em `all`: entra na hora, para a tela conseguir abrir
     onSuccess: (c) => qc.setQueryData<InternalChat[]>(['support-chats', 'all'], (old) => (old?.some((x) => x.id === c.id) ? old : [c, ...(old ?? [])])),
+  });
+};
+
+// ---- equipe do suporte: super_admins entre si (docs/chat-interno.md#equipe-do-suporte) ----
+
+export const useStaffUsers = (enabled = true) =>
+  useQuery({ queryKey: ['staff-users'], enabled, queryFn: () => api<InternalUser[]>('/super-admin/staff/users'), refetchInterval: 30_000 });
+
+export const useStaffChats = (enabled = true) =>
+  useQuery({ queryKey: ['staff-chats'], enabled, queryFn: () => api<InternalChat[]>('/super-admin/staff/chats'), refetchInterval: 60_000 });
+
+/** Abre (ou reaproveita) a conversa direta com um colega do suporte. */
+export const useOpenStaffChat = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => api<InternalChat>('/super-admin/staff/chats', { method: 'POST', body: JSON.stringify({ userId }) }),
+    onSuccess: (c) => qc.setQueryData<InternalChat[]>(['staff-chats'], (old) => (old?.some((x) => x.id === c.id) ? old : [...(old ?? []), c])),
   });
 };

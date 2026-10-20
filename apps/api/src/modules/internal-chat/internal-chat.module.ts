@@ -10,6 +10,7 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { StaffChatController } from './staff-chat.controller';
 import { ACTIVE_TICKET, TICKET_SELECT, activeTicket, queuePosition, ticketOnMessage, type PresentedTicket } from './support-tickets';
 
 class CreateChatDto {
@@ -556,6 +557,6 @@ class SupportController {
 
 @Module({
   imports: [AuthModule, ConversationsModule],
-  controllers: [InternalChatController, SupportController],
+  controllers: [InternalChatController, SupportController, StaffChatController],
 })
 export class InternalChatModule {}

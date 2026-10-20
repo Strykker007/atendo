@@ -271,3 +271,108 @@ Só o QR resolve na versão em produção. Corrigido no repo: restart força soc
 de silêncio anormal. **Deploy do patch exige rebuild da imagem da Evolution + restart do container
 (todos os números reconectam): fazer de madrugada.**
 
+
+---
+
+## 9. 19/10/2026 — queda em massa às 17:19 (cache `IsOnWhatsapp`)
+
+**Sintoma:** às 17:19:12 uns 25 números caíram no mesmo segundo e ficaram em `connecting` na
+Evolution ("QR pendente" no painel), sem ninguém desconectar. Load do servidor em 40–44 (4 CPUs),
+`evolution-db` no teto de 2 CPUs com ~40 consultas iguais ativas. O 1-MSA 4968 entrou em tempestade
+de reconexão (428/440 a cada segundo) às 17:23 — a guarda do doc 29 não está em produção.
+
+**Causa:** o `.env` embutido na imagem da Evolution (`/evolution/.env`) liga
+`DATABASE_SAVE_IS_ON_WHATSAPP=true`. A cada mensagem e a cada contato sincronizado, `saveOnWhatsappCache`
+faz `findFirst` com `"jidOptions"::text LIKE '%<número>@s.whatsapp.net%' OR … OR "remoteJid" = …` —
+leitura da tabela inteira (182 mil linhas, até 2,3 s sob carga). Com muitos números reconectando, a
+sincronização de contatos multiplica a consulta; a carga derruba mais sockets, que reconectam e
+sincronizam de novo — ciclo.
+
+**O que foi feito em produção (19/10, ~17:40–17:51):**
+
+| Passo | Resultado | Reverter |
+|---|---|---|
+| `CREATE EXTENSION pg_trgm` + índice GIN `IsOnWhatsapp_jidOptions_trgm` em `"jidOptions"` | pouco efeito: o sufixo `@s.whatsapp.net` está em toda linha e o planejador segue preferindo a leitura completa | `DROP INDEX CONCURRENTLY "IsOnWhatsapp_jidOptions_trgm"` |
+| `ALTER COLUMN "jidOptions" SET STATISTICS 1000` | só planejamento | `SET STATISTICS -1` |
+| `ALTER SYSTEM SET random_page_cost = 1.1` + `pg_reload_conf()` | valor de SSD; o banco prefere índices em geral | `ALTER SYSTEM RESET random_page_cost; SELECT pg_reload_conf();` |
+| Cópia `IsOnWhatsapp_bkp_20261019` (182.309 linhas) + `TRUNCATE "IsOnWhatsapp"` | `evolution-db` de 200% para ~25% de CPU na hora | `INSERT INTO "IsOnWhatsapp" SELECT * FROM "IsOnWhatsapp_bkp_20261019" ON CONFLICT DO NOTHING` |
+
+O `IsOnWhatsapp` é só cache: o código lê na consulta "esse número tem WhatsApp?" (`whatsappNumbers`)
+e grava a cada mensagem/contato. Sem a linha, a Evolution pergunta ao WhatsApp. O mapeamento LID das
+mensagens fica no Baileys. A tabela volta a crescer (~3 mil linhas/30 min) até a correção abaixo.
+
+**Correção definitiva (no repo, sem deploy):** `DATABASE_SAVE_IS_ON_WHATSAPP: "false"` nos dois
+compose — variável de ambiente vence o `.env` da imagem. Exige recriar o container da Evolution
+(todos os números reconectam): fazer no deploy noturno da Evolution, junto com a `v2.3.7-atendo.4`
+(produção ainda roda `v2.3.7-biz`, sem a guarda de conexão nem o patch da CVE). Depois, apagar a
+`IsOnWhatsapp_bkp_20261019`.
+
+**Hotfix aplicado (19/10, 22:23):** como a `atendo.4` ainda não passou pelo teste com WhatsApp real,
+a variável foi aplicada antes, na **mesma** imagem `v2.3.7-biz`, por um override fora do git
+(`~/atendo/infra/docker-compose.evolution-hotfix.yml`) e `up -d --no-deps --no-build evolution`.
+Antes: backup `/backup/evolution-pre-hotfix-20261019.dump` (926 MB) + `BGSAVE` do Redis; dry-run
+conferido (única diferença: a variável). Resultado: 45 abertas antes, 45 depois; carga 3,4; nenhuma
+consulta ao `IsOnWhatsapp`; um `bad-mac`/428 na Drogam Farma, reconectada sozinha em 4 s. O override
+sai quando a `atendo.4` for implantada pelo `scripts/deploy-evolution.sh` (o compose principal já
+traz a variável; sem o `-f` do override, o compose volta a pedir a imagem do repositório).
+
+**Pareamento perdido (15 números) — defeito da Evolution 2.3.7.** Às 17:19 esses números fecharam
+com código 200 (sem 401) e 3 s depois já emitiam QR: `registered: false`, sem `me` na `Session`. No
+`useMultiFileAuthStatePrisma` da Evolution, a leitura da sessão engole qualquer erro (`catch{return
+null}`) e o chamador faz `creds = lidas || initAuthCreds()` **e grava** — com o banco estourando o
+tempo (`PrismaClientKnownRequestError` às 17:18), a credencial pareada foi sobrescrita por uma nova.
+O aparelho continua vinculado no celular; só a credencial local se perdeu. `POST /instance/restart`
+não resolve (leva a `close`); `GET /instance/connect` devolve QR. Saídas: ler o QR de novo, ou
+restaurar a credencial da `Session` do backup das 09:40 (`/backup/20261019-124021/evolution.dump`)
+só nas instâncias ainda `registered: false`, seguida de `connect` — nunca `logout`.
+Removidos de fato pelo WhatsApp (401) na tempestade: Amor Por Vidas "FIXO" (17:48) e
+`atendo-cd454fd7-5561994309`.
+
+**Restauração (19/10, 18:09–18:18):** credencial da `Session` do backup das 09:40 copiada para
+`"Session_bkp_20261019"` e aplicada só em instância sem `me` (atenção: `registered` é `false` também
+nas pareadas por QR — não serve de critério), seguida de `restart` (ciclo de QR) ou `connect` (close).
+9 voltaram sem QR e recebendo; Farmácia Economize e DROGARIA KELLY 1 foram recusadas pelo WhatsApp
+(401 — aparelho já desvinculado) e precisam de QR. A Economize teve o QR em andamento interrompido pela
+restauração e depois caiu no limite de vínculos do WhatsApp ("tente mais tarde"). Apagar
+`"Session_bkp_20261019"` (contém credenciais) quando estabilizar.
+
+**Corrigido no repo:** `infra/evolution/patch-evolution-creds-read.mjs` — com a leitura vazia, confirma
+no banco que a sessão não existe antes de criar credencial; existe ou o banco não responde → erro, nada
+gravado, e a guarda tenta de novo (`create_failed`, backoff). Testado no build (`verify-patches.test.mjs`).
+
+---
+
+## 10. 19/10/2026 — "conectado, envia, não recebe": causa no Baileys rc.9
+
+Balneário (4ª vez), Marttins e Drog. Kelly I: a Evolution dizia `open`, a sonda respondia, o envio
+saía, e nada chegava — nem mensagem, nem confirmação de entrega. Na tabela `Message` da própria
+Evolution também não havia nada: o WhatsApp não estava entregando para aquele socket. Reiniciar não
+resolvia; ler o QR resolvia.
+
+**Causa (código do `messages-recv.js` do 7.0.0-rc.9):**
+- mensagens, recibos e notificações passam por UMA fila serial (`processingMutex`) sem prazo — uma
+  tarefa que não termina segura tudo, em silêncio, enquanto envio e consultas (fora da fila) funcionam;
+- o processador de nós offline faz `await nodeProcessor(node)` sem `try`: uma exceção (vista hoje:
+  `rate-overlimit` às 11:36, 12:26 e 12:55) deixa `isProcessing = true` até o socket fechar;
+- mensagem que falha no processamento fica **sem ack** (o `catch` só loga), e o servidor a reentrega a
+  cada reconexão — o mesmo nó volta a travar o socket novo; o QR cria aparelho novo, sem essa fila.
+- gatilho nos logs: `error in handling message` em mensagens `category='peer'` (do próprio celular da
+  loja) — Balneário no segundo exato do QR de 11:07:48 e 10 min antes da remoção de 18/10; Marttins no
+  segundo do QR de 18/10. Os nomes saíram do `verified_name` em hex: o log do Baileys não dizia a instância.
+- upstream: rc.10 traz "Fix connection deadlocks", "Mutex redesign", "Proper ack handling", "improved
+  offline node batching"; issue WhiskeySockets/Baileys#2132 ("online, mas não envia nem recebe", rc.9).
+
+**Correção (imagem `v2.3.7-atendo.4`, sem trocar versões):**
+
+| Patch | O quê |
+|---|---|
+| `patch-baileys-recv.mjs` | prazo de 120 s (`ATENDO_RECV_TASK_TIMEOUT_MS`) por tarefa da fila de processamento e da de retry — travou, registra `[atendo] tarefa travada` e a fila segue; loop offline continua depois de erro; NACK `UnhandledError` para mensagem que falha sem ter recebido recibo (inclusive erro antes do `try` original: decodificação, migração de LID) |
+| `patch-evolution-baileys-logger.mjs` | `.child({instance})` no logger do socket e do key store: toda linha do Baileys diz o número |
+| `patch-evolution-creds-read.mjs` | ver § 9 |
+
+Testes no build (`verify-patches.test.mjs`): fila com tarefa travada libera a seguinte; erro na tarefa
+chega a quem chamou; nó offline com erro não para os seguintes; NACK só sem recibo; credencial nos
+quatro casos (lida, leitura falhou, banco fora, instância nova) nos dois bundles.
+
+**Produção** ainda roda `v2.3.7-biz` (sem guarda de conexão, CVE nem estes patches). Deploy:
+`scripts/deploy-evolution.sh` (doc 27) à noite — todos os números reconectam, com a guarda escalonando.

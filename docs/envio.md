@@ -184,9 +184,11 @@ instante da 1ª mensagem, janela deslizante de 24 h, reserva atômica (Lua). Esc
 mesmo contato dentro das 24 h não gasta outra vaga; a vaga volta 24 h depois de usada. Vale para
 qualquer número QR, novo ou antigo — antes não havia vaga nenhuma e o cliente não conseguia nem
 retomar um orçamento. `GET /conversations/cold-quota?numberId=` devolve `{ used, max, resetsAt }`
-(`null` no oficial). A tela avisa antes do erro: *Nova conversa* mostra quantas restam, o chat mostra
-uma faixa acima do campo quando o contato está frio, e *Números* lista todas as regras de proteção
-do número QR (`components/numbers/ProtectionRules.tsx`).
+(`null` no oficial). Na tela, o cliente **não vê avisos de proteção/bloqueio** enquanto há vaga — eles
+assustavam mais do que ajudavam. Só quando as vagas do dia acabam: *Nova conversa* e o chat (faixa
+acima do campo, contato frio) dizem que o limite de contatos novos de hoje foi atingido e quando
+libera uma vaga. O cartão de aquecimento e a lista de regras de proteção saíram de *Números*; as
+travas continuam iguais na API.
 
 Vale para responder no chat, encaminhar, agendadas, "Iniciar conversa" (checado **antes** de
 criar/reabrir a conversa) e envio do sistema (fluxo que retoma dias depois, por exemplo).

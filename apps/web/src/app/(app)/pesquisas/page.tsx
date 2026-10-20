@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { BarChart3, Pencil, Plus, Power, ShieldCheck, Star, ThumbsUp, Trash2 } from 'lucide-react';
+import { BarChart3, Pencil, Plus, Power, Star, ThumbsUp, Trash2 } from 'lucide-react';
 import { SURVEY_DEFAULTS, SURVEY_EXTRA_QUESTIONS_MAX, SURVEY_SCALE_LABEL, SURVEY_SCALES, surveyInteractive, surveyPromptText, type SurveyExtraQuestion, type SurveyScale } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { Empty, PageHeader, PageShell } from '@/components/ui/Page';
@@ -169,7 +169,7 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
               </div>
             ))}
             {f.extraQuestions.length > 0 && (
-              <p className="flex items-start gap-1.5 text-[11.5px] text-muted"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-ok" /> Uma pergunta por vez, só depois que o cliente responder a anterior. Cada mensagem passa pela fila do número, com o mesmo intervalo e limites anti-bloqueio das outras automações.</p>
+              <p className="text-[11.5px] text-muted">Uma pergunta por vez, só depois que o cliente responder a anterior.</p>
             )}
           </div>
 

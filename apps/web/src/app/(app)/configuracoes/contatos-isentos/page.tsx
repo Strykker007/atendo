@@ -18,7 +18,7 @@ function formatPhone(d: string) {
 
 /**
  * Contatos isentos de ticket (docs/contatos-isentos.md). Telefones da lista nunca abrem
- * atendimento: a mensagem fica na aba "Livres" das conversas, sem fila, sem robô e fora dos
+ * atendimento: a mensagem fica em "Conversas livres" (filtros da lista), sem fila, sem robô e fora dos
  * relatórios de desempenho (TMA, TMR, volume, ranking).
  */
 export default function ContatosIsentosPage() {
@@ -50,7 +50,7 @@ export default function ContatosIsentosPage() {
 
       <p className="flex items-start gap-2 rounded-lg bg-accent-soft px-3 py-2 text-[12.5px] text-accent-ink">
         <BellOff size={15} className="shrink-0 mt-0.5" />
-        <span>A mensagem continua chegando e pode ser respondida, mas fica na aba <b>Livres</b> das conversas: não entra na fila, não aciona o robô, não tem dono e não conta em nenhum relatório de desempenho (TMA, TMR, volume, ranking).</span>
+        <span>A mensagem continua chegando e pode ser respondida, mas fica em <b>Conversas livres</b> (nos filtros da lista de conversas): não entra na fila, não aciona o robô, não tem dono e não conta em nenhum relatório de desempenho (TMA, TMR, volume, ranking).</span>
       </p>
 
       {podeGerir && (
@@ -63,24 +63,36 @@ export default function ContatosIsentosPage() {
           </form>
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
-            <input className={cn(inputCls, 'pl-8')} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Ou busque um contato pelo nome ou telefone" aria-label="Buscar contato" />
+            <input className={cn(inputCls, 'pl-8')} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Ou busque um contato pelo nome ou telefone e clique nele" aria-label="Buscar contato" />
           </div>
           {termo.length >= 2 && (
             <ul className="divide-y divide-line rounded-lg border border-line max-h-60 overflow-y-auto">
               {(candidatos.data?.contacts ?? []).length === 0 ? (
                 <li className="px-3 py-2 text-[13px] text-faint">{candidatos.isFetching ? 'Buscando…' : 'Nenhum contato encontrado.'}</li>
-              ) : candidatos.data!.contacts.map((c) => (
-                <li key={c.id} className="flex items-center gap-3 px-3 py-2">
-                  <UserRound size={15} className="text-faint shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm text-ink">{c.name || formatPhone(c.phone)}</p>
-                    <p className="text-[12px] text-faint">{formatPhone(c.phone)}</p>
-                  </div>
-                  {isentos.has(c.id)
-                    ? <span className="text-[12px] text-muted">Já isento</span>
-                    : <Button size="sm" variant="ghost" loading={add.isPending} onClick={() => void adicionar({ contactId: c.id })}><Plus size={13} /> Isentar</Button>}
-                </li>
-              ))}
+              ) : candidatos.data!.contacts.map((c) => {
+                // a linha inteira isenta: clicar no contato achado é o gesto natural, o botão pequeno passava batido
+                const ja = isentos.has(c.id);
+                return (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      disabled={ja || add.isPending}
+                      onClick={() => void adicionar({ contactId: c.id })}
+                      title={ja ? 'Este contato já está na lista' : 'Isentar este contato'}
+                      className="group w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-field disabled:cursor-default disabled:hover:bg-transparent"
+                    >
+                      <UserRound size={15} className="text-faint shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="truncate text-sm text-ink">{c.name || formatPhone(c.phone)}</p>
+                        <p className="text-[12px] text-faint">{formatPhone(c.phone)}</p>
+                      </div>
+                      {ja
+                        ? <span className="text-[12px] text-muted">Já isento</span>
+                        : <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-faint group-hover:text-accent-ink"><Plus size={13} /> Isentar</span>}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

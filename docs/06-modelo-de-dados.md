@@ -53,6 +53,8 @@ tenant_templates (global) ── tenants.templateId
 
 **internal_chats** / **internal_chat_members** / **internal_messages** — chat interno da equipe (direto ou grupo), histórico permanente e auditável por `internal_chat.audit`. Ver [Chat interno](chat-interno.md).
 
+**staff_chats** / **staff_chat_members** / **staff_messages** — chat da equipe do suporte (super_admins entre si, fora de qualquer cliente): canal `team` com todos + diretas. Ver [Equipe do suporte](chat-interno.md#equipe-do-suporte).
+
 **support_tickets** — atendimentos da fila de suporte (um ativo por canal de suporte): `number` sequencial (#123), `status` (`open`|`in_progress`|`resolved`), responsável (`assigneeId`/`assigneeName`), `openedAt`, `firstResponseAt`, `resolvedAt`. `whatsapp_numbers.syncStartedAt` = quando o número reconectou (aviso de sincronização). Migração `20270104000000_support_tickets_number_sync`. Ver [Fila de suporte](chat-interno.md#fila-de-suporte).
 
 **whatsapp_groups** / **campaign_group_targets** — lista branca de grupos por número (opt-in estrito) e alvos de grupo da transmissão. Grupo não é contato nem tem conversa; ver [Grupos restritos](grupos.md).

@@ -15,7 +15,7 @@ servidor novo, sem homologação paralela, sem número de cliente.
 | Web | processo Node local | `localhost:3000` | `apps/web` |
 | PostgreSQL do Atendo | container (`infra/docker-compose.yml`) | `localhost:5433` | volume `infra/volumes/postgres` |
 | Redis (BullMQ + cache **e chaves Signal da Evolution**, db 6) | container | `localhost:6379` | volume `infra/volumes/redis` |
-| Evolution API | container, imagem `atendo/evolution-api:v2.3.7-atendo.3` (build de `infra/evolution`) | `localhost:8080` | volume `infra/volumes/evolution` |
+| Evolution API | container, imagem `atendo/evolution-api:v2.3.7-atendo.4` (build de `infra/evolution`) | `localhost:8080` | volume `infra/volumes/evolution` |
 | Postgres da Evolution | container | só na rede do compose | volume `infra/volumes/evolution-db` |
 | Webhooks | Evolution → `http://host.docker.internal:4000/webhooks/evolution` (a API local) | — | compose de dev |
 
@@ -138,3 +138,22 @@ produção e **não** são da Evolution:
    - Correção proposta: `updateMany` condicional ao status atual ser mais baixo.
 
 As duas correções aguardam autorização.
+
+## 6. WhatsApp real com a `v2.3.7-atendo.4` (19/10/2026, 22:51–23:34)
+
+Chip A pareado na Evolution local (`atendo.4`), chip B conversando com ele. Coletas em
+`.reports/real-20261019-232306.md` e `real-20261019-233412.md`.
+
+| Passo | Resultado |
+|---|---|
+| 1. Pareamento | ✔ 515 → `reconnect.recovered` em 4,5 s → `open`; `Session` = 1 |
+| 2. Mensagens | ✔ B → A: 2 textos + foto; painel → B: 2 textos + foto (link seguro), todos `delivered`. Resposta automática dos dois lados sem loop |
+| 3. Histórico | ✔ ~23,5 mil mensagens antigas na Evolution; `dropping spoofed` = 0 |
+| 4. Reinício pelo painel | ✔ 1 socket novo; 2º e 3º cliques → 429; `stale.dropped` sem 440; mensagem do B chegou depois |
+| 5. Restart do container | ✔ `open` em ~20 s sem QR, 1 socket; mensagem do B chegou depois |
+
+Erros vistos, todos esperados: 5 `No matching sessions` às 23:23 em mensagens do próprio celular A
+para o próprio LID (chaves/sincronização ao aparelho recém-pareado, antes de a sessão Signal existir);
+1 `stream errored out` no 515 do pareamento. Nenhum `[atendo] tarefa travada`, `erro ao tratar` ou
+`falha ao enviar NACK`. O travamento do recebimento em si (doc 23 › 10) não é reproduzível com dois
+chips: fica coberto pelos testes do build (`verify-patches.test.mjs`).
