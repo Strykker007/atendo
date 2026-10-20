@@ -67,7 +67,7 @@ export async function unackedSinceLastSignal(prisma: PrismaService, numberId: st
     WITH base AS (
       SELECT m.direction, m.status, m."createdAt", m."conversationId"
       FROM messages m JOIN conversations c ON c.id = m."conversationId"
-      -- nota interna nasce `delivered` e nunca vai ao WhatsApp: contá-la como sinal de vida zerava a
+      -- nota interna nasce 'delivered' e nunca vai ao WhatsApp: contá-la como sinal de vida zerava a
       -- detecção (Drogaria Marttins, 19/10/2026: uma nota às 15:22 escondeu o número parado desde 11:57)
       WHERE c."numberId" = ${numberId} AND NOT m.internal AND m."createdAt" > now() - ${LOOKBACK}::interval AND m."createdAt" > ${since}
     ), sinal AS (
