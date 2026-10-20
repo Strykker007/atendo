@@ -20,6 +20,8 @@ import { DEFINITIVE_CLOSE } from '../whatsapp/connection-events';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
 import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
 
+const isGroupJid = (jid: string) => jid.endsWith('@g.us');
+
 /**
  * Tudo que **entra** pelo provider: mensagem recebida, mensagem digitada no celular, confirmação
  * de entrega e mudança de conexão do número.
@@ -80,7 +82,9 @@ export class InboundService {
   async ingestInbound(number: WhatsAppNumber, msg: InboundMessage): Promise<{ message: Message; conversation: Conversation; isNew: boolean; isNewContact: boolean; returningAfterClosed: boolean; hoursSinceLastMessage: number | null; fromMe?: boolean; /** confirmação na carência do encerramento: não reabriu e não aciona automação */ quiet?: boolean; /** resposta da pesquisa de satisfação: o processor manda o próximo passo */ survey?: SurveyClaim } | null> {
     // idempotência: o mesmo webhook pode chegar duas vezes. É também o que descarta o eco do
     // que o PAINEL enviou: aquela mensagem já está no banco com este externalId.
-    const exists = await this.prisma.message.findUnique({ where: { externalId: msg.externalId } });
+    // Por NÚMERO: quando um número nosso fala com outro, o WhatsApp usa o mesmo id nos dois
+    // lados — a saída de um não pode descartar a entrada do outro (docs/06-modelo-de-dados.md).
+    const exists = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId: msg.externalId }, select: { id: true } });
     if (exists) return null;
 
     // digitada no celular do cliente, não no painel: entra como enviada
@@ -89,7 +93,7 @@ export class InboundService {
     if (number.receiveStalledAt) await this.voltouAReceber(number.id, number.tenantId);
 
     let contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
-      ?? await this.createContact(number, msg.from, msg.contactName);
+      ?? (isGroupJid(msg.from) ? await this.createGroupContact(number, msg.from) : await this.createContact(number, msg.from, msg.contactName));
     if (msg.contactName) contact = await this.restaurarAgenda(number.tenantId, contact, msg.contactName);
     // o pushName só troca nome que também veio do WhatsApp (ou contato ainda sem nome): nome da
     // ficha ou da agenda não pode ser desfeito pela próxima mensagem do cliente
@@ -124,7 +128,8 @@ export class InboundService {
     // (docs/pesquisa-de-satisfacao.md). Não sendo resposta, a pesquisa sai do caminho e segue normal.
     // contato isento (docs/contatos-isentos.md): chat livre — não reabre, não entra na fila,
     // não marca espera e não aciona automação (o `quiet` já cobre tudo isso)
-    const isento = await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    // grupo nas conversas é sempre chat livre (docs/grupos.md#grupos-nas-conversas)
+    const isento = contact.isGroup || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
     const pesquisa = !isento && decisao.acao === 'reabrir' ? await this.surveys.claim(conversation!.id, { type: msg.type, text: msg.text, interactiveReplyId: msg.interactiveReplyId }, msg.timestamp) : null;
     const quieta = isento || !!pesquisa || (decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
       && !(await this.prisma.flowRun.findFirst({ where: { conversationId: conversation!.id, status: { in: ['running', 'waiting'] } }, select: { id: true } })));
@@ -157,9 +162,11 @@ export class InboundService {
         type: msg.type,
         status: 'delivered',
         ...this.conteudo(msg),
+        senderName: msg.group?.senderName,
+        senderPhone: msg.group?.senderPhone,
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
-        quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
+        quotedMessageId: await this.resolveQuoted(number.id, msg.quotedExternalId),
         quotedPreview: msg.quotedPreview,
         quotedFromStatus: msg.quotedFromStatus ?? false,
         quotedMediaMime: mimeDoStatusCitado(msg),
@@ -178,7 +185,7 @@ export class InboundService {
         lastMessageAt: msg.timestamp,
         // encerrada (confirmação na carência): ninguém está esperando resposta
         ...(!quieta && { awaitingSince: inicioDaEspera(conversation.awaitingSince, msg.timestamp) }),
-        lastMessagePreview: this.previa(msg),
+        lastMessagePreview: msg.group?.senderName ? `${msg.group.senderName}: ${this.previa(msg)}`.slice(0, 120) : this.previa(msg),
         unreadCount: { increment: 1 },
       },
     });
@@ -214,7 +221,7 @@ export class InboundService {
     // sem pushName: o desta mensagem é de quem a enviou (o dono do número), não do contato.
     // Nome só da agenda; senão chega na primeira mensagem que o contato mandar.
     const contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
-      ?? await this.createContact(number, msg.from);
+      ?? (isGroupJid(msg.from) ? await this.createGroupContact(number, msg.from) : await this.createContact(number, msg.from));
 
     // mesma regra da entrada: uma conversa por pessoa neste número (ver reopen.ts)
     let conversation = await this.prisma.conversation.findFirst({
@@ -243,7 +250,7 @@ export class InboundService {
     // Exceção: a despedida pelo celular logo depois de encerrar ("eu que agradeço",
     // "atendimento finalizado ✅") entra no histórico sem reabrir (carência, reopen.ts).
     // contato isento: chat livre, sem reabrir atendimento (docs/contatos-isentos.md)
-    const isento = await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    const isento = contact.isGroup || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
     if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento);
     if (isento && conversation && conversation.status !== 'in_progress') conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
     else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, 'in_progress');
@@ -261,7 +268,7 @@ export class InboundService {
         ...this.conteudo(msg),
         externalId: msg.externalId,
         quotedId: msg.quotedExternalId,
-        quotedMessageId: await this.resolveQuoted(number.tenantId, msg.quotedExternalId),
+        quotedMessageId: await this.resolveQuoted(number.id, msg.quotedExternalId),
         quotedPreview: msg.quotedPreview,
         quotedFromStatus: msg.quotedFromStatus ?? false,
         quotedMediaMime: mimeDoStatusCitado(msg),
@@ -301,12 +308,12 @@ export class InboundService {
    * `UsageService.record` (não foi enviada nem recebida agora — cobrar seria faturar o passado),
    * sem fluxo/automação, sem mexer em não-lidas, espera, prévia ou status da conversa, sem
    * socket (quem pediu recebe na resposta). Duplicata é descartada pelo `externalId`, que é
-   * único: a mesma mensagem nunca entra duas vezes, nem com duas abas sincronizando juntas.
-   * Devolve os ids das que têm mídia — o download vai para uma fila, fora da requisição.
+   * único por número: a mesma mensagem nunca entra duas vezes, nem com duas abas sincronizando juntas
+   * (ver `ingestInbound`). Devolve os ids das que têm mídia — o download vai para uma fila, fora da requisição.
    */
   async importHistory(conversation: { id: string; tenantId: string; numberId: string }, msgs: InboundMessage[]) {
     if (!msgs.length) return { imported: 0, withMedia: [] as string[] };
-    const ja = await this.prisma.message.findMany({ where: { externalId: { in: msgs.map((m) => m.externalId) } }, select: { externalId: true } });
+    const ja = await this.prisma.message.findMany({ where: { numberId: conversation.numberId, externalId: { in: msgs.map((m) => m.externalId) } }, select: { externalId: true } });
     const existentes = new Set(ja.map((m) => m.externalId));
     // da mais antiga para a mais nova: `queueSeq` crescente desempata o mesmo segundo na ordem certa
     const novas = msgs.filter((m) => !existentes.has(m.externalId)).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
@@ -316,7 +323,7 @@ export class InboundService {
     // citada: no próprio lote ou já no banco (do tenant); fora disso fica só o quotedId/preview
     const fora = [...new Set(novas.map((m) => m.quotedExternalId).filter((q): q is string => !!q && !ids.has(q)))];
     const citadas = fora.length
-      ? new Map((await this.prisma.message.findMany({ where: { externalId: { in: fora }, conversation: { tenantId: conversation.tenantId } }, select: { id: true, externalId: true } })).map((m) => [m.externalId!, m.id]))
+      ? new Map((await this.prisma.message.findMany({ where: { numberId: conversation.numberId, externalId: { in: fora } }, select: { id: true, externalId: true } })).map((m) => [m.externalId!, m.id]))
       : new Map<string, string>();
 
     const r = await this.prisma.message.createMany({
@@ -362,11 +369,12 @@ export class InboundService {
 
   /**
    * A citada pode não estar no banco (status/story, mensagem anterior à integração): aí fica só
-   * o `quotedId`. Filtra pelo tenant porque `externalId` é único global, mas o dado não é de todos.
+   * o `quotedId`. Filtra pelo número: o mesmo `externalId` existe nos dois lados quando um
+   * número nosso fala com outro, e a citada é a desta conversa.
    */
-  private async resolveQuoted(tenantId: string, quotedExternalId?: string): Promise<string | null> {
+  private async resolveQuoted(numberId: string, quotedExternalId?: string): Promise<string | null> {
     if (!quotedExternalId) return null;
-    const q = await this.prisma.message.findFirst({ where: { externalId: quotedExternalId, conversation: { tenantId } }, select: { id: true } });
+    const q = await this.prisma.message.findFirst({ where: { numberId, externalId: quotedExternalId }, select: { id: true } });
     return q?.id ?? null;
   }
 
@@ -389,8 +397,9 @@ export class InboundService {
     }
   }
 
-  async applyStatus(st: StatusUpdate) {
-    const m = await this.prisma.message.findUnique({ where: { externalId: st.externalId }, include: { conversation: { select: { tenantId: true } } } });
+  /** `numberId`: número que recebeu o recibo — a saída de um número nosso e a entrada do outro têm o mesmo `externalId`. */
+  async applyStatus(st: StatusUpdate, numberId?: string) {
+    const m = await this.prisma.message.findFirst({ where: { externalId: st.externalId, ...(numberId && { numberId }) }, include: { conversation: { select: { tenantId: true } } } });
     if (!m) return;
     const order = ['pending', 'sent', 'delivered', 'read', 'failed'];
     if (order.indexOf(st.status) <= order.indexOf(m.status) && st.status !== 'failed') return; // não regride
@@ -433,8 +442,8 @@ export class InboundService {
    * não está no banco é descartada.
    */
   async applyReaction(number: WhatsAppNumber, r: InboundReaction) {
-    // filtra pelo tenant: externalId é único global, mas o dado não é de todos
-    const m = await this.prisma.message.findFirst({ where: { externalId: r.targetExternalId, conversation: { tenantId: number.tenantId } }, select: { id: true } });
+    // filtra pelo número: o mesmo externalId existe nos dois lados quando um número nosso fala com outro
+    const m = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId: r.targetExternalId }, select: { id: true } });
     if (!m) return;
     await this.conversations.setReaction(number.tenantId, m.id, { fromMe: r.fromMe, emoji: r.emoji, at: r.timestamp });
   }
@@ -444,8 +453,8 @@ export class InboundService {
    * banco é descartada — virar mensagem nova seria a bolha solta que o WhatsApp não mostra.
    */
   async applyEdit(number: WhatsAppNumber, e: InboundEdit) {
-    // filtra pelo tenant: externalId é único global, mas o dado não é de todos
-    const m = await this.prisma.message.findFirst({ where: { externalId: e.targetExternalId, conversation: { tenantId: number.tenantId } }, select: { id: true } });
+    // filtra pelo número: o mesmo externalId existe nos dois lados quando um número nosso fala com outro
+    const m = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId: e.targetExternalId }, select: { id: true } });
     if (!m) return;
     const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text: e.text, editedAt: new Date() }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(number.tenantId, this.conversations.present(updated));
@@ -469,6 +478,19 @@ export class InboundService {
    * Contato novo: nasce com o nome da agenda do celular, se houver (`phonebook_entries`); senão
    * com o pushName. `upsert` porque duas mensagens da mesma pessoa podem chegar juntas.
    */
+  /**
+   * "Ficha" do grupo liberado para as conversas: o telefone é o jid e o nome vem da lista de
+   * grupos do número (o pushName de cada mensagem é de quem escreveu, não do grupo).
+   */
+  private async createGroupContact(number: WhatsAppNumber, jid: string) {
+    const g = await this.prisma.whatsAppGroup.findUnique({ where: { numberId_jid: { numberId: number.id, jid } }, select: { name: true } });
+    return this.prisma.contact.upsert({
+      where: { tenantId_phone: { tenantId: number.tenantId, phone: jid } },
+      create: { tenantId: number.tenantId, phone: jid, isGroup: true, name: g?.name ?? 'Grupo', nameSource: 'manual' },
+      update: { isGroup: true },
+    });
+  }
+
   private async createContact(number: WhatsAppNumber, phone: string, pushName?: string) {
     const agenda = escolherDaAgenda(
       await this.prisma.phonebookEntry.findMany({ where: { tenantId: number.tenantId, phone }, take: 10 }),

@@ -650,8 +650,11 @@ model WhatsAppNumber {
 model Contact {
   id        String   @id @default(uuid())
   tenantId  String
-  phone     String // E.164
+  phone     String // E.164; grupo: o jid inteiro (`1203630...@g.us`)
   name      String?
+  /// grupo do WhatsApp mostrado nas conversas (docs/grupos.md#grupos-nas-conversas): fica fora
+  /// de contatos, transmissões e isenções — é a "ficha" do grupo, não de uma pessoa
+  isGroup   Boolean  @default(false)
   /// de onde veio o `name` — decide quem pode trocá-lo (ver docs/04-providers-whatsapp.md)
   nameSource ContactNameSource @default(whatsapp)
   /// chave da foto de perfil no NOSSO storage (a URL da CDN do WhatsApp expira)
@@ -1252,7 +1255,9 @@ model Message {
   mediaUrl       String?
   mediaMime      String?
   mediaName      String?
-  /// id no provider — usado para idempotência do webhook e status updates
+  /// id no provider — usado para idempotência do webhook e status updates. Único POR NÚMERO:
+  /// quando um número nosso fala com outro (mesma conta ou outra), o WhatsApp usa o mesmo id na
+  /// saída de um e na entrada do outro — as duas linhas existem
   externalId     String?
   /// id no provider da mensagem citada (pode apontar para algo que não temos)
   quotedId       String?
@@ -1282,6 +1287,10 @@ model Message {
   /// Nome do autor gravado no momento (só em nota interna): a nota continua assinada mesmo
   /// depois que o usuário é removido (`authorId` vira null pelo SetNull)
   authorName     String?
+  /// Recebida num GRUPO: quem escreveu (pushName) e o telefone dele — a conversa é do grupo,
+  /// então sem isto ninguém saberia de quem é cada mensagem (docs/grupos.md#grupos-nas-conversas)
+  senderName     String?
+  senderPhone    String?
   /// Nota interna (cadeado): só a equipe vê, nunca vai ao WhatsApp nem conta no uso
   internal       Boolean          @default(false)
   /// Veio do histórico guardado no provider, anterior à conversa existir no painel
@@ -1318,8 +1327,9 @@ model Message {
   quotedMessage Message?    @relation("MessageQuote", fields: [quotedMessageId], references: [id], onDelete: SetNull)
   quotes        Message[]   @relation("MessageQuote")
 
-  @@unique([externalId])
+  @@unique([numberId, externalId])
   @@unique([conversationId, idempotencyKey])
+  @@index([externalId])
   @@index([conversationId, createdAt])
   @@index([conversationId, status, queueSeq])
   @@index([quotedMessageId])
@@ -2098,6 +2108,11 @@ model WhatsAppGroup {
   authorized Boolean  @default(false)
   authorizedAt   DateTime?
   authorizedById String?
+  /// marcado pelo admin: as mensagens do grupo aparecem nas conversas, como chat livre
+  /// (recurso `groups_inbox`). Independente de `authorized`
+  inbox      Boolean  @default(false)
+  inboxAt    DateTime?
+  inboxById  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -2107,6 +2122,7 @@ model WhatsAppGroup {
 
   @@unique([numberId, jid])
   @@index([tenantId, authorized])
+  @@index([numberId, inbox])
   @@map("whatsapp_groups")
 }
 

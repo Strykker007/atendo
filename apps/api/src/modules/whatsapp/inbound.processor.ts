@@ -150,7 +150,10 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       }
     }
 
-    for (const st of parsed.statuses) await this.inbound.applyStatus(st);
+    for (const st of parsed.statuses) {
+      const number = st.externalNumberId ? await this.numbers.findByExternal(job.data.provider, st.externalNumberId) : null;
+      await this.inbound.applyStatus(st, number?.id);
+    }
 
     for (const r of parsed.reactions) {
       const number = await this.numbers.findByExternal(job.data.provider, r.externalNumberId);

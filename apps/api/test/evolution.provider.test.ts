@@ -56,8 +56,17 @@ describe('EvolutionProvider.parseWebhook — mensagens', () => {
     expect(dele.contactName).toBe('Bruno');
   });
 
-  it('ignora grupos', () => {
-    expect(provider.parseWebhook(upsert({ conversation: 'oi' }, { remoteJid: '12036304@g.us' })).messages).toHaveLength(0);
+  // só chega grupo liberado para as conversas: o filtro do webhook descartou os outros (group-filter.ts)
+  it('grupo: o contato é o jid do grupo e quem escreveu vai em `group`', () => {
+    const [m] = provider.parseWebhook(upsert({ conversation: 'oi' }, { remoteJid: '12036304@g.us', participant: '99887766@lid', participantAlt: '5511988887777@s.whatsapp.net' })).messages;
+    expect(m.from).toBe('12036304@g.us');
+    expect(m.contactName).toBeUndefined();
+    expect(m.group).toEqual({ senderPhone: '5511988887777', senderName: 'Bruno' });
+  });
+
+  it('grupo com autor só em @lid: sem telefone, fica o nome', () => {
+    const [m] = provider.parseWebhook(upsert({ conversation: 'oi' }, { remoteJid: '12036304@g.us', participant: '99887766@lid' })).messages;
+    expect(m.group).toEqual({ senderPhone: undefined, senderName: 'Bruno' });
   });
 
   it('classifica os tipos de mídia', () => {

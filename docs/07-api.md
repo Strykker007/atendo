@@ -193,6 +193,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/groups?numberId=` | `numbers.manage` ou `campaigns.manage` | Grupos do WhatsApp listados e se estão autorizados ([Grupos restritos](grupos.md)) |
 | POST | `/groups/sync` | `numbers.manage` | `{numberId}` → busca os grupos do número (só QR, conectado); grupo novo nasce desmarcado |
 | PATCH | `/groups/:id` | `numbers.manage` | `{authorized}` — opt-in do grupo como destino de transmissão |
+| PATCH | `/groups/:id/inbox` | `numbers.manage` + recurso `groups_inbox` | `{inbox}` — mostra o grupo nas conversas, como chat livre ([Grupos nas conversas](grupos.md#grupos-nas-conversas)) |
 | POST | `/campaigns/:id/start` | idem | `{acceptRisk?}` — QR exige o aceite na 1ª vez (`400 qr_risk_not_accepted`); agenda se `startAt` futuro. Emite `campaign` |
 | POST | `/campaigns/:id/status` | idem | `{status: 'paused'\|'running'\|'canceled'}` — pausar, retomar (limpa `pauseReason`), cancelar. Emite `campaign` |
 | POST | `/reports/run` | todos | Executa um `ReportDefinition` (filtros: `tagIds`, `status`, `numberId`, `origin`, `agentId` — consultor: dono da conversa, ou quem encerrou nas métricas de venda; `groupBy: 'company'` = por empresa) |

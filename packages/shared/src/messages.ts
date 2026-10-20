@@ -7,8 +7,13 @@ export interface InboundMessage {
   externalId: string;
   /** identificador do número do tenant no provider (phone_number_id ou instanceName) */
   externalNumberId: string;
-  /** telefone do contato em E.164 */
+  /** telefone do contato em E.164; em grupo, o jid do grupo (`…@g.us`) */
   from: string;
+  /**
+   * Veio de um grupo liberado para as conversas (docs/grupos.md#grupos-nas-conversas): `from` é
+   * o grupo e aqui fica quem escreveu. `senderPhone` falta quando o WhatsApp só informa o @lid.
+   */
+  group?: { senderPhone?: string; senderName?: string };
   /**
    * Mensagem que SAIU do número do cliente. Acontece quando ele responde pelo celular em vez
    * do painel — o WhatsApp manda o mesmo evento, com esta marca. Precisa entrar no histórico,
@@ -235,6 +240,8 @@ export interface SendResult {
 
 export interface StatusUpdate {
   provider: WhatsAppProviderKind;
+  /** número que recebeu o recibo: o mesmo `externalId` existe nos dois números quando um número nosso fala com outro */
+  externalNumberId?: string;
   externalId: string;
   status: MessageStatus;
   timestamp: Date;

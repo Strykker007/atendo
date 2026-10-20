@@ -299,7 +299,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     await this.api(`/message/sendReaction/${this.instance(ctx)}`, {
       method: 'POST',
       body: JSON.stringify({
-        key: { remoteJid: `${r.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: r.targetFromMe, id: r.targetExternalId },
+        key: { remoteJid: r.to.endsWith('@g.us') ? r.to : `${r.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: r.targetFromMe, id: r.targetExternalId },
         reaction: r.emoji,
       }),
     }, this.shard(ctx));
@@ -324,7 +324,8 @@ export class EvolutionProvider implements WhatsAppProvider {
    * Evolution tira ou põe o nono dígito ao montar o JID. Sem registro, cai no telefone.
    */
   private async storedRemoteJid(ctx: NumberContext, externalId: string, phone: string): Promise<string> {
-    const fallback = `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
+    // grupo nas conversas: o "telefone" já é o jid do grupo
+    const fallback = phone.endsWith('@g.us') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
     try {
       const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
         method: 'POST',
@@ -477,7 +478,8 @@ export class EvolutionProvider implements WhatsAppProvider {
         const items = Array.isArray(data) ? data : [data];
         for (const m of items) {
           if (!m?.key) continue;
-          if (m.key.remoteJid?.endsWith('@g.us')) continue; // grupos ficam fora do atendimento
+          // grupo: só chega aqui o liberado para as conversas — o resto morreu no filtro do
+          // webhook (group-filter.ts, docs/grupos.md)
           // reação chega como mensagem, mas não é: vira marca na mensagem reagida
           const reacao = desembrulhar(m.message)?.reactionMessage;
           if (reacao) {
@@ -514,8 +516,6 @@ export class EvolutionProvider implements WhatsAppProvider {
       case 'messages.edited': {
         const items = Array.isArray(data) ? data : [data];
         for (const d of items) {
-          const jid = String(d?.key?.remoteJid ?? d?.remoteJid ?? '');
-          if (jid.endsWith('@g.us')) continue;
           const edicao = lerEdicao(d?.message) ?? lerEdicao({ protocolMessage: d }) ?? lerEdicao({ protocolMessage: d?.protocolMessage });
           if (edicao) (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...edicao });
           // formato que ainda não conhecemos: registra para ajustar o parser, sem virar bolha
@@ -545,7 +545,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         for (const u of items) {
           const id = u?.keyId ?? u?.key?.id;
           if (!id) continue;
-          out.statuses.push({ provider: 'evolution', externalId: id, status: this.mapAck(u.status), timestamp: new Date() });
+          out.statuses.push({ provider: 'evolution', externalNumberId, externalId: id, status: this.mapAck(u.status), timestamp: new Date() });
         }
         break;
       }
@@ -583,7 +583,10 @@ export class EvolutionProvider implements WhatsAppProvider {
 
   private toInbound(m: any, externalNumberId: string): InboundMessage {
     const msg = desembrulhar(m.message);
-    const from = String(m.key.remoteJid).replace(/@.*$/, '');
+    const jid = String(m.key.remoteJid);
+    const grupo = jid.endsWith('@g.us');
+    // grupo é identificado pelo jid inteiro: o número do grupo não é telefone de ninguém
+    const from = grupo ? jid : jid.replace(/@.*$/, '');
     const lido = lerConteudo(m.message);
     // resposta em texto puro: o contexto (citação, status) vem no topo do webhook, fora de `message`
     const citacao = lerCitacao(msg, m.contextInfo);
@@ -594,7 +597,9 @@ export class EvolutionProvider implements WhatsAppProvider {
       from,
       // em mensagem nossa (`fromMe`) o pushName é o NOSSO nome, não o do contato: o contato
       // nascia chamado "Tiago" quando a conversa começava pelo celular do cliente
-      contactName: m.key.fromMe ? undefined : m.pushName,
+      // grupo: o pushName é de quem escreveu, não o nome do grupo
+      contactName: m.key.fromMe || grupo ? undefined : m.pushName,
+      ...(grupo && !m.key.fromMe && { group: remetenteDoGrupo(m) }),
       type: lido.type,
       text: lido.text,
       media: lido.media ? { ...lido.media, providerMediaId: m.key.id } : undefined,
@@ -697,6 +702,17 @@ export function connectionOrder(data: any): { boot: number; seq: number; gen?: n
 }
 
 /** Resposta do `fetchAllGroups` → só grupos válidos (`@g.us`), sem repetição. */
+/**
+ * Quem escreveu no grupo. O Baileys põe o autor em `key.participant`, que pode vir como @lid
+ * (sem telefone); aí o telefone, quando há, está em `participantAlt`/`participantPn`.
+ */
+export function remetenteDoGrupo(m: any): { senderPhone?: string; senderName?: string } {
+  const jids = [m?.key?.participant, m?.key?.participantAlt, m?.key?.participantPn, m?.participant].filter((j): j is string => typeof j === 'string');
+  const pn = jids.find((j) => j.endsWith('@s.whatsapp.net'));
+  const nome = typeof m?.pushName === 'string' ? m.pushName.trim() : '';
+  return { senderPhone: pn ? pn.replace(/@.*$/, '').split(':')[0] : undefined, senderName: nome || undefined };
+}
+
 export function parseGroupList(rows: unknown): { jid: string; name: string; size: number }[] {
   const out = new Map<string, { jid: string; name: string; size: number }>();
   for (const r of Array.isArray(rows) ? rows : []) {

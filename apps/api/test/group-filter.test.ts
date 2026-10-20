@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripGroupEvents } from '../src/modules/whatsapp/group-filter';
+import { hasGroupEvent, stripGroupEvents } from '../src/modules/whatsapp/group-filter';
 import { parseGroupList } from '../src/modules/whatsapp/providers/evolution.provider';
 
 const msg = (jid: string, id = 'A1') => ({ key: { remoteJid: jid, id, fromMe: false }, message: { conversation: 'oi' }, messageTimestamp: 1 });
@@ -40,6 +40,31 @@ describe('stripGroupEvents (docs/grupos.md)', () => {
     expect(stripGroupEvents(conn)).toBe(conn);
     const qr = { event: 'qrcode.updated', data: { qrcode: { base64: 'x' } } };
     expect(stripGroupEvents(qr)).toBe(qr);
+  });
+});
+
+describe('stripGroupEvents com grupos nas conversas (docs/grupos.md#grupos-nas-conversas)', () => {
+  const G = '120363000000000001@g.us';
+  const inbox = new Set([G]);
+
+  it('grupo liberado passa; o outro grupo continua descartado', () => {
+    const body = { event: 'messages.upsert', data: [msg(G, 'L'), msg('120363000000000002@g.us', 'X'), msg('5511999998888@s.whatsapp.net', 'P')] };
+    const out = stripGroupEvents(body, inbox) as typeof body;
+    expect(out.data.map((m) => m.key.id)).toEqual(['L', 'P']);
+  });
+
+  it('recibo e edição do grupo liberado passam; presença e eventos de grupo não', () => {
+    const st = { event: 'messages.update', data: { keyId: 'k', remoteJid: G, status: 'READ' } };
+    expect(stripGroupEvents(st, inbox)).toBe(st);
+    expect(stripGroupEvents({ event: 'presence.update', data: { id: G, presences: {} } }, inbox)).toBeNull();
+    expect(stripGroupEvents({ event: 'groups.update', data: { id: G } }, inbox)).toBeNull();
+  });
+
+  it('hasGroupEvent só acusa quando há grupo (o controller só então busca a lista)', () => {
+    expect(hasGroupEvent({ event: 'messages.upsert', data: msg('5511999998888@s.whatsapp.net') })).toBe(false);
+    expect(hasGroupEvent({ event: 'messages.upsert', data: [msg('5511@s.whatsapp.net'), msg(G)] })).toBe(true);
+    expect(hasGroupEvent({ event: 'groups.upsert', data: {} })).toBe(true);
+    expect(hasGroupEvent({ event: 'connection.update', data: { state: 'open' } })).toBe(false);
   });
 });
 

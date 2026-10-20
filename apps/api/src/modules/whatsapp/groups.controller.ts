@@ -8,6 +8,8 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { canManageNumber, canUseNumber } from '../auth/number-scope';
 import { ProviderRegistry } from './providers/provider.registry';
 import { NumbersService } from './numbers.service';
+import { GroupInboxRegistry } from './group-inbox';
+import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 
 class SyncGroupsDto {
   @IsUUID() numberId: string;
@@ -15,11 +17,14 @@ class SyncGroupsDto {
 class AuthorizeGroupDto {
   @IsBoolean() authorized: boolean;
 }
+class InboxGroupDto {
+  @IsBoolean() inbox: boolean;
+}
 class ListGroupsQuery {
   @IsOptional() @IsUUID() numberId?: string;
 }
 
-const GROUP_SELECT = { id: true, numberId: true, jid: true, name: true, size: true, authorized: true, authorizedAt: true, updatedAt: true } as const;
+const GROUP_SELECT = { id: true, numberId: true, jid: true, name: true, size: true, authorized: true, authorizedAt: true, inbox: true, updatedAt: true } as const;
 
 /**
  * Grupos restritos (docs/grupos.md): o admin escolhe, um a um, quais grupos do número podem
@@ -32,6 +37,7 @@ export class GroupsController {
     private readonly prisma: PrismaService,
     private readonly registry: ProviderRegistry,
     private readonly numbers: NumbersService,
+    private readonly inboxRegistry: GroupInboxRegistry,
   ) {}
 
   /** Lista da tela de configuração e da escolha de público da transmissão (só dos números que a pessoa usa). */
@@ -49,7 +55,7 @@ export class GroupsController {
   /**
    * Busca os grupos do número no WhatsApp e atualiza a lista. Grupo novo entra desmarcado;
    * a marcação dos que já existiam é preservada. Grupo que sumiu (o número saiu dele) é
-   * removido se não estava autorizado — o autorizado fica, para o admin ver e desmarcar.
+   * removido se não estava marcado (transmissão ou conversas) — o marcado fica, para o admin ver e desmarcar.
    */
   @Post('sync')
   @RequirePermission('numbers.manage')
@@ -71,7 +77,7 @@ export class GroupsController {
           update: { name: g.name, size: g.size },
         }),
       ),
-      this.prisma.whatsAppGroup.deleteMany({ where: { numberId: n.id, authorized: false, jid: { notIn: groups.map((g) => g.jid) } } }),
+      this.prisma.whatsAppGroup.deleteMany({ where: { numberId: n.id, authorized: false, inbox: false, jid: { notIn: groups.map((g) => g.jid) } } }),
     ]);
     return this.list(user, { numberId: n.id });
   }
@@ -87,5 +93,27 @@ export class GroupsController {
       data: dto.authorized ? { authorized: true, authorizedAt: new Date(), authorizedById: user.id } : { authorized: false, authorizedAt: null, authorizedById: null },
       select: GROUP_SELECT,
     });
+  }
+
+  /**
+   * "Mostrar nas conversas" (docs/grupos.md#grupos-nas-conversas): o grupo passa pelo filtro do
+   * webhook e entra no painel como chat livre. Independente de `authorized`; é recurso de plano.
+   */
+  @Patch(':id/inbox')
+  @UseGuards(FeatureGuard)
+  @RequireFeature('groups_inbox')
+  @RequirePermission('numbers.manage')
+  async inbox(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: InboxGroupDto) {
+    const g = await this.prisma.whatsAppGroup.findFirst({ where: { id, tenantId: user.tenantId }, include: { number: { select: { externalId: true } } } });
+    if (!g) throw new NotFoundException('Grupo não encontrado');
+    if (!canManageNumber(user, g.numberId)) throw new ForbiddenException('Você só gerencia os números que atende.');
+    const row = await this.prisma.whatsAppGroup.update({
+      where: { id },
+      data: dto.inbox ? { inbox: true, inboxAt: new Date(), inboxById: user.id } : { inbox: false, inboxAt: null, inboxById: null },
+      select: GROUP_SELECT,
+    });
+    // vale já na próxima mensagem nesta réplica; a outra pega em até 1 min (TTL)
+    this.inboxRegistry.invalidate(g.number.externalId);
+    return row;
   }
 }
