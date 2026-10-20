@@ -295,22 +295,30 @@ class UsersScheduleController {
   }
 }
 
-/** Expira contas temporárias vencidas a cada minuto. `upsertJobScheduler` é idempotente entre instâncias. */
+/**
+ * Expira contas temporárias vencidas a cada minuto e limpa sessões antigas uma vez por dia
+ * (03:30 UTC). `upsertJobScheduler` é idempotente entre instâncias.
+ */
 @Injectable()
 class WorkSchedulesScheduler implements OnModuleInit {
   constructor(@InjectQueue(QUEUE_WORK_SCHEDULES) private readonly queue: Queue) {}
   async onModuleInit() {
     await this.queue.upsertJobScheduler('temporary-expiry', { every: 60_000 }, { name: 'temporary-expiry' });
+    await this.queue.upsertJobScheduler('refresh-token-purge', { pattern: '30 3 * * *' }, { name: 'refresh-token-purge' });
   }
 }
 
 @Processor(QUEUE_WORK_SCHEDULES)
 class WorkSchedulesProcessor extends TrackedWorkerHost {
-  constructor(private readonly shift: ShiftAccessService) {
+  constructor(
+    private readonly shift: ShiftAccessService,
+    private readonly auth: AuthService,
+  ) {
     super(QUEUE_WORK_SCHEDULES);
   }
-  protected async handle(_job: Job) {
-    await this.shift.expireDue();
+  protected async handle(job: Job) {
+    if (job.name === 'refresh-token-purge') await this.auth.purgeStaleRefreshTokens();
+    else await this.shift.expireDue();
   }
 }
 

@@ -35,7 +35,7 @@ tenant_templates (global) ── tenants.templateId
 
 **work_schedules** / **schedule_overrides** — escalas de trabalho do cliente (`type` `FIXED_12X36`|`COMMERCIAL_44H`|`CUSTOM`, `startTime`/`endTime` "HH:MM" locais, `workDays`, `restHours`, `anchorDate`, `toleranceMinutes`) e liberações excepcionais de plantão (`userId`, `validFrom`, `validUntil`, `approvedById`, `reason`, `revokedAt`). Em `users`: `scheduleId` (SetNull ao apagar a escala), `isTemporary`, `accessExpiresAt`, `expiredAt`, `temporaryCreatedById` — migração `20270103000000_work_schedules`. **schedule_access_requests** = pedidos de autorização feitos no login (`reason`, `approverId`, `status` `pending`|`approved`|`denied`, quem decidiu, `overrideId`) — migração `20270105000000_schedule_access_requests`. Ver [Escalas](escalas.md).
 
-**refresh_tokens** — só o hash SHA-256 do token; `revokedAt` permite logout e rotação. Guardamos `userAgent`/`ip` para auditoria.
+**refresh_tokens** — só o hash SHA-256 do token; `revokedAt` permite logout e rotação. Guardamos `userAgent`/`ip` para auditoria. Limpeza diária (03:30 UTC, fila `work-schedules`, `AuthService.purgeStaleRefreshTokens`): apaga vencidos e revogados há mais de 1 dia, mantendo sempre o mais recente de cada usuário (é a "última atividade" do Monitor).
 
 ### WhatsApp
 

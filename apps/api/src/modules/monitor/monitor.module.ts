@@ -24,22 +24,22 @@ class MonitorController {
   @NoTenantOk()
   @Roles('super_admin')
   async tenants() {
-    const [presence, users, numbers] = await Promise.all([
+    const [presence, users, lastRefresh, numbers] = await Promise.all([
       this.gateway.presence(),
-      // o access token dura 15 min: painel aberto renova o refresh — o último é a última atividade
-      this.prisma.user.findMany({
-        where: { tenantId: { not: null }, isActive: true },
-        select: { tenantId: true, lastLoginAt: true, refreshTokens: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } } },
-      }),
+      this.prisma.user.findMany({ where: { tenantId: { not: null }, isActive: true }, select: { id: true, tenantId: true, lastLoginAt: true } }),
+      // o access token dura 15 min: painel aberto renova o refresh — o último é a última atividade.
+      // Um GROUP BY só (antes era um "último token" por usuário, que varria a tabela inteira)
+      this.prisma.refreshToken.groupBy({ by: ['userId'], _max: { createdAt: true } }),
       this.prisma.whatsAppNumber.findMany({
         where: { deletedAt: null },
         orderBy: { createdAt: 'asc' },
         select: { id: true, tenantId: true, label: true, phone: true, color: true, provider: true, status: true, isActive: true, receiveStalledAt: true, waRemovedAt: true, updatedAt: true },
       }),
     ]);
+    const refreshAt = new Map(lastRefresh.map((r) => [r.userId, r._max.createdAt?.getTime() ?? 0]));
     const lastActivity = new Map<string, number>();
     for (const u of users) {
-      const at = Math.max(u.lastLoginAt?.getTime() ?? 0, u.refreshTokens[0]?.createdAt.getTime() ?? 0);
+      const at = Math.max(u.lastLoginAt?.getTime() ?? 0, refreshAt.get(u.id) ?? 0);
       if (at > (lastActivity.get(u.tenantId!) ?? 0)) lastActivity.set(u.tenantId!, at);
     }
     const ids = new Set([...presence.keys(), ...lastActivity.keys(), ...numbers.map((n) => n.tenantId)]);

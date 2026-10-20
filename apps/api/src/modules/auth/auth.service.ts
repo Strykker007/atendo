@@ -5,7 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { env } from '../../config/env';
 import { MailService } from '../../common/mail/mail.service';
-import type { AuthTokenKind } from '@prisma/client';
+import { Prisma, type AuthTokenKind } from '@prisma/client';
 import { refreshAcceptable } from './refresh-grace';
 import { ShiftAccessService, type SessionWindow } from './shift-access.service';
 
@@ -168,6 +168,21 @@ Seu login será: ${user.email}`,
 
   async logout(refreshToken: string) {
     await this.prisma.refreshToken.updateMany({ where: { tokenHash: sha256(refreshToken) }, data: { revokedAt: new Date() } });
+  }
+
+  /**
+   * Limpeza diária de `refresh_tokens`: cada renovação (15 min com o painel aberto) deixa um
+   * token revogado para trás e a tabela só crescia. Apaga os vencidos e os revogados há mais de
+   * 1 dia (revogado só vale 30 s — refresh-grace.ts), mas sempre mantém o mais recente de cada usuário — é a "última atividade" do Monitor.
+   */
+  async purgeStaleRefreshTokens(now = new Date()) {
+    const cutoff = new Date(now.getTime() - 86_400_000);
+    const removed = await this.prisma.$executeRaw(Prisma.sql`
+      DELETE FROM refresh_tokens t
+      WHERE (t."expiresAt" < ${now} OR t."revokedAt" < ${cutoff})
+        AND t."createdAt" < (SELECT max(x."createdAt") FROM refresh_tokens x WHERE x."userId" = t."userId")`);
+    if (removed) this.log.log(`refresh tokens antigos apagados: ${removed}`);
+    return removed;
   }
 
   private async issue(user: { id: string; tenantId: string | null; role: string; email: string; name: string }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow) {
