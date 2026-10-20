@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
-import { useUI, type ConversationTab } from '@/lib/store';
+import { useUI } from '@/lib/store';
 import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { Avatar } from './Avatar';
@@ -28,7 +28,7 @@ export const STATUS_META: Record<ConversationStatus, { label: string; short: str
 };
 // padrão de mercado: o que está comigo primeiro, depois a fila, depois o histórico
 const ORDER: ConversationStatus[] = ['in_progress', 'waiting', 'closed'];
-/** aba "Livres": contatos isentos de ticket (docs/contatos-isentos.md) — só aparece quando há algum */
+/** "Livres": contatos isentos de ticket (docs/contatos-isentos.md) — atalho nos filtros, não aba */
 const FREE_META = { label: 'Livres (sem ticket)', short: 'Livres', color: 'text-muted', soft: 'bg-field', bar: 'bg-faint' };
 
 /**
@@ -80,8 +80,8 @@ export function ConversationList() {
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
   const [iniciando, setIniciando] = useState(false);
-  // "Livres" só aparece quando existe conversa livre (ou a aba já está aberta)
-  const abas: ConversationTab[] = counts.data?.free || status === 'free' ? [...ORDER, 'free'] : ORDER;
+  // "Livres" não é aba: é exceção (diretoria, fornecedor) e fica nos filtros, só quando existe alguma
+  const temLivres = !!counts.data?.free || status === 'free';
   const abaMeta = status === 'free' ? FREE_META : STATUS_META[status];
   const filtroLista = { status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome };
   const conversations = useConversations(filtroLista);
@@ -101,7 +101,7 @@ export function ConversationList() {
   const numerosDaEmpresa = (numbers.data ?? []).filter((n) => !companyId || n.companyId === companyId);
   // seções do modo agrupado que a pessoa recolheu (chave = id do atendente ou FILA)
   const [recolhidos, setRecolhidos] = usePersistedState<string[]>('grupos-recolhidos', []);
-  const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0) + (closeFilter.outcome || closeFilter.reasonId ? 1 : 0);
+  const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0) + (closeFilter.outcome || closeFilter.reasonId ? 1 : 0) + (status === 'free' ? 1 : 0);
 
   const visiveis = useMemo(() => [...(conversations.data ?? []), ...anteriores.itens], [conversations.data, anteriores.itens]);
 
@@ -181,50 +181,39 @@ export function ConversationList() {
         )}
       </div>
 
-      {/* Filtro principal com contadores; ao lado, o agrupamento por atendente */}
-      <div className="px-2.5 pt-2 flex items-center gap-2">
+      {/* Filtro principal com contadores, na largura toda: dividindo a linha com os ícones, as
+          abas ficavam espremidas na coluna de 320px (navegador menor) */}
+      <div className="px-2.5 pt-2">
         {/* gap entre as abas e altura maior: coladas, as três pareciam um bloco só */}
-        <div className={cn('flex-1 min-w-0 grid gap-1 rounded-lg bg-field p-1 text-[11.5px] font-semibold', abas.length === 4 ? 'grid-cols-4' : 'grid-cols-3')}>
-          {abas.map((s) => {
-            const m = s === 'free' ? FREE_META : STATUS_META[s];
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
+          {ORDER.map((s) => {
+            const m = STATUS_META[s];
             const n = counts.data?.[s];
             const on = status === s;
             // mesmo rótulo para todos os perfis (atendente comum continua vendo só as dele)
-            const label = m.short;
             return (
-              <button key={s} onClick={() => setStatus(s)} className={cn('rounded-md py-1.5 px-1 transition-colors flex items-center justify-center gap-1.5', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink hover:bg-panel/60')}>
-                {label}
-                {n !== undefined && <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px]', on ? 'bg-white/20 text-white' : cn(m.soft, m.color))}>{n}</span>}
+              <button key={s} onClick={() => setStatus(s)} title={m.label} className={cn('min-w-0 rounded-md py-1.5 px-1 transition-colors flex items-center justify-center gap-1', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink hover:bg-panel/60')}>
+                <span className="truncate">{m.short}</span>
+                {n !== undefined && <span className={cn('shrink-0 tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px]', on ? 'bg-white/20 text-white' : cn(m.soft, m.color))}>{n}</span>}
               </button>
             );
           })}
         </div>
-        <button
-          onClick={toggleGroupByAssignee}
-          title={groupByAssignee ? 'Agrupado por atendente — voltar à lista cronológica' : 'Agrupar por atendente'}
-          aria-pressed={groupByAssignee}
-          className={cn('shrink-0 w-8 h-8 rounded-lg grid place-items-center', groupByAssignee ? 'bg-accent-soft text-accent-ink ring-1 ring-accent' : 'text-faint hover:text-ink hover:bg-field')}
-        >
-          <Users size={15} />
-        </button>
-        {/* atalho do som de mensagem nova (o mesmo de Configurações → Notificações) */}
-        <button
-          onClick={() => setSoundMuted(!soundMuted)}
-          title={soundMuted ? 'Som de mensagem nova desligado — clique para ligar' : 'Desligar o som de mensagem nova'}
-          aria-label={soundMuted ? 'Ligar o som de mensagem nova' : 'Desligar o som de mensagem nova'}
-          aria-pressed={soundMuted}
-          className={cn('shrink-0 w-8 h-8 rounded-lg grid place-items-center', soundMuted ? 'bg-warn-soft text-warn-ink ring-1 ring-warn' : 'text-faint hover:text-ink hover:bg-field')}
-        >
-          {soundMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-        </button>
+        {/* conversa livre aberta pelos filtros: diz onde a pessoa está e como volta para a fila */}
+        {status === 'free' && (
+          <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-field px-2.5 py-1.5 text-[11.5px] text-muted">
+            <span className="min-w-0 flex-1 truncate"><b className="text-ink">Conversas livres</b> · contatos isentos de ticket</span>
+            <button onClick={() => setStatus('in_progress')} className="shrink-0 font-semibold text-accent-ink hover:underline">Voltar à fila</button>
+          </div>
+        )}
       </div>
 
-      {/* Busca sempre à vista; o resto dos filtros atrás do ícone */}
+      {/* Busca sempre à vista; ao lado, nova conversa, filtros, agrupamento e som */}
       <div className="px-2.5 py-1.5 space-y-1.5 border-b border-line">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <div className="relative flex-1 min-w-0">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-8 pr-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato" aria-label="Buscar contato ou telefone" title="Buscar por nome ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-8 pr-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
           </div>
           <button onClick={() => setIniciando(true)} title="Nova conversa" className="shrink-0 w-8 h-8 rounded-lg grid place-items-center text-faint hover:text-ink hover:bg-field">
             <MessageSquarePlus size={15} />
@@ -236,6 +225,24 @@ export function ConversationList() {
           >
             <SlidersHorizontal size={15} />
             {filtrosAtivos > 0 && <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-white text-[9px] font-bold grid place-items-center tnum">{filtrosAtivos}</span>}
+          </button>
+          <button
+            onClick={toggleGroupByAssignee}
+            title={groupByAssignee ? 'Agrupado por atendente — voltar à lista cronológica' : 'Agrupar por atendente'}
+            aria-pressed={groupByAssignee}
+            className={cn('shrink-0 w-8 h-8 rounded-lg grid place-items-center', groupByAssignee ? 'bg-accent-soft text-accent-ink ring-1 ring-accent' : 'text-faint hover:text-ink hover:bg-field')}
+          >
+            <Users size={15} />
+          </button>
+          {/* atalho do som de mensagem nova (o mesmo de Configurações → Notificações) */}
+          <button
+            onClick={() => setSoundMuted(!soundMuted)}
+            title={soundMuted ? 'Som de mensagem nova desligado — clique para ligar' : 'Desligar o som de mensagem nova'}
+            aria-label={soundMuted ? 'Ligar o som de mensagem nova' : 'Desligar o som de mensagem nova'}
+            aria-pressed={soundMuted}
+            className={cn('shrink-0 w-8 h-8 rounded-lg grid place-items-center', soundMuted ? 'bg-warn-soft text-warn-ink ring-1 ring-warn' : 'text-faint hover:text-ink hover:bg-field')}
+          >
+            {soundMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
           </button>
         </div>
         {filtrosAbertos && (
@@ -305,8 +312,20 @@ export function ConversationList() {
             </button>
           ))}
         </div>
+        {/* conversas livres: contatos isentos de ticket (docs/contatos-isentos.md) — exceção, então
+            fica aqui, discreta, e só existe quando o cliente tem alguma */}
+        {temLivres && (
+          <button
+            onClick={() => setStatus(status === 'free' ? 'in_progress' : 'free')}
+            title="Contatos isentos de ticket (diretoria, fornecedores…): conversam sem abrir atendimento"
+            className={cn('w-full flex items-center justify-between gap-2 text-[11px] font-semibold px-2 py-1 rounded-md border transition-colors', status === 'free' ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}
+          >
+            <span className="truncate">Conversas livres (sem ticket)</span>
+            {counts.data?.free !== undefined && <span className="shrink-0 tnum text-[10px] font-bold">{counts.data.free}</span>}
+          </button>
+        )}
         {filtrosAtivos > 0 && (
-          <button onClick={() => { setTags([]); setOrigin(null); setAssignee(null); setOrdem('recent'); setCloseFilter({ outcome: null, reasonId: null }); }} className="text-[11px] text-accent-ink hover:underline">
+          <button onClick={() => { setTags([]); setOrigin(null); setAssignee(null); setOrdem('recent'); setCloseFilter({ outcome: null, reasonId: null }); if (status === 'free') setStatus('in_progress'); }} className="text-[11px] text-accent-ink hover:underline">
             Limpar filtros
           </button>
         )}
