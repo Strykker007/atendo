@@ -13,7 +13,9 @@ const config: NextConfig = {
   // escalas (docs/escalas.md): as rotas do app são em português; os nomes em inglês da especificação continuam funcionando
   async redirects() {
     return [
-      { source: '/settings/schedules', destination: '/configuracoes/escalas', permanent: false },
+      // tudo que é horário mora em Escalas e plantões: o endereço antigo das escalas continua valendo
+      { source: '/settings/schedules', destination: '/escalas/turnos', permanent: false },
+      { source: '/configuracoes/escalas', destination: '/escalas/turnos', permanent: false },
       { source: '/schedules/approvals', destination: '/escalas/aprovacoes', permanent: false },
       { source: '/escalas', destination: '/escalas/aprovacoes', permanent: false },
     ];

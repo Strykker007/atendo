@@ -494,12 +494,12 @@ export function RandomizerNodeView({ data, selected }: P) {
 }
 
 export function DistributorNodeView({ data, selected }: P) {
-  const d = data as { mode?: string; agentIds?: string[]; departmentId?: string };
+  const d = data as { mode?: string; agentIds?: string[]; departmentId?: string; onlyOnline?: boolean };
   const departments = useDepartments();
   const mode = ({ round_robin: 'Rodízio', least_busy: 'Menos ocupado', queue: 'Fila (qualquer atendente)' } as Record<string, string>)[d.mode ?? ''] ?? '';
   const dept = d.departmentId ? departments.data?.find((x) => x.id === d.departmentId) : undefined;
   const deptLine = d.departmentId ? `\nDepartamento: ${dept ? `${dept.name}${dept.isActive ? '' : ' (desativado)'}` : departments.data ? 'excluído' : '…'}` : '';
-  const who = d.agentIds?.length ? `${d.agentIds.length} atendente(s)` : d.departmentId ? 'todos do departamento' : 'todos os atendentes';
+  const who = (d.agentIds?.length ? `${d.agentIds.length} atendente(s)` : d.departmentId ? 'todos do departamento' : 'todos os atendentes') + (d.onlyOnline ? ' online' : '');
   return (
     <Shell type="distributor" data={data} selected={selected} summary={(d.mode === 'queue' ? mode : `${mode} · ${who}`) + deptLine}>
       <In />
@@ -550,7 +550,8 @@ export function defaultData(type: PaletteItem): FlowNode['data'] {
     case 'variable': return { assignments: [{ id: shortId(), varName: '', op: 'set', value: '' }] };
     case 'transform': return { mode: 'transform', assignments: [{ id: shortId(), varName: '', op: 'extract', value: '' }] };
     case 'randomizer': return { branches: [{ id: shortId(), label: 'A', weight: 50 }, { id: shortId(), label: 'B', weight: 50 }] };
-    case 'distributor': return { mode: 'round_robin', agentIds: [] };
+    // bloco novo já nasce "só online"; os que já existem continuam como estavam
+    case 'distributor': return { mode: 'round_robin', agentIds: [], onlyOnline: true };
     case 'connect_flow': return {};
     case 'http': return { method: 'GET', url: '', headers: [], mappings: [] };
   }

@@ -36,9 +36,9 @@ src/
 │       ├── pesquisas/      pesquisas de satisfação: lista (padrão, desativar), editor com escala, recusa, comentário, agradecimento, prazo e prévia do WhatsApp ([pesquisa-de-satisfacao.md](pesquisa-de-satisfacao.md)). Modal de encerrar: 'Enviar pesquisa de satisfação ao encerrar' (marcada com a padrão; desabilita o fluxo)
 │       ├── tags/           CRUD com paleta de cores; "Conflita com" no modal (badge ⇄ N na linha)
 │       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha
-│       ├── escalas/aprovacoes/  painel do gestor: quem está no turno, autorizar plantão excepcional, gerar/encerrar acesso temporário ([escalas.md](escalas.md))
+│       ├── escalas/        tudo que é horário, em abas (`components/escalas/EscalasTabs`, cada aba com a permissão dela): `aprovacoes/` painel do gestor — quem está no turno, plantão excepcional, acesso temporário (`team.manage`); `turnos/` escalas de trabalho e vínculo com colaboradores (`team.manage`; `/configuracoes/escalas` redireciona); `horario-atendimento/` quadros/faixas/exceções (`settings.manage`) ([escalas.md](escalas.md))
 │       ├── plano/          medidores de uso, excedente, explicação do limite; checkout Asaas em modal (PIX com QR + copia e cola e polling de 4 s, ou cartão) — `components/billing/AsaasCheckoutModal`
-│       ├── configuracoes/  aparência, horários de atendimento (quadros/faixas/simular), boas-vindas, fluxos padrão, segurança; `escalas/` = escalas de trabalho e vínculo com colaboradores
+│       ├── configuracoes/  aparência, boas-vindas, fluxos padrão, segurança; horários e escalas viraram atalhos para `escalas/`
 │       ├── admin/          Financeiro do dono (KPIs, série, assinaturas, faturas, margem)
 │       ├── clientes/       Clientes do dono: busca (nome, razão social, CNPJ, e-mail do admin, empresa) + filtros (plano, assinatura, vencimento, ativos, **presença** — online agora, acessou em 24 h, sem acesso há 7+ dias, nunca acessou — e **conexão** — todos conectados, algum com problema, conectado sem receber, sem número ativo, com Meta, com QR; os dois últimos vêm do monitor ao vivo) e ordenação (inclui atividade recente), no navegador; os números do resumo ao vivo são atalhos para esses filtros; criar, plano/status, ativar, Entrar como. Monitor ao vivo (`useTenantsLive`, `GET /monitor/tenants`): coluna Atividade (Online · N com o painel aberto agora, senão "Visto há…"/"Nunca acessou"), coluna Números com cada número e a saúde (Conectado, QR pendente, Desconectado, Erro, Sem receber, Desativado) e resumo no topo (clientes online, números conectados, com problema). Recarrega nos eventos `tenant_presence`/`tenant_number` e a cada 60 s
 │       └── relatorios/     abre com visão pronta do dia (KPIs + gráficos); filtros no topo (atalhos, data inicial/final, tag, consultor) valem para a tela inteira; 'Relatório personalizado' expande o construtor (métrica, agrupamento, filtros, tabela, CSV, salvos)
@@ -76,6 +76,31 @@ src/
 - `typing` → grava `{state, at}` em `['typing', conversationId]` (`paused` limpa). Mensagem recebida (`message` com `direction: 'in'`) também limpa.
 - `number` → guarda `qrCode` em `['number-qr', id]` e invalida `['numbers']`.
 - **Queda e volta do socket**: na reconexão (`connect` depois do primeiro), invalida tudo que o socket mantém (`REALTIME_KEYS`: conversas, contagens, mensagens, kanban, números, chat interno, suporte…) — o que foi emitido enquanto estava fora não chega nunca, e antes só aparecia trocando de tela (ex.: abrir o Kanban). Quando o servidor recusa o socket (token vencido) ou o socket.io desiste (`connect_error` com `socket.active` false), renova o token e tenta de novo com espera crescente (2 s → 30 s, com sorteio de ±25%) até voltar — antes era uma tentativa só; refresh recusado com 401/403 (sessão encerrada) para de tentar. A recarga da volta é espalhada em até 5 s e só refaz as consultas que estão na tela (`invalidateQueries` com `refetchType: 'active'`, o padrão): num deploy, todos os painéis reconectam juntos e isso evita o pico. Vigia a cada 20 s, ao voltar a rede (`online`) e ao voltar para a aba. Fora por mais de 8 s, aparece a faixa "Sem conexão em tempo real — reconectando…" (`components/layout/RealtimeBanner.tsx`, estado em `useRealtimeStatus`).
+
+
+## Menu lateral
+
+Regra: **item que a pessoa não pode usar não aparece** (`components/layout/Sidebar.tsx`). Cada item espelha o que a API exige na tela dele:
+
+- `need`: permissões do perfil de acesso — basta uma da lista;
+- `feature`: recurso do plano (`@RequireFeature`) — sem ele o item some até para o admin.
+
+| Item | Permissão | Recurso do plano |
+|---|---|---|
+| Conversas, Kanban, Respostas, Configurações | — | — |
+| Agenda | `agenda.manage` | `scheduling` |
+| Fluxos | `flows.manage` (disparar um fluxo na conversa não depende do item) | `flows` |
+| Mensagens agendadas | `conversations.schedule_message` **ou** `conversations.view_all` | — |
+| Tags | `tags.manage` | — |
+| Contatos | `contacts.import_export` | — |
+| Transmissões | `campaigns.manage` | `campaigns` |
+| Pesquisas | `settings.manage` | `satisfaction_surveys` |
+| Relatórios | `reports.view` | — |
+| Equipe | `team.manage` | — |
+| Escalas e plantões | `team.manage` **ou** `settings.manage` — abre na 1ª aba permitida | — |
+| Plano e uso | `billing.manage` | — |
+
+Enquanto o plano carrega, os itens com `feature` aparecem (sumir e voltar pisca o menu). Item novo no menu entra nesta tabela.
 
 ## Feedback de carregamento
 

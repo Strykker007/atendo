@@ -372,9 +372,11 @@ export function randomizerPercents(branches: RandomizerBranch[]): RandomizerBran
  * Distribui a conversa. round_robin = rodízio entre os atendentes; least_busy = quem tem
  * menos conversas abertas; queue = devolve para a fila "Aguardando". `agentIds` vazio = todos
  * os atendentes ativos que operam o número da conversa. `departmentId`: põe a conversa no
- * departamento e só distribui entre quem é dele. Saídas: 'done' e 'fallback' (ninguém disponível).
+ * departamento e só distribui entre quem é dele. `onlyOnline`: só concorre quem está com o painel
+ * aberto e dentro do turno agora (blocos antigos = ausente = todos). Saídas: 'done' e 'fallback'
+ * (ninguém disponível).
  */
-export type DistributorNode = FlowNodeBase<'distributor', { mode: 'round_robin' | 'least_busy' | 'queue'; agentIds?: string[]; departmentId?: string }>;
+export type DistributorNode = FlowNodeBase<'distributor', { mode: 'round_robin' | 'least_busy' | 'queue'; agentIds?: string[]; departmentId?: string; onlyOnline?: boolean }>;
 /** Ação "Definir departamento" com este valor tira a conversa de departamento. */
 export const DEPARTMENT_NONE = 'none';
 export type EndNode = FlowNodeBase<'end', { closeConversation: boolean }>;
