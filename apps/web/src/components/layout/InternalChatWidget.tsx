@@ -68,8 +68,8 @@ function useViewport() {
  * aberta é sempre encaixada inteira na tela: abre para cima quando o botão está na metade de
  * baixo e para baixo na metade de cima.
  *
- * Dois modos: a equipe do cliente vê as conversas dela + o canal **Suporte** fixado no topo; o
- * dono do sistema (logado como ele mesmo) vê os canais de suporte de todos os clientes
+ * Dois modos: a equipe do cliente vê só as conversas internas dela (o canal **Suporte** saiu do
+ * widget do cliente em 19/10/2026); o dono do sistema (logado como ele mesmo) vê os canais de suporte de todos os clientes
  * (docs/chat-interno.md#suporte). "Entrando como" um cliente, o dono vê só o canal de suporte
  * daquele cliente — já aberto — e responde como Suporte.
  */
@@ -87,9 +87,12 @@ export function InternalChatWidget() {
   // `all` = todo canal com mensagem: é onde a conversa aberta é encontrada (as abas da fila são recortes)
   const chatsSuporte = useSupportChats('all', ehDono);
   const chats = ehDono ? chatsSuporte : chatsEquipe;
+  // equipe do cliente: o widget é só comunicação interna — o canal Suporte não aparece (a API
+  // ainda o devolve; "entrando como" o dono usa a mesma rota para abrir esse canal)
+  const listaChats = ehEquipe ? chatsEquipe.data?.filter((c) => !c.isSupport) : chats.data;
   // dono: também a equipe do suporte (colegas super_admin) — docs/chat-interno.md#equipe-do-suporte
   const chatsStaff = useStaffChats(ehDono);
-  const naoLidas = [...(chats.data ?? []), ...(ehDono ? chatsStaff.data ?? [] : [])].reduce((a, c) => a + (c.unread ?? 0), 0);
+  const naoLidas = [...(listaChats ?? []), ...(ehDono ? chatsStaff.data ?? [] : [])].reduce((a, c) => a + (c.unread ?? 0), 0);
   const equipe = useInternalUsers(ehEquipe);
   const colegas = useStaffUsers(ehDono);
   // entrando como: a única conversa é o canal de suporte do cliente, aberto direto
@@ -164,7 +167,7 @@ export function InternalChatWidget() {
     );
   }
 
-  const aberta = chats.data?.find((c) => c.id === chatId) ?? (ehDono ? chatsStaff.data?.find((c) => c.id === chatId) : null) ?? null;
+  const aberta = listaChats?.find((c) => c.id === chatId) ?? (ehDono ? chatsStaff.data?.find((c) => c.id === chatId) : null) ?? null;
   const voltar = entrandoComo ? null : () => set({ chatId: null });
   return (
     <div className="fixed z-[65] flex flex-col rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden" style={{ ...estilo, width: w, height: h }} role="dialog" aria-label="Chat interno">
@@ -197,7 +200,7 @@ export function InternalChatWidget() {
         ? <ChatView chat={aberta} meId={me.data!.id} scope={aberta.isStaff ? 'staff' : entrandoComo ? 'support' : scope} api={aberta.isStaff ? 'staff' : entrandoComo ? 'team' : scope} onLeave={() => set({ chatId: null })} />
         : ehDono
           ? <OwnerHome staff={chatsStaff.data ?? []} onOpen={(id) => set({ chatId: id })} />
-          : <Home chats={chats.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
+          : <Home chats={listaChats ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
     </div>
   );
 }

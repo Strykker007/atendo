@@ -237,7 +237,9 @@ export function useRealtime() {
     socket.on('internal_message', (m: InternalMessage) => {
       upsertInternalMessage(qc, m);
       const eu = qc.getQueryData<{ id: string }>(['me'])?.id;
-      if (m.authorId !== eu && !useUI.getState().soundMuted) playMessageSound();
+      // canal Suporte não aparece no widget do cliente: não toca por uma conversa que ele não vê
+      const suporte = qc.getQueryData<{ id: string; isSupport?: boolean }[]>(['internal-chats'])?.some((c) => c.id === m.chatId && c.isSupport);
+      if (m.authorId !== eu && !suporte && !useUI.getState().soundMuted) playMessageSound();
     });
     socket.on('internal_chat', () => { qc.invalidateQueries({ queryKey: ['internal-chats'] }); });
     // canal de suporte, lado do dono (sala `owners`): mensagem de qualquer cliente

@@ -26,6 +26,12 @@ ledger de uso. O histórico é **permanente e auditável** — não existe apaga
 
 Canal direto entre o cliente e o **suporte do sistema** (o dono, `super_admin`), dentro do mesmo chat.
 
+> **Escondido do cliente desde 19/10/2026.** O widget da equipe do cliente mostra só a comunicação
+> interna: o canal Suporte sai da lista (e das não lidas), e mensagem nele não toca som
+> (`InternalChatWidget.tsx` › `listaChats`, `numeros.ts` › `internal_message`). Só a tela mudou: a API
+> continua criando e devolvendo o canal, os chamados antigos ficam no banco, e o dono ainda o abre
+> "entrando como" o cliente. Para voltar, basta tirar o filtro `!c.isSupport`.
+
 | Regra | Onde |
 |---|---|
 | **Um canal por cliente** (`isSupport = true`, `directKey = "support"`), criado na primeira vez que a equipe abre o chat ou que o dono puxa conversa | `ensureSupportChat` |
