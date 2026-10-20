@@ -290,9 +290,11 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec 
 
 Sem `BACKUP_REMOTE` o serviço avisa no log a cada execução, de propósito.
 `BACKUP_KEEP_DAYS` (padrão 14) apaga as cópias locais antigas. Quando o R2 está
-configurado, `BACKUP_REMOTE_KEEP_DAYS` controla a retenção remota; use retenção
-local curta (por exemplo, 2 dias) para não esgotar o disco do servidor e uma
-retenção remota maior (por exemplo, 7 dias).
+configurado, `BACKUP_REMOTE_KEEP_DAYS` controla a retenção remota. Produção usa
+`BACKUP_KEEP_DAYS=0` (só a cópia mais recente fica no servidor, para restaurar sem
+baixar do R2) e `BACKUP_REMOTE_KEEP_DAYS=7` — cada cópia tem ~12 GB (out/2026) e
+com 2 dias locais o servidor guardava ~32 GB de backup. É seguro: se o envio ao R2
+falhar, o script para (`set -e`) antes de apagar as cópias locais.
 
 ### Restaurar
 
