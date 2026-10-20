@@ -64,13 +64,13 @@ const inMetaWindow = (lastInboundAt: Date | null | undefined) => !!lastInboundAt
 export const MESSAGE_INCLUDE = {
   author: { select: { name: true } },
   quotedMessage: {
-    select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, deletedAt: true, author: { select: { name: true } } },
+    select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, deletedAt: true, senderName: true, author: { select: { name: true } } },
   },
 } satisfies Prisma.MessageInclude;
 
 export type MessageRow = Message & {
   author?: { name: string } | null;
-  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; deletedAt?: Date | null; author: { name: string } | null } | null;
+  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; deletedAt?: Date | null; senderName?: string | null; author: { name: string } | null } | null;
 };
 
 /**
