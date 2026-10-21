@@ -56,3 +56,43 @@ buscada (o story já sumiu).
   arquivo]". Mídia recente do histórico baixa normalmente.
 - O quanto existe depende do que o WhatsApp mandou no pareamento. Para trazer mais, o número
   teria que ser pareado de novo com `syncFullHistory` (hoje desligado em todas as instâncias).
+
+## Recuperação
+
+Às vezes o WhatsApp **não entrega ao vivo** o que o contato escreveu: o número fica "conectado,
+envia, não recebe" (docs/23-evolution-desempenho.md › 10 e 12) ou fora do ar. O celular da loja
+recebe; o painel não. Quando o número é pareado de novo, essas mensagens chegam ao banco da
+Evolution no lote de histórico do QR, que **não** gera webhook. Sem recuperação, elas nunca
+apareciam nas conversas do Atendo (Balneário, 21/10/2026: 139 mensagens de 15 clientes em 29 min).
+
+**Quando roda:** o `InboundService` agenda a fila `wa-gap-recovery` quando um número Evolution
+volta a `connected` (QR lido ou reconexão depois de queda) e quando um número marcado "parou de
+receber" dá sinal de vida. Duas rodadas, 3 e 15 min depois (`GAP_RECOVERY_DELAYS_MS`), porque o lote
+do QR leva minutos para chegar. Reconexões no mesmo minuto não empilham rodadas.
+
+**O que faz** (`whatsapp/gap-recovery.ts` → `InboundService.recoverGap`):
+1. Lê do banco da Evolution tudo das últimas 24h do número, de todos os chats
+   (`EvolutionProvider.fetchRecent`, até 40 páginas de 100). Grupos, status, reações e edições ficam
+   de fora (os mesmos filtros do histórico).
+2. Chat gravado só como `@lid` ganha o telefone de outra mensagem do mesmo chat que a Evolution
+   gravou com `remoteJidAlt`. Sem nenhuma, a mensagem é descartada e contada no log: criar contato
+   com o LID no lugar do telefone abriria uma conversa fantasma.
+3. Descarta o que já está no banco (`externalId` por número, inclusive mensagem apagada no
+   painel), o que é anterior a uma limpeza de histórico da conversa e o eco de mensagem enviada
+   pelo painel cujo id nunca chegou (liga o id em vez de duplicar).
+4. Grava o restante no lugar certo (`createdAt` = horário do WhatsApp), como tráfego real:
+   `imported = false` (conta nos relatórios) e `UsageService.record` em cada uma.
+
+**"Histórico + alerta"** (`conversations/gap-recovery-plan.ts`): a conversa só se mexe se a
+recuperada for mais nova que tudo o que ela já tem. Uma mensagem das 13:20 numa conversa que já
+falou às 13:40 entra no histórico e não traz a prévia de volta nem reabre um atendimento encerrado
+depois. Se o fim da linha ficou sendo o cliente sem resposta: soma as não lidas, marca a espera e,
+se estava encerrada, volta para a fila (mesma carência de "ok"/"obrigada" da entrada ao vivo). Se
+o fim é uma resposta dada pelo celular, a espera acaba. **Nunca** dispara fluxo, bot ou boas-vindas:
+uma resposta automática meia hora atrasada seria pior que nenhuma.
+
+O log do worker registra cada recuperação: `Número <label>: N mensagem(ns) recuperada(s) em M
+conversa(s)`, mais as descartadas por `@lid` e o aviso de janela truncada.
+
+Limitação: o que o WhatsApp não mandou nem no lote do QR (travamento curto, sem novo pareamento)
+não existe na Evolution e não tem como ser recuperado.

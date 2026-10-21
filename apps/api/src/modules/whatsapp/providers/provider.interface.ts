@@ -112,6 +112,21 @@ export interface HistoryPage {
   chatIds?: string[];
 }
 
+/** Tudo o que o provider guardou do número numa janela, de todos os chats (recuperação de buraco). */
+export interface RecentQuery {
+  since: Date;
+  until: Date;
+}
+
+export interface RecentPage {
+  /** só mensagens de conversa (sem reação, edição, grupo, status), com `fromMe` preenchido */
+  messages: InboundMessage[];
+  /** descartadas por não dar para saber o telefone (Evolution: chat só como `@lid`) */
+  unresolved: number;
+  /** a janela tinha mais do que o teto de leitura: o resto fica para a próxima rodada */
+  truncated: boolean;
+}
+
 /**
  * Contrato único. UI, banco e filas só conhecem esta interface.
  * Trocar Meta <-> Evolution = trocar o campo `provider` do número.
@@ -156,6 +171,8 @@ export interface WhatsAppProvider {
    * aparelho; a Meta só entrega o que chega pelo webhook.
    */
   fetchHistory?(ctx: NumberContext, query: HistoryQuery): Promise<HistoryPage>;
+  /** mensagens de todos os chats numa janela de horário (docs/historico-de-mensagens.md#recuperação) */
+  fetchRecent?(ctx: NumberContext, query: RecentQuery): Promise<RecentPage>;
   /** `phone`: telefone do contato, para o provider que precisa do chat além do id */
   markRead(ctx: NumberContext, externalMessageId: string, phone?: string): Promise<void>;
   /**

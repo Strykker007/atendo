@@ -5,7 +5,7 @@ import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '
 import { env } from '../../../config/env';
 import { bytesEmBase64, contextoDaCitacao, lerCitacao } from './quoted';
 import { desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
-import type { HistoryPage, HistoryQuery, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { HistoryPage, HistoryQuery, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, RecentPage, RecentQuery, WhatsAppProvider } from './provider.interface';
 import { phoneVariants } from '../../conversations/phone-variants';
 import { isDefinitiveClose } from '../connection-events';
 import { describeProviderError, ProviderSendError, ProviderTimeoutError } from './provider-error';
@@ -370,6 +370,86 @@ export class EvolutionProvider implements WhatsAppProvider {
       .filter((m) => ehMensagemDeConversa(m))
       .map((m) => ({ ...this.toInbound(m, ctx.externalId), fromMe: !!m.key.fromMe }));
     return { messages, exhausted, oldest: Number.isFinite(oldestTs) ? new Date(oldestTs * 1000) : undefined, chatIds: [...jids] };
+  }
+
+  /**
+   * Tudo o que o banco da Evolution tem do número numa janela, de todos os chats
+   * (docs/historico-de-mensagens.md#recuperação). É onde aparece o que o WhatsApp não entregou ao
+   * vivo e mandou no lote de histórico do QR seguinte (docs/23-evolution-desempenho.md › 12).
+   *
+   * O lote de histórico grava o chat só como `@lid`, sem telefone — o webhook ao vivo chega já
+   * convertido. O telefone sai de outra mensagem do mesmo chat que a Evolution gravou com
+   * `remoteJidAlt`; sem nenhuma, a mensagem é descartada (`unresolved`): criar contato com o LID no
+   * lugar do telefone abriria uma conversa fantasma.
+   */
+  async fetchRecent(ctx: NumberContext, q: RecentQuery): Promise<RecentPage> {
+    const POR_PAGINA = 100;
+    const MAX_PAGINAS = 40;
+    const rows: any[] = [];
+    let truncated = false;
+    for (let page = 1; ; page++) {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        // sem `key`: todos os chats. O filtro de horário só vale com gte E lte.
+        body: JSON.stringify({ where: { messageTimestamp: { gte: q.since.toISOString(), lte: q.until.toISOString() } }, offset: POR_PAGINA, page }),
+      }, this.shard(ctx));
+      const records: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      rows.push(...records);
+      if (records.length < POR_PAGINA || page >= Number(res?.messages?.pages ?? 0)) break;
+      if (page >= MAX_PAGINAS) {
+        truncated = true;
+        break;
+      }
+    }
+
+    const telefones = new Map<string, string | null>();
+    const messages: InboundMessage[] = [];
+    let unresolved = 0;
+    for (const r of rows) {
+      if (!ehMensagemDeConversa(r)) continue;
+      let m = r;
+      if (String(r.key.remoteJid).endsWith('@lid')) {
+        const pn = await this.telefoneDoLid(ctx, r, telefones);
+        if (!pn) {
+          unresolved++;
+          continue;
+        }
+        m = { ...r, key: { ...r.key, remoteJid: pn } };
+      }
+      // `raw` fica o registro original: é com ele que a mídia é buscada depois
+      messages.push({ ...this.toInbound(m, ctx.externalId), fromMe: !!r.key.fromMe, raw: r });
+    }
+    return { messages, unresolved, truncated };
+  }
+
+  /** `<telefone>@s.whatsapp.net` de um chat gravado como `@lid`, ou `null`. Cache por chamada de `fetchRecent`. */
+  private async telefoneDoLid(ctx: NumberContext, r: any, cache: Map<string, string | null>): Promise<string | null> {
+    const pn = (jid: unknown) => (typeof jid === 'string' && jid.endsWith('@s.whatsapp.net') ? jid : null);
+    const proprio = pn(r.key.remoteJidAlt) ?? pn(r.key.senderPn);
+    if (proprio) return proprio;
+    const lid = String(r.key.remoteJid);
+    if (cache.has(lid)) return cache.get(lid)!;
+    let achado: string | null = null;
+    try {
+      // as mais recentes podem ser todas do próprio lote do QR (sem telefone): olha mais algumas páginas
+      for (let page = 1; page <= 3 && !achado; page++) {
+        const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+          method: 'POST',
+          // os DOIS campos: com um só, o OR da Evolution ganha um `{}` vazio e devolve todas as mensagens
+          body: JSON.stringify({ where: { key: { remoteJid: lid, remoteJidAlt: lid } }, offset: 50, page }),
+        }, this.shard(ctx));
+        const records: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+        for (const x of records) {
+          achado = x?.key?.remoteJid === lid ? pn(x.key.remoteJidAlt) ?? pn(x.key.senderPn) : x?.key?.remoteJidAlt === lid ? pn(x.key.remoteJid) : null;
+          if (achado) break;
+        }
+        if (records.length < 50) break;
+      }
+    } catch {
+      /* sem telefone: a mensagem fica de fora */
+    }
+    cache.set(lid, achado);
+    return achado;
   }
 
   /** Editar mensagem nossa (`POST /chat/updateMessage`). O WhatsApp só aceita até ~15 min depois do envio. */

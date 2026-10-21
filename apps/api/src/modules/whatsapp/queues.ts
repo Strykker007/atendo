@@ -1,6 +1,19 @@
 export const QUEUE_INBOUND = 'wa-inbound';
 export const QUEUE_OUTBOUND = 'wa-outbound';
 export const QUEUE_BILLING = 'billing';
+/** recuperação do que o número não recebeu ao vivo (whatsapp/gap-recovery.ts) */
+export const QUEUE_GAP_RECOVERY = 'wa-gap-recovery';
+
+export interface GapRecoveryJob {
+  numberId: string;
+}
+
+/**
+ * Depois de reconectar o WhatsApp manda o atraso em lotes, e o lote de histórico do QR leva
+ * minutos para chegar ao banco da Evolution: uma rodada logo e outra mais tarde. Repetir é seguro
+ * (a mesma mensagem nunca entra duas vezes).
+ */
+export const GAP_RECOVERY_DELAYS_MS = [3 * 60_000, 15 * 60_000];
 
 export interface InboundJob {
   provider: 'meta' | 'evolution';
