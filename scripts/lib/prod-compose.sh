@@ -49,9 +49,11 @@ pc_evo_wanted_cmd() { echo "$(pc_compose) --profile evolution config evolution 2
 pc_evo_running_cmd() { echo "id=\$($(pc_compose) --profile evolution ps -q evolution | head -1); [ -n \"\$id\" ] && $PC_SUDO docker inspect -f '{{.Config.Image}} {{.Image}}' \"\$id\" || echo 'nenhum container da evolution'"; }
 # só constrói (os patches e verify-patches.test.mjs rodam no build); não toca no container
 pc_evo_build_cmd() { echo "$(pc_compose) --profile evolution build evolution"; }
-# guarda a imagem em execução como :previous e :before-<data> (rollback)
+# guarda a imagem em execução como :previous e :before-<data> (rollback). Com o image store do
+# containerd, sobrescrever a tag apaga a imagem antiga mesmo com o container rodando nela: aí vale
+# a tag que o container pediu (reconstruída do mesmo código; docs/27-deploy-evolution.md)
 pc_evo_snapshot_cmd() {
-  echo "id=\$($(pc_compose) --profile evolution ps -q evolution | head -1); if [ -n \"\$id\" ]; then img=\$($PC_SUDO docker inspect -f '{{.Image}}' \"\$id\"); $PC_SUDO docker tag \"\$img\" $EVOLUTION_REPO:previous && $PC_SUDO docker tag \"\$img\" $EVOLUTION_REPO:before-\$(date +%Y%m%d-%H%M%S) && echo \"▶ imagem atual guardada como $EVOLUTION_REPO:previous (\$img)\"; fi"
+  echo "id=\$($(pc_compose) --profile evolution ps -q evolution | head -1); if [ -n \"\$id\" ]; then img=\$($PC_SUDO docker inspect -f '{{.Image}}' \"\$id\"); if ! $PC_SUDO docker image inspect \"\$img\" >/dev/null 2>&1; then img=\$($PC_SUDO docker inspect -f '{{.Config.Image}}' \"\$id\"); echo \"⚠ a imagem do container não existe mais: guardando a tag que ele pediu (\$img)\"; fi; $PC_SUDO docker tag \"\$img\" $EVOLUTION_REPO:previous && $PC_SUDO docker tag \"\$img\" $EVOLUTION_REPO:before-\$(date +%Y%m%d-%H%M%S) && echo \"▶ imagem atual guardada como $EVOLUTION_REPO:previous (\$img)\"; fi"
 }
 # troca só o container da Evolution: sem build (já feito), sem tocar no banco dela nem no Redis
 pc_evo_up_cmd() { echo "$(pc_compose) --profile evolution up -d --no-deps --no-build evolution"; }

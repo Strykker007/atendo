@@ -63,6 +63,15 @@ bash scripts/deploy-evolution.sh ubuntu@IP rollback   # volta para a imagem ante
 `docker compose -f infra/docker-compose.prod.yml --env-file .env.production --profile evolution up -d --build`
 (doc 11) — é a única vez em que tudo sobe junto.
 
+### Tag nova a cada imagem
+
+O host usa o image store do containerd: **construir por cima de uma tag existente apaga a imagem
+antiga**, mesmo com o container rodando nela. Foi o que aconteceu em 21/10/2026 (build da sonda com
+a tag `atendo.4`): a `atendo.4` precisou ser reconstruída a partir da `v1.6.1` (mesmo
+`infra/evolution`) para continuar existindo como `previous`. Regra: toda mudança em
+`infra/evolution` sobe o sufixo da tag no compose (`atendo.5`, `atendo.6`…). Se mesmo assim a imagem
+do container sumir, o `up` guarda como `previous` a tag que o container pediu (aviso ⚠ no terminal).
+
 ## Risco que sobra
 
 `docker compose up -d` sem nome de serviço ainda **recriaria Postgres/Redis/evolution-db** se a
