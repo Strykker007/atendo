@@ -434,6 +434,6 @@ docker logs --since 2h atendo-prod-evolution-1 2>&1 | grep '"recv-probe"' | grep
 - `frames.message` > 0 e `upserts` = 0 → chega e não é processado/decifrado: problema no Baileys;
 - `stuck` com nó antigo → o nó que segura a entrega (anotar `tag`, `type`, `category`).
 
-**Pendente:** deploy da imagem com a sonda (`deploy-evolution.sh build` + `up`, de madrugada);
+**Pendente:** deploy da imagem `v2.3.7-atendo.5` (= `atendo.4` + sonda; `deploy-evolution.sh build` + `up`, de madrugada);
 Kelly I precisa de QR; investigar o 500 `ack class="status"`;
 o host não tem rotação de log do Docker (a sonda acrescenta ~6 MB/dia).

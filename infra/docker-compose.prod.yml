@@ -102,7 +102,7 @@ services:
     # nome de serviço IGNORAR a Evolution — recriar o container reconecta todos os números. Trocar a
     # imagem só por scripts/deploy-evolution.sh. EVOLUTION_IMAGE só existe para o rollback.
     profiles: ["evolution"]
-    image: ${EVOLUTION_IMAGE:-atendo/evolution-api:v2.3.7-atendo.4}
+    image: ${EVOLUTION_IMAGE:-atendo/evolution-api:v2.3.7-atendo.5}
     restart: unless-stopped
     # só prioridade, sem teto: ela recebe as mensagens de todos os números, e um teto atrasaria
     # mensagem chegando
