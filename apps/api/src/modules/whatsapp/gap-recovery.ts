@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import { InjectQueue, Processor } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
@@ -24,8 +23,6 @@ const JANELA_MS = 24 * 3_600_000;
  */
 @Processor(QUEUE_GAP_RECOVERY, { concurrency: 1 })
 export class GapRecoveryProcessor extends TrackedWorkerHost<GapRecoveryJob> {
-  private readonly log = new Logger(GapRecoveryProcessor.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly numbers: NumbersService,

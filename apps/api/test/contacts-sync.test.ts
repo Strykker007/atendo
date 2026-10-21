@@ -12,7 +12,7 @@ function setup() {
     conversation: { findMany: vi.fn().mockResolvedValue([{ id: 'conversation-a' }, { id: 'conversation-b' }, { id: 'conversation-a' }]) },
   };
   const gateway = { emitConversation: vi.fn() };
-  const service = new InboundService(prisma as never, {} as never, gateway as never, {} as never, {} as never, {} as never);
+  const service = new InboundService(prisma as never, {} as never, gateway as never, {} as never, {} as never, {} as never, {} as never);
   return { prisma, gateway, service };
 }
 

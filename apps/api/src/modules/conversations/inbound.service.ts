@@ -427,7 +427,7 @@ export class InboundService {
       this.gateway.emitMessage(number.tenantId, this.conversations.present(m));
     }
     this.gateway.emitConversation(number.tenantId, conversation);
-    const comMidia = new Set(msgs.filter((m) => m.media).map((m) => ids.get(m.externalId)!));
+    const comMidia = new Set<string>(msgs.filter((m) => m.media).map((m) => ids.get(m.externalId)!));
     return { recovered: criadas.length, withMedia: criadas.filter((m) => comMidia.has(m.id)).map((m) => m.id) };
   }
 
