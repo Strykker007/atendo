@@ -85,15 +85,15 @@ META_WEBHOOK_VERIFY_TOKEN=...  # string que você inventa e repete no painel da 
 
 ---
 
-## 3. Resend (e-mails)
+## 3. E-mail (Brevo ou Resend)
 
 Esqueci a senha, alerta de plano e aviso de cobrança dependem disto. **O convite não**: a
 tela de Equipe gera um link copiável para mandar por WhatsApp ([12](12-contas-e-email.md)),
 então dá para estrear sem e-mail e configurar depois.
 
-1. Conta em `resend.com`, chave `re_…`.
-2. **Domínio verificado** (registros SPF/DKIM no DNS). Sem isso a entrega cai em spam.
-3. `MAIL_FROM` com esse domínio: `Atendo <nao-responda@seudominio.com.br>`.
+1. Conta no Brevo (`BREVO_API_KEY`, chave `xkeysib-…`) **ou** no Resend (`RESEND_API_KEY`, chave `re_…`). Com as duas, vale o Brevo. Passo a passo em [12](12-contas-e-email.md).
+2. **Domínio verificado** (registros DKIM/DMARC no DNS). Sem isso a entrega cai em spam.
+3. `MAIL_FROM` com esse domínio: `Atendo <nao-responda@seudominio.com.br>` (no Brevo, cadastrado também em *Senders*).
 
 ---
 
@@ -241,7 +241,7 @@ O Caddy emite o certificado HTTPS sozinho, desde que o DNS já aponte para o ser
 | ✅ | **Backup automático do Postgres**, testado com restauração | feito — ver abaixo |
 | ✅ | **Backup do volume da Evolution** | feito — ver abaixo |
 | ✅ | **Stripe exercitado ponta a ponta** em modo teste | feito — caminho feliz e falha de pagamento |
-| 🟡 | **Resend com domínio verificado** | deixou de ser bloqueador: o convite tem link copiável ([12](12-contas-e-email.md)). Ainda necessário para "esqueci minha senha" e avisos de cobrança |
+| 🟡 | **E-mail (Brevo ou Resend) com domínio verificado** | deixou de ser bloqueador: o convite tem link copiável ([12](12-contas-e-email.md)). Ainda necessário para "esqueci minha senha" e avisos de cobrança |
 | ⬜ | **Sentry ligado** (`SENTRY_DSN`) | Erro em produção só aparece quando o cliente reclama |
 | ⬜ | **Alerta de número caído** | A sessão cai de madrugada e ninguém percebe até de manhã |
 
@@ -290,9 +290,11 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec 
 
 Sem `BACKUP_REMOTE` o serviço avisa no log a cada execução, de propósito.
 `BACKUP_KEEP_DAYS` (padrão 14) apaga as cópias locais antigas. Quando o R2 está
-configurado, `BACKUP_REMOTE_KEEP_DAYS` controla a retenção remota; use retenção
-local curta (por exemplo, 2 dias) para não esgotar o disco do servidor e uma
-retenção remota maior (por exemplo, 7 dias).
+configurado, `BACKUP_REMOTE_KEEP_DAYS` controla a retenção remota. Produção usa
+`BACKUP_KEEP_DAYS=0` (só a cópia mais recente fica no servidor, para restaurar sem
+baixar do R2) e `BACKUP_REMOTE_KEEP_DAYS=7` — cada cópia tem ~12 GB (out/2026) e
+com 2 dias locais o servidor guardava ~32 GB de backup. É seguro: se o envio ao R2
+falhar, o script para (`set -e`) antes de apagar as cópias locais.
 
 ### Restaurar
 

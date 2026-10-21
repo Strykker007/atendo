@@ -12,6 +12,8 @@ export interface WhatsAppGroup {
   /** marcado pelo admin: pode receber transmissão */
   authorized: boolean;
   authorizedAt: string | null;
+  /** marcado pelo admin: as mensagens do grupo aparecem nas conversas, como chat livre (recurso `groups_inbox`) */
+  inbox: boolean;
   updatedAt: string;
 }
 
@@ -28,6 +30,15 @@ export const useAuthorizeGroup = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, authorized }: { id: string; authorized: boolean }) => api<WhatsAppGroup>(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify({ authorized }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['groups'] }),
+  });
+};
+
+/** "Mostrar nas conversas" (docs/grupos.md#grupos-nas-conversas) — recurso de plano `groups_inbox`. */
+export const useInboxGroup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, inbox }: { id: string; inbox: boolean }) => api<WhatsAppGroup>(`/groups/${id}/inbox`, { method: 'PATCH', body: JSON.stringify({ inbox }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['groups'] }),
   });
 };

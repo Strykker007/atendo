@@ -6,7 +6,8 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { env } from '../../config/env';
 import { ProviderRegistry } from './providers/provider.registry';
 import { QUEUE_INBOUND, type InboundJob } from './queues';
-import { stripGroupEvents } from './group-filter';
+import { hasGroupEvent, stripGroupEvents } from './group-filter';
+import { GroupInboxRegistry } from './group-inbox';
 
 /**
  * Recebe webhooks dos dois providers. Só valida e enfileira — o processamento
@@ -18,6 +19,7 @@ export class WebhooksController {
   constructor(
     private readonly registry: ProviderRegistry,
     @InjectQueue(QUEUE_INBOUND) private readonly inbound: Queue<InboundJob>,
+    private readonly groupInbox: GroupInboxRegistry,
   ) {}
 
   /** Handshake de verificação da Meta */
@@ -43,8 +45,12 @@ export class WebhooksController {
   @HttpCode(200)
   async evolution(@Req() req: Request & { rawBody?: Buffer }, @Headers() headers: Record<string, string>) {
     this.registry.get('evolution').verifyWebhook(headers, req.rawBody ?? Buffer.alloc(0));
-    // grupo nunca abre atendimento (docs/grupos.md): descarta aqui, antes de fila, banco e log
-    const body = stripGroupEvents(req.body);
+    // grupo nunca abre atendimento (docs/grupos.md): descarta aqui, antes de fila, banco e log.
+    // Só passa o grupo marcado "Mostrar nas conversas" — lista em memória, buscada só quando o
+    // corpo traz algo de grupo
+    const instance = typeof req.body?.instance === 'string' ? req.body.instance : '';
+    const inbox = hasGroupEvent(req.body) ? await this.groupInbox.allowed(instance) : undefined;
+    const body = stripGroupEvents(req.body, inbox);
     if (!body) return { ok: true };
     // eventos de contato chegam junto da mensagem que os originou (com o pushName dela); o
     // atraso garante que a mensagem já esteja gravada quando o nome for avaliado — a fila roda

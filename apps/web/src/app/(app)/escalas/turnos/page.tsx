@@ -1,7 +1,6 @@
 'use client';
 import { useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, CalendarClock, Pencil, Plus, Trash2 } from 'lucide-react';
+import { CalendarClock, Pencil, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -9,6 +8,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
+import { EscalasTabs } from '@/components/escalas/EscalasTabs';
 import {
   WEEKDAYS, WORK_SCHEDULE_TYPES, useAgents, useAssignSchedule, useCan, useDeleteWorkSchedule, useSaveWorkSchedule, useWorkSchedules,
   type WorkSchedule, type WorkScheduleInput, type WorkScheduleType,
@@ -51,12 +51,12 @@ export default function EscalasPage() {
 
   return (
     <PageShell width="max-w-4xl">
-      <Link href="/configuracoes" className="inline-flex items-center gap-1 text-[13px] text-muted hover:text-ink"><ArrowLeft size={14} /> Configurações</Link>
       <PageHeader
         title="Escalas de trabalho"
         subtitle="Quem tem escala só entra no sistema dentro do turno. Fora dele, o gestor libera um plantão excepcional."
         action={<Button onClick={() => setEditando('nova')}><Plus size={14} /> Nova escala</Button>}
       />
+      <EscalasTabs />
 
       {escalas.isLoading ? <SkeletonRows /> : !escalas.data?.length ? (
         <Empty icon={<CalendarClock size={28} />} title="Nenhuma escala" text="Sem escala, ninguém é travado por horário." />

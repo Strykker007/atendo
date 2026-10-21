@@ -8,6 +8,7 @@ import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
 import { CompanySwitcher } from './CompanySwitcher';
+import { ESCALAS_ABAS, primeiraAbaEscalas } from '@/components/escalas/EscalasTabs';
 import { NoticeBell } from './SystemNotices';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
 import { useTheme, applyTheme } from '@/lib/theme';
@@ -21,28 +22,35 @@ const OWNER_ITEMS = [
   { href: '/avisos', label: 'Avisos', icon: Megaphone },
 ];
 /**
- * `need`: a permissão sem a qual o item some do menu.
+ * Regra do menu (docs/08-frontend.md#menu-lateral): item que a pessoa não pode usar não aparece.
+ * Cada item espelha o que a API exige na tela dele:
  *
- * A API já recusava, mas o menu continuava oferecendo — a pessoa clicava e batia num 403, ou
- * pior, numa tela vazia que parecia defeito. Itens sem `need` são de todo mundo: conversas,
+ * - `need`: permissão do perfil de acesso — basta UMA da lista. A API já recusava, mas o menu
+ *   continuava oferecendo: a pessoa clicava e batia num 403, ou numa tela vazia que parecia defeito.
+ * - `feature`: recurso do plano (`@RequireFeature` na API). Sem ele o item some, mesmo para o admin.
+ *
+ * Itens sem `need` são de todo mundo: conversas, Kanban (ver; mexer nas colunas é `tags.manage`),
  * respostas (consultar) e configurações (onde fica a troca da própria senha).
  */
-/** `feature`: recurso de plano sem o qual o item some (a tela também mostra o bloqueio) */
-const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission; feature?: PlanFeature }[] = [
+const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission[]; feature?: PlanFeature }[] = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
   { href: '/kanban', label: 'Kanban', icon: Columns3 },
-  { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: 'agenda.manage' },
-  { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: 'flows.manage' },
+  { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: ['agenda.manage'], feature: 'scheduling' },
+  // disparar um fluxo numa conversa não depende deste item: aqui é criar/editar
+  { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: ['flows.manage'], feature: 'flows' },
   { href: '/respostas', label: 'Respostas', icon: Zap },
-  { href: '/agendadas', label: 'Mensagens agendadas', icon: AlarmClock },
-  { href: '/tags', label: 'Tags', icon: Tags, need: 'tags.manage' },
-  { href: '/contatos', label: 'Contatos', icon: BookUser, need: 'contacts.import_export' },
-  { href: '/transmissoes', label: 'Transmissões', icon: Send, need: 'campaigns.manage' },
-  { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: 'settings.manage', feature: 'satisfaction_surveys' },
-  { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: 'reports.view' },
-  { href: '/equipe', label: 'Equipe', icon: Users, need: 'team.manage' },
-  { href: '/escalas/aprovacoes', label: 'Escalas e plantões', icon: CalendarClock, need: 'team.manage' },
-  { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: 'billing.manage' },
+  // quem agenda (permissão vendida à parte) ou quem supervisiona a equipe (gerente padrão vê as
+  // de todos sem poder agendar). Sem nenhuma das duas, a lista seria só das próprias — que não existem
+  { href: '/agendadas', label: 'Mensagens agendadas', icon: AlarmClock, need: ['conversations.schedule_message', 'conversations.view_all'] },
+  { href: '/tags', label: 'Tags', icon: Tags, need: ['tags.manage'] },
+  { href: '/contatos', label: 'Contatos', icon: BookUser, need: ['contacts.import_export'] },
+  { href: '/transmissoes', label: 'Transmissões', icon: Send, need: ['campaigns.manage'], feature: 'campaigns' },
+  { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: ['settings.manage'], feature: 'satisfaction_surveys' },
+  { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: ['reports.view'] },
+  { href: '/equipe', label: 'Equipe', icon: Users, need: ['team.manage'] },
+  // tudo que é horário (plantões, escalas, horário de atendimento): o destino é a 1ª aba permitida
+  { href: '/escalas', label: 'Escalas e plantões', icon: CalendarClock, need: ESCALAS_ABAS.map((a) => a.need) },
+  { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: ['billing.manage'] },
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
 
@@ -79,6 +87,10 @@ export function Sidebar() {
     setAccessToken(null);
     window.location.href = '/login';
   }
+  const doCliente = items
+    .filter((i) => (!i.need || i.need.some(permitido)) && (!i.feature || noPlano(i.feature)))
+    .map((i) => (i.href === '/escalas' ? { ...i, href: primeiraAbaEscalas(minhas) ?? i.href } : i));
+  const menu = me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : doCliente;
   const waiting = counts.data?.waiting ?? 0;
   // pedidos de autorização de plantão esperando resposta (docs/escalas.md#pedido-de-autorização)
   const pedidos = useAccessRequests(me.data?.role !== 'super_admin' && permitido('team.manage')).data?.length ?? 0;
@@ -114,15 +126,17 @@ export function Sidebar() {
       {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}
 
       <nav className="flex-1 py-2">
-        {(me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : items.filter((i) => (!i.need || permitido(i.need)) && (!i.feature || noPlano(i.feature)))).map(({ href, label, icon: Icon }) => {
-          const active = target ? target === href : path.startsWith(href);
-          const badge = href === '/conversas' && waiting > 0 ? waiting : href === '/escalas/aprovacoes' && pedidos > 0 ? pedidos : null;
+        {menu.map(({ href, label, icon: Icon }) => {
+          // as abas de Escalas e plantões contam como o mesmo item
+          const raiz = href.startsWith('/escalas/') ? '/escalas' : href;
+          const active = target ? target === href : path.startsWith(raiz);
+          const badge = href === '/conversas' && waiting > 0 ? waiting : raiz === '/escalas' && pedidos > 0 ? pedidos : null;
           return (
             <Link
               key={href}
               href={href}
               title={badge ? `${label} · ${badge} aguardando` : label}
-              onClick={() => { if (!path.startsWith(href)) setTarget(href); }}
+              onClick={() => { if (!path.startsWith(raiz)) setTarget(href); }}
               className={cn(
                 'relative flex items-center gap-2.5 mx-2 my-px rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
                 active ? 'bg-side-on text-side-on-ink font-semibold' : 'text-side-ink hover:bg-white/5 hover:text-white',

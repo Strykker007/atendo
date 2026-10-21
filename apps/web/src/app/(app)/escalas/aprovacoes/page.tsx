@@ -1,6 +1,5 @@
 'use client';
 import { useState } from 'react';
-import Link from 'next/link';
 import { CalendarClock, Check, Copy, Hand, KeyRound, ShieldCheck, TimerOff, UserPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
@@ -8,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
+import { EscalasTabs } from '@/components/escalas/EscalasTabs';
 import {
   useAccessRequests, useCan, useCreateOverride, useCreateTemporaryUser, useDecideAccessRequest, useExpireTemporaryUser, useRevokeOverride, useScheduleOverrides, useTeamShifts, useTemporaryUsers, useWorkSchedules,
   type AccessRequest, type TeamShift,
@@ -46,7 +46,7 @@ export default function AprovacoesPage() {
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Escalas e plantões"
-        subtitle={<>Libere quem precisa entrar fora da escala e gere acessos temporários. Os turnos são configurados em <Link href="/configuracoes/escalas" className="text-accent-ink hover:underline">Configurações → Escalas</Link>.</>}
+        subtitle="Libere quem precisa entrar fora da escala e gere acessos temporários."
         action={
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={() => setGerar(true)}><UserPlus size={14} /> Gerar acesso temporário</Button>
@@ -54,6 +54,7 @@ export default function AprovacoesPage() {
           </div>
         }
       />
+      <EscalasTabs />
 
       {!!pedidos.data?.length && (
         <section className="rounded-2xl border border-warn bg-warn-soft/40">

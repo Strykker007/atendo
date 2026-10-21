@@ -1,19 +1,19 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, RefreshCw, Search, ShieldCheck, UsersRound } from 'lucide-react';
+import { ArrowLeft, MessagesSquare, RefreshCw, Search, ShieldCheck, UsersRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { inputCls } from '@/components/ui/Modal';
-import { useAuthorizeGroup, useCan, useGroups, useNumbers, useSyncGroups } from '@/lib/hooks';
+import { useAuthorizeGroup, useCan, useGroups, useHasFeature, useInboxGroup, useNumbers, useSyncGroups } from '@/lib/hooks';
 
 /**
  * Grupos restritos (docs/grupos.md). Opt-in estrito: o admin marca, um a um, os grupos que
- * podem receber transmissão. Grupo nenhum abre atendimento — mensagens de grupo são
- * descartadas no webhook, marcado ou não.
+ * podem receber transmissão e, com o recurso `groups_inbox`, os que aparecem nas conversas
+ * (chat livre, sem atendimento). O resto é descartado no webhook.
  */
 export default function GruposPage() {
   const podeGerir = useCan('numbers.manage');
@@ -26,14 +26,16 @@ export default function GruposPage() {
   const groups = useGroups(numberId || undefined, !!numberId);
   const sync = useSyncGroups();
   const authorize = useAuthorizeGroup();
+  const inbox = useInboxGroup();
+  const temConversas = useHasFeature('groups_inbox').has;
   const [q, setQ] = useState('');
   const [soMarcados, setSoMarcados] = useState(false);
 
   const lista = useMemo(() => {
     const termo = q.trim().toLowerCase();
-    return (groups.data ?? []).filter((g) => (!soMarcados || g.authorized) && (!termo || g.name.toLowerCase().includes(termo)));
+    return (groups.data ?? []).filter((g) => (!soMarcados || g.authorized || g.inbox) && (!termo || g.name.toLowerCase().includes(termo)));
   }, [groups.data, q, soMarcados]);
-  const marcados = (groups.data ?? []).filter((g) => g.authorized).length;
+  const marcados = (groups.data ?? []).filter((g) => g.authorized || g.inbox).length;
 
   async function atualizar() {
     try {
@@ -47,13 +49,13 @@ export default function GruposPage() {
       <Link href="/configuracoes#empresa" className="inline-flex items-center gap-1 text-[13px] text-muted hover:text-ink"><ArrowLeft size={14} /> Configurações</Link>
       <PageHeader
         title="Grupos autorizados"
-        subtitle="Marque só os grupos que podem receber transmissões e promoções. Os demais são ignorados por completo."
+        subtitle="Marque os grupos que podem receber transmissões e os que devem aparecer nas conversas. Os demais são ignorados por completo."
         action={podeGerir && number ? <Button variant="ghost" onClick={() => void atualizar()} loading={sync.isPending} loadingText="Buscando…"><RefreshCw size={14} /> Buscar grupos do WhatsApp</Button> : undefined}
       />
 
       <p className="flex items-start gap-2 rounded-lg bg-accent-soft px-3 py-2 text-[12.5px] text-accent-ink">
         <ShieldCheck size={15} className="shrink-0 mt-0.5" />
-        <span>Grupo não abre atendimento: o que os membros escrevem nunca chega à caixa de entrada, nem fica gravado. O envio para grupo segue as mesmas travas antiban da transmissão (20–60 s entre mensagens, horário de funcionamento e teto por 24h do número).</span>
+        <span>Grupo não abre atendimento. Só o marcado em <b>Conversas</b> chega ao painel, como conversa livre (sem fila, sem dono e sem robô); dos outros, nada é gravado. O envio de transmissão para grupo segue as mesmas travas antiban (20–60 s entre mensagens, horário de funcionamento e teto por 24h do número).</span>
       </p>
 
       {qr.length === 0 && !numbers.isLoading ? (
@@ -69,7 +71,7 @@ export default function GruposPage() {
               <input className={cn(inputCls, 'pl-8')} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar grupo" aria-label="Buscar grupo" />
             </div>
             <label className="flex items-center gap-1.5 text-[13px] text-muted cursor-pointer">
-              <input type="checkbox" checked={soMarcados} onChange={(e) => setSoMarcados(e.target.checked)} /> Só autorizados ({marcados})
+              <input type="checkbox" checked={soMarcados} onChange={(e) => setSoMarcados(e.target.checked)} /> Só marcados ({marcados})
             </label>
           </div>
 
@@ -91,7 +93,19 @@ export default function GruposPage() {
                       disabled={!podeGerir || authorize.isPending}
                       onChange={(e) => authorize.mutate({ id: g.id, authorized: e.target.checked }, { onError: (err) => toast.err(err) })}
                     />
-                    <span className={g.authorized ? 'text-ok font-medium' : 'text-muted'}>{g.authorized ? 'Autorizado' : 'Ignorado'}</span>
+                    <span className={g.authorized ? 'text-ok font-medium' : 'text-muted'}>Transmissão</span>
+                  </label>
+                  <label
+                    className={cn('flex items-center gap-2 text-[13px]', podeGerir && temConversas ? 'cursor-pointer' : 'opacity-60')}
+                    title={temConversas ? 'Mostrar as mensagens do grupo nas conversas, como conversa livre' : '"Grupos nas conversas" não está incluído no seu plano'}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={g.inbox}
+                      disabled={!podeGerir || !temConversas || inbox.isPending}
+                      onChange={(e) => inbox.mutate({ id: g.id, inbox: e.target.checked }, { onError: (err) => toast.err(err) })}
+                    />
+                    <span className={cn('inline-flex items-center gap-1', g.inbox ? 'text-ok font-medium' : 'text-muted')}><MessagesSquare size={13} /> Conversas</span>
                   </label>
                 </li>
               ))}

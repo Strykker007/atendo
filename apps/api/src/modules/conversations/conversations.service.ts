@@ -64,13 +64,13 @@ const inMetaWindow = (lastInboundAt: Date | null | undefined) => !!lastInboundAt
 export const MESSAGE_INCLUDE = {
   author: { select: { name: true } },
   quotedMessage: {
-    select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, deletedAt: true, author: { select: { name: true } } },
+    select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, deletedAt: true, senderName: true, author: { select: { name: true } } },
   },
 } satisfies Prisma.MessageInclude;
 
 export type MessageRow = Message & {
   author?: { name: string } | null;
-  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; deletedAt?: Date | null; author: { name: string } | null } | null;
+  quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; deletedAt?: Date | null; senderName?: string | null; author: { name: string } | null } | null;
 };
 
 /**
@@ -161,8 +161,9 @@ export class ConversationsService {
       direction: q?.direction ?? null,
       type: q?.type ?? null,
       preview: (q?.deletedAt ? DELETED_MESSAGE_LABEL : q ? messagePreview({ type: q.type, text: q.text, content: q.content as unknown as MessageContent | null, mediaName: q.mediaName }) : m.quotedPreview)?.slice(0, 120) ?? null,
-      // enviada pelo painel: nome do atendente. Recebida: null, o front usa o nome do contato.
-      authorName: q?.direction === 'out' ? q.author?.name ?? null : null,
+      // enviada pelo painel: nome do atendente. Recebida: quem escreveu no grupo, ou null e o
+      // front usa o nome do contato.
+      authorName: q?.direction === 'out' ? q.author?.name ?? null : q?.senderName ?? null,
       fromStatus: m.quotedFromStatus,
       mediaUrl: m.quotedMediaUrl ? this.storage.signedUrl(m.quotedMediaUrl) : null,
       mediaType: m.quotedMediaMime ? (m.quotedMediaMime.startsWith('video/') ? 'video' : 'image') : null,
@@ -444,6 +445,8 @@ export class ConversationsService {
    */
   private async assertColdAllowed(c: { tenantId: string; contactId: string; numberId: string; lastInboundAt: Date | null; number: { provider: string } }, author?: Viewer) {
     if (isWarm(await this.lastInboundOnNumber(c))) return;
+    // grupo nas conversas: o admin liberou o grupo, não é "contato frio" (docs/grupos.md#grupos-nas-conversas)
+    if ((await this.prisma.contact.findUnique({ where: { id: c.contactId }, select: { isGroup: true } }))?.isGroup) return;
     if (c.number.provider !== 'meta') {
       if (!author) {
         // automático: só segue se um atendente já gastou a vaga deste contato (falou primeiro ou disparou o fluxo)
@@ -773,7 +776,7 @@ export class ConversationsService {
     }
 
     const quoted = input.quotedExternalId
-      ? await this.prisma.message.findFirst({ where: { externalId: input.quotedExternalId, conversation: { tenantId } }, select: { id: true } })
+      ? await this.prisma.message.findFirst({ where: { numberId: conv.numberId, externalId: input.quotedExternalId, conversation: { tenantId } }, select: { id: true } })
       : null;
     // {{saudacao}}, {{contact.first_name}}… de resposta rápida / mensagem agendada / digitada.
     // Chave desconhecida fica como foi escrita; encaminhada e template saem intactos.

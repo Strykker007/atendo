@@ -597,7 +597,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             </div>
           ) : (
           <div className="text-xs text-muted truncate tnum flex items-center gap-1.5">
-            <span className="truncate">+{conv.contact.phone}{conv.assignee && ` · ${conv.assignee.name}`}</span>
+            <span className="truncate">{conv.contact.isGroup ? 'Grupo do WhatsApp' : `+${conv.contact.phone}`}{conv.assignee && ` · ${conv.assignee.name}`}</span>
             <OriginBadge origin={conv.origin} data={conv.originData} detailed />
           </div>
           )}
@@ -1063,6 +1063,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
     <div id={`msg-${m.id}`} className={cn('group flex items-center gap-1 rounded-lg transition-colors duration-700', out ? 'justify-end' : 'justify-start')}>
       {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onEditar={onEditar} podeReagir={canResend} />}
       <div className={cn('relative max-w-[72%] px-2.5 py-1.5 text-[13px]', m.reactions?.length && 'mb-3', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
+        {!out && m.senderName && <span className="block text-[11.5px] font-semibold text-accent truncate" title={m.senderPhone ?? undefined}>{m.senderName}</span>}
         {m.forwarded && <ForwardedLabel score={m.forwardingScore} />}
         <Citacao m={m} citada={citada} contato={contato} onVerMidia={onVerMidia} />
         {estruturado ?? (

@@ -1,15 +1,17 @@
 # Grupos restritos (opt-in estrito)
 
-Grupos do WhatsApp entram no sistema **só como destino de transmissão**, e só os que o admin
-marcou um a um. Grupo nenhum abre atendimento.
+Grupos do WhatsApp entram no sistema como **destino de transmissão** e, com o recurso de plano
+`groups_inbox`, como **conversa livre** no painel ([abaixo](#grupos-nas-conversas)) — sempre só os
+que o admin marcou um a um. Grupo nenhum abre atendimento.
 
 ## Regras
 
 | Regra | Onde |
 |---|---|
-| **Descarte imediato no webhook**: todo evento de grupo (`@g.us`) — mensagem, status, edição, presença, `groups.*`, `group-participants.update` — sai do corpo **antes de enfileirar**. Não vira job, não grava no banco, não gera log, não abre conversa. Lote misto segue só com as conversas | `whatsapp/group-filter.ts` (`stripGroupEvents`), chamado em `WebhooksController.evolution` |
-| Grupo **autorizado** também é descartado na entrada: ele é só destino. Por isso o filtro nem consulta a lista branca — seria um acesso ao banco por mensagem de grupo, e grupo movimentado manda centenas por minuto. O parser (`EvolutionProvider.parseWebhook`) e o histórico também ignoram `@g.us` (segunda barreira) | `group-filter.ts`, `evolution.provider.ts` |
+| **Descarte imediato no webhook**: todo evento de grupo (`@g.us`) — mensagem, status, edição, presença, `groups.*`, `group-participants.update` — sai do corpo **antes de enfileirar**. Não vira job, não grava no banco, não gera log, não abre conversa. Lote misto segue só com as conversas. Exceção: mensagem, recibo e edição de grupo marcado **Conversas** (`inbox`) | `whatsapp/group-filter.ts` (`stripGroupEvents`), chamado em `WebhooksController.evolution` |
+| Grupo **autorizado** para transmissão também é descartado na entrada: ele é só destino. A lista dos `inbox` vem de memória (`GroupInboxRegistry`, 1 min por instância, buscada só quando o corpo traz algo de grupo) — consultar o banco por mensagem de grupo seria o custo que o filtro evita. O histórico continua ignorando `@g.us` | `group-filter.ts`, `group-inbox.ts` |
 | **Opt-in estrito**: grupo listado nasce `authorized = false`. Só entra em transmissão o marcado, do mesmo número da transmissão | `GroupsController`, `CampaignsService.create` |
+| Ressincronizar não apaga grupo marcado (transmissão **ou** conversas), mesmo que o número tenha saído dele | `GroupsController.sync` |
 | Desmarcado depois de criada a transmissão → o alvo falha com "Grupo não está mais autorizado" | `GroupSender.send` |
 | Só QR Code (Evolution). A API oficial da Meta não envia para grupos | `GroupsController.sync`, `CampaignsService` |
 
@@ -17,8 +19,9 @@ marcou um a um. Grupo nenhum abre atendimento.
 
 **Configurações → Empresa → Números de WhatsApp → Grupos autorizados** (`/configuracoes/grupos`).
 Escolhe o número (só QR), **Buscar grupos do WhatsApp** (`POST /groups/sync`, número conectado)
-e marca/desmarca cada grupo. Ressincronizar preserva as marcações; grupo de que o número saiu é
-removido se estava desmarcado (o marcado fica, para o admin ver e desmarcar). Gerir exige
+e marca/desmarca cada grupo em duas colunas: **Transmissão** (`authorized`) e **Conversas**
+(`inbox`, desabilitada sem o recurso `groups_inbox`). Ressincronizar preserva as marcações; grupo
+de que o número saiu é removido se estava desmarcado nas duas (o marcado fica, para o admin ver e desmarcar). Gerir exige
 `numbers.manage` e poder gerenciar aquele número (`canManageNumber`).
 
 Na **Nova transmissão** (QR), a seção Público mostra os grupos autorizados do número como chips:
@@ -62,3 +65,24 @@ mensagem de grupo também é descartado no webhook). Falhas aparecem em `problem
 | GET | `/groups?numberId=` | `numbers.manage` ou `campaigns.manage` | Grupos listados (dos números que a pessoa usa), autorizados primeiro |
 | POST | `/groups/sync` | `numbers.manage` | `{numberId}` → busca no WhatsApp (`GET /group/fetchAllGroups`) e devolve a lista |
 | PATCH | `/groups/:id` | `numbers.manage` | `{authorized: boolean}` — marca/desmarca |
+
+## Grupos nas conversas
+
+Recurso de plano **`groups_inbox`** ("Grupos nas conversas"). O admin marca **Conversas** no
+grupo (`PATCH /groups/:id/inbox`, `numbers.manage` + `@RequireFeature('groups_inbox')`), e as
+mensagens dele passam a chegar ao painel. Independente da marcação de transmissão.
+
+| Regra | Onde |
+|---|---|
+| Passa pelo filtro do webhook só se: grupo `inbox`, número não excluído e plano da conta com `groups_inbox`. Plano rebaixado ou desmarcado = volta a ser descartado em até 1 min (TTL da lista; na réplica que recebeu o PATCH, na hora) | `GroupInboxRegistry` |
+| O grupo vira contato com `isGroup = true`, `phone` = jid (`…@g.us`) e nome da lista de grupos (`nameSource = manual`: o pushName de cada mensagem é de quem escreveu, não renomeia o grupo) | `InboundService.createGroupContact` |
+| Conversa **sempre livre** (`ticketExempt`): sem fila, sem dono, sem pesquisa, sem automação (`quiet`), fora dos relatórios — mesmas regras dos [contatos isentos](contatos-isentos.md) | `inbound.service.ts` (`contact.isGroup`) |
+| Quem escreveu fica em `messages.senderName`/`senderPhone` (pushName e telefone do `key.participant`, ou do `participantAlt` quando o participante vem como @lid; sem telefone se só houver @lid). A bolha mostra o nome acima do texto; a prévia da conversa sai como "Nome: texto"; a citação usa o nome | `remetenteDoGrupo` (`evolution.provider.ts`), `ChatPane` |
+| Mensagem e recibo passam pelo ledger (`UsageService.record`) como qualquer outra | `inbound.service.ts` |
+| Responder pelo painel envia para o jid do grupo. Não é "contato frio" (o admin liberou o grupo): não gasta vaga do dia | `ConversationsService.assertColdAllowed` |
+| Grupo não entra na exportação de contatos nem no público de transmissão por contato (`not ct."isGroup"`) — para transmissão, grupo só entra pelos autorizados | `contacts.module.ts`, `segmentation.service.ts` |
+| Histórico anterior (sync) não é importado para grupo | `ehMensagemDeConversa` (`evolution.provider.ts`) |
+
+Limitações conhecidas: "marcar como lida" e reação enviadas pelo painel num grupo podem não
+chegar ao WhatsApp (a Evolution pede o participante da mensagem, que não mandamos); falha é
+silenciosa e não afeta a conversa.

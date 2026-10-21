@@ -221,6 +221,7 @@ export class MetaProvider implements WhatsAppProvider {
         for (const st of v?.statuses ?? []) {
           out.statuses.push({
             provider: 'meta',
+            externalNumberId,
             externalId: st.id,
             status: this.mapStatus(st.status),
             timestamp: new Date(Number(st.timestamp) * 1000),

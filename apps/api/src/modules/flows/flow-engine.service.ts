@@ -1083,7 +1083,13 @@ export class FlowEngineService {
       },
       select: { id: true },
     });
-    const ids = users.map((u) => u.id);
+    let ids = users.map((u) => u.id);
+    // só quem está com o painel aberto e no turno (presença no Redis — o fluxo roda no worker).
+    // Ninguém online = saída "Ninguém disponível"; sem ela ligada, a conversa fica em Aguardando
+    if (node.data.onlyOnline) {
+      const online = await this.gateway.availableUserIds(run.tenantId);
+      ids = ids.filter((id) => online.has(id));
+    }
     let chosen: string | undefined;
     if (node.data.mode === 'least_busy') {
       const open = await this.prisma.conversation.groupBy({ by: ['assigneeId'], where: { tenantId: run.tenantId, assigneeId: { in: ids }, status: { not: 'closed' } }, _count: { _all: true } });

@@ -1,4 +1,4 @@
-import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
+import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit } from '@nestjs/websockets';
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
@@ -14,6 +14,15 @@ import { RedisService } from '../../common/redis/redis.service';
 const GLOBAL_ROOM = 'global';
 /** Dono do sistema logado como ele mesmo: recebe o status dos números de todos os clientes (monitor). */
 const OWNERS_ROOM = 'owners';
+/**
+ * Quem está "disponível" para receber atendimento (Distribuidor com "só quem está online"):
+ * ZSET por cliente, membro `userId|socketId`, score = até quando vale. Fica no Redis porque o
+ * fluxo roda no worker, que não tem servidor Socket.IO (`presence()` lá volta vazio). A API
+ * renova a cada `PRESENCE_BEAT_MS`; socket que morreu sem `disconnect` expira sozinho.
+ */
+const PRESENCE_BEAT_MS = 30_000;
+const PRESENCE_TTL_MS = 90_000;
+const availableKey = (tenantId: string) => `presence:available:${tenantId}`;
 
 /** Dono do sistema, logado como ele mesmo ou "entrando como" um cliente. */
 export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role === 'super_admin' || !!u.impersonatorId;
@@ -35,10 +44,11 @@ export interface TransferAlert {
 
 @Injectable()
 @WebSocketGateway({ cors: { origin: webOrigins, credentials: true } })
-export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
+export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer() server?: Server;
   private redis?: Redis;
   private emitter?: Emitter;
+  private beat?: NodeJS.Timeout;
 
   constructor(
     private readonly jwt: JwtService,
@@ -64,9 +74,11 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
       const fimMs = payload.locked ? 0 : payload.shiftEndsAt ? payload.shiftEndsAt * 1000 - Date.now() : null;
       if (fimMs !== null && fimMs <= 0) return;
       if (payload.tenantId) await client.join(`tenant:${payload.tenantId}`);
+      // na sala do cliente e no turno = pode receber atendimento. O dono "entrando como" não conta
+      if (payload.tenantId && !isOwner(payload)) await this.setAvailable(client, true);
       if (fimMs !== null && payload.tenantId) {
         const sala = `tenant:${payload.tenantId}`;
-        const t = setTimeout(() => { void client.leave(sala); client.emit('shift_ended', {}); }, Math.min(fimMs, 2 ** 31 - 1));
+        const t = setTimeout(() => { void client.leave(sala); void this.setAvailable(client, false); client.emit('shift_ended', {}); }, Math.min(fimMs, 2 ** 31 - 1));
         client.once('disconnect', () => clearTimeout(t));
       }
       if (payload.role === 'super_admin' && !payload.impersonatorId) {
@@ -84,7 +96,42 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   handleDisconnect(client: Socket) {
+    void this.setAvailable(client, false);
     this.presenceChanged(client);
+  }
+
+  afterInit() {
+    // renova a disponibilidade dos sockets DESTA réplica (cada réplica cuida dos seus)
+    this.beat = setInterval(() => {
+      if (!this.server) return;
+      for (const s of this.server.sockets.sockets.values()) {
+        const d = s.data as { tenantId?: string | null; available?: boolean } | undefined;
+        if (!d?.available) continue;
+        // saiu da sala do cliente sem desconectar (emitShiftLocked): deixa de estar disponível
+        void this.setAvailable(s, !!d.tenantId && s.rooms.has(`tenant:${d.tenantId}`));
+      }
+    }, PRESENCE_BEAT_MS);
+    this.beat.unref();
+  }
+
+  private async setAvailable(client: Socket, on: boolean) {
+    const d = client.data as { userId?: string; tenantId?: string | null; available?: boolean } | undefined;
+    if (!d?.tenantId || !d.userId) return;
+    d.available = on;
+    const member = `${d.userId}|${client.id}`;
+    await (on ? this.redisCmd.zadd(availableKey(d.tenantId), Date.now() + PRESENCE_TTL_MS, member) : this.redisCmd.zrem(availableKey(d.tenantId), member)).catch(() => undefined);
+  }
+
+  /**
+   * Quem do cliente está com o painel aberto e dentro do turno agora — funciona na API e no
+   * worker (lê do Redis). Usado pelo Distribuidor com `onlyOnline`.
+   */
+  async availableUserIds(tenantId: string): Promise<Set<string>> {
+    const key = availableKey(tenantId);
+    const now = Date.now();
+    await this.redisCmd.zremrangebyscore(key, '-inf', now);
+    const members = await this.redisCmd.zrangebyscore(key, now, '+inf');
+    return new Set(members.map((m) => m.split('|')[0]));
   }
 
   /** Alguém do cliente abriu/fechou o painel: o monitor do dono recarrega a presença. */
@@ -94,6 +141,7 @@ export class ConversationsGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   async onModuleDestroy() {
+    if (this.beat) clearInterval(this.beat);
     await this.redis?.quit().catch(() => undefined);
   }
 

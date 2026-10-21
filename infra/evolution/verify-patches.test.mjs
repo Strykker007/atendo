@@ -429,3 +429,83 @@ test('recv: mensagem tratada sem erro não ganha ack extra', async () => {
   await handleMessage({ tag: 'message', attrs: { id: 'M3' } });
   assert.deepEqual(acks, []);
 });
+
+// ---------- diagnóstico do recebimento (patch-baileys-recv-probe.mjs; docs/23 › 12) ----------
+
+/** atendoMakeProbe do messages-recv.js patcheado, com ws/ev falsos e relógio manual. */
+async function probeHarness() {
+  const { EventEmitter } = await import('node:events');
+  const code = slice(RECV(), 'const atendoMakeProbe = ', '/*atendo-recv-probe-end*/');
+  const makeProbe = new Function(`${code}; return atendoMakeProbe;`)();
+  const ws = new EventEmitter();
+  ws.isOpen = true;
+  const ev = new EventEmitter();
+  const lines = [];
+  let clock = 1_000_000;
+  const probe = makeProbe({
+    ws, ev, authState: { creds: { me: { id: ME } } }, intervalMs: 3_600_000, now: () => clock,
+    logger: { bindings: () => ({ instance: 'atendo-teste' }) }, print: (l) => lines.push(JSON.parse(l)),
+  });
+  return { probe, ws, ev, lines, tick: (ms) => { clock += ms; } };
+}
+
+test('recv-probe: aplicado uma vez, depois do recv, marcando ack e recibo', () => {
+  const src = RECV();
+  assert.equal(count(src, '/*atendo-recv-probe*/'), 1);
+  assert.ok(src.indexOf('/*atendo-recv*/') < src.indexOf('/*atendo-recv-probe*/'));
+  assert.equal(count(src, 'atendoProbe.acked('), 2);
+});
+
+test('recv-probe: conta frames por tipo, upserts e aponta nó sem ack', async () => {
+  const { probe, ws, ev, lines, tick } = await probeHarness();
+  const msgNode = { tag: 'message', attrs: { id: 'M1', type: 'text', category: 'peer', offline: '1' } };
+  const respondida = { tag: 'message', attrs: { id: 'M2', type: 'text' } };
+  ws.emit('frame', msgNode);
+  ws.emit('frame', respondida);
+  ws.emit('frame', { tag: 'receipt', attrs: { id: 'R1', type: 'read' } });
+  ws.emit('frame', { tag: 'ack', attrs: { id: 'A1', class: 'status' } });
+  ws.emit('frame', { tag: 'message', attrs: { id: 'S1', from: 'status@broadcast', type: 'media' } });
+  ws.emit('frame', new Uint8Array([1])); // frame cru não conta
+  ev.emit('messages.upsert', { messages: [{}, {}] });
+  probe.acked(respondida);
+  tick(90_000);
+  probe.report('teste');
+  const [l] = lines;
+  assert.equal(l.atendo, 'recv-probe');
+  assert.equal(l.instance, 'atendo-teste');
+  assert.deepEqual(l.frames, { message: 2, 'receipt:read': 1, 'ack:status': 1, 'message:status': 1 });
+  assert.equal(l.upserts, 2);
+  assert.equal(l.lastMessageAgoS, 90);
+  assert.equal(l.pending, 3); // M1, R1, S1 (o ack não entra)
+  assert.equal(l.pendingOld, 3);
+  assert.deepEqual(l.stuck[0], { tag: 'message', id: 'M1', type: 'text', category: 'peer', offline: true, ageS: 90 });
+  // a janela zera; o pendente continua até o ack
+  probe.report('teste');
+  assert.deepEqual(lines[1].frames, {});
+  assert.equal(lines[1].upserts, 0);
+  assert.equal(lines[1].pending, 3);
+});
+
+test('recv-probe: socket fechado registra o resumo e esquece os pendentes', async () => {
+  const { ws, lines } = await probeHarness();
+  ws.emit('frame', { tag: 'message', attrs: { id: 'M1' } });
+  ws.emit('close');
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].reason, 'close');
+  assert.equal(lines[0].pending, 1);
+  ws.emit('close');
+  assert.equal(lines.length, 2);
+  assert.equal(lines[1].pending, 0);
+});
+
+test('recv-probe: pendentes têm teto e somem depois de 1 h', async () => {
+  const { probe, ws, lines, tick } = await probeHarness();
+  for (let i = 0; i < 2100; i++) ws.emit('frame', { tag: 'notification', attrs: { id: `N${i}`, type: 'w:gp2' } });
+  probe.report('teste');
+  assert.equal(lines[0].frames['notification:w:gp2'], 2100);
+  assert.equal(lines[0].pending, 2000);
+  tick(3_700_000);
+  probe.report('teste');
+  assert.equal(lines[1].pending, 0);
+  assert.equal(lines[1].pendingOld, 0);
+});

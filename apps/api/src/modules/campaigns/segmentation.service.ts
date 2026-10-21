@@ -62,7 +62,9 @@ export class SegmentationService {
    */
   private async filtrados(tenantId: string, a: Audience): Promise<string[]> {
     if (!this.temFiltro(a) && !a.all) return [];
-    const conds: Prisma.Sql[] = [Prisma.sql`ct."tenantId" = ${tenantId}`, Prisma.sql`ct."optOutAt" is null`, Prisma.sql`ct."waInvalidAt" is null`];
+    const conds: Prisma.Sql[] = [Prisma.sql`ct."tenantId" = ${tenantId}`, Prisma.sql`ct."optOutAt" is null`, Prisma.sql`ct."waInvalidAt" is null`,
+      // grupo nas conversas não é contato de transmissão: grupo entra só pelos autorizados (docs/grupos.md)
+      Prisma.sql`not ct."isGroup"`];
     if (a.tagIds?.length) {
       conds.push(Prisma.sql`(exists (select 1 from contact_tags x where x."contactId" = ct.id and x."tagId" in (${Prisma.join(a.tagIds)}))
         or exists (select 1 from conversation_tags y join conversations cy on cy.id = y."conversationId" where cy."contactId" = ct.id and y."tagId" in (${Prisma.join(a.tagIds)})))`);
@@ -97,7 +99,7 @@ export class SegmentationService {
   /** Seleção manual: só contatos do tenant que podem receber. */
   private async manuais(tenantId: string, ids?: string[]) {
     if (!ids?.length) return [];
-    const rows = await this.prisma.contact.findMany({ where: { tenantId, id: { in: ids }, optOutAt: null, waInvalidAt: null }, select: { id: true } });
+    const rows = await this.prisma.contact.findMany({ where: { tenantId, id: { in: ids }, optOutAt: null, waInvalidAt: null, isGroup: false }, select: { id: true } });
     return rows.map((r) => r.id);
   }
 

@@ -21,9 +21,17 @@ Tokens (`auth_tokens`): 32 bytes aleatórios, só o **hash** no banco, uso únic
 
 ## E-mail transacional
 
-`common/mail/mail.service.ts` usa **Resend** (`RESEND_API_KEY`, `MAIL_FROM`). Sem a chave (dev), o e-mail inteiro vai para o **log da API** — os links de convite/reset aparecem no terminal e o fluxo funciona igual.
+`common/mail/mail.service.ts` envia por **Brevo** (`BREVO_API_KEY`) ou **Resend** (`RESEND_API_KEY`); se as duas estiverem preenchidas, vale o Brevo. Remetente em `MAIL_FROM`. Sem nenhuma chave (dev), o e-mail inteiro vai para o **log da API** — os links de convite/reset aparecem no terminal e o fluxo funciona igual.
 
-Configurar: crie a conta em resend.com, verifique o domínio (registros DNS que eles mostram), gere a API key. `MAIL_FROM="Atendo <no-reply@seudominio.com.br>"`.
+Configurar o Brevo (API REST `POST https://api.brevo.com/v3/smtp/email`, sem SDK):
+1. Conta em brevo.com → *Senders, Domains & Dedicated IPs → Domains* → adicione o domínio e publique no DNS os registros que eles mostram (código Brevo, DKIM, DMARC). Espere ficar "Authenticated".
+2. *Senders* → adicione o remetente (`nao-responda@seudominio.com.br`) — tem que ser do domínio autenticado.
+3. *SMTP & API → API Keys* → gere a chave (`xkeysib-…`) em `BREVO_API_KEY`. Se a conta tiver "Authorized IPs" ligado, libere o IP do servidor, senão a API devolve 401.
+4. `MAIL_FROM="Atendo <nao-responda@seudominio.com.br>"` e reinicie a API.
+
+Falhas aparecem no log como `falha ao enviar e-mail "…" (brevo): HTTP 4xx código: mensagem`.
+
+Resend (alternativa): conta em resend.com, verifique o domínio, gere a API key em `RESEND_API_KEY` e deixe `BREVO_API_KEY` vazia.
 
 E-mails enviados hoje:
 

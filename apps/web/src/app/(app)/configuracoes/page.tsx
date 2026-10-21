@@ -9,7 +9,6 @@ import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { ScheduleSection } from '@/components/settings/ScheduleSection';
 import { WelcomeSection } from '@/components/settings/WelcomeSection';
 import { DefaultFlowsSection } from '@/components/settings/DefaultFlowsSection';
 import { DepartmentsSection } from '@/components/settings/DepartmentsSection';
@@ -28,7 +27,7 @@ type Aba = 'conta' | 'empresa' | 'atendimento';
 const ABAS: { id: Aba; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: 'conta', label: 'Minha conta', icon: <UserRound size={15} />, desc: 'Seu nome, aparência, notificações e senha — só para você.' },
   { id: 'empresa', label: 'Empresa', icon: <Building2 size={15} />, desc: 'Números, empresas/unidades, departamentos e variáveis usadas nas mensagens.' },
-  { id: 'atendimento', label: 'Atendimento', icon: <Headset size={15} />, desc: 'Horários, boas-vindas, fluxos padrão e regras do encerramento.' },
+  { id: 'atendimento', label: 'Atendimento', icon: <Headset size={15} />, desc: 'Boas-vindas, assinatura, transferência, fluxos padrão e regras do encerramento.' },
 ];
 
 /**
@@ -95,7 +94,7 @@ export default function ConfiguracoesPage() {
             {podeConfigurar && <CompaniesSection />}
             {podeEquipe && <DepartmentsSection />}
             {podeEquipe && (
-              <LinkSection href="/configuracoes/escalas" icon={<CalendarClock size={20} />} title="Escalas de trabalho" text="12x36, comercial 44h ou horário próprio: quem tem escala só entra no sistema dentro do turno." action="Configurar escalas" />
+              <LinkSection href="/escalas/turnos" icon={<CalendarClock size={20} />} title="Escalas de trabalho" text="Agora em Escalas e plantões, junto com o horário de atendimento: 12x36, comercial 44h ou horário próprio." action="Abrir escalas" />
             )}
             {podeVariaveis && <GlobalVariablesSection />}
             {podeConfigurar && <PixGatewaySection />}
@@ -107,7 +106,9 @@ export default function ConfiguracoesPage() {
         )}
         {atual === 'atendimento' && (
           <>
-            <ScheduleSection />
+            {/* horário mudou para Escalas e plantões (tudo que é horário fica lá); o atalho fica aqui
+                para quem procura no lugar antigo */}
+            <LinkSection href="/escalas/horario-atendimento" icon={<CalendarClock size={20} />} title="Horários de atendimento" text="Agora em Escalas e plantões: quadros, faixas de horário e exceções (feriados)." action="Abrir horários" />
             <WelcomeSection />
             <SignatureSection />
             <TransferSection />

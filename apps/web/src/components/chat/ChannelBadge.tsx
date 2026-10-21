@@ -13,6 +13,8 @@ export function channelColor(color?: string | null) {
 
 /** "5511999998888@s.whatsapp.net" → "+55 11 99999-8888". Fora do padrão BR devolve só com o "+". */
 export function formatPhone(phone: string) {
+  // grupo nas conversas (docs/grupos.md#grupos-nas-conversas): o "telefone" é o jid do grupo
+  if (phone.endsWith('@g.us')) return 'Grupo do WhatsApp';
   // JID: "numero@s.whatsapp.net" ou "numero:device@..." — só o número interessa
   const d = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
   const br = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);

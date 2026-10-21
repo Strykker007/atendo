@@ -77,7 +77,7 @@ Execução: um `FlowRun` por conversa (iniciar outro para o atual). `advance` ex
 | Condição | Existe (tarefa 1.2; operandos de horário na tarefa 2) | Condição / `condition` | Ramos em ordem com regras E/OU, saída por ramo + Senão. Texto, número, existência, dia da semana, horário entre, etiqueta, **dentro do horário de atendimento**, **faixa de horário atual é**. Formato antigo convertido na leitura. |
 | Atraso inteligente | Revisado (tarefa 1.7) | Atraso inteligente / `wait` | Minutos/horas/dias (job persistente), opcional respeitar expediente, ou **até o próximo horário de atendimento**. Checa pausa e conversa encerrada. Ver [Atraso inteligente](#atraso-inteligente). |
 | Salvar (aguardar resposta com tempo limite) | Existe | Salvar / `question` | Espera resposta, valida (e-mail/telefone/número), grava em variável e opcionalmente na ficha. Mesmas saídas do Menu: **Tentativas esgotadas** e **Não respondeu** (tempo limite) — implementadas na tarefa 1.7, ver [Tempo limite](#tempo-limite-de-resposta-salvar-e-menu). |
-| Distribuidor | Revisado (tarefa 5) | Distribuidor / `distributor` | Rodízio, menos ocupado, fila; saídas Distribuído / Ninguém disponível. Departamento opcional: põe a conversa nele e só distribui entre os participantes — ver [Departamentos](departamentos.md#fluxos). |
+| Distribuidor | Revisado (tarefa 5) | Distribuidor / `distributor` | Rodízio, menos ocupado, fila; saídas Distribuído / Ninguém disponível. Departamento opcional: põe a conversa nele e só distribui entre os participantes — ver [Departamentos](departamentos.md#fluxos). **Só quem está online** (`onlyOnline`, ligado nos blocos novos): ver [abaixo](#distribuidor-só-quem-está-online). |
 | API externa | Novo | API externa / `http` | Chama uma API (GET/POST/PUT/PATCH/DELETE, headers e corpo com `{{variáveis}}`), lê o JSON da resposta e grava campos em variáveis; botão **Testar** no editor. Saídas Sucesso / Erro. Ver [API externa](#api-externa). |
 | Conectar com outro fluxo | Existe (tarefa 1.4) | Conectar com outro fluxo / `connect_flow` | Sem retorno; variáveis seguem; proteção contra loop. Ver [Conectar com outro fluxo](#conectar-com-outro-fluxo). |
 
@@ -373,3 +373,15 @@ Operações em ordem, com origem e parâmetros que aceitam `{{variáveis}}`:
 - Data: formatar DD/MM/AAAA, somar/subtrair dias (retorno AAAA-MM-DD), diferença em dias (origem menos segunda data). Aceita DD/MM/AAAA, AAAA-MM-DD ou ISO com fuso explícito; timestamps viram dia civil no fuso do cliente, inclusive nas transições de horário de verão.
 
 Regex limitada a 200 caracteres e texto a 2.000, sem alternativas, lookaround, referências, repetição de grupos ou quantificadores em chaves; no máximo um quantificador simples. Substituição é literal. Erros nas novas operações deixam o destino vazio, registram aviso como as operações atuais e continuam o fluxo. Somar/subtrair legados preservam o comportamento anterior. Condição compara igualdade/desigualdade numericamente quando ambos os lados são números; comparadores de ordem já eram numéricos. Todos os destinos aparecem no seletor de variáveis.
+
+## Distribuidor: só quem está online
+
+Opção do bloco (`DistributorNode.data.onlyOnline`). Ligada, só concorre quem está **com o painel aberto e dentro do turno** agora; os outros filtros (atendentes marcados, número, departamento) continuam valendo. Bloco novo já nasce ligado; blocos antigos (campo ausente) continuam distribuindo para todos.
+
+- **Presença**: ZSET no Redis `presence:available:<tenantId>`, membro `userId|socketId`, score = validade. O gateway grava ao entrar na sala do cliente, renova a cada 30 s e apaga ao desconectar ou no fim do turno; socket que morre sem avisar expira em 90 s. Fica no Redis porque o fluxo roda no **worker**, que não tem servidor Socket.IO (`ConversationsGateway.availableUserIds`).
+- "No turno" vem de graça: sessão travada (fora da escala) não entra na sala do cliente, então nunca fica disponível. O dono "entrando como" o cliente não conta.
+- **Ninguém online** → saída **Ninguém disponível** (ex.: mandar mensagem "já já alguém te atende" e um Distribuidor em modo Fila). Sem nada ligado nela, o fluxo termina e a conversa continua em **Aguardando**, sem atendente.
+
+**Fluxo sugerido** — distribuir para quem está online e, sem ninguém, deixar na fila:
+`Início → Conteúdo (saudação) → Distribuidor (Rodízio, só online)` → **Distribuído**: Conteúdo "Um atendente já vai falar com você" → Fim · **Ninguém disponível**: Conteúdo "Em instantes alguém te atende" → Distribuidor (Fila) → Fim.
+

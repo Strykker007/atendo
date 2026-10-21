@@ -540,6 +540,12 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               </select>
             </Field>
             {node.data.mode !== 'queue' && (
+              <label className="flex items-start gap-2 text-ink">
+                <input type="checkbox" className="mt-0.5" checked={!!node.data.onlyOnline} onChange={(e) => set({ onlyOnline: e.target.checked })} />
+                <span>Só quem está online agora<span className="block text-[11px] text-muted">Painel aberto e dentro do turno. Ninguém online = saída <b>Ninguém disponível</b> (sem ela ligada, a conversa fica em “Aguardando”).</span></span>
+              </label>
+            )}
+            {node.data.mode !== 'queue' && (
               <Field label="Entre quais atendentes" hint={node.data.departmentId ? 'Nenhum marcado = todos os participantes ativos do departamento. Só recebe quem opera o número da conversa.' : 'Nenhum marcado = todos os ativos. Só recebe quem opera o número da conversa.'}>
                 <div className="space-y-1 max-h-48 overflow-y-auto">
                   {agents.data?.filter((a) => a.isActive && (!node.data.departmentId || a.departments?.some((x) => x.departmentId === node.data.departmentId))).map((a) => {

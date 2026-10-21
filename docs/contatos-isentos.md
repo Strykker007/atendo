@@ -9,6 +9,7 @@ livre**: fica em **Conversas livres** (nos filtros da tela de conversas), fora d
 | Regra | Onde |
 |---|---|
 | Na entrada (`InboundService.ingestInbound`), o telefone do remetente é conferido na lista **com e sem o nono dígito** (`phoneVariants`) | `ignored-contacts/ignored-contacts.ts` (`isTicketExempt`) |
+| **Números da própria conta** são isentos automaticamente, sem cadastro: quando um número conectado da loja escreve para outro (`whatsapp_numbers` do tenant, não excluído, com e sem o nono dígito), é a equipe conversando — sem isto o robô de um responderia o outro, em pingue-pongue | `isTicketExempt` |
 | Isento: a conversa nasce/fica `ticketExempt = true`, `status = in_progress`, **sem dono** e sem `awaitingSince`. Não reabre atendimento (nada de `setStatusSystem`, nada de evento `reopened`), não cai na fila, não roda pesquisa de satisfação | `inbound.service.ts` |
 | Sem automação: a entrada volta como `quiet`, então o processor não dispara fluxo, boas-vindas, horário ou agenda | `inbound.processor.ts` (já respeitava `quiet`) |
 | Mensagem digitada no celular (`fromMe`) para um isento também não reabre atendimento | `InboundService.ingestFromDevice` |

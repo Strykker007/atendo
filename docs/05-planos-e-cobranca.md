@@ -37,6 +37,7 @@ Tabela `plans`. `limits` é jsonb com o formato `PlanLimits` (`packages/shared/s
   // 'consultant_ranking' = ranking de consultores + metas mensais (metas.md)
   // 'satisfaction_surveys' = pesquisa de satisfação no encerramento + relatório (pesquisa-de-satisfacao.md)
   // 'pix_payments' = Pix automático no orçamento, baixa pelo webhook do Asaas da empresa (orcamentos.md#pix-automático)
+  // 'groups_inbox' = grupos marcados "Mostrar nas conversas" aparecem no painel como chat livre (grupos.md#grupos-nas-conversas)
   //   Os dois entraram em TODOS os planos existentes (migração 20261130000100) para ninguém perder o ranking que já usava
 }
 ```

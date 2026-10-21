@@ -5,7 +5,7 @@ import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '
 import { env } from '../../../config/env';
 import { bytesEmBase64, contextoDaCitacao, lerCitacao } from './quoted';
 import { desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
-import type { HistoryPage, HistoryQuery, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, WhatsAppProvider } from './provider.interface';
+import type { HistoryPage, HistoryQuery, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, RecentPage, RecentQuery, WhatsAppProvider } from './provider.interface';
 import { phoneVariants } from '../../conversations/phone-variants';
 import { isDefinitiveClose } from '../connection-events';
 import { describeProviderError, ProviderSendError, ProviderTimeoutError } from './provider-error';
@@ -299,7 +299,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     await this.api(`/message/sendReaction/${this.instance(ctx)}`, {
       method: 'POST',
       body: JSON.stringify({
-        key: { remoteJid: `${r.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: r.targetFromMe, id: r.targetExternalId },
+        key: { remoteJid: r.to.endsWith('@g.us') ? r.to : `${r.to.replace(/\D/g, '')}@s.whatsapp.net`, fromMe: r.targetFromMe, id: r.targetExternalId },
         reaction: r.emoji,
       }),
     }, this.shard(ctx));
@@ -324,7 +324,8 @@ export class EvolutionProvider implements WhatsAppProvider {
    * Evolution tira ou põe o nono dígito ao montar o JID. Sem registro, cai no telefone.
    */
   private async storedRemoteJid(ctx: NumberContext, externalId: string, phone: string): Promise<string> {
-    const fallback = `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
+    // grupo nas conversas: o "telefone" já é o jid do grupo
+    const fallback = phone.endsWith('@g.us') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
     try {
       const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
         method: 'POST',
@@ -369,6 +370,86 @@ export class EvolutionProvider implements WhatsAppProvider {
       .filter((m) => ehMensagemDeConversa(m))
       .map((m) => ({ ...this.toInbound(m, ctx.externalId), fromMe: !!m.key.fromMe }));
     return { messages, exhausted, oldest: Number.isFinite(oldestTs) ? new Date(oldestTs * 1000) : undefined, chatIds: [...jids] };
+  }
+
+  /**
+   * Tudo o que o banco da Evolution tem do número numa janela, de todos os chats
+   * (docs/historico-de-mensagens.md#recuperação). É onde aparece o que o WhatsApp não entregou ao
+   * vivo e mandou no lote de histórico do QR seguinte (docs/23-evolution-desempenho.md › 12).
+   *
+   * O lote de histórico grava o chat só como `@lid`, sem telefone — o webhook ao vivo chega já
+   * convertido. O telefone sai de outra mensagem do mesmo chat que a Evolution gravou com
+   * `remoteJidAlt`; sem nenhuma, a mensagem é descartada (`unresolved`): criar contato com o LID no
+   * lugar do telefone abriria uma conversa fantasma.
+   */
+  async fetchRecent(ctx: NumberContext, q: RecentQuery): Promise<RecentPage> {
+    const POR_PAGINA = 100;
+    const MAX_PAGINAS = 40;
+    const rows: any[] = [];
+    let truncated = false;
+    for (let page = 1; ; page++) {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        // sem `key`: todos os chats. O filtro de horário só vale com gte E lte.
+        body: JSON.stringify({ where: { messageTimestamp: { gte: q.since.toISOString(), lte: q.until.toISOString() } }, offset: POR_PAGINA, page }),
+      }, this.shard(ctx));
+      const records: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      rows.push(...records);
+      if (records.length < POR_PAGINA || page >= Number(res?.messages?.pages ?? 0)) break;
+      if (page >= MAX_PAGINAS) {
+        truncated = true;
+        break;
+      }
+    }
+
+    const telefones = new Map<string, string | null>();
+    const messages: InboundMessage[] = [];
+    let unresolved = 0;
+    for (const r of rows) {
+      if (!ehMensagemDeConversa(r)) continue;
+      let m = r;
+      if (String(r.key.remoteJid).endsWith('@lid')) {
+        const pn = await this.telefoneDoLid(ctx, r, telefones);
+        if (!pn) {
+          unresolved++;
+          continue;
+        }
+        m = { ...r, key: { ...r.key, remoteJid: pn } };
+      }
+      // `raw` fica o registro original: é com ele que a mídia é buscada depois
+      messages.push({ ...this.toInbound(m, ctx.externalId), fromMe: !!r.key.fromMe, raw: r });
+    }
+    return { messages, unresolved, truncated };
+  }
+
+  /** `<telefone>@s.whatsapp.net` de um chat gravado como `@lid`, ou `null`. Cache por chamada de `fetchRecent`. */
+  private async telefoneDoLid(ctx: NumberContext, r: any, cache: Map<string, string | null>): Promise<string | null> {
+    const pn = (jid: unknown) => (typeof jid === 'string' && jid.endsWith('@s.whatsapp.net') ? jid : null);
+    const proprio = pn(r.key.remoteJidAlt) ?? pn(r.key.senderPn);
+    if (proprio) return proprio;
+    const lid = String(r.key.remoteJid);
+    if (cache.has(lid)) return cache.get(lid)!;
+    let achado: string | null = null;
+    try {
+      // as mais recentes podem ser todas do próprio lote do QR (sem telefone): olha mais algumas páginas
+      for (let page = 1; page <= 3 && !achado; page++) {
+        const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+          method: 'POST',
+          // os DOIS campos: com um só, o OR da Evolution ganha um `{}` vazio e devolve todas as mensagens
+          body: JSON.stringify({ where: { key: { remoteJid: lid, remoteJidAlt: lid } }, offset: 50, page }),
+        }, this.shard(ctx));
+        const records: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+        for (const x of records) {
+          achado = x?.key?.remoteJid === lid ? pn(x.key.remoteJidAlt) ?? pn(x.key.senderPn) : x?.key?.remoteJidAlt === lid ? pn(x.key.remoteJid) : null;
+          if (achado) break;
+        }
+        if (records.length < 50) break;
+      }
+    } catch {
+      /* sem telefone: a mensagem fica de fora */
+    }
+    cache.set(lid, achado);
+    return achado;
   }
 
   /** Editar mensagem nossa (`POST /chat/updateMessage`). O WhatsApp só aceita até ~15 min depois do envio. */
@@ -477,7 +558,8 @@ export class EvolutionProvider implements WhatsAppProvider {
         const items = Array.isArray(data) ? data : [data];
         for (const m of items) {
           if (!m?.key) continue;
-          if (m.key.remoteJid?.endsWith('@g.us')) continue; // grupos ficam fora do atendimento
+          // grupo: só chega aqui o liberado para as conversas — o resto morreu no filtro do
+          // webhook (group-filter.ts, docs/grupos.md)
           // reação chega como mensagem, mas não é: vira marca na mensagem reagida
           const reacao = desembrulhar(m.message)?.reactionMessage;
           if (reacao) {
@@ -514,8 +596,6 @@ export class EvolutionProvider implements WhatsAppProvider {
       case 'messages.edited': {
         const items = Array.isArray(data) ? data : [data];
         for (const d of items) {
-          const jid = String(d?.key?.remoteJid ?? d?.remoteJid ?? '');
-          if (jid.endsWith('@g.us')) continue;
           const edicao = lerEdicao(d?.message) ?? lerEdicao({ protocolMessage: d }) ?? lerEdicao({ protocolMessage: d?.protocolMessage });
           if (edicao) (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...edicao });
           // formato que ainda não conhecemos: registra para ajustar o parser, sem virar bolha
@@ -545,7 +625,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         for (const u of items) {
           const id = u?.keyId ?? u?.key?.id;
           if (!id) continue;
-          out.statuses.push({ provider: 'evolution', externalId: id, status: this.mapAck(u.status), timestamp: new Date() });
+          out.statuses.push({ provider: 'evolution', externalNumberId, externalId: id, status: this.mapAck(u.status), timestamp: new Date() });
         }
         break;
       }
@@ -583,7 +663,10 @@ export class EvolutionProvider implements WhatsAppProvider {
 
   private toInbound(m: any, externalNumberId: string): InboundMessage {
     const msg = desembrulhar(m.message);
-    const from = String(m.key.remoteJid).replace(/@.*$/, '');
+    const jid = String(m.key.remoteJid);
+    const grupo = jid.endsWith('@g.us');
+    // grupo é identificado pelo jid inteiro: o número do grupo não é telefone de ninguém
+    const from = grupo ? jid : jid.replace(/@.*$/, '');
     const lido = lerConteudo(m.message);
     // resposta em texto puro: o contexto (citação, status) vem no topo do webhook, fora de `message`
     const citacao = lerCitacao(msg, m.contextInfo);
@@ -594,7 +677,9 @@ export class EvolutionProvider implements WhatsAppProvider {
       from,
       // em mensagem nossa (`fromMe`) o pushName é o NOSSO nome, não o do contato: o contato
       // nascia chamado "Tiago" quando a conversa começava pelo celular do cliente
-      contactName: m.key.fromMe ? undefined : m.pushName,
+      // grupo: o pushName é de quem escreveu, não o nome do grupo
+      contactName: m.key.fromMe || grupo ? undefined : m.pushName,
+      ...(grupo && !m.key.fromMe && { group: remetenteDoGrupo(m) }),
       type: lido.type,
       text: lido.text,
       media: lido.media ? { ...lido.media, providerMediaId: m.key.id } : undefined,
@@ -697,6 +782,17 @@ export function connectionOrder(data: any): { boot: number; seq: number; gen?: n
 }
 
 /** Resposta do `fetchAllGroups` → só grupos válidos (`@g.us`), sem repetição. */
+/**
+ * Quem escreveu no grupo. O Baileys põe o autor em `key.participant`, que pode vir como @lid
+ * (sem telefone); aí o telefone, quando há, está em `participantAlt`/`participantPn`.
+ */
+export function remetenteDoGrupo(m: any): { senderPhone?: string; senderName?: string } {
+  const jids = [m?.key?.participant, m?.key?.participantAlt, m?.key?.participantPn, m?.participant].filter((j): j is string => typeof j === 'string');
+  const pn = jids.find((j) => j.endsWith('@s.whatsapp.net'));
+  const nome = typeof m?.pushName === 'string' ? m.pushName.trim() : '';
+  return { senderPhone: pn ? pn.replace(/@.*$/, '').split(':')[0] : undefined, senderName: nome || undefined };
+}
+
 export function parseGroupList(rows: unknown): { jid: string; name: string; size: number }[] {
   const out = new Map<string, { jid: string; name: string; size: number }>();
   for (const r of Array.isArray(rows) ? rows : []) {

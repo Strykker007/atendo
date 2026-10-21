@@ -374,5 +374,66 @@ Testes no build (`verify-patches.test.mjs`): fila com tarefa travada libera a se
 chega a quem chamou; nó offline com erro não para os seguintes; NACK só sem recibo; credencial nos
 quatro casos (lida, leitura falhou, banco fora, instância nova) nos dois bundles.
 
-**Produção** ainda roda `v2.3.7-biz` (sem guarda de conexão, CVE nem estes patches). Deploy:
-`scripts/deploy-evolution.sh` (doc 27) à noite — todos os números reconectam, com a guarda escalonando.
+**Produção** roda `v2.3.7-atendo.4` desde 21/10/2026 13:39 UTC (ver § 11). A `biz` ficou guardada
+como `atendo/evolution-api:previous` para `rollback` (doc 27).
+
+## 11. 21/10/2026 — Marttins em disputa 440 e Balneário sem receber; deploy da `atendo.4`
+
+- **Marttins (Cel 0192):** às 12:34 UTC o `OutboundProcessor` viu "Connection Closed" e chamou
+  `/instance/restart` (sessão zumbi). Na `biz`, o restart abre socket novo sem fechar o antigo: dois
+  sockets com a mesma credencial se derrubando, ~300 `close 440`/h até o deploy. Restarts automáticos
+  seguintes (12:56, 12:58, 13:11) e conectar/desconectar pelo painel só alimentaram a disputa.
+- **Balneário (cEL 5196):** "envia mas não recebe" ~1 h após cada QR (20/10 22:25, 21/10 13:25),
+  seguido de 401 — o travamento da fila do Baileys rc.9 (§ 10).
+- **Deploy:** `deploy-evolution.sh build` + `up` às 13:39 UTC (backup em
+  `~/atendo-maint/evolution-20261021-103653.*`). 49 números `connected` logo depois, sem QR;
+  Marttins: um único `connecting → open`, nenhum 440 depois da troca; carga do host 5–6 → 2.
+- **Pendente:** instância órfã `atendo-05a723d8-5562994020192` (pareamento de 18/10, mesmo
+  `ownerJid` da Marttins, sem uso desde 20/10) — apagar com ok do responsável.
+
+## 12. 21/10/2026 — Balneário trava de novo com a `atendo.4`; sonda de recebimento
+
+A § 10 não fechou o problema. Linha do tempo da Balneário (cEL 5196), UTC:
+
+- 16:03–16:07 `Download Media failed` em sequência; 16:08:14 `close 428 Connection Terminated`,
+  guarda reconecta em 3,4 s (sem QR).
+- 16:10–16:37 "conectado", 1 mensagem recebida no Atendo, 8 envios parados em `sent`. **Nenhum
+  `[atendo] tarefa travada`** — o prazo da fila (§ 10) não disparou.
+- 16:30 health check: "envia mas não recebe". 16:37:37 logout pela API + QR novo; volta às 16:37:59, com
+  `error in handling message` `category='peer'` de novo no segundo do QR.
+- Drog. Kelly I (`atendo-0988678e-5511999648030`) repetiu o quadro (aviso às 17:35).
+
+**O que os dados mostram:**
+- **Não é a reconexão em si:** desde o deploy, dezenas de números tiveram 428/500 com recuperação
+  automática e seguiram recebendo. Só Balneário e Kelly I travam — as mesmas da § 10.
+- **Não é o nosso pipeline:** a tabela `Message` da Evolution tem 143 mensagens de contatos com horário
+  entre 16:08 e 16:37, a maioria já `READ`/`PLAYED` (lidas no celular), e só 4 estão em `messages` do
+  Atendo. Elas entraram na Evolution pelo histórico do pareamento novo (que não gera
+  `messages.upsert`), não ao vivo: o WhatsApp entregava ao celular e não ao aparelho vinculado.
+- **Mensagens perdidas no painel:** essas ~139 nunca apareciam nas conversas do Atendo. Corrigido pela
+  recuperação automática depois de cada reconexão (docs/historico-de-mensagens.md#recuperação).
+- **Achado paralelo — 500 a cada ~50 min:** `stream errored out` com
+  `<ack class="status" type="media|text">` em 7 instâncias (inclusive Balneário e Kelly I), sem a
+  mensagem correspondente na Evolution (Status/stories não são gravados). Afeta números que não
+  travam; por ora não é tratado como causa.
+
+**Sonda (`patch-baileys-recv-probe.mjs`, só observa):** por socket, a cada `ATENDO_RECV_PROBE_MS`
+(padrão 300000; `"0"` desliga) e no fechamento, uma linha `{"atendo":"recv-probe",...}` com frames
+recebidos por tipo (`message`, `receipt:<type>`, `notification:<type>`, `ack:<class>`, sufixo
+`:status`), `upserts`, `lastFrameAgoS`, `lastMessageAgoS` e até 5 nós sem ack há mais de 60 s
+(`stuck`). Testada no build (`verify-patches.test.mjs`, 62/62).
+
+No próximo travamento, comparar a sonda da instância travada com uma saudável:
+
+```bash
+docker logs --since 2h atendo-prod-evolution-1 2>&1 | grep '"recv-probe"' | grep 5527996935196
+```
+
+- `frames.message` = 0 e `lastFrameAgoS` baixo (pings chegando) → o WhatsApp não está roteando mensagens
+  para o aparelho: problema do lado do servidor/sessão do aparelho, não da fila;
+- `frames.message` > 0 e `upserts` = 0 → chega e não é processado/decifrado: problema no Baileys;
+- `stuck` com nó antigo → o nó que segura a entrega (anotar `tag`, `type`, `category`).
+
+**Pendente:** deploy da imagem com a sonda (`deploy-evolution.sh build` + `up`, de madrugada);
+Kelly I precisa de QR; investigar o 500 `ack class="status"`;
+o host não tem rotação de log do Docker (a sonda acrescenta ~6 MB/dia).

@@ -45,7 +45,8 @@ export class ContactsIoService {
   /** Base inteira do cliente em CSV, com as tags e os campos personalizados como colunas. */
   async exportCsv(tenantId: string) {
     const contacts = await this.prisma.contact.findMany({
-      where: { tenantId },
+      // grupo nas conversas não é pessoa: fica fora da base exportada
+      where: { tenantId, isGroup: false },
       orderBy: { createdAt: 'asc' },
       take: EXPORT_MAX_ROWS,
       select: {

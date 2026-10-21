@@ -29,9 +29,11 @@ describe('parseWebhook: mensagem do aparelho', () => {
     expect(m.from).toBe('5500000000001');
   });
 
-  it('grupo continua fora do atendimento, inclusive vindo do aparelho', () => {
-    const body = upsert({ fromMe: true, remoteJid: '123@g.us' });
-    expect(provider.parseWebhook(body).messages).toHaveLength(0);
+  // grupo não liberado morre antes, no filtro do webhook (group-filter.ts); o liberado entra
+  it('grupo liberado, vindo do aparelho: entra como do celular, sem remetente de grupo', () => {
+    const [m] = provider.parseWebhook(upsert({ fromMe: true, remoteJid: '123@g.us' })).messages;
+    expect(m).toMatchObject({ fromMe: true, from: '123@g.us' });
+    expect(m.group).toBeUndefined();
   });
 
   it('evento sem key é ignorado', () => {

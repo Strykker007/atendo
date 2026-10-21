@@ -151,8 +151,14 @@ Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — meno
 
 ## Telas
 
-- **Configurações → Empresa → Escalas de trabalho** (`/configuracoes/escalas`; `/settings/schedules`
-  redireciona): criar/editar escalas (12x36, 44h, personalizada) e associar cada atendente/gerente.
-- **Escalas e plantões** no menu (`/escalas/aprovacoes`; `/schedules/approvals` redireciona): quem
+**Escalas e plantões** no menu reúne tudo que é horário, em abas (`components/escalas/EscalasTabs.tsx`).
+Cada aba exige a permissão da API dela e some sem ela; o item do menu aparece com qualquer uma e abre
+na primeira permitida. Configurações mantém atalhos nos lugares antigos.
+
+- **Escalas de trabalho** (`/escalas/turnos`, `team.manage`; `/configuracoes/escalas` e `/settings/schedules`
+  redirecionam): criar/editar escalas (12x36, 44h, personalizada) e associar cada atendente/gerente.
+- **Horário de atendimento** (`/escalas/horario-atendimento`, `settings.manage`): quadros, faixas e
+  exceções da empresa (era Configurações → Atendimento).
+- **Plantões e liberações** (`/escalas/aprovacoes`, `team.manage`; `/schedules/approvals` redireciona): quem
   está no turno agora, botão **Autorizar plantão excepcional**, liberações ativas, modal **Gerar
   acesso temporário** (mostra login e senha uma vez, com botão de copiar) e lista dos temporários.
