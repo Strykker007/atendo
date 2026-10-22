@@ -35,6 +35,22 @@ Cliente sem empresas: nenhuma consulta extra além do cache (`PermissionsService
 O tempo real não muda: o socket só avisa "algo mudou" e o painel refaz a consulta, que já
 vai com o header.
 
+## Transferência
+
+Só recebe um atendimento quem conseguiria abri-lo: tem acesso ao **número** da conversa (e ao
+departamento, como no `ConversationScopeGuard`). Quem recebe continua pelo mesmo número — a
+transferência troca o responsável, não o número.
+
+- Usuário vinculado a uma empresa: recebe só das conversas dos números dela.
+- Usuário com números específicos: recebe só desses números.
+- "Todos os números" e sem empresa vinculada (ou vinculado às duas): recebe de qualquer filial —
+  é quem dá apoio entre unidades.
+
+A lista do botão **Transferir** vem de `GET /conversations/:id/transfer-targets`, e o
+`POST /conversations/:id/transfer` recusa (403) destino fora dessa regra
+(`conversations/transfer-scope.ts`). O escopo do destino ignora a empresa selecionada no seletor
+dele: vale qualquer empresa que ele opere. Até a v1.7.0 a lista mostrava a equipe inteira.
+
 ## Painel
 
 - **Seletor** (`components/layout/CompanySwitcher.tsx`, abaixo da marca no menu): some quando

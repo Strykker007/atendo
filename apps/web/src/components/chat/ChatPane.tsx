@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useRelease, useMe, useAgents, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -58,11 +58,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const conv = useConversation(conversationId).data;
   const me = useMe();
   const tenantSettings = useTenantSettings();
-  const agents = useAgents();
   const claim = useClaim();
   const transfer = useTransfer();
   const release = useRelease();
   const [transferOpen, setTransferOpen] = useState(false);
+  // só quem tem acesso ao número da conversa (mesma filial ou "todos os números"); carrega ao abrir o menu
+  const transferTargets = useTransferTargets(conversationId ?? '', transferOpen && !!conversationId);
   const [deptOpen, setDeptOpen] = useState(false);
   const departments = useDepartments();
   const setDepartment = useSetConversationDepartment();
@@ -640,12 +641,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             {transferOpen && (
               <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-xl bg-panel border border-line shadow-lg py-1 text-sm" onMouseLeave={() => setTransferOpen(false)}>
                 <div className="px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">Transferir para</div>
-                {agents.data?.filter((a) => a.isActive && a.id !== conv.assignee?.id).map((a) => (
+                {transferTargets.data?.filter((a) => a.id !== conv.assignee?.id).map((a) => (
                   <button key={a.id} onClick={() => { setTransferOpen(false); transfer.mutateAsync({ id: conv.id, agentId: a.id }).then(() => toast.ok(`Transferido para ${a.name}`)).catch(toast.err); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2">
                     <UserRound size={13} className="text-faint" /> {a.name}
                   </button>
                 ))}
-                {agents.data?.filter((a) => a.isActive && a.id !== conv.assignee?.id).length === 0 && <div className="px-3 py-1.5 text-muted text-xs">Nenhum outro atendente ativo.</div>}
+                {transferTargets.data?.filter((a) => a.id !== conv.assignee?.id).length === 0 && <div className="px-3 py-1.5 text-muted text-xs">Ninguém mais atende por este número.</div>}
                 <div className="border-t border-line my-1" />
                 <button onClick={() => { setTransferOpen(false); release.mutateAsync(conv.id).then(() => { toast.ok('Devolvida para a fila'); setFilterStatus('waiting', true); }).catch(toast.err); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2">
                   <Undo2 size={13} className="text-faint" /> Devolver à fila
