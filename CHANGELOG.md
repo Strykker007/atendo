@@ -3,6 +3,20 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.7.0 — 2026-10-22
+
+- fix(whatsapp): tipos da recuperação (logger da base, Set<string>, teste com a fila nova)
+- fix(deploy): snapshot da Evolution quando a imagem em execução sumiu
+- chore(evolution): imagem v2.3.7-atendo.5 (atendo.4 + sonda de recebimento)
+- feat(whatsapp): recupera mensagens que o número não recebeu ao vivo
+- feat(evolution): sonda de recebimento no Baileys (recv-probe)
+- fix(conversations): citada traz senderName (nome de quem escreveu no grupo)
+- feat: mensagens entre números da conta e grupos nas conversas
+- feat: distribuidor "só quem está online", menu por permissão/plano e hub de Escalas e plantões
+- docs(backup): produção guarda só a cópia local mais recente
+- perf(auth): limpeza diária de refresh_tokens e Monitor sem varrer a tabela
+- feat(mail): envio de e-mail transacional pelo Brevo
+
 ## 1.6.1 — 2026-10-20
 
 - fix(chat): canal Suporte some do chat interno do cliente — fica só a comunicação da equipe
