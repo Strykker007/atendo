@@ -28,6 +28,9 @@ import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage,
 import { RedisService } from '../../common/redis/redis.service';
 import { conflictMap, resolveConflicts } from '../tags/conflicts';
 import { buildTransferMessage, DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFER_TEXT, type TransferVars } from './transfer-message';
+import { canReceiveTransfer } from './transfer-scope';
+import { PermissionsService } from '../auth/permissions.service';
+import type { Principal } from '../auth/permissions';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -126,6 +129,7 @@ export class ConversationsService {
     private readonly closeReasons: CloseReasonsService,
     private readonly audit: AuditService,
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
+    private readonly permissions: PermissionsService,
   ) {}
 
   /**
@@ -292,6 +296,7 @@ export class ConversationsService {
     if (!may(by, 'conversations.transfer_any') && conv.assigneeId !== by.id) throw new ForbiddenException('Só quem está atendendo (ou quem tem permissão) pode transferir.');
     const target = await this.prisma.user.findFirst({ where: { id: toUserId, tenantId, isActive: true } });
     if (!target) throw new NotFoundException('Atendente não encontrado');
+    if (!(await this.canReceive(tenantId, target, conv))) throw new ForbiddenException(`${target.name} não atende pelo número desta conversa. Transfira para alguém da mesma filial ou com acesso a este número.`);
     const updated = await this.prisma.conversation.update({ where: { id }, data: { assigneeId: target.id, status: conv.status === 'closed' ? 'closed' : 'in_progress' } });
     await this.registrar({ tenantId, conversationId: id, type: 'transferred', actorId: by.id, targetId: target.id, fromStatus: conv.status, toStatus: updated.status });
     this.gateway.emitConversation(tenantId, updated);
@@ -305,6 +310,20 @@ export class ConversationsService {
       if (updated.status !== 'closed') await this.sendTransferNotice(tenantId, id, { agentName: target.name });
     }
     return updated;
+  }
+
+  /** Quem pode receber esta conversa: ativo e com acesso ao número/departamento dela (transfer-scope.ts). */
+  async transferTargets(tenantId: string, id: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { numberId: true, departmentId: true } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    const users = await this.prisma.user.findMany({ where: { tenantId, isActive: true }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } });
+    const ok = await Promise.all(users.map((u) => this.canReceive(tenantId, u, conv)));
+    return users.filter((_, i) => ok[i]).map(({ id, name }) => ({ id, name }));
+  }
+
+  private async canReceive(tenantId: string, user: { id: string; role: Principal['role'] }, conv: { numberId: string; departmentId: string | null }) {
+    const [scope, companyNumbers] = await Promise.all([this.permissions.scope(user), this.permissions.companyNumbers(tenantId)]);
+    return canReceiveTransfer({ role: user.role, ...scope }, conv, companyNumbers);
   }
 
   /**

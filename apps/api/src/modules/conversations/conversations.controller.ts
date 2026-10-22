@@ -265,6 +265,12 @@ export class ConversationsController {
     return this.conversations.claim(u.tenantId, id, u);
   }
 
+  /** Quem pode receber a transferência desta conversa (mesmo número/filial ou acesso a ele). */
+  @Get(':id/transfer-targets')
+  transferTargets(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.transferTargets(u.tenantId, id);
+  }
+
   @Post(':id/transfer')
   transfer(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: TransferDto) {
     return this.conversations.transfer(u.tenantId, id, dto.agentId, u);

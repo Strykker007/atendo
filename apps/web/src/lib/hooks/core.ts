@@ -230,6 +230,9 @@ export const useConversationCounts = (numberId: string | null, departmentId: str
 
 // ---- posse do atendimento ----
 export const useClaim = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/claim`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
+/** Quem pode receber a conversa: tem acesso ao número dela (mesma filial ou "todos os números"). */
+export const useTransferTargets = (id: string, enabled: boolean) =>
+  useQuery({ queryKey: ['transfer-targets', id], enabled, queryFn: () => api<{ id: string; name: string }[]>(`/conversations/${id}/transfer-targets`) });
 export const useTransfer = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, agentId }: { id: string; agentId: string }) => api<Conversation>(`/conversations/${id}/transfer`, { method: 'POST', body: JSON.stringify({ agentId }) }), onSuccess: (_, v) => invConv(qc, v.id) }); };
 export const useRelease = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/release`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
 
