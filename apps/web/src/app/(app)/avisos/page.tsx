@@ -28,7 +28,7 @@ export default function AvisosPage() {
   const [message, setMessage] = useState('');
   const [type, setType] = useState<SystemNoticeType>('INFO');
 
-  if (me.data && me.data.role !== 'super_admin') {
+  if (me.data && !me.data.systemOwner) {
     return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
   }
 

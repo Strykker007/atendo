@@ -25,6 +25,7 @@
 | [Agendamento de mensagens](agendamento-de-mensagens.md) | Dev / Cliente | Atendente agenda uma mensagem para sair depois; job de 1 minuto, regras de envio, cancelamento |
 | [Orçamentos](orcamentos.md) | Dev / Cliente | Orçamento gerado no chat vira link seguro `/o/:hash`; página pública com Pix, pagar agora e envio de comprovante |
 | [Contatos isentos de ticket](contatos-isentos.md) | Dev / Cliente | Telefones que nunca abrem atendimento: "Conversas livres" nos filtros, sem fila nem automação, fora dos relatórios |
+| [Donos do sistema](donos-do-sistema.md) | Dev / Dono | Quem é dono (super_admin ou marcação), menu de dono + do cliente, "Ver cliente", convidar/vincular/tirar dono |
 | [Chat interno da equipe](chat-interno.md) | Dev / Cliente | Widget flutuante de conversa direta/grupo entre a equipe, histórico permanente e auditoria |
 | [Avisos do sistema](avisos.md) | Dev / Dono | Avisos globais do super_admin: popup ao vivo, sino no menu e tela de publicação |
 | [Metas de consultores](metas.md) | Dev / Cliente | Meta mensal por consultor (padrão + individual), atingimento, ritmo esperado, projeção e ranking |

@@ -36,6 +36,13 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/super-admin/notices` | super_admin | Todos os avisos (ativos e desativados) |
 | POST | `/super-admin/notices` | super_admin | `{title, message, type?: INFO \| WARNING \| CRITICAL}` — grava e emite `system_notice` para todos os conectados |
 | PATCH | `/super-admin/notices/:id` | super_admin | `{active}` — desativar tira do sino de todos |
+| GET | `/super-admin/owners` | dono | Donos do sistema ([Donos do sistema](donos-do-sistema.md)) |
+| GET | `/super-admin/owners/candidates?q=` | dono | Usuários de clientes que podem virar dono |
+| POST | `/super-admin/owners` | dono | `{userId}` — marca `isSystemOwner` (continua na empresa) |
+| POST | `/super-admin/owners/invite` | dono | `{name, email}` — dono novo sem empresa, por convite (`inviteLink`, `emailSent`) |
+| POST | `/super-admin/owners/:id/invite-link` | dono | Novo link de convite (invalida o anterior) |
+| POST | `/super-admin/owners/:id/link` | dono | `{tenantId, role}` — vincula dono sem empresa a um cliente; sessões dele caem |
+| DELETE | `/super-admin/owners/:id` | dono | Tira de dono (marcado perde a marca; `super_admin` sem empresa é desativado). Nunca a si mesmo nem o último |
 | GET | `/monitor/tenants` | super_admin | Monitor ao vivo: `{tenantId, onlineUsers, lastActivityAt, numbers[{id, label, phone, color, provider, status, isActive, receiveStalledAt, waRemovedAt, updatedAt}]}[]`. `onlineUsers` = usuários distintos com socket conectado agora (dono "entrando como" não conta); `lastActivityAt` = último login ou renovação de sessão (o access token dura 15 min, então painel aberto renova). Números excluídos ficam fora. Atualização: eventos `tenant_presence`/`tenant_number` na sala `owners` |
 | POST | `/tenants/:id/impersonate` | super_admin | `{accessToken, tenant}` — "entrar como" (token com o tenant, papel admin, `impersonatorId`) |
 | GET | `/tenants/me/agents` | todos | Atendentes do meu tenant (todos podem listar para transferir) |

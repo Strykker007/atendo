@@ -82,7 +82,7 @@ export default function PlanosPage() {
   const [form, setForm] = useState<(PlanInput & { id?: string }) | null>(null);
   const [confirmar, setConfirmar] = useState<PlanRow | null>(null);
 
-  if (me.data && me.data.role !== 'super_admin') {
+  if (me.data && !me.data.systemOwner) {
     return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
   }
 

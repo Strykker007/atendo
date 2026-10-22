@@ -58,7 +58,7 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
   async handleConnection(client: Socket) {
     try {
       const token = client.handshake.auth?.token as string;
-      const payload = await this.jwt.verifyAsync<{ sub: string; tenantId: string; role: string; impersonatorId?: string; shiftEndsAt?: number; locked?: boolean; iatMs?: number }>(token, { secret: env.JWT_ACCESS_SECRET });
+      const payload = await this.jwt.verifyAsync<{ sub: string; tenantId: string; role: string; impersonatorId?: string; owner?: boolean; shiftEndsAt?: number; locked?: boolean; iatMs?: number }>(token, { secret: env.JWT_ACCESS_SECRET });
       // corte de sessão (liberação encerrada, escala trocada — ShiftAccessService.cutSessions): token
       // anterior ao corte reconecta como travado
       if (!payload.locked && !payload.impersonatorId && (payload.role === 'agent' || payload.role === 'manager')) {
@@ -66,7 +66,10 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
         if (corte && (payload.iatMs ?? 0) <= corte) payload.locked = true;
       }
       // presença (monitor do dono): quem está com o painel aberto. O dono "entrando como" não conta
-      client.data = { userId: payload.sub, tenantId: payload.tenantId ?? null, owner: isOwner(payload) };
+      // `staff`: pessoa do suporte logada como ela mesma — super_admin ou dono por marcação, que tem
+      // cliente próprio e continua contando na presença dele (docs/donos-do-sistema.md)
+      const staff = (payload.role === 'super_admin' || !!payload.owner) && !payload.impersonatorId;
+      client.data = { userId: payload.sub, tenantId: payload.tenantId ?? null, owner: isOwner(payload), staff };
       // sala da pessoa: avisos só dela (transferência, plantão liberado). Fica mesmo com o turno encerrado
       if (payload.tenantId && payload.sub) await client.join(`user:${payload.tenantId}:${payload.sub}`);
       // Fim de turno (docs/escalas.md#fim-de-turno): sessão travada não entra na sala do cliente —
@@ -81,7 +84,7 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
         const t = setTimeout(() => { void client.leave(sala); void this.setAvailable(client, false); client.emit('shift_ended', {}); }, Math.min(fimMs, 2 ** 31 - 1));
         client.once('disconnect', () => clearTimeout(t));
       }
-      if (payload.role === 'super_admin' && !payload.impersonatorId) {
+      if (staff) {
         await client.join(OWNERS_ROOM);
         // sala só desta pessoa do suporte: conversa direta do chat da equipe do suporte
         await client.join(`owner:${payload.sub}`);
@@ -162,13 +165,13 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
     return out;
   }
 
-  /** Pessoas do suporte (super_admin logado como ele mesmo) com o painel aberto agora. */
+  /** Pessoas do suporte (donos logados como eles mesmos) com o painel aberto agora. */
   async ownersOnline(): Promise<Set<string>> {
     const out = new Set<string>();
     if (!this.server) return out;
     for (const s of await this.server.fetchSockets()) {
-      const d = s.data as { userId?: string; tenantId?: string | null; owner?: boolean } | undefined;
-      if (d?.owner && !d.tenantId && d.userId) out.add(d.userId);
+      const d = s.data as { userId?: string; staff?: boolean } | undefined;
+      if (d?.staff && d.userId) out.add(d.userId);
     }
     return out;
   }

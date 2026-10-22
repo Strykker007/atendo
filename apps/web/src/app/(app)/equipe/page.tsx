@@ -51,7 +51,10 @@ export default function EquipePage() {
   const resend = useResendInvite();
   const inviteLink = useInviteLink();
   const [linkId, setLinkId] = useState<string | null>(null);
-  const [link, setLink] = useState<string | null>(null);
+  // links de convite gerados nesta tela, um por pessoa: convidar várias seguidas mostrava só o
+  // último, sem dizer de quem era. Mesmo nome = link novo da mesma pessoa (o anterior deixa de valer)
+  const [links, setLinks] = useState<{ url: string; name: string }[]>([]);
+  const setLink = (l: { url: string; name: string } | null) => { if (l) setLinks((xs) => [...xs.filter((x) => x.name !== l.name), l]); };
   const [resendingId, setResendingId] = useState<string | null>(null);
 
   async function toggle(a: Agent) {
@@ -157,7 +160,7 @@ export default function EquipePage() {
                           setLinkId(a.id);
                           try {
                             const r = await inviteLink.mutateAsync(a.id);
-                            setLink(r.link);
+                            setLink({ url: r.link, name: a.name });
                             try { await navigator.clipboard.writeText(r.link); toast.ok('Link copiado — mande para o atendente'); }
                             catch { toast.ok('Link gerado abaixo'); }
                           } catch (err) { toast.err(err); } finally { setLinkId(null); }
@@ -165,7 +168,7 @@ export default function EquipePage() {
                       >
                         Copiar link do convite
                       </Button>
-                      <Button size="sm" variant="ghost" icon={<Send size={12} />} loading={resendingId === a.id} onClick={async () => { setResendingId(a.id); try { const r = await resend.mutateAsync(a.id); if (r.emailSent) toast.ok(`Convite reenviado para ${a.email}`); else { setLink(r.inviteLink); toast.ok('E-mail não configurado — use o link do convite'); } } catch (err) { toast.err(err); } finally { setResendingId(null); } }}>Reenviar por e-mail</Button>
+                      <Button size="sm" variant="ghost" icon={<Send size={12} />} loading={resendingId === a.id} onClick={async () => { setResendingId(a.id); try { const r = await resend.mutateAsync(a.id); if (r.emailSent) toast.ok(`Convite reenviado para ${a.email}`); else { setLink({ url: r.inviteLink, name: a.name }); toast.ok('E-mail não configurado — use o link do convite'); } } catch (err) { toast.err(err); } finally { setResendingId(null); } }}>Reenviar por e-mail</Button>
                       </>
                     )}
                     {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
@@ -183,21 +186,26 @@ export default function EquipePage() {
         </div>
       )}
 
-      {link && (
+      {links.length > 0 && (
         <div className="rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-sm space-y-2">
-          <div className="flex items-center gap-2 font-medium text-accent-ink"><LinkIcon size={14} /> Link do convite (vale 3 dias)</div>
-          <div className="flex flex-wrap items-center gap-2">
-            <code className="flex-1 min-w-0 truncate rounded-lg bg-panel border border-line px-2.5 py-1.5 text-[11.5px] font-mono">{link}</code>
-            <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(link).then(() => toast.ok('Copiado')).catch(() => undefined)}>Copiar</Button>
-            <Button size="sm" variant="ghost" onClick={() => setLink(null)}>Fechar</Button>
+          <div className="flex items-center gap-2 font-medium text-accent-ink">
+            <LinkIcon size={14} /> {links.length === 1 ? 'Link do convite' : `Links dos convites (${links.length})`} — vale 3 dias
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setLinks([])}>Fechar</Button>
           </div>
-          <p className="text-[11.5px] text-muted">Mande por WhatsApp. Ao abrir, o atendente define a própria senha. Gerar um link novo invalida este.</p>
+          {links.map((l) => (
+            <div key={l.name} className="flex flex-wrap items-center gap-2">
+              <span className="w-full sm:w-40 shrink-0 truncate font-medium text-ink" title={l.name}>{l.name}</span>
+              <code className="flex-1 min-w-0 truncate rounded-lg bg-panel border border-line px-2.5 py-1.5 text-[11.5px] font-mono">{l.url}</code>
+              <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(l.url).then(() => toast.ok(`Link de ${l.name} copiado`)).catch(() => undefined)}>Copiar</Button>
+            </div>
+          ))}
+          <p className="text-[11.5px] text-muted">Cada link é de uma pessoa só: mande para quem está ao lado dele. Ao abrir, a pessoa cria a própria senha. Gerar outro link para a mesma pessoa faz o anterior parar de funcionar.</p>
         </div>
       )}
 
       <AccessProfiles />
 
-      <CreateAgentModal open={creating} onClose={() => setCreating(false)} profiles={selectableProfiles} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ?? null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Membro criado — mande o link do convite'); } else toast.ok('Membro criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
+      <CreateAgentModal open={creating} onClose={() => setCreating(false)} profiles={selectableProfiles} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ? { url: r.inviteLink, name: b.name } : null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Membro criado — mande o link do convite'); } else toast.ok('Membro criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
       <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditEmail={!!editing && canEditEmail(editing)} isSelf={editing?.id === me.data?.id} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>

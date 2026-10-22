@@ -24,8 +24,8 @@ const PAGE = 50;
 const TEAM_KEY = 'team';
 const MEMBER_SELECT = { userId: true, user: { select: { id: true, name: true, isActive: true } } } as const;
 const MESSAGE_INCLUDE = { replyTo: { select: { id: true, authorId: true, authorName: true, text: true } } } as const;
-/** quem é da equipe do suporte: todo super_admin ativo (sem cliente) */
-const STAFF = { role: 'super_admin', tenantId: null, isActive: true } as const;
+/** quem é da equipe do suporte: todo dono ativo — super_admin (sem cliente) ou marcado `isSystemOwner` (docs/donos-do-sistema.md) */
+const STAFF = { isActive: true, OR: [{ role: 'super_admin' as const }, { isSystemOwner: true }] };
 
 type ChatRow = Prisma.StaffChatGetPayload<{ include: { members: { select: typeof MEMBER_SELECT } } }>;
 

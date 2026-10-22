@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Logger, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -26,6 +26,7 @@ import { freePeriod } from '../billing/plan-rules';
 import { TYPING_SPEED_KEYS, countLimit, type Permission, type PlanLimits, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
 import { TenantTemplatesController } from './tenant-templates.controller';
+import { SystemOwnersController } from './system-owners.controller';
 import { provisionedTags, templateTagConflictPairs, type TemplateContent } from './tenant-template';
 import { TemplateRolloutService } from './template-rollout.service';
 import { conflictPair } from '../tags/conflicts';
@@ -368,6 +369,13 @@ class TenantsController {
       : u.role === 'manager' ? (['agent'] as const)
       : u.role === 'tenant_admin' && only(['name', 'email', 'typingSpeed']) ? (['agent', 'manager', 'tenant_admin'] as const)
       : (['agent', 'manager'] as const);
+    // Dono do sistema na equipe (docs/donos-do-sistema.md): trocar senha, login, papel, perfil ou
+    // desativar daria a quem é só admin do cliente a conta de dono — e com ela todos os clientes.
+    // Nome e velocidade de digitação seguem livres; o resto, só outro dono
+    if (!u.systemOwner && !only(['name', 'typingSpeed'])) {
+      const alvo = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId }, select: { isSystemOwner: true } });
+      if (alvo?.isSystemOwner) throw new ForbiddenException('Esta pessoa é dona do sistema: só outro dono altera o acesso dela.');
+    }
     const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, email: true, role: true, isActive: true } });
     // revoga sessões ativas ao trocar senha, desativar, ou mudar login/papel (vão no token).
     // Depois do update: se a edição for recusada, ninguém é deslogado à toa
@@ -397,7 +405,7 @@ class TenantsController {
 
 @Module({
   imports: [AuthModule, BillingModule],
-  controllers: [TenantsController, TenantSettingsController, ProfilesController, TenantTemplatesController],
+  controllers: [TenantsController, TenantSettingsController, ProfilesController, TenantTemplatesController, SystemOwnersController],
   providers: [TenantSettingsService, SchedulesService, TenantProvisioningService, TemplateRolloutService],
   exports: [TenantSettingsService, SchedulesService, TenantProvisioningService],
 })

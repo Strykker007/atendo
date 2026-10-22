@@ -182,7 +182,7 @@ export default function ClientesPage() {
   const { brandName } = useBrand();
   const me = useMe();
   const tenants = useTenants();
-  const live = useTenantsLive(me.data?.role === 'super_admin');
+  const live = useTenantsLive(!!me.data?.systemOwner);
   const liveDe = useMemo(() => new Map((live.data ?? []).map((l) => [l.tenantId, l])), [live.data]);
   const resumo = useMemo(() => {
     const l = live.data ?? [];
@@ -208,7 +208,7 @@ export default function ClientesPage() {
   const set = (p: Partial<Filtros>) => setFiltros((f) => ({ ...f, ...p }));
   const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros, liveDe), [tenants.data, filtros, liveDe]);
   const filtrando = JSON.stringify({ ...filtros, ordem: 'nome' }) !== JSON.stringify(FILTROS_VAZIOS);
-  if (me.data && me.data.role !== 'super_admin') return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
+  if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
   async function enter(t: TenantRow) {
     setBusy(t.id);

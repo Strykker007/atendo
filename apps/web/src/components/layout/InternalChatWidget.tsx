@@ -80,6 +80,8 @@ export function InternalChatWidget() {
   /** dono "entrando como": usa as rotas do cliente, que devolvem só o canal de suporte */
   const entrandoComo = !!me.data?.tenantId && !!me.data.impersonatorId;
   const habilitado = ehDono || ehEquipe || entrandoComo;
+  /** dono por marcação, na empresa dele: chat da equipe dele + Equipe do suporte (docs/donos-do-sistema.md) */
+  const donoMarcado = ehEquipe && !!me.data?.systemOwner;
   const scope: ChatScope = ehDono ? 'support' : 'team';
   const titulo = ehDono ? 'Suporte aos clientes' : entrandoComo ? 'Suporte a este cliente' : 'Chat da equipe';
   const { open, minimized, side, y, chatId: chatSalvo, set } = useWidget();
@@ -91,8 +93,8 @@ export function InternalChatWidget() {
   // ainda o devolve; "entrando como" o dono usa a mesma rota para abrir esse canal)
   const listaChats = ehEquipe ? chatsEquipe.data?.filter((c) => !c.isSupport) : chats.data;
   // dono: também a equipe do suporte (colegas super_admin) — docs/chat-interno.md#equipe-do-suporte
-  const chatsStaff = useStaffChats(ehDono);
-  const naoLidas = [...(listaChats ?? []), ...(ehDono ? chatsStaff.data ?? [] : [])].reduce((a, c) => a + (c.unread ?? 0), 0);
+  const chatsStaff = useStaffChats(ehDono || donoMarcado);
+  const naoLidas = [...(listaChats ?? []), ...(ehDono || donoMarcado ? chatsStaff.data ?? [] : [])].reduce((a, c) => a + (c.unread ?? 0), 0);
   const equipe = useInternalUsers(ehEquipe);
   const colegas = useStaffUsers(ehDono);
   // entrando como: a única conversa é o canal de suporte do cliente, aberto direto
@@ -167,7 +169,7 @@ export function InternalChatWidget() {
     );
   }
 
-  const aberta = listaChats?.find((c) => c.id === chatId) ?? (ehDono ? chatsStaff.data?.find((c) => c.id === chatId) : null) ?? null;
+  const aberta = listaChats?.find((c) => c.id === chatId) ?? (ehDono || donoMarcado ? chatsStaff.data?.find((c) => c.id === chatId) : null) ?? null;
   const voltar = entrandoComo ? null : () => set({ chatId: null });
   return (
     <div className="fixed z-[65] flex flex-col rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden" style={{ ...estilo, width: w, height: h }} role="dialog" aria-label="Chat interno">
@@ -200,7 +202,9 @@ export function InternalChatWidget() {
         ? <ChatView chat={aberta} meId={me.data!.id} scope={aberta.isStaff ? 'staff' : entrandoComo ? 'support' : scope} api={aberta.isStaff ? 'staff' : entrandoComo ? 'team' : scope} onLeave={() => set({ chatId: null })} />
         : ehDono
           ? <OwnerHome staff={chatsStaff.data ?? []} onOpen={(id) => set({ chatId: id })} />
-          : <Home chats={listaChats ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
+          : donoMarcado
+            ? <TeamAndStaffHome chats={listaChats ?? []} staff={chatsStaff.data ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />
+            : <Home chats={listaChats ?? []} loading={chats.isLoading} onOpen={(id) => set({ chatId: id })} />)}
     </div>
   );
 }
@@ -431,6 +435,26 @@ function OwnerHome({ staff, onOpen }: { staff: InternalChat[]; onOpen: (id: stri
  * Equipe do suporte (docs/chat-interno.md#equipe-do-suporte): o canal com todos os super_admins
  * fixado no topo, as conversas diretas e, embaixo, os colegas (clicar abre a direta).
  */
+/** Dono por marcação: a equipe da empresa dele ou a equipe do suporte, um seletor em cima. */
+function TeamAndStaffHome({ chats, staff, loading, onOpen }: { chats: InternalChat[]; staff: InternalChat[]; loading: boolean; onOpen: (id: string) => void }) {
+  const [modo, setModo] = useState<'empresa' | 'suporte'>('empresa');
+  const n = (xs: InternalChat[]) => xs.reduce((a, c) => a + (c.unread ?? 0), 0);
+  const MODOS = [['empresa', 'Minha equipe', Users, n(chats)], ['suporte', 'Equipe do suporte', Headset, n(staff)]] as const;
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex gap-1 mx-2 mt-2 text-[12px] font-semibold">
+        {MODOS.map(([id, label, Icone, k]) => (
+          <button key={id} type="button" onClick={() => setModo(id)} className={cn('flex-1 flex items-center justify-center gap-1.5 rounded-lg py-1.5 border', modo === id ? 'border-accent text-accent bg-accent-soft' : 'border-line text-muted hover:text-ink')}>
+            <Icone size={13} />{label}
+            {k > 0 && <span className="min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-[10px] font-bold grid place-items-center tnum">{k}</span>}
+          </button>
+        ))}
+      </div>
+      {modo === 'suporte' ? <StaffHome chats={staff} onOpen={onOpen} /> : <Home chats={chats} loading={loading} onOpen={onOpen} />}
+    </div>
+  );
+}
+
 function StaffHome({ chats, onOpen }: { chats: InternalChat[]; onOpen: (id: string) => void }) {
   const colegas = useStaffUsers(true);
   const abrir = useOpenStaffChat();
