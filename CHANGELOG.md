@@ -3,6 +3,74 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.7.0 — 2026-10-22
+
+- fix(whatsapp): tipos da recuperação (logger da base, Set<string>, teste com a fila nova)
+- fix(deploy): snapshot da Evolution quando a imagem em execução sumiu
+- chore(evolution): imagem v2.3.7-atendo.5 (atendo.4 + sonda de recebimento)
+- feat(whatsapp): recupera mensagens que o número não recebeu ao vivo
+- feat(evolution): sonda de recebimento no Baileys (recv-probe)
+- fix(conversations): citada traz senderName (nome de quem escreveu no grupo)
+- feat: mensagens entre números da conta e grupos nas conversas
+- feat: distribuidor "só quem está online", menu por permissão/plano e hub de Escalas e plantões
+- docs(backup): produção guarda só a cópia local mais recente
+- perf(auth): limpeza diária de refresh_tokens e Monitor sem varrer a tabela
+- feat(mail): envio de e-mail transacional pelo Brevo
+
+## 1.6.1 — 2026-10-20
+
+- fix(chat): canal Suporte some do chat interno do cliente — fica só a comunicação da equipe
+- fix(web): abas da lista de conversas sem aperto, Conversas livres nos filtros e contato isento com um clique
+- docs(evolution): resultado do teste com WhatsApp real da v2.3.7-atendo.4
+- fix(whatsapp): crase no comentário SQL fechava o template do Prisma.sql em receive-stall
+- docs(evolution): registra o hotfix do cache IsOnWhatsapp aplicado em 19/10 22:23
+- fix(evolution): imagem atendo.4 — credencial não sobrescrita, recebimento que não trava, cache IsOnWhatsapp desligado
+- fix(whatsapp): nota interna não conta como sinal de vida na detecção de 'parou de receber'
+- fix(web): tira os avisos de proteção contra bloqueio da tela do cliente
+- feat(chat): chat da equipe do suporte entre super_admins
+- fix(deploy): chaves nas variáveis antes de '…' — o bash 3.2 do macOS lia o caractere como parte do nome
+
+## 1.6.0 — 2026-10-19
+
+- feat(perfis): perfis padrão identificados por systemRole, renomeáveis e excluíveis
+- fix(backup): retenção remota separada da local e rclone compatível com token R2 restrito ao bucket
+- test: testes locais da estabilização — carga sintética, laboratório de reconexão e roteiro com WhatsApp real
+- fix(evolution): guarda de conexão na 2.3.7 — uma conexão por instância, gerações de socket e backoff com jitter
+- fix(whatsapp): prazos nas chamadas à Evolution, restart manual com trava, 402/403/406 como queda e ordem do connection.update
+- fix(deploy): deploy comum não reconstrói nem reinicia a Evolution; deploy próprio com rollback
+- fix(evolution): backport da CVE-2026-48063 no Baileys rc.9 e trava dos gatilhos de placeholder
+- docs: estratégia de atualização da Evolution/Baileys e CVE-2026-48063 (proposta)
+- docs(auditoria): base segue no QR; Cloud API só por cliente
+- docs: auditoria da Evolution API (banimentos, desconexões, webhooks) e plano de migração
+- feat(escalas): modo fim de turno com passagem travada e corte imediato de sessão
+- feat(escalas): popup no login fora da escala com pedido de autorização ao gestor
+- perf(tempo-real): espalha a recarga da reconexão e para de tentar com sessão encerrada
+- feat: fila de suporte com tickets, aviso de sincronização ao reconectar número e tempo real que se recupera sozinho
+- feat(escalas): escalas de trabalho, trava de login por turno e acessos temporários
+- feat(chat-interno): clicar na barra minimizada reabre o chat
+- feat: previews ricos no editor de fluxos, fluxos de encerramento e suporte entrando como cliente
+- fix(web): aspas no JSX quebravam o build (react/no-unescaped-entities)
+
+## 1.5.0 — 2026-10-17
+
+- commit para validar
+- feat(chat-interno): canal de suporte entre o cliente e o dono do sistema
+- feat(ui): botão do chat da equipe redesenhado e menu "Mensagens agendadas"
+- feat(chat-interno): responder mensagem, gerenciar membros e apagar grupo
+- fix(chat-interno): trava magnética nas laterais e janela sempre encaixada na tela
+- feat: contatos isentos de ticket e chat interno da equipe
+- feat: import/export de contatos, transferência com aviso e alarme, teste de som
+- wip: grupos restritos, ajustes da agenda, e-mail da equipe e ordenação (em andamento)
+- feat(modelos): configurações de atendimento no modelo de perfil
+- feat(conversas): excluir a conversa inteira, preservando o ledger de cobrança
+- feat(agendadas): tela com todas as mensagens agendadas, filtros e cancelamento
+- feat(admin): filtrar clientes por presença e conexão dos números
+- feat(fluxos): ordenar a lista de fluxos arrastando
+- feat(fluxos): menu do fluxo como botões clicáveis no QR (Evolution)
+- feat(atendimento): encerramento sem venda e assinatura obrigatória
+- feat(meta): templates com mídia e botões dinâmicos, inscrição na WABA e erros em português
+- perf: painel recarrega menos, mídia com cache, backup de madrugada e teto de CPU no evolution-db
+
 ## 1.4.1 — 2026-10-16
 
 - fix(envio): mensagem do atendente não espera atrás de automática segurada pela proteção
