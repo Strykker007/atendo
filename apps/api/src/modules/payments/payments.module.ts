@@ -15,6 +15,7 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { UsageService } from '../billing/usage.service';
+import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
 
 const ASAAS_URL = { production: 'https://api.asaas.com/v3', sandbox: 'https://api-sandbox.asaas.com/v3' } as const;
 /** Eventos que dão baixa: RECEIVED = Pix caiu; CONFIRMED = cartão/boleto confirmado (por garantia). */
@@ -149,12 +150,12 @@ export class PaymentGatewayService implements OnModuleInit {
 
     const webhookToken = randomBytes(24).toString('hex');
     const gatewayId = atual?.id ?? randomUUID();
-    const admin = await this.prisma.user.findFirst({ where: { tenantId, role: 'tenant_admin', isActive: true }, select: { email: true }, orderBy: { createdAt: 'asc' } });
+    const admin = await this.prisma.user.findFirst({ where: { tenantId, role: 'tenant_admin', isActive: true }, select: LOGIN_EMAIL_SELECT, orderBy: { createdAt: 'asc' } });
     const wh = await account.request<{ id: string }>('POST', '/webhooks', {
       name: 'Atendo — Pix do orçamento',
       url: `${env.API_PUBLIC_URL}/webhooks/pix/asaas/${gatewayId}`,
       // e-mail que o Asaas avisa se o webhook começar a falhar
-      email: info.email || admin?.email,
+      email: info.email || loginEmail(admin) || undefined,
       enabled: true,
       interrupted: false,
       authToken: webhookToken,

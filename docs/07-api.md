@@ -41,12 +41,15 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/super-admin/owners` | dono | `{userId}` — marca `isSystemOwner` (continua na empresa) |
 | POST | `/super-admin/owners/invite` | dono | `{name, email}` — dono novo sem empresa, por convite (`inviteLink`, `emailSent`) |
 | POST | `/super-admin/owners/:id/invite-link` | dono | Novo link de convite (invalida o anterior) |
-| POST | `/super-admin/owners/:id/link` | dono | `{tenantId, role}` — vincula dono sem empresa a um cliente; sessões dele caem |
-| DELETE | `/super-admin/owners/:id` | dono | Tira de dono (marcado perde a marca; `super_admin` sem empresa é desativado). Nunca a si mesmo nem o último |
+| POST | `/super-admin/owners/:id/link` | dono | `{tenantId, role, owner?}` — vínculo: a pessoa vira membro de mais um cliente, sem novo login ([multiempresa.md](multiempresa.md)); `owner` = atua como dono lá |
+| DELETE | `/super-admin/owners/:id/link/:userId` | dono | Desfaz o vínculo (desativa a linha da empresa; histórico fica) |
+| DELETE | `/super-admin/owners/:id` | dono | Tira de dono (a marca sai de todas as empresas da pessoa; `super_admin` sem empresa é desativado). Nunca a si mesmo nem o último |
 | GET | `/monitor/tenants` | super_admin | Monitor ao vivo: `{tenantId, onlineUsers, lastActivityAt, numbers[{id, label, phone, color, provider, status, isActive, receiveStalledAt, waRemovedAt, updatedAt}]}[]`. `onlineUsers` = usuários distintos com socket conectado agora (dono "entrando como" não conta); `lastActivityAt` = último login ou renovação de sessão (o access token dura 15 min, então painel aberto renova). Números excluídos ficam fora. Atualização: eventos `tenant_presence`/`tenant_number` na sala `owners` |
 | POST | `/tenants/:id/impersonate` | super_admin | `{accessToken, tenant}` — "entrar como" (token com o tenant, papel admin, `impersonatorId`) |
 | GET | `/tenants/me/agents` | todos | Atendentes do meu tenant (todos podem listar para transferir) |
 | POST | `/tenants/me/agents` | tenant_admin, manager | Cria atendente (`role: agent`) ou gerente (`role: manager`, só admin); respeita `maxAgents` |
+| GET | `/auth/memberships` | todos | Empresas da pessoa logada: `{userId, tenantId, tenantName, role, systemOwner, current}[]` ([multiempresa.md](multiempresa.md)) |
+| POST | `/auth/switch` | todos | `{userId}` — troca para outra empresa da pessoa: novo access token + refresh cookie da linha escolhida. 403 fora dos vínculos dela |
 | PATCH | `/auth/me` | todos (menos dono impersonando) | `{name}` — o próprio nome de exibição. O nome vai no access token: o front chama `/auth/refresh` em seguida |
 | PATCH | `/tenants/me/agents/:id` | `team.manage` | Nome (admin da conta edita de qualquer pessoa, inclusive outro admin; gerente só de atendentes) / `email` (login, único sem diferenciar maiúsculas, gravado em minúsculas; admin da conta edita de qualquer pessoa — inclusive outro admin e o próprio —, gerente só de atendentes; `400` se já em uso) / `role` (`agent`\|`manager`, só admin da conta) — `email`/`role` revogam as sessões da pessoa / ativo / `password` (redefine e revoga sessões) / `typingSpeed` (`slow`\|`normal`\|`fast`: velocidade do "digitando…" simulado; sozinho, vale também para admins da equipe) |
 | **Números** | | | |

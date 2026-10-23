@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Building2, KeyRound, Link as LinkIcon, Plus, Search, Send, UserMinus, UserRound } from 'lucide-react';
+import { Building2, KeyRound, Link as LinkIcon, Plus, Search, Send, UserMinus, UserRound, X } from 'lucide-react';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Field, Modal, inputCls } from '@/components/ui/Modal';
@@ -8,7 +8,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
 import {
-  useInviteOwner, useLinkOwner, useMe, useOwnerCandidates, useOwnerInviteLink, usePromoteOwner, useRemoveOwner, useSystemOwners, useTenants,
+  useInviteOwner, useLinkOwner, useMe, useOwnerCandidates, useOwnerInviteLink, usePromoteOwner, useRemoveOwner, useSystemOwners, useTenants, useUnlinkOwner,
   type SystemOwner,
 } from '@/lib/hooks';
 
@@ -16,27 +16,34 @@ const PAPEL: Record<SystemOwner['role'], string> = { super_admin: 'Sem empresa',
 
 /**
  * Donos do sistema (docs/donos-do-sistema.md): quem vê as telas de dono e conversa na equipe do
- * suporte. Dono de uma empresa continua nela, com o papel e o plano de lá; dono sem empresa pode
- * ser vinculado a uma depois. Só dono abre esta tela (a API também bloqueia).
+ * suporte. Cada dono pode ser vinculado a várias empresas (docs/multiempresa.md), com papel próprio
+ * em cada uma; onde atua como dono, a empresa tem acesso amplo. Só dono abre esta tela (a API também bloqueia).
  */
 export default function DonosPage() {
   const me = useMe();
   const owners = useSystemOwners();
   const remove = useRemoveOwner();
   const novoLink = useOwnerInviteLink();
+  const unlink = useUnlinkOwner();
   const [adicionando, setAdicionando] = useState(false);
   const [vinculando, setVinculando] = useState<SystemOwner | null>(null);
   const [links, setLinks] = useState<{ name: string; url: string }[]>([]);
   const guardarLink = (name: string, url: string) => setLinks((xs) => [...xs.filter((x) => x.name !== name), { name, url }]);
-  const euId = me.data?.impersonatorId ?? me.data?.id;
+  // a pessoa (login principal): numa empresa vinculada, `id` é a linha de lá
+  const euId = me.data?.impersonatorId ?? me.data?.personId ?? me.data?.id;
 
   if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
+
+  async function desvincular(o: SystemOwner, m: SystemOwner['memberships'][number]) {
+    if (!window.confirm(`Tirar ${o.name} de ${m.tenant?.name ?? 'esta empresa'}? As conversas e o histórico dele lá ficam; ele deixa de entrar nela.`)) return;
+    try { await unlink.mutateAsync({ id: o.id, userId: m.id }); toast.ok('Vínculo desfeito'); } catch (err) { toast.err(err); }
+  }
 
   async function tirar(o: SystemOwner) {
     const semEmpresa = !o.tenant;
     const ok = window.confirm(semEmpresa
       ? `${o.name} não tem empresa: tirar de dono desativa o acesso dele. Continuar?`
-      : `${o.name} deixa de ser dono do sistema e continua em ${o.tenant!.name} como ${PAPEL[o.role].toLowerCase()}. Continuar?`);
+      : `${o.name} deixa de ser dono do sistema e continua nas empresas dele como membro comum. Continuar?`);
     if (!ok) return;
     try { await remove.mutateAsync(o.id); toast.ok(semEmpresa ? 'Acesso desativado' : 'Marcação de dono retirada'); } catch (err) { toast.err(err); }
   }
@@ -83,13 +90,25 @@ export default function DonosPage() {
                   : <span>Sem empresa</span>}
                 {!o.isActive ? <span className="block text-danger">Desativado</span> : !o.passwordSetAt && o.invitedAt && <span className="block text-warn-ink">Convite pendente</span>}
               </div>
+              {o.memberships.length > 0 && (
+                <div className="basis-full flex flex-wrap gap-1.5 pl-12">
+                  {o.memberships.map((m) => (
+                    <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-field px-2 py-0.5 text-[11.5px] text-muted">
+                      <Building2 size={11} /> {m.tenant?.name} · {PAPEL[m.role]}{m.isSystemOwner && ' · dono'}
+                      <button type="button" onClick={() => void desvincular(o, m)} disabled={unlink.isPending} className="ml-0.5 rounded hover:text-danger" title="Desfazer vínculo" aria-label={`Desfazer vínculo com ${m.tenant?.name}`}>
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-1">
                 {o.isActive && !o.passwordSetAt && o.invitedAt && (
                   <Button size="sm" variant="ghost" icon={<LinkIcon size={12} />} loading={novoLink.isPending && novoLink.variables === o.id}
                     onClick={() => novoLink.mutateAsync(o.id).then((r) => guardarLink(o.name, r.link)).catch(toast.err)}>Link</Button>
                 )}
-                {o.isActive && !o.tenant && (
-                  <Button size="sm" variant="ghost" icon={<Building2 size={12} />} onClick={() => setVinculando(o)}>Vincular a empresa</Button>
+                {o.isActive && (
+                  <Button size="sm" variant="ghost" icon={<Building2 size={12} />} onClick={() => setVinculando(o)}>Adicionar empresa</Button>
                 )}
                 {o.isActive && o.id !== euId && (
                   <button type="button" onClick={() => void tirar(o)} disabled={remove.isPending} className="p-1.5 rounded-md text-muted hover:text-danger hover:bg-field" title="Tirar de dono" aria-label="Tirar de dono">
@@ -103,7 +122,7 @@ export default function DonosPage() {
       )}
 
       <AdicionarModal open={adicionando} onClose={() => setAdicionando(false)} onLink={guardarLink} />
-      <VincularModal owner={vinculando} onClose={() => setVinculando(null)} isSelf={vinculando?.id === euId} />
+      <VincularModal owner={vinculando} onClose={() => setVinculando(null)} />
     </PageShell>
   );
 }
@@ -180,34 +199,38 @@ function AdicionarModal({ open, onClose, onLink }: { open: boolean; onClose: () 
   );
 }
 
-/** Vincular dono sem empresa a uma empresa existente: continua dono e ganha o menu do cliente. */
-function VincularModal({ owner, onClose, isSelf }: { owner: SystemOwner | null; onClose: () => void; isSelf: boolean }) {
+/**
+ * Vincular o dono a mais uma empresa (docs/multiempresa.md): ele vira membro de lá, com o papel
+ * escolhido, e troca pelo seletor sem novo login. "Atua como dono" = acesso amplo nessa empresa.
+ */
+function VincularModal({ owner, onClose }: { owner: SystemOwner | null; onClose: () => void }) {
   const tenants = useTenants();
   const link = useLinkOwner();
   const [tenantId, setTenantId] = useState('');
   const [role, setRole] = useState<'tenant_admin' | 'manager' | 'agent'>('tenant_admin');
-  useEffect(() => { setTenantId(''); setRole('tenant_admin'); }, [owner?.id]);
+  const [dono, setDono] = useState(false);
+  useEffect(() => { setTenantId(''); setRole('tenant_admin'); setDono(false); }, [owner?.id]);
   const nomeEmpresa = tenants.data?.find((t) => t.id === tenantId)?.name;
+  // a empresa do login principal e as já vinculadas não aparecem de novo
+  const ja = new Set([owner?.tenant?.id, ...(owner?.memberships ?? []).map((m) => m.tenant?.id)]);
 
   async function salvar() {
     if (!owner || !tenantId) return;
     try {
-      await link.mutateAsync({ id: owner.id, tenantId, role });
+      await link.mutateAsync({ id: owner.id, tenantId, role, owner: dono });
       toast.ok(`${owner.name} agora faz parte de ${nomeEmpresa ?? 'a empresa'}`);
       onClose();
-      // as sessões do vinculado caem para o vínculo valer já — inclusive a sua
-      if (isSelf) window.location.href = '/login';
     } catch (err) { toast.err(err); }
   }
 
   return (
-    <Modal open={!!owner} onClose={onClose} title={owner ? `Vincular ${owner.name} a uma empresa` : ''}>
+    <Modal open={!!owner} onClose={onClose} title={owner ? `Adicionar ${owner.name} a uma empresa` : ''}>
       <div className="space-y-3">
-        <p className="text-[12.5px] text-muted">Continua dono do sistema e passa a ter o menu da empresa, como a equipe dela. As sessões abertas dele são encerradas para o vínculo valer na hora{isSelf ? ' — inclusive a sua: você vai entrar de novo' : ''}.</p>
+        <p className="text-[12.5px] text-muted">Vira membro da empresa com o papel escolhido: atende com o próprio nome, recebe transferências e aparece na equipe. Entra com o mesmo login e troca de empresa no seletor do menu (Ctrl+K).</p>
         <Field label="Empresa">
           <select className={inputCls} value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
             <option value="">Escolha…</option>
-            {(tenants.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {(tenants.data ?? []).filter((t) => !ja.has(t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
         <Field label="Papel na empresa">
@@ -217,9 +240,16 @@ function VincularModal({ owner, onClose, isSelf }: { owner: SystemOwner | null; 
             <option value="agent">Atendente</option>
           </select>
         </Field>
+        <label className="flex items-start gap-2 text-[13px] text-ink">
+          <input type="checkbox" className="mt-0.5" checked={dono} onChange={(e) => setDono(e.target.checked)} />
+          <span>
+            Atua como dono nesta empresa
+            <span className="block text-[12px] text-muted">A empresa ganha acesso amplo: todos os recursos, sem limites do plano. Deixe desmarcado onde for membro comum (ex.: síndico).</span>
+          </span>
+        </label>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => void salvar()} loading={link.isPending} disabled={!tenantId}>Vincular</Button>
+          <Button onClick={() => void salvar()} loading={link.isPending} disabled={!tenantId}>Adicionar</Button>
         </div>
       </div>
     </Modal>

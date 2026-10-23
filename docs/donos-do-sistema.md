@@ -5,6 +5,9 @@ conversa na [Equipe do suporte](chat-interno.md#equipe-do-suporte). Até 20/10/2
 `super_admin` sem cliente; um sócio que também opera uma empresa (o Danilo, admin do VogoChat
 Plus) não tinha como ser dono sem sair dela.
 
+Ser dono é da **pessoa**: qualquer linha dela (login principal ou vínculo em outra empresa,
+[multiempresa.md](multiempresa.md)) marcada ou `super_admin`.
+
 ## Dois jeitos de ser dono
 
 | | `super_admin` | Marcação `users.isSystemOwner` |
@@ -46,10 +49,11 @@ cliente" num cliente sem dono mostra o plano dele, como ele vê.
 
 ## Ver cliente
 
-O seletor **Ver cliente…** no topo do menu (só dono, `OwnerSwitcher.tsx`) faz o mesmo "entrar como"
-da tela Clientes (`POST /tenants/:id/impersonate`), sem sair da tela: o menu passa a ser o do
-cliente visitado **mais** a seção de dono. Troca direto de um cliente para outro. **← Voltar à minha
-conta** (ou *Sair do cliente* na faixa) volta à empresa do dono, se ele tiver, ou ao Financeiro.
+O seletor do topo do menu (`WorkspaceSwitcher.tsx`, também **Ctrl+K**, ver
+[multiempresa.md › Seletor](multiempresa.md#seletor)) busca em todos os clientes e mostra os
+recentes. Escolher um cliente faz o mesmo "entrar como" da tela Clientes (`POST /tenants/:id/impersonate`),
+sem sair da tela: o menu passa a ser o do cliente visitado **mais** a seção de dono. Troca direto de
+um cliente para outro. Escolher uma das **Minhas empresas** (ou *Sair do cliente* na faixa) volta.
 
 Entrando como, valem o papel de admin do cliente visitado e **nada** do cliente de origem do dono:
 perfil, números, departamentos e empresas dele são ignorados (`PermissionsService.scope` com
@@ -61,12 +65,13 @@ no token vêm do banco (`AuthService.impersonate`), para trocar de cliente sem v
 | Ação | Rota | Regra |
 |---|---|---|
 | Listar | `GET /super-admin/owners` | todos os donos, com empresa, papel, convite pendente, desativado |
-| Buscar candidato | `GET /super-admin/owners/candidates?q=` | usuários ativos de clientes que ainda não são donos (nome/e-mail, 10) |
+| Buscar candidato | `GET /super-admin/owners/candidates?q=` | logins principais ativos de clientes que ainda não são donos (nome/e-mail, 10) |
 | Tornar dono (usuário existente) | `POST /super-admin/owners` `{userId}` | liga `isSystemOwner`; a pessoa continua na empresa |
 | Convidar pessoa nova | `POST /super-admin/owners/invite` `{name,email}` | cria `super_admin` sem empresa com convite (e-mail quando houver; o link volta sempre). E-mail já usado → erro pedindo para buscar em "Usuário existente" |
 | Novo link de convite | `POST /super-admin/owners/:id/invite-link` | só quem ainda não definiu a senha; invalida o anterior |
-| Vincular a empresa | `POST /super-admin/owners/:id/link` `{tenantId, role}` | só dono **sem** empresa: vira o papel escolhido no cliente + `isSystemOwner`, perfil padrão do papel, e as sessões abertas caem (refresh revogado) para o vínculo valer já. Não passa pelo limite de usuários do plano |
-| Tirar de dono | `DELETE /super-admin/owners/:id` | marcado: perde só a marcação. `super_admin` sem empresa: é **desativado** (não tem outro acesso). Ninguém tira a si mesmo, e sempre fica pelo menos um dono ativo |
+| Adicionar empresa | `POST /super-admin/owners/:id/link` `{tenantId, role, owner}` | cria um **vínculo**: a mesma pessoa como membro de mais uma empresa, com o papel escolhido; `owner` = atua como dono lá (acesso amplo). Sem novo login: troca pelo seletor ([multiempresa.md](multiempresa.md)). Não passa pelo limite de usuários do plano |
+| Desfazer vínculo | `DELETE /super-admin/owners/:id/link/:userId` | desativa a linha da empresa (histórico fica) e derruba as sessões dela |
+| Tirar de dono | `DELETE /super-admin/owners/:id` | a marcação sai de todas as empresas da pessoa (os vínculos ficam, como membro comum). `super_admin` sem empresa: é **desativado**, e com ele os vínculos. Ninguém tira a si mesmo, e sempre fica pelo menos um dono ativo |
 
 O vínculo a uma empresa é feito **só por um dono**: um cliente não consegue convidar uma conta de
 dono para a equipe dele (o e-mail é único no sistema, então o convite comum recusa).
@@ -84,7 +89,6 @@ dono para a equipe dele (o e-mail é único no sistema, então o convite comum r
 
 ## Fora do escopo
 
-- Uma pessoa em várias empresas (o e-mail continua único: um usuário, uma empresa).
 - Mudar contas em produção: depois do deploy, um dono marca os outros pela tela.
 
 ## Proteções dentro da empresa do dono marcado

@@ -30,6 +30,9 @@ import { SystemOwnersController } from './system-owners.controller';
 import { provisionedTags, templateTagConflictPairs, type TemplateContent } from './tenant-template';
 import { TemplateRolloutService } from './template-rollout.service';
 import { conflictPair } from '../tags/conflicts';
+import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
+
+const VINCULO_SEM_CONVITE = 'Esta pessoa entra pelo login de outra empresa (vínculo): não tem convite.';
 
 class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
@@ -136,17 +139,19 @@ class TenantsController {
   @Get()
   @NoTenantOk()
   @Roles('super_admin')
-  list() {
-    return this.prisma.tenant.findMany({
+  async list() {
+    const rows = await this.prisma.tenant.findMany({
       orderBy: { createdAt: 'desc' },
       include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true, isFree: true, billingCycle: true, durationDays: true } } } },
         // personalização do plano (valor/limites negociados) — a coluna Plano mostra o selo
         planOverride: { select: { planId: true, priceMonth: true, expiresAt: true } },
-        users: { where: { role: 'tenant_admin' }, select: { email: true, name: true }, take: 1 },
+        users: { where: { role: 'tenant_admin' }, select: { ...LOGIN_EMAIL_SELECT, name: true }, take: 1 },
         // plano de cada empresa na própria listagem: com assinatura própria, o plano do cliente não diz tudo
         companies: { where: { deletedAt: null }, orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { select: { planId: true, status: true, currentPeriodEnd: true, priceMonth: true, plan: { select: { name: true } } } } } },
         _count: { select: { numbers: true, users: true, conversations: true } } },
     });
+    // admin que é vínculo (docs/multiempresa.md) aparece com o login dele
+    return rows.map((t) => ({ ...t, users: t.users.map((x) => ({ name: x.name, email: loginEmail(x) ?? '' })) }));
   }
 
   /** Dono ajusta plano/status manualmente (sem passar pelo Stripe) ou ativa/desativa o cliente. */
@@ -269,8 +274,10 @@ class TenantsController {
 
   /** Todos podem listar (precisam para transferir); só admin gerencia. */
   @Get('me/agents')
-  agents(@CurrentUser() u: AuthUser) {
-    return this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, scheduleId: true, isTemporary: true, accessExpiresAt: true, expiredAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
+  async agents(@CurrentUser() u: AuthUser) {
+    const rows = await this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, ...LOGIN_EMAIL_SELECT, primaryUserId: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, scheduleId: true, isTemporary: true, accessExpiresAt: true, expiredAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
+    // vínculo (pessoa de outra empresa, docs/multiempresa.md): mostra o login dela; não tem convite pendente
+    return rows.map(({ primaryUser: _p, primaryUserId, ...r }) => ({ ...r, email: loginEmail({ email: r.email, primaryUser: _p }) ?? '', linked: !!primaryUserId }));
   }
 
   @Post('me/agents')
@@ -318,6 +325,7 @@ class TenantsController {
       this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId } }),
       this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } }),
     ]);
+    if (target.primaryUserId) throw new BadRequestException(VINCULO_SEM_CONVITE);
     const link = await this.auth.sendInvite(target.id, u.name, tenant.name).catch(() => null);
     return { ok: true, emailSent: !!link, inviteLink: link ?? (await this.auth.inviteLink(target.id)).link };
   }
@@ -329,7 +337,8 @@ class TenantsController {
   @Post('me/agents/:id/invite-link')
   @RequirePermission('team.manage')
   async inviteLink(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const target = await this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { id: true, passwordSetAt: true } });
+    const target = await this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { id: true, passwordSetAt: true, primaryUserId: true } });
+    if (target.primaryUserId) throw new BadRequestException(VINCULO_SEM_CONVITE);
     if (target.passwordSetAt) throw new BadRequestException('Este usuário já definiu a senha. Para trocar, use "Redefinir senha".');
     return this.auth.inviteLink(target.id);
   }
@@ -342,6 +351,11 @@ class TenantsController {
     if (dto.name !== undefined) rest.name = dto.name.trim();
     // gerente não promove ninguém a gerente (mesma regra do convite)
     if (dto.role !== undefined && u.role === 'manager') throw new BadRequestException('Só o admin da conta muda o papel.');
+    if (dto.email !== undefined || password) {
+      // vínculo: login e senha são os da pessoa, na empresa principal dela (docs/multiempresa.md)
+      const alvo = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId }, select: { primaryUserId: true } });
+      if (alvo?.primaryUserId) throw new BadRequestException('Esta pessoa entra pelo login de outra empresa: e-mail e senha só ela troca, no próprio perfil.');
+    }
     if (dto.email !== undefined) {
       // login em minúsculas; a unicidade é conferida sem diferenciar maiúsculas (o índice do banco diferencia)
       rest.email = dto.email.trim().toLowerCase();

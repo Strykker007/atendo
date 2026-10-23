@@ -9,6 +9,7 @@ import { env } from '../../config/env';
 import { decideCanSend, unitOf, type QuotaDecision, type QuotaKind } from './quota';
 import { effectiveLimits } from './plan-override';
 import { ownerLimits } from './owner-limits';
+import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
 
 export const periodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: string) => `usage:${tenantId}:${period}:${metric}`;
@@ -35,8 +36,8 @@ export class UsageService {
 
   /** E-mails dos admins do tenant (destinatários de alertas de plano e cobrança). */
   async adminEmails(tenantId: string) {
-    const admins = await this.prisma.user.findMany({ where: { tenantId, isActive: true, role: 'tenant_admin' }, select: { email: true } });
-    return admins.map((a) => a.email);
+    const admins = await this.prisma.user.findMany({ where: { tenantId, isActive: true, role: 'tenant_admin' }, select: LOGIN_EMAIL_SELECT });
+    return [...new Set(admins.map(loginEmail).filter((e): e is string => !!e))];
   }
 
   /**

@@ -11,6 +11,7 @@ import { freePeriod, rollMonthly } from './plan-rules';
 import { AsaasService } from './asaas.service';
 import { overridePrice } from './plan-override';
 import { DiscountLedgerService } from './discount-ledger.service';
+import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
 
 /** Price do Stripe de um plano: anual cobra `priceYear` por ano; o resto, a mensalidade. */
 const stripePriceOf = (p: Plan) =>
@@ -58,9 +59,9 @@ export class StripeService {
   // ---------- Customer / Checkout / Portal ----------
 
   private async customerFor(tenantId: string) {
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { users: { where: { role: 'tenant_admin' }, take: 1 } } });
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { users: { where: { role: 'tenant_admin' }, take: 1, select: LOGIN_EMAIL_SELECT } } });
     if (tenant.stripeCustomerId) return tenant.stripeCustomerId;
-    const customer = await this.client.customers.create({ name: tenant.name, email: tenant.users[0]?.email, metadata: { tenantId } });
+    const customer = await this.client.customers.create({ name: tenant.name, email: loginEmail(tenant.users[0]) ?? undefined, metadata: { tenantId } });
     await this.prisma.tenant.update({ where: { id: tenantId }, data: { stripeCustomerId: customer.id } });
     return customer.id;
   }

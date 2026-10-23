@@ -81,6 +81,8 @@ resposta do suporte depois dela.
 Os donos do sistema ([Donos do sistema](donos-do-sistema.md): `super_admin` sem cliente ou usuário
 com `isSystemOwner`) não são a mesma equipe de cliente, então não cabem no chat interno acima — antes só se falavam abrindo um canal de suporte. O chat da equipe
 do suporte é separado (tabelas `staff_*`, rotas `/super-admin/staff/*`):
+É por **pessoa**: quem tem mais de uma empresa ([multiempresa.md](multiempresa.md)) aparece uma vez,
+pelo login principal, e vê as mesmas conversas em qualquer empresa (salas `owner:<personId>`).
 
 | Regra | Onde |
 |---|---|

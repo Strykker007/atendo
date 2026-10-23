@@ -8,7 +8,7 @@ import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
 import { CompanySwitcher } from './CompanySwitcher';
-import { OwnerSwitcher } from './OwnerSwitcher';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ESCALAS_ABAS, primeiraAbaEscalas } from '@/components/escalas/EscalasTabs';
 import { NoticeBell } from './SystemNotices';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
@@ -135,8 +135,8 @@ export function Sidebar() {
         </>
       )}
       {/* empresa/unidade ativa: some quando o cliente não usa empresas */}
-      {/* dono: entra em qualquer cliente pelo menu (docs/donos-do-sistema.md#ver-cliente) */}
-      {me.data?.systemOwner && <OwnerSwitcher collapsed={collapsed} />}
+      {/* minhas empresas + (dono) qualquer cliente — Ctrl+K (docs/multiempresa.md#seletor) */}
+      <WorkspaceSwitcher collapsed={collapsed} owner={!!me.data?.systemOwner} />
       {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}
 
       <nav className="flex-1 py-2">

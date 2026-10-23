@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { IsEmail, IsIn, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -22,11 +22,25 @@ class InviteOwnerDto {
 class LinkDto {
   @IsUUID() tenantId!: string;
   @IsIn(['tenant_admin', 'manager', 'agent']) role!: 'tenant_admin' | 'manager' | 'agent';
+  /** atua como dono nesta empresa: ela ganha o acesso amplo (docs/donos-do-sistema.md#acesso-amplo) */
+  @IsOptional() @IsBoolean() owner?: boolean;
 }
 
-/** dono = super_admin (sem cliente) ou usuário marcado — docs/donos-do-sistema.md */
-const OWNER = { OR: [{ role: 'super_admin' as const }, { isSystemOwner: true }] };
-const SELECT = { id: true, name: true, email: true, role: true, isActive: true, isSystemOwner: true, invitedAt: true, passwordSetAt: true, lastLoginAt: true, tenant: { select: { id: true, name: true } } } as const;
+/**
+ * dono = PESSOA (login principal, docs/multiempresa.md) super_admin, marcada, ou com um vínculo
+ * marcado — docs/donos-do-sistema.md
+ */
+const OWNER = {
+  primaryUserId: null,
+  OR: [{ role: 'super_admin' as const }, { isSystemOwner: true }, { memberships: { some: { isSystemOwner: true, isActive: true } } }],
+};
+/** linhas da pessoa: o login principal e os vínculos */
+const ROWS_OF = (personId: string) => ({ OR: [{ id: personId }, { primaryUserId: personId }] });
+const SELECT = {
+  id: true, name: true, email: true, role: true, isActive: true, isSystemOwner: true, invitedAt: true, passwordSetAt: true, lastLoginAt: true,
+  tenant: { select: { id: true, name: true } },
+  memberships: { where: { isActive: true }, select: { id: true, role: true, isSystemOwner: true, tenant: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' as const } },
+} as const;
 
 /**
  * Donos do sistema (docs/donos-do-sistema.md): quem tem as telas de dono e a equipe do suporte.
@@ -57,7 +71,7 @@ export class SystemOwnersController {
     const termo = (q ?? '').trim();
     if (termo.length < 2) return [];
     return this.prisma.user.findMany({
-      where: { isActive: true, isSystemOwner: false, role: { not: 'super_admin' }, OR: [{ email: { contains: termo, mode: 'insensitive' } }, { name: { contains: termo, mode: 'insensitive' } }] },
+      where: { isActive: true, primaryUserId: null, isSystemOwner: false, role: { not: 'super_admin' }, OR: [{ email: { contains: termo, mode: 'insensitive' } }, { name: { contains: termo, mode: 'insensitive' } }] },
       select: { id: true, name: true, email: true, role: true, tenant: { select: { id: true, name: true } } },
       orderBy: { name: 'asc' },
       take: 10,
@@ -67,8 +81,8 @@ export class SystemOwnersController {
   /** Marca um usuário existente de um cliente como dono. */
   @Post()
   async promote(@Body() dto: PromoteDto) {
-    const target = await this.prisma.user.findUnique({ where: { id: dto.userId }, select: { role: true, isSystemOwner: true, isActive: true } });
-    if (!target || !target.isActive) throw new BadRequestException('Usuário não encontrado ou desativado.');
+    const target = await this.prisma.user.findUnique({ where: { id: dto.userId }, select: { role: true, isSystemOwner: true, isActive: true, primaryUserId: true } });
+    if (!target || !target.isActive || target.primaryUserId) throw new BadRequestException('Usuário não encontrado ou desativado.');
     if (target.role === 'super_admin' || target.isSystemOwner) throw new BadRequestException('Este usuário já é dono do sistema.');
     const row = await this.prisma.user.update({ where: { id: dto.userId }, data: { isSystemOwner: true }, select: SELECT });
     this.permissions.invalidate();
@@ -100,18 +114,39 @@ export class SystemOwnersController {
   }
 
   /**
-   * Vincula um dono sem cliente a um cliente existente, com o papel escolhido: continua dono (pela
-   * marcação) e passa a ter o menu do cliente. As sessões abertas caem para o novo vínculo valer já.
+   * Vincula o dono a uma empresa (docs/multiempresa.md): cria a linha dele lá, com o papel escolhido —
+   * membro de verdade (atende, recebe transferências, aparece na equipe), sem e-mail nem senha
+   * próprios: entra pelo login principal e troca no seletor. `owner` = atua como dono nesta empresa
+   * (acesso amplo). Vínculo desativado na mesma empresa volta, com o histórico dele.
    */
   @Post(':id/link')
   async link(@Param('id') id: string, @Body() dto: LinkDto) {
-    const target = await this.prisma.user.findUnique({ where: { id }, select: { role: true, tenantId: true } });
-    if (!target || target.role !== 'super_admin' || target.tenantId) throw new BadRequestException('Só um dono sem cliente pode ser vinculado a um cliente.');
+    const person = await this.prisma.user.findFirst({ where: { id, ...OWNER, isActive: true }, select: { id: true, name: true, tenantId: true } });
+    if (!person) throw new BadRequestException('Dono não encontrado.');
     const tenant = await this.prisma.tenant.findUnique({ where: { id: dto.tenantId }, select: { id: true } });
     if (!tenant) throw new BadRequestException('Cliente não encontrado.');
-    await this.prisma.user.update({ where: { id }, data: { tenantId: tenant.id, role: dto.role, isSystemOwner: true } });
-    await this.provisioning.linkRoleProfile(tenant.id, id, dto.role);
-    await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+    if (person.tenantId === tenant.id) throw new BadRequestException('Esta já é a empresa do login principal.');
+    const existing = await this.prisma.user.findFirst({ where: { primaryUserId: person.id, tenantId: tenant.id }, select: { id: true, isActive: true } });
+    if (existing?.isActive) throw new BadRequestException('Já vinculado a esta empresa.');
+    const data = { role: dto.role, isSystemOwner: !!dto.owner, isActive: true, name: person.name };
+    const row = existing
+      ? await this.prisma.user.update({ where: { id: existing.id }, data, select: { id: true } })
+      : await this.prisma.user.create({
+          data: { ...data, tenantId: tenant.id, primaryUserId: person.id, email: null, passwordHash: await this.auth.hashPassword(randomBytes(24).toString('base64url')) },
+          select: { id: true },
+        });
+    await this.provisioning.linkRoleProfile(tenant.id, row.id, dto.role);
+    this.permissions.invalidate();
+    return this.prisma.user.findUniqueOrThrow({ where: { id: person.id }, select: SELECT });
+  }
+
+  /** Desfaz um vínculo: a linha da empresa é desativada (conversas e histórico ficam) e as sessões dela caem. */
+  @Delete(':id/link/:userId')
+  async unlink(@Param('id') id: string, @Param('userId') userId: string) {
+    const row = await this.prisma.user.findFirst({ where: { id: userId, primaryUserId: id }, select: { id: true } });
+    if (!row) throw new BadRequestException('Vínculo não encontrado.');
+    await this.prisma.user.update({ where: { id: row.id }, data: { isActive: false } });
+    await this.prisma.refreshToken.updateMany({ where: { userId: row.id, revokedAt: null }, data: { revokedAt: new Date() } });
     this.permissions.invalidate();
     return this.prisma.user.findUniqueOrThrow({ where: { id }, select: SELECT });
   }
@@ -122,16 +157,17 @@ export class SystemOwnersController {
    */
   @Delete(':id')
   async remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    if (id === (u.impersonatorId ?? u.id)) throw new BadRequestException('Você não pode tirar a si mesmo de dono.');
+    if (id === (u.impersonatorId ?? u.personId)) throw new BadRequestException('Você não pode tirar a si mesmo de dono.');
     const target = await this.prisma.user.findFirst({ where: { id, ...OWNER }, select: { role: true, tenantId: true, isActive: true } });
     if (!target) throw new BadRequestException('Dono não encontrado.');
     const outros = await this.prisma.user.count({ where: { ...OWNER, isActive: true, id: { not: id } } });
     if (!outros) throw new BadRequestException('O sistema precisa de pelo menos um dono ativo.');
+    // a marcação sai de todas as empresas da pessoa (os vínculos continuam, como membro comum)
+    await this.prisma.user.updateMany({ where: ROWS_OF(id), data: { isSystemOwner: false } });
     if (target.role === 'super_admin' && !target.tenantId) {
+      // sem empresa própria não há outro acesso: o login sai, e com ele os vínculos
       await this.prisma.user.update({ where: { id }, data: { isActive: false } });
-      await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
-    } else {
-      await this.prisma.user.update({ where: { id }, data: { isSystemOwner: false } });
+      await this.prisma.refreshToken.updateMany({ where: { revokedAt: null, user: ROWS_OF(id) }, data: { revokedAt: new Date() } });
     }
     this.permissions.invalidate();
     return { ok: true };

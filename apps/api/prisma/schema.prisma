@@ -134,13 +134,20 @@ enum Role {
 model User {
   id           String    @id @default(uuid())
   tenantId     String?   // null = super_admin (dono do Atendo)
-  email        String    @unique
+  /// login. Vazio só em vínculo (`primaryUserId`): ele entra pelo login principal (docs/multiempresa.md)
+  email        String?   @unique
   name         String
   passwordHash String
   role         Role
   /// dono do sistema sem trocar o papel: continua no cliente dele (com o papel e o plano de lá) e
   /// ganha as telas de dono e a equipe do suporte. `super_admin` (sem cliente) é dono sempre.
   isSystemOwner Boolean  @default(false)
+  /// Vínculo (docs/multiempresa.md): esta linha é a MESMA pessoa de `primaryUserId`, como membro de
+  /// outra empresa — papel, perfil, números, departamentos e escala próprios desta empresa. Sem
+  /// e-mail nem senha: entra pelo login principal e troca de empresa no seletor.
+  primaryUserId String?
+  primaryUser   User?    @relation("memberships", fields: [primaryUserId], references: [id], onDelete: Cascade)
+  memberships   User[]   @relation("memberships")
   /// perfil de acesso: quando presente, é ELE que decide o que o usuário pode fazer.
   /// Sem perfil, vale o conjunto padrão do `role` (ver packages/shared/permissions.ts).
   profileId    String?
@@ -198,6 +205,7 @@ model User {
   @@index([profileId])
   @@index([scheduleId])
   @@index([accessExpiresAt])
+  @@index([primaryUserId])
   @@map("users")
 }
 

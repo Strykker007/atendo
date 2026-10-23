@@ -34,7 +34,7 @@ export class PermissionsService {
     }
     return {
       // lido do banco (com o cache curto), não do token: tirar a marcação vale em segundos
-      systemOwner: user.role === 'super_admin' || row.systemOwner,
+      systemOwner: row.systemOwner,
       permissions: permissionsOf({ role: user.role, profilePermissions: row.permissions }),
       numberIds: row.numberIds,
       departmentIds: row.departmentIds,
@@ -57,16 +57,21 @@ export class PermissionsService {
     if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit;
     const row = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { isSystemOwner: true, role: true, profile: { select: { permissions: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } }, companies: { select: { companyId: true } } },
+      select: { primaryUserId: true, profile: { select: { permissions: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } }, companies: { select: { companyId: true } } },
     });
+    // dono é a PESSOA (docs/multiempresa.md): qualquer linha dela marcada ou super_admin — pelo papel
+    // guardado, não o do token ("entrando como" o token diz tenant_admin)
+    const personId = row?.primaryUserId ?? userId;
+    const donas = row
+      ? await this.prisma.user.count({ where: { isActive: true, OR: [{ id: personId }, { primaryUserId: personId }], AND: [{ OR: [{ isSystemOwner: true }, { role: 'super_admin' }] }] } })
+      : 0;
     const entry = {
       at: Date.now(),
       permissions: row?.profile?.permissions ?? null,
       numberIds: (row?.numbers ?? []).map((n) => n.numberId),
       departmentIds: (row?.departments ?? []).map((d) => d.departmentId),
       companyIds: (row?.companies ?? []).map((c) => c.companyId),
-      // pelo papel guardado, não o do token: "entrando como" o token diz tenant_admin
-      systemOwner: !!row?.isSystemOwner || row?.role === 'super_admin',
+      systemOwner: donas > 0,
     };
     this.cache.set(userId, entry);
     return entry;

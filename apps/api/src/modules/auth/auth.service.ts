@@ -1,4 +1,4 @@
-import { Logger, BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Logger, BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'node:crypto';
@@ -50,7 +50,7 @@ export class AuthService {
     const raw = await this.issueToken(user.id, 'reset', 2);
     const link = `${env.WEB_ORIGIN}/redefinir-senha?token=${raw}`;
     await this.mail.send({
-      to: user.email,
+      to: email,
       subject: 'Redefinir sua senha no Atendo',
       text: `Olá, ${user.name}.
 
@@ -67,11 +67,11 @@ Se não foi você, ignore este e-mail — nada muda.`,
     await this.setPassword(user.id, password);
   }
 
-  /** Trocar a própria senha (logado). */
-  async changePassword(userId: string, current: string, next: string) {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  /** Trocar a própria senha (logado). Num vínculo, a senha é a do login principal (`personId`). */
+  async changePassword(personId: string, current: string, next: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: personId } });
     if (!(await argon2.verify(user.passwordHash, current))) throw new BadRequestException('Senha atual incorreta.');
-    await this.setPassword(userId, next);
+    await this.setPassword(personId, next);
   }
 
   /**
@@ -81,7 +81,10 @@ Se não foi você, ignore este e-mail — nada muda.`,
   async updateName(userId: string, name: string) {
     const clean = name.trim();
     if (!clean) throw new BadRequestException('Informe o nome.');
-    return this.prisma.user.update({ where: { id: userId }, data: { name: clean }, select: { id: true, name: true } });
+    // o nome é da pessoa: vale em todas as empresas dela (docs/multiempresa.md)
+    const { personId } = await this.person(userId);
+    await this.prisma.user.updateMany({ where: { OR: [{ id: personId }, { primaryUserId: personId }] }, data: { name: clean } });
+    return { id: userId, name: clean };
   }
 
   /** Convite: cria o usuário sem senha utilizável e manda o link para ele definir a própria. */
@@ -109,6 +112,7 @@ Se não foi você, ignore este e-mail — nada muda.`,
 
   async sendInvite(userId: string, inviterName: string, tenantName: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!user.email) throw new BadRequestException('Vínculo não tem convite: a pessoa entra pelo login principal.');
     const { link } = await this.inviteLink(user.id);
     await this.mail.send({
       to: user.email,
@@ -134,8 +138,8 @@ Seu login será: ${user.email}`,
 
   private async setPassword(userId: string, password: string) {
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await this.hashPassword(password), passwordSetAt: new Date(), isActive: true } });
-    // senha nova = sessões antigas fora
-    await this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    // senha nova = sessões antigas fora, em todas as empresas da pessoa
+    await this.prisma.refreshToken.updateMany({ where: { revokedAt: null, user: { OR: [{ id: userId }, { primaryUserId: userId }] } }, data: { revokedAt: new Date() } });
   }
 
   async login(email: string, password: string, meta: { userAgent?: string; ip?: string }) {
@@ -158,6 +162,11 @@ Seu login será: ${user.email}`,
     // revogado há poucos segundos ainda passa: é a corrida de duas abas renovando juntas,
     // não um token vazado (ver refresh-grace.ts)
     if (!row || !refreshAcceptable(row)) throw new UnauthorizedException('Refresh inválido');
+    // vínculo: login principal desativado derruba as outras empresas junto
+    if (row.user.primaryUserId) {
+      const principal = await this.prisma.user.findUnique({ where: { id: row.user.primaryUserId }, select: { isActive: true } });
+      if (!principal?.isActive) throw new UnauthorizedException('Refresh inválido');
+    }
     // turno acabou há pouco: token TRAVADO (modo fim de turno). Acabou faz tempo ou a conta
     // temporária venceu: a sessão para aqui (o token não é rotacionado) — docs/escalas.md#fim-de-turno
     const janela = await this.shift.sessionWindow(row.user, 'refresh');
@@ -185,7 +194,59 @@ Seu login será: ${user.email}`,
     return removed;
   }
 
-  private async issue(user: { id: string; tenantId: string | null; role: string; email: string; name: string; isSystemOwner?: boolean }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow) {
+  /**
+   * Pessoa da linha de usuário (docs/multiempresa.md): `personId` = login principal; e-mail do login;
+   * `owner` = dona do sistema em qualquer das empresas dela (os menus de dono são da pessoa).
+   */
+  async person(userId: string) {
+    const row = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, primaryUserId: true, email: true } });
+    const personId = row.primaryUserId ?? row.id;
+    const rows = await this.prisma.user.findMany({ where: { isActive: true, OR: [{ id: personId }, { primaryUserId: personId }] }, select: { id: true, email: true, role: true, isSystemOwner: true } });
+    return {
+      personId,
+      email: row.email ?? rows.find((r) => r.id === personId)?.email ?? '',
+      owner: rows.some((r) => r.isSystemOwner || r.role === 'super_admin'),
+    };
+  }
+
+  /**
+   * Empresas da pessoa logada (seletor "Minhas empresas"). Entrando como cliente, as do dono.
+   * `current` = a linha desta sessão.
+   */
+  async memberships(caller: { id: string; impersonatorId?: string }) {
+    const { personId } = await this.person(caller.impersonatorId ?? caller.id);
+    const rows = await this.prisma.user.findMany({
+      where: { isActive: true, OR: [{ id: personId }, { primaryUserId: personId }] },
+      select: { id: true, role: true, isSystemOwner: true, tenant: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((r) => ({
+      userId: r.id,
+      tenantId: r.tenant?.id ?? null,
+      tenantName: r.tenant?.name ?? null,
+      role: r.role,
+      systemOwner: r.isSystemOwner || r.role === 'super_admin',
+      current: r.id === caller.id && !caller.impersonatorId,
+    }));
+  }
+
+  /**
+   * Troca de empresa (seletor): sessão nova, com refresh próprio, como a linha escolhida — membro de
+   * verdade daquela empresa, não "entrando como". Só entre linhas da mesma pessoa; escala e conta
+   * temporária da empresa de destino valem como num login.
+   */
+  async switchTo(caller: { id: string; impersonatorId?: string }, targetId: string, meta: { userAgent?: string; ip?: string }) {
+    const { personId } = await this.person(caller.impersonatorId ?? caller.id);
+    const target = await this.prisma.user.findUnique({ where: { id: targetId } });
+    if (!target || (target.id !== personId && target.primaryUserId !== personId)) throw new ForbiddenException('Esta empresa não está entre as suas.');
+    if (!target.isActive) throw new ForbiddenException('Seu acesso a esta empresa foi desativado.');
+    const janela = await this.shift.sessionWindow(target, 'login');
+    if (!target.isActive) throw new ForbiddenException('Seu acesso a esta empresa venceu.');
+    await this.prisma.user.update({ where: { id: target.id }, data: { lastLoginAt: new Date() } });
+    return this.issue(target, meta, janela);
+  }
+
+  private async issue(user: { id: string; tenantId: string | null; role: string; name: string }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow) {
     // Fim de turno viaja no token: o JwtAuthGuard trava as ações sem consultar o banco a cada
     // requisição. `shiftEndsAt` = a partir de quando trava; `locked` = já nasce travado (passagem)
     const sec = (d: Date) => Math.floor(d.getTime() / 1000);
@@ -194,10 +255,12 @@ Seu login será: ${user.email}`,
       : janela?.shiftEndsAt ? { shiftEndsAt: sec(janela.shiftEndsAt) } : {};
     // travado: o token não vive além da janela de passagem
     const ttl = janela?.lockedUntil ? Math.max(30, Math.min(ttlMs(env.JWT_ACCESS_TTL), janela.lockedUntil.getTime() - Date.now()) / 1000 | 0) : (env.JWT_ACCESS_TTL as any);
+    const who = await this.person(user.id);
     const accessToken = await this.jwt.signAsync(
       // `iatMs`: o corte de sessão (cutSessions) compara em milissegundos — `iat` do JWT é em segundos
       // `owner`: só para o socket (salas do suporte); nas rotas a marcação vem do banco (PermissionsService)
-      { sub: user.id, tenantId: user.tenantId, role: user.role, email: user.email, name: user.name, iatMs: Date.now(), ...(user.isSystemOwner && { owner: true }), ...shift },
+      // `pid`: login principal, quando a sessão é de um vínculo (docs/multiempresa.md)
+      { sub: user.id, tenantId: user.tenantId, role: user.role, email: who.email, name: user.name, iatMs: Date.now(), ...(who.owner && { owner: true }), ...(who.personId !== user.id && { pid: who.personId }), ...shift },
       { secret: env.JWT_ACCESS_SECRET, expiresIn: ttl },
     );
     const refreshToken = randomBytes(48).toString('base64url');
@@ -216,9 +279,11 @@ Seu login será: ${user.email}`,
     const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     // nome e e-mail do banco: trocando de um cliente para outro, o token atual já é o de
     // "entrando como" (nome com "(dono)") — docs/donos-do-sistema.md#ver-cliente
-    const owner = await this.prisma.user.findUniqueOrThrow({ where: { id: caller.impersonatorId ?? caller.id }, select: { id: true, email: true, name: true } });
+    // sempre pelo login principal: `impersonatorId` identifica a pessoa (equipe do suporte, auditoria)
+    const { personId, email } = await this.person(caller.impersonatorId ?? caller.id);
+    const owner = await this.prisma.user.findUniqueOrThrow({ where: { id: personId }, select: { id: true, name: true } });
     const accessToken = await this.jwt.signAsync(
-      { sub: owner.id, tenantId: tenant.id, role: 'tenant_admin', email: owner.email, name: `${owner.name} (dono)`, impersonatorId: owner.id },
+      { sub: owner.id, tenantId: tenant.id, role: 'tenant_admin', email, name: `${owner.name} (dono)`, impersonatorId: owner.id },
       { secret: env.JWT_ACCESS_SECRET, expiresIn: '1h' as any },
     );
     return { accessToken, tenant: { id: tenant.id, name: tenant.name } };

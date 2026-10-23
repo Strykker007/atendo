@@ -47,7 +47,7 @@ export const useReorderFolders = () => useReorder('/quick-replies/folders/reorde
 export const useReorderReplies = () => useReorder('/quick-replies/reorder');
 
 /** Usuário logado (papel, tenant, permissões) — para esconder o que ele não pode fazer. */
-export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id: string; tenantId: string | null; role: Agent['role']; email: string; name: string; impersonatorId?: string; systemOwner?: boolean; permissions?: Permission[] }>('/auth/me'), staleTime: Infinity });
+export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<{ id: string; /** login principal (docs/multiempresa.md); igual a `id` fora de vínculo */ personId: string; tenantId: string | null; role: Agent['role']; email: string; name: string; impersonatorId?: string; systemOwner?: boolean; permissions?: Permission[] }>('/auth/me'), staleTime: Infinity });
 
 /**
  * O usuário pode fazer isto? Esconder na tela é conveniência — quem autoriza de verdade é a

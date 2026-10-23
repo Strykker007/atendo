@@ -24,8 +24,15 @@ const PAGE = 50;
 const TEAM_KEY = 'team';
 const MEMBER_SELECT = { userId: true, user: { select: { id: true, name: true, isActive: true } } } as const;
 const MESSAGE_INCLUDE = { replyTo: { select: { id: true, authorId: true, authorName: true, text: true } } } as const;
-/** quem é da equipe do suporte: todo dono ativo — super_admin (sem cliente) ou marcado `isSystemOwner` (docs/donos-do-sistema.md) */
-const STAFF = { isActive: true, OR: [{ role: 'super_admin' as const }, { isSystemOwner: true }] };
+/**
+ * quem é da equipe do suporte: toda PESSOA dona ativa — o login principal (docs/multiempresa.md),
+ * super_admin, marcado `isSystemOwner` ou com um vínculo marcado (docs/donos-do-sistema.md)
+ */
+const STAFF = {
+  isActive: true,
+  primaryUserId: null,
+  OR: [{ role: 'super_admin' as const }, { isSystemOwner: true }, { memberships: { some: { isSystemOwner: true, isActive: true } } }],
+};
 
 type ChatRow = Prisma.StaffChatGetPayload<{ include: { members: { select: typeof MEMBER_SELECT } } }>;
 
@@ -158,4 +165,5 @@ export class StaffChatController {
 }
 
 /** Pessoa do suporte por trás do token (também quando "entrando como" um cliente). */
-const meId = (u: AuthUser) => u.impersonatorId ?? u.id;
+// a pessoa, não a linha da empresa: a conversa do suporte é a mesma em qualquer empresa dela
+const meId = (u: AuthUser) => u.impersonatorId ?? u.personId;
