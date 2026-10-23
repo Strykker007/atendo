@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.7.1 — 2026-10-23
+
+- test(send-queue): ConversationsService recebe PermissionsService
+- fix(evolution): ack da stanza <status> e canário para testar imagem nova
+- fix(conversations): transferir só para quem atende pelo número da conversa
+- wip(donos): donos do sistema — migration system_owner, controller, tela /donos e OwnerSwitcher
+
 ## 1.7.0 — 2026-10-22
 
 - fix(whatsapp): tipos da recuperação (logger da base, Set<string>, teste com a fila nova)
