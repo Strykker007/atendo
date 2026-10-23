@@ -60,3 +60,15 @@ pc_evo_up_cmd() { echo "$(pc_compose) --profile evolution up -d --no-deps --no-b
 pc_evo_rollback_cmd() { echo "$PC_SUDO env EVOLUTION_IMAGE=$EVOLUTION_REPO:previous $(pc_dc) --profile evolution up -d --no-deps --no-build --force-recreate evolution"; }
 # a imagem pedida precisa existir no host (senão o compose tentaria baixar do Docker Hub)
 pc_evo_image_exists_cmd() { echo "$PC_SUDO docker image inspect \"$1\" >/dev/null 2>&1"; }
+
+# ---- Evolution canário (docs/27-deploy-evolution.md#canário) ----
+# Outro container, banco e Redis: build/up/stop dele nunca tocam na Evolution principal.
+pc_canary_build_cmd() { echo "$(pc_compose) --profile evolution-canary build evolution-canary"; }
+pc_canary_wanted_cmd() { echo "$(pc_compose) --profile evolution-canary config evolution-canary 2>/dev/null | awk '/^[^ ]/{f=0} /^  [^ ]/{f=0} /^  evolution-canary:\$/{f=1; next} f && /^    image:/{print \$2; exit}'"; }
+pc_canary_running_cmd() { echo "id=\$($(pc_compose) --profile evolution-canary ps -q evolution-canary | head -1); [ -n \"\$id\" ] && $PC_SUDO docker inspect -f '{{.Config.Image}} {{.Image}}' \"\$id\" || echo 'canário parado'"; }
+# banco próprio no mesmo Postgres da Evolution (a Evolution cria as tabelas ao subir); idempotente
+pc_canary_db_cmd() {
+  echo "db=\$($(pc_compose) ps -q evolution-db | head -1); $PC_SUDO docker exec \"\$db\" createdb -U evolution evolution_canary 2>/dev/null; $PC_SUDO docker exec \"\$db\" psql -U evolution -d evolution_canary -tAc 'select 1' >/dev/null && echo '▶ banco evolution_canary pronto'"
+}
+pc_canary_up_cmd() { echo "$(pc_compose) --profile evolution-canary up -d --no-deps --no-build evolution-canary"; }
+pc_canary_stop_cmd() { echo "$(pc_compose) --profile evolution-canary stop evolution-canary"; }

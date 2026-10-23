@@ -10,13 +10,15 @@
 #    (patch-baileys-recv.mjs) e nome da instância nos logs do Baileys (patch-evolution-baileys-logger.mjs)
 #    — docs/23-evolution-desempenho.md › 9 e 10;
 #  - diagnóstico do recebimento: linha `recv-probe` por socket a cada 5 min, só observa
-#    (patch-baileys-recv-probe.mjs) — docs/23-evolution-desempenho.md › 12.
+#    (patch-baileys-recv-probe.mjs) — docs/23-evolution-desempenho.md › 12;
+#  - ack da stanza <status> (stories): sem ele o servidor derruba o stream a cada ~50 min e o número
+#    para de receber (patch-baileys-status-ack.mjs; Baileys#2858) — docs/23-evolution-desempenho.md › 13.
 # A versão continua FIXA: trocar a tag aqui só depois de testar — cada patch falha o build se o
 # trecho que ele altera mudar, e os testes (verify-patches.test.mjs) rodam aqui: se falharem, a
 # imagem não é gerada.
 FROM evoapicloud/evolution-api:v2.3.7
 COPY atendo/connection-guard.cjs /evolution/atendo/connection-guard.cjs
-COPY patch-baileys-biz.mjs patch-evolution-restart.mjs patch-baileys-cve-2026-48063.mjs patch-evolution-placeholder-triggers.mjs patch-evolution-connection.mjs patch-evolution-creds-read.mjs patch-baileys-recv.mjs patch-baileys-recv-probe.mjs patch-evolution-baileys-logger.mjs verify-patches.test.mjs test/connection-guard.test.mjs /tmp/
+COPY patch-baileys-biz.mjs patch-evolution-restart.mjs patch-baileys-cve-2026-48063.mjs patch-evolution-placeholder-triggers.mjs patch-evolution-connection.mjs patch-evolution-creds-read.mjs patch-baileys-recv.mjs patch-baileys-recv-probe.mjs patch-baileys-status-ack.mjs patch-evolution-baileys-logger.mjs verify-patches.test.mjs test/connection-guard.test.mjs /tmp/
 RUN node /tmp/patch-baileys-biz.mjs \
  && node /tmp/patch-evolution-restart.mjs \
  && node /tmp/patch-baileys-cve-2026-48063.mjs \
@@ -25,6 +27,7 @@ RUN node /tmp/patch-baileys-biz.mjs \
  && node /tmp/patch-evolution-creds-read.mjs \
  && node /tmp/patch-baileys-recv.mjs \
  && node /tmp/patch-baileys-recv-probe.mjs \
+ && node /tmp/patch-baileys-status-ack.mjs \
  && node /tmp/patch-evolution-baileys-logger.mjs \
  && ATENDO_GUARD_PATH=/evolution/atendo/connection-guard.cjs node --test /tmp/verify-patches.test.mjs /tmp/connection-guard.test.mjs \
  && rm /tmp/patch-*.mjs /tmp/verify-patches.test.mjs /tmp/connection-guard.test.mjs

@@ -509,3 +509,67 @@ test('recv-probe: pendentes têm teto e somem depois de 1 h', async () => {
   assert.equal(lines[1].pending, 0);
   assert.equal(lines[1].pendingOld, 0);
 });
+
+// ---------- ack da stanza <status> (patch-baileys-status-ack.mjs; docs/23 › 13) ----------
+
+/** CB:status e sendMessageAck do messages-recv.js patcheado, com ws/sendNode/sonda falsos. */
+async function statusAckHarness() {
+  const { EventEmitter } = await import('node:events');
+  const { getBinaryNodeChild } = await mod('lib/WABinary/index.js');
+  const src = RECV();
+  const ackCode = slice(src, 'const sendMessageAck = async (atendoNode, errorCode) => {', 'await sendNode(stanza);\n    };');
+  const handlerCode = slice(src, "ws.on('CB:status', (node) => {", '});');
+  const ws = new EventEmitter();
+  const sent = [];
+  const probed = [];
+  const errors = [];
+  new Function('ws', 'atendoAcked', 'atendoProbe', 'getBinaryNodeChild', 'authState', 'logger', 'sendNode', 'onUnexpectedError', `${ackCode}\n${handlerCode}`)(
+    ws, new WeakSet(), { acked: (n) => probed.push(n.attrs.id) }, getBinaryNodeChild, { creds: { me: { id: ME } } },
+    { debug: () => {} }, async (s) => sent.push(s), (e, where) => errors.push([e.message, where]));
+  return { ws, sent, probed, errors };
+}
+
+test('status-ack: aplicado uma vez, antes do handler de ack de mensagem', () => {
+  const src = RECV();
+  assert.equal(count(src, '/*atendo-status-ack*/'), 1);
+  assert.equal(count(src, "ws.on('CB:status'"), 1);
+  assert.ok(src.indexOf('/*atendo-status-ack*/') < src.indexOf("ws.on('CB:ack,class:message'"));
+});
+
+test('status-ack: <status> recebe ack class="status" com type e participant, sem erro', async () => {
+  const { ws, sent, probed, errors } = await statusAckHarness();
+  ws.emit('CB:status', { tag: 'status', attrs: { id: '3A2069ED', from: 'status@broadcast', participant: '93952443158664@lid', type: 'media', offline: '1' } });
+  ws.emit('CB:status', { tag: 'status', attrs: { id: 'AC46729E', from: CONTACT, type: 'text' } });
+  await sleep(10);
+  assert.deepEqual(sent, [
+    { tag: 'ack', attrs: { id: '3A2069ED', to: 'status@broadcast', class: 'status', participant: '93952443158664@lid', type: 'media' } },
+    { tag: 'ack', attrs: { id: 'AC46729E', to: CONTACT, class: 'status', type: 'text' } },
+  ]);
+  assert.deepEqual(probed, ['3A2069ED', 'AC46729E'], 'a sonda vê o ack');
+  assert.deepEqual(errors, []);
+});
+
+test('status-ack: falha ao enviar o ack é registrada e não derruba o handler', async () => {
+  const { EventEmitter } = await import('node:events');
+  const handlerCode = slice(RECV(), "ws.on('CB:status', (node) => {", '});');
+  const ws = new EventEmitter();
+  const errors = [];
+  new Function('ws', 'sendMessageAck', 'onUnexpectedError', handlerCode)(
+    ws, async () => { throw new Error('socket fechado'); }, (e, where) => errors.push([e.message, where]));
+  ws.emit('CB:status', { tag: 'status', attrs: { id: 'X1', from: CONTACT, type: 'media' } });
+  await sleep(10);
+  assert.deepEqual(errors, [['socket fechado', 'acking status']]);
+});
+
+test('recv-probe: <status> sem ack aparece em stuck e sai com o ack', async () => {
+  const { probe, ws, lines, tick } = await probeHarness();
+  const st = { tag: 'status', attrs: { id: 'ST1', from: 'status@broadcast', type: 'media', offline: '1' } };
+  ws.emit('frame', st);
+  tick(90_000);
+  probe.report('teste');
+  assert.deepEqual(lines[0].frames, { 'status:status': 1 });
+  assert.deepEqual(lines[0].stuck, [{ tag: 'status', id: 'ST1', type: 'media', status: true, offline: true, ageS: 90 }]);
+  probe.acked(st);
+  probe.report('teste');
+  assert.equal(lines[1].pending, 0);
+});

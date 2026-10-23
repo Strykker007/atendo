@@ -9,7 +9,7 @@
 // O que este patch faz (SÓ observa; não muda fluxo, ack nem fila):
 //  - conta os frames recebidos por tipo (message, receipt:<type>, notification:<type>, ack:<class>,
 //    sufixo `:status` para status@broadcast) e as mensagens que viraram messages.upsert;
-//  - guarda message/receipt/notification/call que chegaram e ainda não receberam ack nosso;
+//  - guarda message/receipt/notification/call/status que chegaram e ainda não receberam ack nosso;
 //  - a cada ATENDO_RECV_PROBE_MS (padrão 300000; "0" desliga) e no fechamento do socket imprime uma
 //    linha JSON `{"atendo":"recv-probe",...}` com contagens, há quanto tempo veio o último frame e a
 //    última mensagem, e até 5 nós sem ack há mais de 60 s.
@@ -25,7 +25,7 @@ const MARK = '/*atendo-recv-probe*/';
 
 const PROBE = `    ${MARK}
     const atendoMakeProbe = ({ ws, ev, logger, authState, intervalMs, now = Date.now, print = (line) => console.log(line) }) => {
-        const TRACKED = new Set(['message', 'receipt', 'notification', 'call']);
+        const TRACKED = new Set(['message', 'receipt', 'notification', 'call', 'status']);
         const MAX_PENDING = 2000;
         const instance = (() => { try { return logger.bindings?.().instance; } catch { return undefined; } })();
         const startedAt = now();

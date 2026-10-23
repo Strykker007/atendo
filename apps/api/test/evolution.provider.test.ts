@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { MessageStatus, MessageType, NumberStatus, BillingCategory } from '@atendo/shared';
-import { EvolutionProvider, menuButtonsPayload } from '../src/modules/whatsapp/providers/evolution.provider';
+import { EvolutionProvider, evolutionClientConfig, evolutionShard, menuButtonsPayload } from '../src/modules/whatsapp/providers/evolution.provider';
 import type { NumberContext } from '../src/modules/whatsapp/providers/provider.interface';
 
 const provider = new EvolutionProvider();
@@ -411,5 +411,44 @@ describe('menuButtonsPayload (menu do fluxo como botões no QR)', () => {
   it('com cabeçalho, o texto inteiro vai na descrição', () => {
     const p = menuButtonsPayload({ text: 'Escolha', interactive: { header: 'Portaria', options: [{ id: 'x', title: 'Sim' }] } });
     expect(p).toMatchObject({ title: 'Portaria', description: 'Escolha' });
+  });
+});
+
+describe('evolutionShard: servidor da instância', () => {
+  const canary = { EVOLUTION_CANARY_URL: 'http://evolution-canary:8080', EVOLUTION_CANARY_INSTANCES: ['atendo-01133306-5527996935196'] };
+
+  it('fora da lista do canário: o padrão do .env', () => {
+    expect(evolutionShard({}, 'atendo-x-5500000000000', canary)).toBeUndefined();
+  });
+
+  it('na lista do canário: a Evolution canário, com a mesma chave', () => {
+    expect(evolutionShard({}, 'atendo-01133306-5527996935196', canary)).toEqual({ baseUrl: 'http://evolution-canary:8080' });
+  });
+
+  it('canário sem URL fica desligado mesmo com a instância na lista', () => {
+    expect(evolutionShard({}, 'atendo-01133306-5527996935196', { ...canary, EVOLUTION_CANARY_URL: '' })).toBeUndefined();
+  });
+
+  it('shard gravado no número vence o canário', () => {
+    expect(evolutionShard({ baseUrl: 'http://evo-2:8080', apiKey: 'k2' }, 'atendo-01133306-5527996935196', canary)).toEqual({ baseUrl: 'http://evo-2:8080', apiKey: 'k2' });
+  });
+});
+
+describe('evolutionClientConfig: o que o painel pode gravar', () => {
+  const tenant = '01133306-aaaa-bbbb-cccc-000000000000';
+
+  it('baseUrl e apiKey do body são descartados (vazaria a chave global da Evolution)', () => {
+    expect(evolutionClientConfig({ baseUrl: 'https://atacante.example', apiKey: 'x', instanceName: 'atendo-01133306-5511999999999' }, tenant))
+      .toEqual({ instanceName: 'atendo-01133306-5511999999999' });
+  });
+
+  it('sem instanceName: vazio (o servidor usa o padrão)', () => {
+    expect(evolutionClientConfig({}, tenant)).toEqual({});
+    expect(evolutionClientConfig({ instanceName: '' }, tenant)).toEqual({});
+  });
+
+  it('instanceName de outra conta é recusado', () => {
+    expect(() => evolutionClientConfig({ instanceName: 'atendo-0988678e-5511999648030' }, tenant)).toThrow(/instanceName/);
+    expect(() => evolutionClientConfig({ instanceName: 123 }, tenant)).toThrow(/instanceName/);
   });
 });

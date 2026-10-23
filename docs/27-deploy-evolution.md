@@ -72,6 +72,49 @@ a tag `atendo.4`): a `atendo.4` precisou ser reconstruída a partir da `v1.6.1` 
 `infra/evolution` sobe o sufixo da tag no compose (`atendo.5`, `atendo.6`…). Se mesmo assim a imagem
 do container sumir, o `up` guarda como `previous` a tag que o container pediu (aviso ⚠ no terminal).
 
+## Canário
+
+Imagem nova testada em **poucos números** antes de trocar a de todos. É um segundo container
+(`evolution-canary`, profile `evolution-canary`) com banco próprio (`evolution_canary`, no mesmo
+Postgres do `evolution-db`), Redis próprio (db 7, prefixo `evolution-canary`) e volume próprio. Ele
+nunca carrega as instâncias da principal: duas Evolution com a mesma credencial abririam dois sockets
+e se derrubariam (440, doc 23 › 11). A imagem é `EVOLUTION_CANARY_IMAGE` (padrão no compose).
+
+A API escolhe o servidor por instância (`evolutionShard`, `evolution.provider.ts`): quem está em
+`EVOLUTION_CANARY_INSTANCES` (nomes separados por vírgula) fala com `EVOLUTION_CANARY_URL`; o resto segue no
+`EVOLUTION_BASE_URL`. Mesma `EVOLUTION_API_KEY`, mesmo webhook. Só o `.env.production` decide: o
+painel não grava `baseUrl`/`apiKey` (`evolutionClientConfig`; antes o body aceitava, e a API mandaria a
+chave global para a URL escolhida).
+
+```sh
+bash scripts/deploy-evolution.sh ubuntu@IP canary-status
+bash scripts/deploy-evolution.sh ubuntu@IP canary-build   # da main; constrói só a imagem do canário
+bash scripts/deploy-evolution.sh ubuntu@IP canary-up      # cria o banco se faltar e sobe o canário
+bash scripts/deploy-evolution.sh ubuntu@IP canary-stop
+```
+
+Nenhuma dessas ações toca na Evolution principal. **Não rode `build` da principal** enquanto o canário
+testa uma mudança de `infra/evolution`: ele reconstruiria a tag da principal (`atendo.5`) com o código
+novo (ver Tag nova a cada imagem).
+
+### Mover um número para o canário (precisa de QR)
+
+1. API com suporte ao canário no ar (deploy comum) e, no `.env.production`,
+   `EVOLUTION_CANARY_URL=http://evolution-canary:8080` (lista ainda vazia). `canary-build` + `canary-up`.
+2. No painel, **Desconectar** o número (logout na principal; a instância fica lá, sem credencial).
+3. `EVOLUTION_CANARY_INSTANCES=<instância>` no `.env.production` e recriar só a aplicação:
+   `docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --no-deps api worker`.
+4. No painel, **Conectar** → o QR vem do canário. Ler no celular.
+5. Acompanhar no canário:
+   `docker logs --since 2h atendo-prod-evolution-canary-1 2>&1 | grep -E '"recv-probe"|stream errored'`.
+
+**Voltar para a principal:** Desconectar, tirar a instância da lista, recriar `api worker`, Conectar (QR).
+**Promover a imagem:** subir a tag da `evolution` no compose para a do canário e `up` de madrugada (a
+imagem já existe, não precisa de `build`); depois devolver os números do canário (QR) e `canary-stop`.
+
+**1º uso (23/10/2026):** `atendo.6` (ack de `<status>`, doc 23 › 13) só na Balneário,
+`atendo-01133306-5527996935196`.
+
 ## Risco que sobra
 
 `docker compose up -d` sem nome de serviço ainda **recriaria Postgres/Redis/evolution-db** se a
