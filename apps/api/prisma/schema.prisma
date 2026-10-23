@@ -138,6 +138,9 @@ model User {
   name         String
   passwordHash String
   role         Role
+  /// dono do sistema sem trocar o papel: continua no cliente dele (com o papel e o plano de lá) e
+  /// ganha as telas de dono e a equipe do suporte. `super_admin` (sem cliente) é dono sempre.
+  isSystemOwner Boolean  @default(false)
   /// perfil de acesso: quando presente, é ELE que decide o que o usuário pode fazer.
   /// Sem perfil, vale o conjunto padrão do `role` (ver packages/shared/permissions.ts).
   profileId    String?

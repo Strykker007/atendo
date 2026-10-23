@@ -59,7 +59,7 @@ export default function TemplateEditorPage() {
     setContent(tpl.data.content);
   }, [tpl.data]);
 
-  if (me.data && me.data.role !== 'super_admin') return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
+  if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
   if (!tpl.data || !content) return <PageShell><SkeletonRows rows={4} /></PageShell>;
 
   const edit = (patch: Partial<TemplateContent>) => { setContent({ ...content, ...patch }); setDirty(true); };

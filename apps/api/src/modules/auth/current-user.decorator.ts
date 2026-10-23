@@ -4,11 +4,17 @@ import type { Permission } from '@atendo/shared';
 
 export interface AuthUser {
   id: string;
-  /** null para super_admin (dono do Atendo, sem tenant) — rotas de cliente são bloqueadas pelo TenantGuard */
+  /** null para super_admin sem cliente (dono do Atendo) — rotas de cliente são bloqueadas pelo TenantGuard */
   tenantId: string;
   role: Role;
   email: string;
   name: string;
+  /**
+   * Dono do sistema: `super_admin` ou usuário com `isSystemOwner` (docs/donos-do-sistema.md).
+   * Libera as rotas `@Roles('super_admin')`; dentro do cliente dele valem o papel e o plano de lá.
+   * Preenchido pelo JwtAuthGuard (vem do banco, também "entrando como")
+   */
+  systemOwner?: boolean;
   /** presente quando o dono do sistema está "entrando como" este tenant */
   impersonatorId?: string;
   /** preenchido pelo JwtAuthGuard em toda rota */

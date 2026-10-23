@@ -41,6 +41,7 @@ export interface ShiftSubject {
   id: string;
   tenantId: string | null;
   role: string;
+  isSystemOwner?: boolean;
   name?: string;
   scheduleId: string | null;
   isTemporary: boolean;
@@ -96,7 +97,8 @@ export class ShiftAccessService {
     // conta temporária trava na hora exata do vencimento
     const vence = user.isTemporary ? user.accessExpiresAt : null;
     const livre = { shiftEndsAt: vence, lockedUntil: null };
-    if (user.role === 'super_admin' || user.role === 'tenant_admin' || !user.scheduleId || !user.tenantId) return livre;
+    // dono do sistema (docs/donos-do-sistema.md) não fica preso à escala que o cliente dele montar
+    if (user.role === 'super_admin' || user.role === 'tenant_admin' || user.isSystemOwner || !user.scheduleId || !user.tenantId) return livre;
     const [schedule, settings] = await Promise.all([
       this.prisma.workSchedule.findFirst({ where: { id: user.scheduleId, tenantId: user.tenantId } }),
       this.prisma.tenantSettings.findUnique({ where: { tenantId: user.tenantId }, select: { timezone: true } }),

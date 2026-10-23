@@ -57,6 +57,7 @@ export class JwtAuthGuard implements CanActivate {
     // decidem por permissão (quem vê os atendimentos da equipe, quem transfere os dos outros)
     const scope = await this.permissions.scope(req.user);
     req.user.permissions = scope.permissions;
+    req.user.systemOwner = scope.systemOwner;
     req.user.numberIds = scope.numberIds;
     req.user.ownNumberIds = scope.numberIds;
     req.user.companyRestricted = scope.companyIds.length > 0;
