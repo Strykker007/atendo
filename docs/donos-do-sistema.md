@@ -11,7 +11,7 @@ Plus) não tinha como ser dono sem sair dela.
 |---|---|---|
 | Empresa | nenhuma (`tenantId` null) | a dele, com o papel e o **plano** de lá |
 | Menu | seção de dono + Configurações | menu da empresa + seção **Dono do sistema** |
-| Plano/limites na empresa | — | valem normalmente (a marcação não libera recurso fora do plano) |
+| Plano/limites na empresa | — | **ignorados**: a empresa tem acesso amplo (ver abaixo) |
 | Listas da equipe da empresa (atribuição, departamentos, empresas) | não aparece | aparece, como qualquer membro |
 
 Regra única no código: dono = `role === 'super_admin'` **ou** `isSystemOwner`.
@@ -20,9 +20,29 @@ Regra única no código: dono = `role === 'super_admin'` **ou** `isSystemOwner`.
   cache de 15 s — tirar a marcação vale em segundos) e o `JwtAuthGuard` põe em `AuthUser.systemOwner`.
   O `RolesGuard` deixa o dono entrar nas rotas `@Roles('super_admin')`. O `PermissionsGuard` e o
   `FeatureGuard` **não** mudaram: dentro da empresa, o dono marcado tem as permissões do papel/perfil.
+- **Plano:** a empresa com dono marcado ativo tem **acesso amplo** (abaixo). Dentro dela, as
+  permissões continuam as do papel/perfil de cada pessoa.
 - **Token:** leva `owner: true` só para o socket (salas `owners` e `owner:<id>` da equipe do suporte).
 - **Tela:** `GET /auth/me` devolve `systemOwner`; as telas de dono (`/admin`, `/clientes`,
   `/planos`, `/avisos`, `/donos`) checam esse campo.
+
+## Acesso amplo
+
+Empresa com pelo menos um dono marcado e ativo (`users.isSystemOwner`, `isActive`) ignora o plano:
+`UsageService.limits()` devolve `ownerLimits(...)` (`billing/owner-limits.ts`) com status `active`.
+Como guards, quota, IA, workers e a tela Plano e uso leem só dali, vale para tudo:
+
+- todos os recursos (`PLAN_FEATURES`), inclusive os que rodam sem ninguém logado (IA, pesquisa,
+  Pix, grupos);
+- nenhum limite de números, atendentes, fluxos, respostas rápidas ou empresas;
+- envio sem quota (mensagens, conversas, templates) e sem bloqueio por assinatura suspensa;
+- IA sem limite de interações. **Fica** o teto de custo de IA do plano (`aiMonthlyCostCap`), que
+  protege a plataforma de um fluxo em loop.
+
+Vale para a empresa toda, não só para o dono: os recursos são por empresa. O que muda é só o que a
+empresa pode usar. A mensalidade da assinatura e o registro no ledger (`UsageService.record`)
+continuam iguais. Tirar a marcação (ou desativar o dono) devolve o plano em até uma requisição. "Ver
+cliente" num cliente sem dono mostra o plano dele, como ele vê.
 
 ## Ver cliente
 

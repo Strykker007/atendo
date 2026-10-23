@@ -8,6 +8,7 @@ import { MailService } from '../../common/mail/mail.service';
 import { env } from '../../config/env';
 import { decideCanSend, unitOf, type QuotaDecision, type QuotaKind } from './quota';
 import { effectiveLimits } from './plan-override';
+import { ownerLimits } from './owner-limits';
 
 export const periodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: string) => `usage:${tenantId}:${period}:${metric}`;
@@ -116,11 +117,18 @@ export class UsageService {
    * Limites que valem para o tenant: os do plano, com a personalização do dono por cima quando
    * ela vale (docs/05-planos-e-cobranca.md#personalização-por-cliente). Guards, quota, IA e
    * excedente leem daqui — nunca de `plan.limits` direto.
+   * Empresa com dono do sistema ativo: acesso amplo, qualquer que seja o plano ou a situação da
+   * assinatura (`ownerLimits`, docs/donos-do-sistema.md#acesso-amplo).
    */
   async limits(tenantId: string): Promise<{ limits: PlanLimits; status: string } | null> {
-    const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true, tenant: { select: { planOverride: true } } } });
-    if (!sub) return null;
-    return { limits: effectiveLimits(sub.plan.limits as unknown as PlanLimits, sub.tenant.planOverride, sub.planId), status: sub.status };
+    const [sub, owner] = await Promise.all([
+      this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true, tenant: { select: { planOverride: true } } } }),
+      this.prisma.user.findFirst({ where: { tenantId, isSystemOwner: true, isActive: true }, select: { id: true } }),
+    ]);
+    const plan = sub ? effectiveLimits(sub.plan.limits as unknown as PlanLimits, sub.tenant.planOverride, sub.planId) : null;
+    if (owner) return { limits: ownerLimits(plan), status: 'active' };
+    if (!sub || !plan) return null;
+    return { limits: plan, status: sub.status };
   }
 
   /** Quanto o tenant já usa de um limite de quantidade (o que conta para `CountLimit`). */
