@@ -365,7 +365,11 @@ pelo próprio celular (`patch-evolution-placeholder-triggers.mjs`). Os testes de
 - `patch-evolution-creds-read.mjs`: leitura da credencial que falha (banco sobrecarregado) não vira
   credencial nova gravada por cima da pareada — o connect falha e a guarda tenta de novo;
 - `patch-baileys-recv.mjs`: recebimento que não trava (fila com prazo, offline que não morre, NACK);
-- `patch-evolution-baileys-logger.mjs`: nome da instância (`instance`) em toda linha de log do Baileys.
+- `patch-evolution-baileys-logger.mjs`: nome da instância (`instance`) em toda linha de log do Baileys;
+- `patch-baileys-status-ack.mjs` (`v2.3.7-atendo.6`, [23 › 13](23-evolution-desempenho.md)): ack da stanza
+  `<status>` (stories). Sem ele o WhatsApp derruba o stream a cada ~50 min e, quando os status
+  pendentes se acumulam, o número para de receber. Em teste só na Balneário pelo canário
+  ([27 › Canário](27-deploy-evolution.md#canário)).
 - No compose, `DATABASE_SAVE_IS_ON_WHATSAPP: "false"` desliga o cache `IsOnWhatsapp` que o `.env` da
   imagem liga (consulta que varria a tabela inteira a cada mensagem).
 

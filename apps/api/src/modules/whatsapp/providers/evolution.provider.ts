@@ -16,7 +16,9 @@ export interface EvolutionNumberConfig {
   /** token da instância (Evolution gera um por instância) */
   instanceToken?: string;
   /**
-   * Shard: qual servidor Evolution hospeda esta instância. Vazio = o padrão do .env.
+   * Shard: qual servidor Evolution hospeda esta instância. Vazio = o canário, se a instância estiver
+   * em EVOLUTION_CANARY_INSTANCES, senão o padrão do .env (`evolutionShard`). Só o servidor grava —
+   * o painel não consegue (`evolutionClientConfig`).
    * Com centenas de números, distribuímos entre vários servidores (cada instância Baileys custa ~100 MB de RAM).
    */
   baseUrl?: string;
@@ -60,8 +62,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   private shard(ctx: NumberContext) {
-    const c = ctx.config as unknown as EvolutionNumberConfig;
-    return c.baseUrl ? { baseUrl: c.baseUrl, apiKey: c.apiKey } : undefined;
+    return evolutionShard(ctx.config as unknown as EvolutionNumberConfig, this.instance(ctx), env);
   }
 
   private instance(ctx: NumberContext) {
@@ -751,6 +752,34 @@ export class EvolutionProvider implements WhatsAppProvider {
 export const EVOLUTION_TIMEOUT_MS = 15_000;
 export const EVOLUTION_MEDIA_TIMEOUT_MS = 60_000;
 const ROTAS_LENTAS = /^\/(message\/(sendMedia|sendWhatsAppAudio)|chat\/(getBase64FromMediaMessage|findContacts)|group\/fetchAllGroups|instance\/restart)\//;
+
+/**
+ * Servidor Evolution da instância: o shard gravado no número (só o servidor grava — ver
+ * `evolutionClientConfig`), senão o canário se a instância estiver na lista, senão o padrão (undefined).
+ */
+export function evolutionShard(
+  config: Pick<EvolutionNumberConfig, 'baseUrl' | 'apiKey'>,
+  instanceName: string,
+  canary: { EVOLUTION_CANARY_URL: string; EVOLUTION_CANARY_INSTANCES: string[] },
+): { baseUrl: string; apiKey?: string } | undefined {
+  if (config.baseUrl) return { baseUrl: config.baseUrl, apiKey: config.apiKey };
+  if (canary.EVOLUTION_CANARY_URL && canary.EVOLUTION_CANARY_INSTANCES.includes(instanceName)) return { baseUrl: canary.EVOLUTION_CANARY_URL };
+  return undefined;
+}
+
+/**
+ * Config da Evolution vinda do painel. `baseUrl`/`apiKey` nunca: a API mandaria a chave global da
+ * Evolution (header `apikey`) para a URL que o cliente escolhesse. `instanceName` só no prefixo da
+ * própria conta — o front não manda, o padrão é `atendo-<tenant>-<telefone>`.
+ */
+export function evolutionClientConfig(config: Record<string, unknown>, tenantId: string): { instanceName?: string } {
+  const name = config.instanceName;
+  if (name === undefined || name === null || name === '') return {};
+  if (typeof name !== 'string' || !name.startsWith(`atendo-${tenantId.slice(0, 8)}-`)) {
+    throw new BadRequestException('instanceName inválido para esta conta');
+  }
+  return { instanceName: name };
+}
 
 export function evolutionTimeoutMs(path: string, delayMs = 0): number {
   return (ROTAS_LENTAS.test(path) ? EVOLUTION_MEDIA_TIMEOUT_MS : EVOLUTION_TIMEOUT_MS) + Math.max(0, delayMs);

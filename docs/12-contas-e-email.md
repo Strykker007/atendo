@@ -64,6 +64,9 @@ O convite **não depende de e-mail**. Ao criar um atendente sem senha, a API dev
 `inviteLink`, e a tela de Equipe tem **"Copiar link do convite"** — o admin manda por
 WhatsApp. O link vale 3 dias e gerar um novo invalida o anterior.
 
+Cada link é **de uma pessoa**: convidando várias seguidas, a tela de Equipe lista todos os links
+gerados, um por linha, com o nome de quem é (antes mostrava só o último, sem dono).
+
 Isso existe porque e-mail é uma dependência externa que atrasa a entrada de um cliente
 (precisa de domínio verificado) e, mesmo configurado, cai em spam. Com o link, o cliente
 cadastra a equipe dele no primeiro dia.

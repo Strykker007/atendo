@@ -5,7 +5,7 @@ import { Eye, LogOut } from 'lucide-react';
 import { impersonation, setAccessToken, api } from '@/lib/api';
 import { useMe } from '@/lib/hooks';
 
-/** Faixa fixa quando o dono está "dentro" de um cliente. Sair volta ao Financeiro. */
+/** Faixa fixa quando o dono está "dentro" de um cliente. Sair volta à conta dele (empresa própria ou Clientes). */
 export function ImpersonationBanner() {
   const me = useMe();
   const qc = useQueryClient();
@@ -19,7 +19,9 @@ export function ImpersonationBanner() {
     // refresh devolve o token do dono (sem impersonação, pois o flag já foi limpo)
     try { const r = await api<{ accessToken: string }>('/auth/refresh', { method: 'POST' }, false); setAccessToken(r.accessToken); } catch { /* login pedirá de novo */ }
     qc.clear();
-    router.replace('/clientes');
+    // dono com empresa própria volta às conversas dela; sem empresa, à lista de clientes
+    const eu = await api<{ tenantId: string | null }>('/auth/me').catch(() => null);
+    router.replace(eu?.tenantId ? '/conversas' : '/clientes');
   }
 
   return (

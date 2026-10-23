@@ -2,12 +2,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock } from 'lucide-react';
+import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
 import { useNav } from './NavigationProgress';
 import { CompanySwitcher } from './CompanySwitcher';
+import { OwnerSwitcher } from './OwnerSwitcher';
 import { ESCALAS_ABAS, primeiraAbaEscalas } from '@/components/escalas/EscalasTabs';
 import { NoticeBell } from './SystemNotices';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
@@ -20,6 +21,7 @@ const OWNER_ITEMS = [
   { href: '/clientes', label: 'Clientes', icon: Building2 },
   { href: '/planos', label: 'Planos', icon: Package },
   { href: '/avisos', label: 'Avisos', icon: Megaphone },
+  { href: '/donos', label: 'Donos do sistema', icon: KeyRound },
 ];
 /**
  * Regra do menu (docs/08-frontend.md#menu-lateral): item que a pessoa não pode usar não aparece.
@@ -87,10 +89,20 @@ export function Sidebar() {
     setAccessToken(null);
     window.location.href = '/login';
   }
+  /**
+   * Menu: o do cliente (a empresa do dono, ou a que ele está vendo) + a seção de dono para quem é
+   * dono do sistema (docs/donos-do-sistema.md). Dono sem empresa e fora de cliente: só a seção
+   * de dono e Configurações, como antes.
+   */
   const doCliente = items
     .filter((i) => (!i.need || i.need.some(permitido)) && (!i.feature || noPlano(i.feature)))
     .map((i) => (i.href === '/escalas' ? { ...i, href: primeiraAbaEscalas(minhas) ?? i.href } : i));
-  const menu = me.data?.role === 'super_admin' ? [...OWNER_ITEMS, items[items.length - 1]] : doCliente;
+  const semCliente = !me.data?.tenantId;
+  const menu: { href: string; label: string; icon: typeof MessageSquare; secao?: string }[] = !me.data?.systemOwner
+    ? doCliente
+    : semCliente
+      ? [...OWNER_ITEMS, items[items.length - 1]]
+      : [...doCliente, ...OWNER_ITEMS.map((i, n) => (n === 0 ? { ...i, secao: 'Dono do sistema' } : i))];
   const waiting = counts.data?.waiting ?? 0;
   // pedidos de autorização de plantão esperando resposta (docs/escalas.md#pedido-de-autorização)
   const pedidos = useAccessRequests(me.data?.role !== 'super_admin' && permitido('team.manage')).data?.length ?? 0;
@@ -123,17 +135,22 @@ export function Sidebar() {
         </>
       )}
       {/* empresa/unidade ativa: some quando o cliente não usa empresas */}
+      {/* dono: entra em qualquer cliente pelo menu (docs/donos-do-sistema.md#ver-cliente) */}
+      {me.data?.systemOwner && <OwnerSwitcher collapsed={collapsed} />}
       {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}
 
       <nav className="flex-1 py-2">
-        {menu.map(({ href, label, icon: Icon }) => {
+        {menu.map(({ href, label, icon: Icon, secao }) => {
           // as abas de Escalas e plantões contam como o mesmo item
           const raiz = href.startsWith('/escalas/') ? '/escalas' : href;
           const active = target ? target === href : path.startsWith(raiz);
           const badge = href === '/conversas' && waiting > 0 ? waiting : raiz === '/escalas' && pedidos > 0 ? pedidos : null;
           return (
+            <div key={href}>
+            {secao && (collapsed
+              ? <div className="mx-3 my-1.5 border-t border-side-line" />
+              : <div className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-side-ink/50">{secao}</div>)}
             <Link
-              key={href}
               href={href}
               title={badge ? `${label} · ${badge} aguardando` : label}
               onClick={() => { if (!path.startsWith(raiz)) setTarget(href); }}
@@ -150,6 +167,7 @@ export function Sidebar() {
                 <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-wait text-white', collapsed ? 'absolute -top-0.5 right-1' : 'ml-auto')}>{badge}</span>
               )}
             </Link>
+            </div>
           );
         })}
       </nav>
@@ -158,7 +176,7 @@ export function Sidebar() {
         {!collapsed && me.data && (
           <div className="px-3 py-1.5 text-xs">
             <div className="text-white font-medium truncate">{me.data.name}</div>
-            <div className="text-side-ink/70 truncate">{{ agent: 'Atendente', manager: 'Gerente', tenant_admin: me.data.impersonatorId ? 'Dono · dentro do cliente' : 'Administrador', super_admin: 'Dono do sistema' }[me.data.role]}</div>
+            <div className="text-side-ink/70 truncate">{{ agent: 'Atendente', manager: 'Gerente', tenant_admin: me.data.impersonatorId ? 'Dono · dentro do cliente' : 'Administrador', super_admin: 'Dono do sistema' }[me.data.role]}{me.data.systemOwner && !me.data.impersonatorId && me.data.role !== 'super_admin' ? ' · dono do sistema' : ''}</div>
           </div>
         )}
         <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white disabled:opacity-60', collapsed && 'justify-center px-0')}>

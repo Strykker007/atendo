@@ -437,3 +437,57 @@ docker logs --since 2h atendo-prod-evolution-1 2>&1 | grep '"recv-probe"' | grep
 **Pendente:** deploy da imagem `v2.3.7-atendo.5` (= `atendo.4` + sonda; `deploy-evolution.sh build` + `up`, de madrugada);
 Kelly I precisa de QR; investigar o 500 `ack class="status"`;
 o host não tem rotação de log do Docker (a sonda acrescenta ~6 MB/dia).
+
+## 13. 22–23/10/2026 — Balneário "muda" desde 20:25: leitura da sonda (`atendo.5`)
+
+Sonda da § 12 em produção (`v2.3.7-atendo.5`). Linha do tempo da Balneário (cEL 5196), UTC:
+
+- 21:42 QR novo. Sockets gen 14 e 15 normais: 30–50 `message` a cada 5 min, recibos, `notification:*`,
+  `message:status` ao vivo.
+- 22:35 `500 Stream Errored (ack)` (`<ack class="status" type="media">`) → reconecta e **continua normal**.
+- **23:25 (20:25 BRT)** mesmo `500 (ack class=status)` → gen 16 em diante (~25 sockets até 10:35 de 23/10,
+  incluindo 8 restarts manuais entre 09:13 e 10:10): todo socket recebe só a rajada inicial (`success` +
+  ~90–105 `status:status`, às vezes poucas `message`) e depois **só ping** (`iq`/`ib`) até cair de novo
+  pelo próximo `500 (ack)` ~50 min depois.
+
+**O que isso descarta:**
+- Não é o socket caindo nem o nosso pipeline: o socket fica aberto (ping a cada ~30 s, `stuck` vazio) e
+  todo `message` que chega vira `upsert`.
+- Não é configuração da instância: `readStatus`/`readMessages`/`alwaysOnline`/`syncFullHistory` iguais
+  (`false`) nas 70 instâncias.
+- Não é falta de pre-key: `nextPreKeyId` 1630 em ~15 h (≈ 2 lotes de 812), normal.
+
+**O que aponta:** o WhatsApp deixa de empurrar tráfego ao vivo para o aparelho vinculado (nem
+`notification:devices`, que os saudáveis recebem o tempo todo). A cada conexão ele reentrega ~100 status
+— sinal de que não considera esses status confirmados. O gatilho coincide com o `500` em que o servidor
+rejeita um `ack` nosso de `class="status"`. O erro acontece em vários números (148 em 24 h), mas só
+Balneário e Kelly I (5511999648030) ficam mudas; 5562994185447 e 5544991068595 têm pouco tráfego e
+precisam ser conferidas. Restart não resolve (o estado é do lado do servidor para aquele aparelho); QR
+novo resolve até o próximo `500 (ack)` "ruim".
+
+**Ponto cego:** `CB:success` do Baileys rc.9 pula o `passive → active` se `uploadPreKeysToServerIfRequired`
+falhar, mas emite `connection: open` mesmo assim; o aviso (`failed to send initial passive iq`) é `warn`
+e o logger do Baileys está em `error`, então não aparece.
+
+**Causa (achada no mesmo dia):** os `status:status` da sonda são stanzas com a **tag `<status>`**
+(não `<message from="status@broadcast">`). O WhatsApp passou a entregar os status dos contatos assim
+em parte das contas, aos poucos, e o Baileys **não tem handler** para essa tag (rc.9, rc14 e `master`):
+ela nunca recebe ack. ~50 min depois o servidor encerra o stream cobrando esse ack (o `500 (ack)`
+"paralelo" da § 12, 148 vezes em 24 h). Na reconexão ele reentrega os mesmos `<status>` no offline, e
+eles continuam sem ack. Quando enchem o lote offline (a rajada inicial soma sempre ~105 frames),
+nada mais passa: só ping, "conectado, envia, não recebe". QR novo esvazia a fila até acumular de
+novo, por isso "volta e trava". Upstream: Baileys#2858 (outra instalação com Evolution 2.3.7 + rc.9,
+onde nem QR resolvia) e PR #2866, ainda aberto. **Atualizar o Baileys não corrige:** nenhuma versão
+publicada trata `<status>`. Os commits de ack/offline do rc14 (#2373, #2280, #2138) não tratam essa tag.
+
+**Correção:** `infra/evolution/patch-baileys-status-ack.mjs` (imagem `v2.3.7-atendo.6`): ack imediato
+de todo `<status>`, sem erro, pelo `sendMessageAck` do rc.9 (`class="status"` + `type`/`participant`). A
+sonda passa a acompanhar `<status>` sem ack (`stuck`). Primeiro só na Balneário, pelo canário (doc 27
+› Canário). Sinais de que funcionou: nenhum `stream errored out` com `"class":"status"` no canário,
+os `<status>` reentregues uma vez e acabou, e a sonda mostrando `message`/`notification` depois dos
+5 primeiros minutos.
+
+**Upstream (23/10/2026):** a Evolution não lançou nada depois da 2.4.0-rc2 (17/05, ainda rc.9). O
+`develop` (14/07) usa Baileys rc13 e mantém o 408 em `codesToNotReconnect` (doc 25 › 3). O Baileys
+está no rc14 (29/07). Quando o upstream tratar `<status>`, o patch falha o build de propósito
+("já trata CB:status") e sai.

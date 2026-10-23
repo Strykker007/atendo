@@ -16,7 +16,7 @@ import type { Permission } from '@atendo/shared';
  */
 @Injectable()
 export class PermissionsService {
-  private readonly cache = new Map<string, { at: number; permissions: string[] | null; numberIds: string[]; departmentIds: string[]; companyIds: string[] }>();
+  private readonly cache = new Map<string, { at: number; permissions: string[] | null; numberIds: string[]; departmentIds: string[]; companyIds: string[]; systemOwner: boolean }>();
   /** empresas de cada cliente → números delas (docs/empresas.md) */
   private readonly companies = new Map<string, { at: number; map: Map<string, string[]> }>();
   private static readonly TTL_MS = 15_000;
@@ -24,9 +24,17 @@ export class PermissionsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Permissões (o que pode fazer), números e departamentos (sobre quais dados) numa consulta só. */
-  async scope(user: { id: string; role: Principal['role'] }): Promise<{ permissions: Permission[]; numberIds: string[]; departmentIds: string[]; companyIds: string[] }> {
+  async scope(user: { id: string; role: Principal['role']; impersonatorId?: string }): Promise<{ permissions: Permission[]; numberIds: string[]; departmentIds: string[]; companyIds: string[]; systemOwner: boolean }> {
     const row = await this.load(user.id);
+    // "entrando como": admin completo do cliente visitado. Perfil, números, departamentos e
+    // empresas são do cliente de origem do dono (docs/donos-do-sistema.md) — aplicados aqui,
+    // recortariam o cliente visitado por ids de outro cliente
+    if (user.impersonatorId) {
+      return { permissions: permissionsOf({ role: user.role, profilePermissions: null }), numberIds: [], departmentIds: [], companyIds: [], systemOwner: row.systemOwner };
+    }
     return {
+      // lido do banco (com o cache curto), não do token: tirar a marcação vale em segundos
+      systemOwner: user.role === 'super_admin' || row.systemOwner,
       permissions: permissionsOf({ role: user.role, profilePermissions: row.permissions }),
       numberIds: row.numberIds,
       departmentIds: row.departmentIds,
@@ -49,7 +57,7 @@ export class PermissionsService {
     if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit;
     const row = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { profile: { select: { permissions: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } }, companies: { select: { companyId: true } } },
+      select: { isSystemOwner: true, role: true, profile: { select: { permissions: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } }, companies: { select: { companyId: true } } },
     });
     const entry = {
       at: Date.now(),
@@ -57,12 +65,14 @@ export class PermissionsService {
       numberIds: (row?.numbers ?? []).map((n) => n.numberId),
       departmentIds: (row?.departments ?? []).map((d) => d.departmentId),
       companyIds: (row?.companies ?? []).map((c) => c.companyId),
+      // pelo papel guardado, não o do token: "entrando como" o token diz tenant_admin
+      systemOwner: !!row?.isSystemOwner || row?.role === 'super_admin',
     };
     this.cache.set(userId, entry);
     return entry;
   }
 
-  /** Chamar sempre que um perfil for salvo, um usuário trocar de perfil, departamento ou empresa, ou uma empresa mudar de números. */
+  /** Chamar sempre que um perfil for salvo, um usuário trocar de perfil, departamento, empresa ou marcação de dono, ou uma empresa mudar de números. */
   invalidate() {
     this.cache.clear();
     this.companies.clear();

@@ -55,7 +55,7 @@ export default function AdminPage() {
   const [period, setPeriod] = useState(periodOf(new Date()));
   const fin = useFinance(months);
   const margin = useMargin(period);
-  if (me.data && me.data.role !== 'super_admin') return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
+  if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
   const d = fin.data;
   const series = d?.series.map((s) => ({ ...s, mes: mm(s.period), Faturado: s.invoiced, Recebido: s.received, Atrasado: s.overdue, Custo: s.providerCost + s.infraCost, Excedente: s.overage, Clientes: s.newTenants })) ?? [];

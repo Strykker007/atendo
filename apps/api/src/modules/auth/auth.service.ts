@@ -185,7 +185,7 @@ Seu login será: ${user.email}`,
     return removed;
   }
 
-  private async issue(user: { id: string; tenantId: string | null; role: string; email: string; name: string }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow) {
+  private async issue(user: { id: string; tenantId: string | null; role: string; email: string; name: string; isSystemOwner?: boolean }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow) {
     // Fim de turno viaja no token: o JwtAuthGuard trava as ações sem consultar o banco a cada
     // requisição. `shiftEndsAt` = a partir de quando trava; `locked` = já nasce travado (passagem)
     const sec = (d: Date) => Math.floor(d.getTime() / 1000);
@@ -196,7 +196,8 @@ Seu login será: ${user.email}`,
     const ttl = janela?.lockedUntil ? Math.max(30, Math.min(ttlMs(env.JWT_ACCESS_TTL), janela.lockedUntil.getTime() - Date.now()) / 1000 | 0) : (env.JWT_ACCESS_TTL as any);
     const accessToken = await this.jwt.signAsync(
       // `iatMs`: o corte de sessão (cutSessions) compara em milissegundos — `iat` do JWT é em segundos
-      { sub: user.id, tenantId: user.tenantId, role: user.role, email: user.email, name: user.name, iatMs: Date.now(), ...shift },
+      // `owner`: só para o socket (salas do suporte); nas rotas a marcação vem do banco (PermissionsService)
+      { sub: user.id, tenantId: user.tenantId, role: user.role, email: user.email, name: user.name, iatMs: Date.now(), ...(user.isSystemOwner && { owner: true }), ...shift },
       { secret: env.JWT_ACCESS_SECRET, expiresIn: ttl },
     );
     const refreshToken = randomBytes(48).toString('base64url');
@@ -211,8 +212,11 @@ Seu login será: ${user.email}`,
    * marcado com `impersonatorId`. O refresh cookie continua sendo o do dono — o front renova
    * chamando /tenants/:id/impersonate de novo.
    */
-  async impersonate(owner: { id: string; email: string; name: string }, tenantId: string) {
+  async impersonate(caller: { id: string; impersonatorId?: string }, tenantId: string) {
     const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    // nome e e-mail do banco: trocando de um cliente para outro, o token atual já é o de
+    // "entrando como" (nome com "(dono)") — docs/donos-do-sistema.md#ver-cliente
+    const owner = await this.prisma.user.findUniqueOrThrow({ where: { id: caller.impersonatorId ?? caller.id }, select: { id: true, email: true, name: true } });
     const accessToken = await this.jwt.signAsync(
       { sub: owner.id, tenantId: tenant.id, role: 'tenant_admin', email: owner.email, name: `${owner.name} (dono)`, impersonatorId: owner.id },
       { secret: env.JWT_ACCESS_SECRET, expiresIn: '1h' as any },

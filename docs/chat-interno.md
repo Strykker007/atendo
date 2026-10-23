@@ -78,17 +78,18 @@ resposta do suporte depois dela.
 
 ## Equipe do suporte
 
-Os donos do sistema (`super_admin`, sem cliente) não são equipe de nenhum cliente, então não
-cabem no chat interno acima — antes só se falavam abrindo um canal de suporte. O chat da equipe
+Os donos do sistema ([Donos do sistema](donos-do-sistema.md): `super_admin` sem cliente ou usuário
+com `isSystemOwner`) não são a mesma equipe de cliente, então não cabem no chat interno acima — antes só se falavam abrindo um canal de suporte. O chat da equipe
 do suporte é separado (tabelas `staff_*`, rotas `/super-admin/staff/*`):
 
 | Regra | Onde |
 |---|---|
-| Canal fixo **Equipe do suporte** (`staff_chats.key = "team"`): todo `super_admin` ativo lê e escreve, sem cadastro — quem vira super_admin já entra, quem é desativado sai | `StaffChatController.chatOf` |
+| Canal fixo **Equipe do suporte** (`staff_chats.key = "team"`): todo dono ativo lê e escreve, sem cadastro — quem vira dono já entra, quem é desativado ou perde a marcação sai | `StaffChatController.chatOf` |
 | Conversa **direta** entre dois do suporte: uma por par (`key = "<menor id>:<maior id>"`) | `POST /super-admin/staff/chats` |
 | Não lidas por pessoa: `staff_chat_members.lastReadAt` (no canal da equipe a linha nasce sob demanda) | `send` / `read` |
 | Tempo real: `staff_message` — canal da equipe vai para a sala `owners`; direta, só para `owner:<id>` de cada um | `ConversationsGateway.emitStaffMessage` |
-| "Online agora" = super_admin com o painel aberto logado como ele mesmo | `ConversationsGateway.ownersOnline` |
+| "Online agora" = dono com o painel aberto logado como ele mesmo (`client.data.staff`) | `ConversationsGateway.ownersOnline` |
+| Dono marcado, na empresa dele: o widget mostra **Minha equipe \| Equipe do suporte** | `TeamAndStaffHome` |
 | Sem grupos, sem apagar/editar, sem auditoria por cliente (não é dado de cliente) | — |
 
 No widget do dono, o topo alterna **Clientes** (a fila de suporte) e **Equipe do suporte**

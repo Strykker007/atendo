@@ -38,3 +38,4 @@ export * from './hooks/contatos';
 export * from './hooks/isentos';
 export * from './hooks/chat-interno';
 export * from './hooks/escalas';
+export * from './hooks/donos';

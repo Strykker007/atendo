@@ -41,6 +41,17 @@ const schema = z.object({
   EVOLUTION_BASE_URL: z.string().url(),
   EVOLUTION_API_KEY: z.string().min(1),
   /**
+   * Evolution canário (docs/27-deploy-evolution.md#canário): imagem nova testada em poucos números
+   * antes de ir para todos. Só as instâncias de EVOLUTION_CANARY_INSTANCES (nomes separados por
+   * vírgula) falam com EVOLUTION_CANARY_URL; as demais seguem no EVOLUTION_BASE_URL. Mesma chave.
+   * Qualquer um dos dois vazio = desligado.
+   */
+  EVOLUTION_CANARY_URL: z.union([z.literal(''), z.string().url()]).default(''),
+  EVOLUTION_CANARY_INSTANCES: z
+    .string()
+    .default('')
+    .transform((s) => s.split(',').map((o) => o.trim()).filter(Boolean)),
+  /**
    * Pix como cartão nativo ("Copiar chave Pix") na Evolution. Exige a imagem com o patch do nó
    * <biz> (infra/evolution): sem ele o WhatsApp entrega (`delivered`) e o celular não exibe nada.
    * Desligado = sai como texto (docs/04-providers-whatsapp.md#chave-pix-copiar-chave-pix).

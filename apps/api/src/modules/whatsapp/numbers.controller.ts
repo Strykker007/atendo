@@ -19,6 +19,7 @@ import { canManageNumber, canUseNumber, unrestricted } from '../auth/number-scop
 import { ContactsSyncScheduler } from './contacts-sync';
 import { textSearch } from '../../common/text-search';
 import { phoneVariants } from '../conversations/phone-variants';
+import { evolutionClientConfig, type EvolutionNumberConfig } from './providers/evolution.provider';
 
 class CreateNumberDto {
   @Matches(/^\+?[1-9]\d{7,14}$/) phone: string;
@@ -97,8 +98,9 @@ export class NumbersController {
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxNumbers')
   async create(@CurrentUser() user: AuthUser, @Body() dto: CreateNumberDto) {
-    const externalId = String(dto.config.phoneNumberId ?? dto.config.instanceName ?? `atendo-${user.tenantId.slice(0, 8)}-${dto.phone}`);
-    const config = dto.provider === 'evolution' ? { instanceName: externalId, ...dto.config } : dto.config;
+    const evo = dto.provider === 'evolution' ? evolutionClientConfig(dto.config, user.tenantId) : undefined;
+    const externalId = String((evo ? evo.instanceName : (dto.config.phoneNumberId ?? dto.config.instanceName)) ?? `atendo-${user.tenantId.slice(0, 8)}-${dto.phone}`);
+    const config = evo ? { instanceName: externalId } : dto.config;
     const phone = dto.phone.replace(/^\+/, '');
     const data = {
       label: dto.label,
@@ -134,8 +136,15 @@ export class NumbersController {
   @Put(':id/provider')
   @RequirePermission('numbers.manage')
   async switchProvider(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: SwitchProviderDto) {
-    await this.manageable(user, id);
-    return this.numbers.switchProvider(id, dto.provider, dto.config as any);
+    const n = await this.manageable(user, id);
+    if (dto.provider !== 'evolution') return this.numbers.switchProvider(id, dto.provider, dto.config as any);
+    // continua na Evolution: o shard (servidor da instância) é do servidor, não do body
+    const current = n.provider === 'evolution' ? ((await this.numbers.context(id)).config as unknown as EvolutionNumberConfig) : undefined;
+    const config: EvolutionNumberConfig = {
+      instanceName: evolutionClientConfig(dto.config, user.tenantId).instanceName ?? current?.instanceName ?? `atendo-${user.tenantId.slice(0, 8)}-${n.phone}`,
+      ...(current?.baseUrl ? { baseUrl: current.baseUrl, apiKey: current.apiKey } : {}),
+    };
+    return this.numbers.switchProvider(id, dto.provider, config);
   }
 
   @Patch(':id')

@@ -12,6 +12,8 @@ export class RolesGuard implements CanActivate {
     const roles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (!roles?.length) return true;
     const user = ctx.switchToHttp().getRequest().user;
+    // dono do sistema por marcação (docs/donos-do-sistema.md) entra nas rotas de dono sem ter o papel
+    if (user?.systemOwner && roles.includes('super_admin')) return true;
     if (!user || !roles.includes(user.role)) throw new ForbiddenException('Sem permissão');
     return true;
   }

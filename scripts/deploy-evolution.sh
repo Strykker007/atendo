@@ -11,6 +11,13 @@
 #             do Redis antes. Não recria evolution-db nem redis.
 #   rollback  volta o container para atendo/evolution-api:previous (mesma confirmação).
 #
+# Canário (docs/27-deploy-evolution.md#canário) — container à parte, só para as instâncias de
+# EVOLUTION_CANARY_INSTANCES; nenhuma destas ações toca na Evolution principal:
+#   canary-status  imagem pedida × rodando e instâncias abertas no canário.
+#   canary-build   como `build`, mas constrói a imagem do canário (EVOLUTION_CANARY_IMAGE).
+#   canary-up      cria o banco evolution_canary se faltar e sobe/troca o container do canário.
+#   canary-stop    para o canário (os números dele ficam sem conexão até voltarem para a principal).
+#
 # Sem `up`/`rollback`, nada é reiniciado. Rodar fora de horário de movimento (doc 23 › 4).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,7 +25,7 @@ cd "$(dirname "$0")/.."
 source scripts/lib/prod-compose.sh
 
 HOST=${1:?informe o destino, ex.: bash scripts/deploy-evolution.sh ubuntu@1.2.3.4 status}
-ACTION=${2:?informe a ação: status | build | up | rollback}
+ACTION=${2:?informe a ação: status | build | up | rollback | canary-status | canary-build | canary-up | canary-stop}
 KEY=${3:-$HOME/.ssh/atendo-prod.key}
 SSH="ssh -i $KEY -o BatchMode=yes"
 CONFIRM_PHRASE="RECONECTAR TODOS OS NUMEROS"
@@ -33,6 +40,23 @@ status() {
   echo "▶ Pedida pelo compose: $(remote "$(pc_evo_wanted_cmd)")"
   echo "▶ Rodando:             $(remote "$(pc_evo_running_cmd)")"
   echo "▶ Instâncias abertas:  $(remote "$PC_SUDO docker exec \$($(pc_compose) --profile evolution ps -q evolution | head -1) sh -c 'wget -qO- --header=\"apikey: \$AUTHENTICATION_API_KEY\" http://localhost:8080/instance/fetchInstances' | grep -o '\"connectionStatus\":\"open\"' | wc -l" || echo '?')"
+}
+
+canary_status() {
+  echo "▶ Canário pedido:      $(remote "$(pc_canary_wanted_cmd)")"
+  echo "▶ Canário rodando:     $(remote "$(pc_canary_running_cmd)")"
+  echo "▶ Abertas no canário:  $(remote "id=\$($(pc_compose) --profile evolution-canary ps -q evolution-canary | head -1); [ -n \"\$id\" ] && $PC_SUDO docker exec \"\$id\" sh -c 'wget -qO- --header=\"apikey: \$AUTHENTICATION_API_KEY\" http://localhost:8080/instance/fetchInstances' | grep -o '\"connectionStatus\":\"open\"' | wc -l || echo 0" || echo '?')"
+}
+
+# envio do código: só da main e sem alteração pendente (DEPLOY_ANY_BRANCH=1 para emergência)
+send_evolution_code() {
+  if [ "${DEPLOY_ANY_BRANCH:-}" != "1" ]; then
+    [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || { echo "✖ Só da main (DEPLOY_ANY_BRANCH=1 para emergência)." >&2; exit 1; }
+    [ -z "$(git status --porcelain)" ] || { echo "✖ Há alterações não commitadas." >&2; exit 1; }
+  fi
+  echo "▶ Enviando infra/evolution e o compose…"
+  rsync -az --delete -e "$SSH" infra/evolution/ "$HOST:~/atendo/infra/evolution/"
+  rsync -az -e "$SSH" "$PC_FILE" "$HOST:~/atendo/$PC_FILE"
 }
 
 confirm() {
@@ -61,13 +85,7 @@ case "$ACTION" in
   status)
     status ;;
   build)
-    if [ "${DEPLOY_ANY_BRANCH:-}" != "1" ]; then
-      [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || { echo "✖ Só da main (DEPLOY_ANY_BRANCH=1 para emergência)." >&2; exit 1; }
-      [ -z "$(git status --porcelain)" ] || { echo "✖ Há alterações não commitadas." >&2; exit 1; }
-    fi
-    echo "▶ Enviando infra/evolution e o compose…"
-    rsync -az --delete -e "$SSH" infra/evolution/ "$HOST:~/atendo/infra/evolution/"
-    rsync -az -e "$SSH" "$PC_FILE" "$HOST:~/atendo/$PC_FILE"
+    send_evolution_code
     echo "▶ Construindo (os testes dos patches rodam no build; falhou = imagem não gerada)…"
     remote "$(pc_evo_build_cmd)"
     status
@@ -94,6 +112,26 @@ case "$ACTION" in
     sleep 30
     status
     echo "ℹ O compose continua pedindo a imagem nova: o deploy comum avisa a diferença e não mexe." ;;
+  canary-status)
+    canary_status ;;
+  canary-build)
+    send_evolution_code
+    echo "▶ Construindo a imagem do canário (testes dos patches no build)…"
+    remote "$(pc_canary_build_cmd)"
+    canary_status
+    echo "ℹ Canário não foi trocado. Para subir: bash scripts/deploy-evolution.sh $HOST canary-up" ;;
+  canary-up)
+    WANTED=$(remote "$(pc_canary_wanted_cmd)")
+    [ -n "$WANTED" ] || { echo "✖ Não achei a imagem do evolution-canary no compose." >&2; exit 1; }
+    remote "$(pc_evo_image_exists_cmd "$WANTED")" || { echo "✖ $WANTED não existe no servidor — rode 'canary-build' antes." >&2; exit 1; }
+    remote "$(pc_canary_db_cmd)"
+    echo "▶ Subindo o canário com ${WANTED} (a Evolution principal não é tocada)…"
+    remote "$(pc_canary_up_cmd)"
+    sleep 20
+    canary_status ;;
+  canary-stop)
+    remote "$(pc_canary_stop_cmd)"
+    canary_status ;;
   *)
-    echo "✖ Ação desconhecida: $ACTION (status | build | up | rollback)" >&2; exit 1 ;;
+    echo "✖ Ação desconhecida: $ACTION (status | build | up | rollback | canary-status | canary-build | canary-up | canary-stop)" >&2; exit 1 ;;
 esac
