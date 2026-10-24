@@ -259,7 +259,12 @@ O serviço `backup` do compose de produção roda **todo dia às 03:30** (horár
 | `atendo.dump` | conversas, mensagens, contatos, agendamentos, fluxos, cobrança |
 | `evolution.dump` | estado das instâncias |
 | `evolution-instances.tar.gz` | **credenciais de pareamento** — sem isto, todo número precisa ler o QR de novo |
-| `storage.tar.gz` | mídia, só quando `STORAGE_DRIVER=local` (com S3/R2 a durabilidade é do provedor) |
+| mídia | só quando `STORAGE_DRIVER=local` (com S3/R2 a durabilidade é do provedor). Com `BACKUP_REMOTE`, vai **incremental** para `<remoto>/storage` (só arquivos novos, nada é apagado lá) e não fica na pasta datada; sem remoto, `storage.tar.gz` na pasta |
+
+Até 24/10/2026 a mídia ia num `storage.tar.gz` inteiro por dia (~17 GB). Com a cópia de ontem
+ainda no servidor, o backup das 03:30 encheu o disco (96 GB): Redis e bancos pararam de gravar
+e a API passou a dar erro. Hoje cada cópia datada tem só os dumps (~2 GB), e um backup que falha
+no meio apaga a própria pasta incompleta.
 
 ### Envio remoto (obrigatório na prática)
 
@@ -291,10 +296,10 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env.production exec 
 Sem `BACKUP_REMOTE` o serviço avisa no log a cada execução, de propósito.
 `BACKUP_KEEP_DAYS` (padrão 14) apaga as cópias locais antigas. Quando o R2 está
 configurado, `BACKUP_REMOTE_KEEP_DAYS` controla a retenção remota. Produção usa
-`BACKUP_KEEP_DAYS=0` (só a cópia mais recente fica no servidor, para restaurar sem
-baixar do R2) e `BACKUP_REMOTE_KEEP_DAYS=7` — cada cópia tem ~12 GB (out/2026) e
-com 2 dias locais o servidor guardava ~32 GB de backup. É seguro: se o envio ao R2
-falhar, o script para (`set -e`) antes de apagar as cópias locais.
+`BACKUP_KEEP_DAYS=0` (só a cópia de hoje fica no servidor, para restaurar sem
+baixar do R2: as anteriores saem ao fim de cada backup) e `BACKUP_REMOTE_KEEP_DAYS=7`.
+A retenção remota vale para as pastas datadas; `<remoto>/storage` é uma cópia só, fora dela.
+É seguro: se o envio ao R2 falhar, o script para (`set -e`) antes de apagar as cópias locais.
 
 ### Restaurar
 
@@ -307,6 +312,14 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env.production start
 ```
 
 `restore.sh` é **destrutivo**: substitui os bancos atuais. Pare a API e o worker antes.
+
+Mídia com remoto: o `restore.sh` mostra o comando, porque o volume de mídia do serviço é só
+leitura:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml --env-file .env.production \
+  run --rm -v ./volumes/storage:/restore backup rclone copy r2:atendo-backups/storage /restore
+```
 
 ### Testado
 
