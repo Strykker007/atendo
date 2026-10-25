@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.8.0 — 2026-10-25
+
+- feat(atendimento): resposta pelo celular sem limbo, aviso de encerramento, atalho de isentos e atendimentos internos em Relatórios
+
 ## 1.7.2 — 2026-10-25
 
 - fix(backup): mídia incremental no R2 e só a cópia de hoje no servidor
