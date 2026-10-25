@@ -478,6 +478,9 @@ export class ConversationsController {
       }
       // a pesquisa substitui o fluxo: o fluxo reabre a conversa para falar, e duas automações
       // perguntando ao mesmo tempo confundem o cliente (docs/pesquisa-de-satisfacao.md)
+      // aviso de encerramento ao cliente (se ligado): antes da pesquisa, que é a última palavra.
+      // Interno não avisa — é conversa da equipe, não atendimento
+      if (!interno) await this.conversations.sendCloseNotice(u.tenantId, id, u.id);
       if (pesquisa) await this.surveys.sendOnClose(u.tenantId, id, pesquisa, dono?.assigneeId ?? u.id).catch(() => undefined);
       else if (fluxo) await this.flows.startOnClose(u.tenantId, id, fluxo).catch(() => undefined);
     }

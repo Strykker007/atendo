@@ -27,6 +27,8 @@ export interface Conversation {
   lastInboundAt: string | null; numberId: string;
   /** desde quando o contato espera resposta; null = já respondemos */
   awaitingSince: string | null;
+  /** respondida pelo celular (fora do painel) enquanto estava sem dono — selo na fila */
+  deviceReplyAt?: string | null;
   contact: { id: string; name: string | null; phone: string; /** grupo nas conversas: `phone` é o jid do grupo */ isGroup?: boolean; avatarUrl?: string | null; email?: string | null; /** CPF/CNPJ só dígitos (Pix automático) */ document?: string | null; address?: string | null; note1?: string | null; note2?: string | null; tags?: { tag: Tag }[]; /** pediu para não receber automáticas ("sair") */ optOutAt?: string | null; /** a checagem disse que o telefone não tem WhatsApp */ waInvalidAt?: string | null };
   /** `isPrimary` = etapa do atendimento no Kanban (no máximo uma). Transitórias: saem ao encerrar */
   tags: { tag: Tag; isPrimary?: boolean }[];

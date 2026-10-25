@@ -11,6 +11,7 @@ import { assertOwnMedia, contentItemErrors } from '../flows/flow-validation';
 import { TenantSettingsService } from './tenant-settings.service';
 import { SchedulesService } from './schedules.service';
 import { DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFER_TEXT } from '../conversations/transfer-message';
+import { DEFAULT_CLOSE_TEXT } from '../conversations/close-message';
 
 const isTimezone = (tz: string) => {
   try {
@@ -60,6 +61,9 @@ class SettingsDto {
   @IsOptional() @IsBoolean() transferMessageEnabled?: boolean;
   @IsOptional() @IsString() @MaxLength(500) transferMessageText?: string | null;
   @IsOptional() @IsString() @MaxLength(500) departmentTransferMessageText?: string | null;
+  /** aviso ao cliente quando o atendente encerra; texto vazio/null = o padrão (close-message.ts) */
+  @IsOptional() @IsBoolean() closeMessageEnabled?: boolean;
+  @IsOptional() @IsString() @MaxLength(500) closeMessageText?: string | null;
 }
 class ScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(60) name?: string;
@@ -92,7 +96,7 @@ export class TenantSettingsController {
   @Get()
   async get(@CurrentUser() u: AuthUser) {
     const [s, now] = await Promise.all([this.settings.get(u.tenantId), this.schedules.now(u.tenantId)]);
-    return { ...s, publicLogoUrl: s.publicLogoKey ? this.storage.signedUrl(s.publicLogoKey) : null, isOpenNow: now.open, currentBand: now.band.name, nextOpenLabel: now.nextOpenLabel, transferDefaults: { agent: DEFAULT_TRANSFER_TEXT, department: DEFAULT_DEPARTMENT_TRANSFER_TEXT } };
+    return { ...s, publicLogoUrl: s.publicLogoKey ? this.storage.signedUrl(s.publicLogoKey) : null, isOpenNow: now.open, currentBand: now.band.name, nextOpenLabel: now.nextOpenLabel, transferDefaults: { agent: DEFAULT_TRANSFER_TEXT, department: DEFAULT_DEPARTMENT_TRANSFER_TEXT }, closeDefault: DEFAULT_CLOSE_TEXT };
   }
 
   @Patch()

@@ -37,9 +37,15 @@ export const useReorderCloseReasons = () => {
 
 /** Auditoria (`GET /audit-logs`, só com `profiles.manage`): encerramentos internos, do mais recente. */
 export interface AuditLogRow { id: string; action: string; actorId: string | null; actorName: string | null; entityId: string; contactId: string | null; contactName: string | null; data: { reason?: string | null; bulk?: boolean } | null; createdAt: string }
-export const useInternalCloseAudit = (enabled: boolean, page = 1) =>
+export const useInternalCloseAudit = (enabled: boolean, page = 1, f: { from?: string; to?: string; actorId?: string } = {}) =>
   useQuery({
-    queryKey: ['audit-logs', 'conversation.closed_internal', page],
-    queryFn: () => api<{ total: number; page: number; pageSize: number; rows: AuditLogRow[] }>(`/audit-logs?action=conversation.closed_internal&page=${page}&pageSize=10`),
+    queryKey: ['audit-logs', 'conversation.closed_internal', page, f],
+    queryFn: () => {
+      const q = new URLSearchParams({ action: 'conversation.closed_internal', page: String(page), pageSize: '25' });
+      if (f.from) q.set('from', f.from);
+      if (f.to) q.set('to', f.to);
+      if (f.actorId) q.set('actorId', f.actorId);
+      return api<{ total: number; page: number; pageSize: number; rows: AuditLogRow[] }>(`/audit-logs?${q}`);
+    },
     enabled,
   });

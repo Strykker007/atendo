@@ -28,6 +28,7 @@ import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage,
 import { RedisService } from '../../common/redis/redis.service';
 import { conflictMap, resolveConflicts } from '../tags/conflicts';
 import { buildTransferMessage, DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFER_TEXT, type TransferVars } from './transfer-message';
+import { buildCloseMessage, DEFAULT_CLOSE_TEXT } from './close-message';
 import { canReceiveTransfer } from './transfer-scope';
 import { PermissionsService } from '../auth/permissions.service';
 import type { Principal } from '../auth/permissions';
@@ -341,6 +342,26 @@ export class ConversationsService {
   }
 
   /**
+   * Aviso ao cliente de que o atendimento foi encerrado (Configurações → Encerramento). Sai com a
+   * conversa já encerrada e sem reabrir (`allowClosed`), pela fila de saída (quota, janela de 24h
+   * da Meta, ledger). O "ok/obrigado" que vem em resposta cai na carência e não reabre (reopen.ts).
+   * Nunca derruba o encerramento: desconectado, fora da janela ou descadastrado só pulam o aviso.
+   */
+  async sendCloseNotice(tenantId: string, conversationId: string, fallbackAgentId: string) {
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { closeMessageEnabled: true, closeMessageText: true } });
+    if (!s?.closeMessageEnabled) return;
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId, status: 'closed' }, select: { closedAt: true, assigneeId: true } });
+    if (!conv?.closedAt) return;
+    // {{atendente}}: o dono do atendimento; sem dono, quem encerrou
+    const agent = await this.prisma.user.findFirst({ where: { id: conv.assigneeId ?? fallbackAgentId, tenantId }, select: { name: true } });
+    const text = buildCloseMessage(s.closeMessageText ?? DEFAULT_CLOSE_TEXT, agent?.name);
+    if (!text) return;
+    // um aviso por encerramento: repetir a chamada (duplo clique, retry) não manda duas vezes
+    await this.sendAsSystem(conversationId, text, undefined, undefined, { allowClosed: true, idempotencyKey: `close-${conversationId}-${conv.closedAt.getTime()}` })
+      .catch((err) => this.log.warn(`aviso de encerramento não enviado (${conversationId}): ${err instanceof Error ? err.message : err}`));
+  }
+
+  /**
    * Transferir para outro departamento (ou tirar de departamento, `null`).
    *
    * Vai para a **fila** do departamento: sem dono e em Aguardando — quem atendia normalmente
@@ -635,6 +656,8 @@ export class ConversationsService {
       data: {
         status,
         closedAt: status === 'closed' ? new Date() : null,
+        // status mudou: o selo "respondida pelo celular" era daquele momento
+        deviceReplyAt: null,
         // encerrar limpa a pausa do robô: o próximo atendimento começa normal
         ...(status === 'closed' && BOT_PAUSE_CLEAR),
         ...(status === 'waiting' && { assigneeId: null }),
@@ -1481,6 +1504,8 @@ export class ConversationsService {
       data: {
         status,
         closedAt: status === 'closed' ? new Date() : null,
+        // status mudou: o selo "respondida pelo celular" era daquele momento
+        deviceReplyAt: null,
         // encerrar limpa a pausa do robô: o próximo atendimento começa normal
         ...(status === 'closed' && BOT_PAUSE_CLEAR),
         // reabrir em "in_progress" = quem reabriu assume; reabrir em "waiting" = volta para a fila

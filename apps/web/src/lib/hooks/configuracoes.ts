@@ -34,10 +34,13 @@ export interface TenantSettings {
   /** mensagem automática ao cliente na transferência; textos null = os padrões (`transferDefaults`) */
   transferMessageEnabled: boolean; transferMessageText: string | null; departmentTransferMessageText: string | null;
   transferDefaults: { agent: string; department: string };
+  /** aviso ao cliente quando o atendente encerra; texto null = o padrão (`closeDefault`) */
+  closeMessageEnabled: boolean; closeMessageText: string | null;
+  closeDefault: string;
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'requireSignature' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'requireSignature' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText' | 'closeMessageEnabled' | 'closeMessageText'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

@@ -2,10 +2,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, ReceiptText, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
+import { ExemptConfirm } from './ExemptConfirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, FileCheck2, CircleDashed, Play, Loader2 } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
@@ -77,6 +78,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const podeLimpar = useCan('conversations.delete_chat');
   const [apagando, setApagando] = useState<Message | null>(null);
   const [limpando, setLimpando] = useState(false);
+  // atalho da lista de isentos (docs/contatos-isentos.md): mesma permissão da tela da lista
+  const podeIsentar = useCan('settings.manage');
+  const [isentando, setIsentando] = useState(false);
   const apagar = useDeleteMessage();
   const limpar = useClearHistory();
   const podeExcluir = useCan('conversations.delete_conversation');
@@ -604,10 +608,17 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           )}
         </div>
         {conv.ticketExempt ? (
-          // contato isento: chat livre, sem fila, sem dono e fora dos relatórios (docs/contatos-isentos.md)
-          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted" title="Contato isento de ticket: não entra na fila nem nos relatórios">
-            <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre · sem ticket
-          </span>
+          // contato isento: chat livre, sem fila, sem dono e fora dos relatórios (docs/contatos-isentos.md).
+          // Com permissão, o selo é o atalho para voltar a abrir atendimento
+          podeIsentar && !conv.contact.isGroup ? (
+            <button type="button" onClick={() => setIsentando(true)} className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted hover:text-ink hover:ring-1 hover:ring-line" title="Contato isento de ticket: não entra na fila nem nos relatórios. Clique para voltar a abrir atendimento">
+              <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre · sem ticket
+            </button>
+          ) : (
+            <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted" title="Contato isento de ticket: não entra na fila nem nos relatórios">
+              <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre · sem ticket
+            </span>
+          )
         ) : (
           <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
             <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
@@ -687,6 +698,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <Button size="sm" variant="ghost" icon={<History size={14} />} onClick={() => setHistorico(true)} title="Quem assumiu, transferiu e encerrou — e quando">
           <span className="hidden lg:inline">Histórico</span>
         </Button>
+        {podeIsentar && !conv.ticketExempt && !conv.contact.isGroup && (
+          <Button size="sm" variant="ghost" icon={<BellOff size={14} />} onClick={() => setIsentando(true)} title="Não abrir atendimento para este número (diretoria, fornecedor, celular da equipe): vira conversa livre, fora da fila e dos relatórios">
+            <span className="hidden xl:inline">Não abrir atendimento</span>
+          </Button>
+        )}
+        {isentando && <ExemptConfirm conv={conv} open onClose={() => setIsentando(false)} />}
         {podeLimpar && (
           <Button size="sm" variant="ghost" icon={<Eraser size={14} />} onClick={() => setLimpando(true)} title="Limpar o histórico desta conversa (fica registrado quem limpou)" aria-label="Limpar histórico" />
         )}

@@ -33,6 +33,10 @@ livre**: fica em **Conversas livres** (nos filtros da tela de conversas), fora d
 Adicionar por telefone digitado (com DDI) ou buscando um contato existente e clicando na linha dele (a linha inteira isenta); remover pela lixeira.
 Exige `settings.manage`.
 
+**Atalhos** (mesma permissão; grupo não tem, porque é sempre livre), com confirmação (`components/chat/ExemptConfirm.tsx`):
+- **Menu do card** na lista de conversas (clique direito ou ⋮): *Não abrir atendimento* / *Voltar a abrir atendimento*.
+- **Cabeçalho da conversa aberta**: botão *Não abrir atendimento* (sino cortado); na conversa livre, o selo **Livre · sem ticket** é clicável e oferece voltar a abrir atendimento.
+
 Na lista de conversas, **não é aba**: ficava como 4ª aba ao lado de Aguardando/Atendendo/Encerrado,
 espremia as quatro na coluna de 320px e não dizia o que era. Agora é o botão **Conversas livres (sem
 ticket)** dentro dos filtros (ícone de ajustes), com o contador, e só aparece quando o cliente tem
@@ -55,4 +59,5 @@ Migração: `20261230000000_ignored_contacts_internal_chat`.
 | GET | `/ignored-contacts` | `settings.manage` | Lista, mais novos primeiro, com o contato do painel (`contact`) quando o telefone já existe |
 | POST | `/ignored-contacts` | `settings.manage` | `{phone}` ou `{contactId}`, `label?`. 409 se o telefone (com/sem nono dígito) já está |
 | DELETE | `/ignored-contacts/:id` | `settings.manage` | Tira da lista e devolve as conversas ao fluxo normal |
+| DELETE | `/ignored-contacts/contact/:contactId` | `settings.manage` | O mesmo, pelo contato (atalho da conversa). 404 se não está na lista; 409 se é número da própria conta (isento sem cadastro) |
 | GET | `/conversations?free=1` | (escopo normal da lista) | Visão Conversas livres. `/conversations/counts` devolve `free` |

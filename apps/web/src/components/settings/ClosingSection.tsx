@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2, EyeOff, GripVertical, Plus, Tag, Trash2, XCircle } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { cn } from '@/lib/utils';
@@ -9,7 +9,7 @@ import { toast } from '@/components/ui/Toast';
 import { ColorPopover, PALETTE } from '@/components/ui/ColorSwatches';
 import {
   useTenantSettings, useUpdateTenantSettings, useCloseReasons, useCreateCloseReason, useUpdateCloseReason, useDeleteCloseReason, useReorderCloseReasons,
-  useCan, useInternalCloseAudit, useOutcomeLabels, OUTCOME_LABELS_DEFAULT, type CloseReason, type CloseReasonOutcome,
+  useOutcomeLabels, OUTCOME_LABELS_DEFAULT, type CloseReason, type CloseReasonOutcome,
 } from '@/lib/hooks';
 
 /** nomes sugeridos quando a empresa desliga a venda (atendimento, não comercial) */
@@ -61,9 +61,47 @@ export function ClosingSection() {
           titulo={`Exigir motivo ao encerrar como “${labels.lost}”`}
           desc={d.requireReasonOnLost ? `Ligado: com motivo cadastrado para “${labels.lost}”, o atendente escolhe um para encerrar.` : 'Desligado: o motivo aparece, mas é opcional.'} />
       </div>
+      <CloseMessageFields />
       <ReasonsList />
-      <InternalCloseAudit />
     </section>
+  );
+}
+
+/**
+ * Aviso ao cliente de que o atendimento foi encerrado. Sai como mensagem do sistema com a conversa
+ * já encerrada (não reabre); o "ok/obrigado" em resposta também não reabre. Não sai no
+ * encerramento interno nem no em massa. Fora da janela de 24h da API oficial, desconectado ou com
+ * o contato descadastrado, não sai — e o encerramento acontece igual.
+ */
+function CloseMessageFields() {
+  const settings = useTenantSettings();
+  const update = useUpdateTenantSettings();
+  const [texto, setTexto] = useState('');
+  const s = settings.data;
+  useEffect(() => { if (s) setTexto(s.closeMessageText ?? s.closeDefault ?? ''); }, [s]);
+  if (!s) return null;
+  const on = s.closeMessageEnabled;
+  const mudou = texto !== (s.closeMessageText ?? s.closeDefault ?? '');
+  // igual ao padrão (ou vazio) grava null: se o padrão melhorar, o cliente acompanha
+  const salvar = () => update.mutateAsync({ closeMessageText: !texto.trim() || texto.trim() === s.closeDefault ? null : texto.trim() })
+    .then(() => toast.ok('Mensagem de encerramento salva')).catch(toast.err);
+  return (
+    <div className="space-y-2.5 border-t border-line pt-3">
+      <Regra on={on} disabled={update.isPending}
+        onToggle={() => update.mutateAsync({ closeMessageEnabled: !on }).then(() => toast.ok(!on ? 'O cliente será avisado ao encerrar' : 'Encerramento sem aviso ao cliente')).catch(toast.err)}
+        titulo="Avisar o cliente ao encerrar"
+        desc={on ? 'Ligado: a mensagem abaixo vai para o cliente quando o atendente encerra (antes da pesquisa de satisfação, se houver). Não sai no encerramento interno nem no em massa.' : 'Desligado: o atendimento é encerrado sem mensagem ao cliente.'} />
+      {on && (
+        <div className="space-y-2">
+          <label className="block space-y-1">
+            <span className="text-xs font-semibold text-muted">Mensagem — use <code className="font-mono">{'{{atendente}}'}</code> (primeiro nome de quem atendeu)</span>
+            <textarea className={inputCls} rows={2} maxLength={500} value={texto} onChange={(e) => setTexto(e.target.value)} />
+          </label>
+          <p className="text-[11px] text-faint">Deixe em branco para voltar ao texto padrão. Se o cliente responder “ok” ou “obrigado” logo depois, o atendimento continua encerrado.</p>
+          <Button size="sm" onClick={salvar} disabled={!mudou} loading={update.isPending}>Salvar mensagem</Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -208,49 +246,6 @@ function ReasonsList() {
         </select>
         <Button type="submit" size="sm" icon={<Plus size={14} />} loading={create.isPending}>Adicionar</Button>
       </form>
-    </div>
-  );
-}
-
-/**
- * Auditoria dos encerramentos internos: quem, quando, qual contato e o motivo. Só com
- * `profiles.manage` (por padrão o Administrador) — a mesma regra da API (`GET /audit-logs`).
- */
-function InternalCloseAudit() {
-  const pode = useCan('profiles.manage');
-  const [page, setPage] = useState(1);
-  const audit = useInternalCloseAudit(pode, page);
-  if (!pode) return null;
-  const d = audit.data;
-  const paginas = d ? Math.max(1, Math.ceil(d.total / d.pageSize)) : 1;
-  return (
-    <div className="space-y-2 border-t border-line pt-3">
-      <div>
-        <div className="text-sm font-medium text-ink flex items-center gap-1.5"><EyeOff size={14} className="text-warn" /> Encerramentos internos (auditoria)</div>
-        <p className="text-xs text-muted">Atendimentos encerrados como internos não entram nos relatórios. Confira aqui quem usou e quando — o registro não pode ser alterado.</p>
-      </div>
-      {d && d.rows.length === 0 && <p className="text-xs text-faint">Nenhum encerramento interno até agora.</p>}
-      {d && d.rows.length > 0 && (
-        <ul className="rounded-xl border border-line divide-y divide-line text-[12.5px]">
-          {d.rows.map((r) => (
-            <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5">
-              <span className="text-muted tnum">{new Date(r.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span>
-              <span className="text-ink font-medium">{r.actorName ?? '(sistema)'}</span>
-              <span className="text-muted">encerrou</span>
-              <span className="text-ink truncate max-w-[14rem]">{r.contactName ?? '(contato excluído)'}</span>
-              {r.data?.reason && <span className="text-muted">· {r.data.reason}</span>}
-              {r.data?.bulk && <span className="text-faint">· em massa</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {d && paginas > 1 && (
-        <div className="flex items-center justify-end gap-2 text-[12px]">
-          <Button type="button" size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Anterior</Button>
-          <span className="text-muted">{page} / {paginas}</span>
-          <Button type="button" size="sm" variant="ghost" disabled={page >= paginas} onClick={() => setPage((p) => p + 1)}>Próxima</Button>
-        </div>
-      )}
     </div>
   );
 }

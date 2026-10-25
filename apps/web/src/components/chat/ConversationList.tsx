@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX, Smartphone, BellOff, Bell } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
+import { ExemptConfirm, useExemptShortcut } from './ExemptConfirm';
 import { Avatar } from './Avatar';
 import { TagPicker } from './TagPicker';
 import { LastCloseInline } from './LastClose';
@@ -458,6 +459,8 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
   const m = STATUS_META[c.status];
   /** menu do card: clique direito no card ou os três pontos que aparecem no hover */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // confirmação do atalho "Não abrir atendimento": fica no card porque o menu fecha ao clicar
+  const [isentando, setIsentando] = useState(false);
   return (
     <div className="relative group" onContextMenu={(e) => { if (selecionando) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}>
     <button onClick={onClick} className={cn('relative w-full text-left pl-3.5 pr-2.5 py-2 flex gap-2.5 border-b border-line hover:bg-field transition-colors', active && !selecionando && 'bg-accent-soft hover:bg-accent-soft', selecionando && marcado && 'bg-accent-soft')}>
@@ -482,6 +485,12 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
         <div className="flex items-center justify-between gap-2 mt-0.5">
           <span className={cn('text-xs truncate', c.unreadCount > 0 ? 'text-ink' : 'text-muted')}>{formatPreview(c.lastMessagePreview)}</span>
           <SeloEspera desde={c.awaitingSince} encerrada={c.status === 'closed'} agora={agora} />
+          {/* respondida do celular, sem dono: alguém precisa assumir pelo painel (o celular não diz quem respondeu) */}
+          {c.status === 'waiting' && !c.assignee && c.deviceReplyAt && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold rounded-md px-1 py-0.5 shrink-0 bg-wait-soft text-wait" title={`Respondida pelo celular em ${new Date(c.deviceReplyAt).toLocaleString('pt-BR')}, fora do painel. Assuma para o atendimento ter dono.`}>
+              <Smartphone size={9} /> Celular
+            </span>
+          )}
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
         {/* linha única, de altura fixa e sempre presente (mesmo vazia): nada quebra para baixo e
@@ -509,7 +518,8 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
           <MoreVertical size={14} />
         </button>
       )}
-      {menu && <MenuDoCard c={c} active={active} pos={menu} onFechar={() => setMenu(null)} />}
+      {menu && <MenuDoCard c={c} active={active} pos={menu} onFechar={() => setMenu(null)} onIsentar={() => setIsentando(true)} />}
+      {isentando && <ExemptConfirm conv={c} open onClose={() => setIsentando(false)} />}
     </div>
   );
 }
@@ -519,8 +529,9 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
  * muda, o contato não fica sabendo. Se a conversa está aberta, ela fecha — aberta, a tela a
  * marcaria como lida de novo na próxima mensagem.
  */
-function MenuDoCard({ c, active, pos, onFechar }: { c: Conversation; active: boolean; pos: { x: number; y: number }; onFechar: () => void }) {
+function MenuDoCard({ c, active, pos, onFechar, onIsentar }: { c: Conversation; active: boolean; pos: { x: number; y: number }; onFechar: () => void; onIsentar: () => void }) {
   const setConversation = useUI((s) => s.setConversation);
+  const isencao = useExemptShortcut(c);
   const marcarNaoLida = useMarkUnread();
   const marcarLida = useMarkRead();
   const ref = useRef<HTMLDivElement>(null);
@@ -542,7 +553,7 @@ function MenuDoCard({ c, active, pos, onFechar }: { c: Conversation; active: boo
   const naoLida = c.unreadCount > 0;
   // não deixa o menu sair pela borda da janela
   const left = Math.min(pos.x, window.innerWidth - 200);
-  const top = Math.min(pos.y, window.innerHeight - 48);
+  const top = Math.min(pos.y, window.innerHeight - (isencao.pode ? 80 : 48));
   return createPortal(
     <div ref={ref} role="menu" style={{ left, top }} className="fixed z-50 w-[190px] py-1 rounded-lg border border-line bg-panel shadow-lg">
       <button
@@ -561,6 +572,18 @@ function MenuDoCard({ c, active, pos, onFechar }: { c: Conversation; active: boo
         {naoLida ? <MailOpen size={14} className="text-muted" /> : <Mail size={14} className="text-muted" />}
         {naoLida ? 'Marcar como lida' : 'Marcar como não lida'}
       </button>
+      {isencao.pode && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => { onIsentar(); onFechar(); }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-ink hover:bg-field"
+          title={isencao.isento ? 'Tira o número da lista de isentos' : 'Diretoria, fornecedor, celular da equipe: conversa livre, fora da fila e dos relatórios'}
+        >
+          {isencao.isento ? <Bell size={14} className="text-muted" /> : <BellOff size={14} className="text-muted" />}
+          {isencao.isento ? 'Voltar a abrir atendimento' : 'Não abrir atendimento'}
+        </button>
+      )}
     </div>,
     document.body,
   );

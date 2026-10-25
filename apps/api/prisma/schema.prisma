@@ -527,6 +527,10 @@ model TenantSettings {
   transferMessageText String?
   /// texto da transferência para um departamento, com {{departamento}}; null = o padrão
   departmentTransferMessageText String?
+  /// mensagem automática ao cliente quando o atendente encerra (conversations/close-message.ts)
+  closeMessageEnabled Boolean @default(false)
+  /// texto do aviso de encerramento, com {{atendente}}; null = o padrão
+  closeMessageText String?
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1010,6 +1014,10 @@ model Conversation {
   /// e comparar `lastInboundAt` com `lastMessageAt` é comparação entre colunas: dá para ler,
   /// não dá para ordenar nem filtrar.
   awaitingSince  DateTime?
+  /// Última resposta mandada pelo CELULAR (fora do painel) enquanto a conversa estava sem dono.
+  /// O celular não diz quem escreveu: a conversa vai para Aguardando com o selo "Respondida pelo
+  /// celular" para alguém assumir. Limpa quando o contato volta a escrever ou o status muda.
+  deviceReplyAt  DateTime?
   lastMessagePreview String?
   unreadCount    Int       @default(0)
   closedAt       DateTime?

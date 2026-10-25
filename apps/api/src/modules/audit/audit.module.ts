@@ -41,6 +41,10 @@ const ListQuery = z.object({
   action: z.enum(['conversation.closed_internal', 'conversation.deleted']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  /** período [from, to) e quem fez — filtros da tela Relatórios → Atendimentos internos */
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  actorId: z.string().uuid().optional(),
 });
 
 /**
@@ -56,7 +60,12 @@ class AuditController {
   @Get()
   async list(@CurrentUser() u: AuthUser, @Query() q: Record<string, string | undefined>) {
     const f = ListQuery.parse(q);
-    const where: Prisma.AuditLogWhereInput = { tenantId: u.tenantId, ...(f.action && { action: f.action }) };
+    const where: Prisma.AuditLogWhereInput = {
+      tenantId: u.tenantId,
+      ...(f.action && { action: f.action }),
+      ...(f.actorId && { actorId: f.actorId }),
+      ...((f.from || f.to) && { createdAt: { ...(f.from && { gte: new Date(f.from) }), ...(f.to && { lt: new Date(f.to) }) } }),
+    };
     const [total, rows] = await Promise.all([
       this.prisma.auditLog.count({ where }),
       this.prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (f.page - 1) * f.pageSize, take: f.pageSize }),

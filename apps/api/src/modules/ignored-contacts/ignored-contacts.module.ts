@@ -66,6 +66,27 @@ class IgnoredContactsController {
     return row;
   }
 
+  /**
+   * Tirar da lista pelo contato — o atalho da conversa aberta e do card, que não conhecem o id do
+   * registro. Número da própria conta é isento sem estar na lista: aí não há o que tirar (409).
+   */
+  @Delete('contact/:contactId')
+  @RequirePermission('settings.manage')
+  async removeByContact(@CurrentUser() u: AuthUser, @Param('contactId', ParseUUIDPipe) contactId: string) {
+    const c = await this.prisma.contact.findFirst({ where: { id: contactId, tenantId: u.tenantId }, select: { phone: true } });
+    if (!c) throw new NotFoundException('Contato não encontrado');
+    const variants = phoneVariants(normalizeExemptPhone(c.phone));
+    const rows = await this.prisma.ignoredContact.findMany({ where: { tenantId: u.tenantId, phone: { in: variants } } });
+    if (!rows.length) {
+      const own = await this.prisma.whatsAppNumber.findFirst({ where: { tenantId: u.tenantId, deletedAt: null, phone: { in: variants } }, select: { id: true } });
+      if (own) throw new ConflictException('Este é um número da própria conta: conversa entre números da loja nunca abre atendimento.');
+      throw new NotFoundException('Este contato não está na lista de isentos.');
+    }
+    await this.prisma.ignoredContact.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+    for (const r of rows) await this.marcarConversas(u.tenantId, r.phone, false);
+    return { ok: true };
+  }
+
   @Delete(':id')
   @RequirePermission('settings.manage')
   async remove(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {

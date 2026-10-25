@@ -30,6 +30,8 @@ export interface SettingsUpdate {
   transferMessageEnabled?: boolean;
   transferMessageText?: string | null;
   departmentTransferMessageText?: string | null;
+  closeMessageEnabled?: boolean;
+  closeMessageText?: string | null;
 }
 
 export const OUTCOME_LABELS_DEFAULT = { won: 'Comprou', lost: 'Não comprou' } as const;
@@ -44,7 +46,7 @@ export class TenantSettingsService {
   }
 
   async update(tenantId: string, dto: SettingsUpdate) {
-    const { welcomeMessages, wonLabel, lostLabel, rankingWeights, secureMediaText, transferMessageText, departmentTransferMessageText, ...rest } = dto;
+    const { welcomeMessages, wonLabel, lostLabel, rankingWeights, secureMediaText, transferMessageText, departmentTransferMessageText, closeMessageText, ...rest } = dto;
     const data: Prisma.TenantSettingsUncheckedUpdateInput = {
       ...rest,
       ...(welcomeMessages && { welcomeMessages: welcomeMessages as unknown as Prisma.InputJsonValue }),
@@ -57,6 +59,7 @@ export class TenantSettingsService {
       ...(secureMediaText !== undefined && { secureMediaText: secureMediaText?.trim() || null }),
       ...(transferMessageText !== undefined && { transferMessageText: transferMessageText?.trim() || null }),
       ...(departmentTransferMessageText !== undefined && { departmentTransferMessageText: departmentTransferMessageText?.trim() || null }),
+      ...(closeMessageText !== undefined && { closeMessageText: closeMessageText?.trim() || null }),
     };
     if (dto.attendanceActive !== undefined) {
       // cada vez que liga/desliga é um período novo da faixa Fechado (a resposta sai de novo)

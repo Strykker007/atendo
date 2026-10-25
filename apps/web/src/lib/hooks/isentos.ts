@@ -37,3 +37,12 @@ export const useRemoveIgnoredContact = () => {
     onSuccess: () => invalidar(qc),
   });
 };
+
+/** Atalho da conversa/card: tira da lista pelo contato (sem precisar do id do registro). */
+export const useRemoveIgnoredByContact = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (contactId: string) => api<{ ok: boolean }>(`/ignored-contacts/contact/${contactId}`, { method: 'DELETE' }),
+    onSuccess: () => invalidar(qc),
+  });
+};
