@@ -3,6 +3,12 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.7.2 — 2026-10-25
+
+- fix(backup): mídia incremental no R2 e só a cópia de hoje no servidor
+- feat(multiempresa): uma pessoa em várias empresas + seletor com busca (Ctrl+K)
+- feat(donos): empresa de dono do sistema tem acesso amplo, independente do plano
+
 ## 1.7.1 — 2026-10-23
 
 - test(send-queue): ConversationsService recebe PermissionsService
