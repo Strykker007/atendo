@@ -15,6 +15,11 @@ export interface AuthUser {
    * Preenchido pelo JwtAuthGuard (vem do banco, também "entrando como")
    */
   systemOwner?: boolean;
+  /**
+   * Pessoa (login principal). Igual a `id`, salvo quando a sessão é de um vínculo — a mesma pessoa
+   * em outra empresa (docs/multiempresa.md). Senha, nome e equipe do suporte são da pessoa.
+   */
+  personId: string;
   /** presente quando o dono do sistema está "entrando como" este tenant */
   impersonatorId?: string;
   /** preenchido pelo JwtAuthGuard em toda rota */

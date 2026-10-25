@@ -37,7 +37,8 @@ export default function EquipePage() {
   // próprio login por aqui — trocar encerra as sessões da pessoa
   const canEditAccess = (a: Agent) => canManageTeam && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager'));
   // e-mail de outro admin (ou o próprio): só o admin da conta — o papel continua fora do alcance
-  const canEditEmail = (a: Agent) => canEditAccess(a) || (canManageTeam && me.data?.role === 'tenant_admin' && a.role === 'tenant_admin');
+  // vínculo (docs/multiempresa.md): o login é o da empresa principal da pessoa — ninguém daqui troca
+  const canEditEmail = (a: Agent) => !a.linked && (canEditAccess(a) || (canManageTeam && me.data?.role === 'tenant_admin' && a.role === 'tenant_admin'));
   async function saveEdit(a: Agent, b: { name?: string; email?: string; role?: 'agent' | 'manager' }) {
     try {
       await update.mutateAsync({ id: a.id, ...b });
@@ -103,7 +104,7 @@ export default function EquipePage() {
                     {a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}
                     {(canRename(a) || canEditEmail(a)) && !canEditAccess(a) && <button onClick={() => setEditing(a)} className="ml-1.5 align-middle text-faint hover:text-ink p-0.5" title="Editar" aria-label={`Editar ${a.name}`}><Pencil size={12} /></button>}
                   </td>
-                  <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}</td>
+                  <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}{a.linked && <span className="block text-[11px] text-faint" title="Entra com o login de outra empresa e troca pelo seletor do menu">login de outra empresa</span>}</td>
                   <td className="px-5 py-3">
                     {canManageTeam && a.role !== 'tenant_admin' && a.role !== 'super_admin' ? (
                       <select
@@ -174,7 +175,7 @@ export default function EquipePage() {
                     {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
                       <>
                         <Button size="sm" variant="ghost" icon={<Pencil size={12} />} onClick={() => setEditing(a)}>Editar</Button>
-                        <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>
+                        {!a.linked && <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>}
                         <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-faint hover:text-danger' : 'text-accent')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
                       </>
                     )}

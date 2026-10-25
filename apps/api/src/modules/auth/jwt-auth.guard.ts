@@ -30,10 +30,10 @@ export class JwtAuthGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest<Request & { user?: AuthUser }>();
     const token = req.headers.authorization?.replace(/^Bearer /, '');
     if (!token) throw new UnauthorizedException();
-    let payload: (AuthUser & { sub: string; iatMs?: number; locked?: boolean }) | undefined;
+    let payload: (AuthUser & { sub: string; pid?: string; iatMs?: number; locked?: boolean }) | undefined;
     try {
-      payload = await this.jwt.verifyAsync<AuthUser & { sub: string; impersonatorId?: string; shiftEndsAt?: number; locked?: boolean; lockedUntil?: number; iatMs?: number }>(token, { secret: env.JWT_ACCESS_SECRET });
-      req.user = { id: payload.sub, tenantId: payload.tenantId, role: payload.role, email: payload.email, name: payload.name, impersonatorId: payload.impersonatorId };
+      payload = await this.jwt.verifyAsync<AuthUser & { sub: string; pid?: string; impersonatorId?: string; shiftEndsAt?: number; locked?: boolean; lockedUntil?: number; iatMs?: number }>(token, { secret: env.JWT_ACCESS_SECRET });
+      req.user = { id: payload.sub, personId: payload.pid ?? payload.sub, tenantId: payload.tenantId, role: payload.role, email: payload.email, name: payload.name, impersonatorId: payload.impersonatorId };
       // fim de turno: pela hora gravada no token — zero consulta ao banco por requisição
       const travado = !!payload.locked || (!!payload.shiftEndsAt && Date.now() >= payload.shiftEndsAt * 1000);
       if (travado) {

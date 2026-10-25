@@ -159,6 +159,12 @@ O cliente vê "Condições personalizadas (até …)" em Plano e uso (`customPla
 
 Atalho de desconto: no diálogo, digitar **"% off"** preenche a mensalidade com o preço do plano menos o percentual (e digitar o valor mostra o % equivalente). O que fica gravado é o valor.
 
+### Empresa de dono do sistema
+
+Empresa com dono do sistema marcado e ativo ignora o plano: todos os recursos, sem limites nem
+quota, só com o teto de custo de IA (`ownerLimits`, [donos-do-sistema.md › Acesso amplo](donos-do-sistema.md#acesso-amplo)).
+A assinatura e o ledger seguem normais.
+
 ### Promoções
 
 "Quem assinar até a data tal ganha x% por N meses." Tela: **Planos → Promoções** (só o dono). Tabela `promotions`: `discountPercent` (até 99%), `durationMonths`, `planIds`, janela de adesão `startsAt`–`endsAt` (último dia inclusive, horário de Brasília), `isActive` para encerrar antes.

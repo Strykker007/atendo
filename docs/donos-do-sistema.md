@@ -5,13 +5,16 @@ conversa na [Equipe do suporte](chat-interno.md#equipe-do-suporte). Até 20/10/2
 `super_admin` sem cliente; um sócio que também opera uma empresa (o Danilo, admin do VogoChat
 Plus) não tinha como ser dono sem sair dela.
 
+Ser dono é da **pessoa**: qualquer linha dela (login principal ou vínculo em outra empresa,
+[multiempresa.md](multiempresa.md)) marcada ou `super_admin`.
+
 ## Dois jeitos de ser dono
 
 | | `super_admin` | Marcação `users.isSystemOwner` |
 |---|---|---|
 | Empresa | nenhuma (`tenantId` null) | a dele, com o papel e o **plano** de lá |
 | Menu | seção de dono + Configurações | menu da empresa + seção **Dono do sistema** |
-| Plano/limites na empresa | — | valem normalmente (a marcação não libera recurso fora do plano) |
+| Plano/limites na empresa | — | **ignorados**: a empresa tem acesso amplo (ver abaixo) |
 | Listas da equipe da empresa (atribuição, departamentos, empresas) | não aparece | aparece, como qualquer membro |
 
 Regra única no código: dono = `role === 'super_admin'` **ou** `isSystemOwner`.
@@ -20,16 +23,37 @@ Regra única no código: dono = `role === 'super_admin'` **ou** `isSystemOwner`.
   cache de 15 s — tirar a marcação vale em segundos) e o `JwtAuthGuard` põe em `AuthUser.systemOwner`.
   O `RolesGuard` deixa o dono entrar nas rotas `@Roles('super_admin')`. O `PermissionsGuard` e o
   `FeatureGuard` **não** mudaram: dentro da empresa, o dono marcado tem as permissões do papel/perfil.
+- **Plano:** a empresa com dono marcado ativo tem **acesso amplo** (abaixo). Dentro dela, as
+  permissões continuam as do papel/perfil de cada pessoa.
 - **Token:** leva `owner: true` só para o socket (salas `owners` e `owner:<id>` da equipe do suporte).
 - **Tela:** `GET /auth/me` devolve `systemOwner`; as telas de dono (`/admin`, `/clientes`,
   `/planos`, `/avisos`, `/donos`) checam esse campo.
 
+## Acesso amplo
+
+Empresa com pelo menos um dono marcado e ativo (`users.isSystemOwner`, `isActive`) ignora o plano:
+`UsageService.limits()` devolve `ownerLimits(...)` (`billing/owner-limits.ts`) com status `active`.
+Como guards, quota, IA, workers e a tela Plano e uso leem só dali, vale para tudo:
+
+- todos os recursos (`PLAN_FEATURES`), inclusive os que rodam sem ninguém logado (IA, pesquisa,
+  Pix, grupos);
+- nenhum limite de números, atendentes, fluxos, respostas rápidas ou empresas;
+- envio sem quota (mensagens, conversas, templates) e sem bloqueio por assinatura suspensa;
+- IA sem limite de interações. **Fica** o teto de custo de IA do plano (`aiMonthlyCostCap`), que
+  protege a plataforma de um fluxo em loop.
+
+Vale para a empresa toda, não só para o dono: os recursos são por empresa. O que muda é só o que a
+empresa pode usar. A mensalidade da assinatura e o registro no ledger (`UsageService.record`)
+continuam iguais. Tirar a marcação (ou desativar o dono) devolve o plano em até uma requisição. "Ver
+cliente" num cliente sem dono mostra o plano dele, como ele vê.
+
 ## Ver cliente
 
-O seletor **Ver cliente…** no topo do menu (só dono, `OwnerSwitcher.tsx`) faz o mesmo "entrar como"
-da tela Clientes (`POST /tenants/:id/impersonate`), sem sair da tela: o menu passa a ser o do
-cliente visitado **mais** a seção de dono. Troca direto de um cliente para outro. **← Voltar à minha
-conta** (ou *Sair do cliente* na faixa) volta à empresa do dono, se ele tiver, ou ao Financeiro.
+O seletor do topo do menu (`WorkspaceSwitcher.tsx`, também **Ctrl+K**, ver
+[multiempresa.md › Seletor](multiempresa.md#seletor)) busca em todos os clientes e mostra os
+recentes. Escolher um cliente faz o mesmo "entrar como" da tela Clientes (`POST /tenants/:id/impersonate`),
+sem sair da tela: o menu passa a ser o do cliente visitado **mais** a seção de dono. Troca direto de
+um cliente para outro. Escolher uma das **Minhas empresas** (ou *Sair do cliente* na faixa) volta.
 
 Entrando como, valem o papel de admin do cliente visitado e **nada** do cliente de origem do dono:
 perfil, números, departamentos e empresas dele são ignorados (`PermissionsService.scope` com
@@ -41,12 +65,13 @@ no token vêm do banco (`AuthService.impersonate`), para trocar de cliente sem v
 | Ação | Rota | Regra |
 |---|---|---|
 | Listar | `GET /super-admin/owners` | todos os donos, com empresa, papel, convite pendente, desativado |
-| Buscar candidato | `GET /super-admin/owners/candidates?q=` | usuários ativos de clientes que ainda não são donos (nome/e-mail, 10) |
+| Buscar candidato | `GET /super-admin/owners/candidates?q=` | logins principais ativos de clientes que ainda não são donos (nome/e-mail, 10) |
 | Tornar dono (usuário existente) | `POST /super-admin/owners` `{userId}` | liga `isSystemOwner`; a pessoa continua na empresa |
 | Convidar pessoa nova | `POST /super-admin/owners/invite` `{name,email}` | cria `super_admin` sem empresa com convite (e-mail quando houver; o link volta sempre). E-mail já usado → erro pedindo para buscar em "Usuário existente" |
 | Novo link de convite | `POST /super-admin/owners/:id/invite-link` | só quem ainda não definiu a senha; invalida o anterior |
-| Vincular a empresa | `POST /super-admin/owners/:id/link` `{tenantId, role}` | só dono **sem** empresa: vira o papel escolhido no cliente + `isSystemOwner`, perfil padrão do papel, e as sessões abertas caem (refresh revogado) para o vínculo valer já. Não passa pelo limite de usuários do plano |
-| Tirar de dono | `DELETE /super-admin/owners/:id` | marcado: perde só a marcação. `super_admin` sem empresa: é **desativado** (não tem outro acesso). Ninguém tira a si mesmo, e sempre fica pelo menos um dono ativo |
+| Adicionar empresa | `POST /super-admin/owners/:id/link` `{tenantId, role, owner}` | cria um **vínculo**: a mesma pessoa como membro de mais uma empresa, com o papel escolhido; `owner` = atua como dono lá (acesso amplo). Sem novo login: troca pelo seletor ([multiempresa.md](multiempresa.md)). Não passa pelo limite de usuários do plano |
+| Desfazer vínculo | `DELETE /super-admin/owners/:id/link/:userId` | desativa a linha da empresa (histórico fica) e derruba as sessões dela |
+| Tirar de dono | `DELETE /super-admin/owners/:id` | a marcação sai de todas as empresas da pessoa (os vínculos ficam, como membro comum). `super_admin` sem empresa: é **desativado**, e com ele os vínculos. Ninguém tira a si mesmo, e sempre fica pelo menos um dono ativo |
 
 O vínculo a uma empresa é feito **só por um dono**: um cliente não consegue convidar uma conta de
 dono para a equipe dele (o e-mail é único no sistema, então o convite comum recusa).
@@ -64,7 +89,6 @@ dono para a equipe dele (o e-mail é único no sistema, então o convite comum r
 
 ## Fora do escopo
 
-- Uma pessoa em várias empresas (o e-mail continua único: um usuário, uma empresa).
 - Mudar contas em produção: depois do deploy, um dono marca os outros pela tela.
 
 ## Proteções dentro da empresa do dono marcado

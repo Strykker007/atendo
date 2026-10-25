@@ -9,6 +9,7 @@ import { nextPeriodEnd, type ConsolidatedItem } from './dues';
 import { cycleValue, overridePrice } from './plan-override';
 import { PromotionsService } from './promotions.service';
 import { DiscountLedgerService } from './discount-ledger.service';
+import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
 
 // ---------- Tipos da API v3 do Asaas (só o que usamos) ----------
 
@@ -143,11 +144,11 @@ export class AsaasService {
 
   /** Cria (ou atualiza) o cliente do tenant no Asaas e devolve o `asaasCustomerId`. */
   async createOrUpdateCustomer(tenantId: string, data: AsaasCustomerInput): Promise<string> {
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { users: { where: { role: 'tenant_admin' }, take: 1 } } });
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { users: { where: { role: 'tenant_admin' }, take: 1, select: LOGIN_EMAIL_SELECT } } });
     const body = {
       name: data.name?.trim() || tenant.name,
       cpfCnpj: onlyDigits(data.cpfCnpj),
-      email: data.email || tenant.users[0]?.email,
+      email: data.email || loginEmail(tenant.users[0]) || undefined,
       mobilePhone: onlyDigits(data.mobilePhone),
       postalCode: onlyDigits(data.postalCode),
       addressNumber: data.addressNumber,

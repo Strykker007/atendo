@@ -1,5 +1,5 @@
 import { Body, Controller, ForbiddenException, Get, HttpCode, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -25,6 +25,9 @@ class ChangePasswordDto {
 }
 class UpdateMeDto {
   @IsString() @MinLength(1) @MaxLength(80) name: string;
+}
+class SwitchDto {
+  @IsUUID() userId: string;
 }
 
 const COOKIE = 'atendo_rt';
@@ -99,7 +102,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
     if (user.impersonatorId) throw new ForbiddenException('Dono entrando como cliente não troca a senha do cliente.');
-    await this.auth.changePassword(user.id, dto.current, dto.password);
+    await this.auth.changePassword(user.personId, dto.current, dto.password);
     return { ok: true };
   }
 
@@ -110,6 +113,28 @@ export class AuthController {
   updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateMeDto) {
     if (user.impersonatorId) throw new ForbiddenException('Dono entrando como cliente não altera o perfil do cliente.');
     return this.auth.updateName(user.id, dto.name);
+  }
+
+  /** Empresas da pessoa logada — seletor "Minhas empresas" (docs/multiempresa.md). */
+  @Get('memberships')
+  @NoTenantOk()
+  @ShiftLockOk()
+  @UseGuards(JwtAuthGuard)
+  memberships(@CurrentUser() user: AuthUser) {
+    return this.auth.memberships(user);
+  }
+
+  /** Troca para outra empresa da pessoa: sessão nova (access + refresh) como membro de lá. */
+  @Post('switch')
+  @HttpCode(200)
+  @NoTenantOk()
+  @ShiftLockOk()
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  async switchTo(@CurrentUser() user: AuthUser, @Body() dto: SwitchDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.switchTo(user, dto.userId, { userAgent: req.headers['user-agent'], ip: req.ip });
+    this.setCookie(res, r.refreshToken, r.refreshMaxAge);
+    return { accessToken: r.accessToken };
   }
 
   @Get('me')

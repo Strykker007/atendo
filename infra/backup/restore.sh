@@ -23,6 +23,10 @@ fi
 if [ -f "$SRC/storage.tar.gz" ]; then
   tar xzf "$SRC/storage.tar.gz" -C /data/storage
   echo "mídia restaurada"
+elif [ -n "${BACKUP_REMOTE:-}" ]; then
+  # com remoto a mídia não fica na pasta datada: está em $BACKUP_REMOTE/storage (backup.sh)
+  echo "mídia: está em $BACKUP_REMOTE/storage — restaure com (o volume do serviço é só leitura):"
+  echo "  docker compose -f infra/docker-compose.prod.yml --env-file .env.production run --rm -v ./volumes/storage:/restore backup rclone copy $BACKUP_REMOTE/storage /restore"
 fi
 
 echo "Pronto. Suba api e worker de novo."
