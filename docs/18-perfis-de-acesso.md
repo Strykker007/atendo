@@ -110,8 +110,9 @@ acesso de cada uma**. "Adicionar linha" cria outra já no perfil da última (cad
 seguidos não pede 5 escolhas). **Colar de uma planilha** preenche a tabela: uma pessoa por linha,
 separada por tab, `;` ou `,`, em qualquer ordem — o e-mail é achado pelo `@`, o perfil pelo nome
 (sem diferenciar acento/maiúscula: "gerente" = "Gerente"), o resto é o nome; sem perfil
-reconhecido, entra no da última linha. Linha pela metade aparece marcada (falta o nome / e-mail
-inválido) e trava o envio; linha vazia é ignorada.
+reconhecido, entra no da última linha. Cada campo só acusa (falta o nome / falta o e-mail / e-mail
+inválido) **depois que a pessoa sai dele** ou ao clicar em Convidar — digitando, nunca; linha
+colada já vem conferida. Com linha errada, Convidar não envia e marca todas; linha vazia é ignorada.
 
 Sempre **por convite** (e-mail + link copiável, que aparece na lista de links da Equipe, um por
 pessoa). Mesmas regras do cadastro individual, **por pessoa**: perfil do cliente, sem

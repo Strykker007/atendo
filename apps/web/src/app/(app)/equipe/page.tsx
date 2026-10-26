@@ -265,7 +265,11 @@ function CreateAgentModal({ open, onClose, onSubmit, pending, profiles }: { open
 }
 
 type Perfil = { id: string; name: string; systemRole?: 'tenant_admin' | 'manager' | 'agent' | null };
-type Linha = { key: number; name: string; email: string; profileId: string; erro?: string };
+/**
+ * `tocou`: campos de onde a pessoa já saiu — o aviso de cada campo só aparece depois disso
+ * (digitando, não; e sair do nome não acusa o e-mail que ela ainda vai digitar).
+ */
+type Linha = { key: number; name: string; email: string; profileId: string; erro?: string; tocou?: { name?: boolean; email?: boolean } };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const semAcento = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 let proximaChave = 0;
@@ -284,7 +288,9 @@ function colarLinhas(texto: string, perfis: Perfil[], padrao: string): Linha[] {
   });
 }
 
-const problemaDa = (l: Linha) => (!l.name.trim() ? 'falta o nome' : !EMAIL_RE.test(l.email.trim()) ? 'e-mail inválido' : null);
+const faltaNome = (l: Linha) => !l.name.trim();
+const emailRuim = (l: Linha) => !EMAIL_RE.test(l.email.trim());
+const problemaDa = (l: Linha) => (faltaNome(l) ? 'falta o nome' : emailRuim(l) ? 'e-mail inválido' : null);
 
 /**
  * Várias pessoas de uma vez, cada uma com o seu perfil, por convite. Linha a linha (como um
@@ -296,10 +302,13 @@ function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: {
   const [linhas, setLinhas] = useState<Linha[]>([]);
   const [colando, setColando] = useState(false);
   const [colado, setColado] = useState('');
+  // clicou em Convidar com linha errada: a partir daí todas as linhas mostram o que falta
+  const [tentou, setTentou] = useState(false);
   useEffect(() => {
-    if (open) { setLinhas([nova(), nova(), nova()]); setColando(false); setColado(''); }
+    if (open) { setLinhas([nova(), nova(), nova()]); setColando(false); setColado(''); setTentou(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, padrao]);
+  const tocar = (key: number, campo: 'name' | 'email') => setLinhas((xs) => xs.map((x) => (x.key === key ? { ...x, tocou: { ...x.tocou, [campo]: true } } : x)));
   const mudar = (key: number, p: Partial<Linha>) => setLinhas((xs) => xs.map((x) => (x.key === key ? { ...x, ...p, erro: undefined } : x)));
   // linha em branco não conta (sobra das 3 iniciais); preenchida pela metade é erro
   const preenchidas = linhas.filter((l) => l.name.trim() || l.email.trim());
@@ -309,11 +318,13 @@ function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: {
   function aplicarColagem() {
     const novas = colarLinhas(colado, profiles, linhas[linhas.length - 1]?.profileId || padrao);
     // substitui as linhas vazias, mantém o que já foi digitado
-    setLinhas((xs) => [...xs.filter((x) => x.name.trim() || x.email.trim()), ...novas]);
+    // colado já vem completo: o que estiver errado aparece na hora
+    setLinhas((xs) => [...xs.filter((x) => x.name.trim() || x.email.trim()), ...novas.map((n) => ({ ...n, tocou: { name: true, email: true } }))]);
     setColado('');
     setColando(false);
   }
   async function enviar() {
+    if (comProblema.length) { setTentou(true); return; }
     const r = await onSubmit({ people: validas.map((l) => ({ name: l.name.trim(), email: l.email.trim(), profileId: l.profileId || undefined })) });
     if (!r) return;
     const falhas = r.filter((x) => !x.ok);
@@ -332,15 +343,20 @@ function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: {
             <span>#</span><span>Nome</span><span>E-mail</span><span>Perfil de acesso</span><span />
           </div>
           {linhas.map((l, i) => {
-            const problema = (l.name.trim() || l.email.trim()) ? problemaDa(l) : null;
+            // linha vazia nunca acusa; preenchida, cada campo acusa depois de sair dele (ou ao tentar enviar)
+            const usada = !!(l.name.trim() || l.email.trim());
+            const avisoNome = usada && (tentou || l.tocou?.name) && faltaNome(l) ? 'falta o nome' : null;
+            const avisoEmail = usada && (tentou || l.tocou?.email) && emailRuim(l) ? (l.email.trim() ? 'e-mail inválido' : 'falta o e-mail') : null;
             return (
               <div key={l.key} className="grid grid-cols-[1.5rem_minmax(0,1fr)_2rem] sm:grid-cols-[1.5rem_minmax(0,1fr)_minmax(0,1.3fr)_minmax(9rem,11rem)_2rem] gap-2 px-3 py-2 items-start">
                 <span className="pt-2 text-faint tnum text-sm">{i + 1}</span>
                 <>
-                  <div className="col-start-2 sm:col-start-auto"><input className={inputCls} value={l.name} onChange={(e) => mudar(l.key, { name: e.target.value })} placeholder="Nome" maxLength={80} aria-label={`Nome da pessoa ${i + 1}`} /></div>
+                  <div className="col-start-2 sm:col-start-auto"><input className={inputCls} value={l.name} onChange={(e) => mudar(l.key, { name: e.target.value })} onBlur={() => tocar(l.key, 'name')} placeholder="Nome" maxLength={80} aria-label={`Nome da pessoa ${i + 1}`} aria-invalid={!!avisoNome} />
+                    {avisoNome && <p className="text-[11px] text-danger-ink mt-0.5">{avisoNome}</p>}
+                  </div>
                   <div className="col-start-2 sm:col-start-auto">
-                    <input type="email" className={inputCls} value={l.email} onChange={(e) => mudar(l.key, { email: e.target.value })} placeholder="email@empresa.com.br" aria-label={`E-mail da pessoa ${i + 1}`} />
-                    {(l.erro || problema) && <p className="text-[11px] text-danger-ink mt-0.5">{l.erro ?? problema}</p>}
+                    <input type="email" className={inputCls} value={l.email} onChange={(e) => mudar(l.key, { email: e.target.value })} onBlur={() => tocar(l.key, 'email')} placeholder="email@empresa.com.br" aria-label={`E-mail da pessoa ${i + 1}`} aria-invalid={!!avisoEmail} />
+                    {(l.erro || avisoEmail) && <p className="text-[11px] text-danger-ink mt-0.5">{l.erro ?? avisoEmail}</p>}
                   </div>
                   <div className="col-start-2 sm:col-start-auto">
                     <select className={inputCls} value={l.profileId} onChange={(e) => mudar(l.key, { profileId: e.target.value })} aria-label={`Perfil de acesso da pessoa ${i + 1}`}>
@@ -369,7 +385,7 @@ function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: {
         )}
         {passaDoPlano && <p className="text-[12.5px] text-warn-ink">A lista passa do limite do plano: tire {validas.length - room!} pessoa{validas.length - room! === 1 ? '' : 's'} ou faça upgrade em Plano e uso.</p>}
         <p className="text-xs text-muted rounded-lg bg-field px-3 py-2">Cada pessoa recebe um e-mail com o link (válido por 3 dias) para criar a própria senha. Os links também aparecem aqui na Equipe para você mandar pelo WhatsApp.</p>
-        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Fechar</Button><Button onClick={enviar} disabled={!validas.length || comProblema.length > 0 || validas.length > 50 || passaDoPlano} title={comProblema.length ? 'Corrija as linhas marcadas' : undefined} loading={pending} loadingText="Convidando…">Convidar {validas.length || ''}</Button></div>
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Fechar</Button><Button onClick={enviar} disabled={!validas.length || validas.length > 50 || passaDoPlano} loading={pending} loadingText="Convidando…">Convidar {validas.length || ''}</Button></div>
       </div>
     </Modal>
   );
