@@ -3,6 +3,14 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.9.0 — 2026-10-26
+
+- fix(equipe): adicionar várias valida o campo ao sair dele ou ao convidar, não enquanto digita
+- fix(equipe): adicionar várias responsivo — seletor de perfil não corta mais o texto, vira bloco no celular
+- feat(equipe): adicionar várias com perfil por pessoa (tabela linha a linha + colar de planilha)
+- fix(menu): menu lateral rola em tela baixa, com marca e rodapé fixos
+- feat(equipe): adicionar várias pessoas de uma vez (lista colada, mesmo perfil, por convite)
+
 ## 1.8.1 — 2026-10-26
 
 - fix(envio): automática segurada pelo teto/h não empurra mais o envio do atendente
