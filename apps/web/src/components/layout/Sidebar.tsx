@@ -111,7 +111,7 @@ export function Sidebar() {
     <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-14' : 'w-52')}>
       {/* recolher fica no topo, ao lado da marca: no rodapé ficava perdido no meio da gaveta
           e as pessoas não achavam */}
-      <div className={cn('h-12 flex items-center gap-2.5 px-3.5', collapsed && 'justify-center px-0')}>
+      <div className={cn('h-12 shrink-0 flex items-center gap-2.5 px-3.5', collapsed && 'justify-center px-0')}>
         {/* o menu tem fundo escuro: a logo do menu é a versão com texto claro. Recolhido fica só o símbolo. */}
         {collapsed ? (
           <MarcaIcone className="h-7 w-auto shrink-0" />
@@ -139,7 +139,9 @@ export function Sidebar() {
       <WorkspaceSwitcher collapsed={collapsed} owner={!!me.data?.systemOwner} />
       {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}
 
-      <nav className="flex-1 py-2">
+      {/* só o menu rola: em tela baixa (notebook, zoom) os itens de baixo ficavam inalcançáveis,
+          e marca, seletores e rodapé (Sair, versão) continuam sempre à vista */}
+      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin [scrollbar-width:thin] py-2">
         {menu.map(({ href, label, icon: Icon, secao }) => {
           // as abas de Escalas e plantões contam como o mesmo item
           const raiz = href.startsWith('/escalas/') ? '/escalas' : href;
@@ -172,7 +174,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-side-line p-2 space-y-0.5">
+      <div className="shrink-0 border-t border-side-line p-2 space-y-0.5">
         {!collapsed && me.data && (
           <div className="px-3 py-1.5 text-xs">
             <div className="text-white font-medium truncate">{me.data.name}</div>
