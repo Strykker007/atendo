@@ -95,7 +95,7 @@ tela é conveniência, não segurança.
 | PATCH | `/profiles/:id` | `profiles.manage` | Edita (filtra por `grantable`) |
 | DELETE | `/profiles/:id` | `profiles.manage` | Exclui (recusa só o Administrador) |
 | PATCH | `/tenants/me/agents/:id` | `team.manage` | `profileId` vincula; `""` desvincula. `name`: admin da conta renomeia qualquer pessoa; gerente, só atendentes. `email`/`role` (`agent`\|`manager`): mesma regra de alcance, `role` só pelo admin; revogam as sessões e invalidam o cache de permissões |
-| POST | `/tenants/me/agents/bulk` | `team.manage` | Cadastro em massa: `{ profileId?, people: [{ name, email }] }` (1–50) — ver [Cadastro em massa](#cadastro-em-massa) |
+| POST | `/tenants/me/agents/bulk` | `team.manage` | Cadastro em massa: `{ profileId?, people: [{ name, email, profileId? }] }` (1–50) — ver [Cadastro em massa](#cadastro-em-massa) |
 | PATCH | `/auth/me` | — | `{name}`: cada um edita o próprio nome (Configurações → Meu perfil) |
 
 ## Interface
@@ -105,19 +105,25 @@ com seletor por pessoa. `useCan('x')` esconde o que a pessoa não pode fazer.
 
 ### Cadastro em massa
 
-**Equipe → Adicionar várias**: escolhe um perfil e cola a lista, uma pessoa por linha —
-`Nome; e-mail`, com `;`, `,` ou tab (colar de planilha), em qualquer ordem (o e-mail é achado
-pelo `@`). A tela mostra quantas entram, as linhas inválidas e se a lista passa do limite do plano.
+**Equipe → Adicionar várias**: uma tabela com uma linha por pessoa — **nome, e-mail e perfil de
+acesso de cada uma**. "Adicionar linha" cria outra já no perfil da última (cadastrar 5 atendentes
+seguidos não pede 5 escolhas). **Colar de uma planilha** preenche a tabela: uma pessoa por linha,
+separada por tab, `;` ou `,`, em qualquer ordem — o e-mail é achado pelo `@`, o perfil pelo nome
+(sem diferenciar acento/maiúscula: "gerente" = "Gerente"), o resto é o nome; sem perfil
+reconhecido, entra no da última linha. Linha pela metade aparece marcada (falta o nome / e-mail
+inválido) e trava o envio; linha vazia é ignorada.
 
-Todas entram no mesmo perfil e **sempre por convite** (e-mail + link copiável, que aparece na lista
-de links da Equipe, um por pessoa). Mesmas regras do cadastro individual: perfil do cliente, sem
+Sempre **por convite** (e-mail + link copiável, que aparece na lista de links da Equipe, um por
+pessoa). Mesmas regras do cadastro individual, **por pessoa**: perfil do cliente, sem
 Administrador, sem dar permissão que quem cria não tem, gerente não cria gerente.
 
-Cada linha é independente: e-mail já usado na plataforma ("E-mail já cadastrado") ou repetido na
-lista ("Repetido na lista", sem diferenciar maiúsculas) volta como erro daquela linha, e as demais
-são criadas. O limite de usuários do plano (`maxAgents`) é conferido para o **lote inteiro antes de
-criar qualquer uma** — passou, nada é criado. Na tela, ficam na caixa só as linhas que deram erro,
-para corrigir e mandar de novo. Até 50 por vez; convites saem em sequência.
+API: `people: [{ name, email, profileId? }]`; `profileId` do lote vale para quem não trouxer o
+seu. Cada linha é independente: e-mail já usado na plataforma ("E-mail já cadastrado"), repetido
+na lista ("Repetido na lista", sem diferenciar maiúsculas) ou perfil que não pode ser dado volta
+como erro daquela linha, e as demais são criadas. O limite de usuários do plano (`maxAgents`) é
+conferido para o **lote inteiro antes de criar qualquer uma** — passou, nada é criado. Na tela,
+ficam só as linhas que deram erro, com o motivo, para corrigir e mandar de novo. Até 50 por vez;
+convites saem em sequência.
 
 ## Perfis na criação do cliente
 

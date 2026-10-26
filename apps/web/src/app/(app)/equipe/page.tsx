@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, KeyRound, Power, Users, Pencil, UsersRound } from 'lucide-react';
+import { Plus, KeyRound, Power, Users, Pencil, UsersRound, X, ClipboardPaste } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
@@ -264,66 +264,109 @@ function CreateAgentModal({ open, onClose, onSubmit, pending, profiles }: { open
   );
 }
 
+type Perfil = { id: string; name: string; systemRole?: 'tenant_admin' | 'manager' | 'agent' | null };
+type Linha = { key: number; name: string; email: string; profileId: string; erro?: string };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const semAcento = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+let proximaChave = 0;
+
 /**
- * Várias pessoas de uma vez: uma por linha, "Nome; e-mail" (também aceita tab — colar do Excel —,
- * vírgula ou o e-mail primeiro). Todas no mesmo perfil, por convite.
+ * Texto colado (planilha: tab; ou `;`/`,`) → linhas. Em cada linha o e-mail é achado pelo `@`, o
+ * perfil pelo nome (sem acento/maiúscula) e o resto é o nome. Sem perfil reconhecido, usa `padrao`.
  */
-function parsePessoas(texto: string) {
+function colarLinhas(texto: string, perfis: Perfil[], padrao: string): Linha[] {
   return texto.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((linha) => {
     const partes = linha.split(/[\t;,]/).map((x) => x.trim()).filter(Boolean);
-    const email = partes.find((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) ?? '';
-    const name = partes.filter((x) => x !== email).join(' ').slice(0, 80);
-    return { linha, name, email, erro: !email ? 'sem e-mail válido' : !name ? 'sem nome' : null };
+    const email = partes.find((x) => EMAIL_RE.test(x)) ?? '';
+    const perfil = perfis.find((p) => partes.some((x) => semAcento(x) === semAcento(p.name)));
+    const name = partes.filter((x) => x !== email && (!perfil || semAcento(x) !== semAcento(perfil.name))).join(' ').slice(0, 80);
+    return { key: ++proximaChave, name, email, profileId: perfil?.id ?? padrao };
   });
 }
 
-function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: { open: boolean; onClose: () => void; onSubmit: (b: { profileId?: string; people: { name: string; email: string }[] }) => Promise<BulkAgentResult[] | null>; pending: boolean; profiles: { id: string; name: string; systemRole?: 'tenant_admin' | 'manager' | 'agent' | null }[]; room: number | null }) {
-  const defaultProfileId = profiles.find((p) => p.systemRole === 'agent')?.id ?? profiles[0]?.id ?? '';
-  const [profileId, setProfileId] = useState('');
-  const [texto, setTexto] = useState('');
-  const [resultado, setResultado] = useState<BulkAgentResult[] | null>(null);
+const problemaDa = (l: Linha) => (!l.name.trim() ? 'falta o nome' : !EMAIL_RE.test(l.email.trim()) ? 'e-mail inválido' : null);
+
+/**
+ * Várias pessoas de uma vez, cada uma com o seu perfil, por convite. Linha a linha (como um
+ * formulário) ou colando de uma planilha — Nome, e-mail e, se quiser, o perfil pelo nome.
+ */
+function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: { open: boolean; onClose: () => void; onSubmit: (b: { people: { name: string; email: string; profileId?: string }[] }) => Promise<BulkAgentResult[] | null>; pending: boolean; profiles: Perfil[]; room: number | null }) {
+  const padrao = profiles.find((p) => p.systemRole === 'agent')?.id ?? profiles[0]?.id ?? '';
+  const nova = (profileId = padrao): Linha => ({ key: ++proximaChave, name: '', email: '', profileId });
+  const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [colando, setColando] = useState(false);
+  const [colado, setColado] = useState('');
   useEffect(() => {
-    if (open) { setProfileId(defaultProfileId); setTexto(''); setResultado(null); }
-  }, [open, defaultProfileId]);
-  const pessoas = parsePessoas(texto);
-  const validas = pessoas.filter((p) => !p.erro);
+    if (open) { setLinhas([nova(), nova(), nova()]); setColando(false); setColado(''); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, padrao]);
+  const mudar = (key: number, p: Partial<Linha>) => setLinhas((xs) => xs.map((x) => (x.key === key ? { ...x, ...p, erro: undefined } : x)));
+  // linha em branco não conta (sobra das 3 iniciais); preenchida pela metade é erro
+  const preenchidas = linhas.filter((l) => l.name.trim() || l.email.trim());
+  const comProblema = preenchidas.filter((l) => problemaDa(l));
+  const validas = preenchidas.filter((l) => !problemaDa(l));
   const passaDoPlano = room !== null && validas.length > room;
+  function aplicarColagem() {
+    const novas = colarLinhas(colado, profiles, linhas[linhas.length - 1]?.profileId || padrao);
+    // substitui as linhas vazias, mantém o que já foi digitado
+    setLinhas((xs) => [...xs.filter((x) => x.name.trim() || x.email.trim()), ...novas]);
+    setColado('');
+    setColando(false);
+  }
   async function enviar() {
-    const r = await onSubmit({ profileId: profileId || undefined, people: validas.map(({ name, email }) => ({ name, email })) });
+    const r = await onSubmit({ people: validas.map((l) => ({ name: l.name.trim(), email: l.email.trim(), profileId: l.profileId || undefined })) });
     if (!r) return;
-    // só os que deram erro continuam na caixa, para corrigir e mandar de novo
     const falhas = r.filter((x) => !x.ok);
     if (!falhas.length) return onClose();
-    setResultado(r);
-    setTexto(falhas.map((x) => `${x.name}; ${x.email}`).join('\n'));
+    // ficam só as que não entraram, com o motivo na própria linha
+    setLinhas(falhas.map((f) => ({ key: ++proximaChave, name: f.name, email: f.email, profileId: validas.find((v) => v.email.trim() === f.email)?.profileId ?? padrao, erro: f.error })));
   }
   return (
-    <Modal open={open} onClose={onClose} title="Adicionar várias pessoas" width="max-w-lg">
-      <div className="space-y-4">
-        <Field label="Perfil de acesso" hint="Todas as pessoas desta lista entram neste perfil. Dá para trocar depois, uma a uma.">
-          <select className={inputCls} value={profileId} onChange={(e) => setProfileId(e.target.value)} required={profiles.length > 0}>
-            {!profiles.length && <option value="">Acesso padrão</option>}
-            {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Pessoas" hint="Uma por linha: nome e e-mail separados por ponto e vírgula, vírgula ou tab. Dá para colar direto de uma planilha.">
-          <textarea className={cn(inputCls, 'h-40 font-mono text-[12.5px]')} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={'Maria Souza; maria@loja.com.br\nJoão Lima; joao@loja.com.br'} autoFocus />
-        </Field>
-        {pessoas.length > 0 && (
-          <div className="text-[12.5px] space-y-1">
-            <p className="text-muted"><b className="text-ink tnum">{validas.length}</b> pessoa{validas.length === 1 ? '' : 's'} para convidar (máx. 50 por vez){room !== null && <> · o plano ainda comporta <b className="text-ink tnum">{room}</b></>}</p>
-            {pessoas.filter((p) => p.erro).map((p) => <p key={p.linha} className="text-danger-ink truncate">“{p.linha}” — {p.erro}</p>)}
-            {passaDoPlano && <p className="text-warn-ink">A lista passa do limite do plano: tire {validas.length - room!} pessoa{validas.length - room! === 1 ? '' : 's'} ou faça upgrade em Plano e uso.</p>}
+    <Modal open={open} onClose={onClose} title="Adicionar várias pessoas" width="max-w-3xl">
+      <div className="space-y-3">
+        <div className="rounded-xl border border-line overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-field text-left text-xs text-muted"><tr><th className="px-3 py-2 w-8">#</th><th className="px-2 py-2">Nome</th><th className="px-2 py-2">E-mail</th><th className="px-2 py-2">Perfil de acesso</th><th className="w-8" /></tr></thead>
+            <tbody className="divide-y divide-line">
+              {linhas.map((l, i) => {
+                const problema = (l.name.trim() || l.email.trim()) ? problemaDa(l) : null;
+                return (
+                  <tr key={l.key} className="align-top">
+                    <td className="px-3 py-2 text-faint tnum">{i + 1}</td>
+                    <td className="px-2 py-1.5"><input className={cn(inputCls, 'h-8')} value={l.name} onChange={(e) => mudar(l.key, { name: e.target.value })} placeholder="Nome" maxLength={80} /></td>
+                    <td className="px-2 py-1.5">
+                      <input type="email" className={cn(inputCls, 'h-8')} value={l.email} onChange={(e) => mudar(l.key, { email: e.target.value })} placeholder="email@empresa.com.br" />
+                      {(l.erro || problema) && <p className="text-[11px] text-danger-ink mt-0.5">{l.erro ?? problema}</p>}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <select className={cn(inputCls, 'h-8')} value={l.profileId} onChange={(e) => mudar(l.key, { profileId: e.target.value })}>
+                        {!profiles.length && <option value="">Acesso padrão</option>}
+                        {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-1 py-1.5"><button type="button" onClick={() => setLinhas((xs) => (xs.length > 1 ? xs.filter((x) => x.key !== l.key) : [nova()]))} className="p-1.5 rounded-md text-faint hover:text-danger-ink hover:bg-field" title="Remover linha"><X size={14} /></button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* a nova linha herda o perfil da última: quem cadastra 5 atendentes seguidos não escolhe 5 vezes */}
+          <Button size="sm" variant="ghost" icon={<Plus size={14} />} disabled={linhas.length >= 50} onClick={() => setLinhas((xs) => [...xs, nova(xs[xs.length - 1]?.profileId)])}>Adicionar linha</Button>
+          <Button size="sm" variant="ghost" icon={<ClipboardPaste size={14} />} onClick={() => setColando((v) => !v)}>Colar de uma planilha</Button>
+          <span className="ml-auto text-[12px] text-muted"><b className="text-ink tnum">{validas.length}</b> para convidar (máx. 50){room !== null && <> · o plano comporta mais <b className="text-ink tnum">{room}</b></>}</span>
+        </div>
+        {colando && (
+          <div className="rounded-xl bg-field p-3 space-y-2">
+            <p className="text-[12px] text-muted">Uma pessoa por linha: <b>nome</b>, <b>e-mail</b> e, se quiser, o <b>perfil</b> com o mesmo nome que aparece aqui (ex.: Gerente). Separe por tab (colar da planilha), ponto e vírgula ou vírgula. Sem perfil, entra no da última linha.</p>
+            <textarea className={cn(inputCls, 'h-28 font-mono text-[12.5px]')} value={colado} onChange={(e) => setColado(e.target.value)} placeholder={'Maria Souza; maria@loja.com.br; Atendente\nJoão Lima; joao@loja.com.br; Gerente'} autoFocus />
+            <div className="flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => setColando(false)}>Cancelar</Button><Button size="sm" onClick={aplicarColagem} disabled={!colado.trim()}>Pôr na lista</Button></div>
           </div>
         )}
-        {resultado && (
-          <div className="rounded-lg bg-field px-3 py-2 text-[12.5px] space-y-0.5">
-            <p className="font-medium text-ink">{resultado.filter((r) => r.ok).length} criada(s). Ficaram na caixa as que não entraram:</p>
-            {resultado.filter((r) => !r.ok).map((r) => <p key={r.email} className="text-danger-ink">{r.name} ({r.email}) — {r.error}</p>)}
-          </div>
-        )}
+        {passaDoPlano && <p className="text-[12.5px] text-warn-ink">A lista passa do limite do plano: tire {validas.length - room!} pessoa{validas.length - room! === 1 ? '' : 's'} ou faça upgrade em Plano e uso.</p>}
         <p className="text-xs text-muted rounded-lg bg-field px-3 py-2">Cada pessoa recebe um e-mail com o link (válido por 3 dias) para criar a própria senha. Os links também aparecem aqui na Equipe para você mandar pelo WhatsApp.</p>
-        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Fechar</Button><Button onClick={enviar} disabled={!validas.length || validas.length > 50 || passaDoPlano} loading={pending} loadingText="Convidando…">Convidar {validas.length || ''}</Button></div>
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Fechar</Button><Button onClick={enviar} disabled={!validas.length || comProblema.length > 0 || validas.length > 50 || passaDoPlano} title={comProblema.length ? 'Corrija as linhas marcadas' : undefined} loading={pending} loadingText="Convidando…">Convidar {validas.length || ''}</Button></div>
       </div>
     </Modal>
   );

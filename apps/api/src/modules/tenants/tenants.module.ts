@@ -90,8 +90,10 @@ class CreateAgentDto {
 class BulkPersonDto {
   @IsEmail() @MaxLength(120) email: string;
   @IsString() @MinLength(1) @MaxLength(80) name: string;
+  /** perfil desta pessoa; ausente = o `profileId` do lote */
+  @IsOptional() @IsUUID() profileId?: string;
 }
-/** Várias pessoas de uma vez, todas no mesmo perfil e sempre por convite (docs/18-perfis-de-acesso.md#cadastro-em-massa). */
+/** Várias pessoas de uma vez, cada uma no seu perfil, sempre por convite (docs/18-perfis-de-acesso.md#cadastro-em-massa). */
 class BulkAgentsDto {
   @IsOptional() @IsIn(['agent', 'manager']) role?: 'agent' | 'manager';
   @IsOptional() @IsUUID() profileId?: string;
@@ -311,23 +313,33 @@ class TenantsController {
   }
 
   /**
-   * Cadastro em massa: todas no mesmo perfil, por convite. Cada pessoa é independente — e-mail
-   * repetido ou já usado vira erro só daquela linha. O limite do plano vale para o lote inteiro
+   * Cadastro em massa: cada pessoa com o seu perfil, por convite. Cada pessoa é independente —
+   * e-mail repetido ou já usado, ou perfil que quem cria não pode dar, vira erro só daquela linha. O limite do plano vale para o lote inteiro
    * (antes de criar qualquer uma), para não deixar metade da equipe de fora sem aviso.
    */
   @Post('me/agents/bulk')
   @RequirePermission('team.manage')
   async createAgentsBulk(@CurrentUser() u: AuthUser, @Body() dto: BulkAgentsDto) {
-    const { profileId, role } = await this.agentAccess(u, dto);
+    // mesma regra do individual, uma vez por perfil distinto da lista
+    const acessos = new Map<string, Promise<{ profileId?: string; role: 'agent' | 'manager' }>>();
+    const acessoDe = (profileId?: string) => {
+      const k = profileId ?? '';
+      if (!acessos.has(k)) acessos.set(k, this.agentAccess(u, { profileId, role: dto.role }));
+      return acessos.get(k)!;
+    };
     const norm = (e: string) => e.trim().toLowerCase();
     const vistos = new Set<string>();
     const existentes = new Set((await this.prisma.user.findMany({ where: { email: { in: dto.people.map((p) => p.email.trim()), mode: 'insensitive' } }, select: { email: true } })).map((x) => norm(x.email!)));
     const linhas = dto.people.map((p) => {
       const email = p.email.trim();
-      const erro = existentes.has(norm(email)) ? 'E-mail já cadastrado' : vistos.has(norm(email)) ? 'Repetido na lista' : null;
+      const erro: string | null = existentes.has(norm(email)) ? 'E-mail já cadastrado' : vistos.has(norm(email)) ? 'Repetido na lista' : null;
       vistos.add(norm(email));
-      return { name: p.name.trim(), email, erro };
+      return { name: p.name.trim(), email, profileId: p.profileId ?? dto.profileId, erro };
     });
+    for (const l of linhas) {
+      if (l.erro) continue;
+      try { await acessoDe(l.profileId); } catch (err) { l.erro = err instanceof Error ? err.message : 'Perfil inválido'; }
+    }
     await this.usage.assertRoom(u.tenantId, 'maxAgents', linhas.filter((l) => !l.erro).length);
     const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
     const results = [];
@@ -335,6 +347,7 @@ class TenantsController {
     for (const l of linhas) {
       if (l.erro) { results.push({ name: l.name, email: l.email, ok: false, error: l.erro }); continue; }
       try {
+        const { profileId, role } = await acessoDe(l.profileId);
         const r = await this.inviteAgent(u, tenant.name, l, profileId, role);
         results.push({ name: l.name, email: l.email, ok: true, inviteLink: r.inviteLink, emailSent: r.emailSent });
       } catch (err) {
