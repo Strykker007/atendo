@@ -3,6 +3,14 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.8.1 — 2026-10-26
+
+- fix(envio): automática segurada pelo teto/h não empurra mais o envio do atendente
+- feat(relatorios): relatório diário por e-mail com ranking da equipe (feature daily_report, opt-in por usuário)
+- feat(dono): Clientes com mensalidade e exportar CSV; Financeiro só de leitura, sem a aba Assinaturas duplicada, nomes levam ao cliente
+- fix(backup): mídia incremental pelas últimas 48 h e conferência completa semanal
+- feat(financeiro): aba Em teste com receita a converter e exportar CSV em todas as abas; doc da migração para a Meta oficial
+
 ## 1.8.0 — 2026-10-25
 
 - feat(atendimento): resposta pelo celular sem limbo, aviso de encerramento, atalho de isentos e atendimentos internos em Relatórios
