@@ -21,6 +21,8 @@ export interface WorkSchedule {
   restHours: number;
   anchorDate: string | null;
   toleranceMinutes: number;
+  /** minutos depois do fim em que a sessão ainda funciona (com contador); 0 = trava na hora */
+  exitGraceMinutes: number;
   users: { id: string; name: string }[];
 }
 export type WorkScheduleInput = Omit<WorkSchedule, 'id' | 'users'>;

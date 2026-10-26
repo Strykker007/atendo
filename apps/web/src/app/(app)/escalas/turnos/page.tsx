@@ -18,9 +18,9 @@ const hoje = () => new Date().toLocaleDateString('sv-SE');
 
 /** Valores iniciais de cada tipo: 12x36 das 07h às 19h; comercial 44h de seg. a sex. (8h48 por dia). */
 const PRESET: Record<WorkScheduleType, Omit<WorkScheduleInput, 'name' | 'type'>> = {
-  FIXED_12X36: { startTime: '07:00', endTime: '19:00', workDays: [], restHours: 36, anchorDate: hoje(), toleranceMinutes: 15 },
-  COMMERCIAL_44H: { startTime: '08:00', endTime: '17:48', workDays: [1, 2, 3, 4, 5], restHours: 0, anchorDate: null, toleranceMinutes: 15 },
-  CUSTOM: { startTime: '09:00', endTime: '18:00', workDays: [1, 2, 3, 4, 5], restHours: 0, anchorDate: null, toleranceMinutes: 15 },
+  FIXED_12X36: { startTime: '07:00', endTime: '19:00', workDays: [], restHours: 36, anchorDate: hoje(), toleranceMinutes: 15, exitGraceMinutes: 0 },
+  COMMERCIAL_44H: { startTime: '08:00', endTime: '17:48', workDays: [1, 2, 3, 4, 5], restHours: 0, anchorDate: null, toleranceMinutes: 15, exitGraceMinutes: 0 },
+  CUSTOM: { startTime: '09:00', endTime: '18:00', workDays: [1, 2, 3, 4, 5], restHours: 0, anchorDate: null, toleranceMinutes: 15, exitGraceMinutes: 0 },
 };
 
 /** "seg., ter., qua." ou "a cada 48h (desde 19/10)" — resumo da escala no card. */
@@ -124,7 +124,7 @@ export default function EscalasPage() {
 function ScheduleForm({ escala, onClose }: { escala: WorkSchedule | null; onClose: () => void }) {
   const save = useSaveWorkSchedule();
   const [f, setF] = useState<WorkScheduleInput>(() => escala
-    ? { name: escala.name, type: escala.type, startTime: escala.startTime, endTime: escala.endTime, workDays: escala.workDays, restHours: escala.restHours, anchorDate: escala.anchorDate, toleranceMinutes: escala.toleranceMinutes }
+    ? { name: escala.name, type: escala.type, startTime: escala.startTime, endTime: escala.endTime, workDays: escala.workDays, restHours: escala.restHours, anchorDate: escala.anchorDate, toleranceMinutes: escala.toleranceMinutes, exitGraceMinutes: escala.exitGraceMinutes }
     : { name: '', type: 'COMMERCIAL_44H', ...PRESET.COMMERCIAL_44H });
   const set = (p: Partial<WorkScheduleInput>) => setF((cur) => ({ ...cur, ...p }));
   // CUSTOM escolhe entre dias da semana e ciclo; 12x36 é sempre ciclo
@@ -188,8 +188,11 @@ function ScheduleForm({ escala, onClose }: { escala: WorkSchedule | null; onClos
             </div>
           </Field>
         )}
-        <Field label="Tolerância (minutos)" hint="Quanto antes do início o login já é aceito.">
+        <Field label="Tolerância de entrada (minutos)" hint="Quanto antes do início o login já é aceito.">
           <input type="number" min={0} max={120} className={inputCls} value={f.toleranceMinutes} onChange={(e) => set({ toleranceMinutes: Number(e.target.value) })} />
+        </Field>
+        <Field label="Tolerância para sair (minutos)" hint="Depois do fim do turno, o painel segue funcionando por este tempo, com contador na tela. 0 = trava na hora.">
+          <input type="number" min={0} max={30} className={inputCls} value={f.exitGraceMinutes} onChange={(e) => set({ exitGraceMinutes: Number(e.target.value) })} />
         </Field>
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>

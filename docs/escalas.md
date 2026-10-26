@@ -14,7 +14,11 @@ um **acesso temporário** que expira sozinho.
 
 - Horários em hora **local**, no fuso de `tenant_settings.timezone`.
 - `endTime <= startTime` = o turno vira a meia-noite e pertence ao dia em que começou.
-- `toleranceMinutes` (padrão 15): login aceito alguns minutos **antes** do início. O fim é exato.
+- `toleranceMinutes` (padrão 15): login aceito alguns minutos **antes** do início.
+- `exitGraceMinutes` (padrão 0, máx. 30): **tolerância para sair** — depois do fim, o painel segue
+  funcionando por esses minutos, com contador na tela. 0 = trava no fim exato. Só vale para o fim do
+  turno (liberação e conta temporária terminam na hora). Na escala por ciclo, entrada + saída
+  precisam caber no descanso. "Quem está no turno agora" continua usando o fim real.
 - Apagar a escala solta os colaboradores (`users.scheduleId` → null, sem trava).
 
 Regra pura em `apps/api/src/modules/auth/shift-window.ts` (testes em `test/shift-window.test.ts`).
@@ -69,7 +73,11 @@ um erro: "Agora está fora do horário da sua escala…", com **Solicitar acesso
 Quando o turno (ou a liberação) acaba com a pessoa logada, a sessão **não cai**: entra no modo
 fim de turno.
 
-- **Antes**: avisos com som 15 e 5 min antes do fim ("vá concluindo ou devolva seus atendimentos").
+- **Antes**: avisos com som 15 e 5 min antes do fim real do turno ("vá concluindo ou devolva seus atendimentos").
+- **Tolerância para sair** (se a escala tiver): no fim real, toca um som e aparece no topo uma faixa
+  "Seu turno terminou às 07:00 — o painel trava em 4:59", com contagem regressiva. Tudo segue
+  funcionando (mensagens, respostas, socket) até o prazo; aí vem a trava abaixo. O token leva
+  `graceFrom` (fim real) além de `shiftEndsAt` (fim + tolerância).
 - **Na hora**, a tela inteira trava (`components/layout/ShiftEndScreen.tsx`) com:
   - o **resumo do turno** (atendimentos assumidos, encerrados, transferidos — eventos desde o início do turno);
   - **Devolver N para a fila**: os atendimentos abertos com a pessoa voltam para Aguardando
@@ -83,7 +91,7 @@ fim de turno.
 
 | Camada | Como trava |
 |---|---|
-| Token | `shiftEndsAt` (fim do turno ou da liberação, o que for maior; conta temporária: o vencimento) e, na passagem, `locked` + `lockedUntil`. O token travado não vive além da passagem |
+| Token | `shiftEndsAt` (fim do turno + tolerância para sair, ou da liberação, o que for maior; conta temporária: o vencimento) e, na passagem, `locked` + `lockedUntil`. O token travado não vive além da passagem |
 | `JwtAuthGuard` | Passou de `shiftEndsAt` ou `locked` → `403 SHIFT_ENDED` em toda rota, menos as `@ShiftLockOk` (`GET /auth/me`, `/me/shift`). Pela hora no token: zero consulta ao banco |
 | Socket | Travado não entra na sala do cliente (não recebe mensagem nenhuma); ainda no turno, sai sozinho na hora exata (`shift_ended`). Continua só na sala da pessoa, para o aviso de destrave |
 | Refresh | Reavalia escala e liberações no banco: no turno → token novo; acabou há < 30 min → token travado (passagem); depois disso → `403 FOR_OUT_OF_SCHEDULE` e a sessão acaba |
@@ -129,7 +137,7 @@ Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — meno
 | Método | Rota | Descrição |
 |---|---|---|
 | GET | `/work-schedules` | Escalas do cliente, com quem está em cada uma |
-| POST | `/work-schedules` | `{name, type, startTime, endTime, workDays?, restHours?, anchorDate?, toleranceMinutes?}` |
+| POST | `/work-schedules` | `{name, type, startTime, endTime, workDays?, restHours?, anchorDate?, toleranceMinutes?, exitGraceMinutes?}` |
 | PATCH | `/work-schedules/:id` | Mesmos campos, parciais (revalida a escala inteira) |
 | DELETE | `/work-schedules/:id` | Apaga; colaboradores ficam sem escala |
 | GET | `/work-schedules/team` | Equipe ativa agora: escala, `onShift`, `exempt` (admin/sem escala) e liberação ativa |

@@ -9,6 +9,8 @@
  *   - **por ciclo** (12x36, custom com `restHours > 0`): trabalho + descanso se repetem a partir
  *     de `anchorDate`, sem olhar o dia da semana.
  * `endTime <= startTime` = o turno vira a meia-noite (pertence ao dia em que começou).
+ * `exitGraceMinutes` = tolerância para sair: a SESSÃO vale até `fim + tolerância` (currentShift /
+ * lastShift), mas o turno em si (isWithinShift, quem está no turno) termina no fim exato.
  */
 
 export type WorkScheduleKind = 'FIXED_12X36' | 'COMMERCIAL_44H' | 'CUSTOM';
@@ -21,6 +23,7 @@ export interface ShiftRule {
   restHours: number;
   anchorDate: string | null;
   toleranceMinutes: number;
+  exitGraceMinutes?: number;
 }
 
 /** Instante em hora local: data `AAAA-MM-DD` + minutos desde a meia-noite. */
@@ -51,6 +54,8 @@ export function shiftDuration(rule: Pick<ShiftRule, 'startTime' | 'endTime'>) {
   const d = mod(hmToMinutes(rule.endTime) - hmToMinutes(rule.startTime), DAY);
   return d === 0 ? DAY : d;
 }
+
+const exitGrace = (rule: Pick<ShiftRule, 'exitGraceMinutes'>) => Math.max(0, rule.exitGraceMinutes ?? 0);
 
 /** Escala por ciclo (trabalho + descanso), em vez de dias da semana. */
 export const isCyclic = (rule: Pick<ShiftRule, 'type' | 'restHours'>) => rule.type === 'FIXED_12X36' || (rule.type === 'CUSTOM' && rule.restHours > 0);
@@ -85,8 +90,14 @@ export function isWithinShift(rule: ShiftRule, now: LocalMoment): boolean {
 /** Turno em minutos locais absolutos (dia × 1440 + minuto), para converter em instante no fuso. */
 export interface ShiftSpan {
   start: number;
+  /** fim do acesso (já com a tolerância para sair) */
   end: number;
+  /** fim real do turno, quando há tolerância para sair: daqui até `end` corre o contador */
+  graceFrom?: number;
 }
+
+const span = (s: number, duration: number, grace: number): ShiftSpan =>
+  grace ? { start: s, end: s + duration + grace, graceFrom: s + duration } : { start: s, end: s + duration };
 
 /**
  * Turno que está valendo agora (contando a tolerância antes do início) — ou null fora dele.
@@ -96,6 +107,7 @@ export function currentShift(rule: ShiftRule, now: LocalMoment): ShiftSpan | nul
   const start = hmToMinutes(rule.startTime);
   const duration = shiftDuration(rule);
   const tol = Math.max(0, rule.toleranceMinutes);
+  const grace = exitGrace(rule);
   const today = dayIndex(now.ymd);
   const t = today * DAY + now.minute;
   if (isCyclic(rule)) {
@@ -103,12 +115,12 @@ export function currentShift(rule: ShiftRule, now: LocalMoment): ShiftSpan | nul
     const cycle = duration + rule.restHours * 60;
     const anchor = dayIndex(rule.anchorDate) * DAY + start;
     const s = anchor + Math.floor((t - anchor + tol) / cycle) * cycle;
-    return t >= s - tol && t < s + duration ? { start: s, end: s + duration } : null;
+    return t >= s - tol && t < s + duration + grace ? span(s, duration, grace) : null;
   }
   for (const day of [today - 1, today, today + 1]) {
     if (!rule.workDays.includes(weekdayOf(day))) continue;
     const s = day * DAY + start;
-    if (t >= s - tol && t < s + duration) return { start: s, end: s + duration };
+    if (t >= s - tol && t < s + duration + grace) return span(s, duration, grace);
   }
   return null;
 }
@@ -117,6 +129,7 @@ export function currentShift(rule: ShiftRule, now: LocalMoment): ShiftSpan | nul
 export function lastShift(rule: ShiftRule, now: LocalMoment): ShiftSpan | null {
   const start = hmToMinutes(rule.startTime);
   const duration = shiftDuration(rule);
+  const grace = exitGrace(rule);
   const today = dayIndex(now.ymd);
   const t = today * DAY + now.minute;
   if (isCyclic(rule)) {
@@ -124,13 +137,13 @@ export function lastShift(rule: ShiftRule, now: LocalMoment): ShiftSpan | null {
     const cycle = duration + rule.restHours * 60;
     const anchor = dayIndex(rule.anchorDate) * DAY + start;
     let s = anchor + Math.floor((t - anchor) / cycle) * cycle;
-    if (s + duration > t) s -= cycle;
-    return { start: s, end: s + duration };
+    if (s + duration + grace > t) s -= cycle;
+    return span(s, duration, grace);
   }
   for (let day = today; day >= today - 8; day--) {
     if (!rule.workDays.includes(weekdayOf(day))) continue;
     const s = day * DAY + start;
-    if (s + duration <= t) return { start: s, end: s + duration };
+    if (s + duration + grace <= t) return span(s, duration, grace);
   }
   return null;
 }

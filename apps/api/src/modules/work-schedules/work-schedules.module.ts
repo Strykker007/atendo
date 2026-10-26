@@ -38,6 +38,7 @@ class ScheduleDto {
   @IsOptional() @IsInt() @Min(0) @Max(168) restHours?: number;
   @IsOptional() @Matches(YMD) anchorDate?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(120) toleranceMinutes?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(30) exitGraceMinutes?: number;
 }
 class UpdateScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(80) name?: string;
@@ -48,6 +49,7 @@ class UpdateScheduleDto {
   @IsOptional() @IsInt() @Min(0) @Max(168) restHours?: number;
   @IsOptional() @Matches(YMD) anchorDate?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(120) toleranceMinutes?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(30) exitGraceMinutes?: number;
 }
 class AssignScheduleDto {
   /** null/ausente = tira da escala (sem trava de horário) */
@@ -75,7 +77,7 @@ class TemporaryUserDto {
  */
 function cleanSchedule(dto: ScheduleDto) {
   const restHours = dto.type === 'FIXED_12X36' ? (dto.restHours || 36) : dto.type === 'COMMERCIAL_44H' ? 0 : (dto.restHours ?? 0);
-  const rule = { ...dto, name: dto.name.trim(), restHours, workDays: [...new Set(dto.workDays ?? [])].sort((a, b) => a - b), anchorDate: dto.anchorDate || null, toleranceMinutes: dto.toleranceMinutes ?? 15 };
+  const rule = { ...dto, name: dto.name.trim(), restHours, workDays: [...new Set(dto.workDays ?? [])].sort((a, b) => a - b), anchorDate: dto.anchorDate || null, toleranceMinutes: dto.toleranceMinutes ?? 15, exitGraceMinutes: dto.exitGraceMinutes ?? 0 };
   if (!rule.name) throw new BadRequestException('Informe o nome da escala.');
   if (isCyclic(rule)) {
     if (!rule.anchorDate) throw new BadRequestException('Informe um dia em que o turno começa (referência do ciclo).');
@@ -85,10 +87,12 @@ function cleanSchedule(dto: ScheduleDto) {
     rule.anchorDate = null;
   }
   if (rule.toleranceMinutes >= shiftDuration(rule)) throw new BadRequestException('A tolerância precisa ser menor que o turno.');
+  // a saída de um turno não pode encostar na entrada do próximo
+  if (isCyclic(rule) && rule.toleranceMinutes + rule.exitGraceMinutes >= rule.restHours * 60) throw new BadRequestException('As tolerâncias de entrada e saída precisam caber no descanso.');
   return rule;
 }
 
-const scheduleSelect = { id: true, name: true, type: true, startTime: true, endTime: true, workDays: true, restHours: true, anchorDate: true, toleranceMinutes: true, users: { select: { id: true, name: true } } } as const;
+const scheduleSelect = { id: true, name: true, type: true, startTime: true, endTime: true, workDays: true, restHours: true, anchorDate: true, toleranceMinutes: true, exitGraceMinutes: true, users: { select: { id: true, name: true } } } as const;
 
 /** Modelos de escala do tenant e vínculo com colaboradores (docs/escalas.md). */
 @Controller('work-schedules')
@@ -121,7 +125,7 @@ class WorkSchedulesController {
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateScheduleDto) {
     const cur = await this.prisma.workSchedule.findFirst({ where: { id, tenantId: u.tenantId } });
     if (!cur) throw new NotFoundException('Escala não encontrada.');
-    const merged = { name: cur.name, type: cur.type, startTime: cur.startTime, endTime: cur.endTime, workDays: cur.workDays, restHours: cur.restHours, anchorDate: cur.anchorDate, toleranceMinutes: cur.toleranceMinutes, ...dto };
+    const merged = { name: cur.name, type: cur.type, startTime: cur.startTime, endTime: cur.endTime, workDays: cur.workDays, restHours: cur.restHours, anchorDate: cur.anchorDate, toleranceMinutes: cur.toleranceMinutes, exitGraceMinutes: cur.exitGraceMinutes, ...dto };
     const updated = await this.prisma.workSchedule.update({ where: { id }, data: cleanSchedule(merged), select: scheduleSelect });
     // horário mudou: quem está nesta escala é reavaliado na hora
     await this.cortar(u.tenantId, updated.users.map((x) => x.id));

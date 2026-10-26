@@ -31,13 +31,14 @@ async function sair(code?: string) {
  * Fim de turno (docs/escalas.md#fim-de-turno). Em vez de derrubar a sessão:
  *
  *  - **avisa antes** (15 e 5 min) para a pessoa ir fechando os atendimentos;
+ *  - com tolerância para sair, o turno acaba mas o painel segue até o prazo, com **contador** na tela;
  *  - na hora, **trava a tela** (a API já recusa qualquer ação e o socket para de receber
  *    mensagens) e vira uma passagem de turno: resumo do que ela fez, **devolver os atendimentos
  *    abertos para a fila** (o cliente não fica preso com quem foi embora) e **pedir mais tempo**;
  *  - liberação aprovada destrava sozinha; sem resposta, a sessão encerra no fim da passagem.
  */
 export function ShiftEndScreen() {
-  const { locked, endsAt, lockedUntil } = useShiftSession();
+  const { locked, endsAt, lockedUntil, graceFrom } = useShiftSession();
   const qc = useQueryClient();
   const avisados = useRef(new Set<string>());
   const travadoDesde = useRef<number | null>(null);
@@ -46,20 +47,23 @@ export function ShiftEndScreen() {
   useEffect(() => {
     if (!endsAt || locked) return;
     const timers: ReturnType<typeof setTimeout>[] = [];
+    // os avisos contam até o fim REAL do turno; a tolerância para sair vem depois, com o contador
+    const fimTurno = graceFrom ?? endsAt;
     for (const min of [15, 5]) {
-      const em = endsAt - min * 60_000 - Date.now();
-      const chave = `${endsAt}:${min}`;
+      const em = fimTurno - min * 60_000 - Date.now();
+      const chave = `${fimTurno}:${min}`;
       if (em > -60_000 && !avisados.current.has(chave)) {
         timers.push(setTimeout(() => {
           avisados.current.add(chave);
-          toast.warn(`Seu turno termina em ${min} minutos (${hora(endsAt)}). Vá concluindo ou devolva seus atendimentos para a fila.`);
+          toast.warn(`Seu turno termina em ${min} minutos (${hora(fimTurno)}). Vá concluindo ou devolva seus atendimentos para a fila.`);
           playMessageSound();
         }, Math.max(0, em)));
       }
     }
+    if (graceFrom) timers.push(setTimeout(() => playMessageSound(), Math.max(0, graceFrom - Date.now())));
     timers.push(setTimeout(() => { void refresh().then((ok) => { if (!ok) useShiftSession.setState({ locked: true }); }); }, Math.max(0, endsAt - Date.now())));
     return () => timers.forEach(clearTimeout);
-  }, [endsAt, locked]);
+  }, [endsAt, locked, graceFrom]);
 
   // destravou (liberação aprovada / ainda no turno depois de um corte): recarrega tudo que falhou travado
   useEffect(() => {
@@ -72,8 +76,27 @@ export function ShiftEndScreen() {
     travadoDesde.current = locked ? travadoDesde.current ?? Date.now() : null;
   }, [locked, qc]);
 
-  if (!locked) return null;
+  if (!locked) return graceFrom && endsAt ? <ExitGraceBar graceFrom={graceFrom} endsAt={endsAt} /> : null;
   return <LockedScreen lockedUntil={lockedUntil} />;
+}
+
+/** Tolerância para sair: o turno acabou, o painel segue funcionando e o contador mostra quanto falta para travar. */
+function ExitGraceBar({ graceFrom, endsAt }: { graceFrom: number; endsAt: number }) {
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (agora < graceFrom || agora >= endsAt) return null;
+  return (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-2rem)] max-w-md rounded-xl border border-warn bg-panel shadow-xl px-4 py-3 flex items-center gap-3" role="status" aria-live="polite">
+      <span className="w-9 h-9 rounded-lg bg-warn-soft text-warn grid place-items-center shrink-0"><Hourglass size={18} /></span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-ink">Seu turno terminou às {hora(graceFrom)}</p>
+        <p className="text-[12.5px] text-muted">Conclua ou devolva seus atendimentos. O painel trava em <b className="text-ink tnum">{mmss(endsAt - agora)}</b>.</p>
+      </div>
+    </div>
+  );
 }
 
 function LockedScreen({ lockedUntil }: { lockedUntil: number | null }) {

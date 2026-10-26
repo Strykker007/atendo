@@ -239,6 +239,8 @@ model WorkSchedule {
   anchorDate String?
   /// minutos antes do início em que o login já é aceito
   toleranceMinutes Int       @default(15)
+  /// minutos DEPOIS do fim em que a sessão ainda funciona (tolerância para sair); 0 = trava na hora
+  exitGraceMinutes Int       @default(0)
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 

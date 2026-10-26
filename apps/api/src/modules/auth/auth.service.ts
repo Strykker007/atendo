@@ -252,7 +252,7 @@ Seu login será: ${user.email}`,
     const sec = (d: Date) => Math.floor(d.getTime() / 1000);
     const shift = janela?.lockedUntil
       ? { shiftEndsAt: sec(janela.shiftEndsAt ?? new Date()), locked: true, lockedUntil: sec(janela.lockedUntil) }
-      : janela?.shiftEndsAt ? { shiftEndsAt: sec(janela.shiftEndsAt) } : {};
+      : janela?.shiftEndsAt ? { shiftEndsAt: sec(janela.shiftEndsAt), ...(janela.graceFrom && { graceFrom: sec(janela.graceFrom) }) } : {};
     // travado: o token não vive além da janela de passagem
     const ttl = janela?.lockedUntil ? Math.max(30, Math.min(ttlMs(env.JWT_ACCESS_TTL), janela.lockedUntil.getTime() - Date.now()) / 1000 | 0) : (env.JWT_ACCESS_TTL as any);
     const who = await this.person(user.id);

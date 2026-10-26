@@ -25,8 +25,8 @@ export class ShiftController {
   async summary(@CurrentUser() u: AuthUser) {
     const me = await this.prisma.user.findUniqueOrThrow({ where: { id: u.id }, select: { schedule: true } });
     const endsAt = u.shiftEndsAt ? new Date(u.shiftEndsAt * 1000) : null;
-    // início do turno = fim − duração (sem escala: últimas 12 h)
-    const since = endsAt && me.schedule ? new Date(endsAt.getTime() - shiftDuration(me.schedule as ShiftRule) * 60_000) : new Date(Date.now() - 12 * 3_600_000);
+    // início do turno = fim − duração − tolerância para sair (sem escala: últimas 12 h)
+    const since = endsAt && me.schedule ? new Date(endsAt.getTime() - (shiftDuration(me.schedule as ShiftRule) + me.schedule.exitGraceMinutes) * 60_000) : new Date(Date.now() - 12 * 3_600_000);
     const [eventos, abertos] = await Promise.all([
       // índice (tenantId, actorId, createdAt): barato mesmo em conta movimentada
       this.prisma.conversationEvent.groupBy({ by: ['type'], where: { tenantId: u.tenantId, actorId: u.id, createdAt: { gte: since }, type: { in: ['claimed', 'closed', 'transferred'] } }, _count: true }),

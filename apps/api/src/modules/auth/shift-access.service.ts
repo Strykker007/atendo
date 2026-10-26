@@ -26,6 +26,8 @@ export const HANDOFF_MS = 30 * 60_000;
 export interface SessionWindow {
   shiftEndsAt: Date | null;
   lockedUntil: Date | null;
+  /** fim real do turno quando há tolerância para sair (até `shiftEndsAt` a tela mostra o contador) */
+  graceFrom?: Date | null;
 }
 
 /**
@@ -115,7 +117,10 @@ export class ShiftAccessService {
       // vale o que durar mais (turno ou liberação), mas nunca além do vencimento da conta temporária
       const fins = [turno && instante(turno.end), liberacao?.validUntil].filter((d): d is Date => !!d);
       const maior = new Date(Math.max(...fins.map((d) => d.getTime())));
-      return { shiftEndsAt: vence && vence < maior ? vence : maior, lockedUntil: null };
+      const fim = vence && vence < maior ? vence : maior;
+      // tolerância para sair só quando quem define o fim é o turno (liberação e conta temporária: fim exato)
+      const graceFrom = turno?.graceFrom != null && fim.getTime() === instante(turno.end).getTime() ? instante(turno.graceFrom) : null;
+      return { shiftEndsAt: fim, lockedUntil: null, graceFrom };
     }
     if (mode === 'refresh') {
       // acabou há pouco (turno ou liberação): sessão travada na tela de passagem
