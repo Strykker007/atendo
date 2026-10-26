@@ -83,14 +83,20 @@ for _ = 1, 10 do
   if not a and not b and not c then break end
 end
 local ttl = (t - now) + 3600000
-redis.call('SET', KEYS[1], t + numDelay, 'PX', ttl)
-redis.call('SET', KEYS[3], t + convInterval, 'PX', ttl)
+-- Segurada pelo teto de automáticas/h, a vaga fica até 1 h à frente. Gravar esse instante no
+-- "próximo" do número e da conversa empurrava TODO envio seguinte para depois dela — inclusive
+-- o do atendente, em qualquer conversa (Farma Vasque, 26/10/2026: atendentes ~50 min sem sair).
+-- O espaçamento a partir dela vem do DELIVERED, quando ela de fato sair.
+if capped == 0 then
+  redis.call('SET', KEYS[1], t + numDelay, 'PX', ttl)
+  redis.call('SET', KEYS[3], t + convInterval, 'PX', ttl)
+end
 redis.call('ZADD', KEYS[2], t, member)
 redis.call('PEXPIRE', KEYS[2], ttl)
 redis.call('ZADD', KEYS[4], t, member)
 redis.call('PEXPIRE', KEYS[4], ttl)
 local lastCur = tonumber(redis.call('GET', KEYS[6]) or '0')
-if t > lastCur then redis.call('SET', KEYS[6], t, 'PX', ttl) end
+if capped == 0 and t > lastCur then redis.call('SET', KEYS[6], t, 'PX', ttl) end
 if autoLimit > 0 then
   redis.call('ZADD', KEYS[7], t, member)
   redis.call('PEXPIRE', KEYS[7], ttl + 3600000)
