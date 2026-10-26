@@ -59,6 +59,7 @@ com o do repositório e recria só o caddy se diferente).
 | 🟡 semana | Contador do rate limit no Redis (vale para as duas APIs e sobrevive a deploy) | 11 |
 | 🟡 semana | `PermitRootLogin no` no SSH e reiniciar o servidor (há atualização pendente de reboot) | 7 |
 | 🟡 semana | Dependabot + `pnpm audit --prod --audit-level=high` no CI | 20 |
+| ✅ feito | Papel só de leitura `atendo_ro` para diagnóstico + `scripts/prod/write.sh` para escrita manual ([33](33-operacao-segura-producao.md)) — falta rodar o `readonly-role.sql` uma vez | 3 |
 | 🟢 mês | Usuário do banco sem superusuário para a aplicação | 3 |
 | 🟢 mês | Captcha (Cloudflare Turnstile) no "esqueci a senha" e após falhas de login | 12 |
 | 🟢 mês | Limite de 30 MB só nos webhooks; resto da API com limite pequeno | 14 |
