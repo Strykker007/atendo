@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download } from 'lucide-react';
+import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download, Hourglass } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { SkeletonCards, SkeletonRows } from '@/components/ui/Skeleton';
@@ -22,28 +23,47 @@ const Tip = ({ active, payload, label }: { active?: boolean; payload?: { name: s
   </div>
 ) : null;
 
-type Tab = 'visao' | 'clientes' | 'faturas' | 'descontos' | 'margem';
+type Tab = 'visao' | 'teste' | 'faturas' | 'descontos' | 'margem';
 
 const ORIGEM: Record<DiscountSource, string> = { checkout: 'Checkout', tenant_create: 'Novo cliente', manual: 'Dono, no cliente', bulk: 'Dono, aplicar a todos', plan_return: 'Voltou ao plano' };
 const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '');
 /** Fim efetivo: o que vier primeiro entre o previsto e o encerramento. */
 const fimDe = (g: DiscountGrant) => (g.endsAt && g.closedAt ? (g.endsAt < g.closedAt ? g.endsAt : g.closedAt) : g.closedAt ?? g.endsAt);
 
-/** CSV do livro de descontos para a contabilidade (`;` e vírgula decimal: abre direto no Excel em pt-BR). */
-function exportarDescontos(rows: DiscountGrant[]) {
-  const num = (v: number) => v.toFixed(2).replace('.', ',');
+const num = (v: number) => v.toFixed(2).replace('.', ',');
+
+/** CSV para a contabilidade/planilha (`;` e vírgula decimal: abre direto no Excel em pt-BR). */
+function baixarCsv(nome: string, head: string[], linhas: string[][]) {
   const cel = (v: string) => (/[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  const head = ['Concedido em', 'Cliente', 'Plano', 'Tipo', 'Promoção', 'Origem', 'Concedido por', 'Preço de tabela', 'Valor concedido', 'Desconto %', 'Unidades', 'Desconto/mês', 'Início', 'Fim previsto', 'Encerrado em'];
-  const linhas = rows.map((g) => [
-    dia(g.createdAt), g.tenant, g.plan, g.kind === 'promotion' ? 'Promoção' : 'Negociado', g.promotion ?? '', ORIGEM[g.source], g.grantedBy ?? 'Automático',
-    num(g.listPrice), num(g.priceMonth), num(g.discountPercent), String(g.units), num((g.listPrice - g.priceMonth) * g.units), dia(g.startsAt), dia(g.endsAt), dia(g.closedAt),
-  ].map(cel).join(';'));
-  const blob = new Blob(['\ufeff' + [head.join(';'), ...linhas].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob(['\ufeff' + [head, ...linhas].map((l) => l.map(cel).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `descontos-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${nome}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+function exportarDescontos(rows: DiscountGrant[]) {
+  baixarCsv('descontos', ['Concedido em', 'Cliente', 'Plano', 'Tipo', 'Promoção', 'Origem', 'Concedido por', 'Preço de tabela', 'Valor concedido', 'Desconto %', 'Unidades', 'Desconto/mês', 'Início', 'Fim previsto', 'Encerrado em'], rows.map((g) => [
+    dia(g.createdAt), g.tenant, g.plan, g.kind === 'promotion' ? 'Promoção' : 'Negociado', g.promotion ?? '', ORIGEM[g.source], g.grantedBy ?? 'Automático',
+    num(g.listPrice), num(g.priceMonth), num(g.discountPercent), String(g.units), num((g.listPrice - g.priceMonth) * g.units), dia(g.startsAt), dia(g.endsAt), dia(g.closedAt),
+  ]));
+}
+
+/** Nome do cliente com atalho para ele em Clientes (onde se age: plano, status, vencimento). */
+const Cliente = ({ nome }: { nome: string }) => <Link href={`/clientes?busca=${encodeURIComponent(nome)}`} className="text-ink hover:text-accent-ink hover:underline">{nome}</Link>;
+
+/** Situação do teste em texto: "termina em 5 dias", "termina hoje", "venceu há 3 dias". */
+const prazoTeste = (dias: number) => (dias > 1 ? `termina em ${dias} dias` : dias === 1 ? 'termina amanhã' : dias === 0 ? 'termina hoje' : `venceu há ${-dias} dia${dias === -1 ? '' : 's'}`);
+
+/** Linha de ações acima de uma tabela: explicação curta + exportar. */
+function Exportar({ texto, onClick, disabled }: { texto: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <div className="flex items-center justify-between mb-2">
+      <p className="text-[12px] text-muted">{texto}</p>
+      <Button size="sm" variant="ghost" icon={<Download size={14} />} disabled={disabled} onClick={onClick}>Exportar CSV</Button>
+    </div>
+  );
 }
 
 /** Financeiro do dono do Atendo. Só super_admin (a API também bloqueia). */
@@ -64,7 +84,7 @@ export default function AdminPage() {
     <PageShell width="max-w-6xl">
       <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso.`} action={
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
-          {([['visao', 'Visão geral'], ['clientes', 'Assinaturas'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
+          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>
           ))}
         </div>
@@ -76,7 +96,7 @@ export default function AdminPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Kpi icon={<Wallet size={16} />} label="MRR (receita recorrente/mês)" value={brl(d.now.mrr)} sub={`ARR ${brl(d.now.arr)}${d.now.discountMonth ? ` · ${brl(d.now.discountMonth)} em descontos` : ''}`} />
-            <Kpi icon={<Users size={16} />} label="Clientes ativos" value={String(d.now.activeTenants)} sub={`${d.now.trialing} em teste · ${d.now.canceled} cancelados`} />
+            <Kpi icon={<Users size={16} />} label="Clientes ativos" value={String(d.now.activeTenants)} sub={`${d.now.trialing} em teste (${brl(d.now.trialMrr)}/mês a converter) · ${d.now.canceled} cancelados`} />
             <Kpi icon={<AlertTriangle size={16} />} label="Em atraso" value={brl(d.now.overdueAmount)} sub={`${d.now.pastDue} pendentes · ${d.now.suspended} suspensos`} tone={d.now.overdueAmount > 0 ? 'warn' : undefined} />
             <Kpi icon={<TrendingUp size={16} />} label="Margem estimada do mês" value={brl(d.now.monthMargin)} sub={`custo ${brl(d.now.monthCost)}`} tone={d.now.monthMargin < 0 ? 'danger' : 'ok'} />
           </div>
@@ -130,18 +150,33 @@ export default function AdminPage() {
         </>
       )}
 
-      {d && tab === 'clientes' && (
-        <Table head={['Cliente', 'Plano', 'Mensalidade', 'Status', 'Renova em', 'Obs.']} rows={d.subscriptions.map((s) => [
-          s.tenant, s.plan, brl(s.price), <Pill key="s" status={s.status} />, new Date(s.periodEnd).toLocaleDateString('pt-BR'),
-          s.cancelAtPeriodEnd ? 'cancela no fim do período' : s.graceUntil ? `carência até ${new Date(s.graceUntil).toLocaleDateString('pt-BR')}` : '',
-        ])} />
+      {d && tab === 'teste' && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-3 mb-4">
+            <Kpi icon={<Hourglass size={16} />} label="Receita em teste/mês" value={brl(d.now.trialMrr)} sub={`${d.trials.length} cliente(s) em teste, fora do MRR`} tone={d.now.trialMrr > 0 ? 'warn' : undefined} />
+            <Kpi icon={<Hourglass size={16} />} label="Terminam em 7 dias" value={String(d.now.trialsEndingSoon)} sub={brl(d.trials.filter((t) => t.daysLeft <= 7).reduce((a, t) => a + t.price, 0)) + '/mês em jogo'} />
+            <Kpi icon={<Hourglass size={16} />} label="Tempo médio em teste" value={`${d.trials.length ? Math.round(d.trials.reduce((a, t) => a + t.daysIn, 0) / d.trials.length) : 0} dias`} sub={`${d.trials.filter((t) => t.daysLeft < 0).length} com teste vencido`} />
+          </div>
+          <Exportar texto="Clientes em teste sem pagamento, pelo fim do teste. Mensalidade = o que passa a entrar quando ele converter." disabled={!d.trials.length} onClick={() => baixarCsv('em-teste', ['Cliente', 'Plano', 'Mensalidade', 'Início', 'Dias em teste', 'Fim do teste', 'Situação'], d.trials.map((t) => [
+            t.tenant, t.plan, num(t.price), dia(t.startedAt), String(t.daysIn), dia(t.endsAt), prazoTeste(t.daysLeft),
+          ]))} />
+          <Table head={['Cliente', 'Plano', 'Mensalidade', 'Em teste há', 'Fim do teste', 'Situação']} rows={d.trials.map((t) => [
+            <Cliente key="c" nome={t.tenant} />, t.plan, brl(t.price), `${t.daysIn} dia${t.daysIn === 1 ? '' : 's'}`, dia(t.endsAt),
+            <span key="p" className={t.daysLeft < 0 ? 'text-danger' : t.daysLeft <= 7 ? 'text-warn' : 'text-muted'}>{prazoTeste(t.daysLeft)}</span>,
+          ])} empty="Nenhum cliente em teste." />
+        </>
       )}
 
       {d && tab === 'faturas' && (
-        <Table head={['Cliente', 'Período', 'Total', 'Excedente', 'Status', 'Vencimento', '']} rows={d.invoices.map((i) => [
-          i.tenant, i.period, brl(i.total), brl(i.overage), <Pill key="s" status={i.status} />, i.dueAt ? new Date(i.dueAt).toLocaleDateString('pt-BR') : '—',
+        <>
+          <Exportar texto="Faturas dos últimos meses (até 100), mais recente primeiro." disabled={!d.invoices.length} onClick={() => baixarCsv('faturas', ['Cliente', 'Período', 'Total', 'Excedente', 'Status', 'Vencimento', 'Pago em'], d.invoices.map((i) => [
+            i.tenant, i.period, num(i.total), num(i.overage), STATUS_PT[i.status] ?? i.status, dia(i.dueAt), dia(i.paidAt),
+          ]))} />
+          <Table head={['Cliente', 'Período', 'Total', 'Excedente', 'Status', 'Vencimento', '']} rows={d.invoices.map((i) => [
+          <Cliente key="c" nome={i.tenant} />, i.period, brl(i.total), brl(i.overage), <Pill key="s" status={i.status} />, i.dueAt ? new Date(i.dueAt).toLocaleDateString('pt-BR') : '—',
           i.hostedUrl ? <a key="l" href={i.hostedUrl} target="_blank" rel="noreferrer" className="text-accent-ink underline text-xs">Stripe</a> : '',
         ])} empty="Nenhuma fatura ainda — aparecem quando o Stripe gerar a primeira cobrança." />
+        </>
       )}
 
       {d && tab === 'descontos' && (
@@ -151,15 +186,12 @@ export default function AdminPage() {
             <Kpi icon={<Receipt size={16} />} label="Desconto este mês" value={brl(d.series[d.series.length - 1]?.discounts ?? 0)} sub="pelo livro de descontos" />
             <Kpi icon={<Receipt size={16} />} label={`Desconto em ${months} meses`} value={brl(d.series.reduce((a, x) => a + x.discounts, 0))} sub={`${d.discounts.length} concessão(ões) registradas`} />
           </div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[12px] text-muted">Toda concessão de valor diferente do de tabela, permanente. Encerrada antes do previsto mostra a data.</p>
-            <Button size="sm" variant="ghost" icon={<Download size={14} />} disabled={!d.discounts.length} onClick={() => exportarDescontos(d.discounts)}>Exportar CSV</Button>
-          </div>
+          <Exportar texto="Toda concessão de valor diferente do de tabela, permanente. Encerrada antes do previsto mostra a data." disabled={!d.discounts.length} onClick={() => exportarDescontos(d.discounts)} />
           <Table head={['Concedido em', 'Cliente', 'Plano', 'Tipo', 'De → por', '%', 'Vigência', 'Origem / por']} rows={d.discounts.map((g) => {
             const fim = fimDe(g);
             const correndo = !fim || new Date(fim) > new Date();
             return [
-              dia(g.createdAt), g.tenant, g.plan,
+              dia(g.createdAt), <Cliente key="c" nome={g.tenant} />, g.plan,
               g.kind === 'promotion' ? <span key="k" className="text-accent-ink">{g.promotion ?? 'Promoção'}</span> : 'Negociado',
               <span key="v">{brl(g.listPrice)} → <b className="text-ink">{brl(g.priceMonth)}</b>{g.units > 1 && <span className="text-faint"> × {g.units}</span>}</span>,
               `${g.discountPercent.toLocaleString('pt-BR')}%`,
@@ -175,11 +207,16 @@ export default function AdminPage() {
           <div className="flex justify-end"><select value={period} onChange={(e) => setPeriod(e.target.value)} className="rounded-lg border border-line bg-panel text-ink px-3 py-1.5 text-sm">{Array.from({ length: 6 }, (_, i) => { const x = new Date(); x.setMonth(x.getMonth() - i); return periodOf(x); }).map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
           {margin.isLoading && <SkeletonRows rows={4} />}
           {margin.data && (
+            <>
+            <Exportar texto={`Receita, custo e margem de cada cliente em ${mm(period)}.`} disabled={!margin.data.length} onClick={() => baixarCsv(`margem-${period}`, ['Cliente', 'Plano', 'Mensagens', 'Templates', 'Receita', 'Excedente', 'Custo Meta', 'Infra', 'Margem', 'Margem %'], margin.data!.map((r) => [
+              r.name, r.plan ?? '', String(r.messagesSent), String(r.templatesSent), num(r.revenue), num(r.overage), num(r.providerCost), num(r.infraCost), num(r.margin), num(r.marginPct),
+            ]))} />
             <Table head={['Cliente', 'Plano', 'Msgs', 'Templates', 'Receita', 'Custo Meta', 'Infra', 'Margem', '%']} rows={margin.data.map((r) => [
-              <span key="n" className="inline-flex items-center gap-2"><Building2 size={14} className="text-faint" />{r.name}</span>, r.plan ?? '—', r.messagesSent.toLocaleString('pt-BR'), r.templatesSent.toLocaleString('pt-BR'),
+              <span key="n" className="inline-flex items-center gap-2"><Building2 size={14} className="text-faint" /><Cliente nome={r.name} /></span>, r.plan ?? '—', r.messagesSent.toLocaleString('pt-BR'), r.templatesSent.toLocaleString('pt-BR'),
               <span key="r">{brl(r.revenue)}{r.overage > 0 && <span className="text-[10px] text-warn ml-1">+{brl(r.overage)}</span>}</span>, brl(r.providerCost), brl(r.infraCost),
               <b key="m" className={r.margin >= 0 ? 'text-ok' : 'text-danger'}>{brl(r.margin)}</b>, <span key="p" className={r.marginPct < 30 ? 'text-warn' : 'text-muted'}>{r.marginPct.toFixed(0)}%</span>,
             ])} />
+            </>
           )}
         </>
       )}

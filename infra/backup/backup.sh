@@ -47,9 +47,22 @@ log "tamanho: $(du -sh "$DIR" | cut -f1)"
 if [ -n "${BACKUP_REMOTE:-}" ]; then
   log "enviando para $BACKUP_REMOTE"
   rclone copy "$DIR" "$BACKUP_REMOTE/$STAMP" --transfers 4
+  # Mídia: comparar os ~365 mil arquivos com o R2 todo dia levava horas (o rclone faz um HEAD por
+  # objeto para ler a data) e podia invadir o backup do dia seguinte. No dia a dia vai só o que
+  # mudou nas últimas 48 h, sem listar o destino; no domingo, conferência completa por tamanho
+  # (pega o que o incremental perder). Falha aqui não pode impedir a retenção nem o "concluído":
+  # os bancos já subiram.
   if [ -n "$HAS_MEDIA" ]; then
-    log "mídia (incremental) para $BACKUP_REMOTE/storage"
-    rclone copy /data/storage "$BACKUP_REMOTE/storage" --transfers 4
+    if [ "$(date +%u)" = "${BACKUP_MEDIA_FULL_DOW:-7}" ]; then
+      log "mídia (conferência completa) para $BACKUP_REMOTE/storage"
+      rclone copy /data/storage "$BACKUP_REMOTE/storage" --transfers 8 --checkers 16 --size-only --fast-list --max-duration 6h \
+        || log "AVISO: conferência da mídia não terminou — continua no próximo domingo"
+    else
+      log "mídia (últimas 48 h) para $BACKUP_REMOTE/storage"
+      rclone copy /data/storage "$BACKUP_REMOTE/storage" --transfers 8 --max-age 48h --no-traverse \
+        || log "AVISO: falha ao enviar a mídia recente"
+    fi
+    log "mídia enviada"
   fi
   # a retenção vale para as pastas datadas; a mídia é uma cópia só, que só cresce
   rclone delete "$BACKUP_REMOTE" --min-age "${REMOTE_KEEP_DAYS}d" --exclude "/storage/**" --rmdirs || true

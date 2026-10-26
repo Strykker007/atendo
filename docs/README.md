@@ -30,6 +30,7 @@
 | [Chat interno da equipe](chat-interno.md) | Dev / Cliente | Widget flutuante de conversa direta/grupo entre a equipe, histórico permanente e auditoria |
 | [Avisos do sistema](avisos.md) | Dev / Dono | Avisos globais do super_admin: popup ao vivo, sino no menu e tela de publicação |
 | [Metas de consultores](metas.md) | Dev / Cliente | Meta mensal por consultor (padrão + individual), atingimento, ritmo esperado, projeção e ranking |
+| [Relatório diário por e-mail](relatorio-diario.md) | Produto / Dev | Resumo do dia anterior + ranking da equipe às 7h para quem marcar; funcionalidade de plano `daily_report` |
 | [Relatórios sem pico](relatorios-desempenho.md) | Dev / Ops | Limite de consultas simultâneas, cache curto, teto de período e regras para relatório novo |
 | [Pesquisa de satisfação](pesquisa-de-satisfacao.md) | Dev / Cliente | CSAT/NPS no encerramento: escalas, recusa sem insistência, interceptação da resposta, relatório por consultor |
 | [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão e contas temporárias que expiram sozinhas |
@@ -54,5 +55,6 @@
 | [28 — Estabilização da conexão](28-estabilizacao-conexao.md) | Dev / Ops | Etapas dos P0/P1: prazos na Evolution, restart com trava, 401/402/403/406, registro e ordem do connection.update, sonda de sessão zumbi |
 | [29 — Reconexão na Evolution](29-reconexao-evolution.md) | Dev / Ops | Guarda de conexão na 2.3.7: uma conexão por instância, gerações de socket, backoff com jitter, 440 sem disputa, medições antes/depois e piloto |
 | [30 — Testes locais](30-testes-locais.md) | Dev / Ops | `pnpm test:local`: mocks da guarda, carga sintética (100/500/1.000), laboratório de reconexão, roteiro com WhatsApp real e critérios de aprovação da etapa 3 |
+| [31 — Migração para a Meta oficial](31-migracao-meta-oficial.md) | Negócio / Ops | App novo no portfólio já verificado do sócio, convivendo com o sistema antigo; primeiro número de teste e migração cliente a cliente |
 
 Convenção: código em inglês, comentários e documentação em português.

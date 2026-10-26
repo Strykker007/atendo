@@ -47,6 +47,8 @@ suspensão funcionando.
 
 ## 2. Meta (API oficial)
 
+> **Situação atual e plano concreto:** [31 — Migração para a Meta oficial](31-migracao-meta-oficial.md).
+
 **Leia isto antes de contar com a Meta para a estreia:** a verificação do negócio pode levar
 dias ou semanas, e não depende de nós. Se o primeiro cliente entra na semana que vem, o
 caminho realista é **Evolution (QR)**, que já está rodando, e migrar para a oficial depois —
@@ -259,7 +261,7 @@ O serviço `backup` do compose de produção roda **todo dia às 03:30** (horár
 | `atendo.dump` | conversas, mensagens, contatos, agendamentos, fluxos, cobrança |
 | `evolution.dump` | estado das instâncias |
 | `evolution-instances.tar.gz` | **credenciais de pareamento** — sem isto, todo número precisa ler o QR de novo |
-| mídia | só quando `STORAGE_DRIVER=local` (com S3/R2 a durabilidade é do provedor). Com `BACKUP_REMOTE`, vai **incremental** para `<remoto>/storage` (só arquivos novos, nada é apagado lá) e não fica na pasta datada; sem remoto, `storage.tar.gz` na pasta |
+| mídia | só quando `STORAGE_DRIVER=local` (com S3/R2 a durabilidade é do provedor). Com `BACKUP_REMOTE`, vai **incremental** para `<remoto>/storage` (só arquivos novos, nada é apagado lá) e não fica na pasta datada. No dia a dia sobe só o que mudou nas **últimas 48 h** (`--max-age 48h --no-traverse`, sem listar o R2); uma vez por semana (`BACKUP_MEDIA_FULL_DOW`, padrão 7 = domingo) faz a **conferência completa** por tamanho, com teto de 6 h. Antes comparava os ~365 mil arquivos todo dia — um HEAD por objeto, horas de execução, arriscando invadir o backup seguinte. Falha na mídia vira `AVISO` no log e não impede a retenção nem o `concluído`; sem remoto, `storage.tar.gz` na pasta |
 
 Até 24/10/2026 a mídia ia num `storage.tar.gz` inteiro por dia (~17 GB). Com a cópia de ontem
 ainda no servidor, o backup das 03:30 encheu o disco (96 GB): Redis e bancos pararam de gravar

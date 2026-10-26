@@ -22,7 +22,7 @@ export class FinanceService {
   async overview(months = 12) {
     const periods = this.periods(months);
     const [subs, invoices, counters, tenants, companySubs, grantRows] = await Promise.all([
-      this.prisma.subscription.findMany({ include: { plan: true, tenant: { select: { name: true, planOverride: true } } } }),
+      this.prisma.subscription.findMany({ include: { plan: true, tenant: { select: { name: true, createdAt: true, planOverride: true } } } }),
       this.prisma.invoice.findMany({ where: { period: { in: periods } }, include: { tenant: { select: { name: true } } }, orderBy: { createdAt: 'desc' } }),
       this.prisma.usageCounter.findMany({ where: { period: { in: periods } } }),
       this.prisma.tenant.findMany({ select: { id: true, createdAt: true, numbers: { select: { infraCostMonth: true } } } }),
@@ -99,6 +99,23 @@ export class FinanceService {
     // desconto vigente agora, da mesma fonte do MRR (o valor que vale hoje), não do livro
     const comDesconto = active.filter(paying).map((s) => ({ s, negociado: overridePrice(s.tenant.planOverride, s.planId) })).filter((x) => x.negociado !== null);
     const discountMonth = comDesconto.reduce((a, { s, negociado }) => a + (Number(s.plan.priceMonth) - negociado!) * Math.max(1, s.units), 0);
+    // em teste sem pagamento: a receita que ainda não entra. O fim do teste é o `currentPeriodEnd`
+    // (o que o dono edita em Clientes → Vencimento); o início, a criação do cliente
+    const DAY = 86_400_000;
+    const nowMs = Date.now();
+    const trials = active
+      .filter((s) => !paying(s))
+      .map((s) => ({
+        tenant: s.tenant.name,
+        plan: s.plan.name,
+        price: price(s),
+        startedAt: s.tenant.createdAt,
+        endsAt: s.currentPeriodEnd,
+        daysIn: Math.max(0, Math.floor((nowMs - s.tenant.createdAt.getTime()) / DAY)),
+        /** negativo = venceu e segue em teste (ninguém converteu nem suspendeu) */
+        daysLeft: Math.ceil((s.currentPeriodEnd.getTime() - nowMs) / DAY),
+      }))
+      .sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());
     const statusCount = subs.reduce<Record<string, number>>((acc, s) => ((acc[s.status] = (acc[s.status] ?? 0) + 1), acc), {});
 
     return {
@@ -117,7 +134,12 @@ export class FinanceService {
         /** MRR que deixa de entrar por desconto vigente (promoção + negociado) e em quantos clientes */
         discountMonth: Math.round(discountMonth * 100) / 100,
         discountedTenants: comDesconto.length,
+        /** mensalidade que passa a entrar se todo cliente em teste converter */
+        trialMrr: Math.round(trials.reduce((a, t) => a + t.price, 0) * 100) / 100,
+        /** testes que terminam nos próximos 7 dias (inclui os já vencidos) */
+        trialsEndingSoon: trials.filter((t) => t.daysLeft <= 7).length,
       },
+      trials,
       byPlan,
       series,
       invoices: invoices.slice(0, 100).map((i) => ({ id: i.id, tenant: i.tenant.name, period: i.period, total: Number(i.totalAmount), overage: Number(i.overageAmount), status: i.status, dueAt: i.dueAt, paidAt: i.paidAt, hostedUrl: i.hostedUrl })),

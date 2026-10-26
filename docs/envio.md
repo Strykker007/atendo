@@ -205,6 +205,10 @@ Mensagem sem autor humano (fluxo, boas-vindas, faixa, lembrete, campanha) no **Q
   origem (`wa:last`, atualizado na reserva e na entrega). Com o número ocioso, a 1ª também espera;
 - teto de **automáticas por hora** no número (`autoPerHour`, padrão 80 Evolution / 5000 Meta,
   janela deslizante `wa:auto`). Estourou → o envio espera a vaga (log `warn`), nunca é descartado.
+  A vaga segurada pelo teto (até 1 h à frente) **não** move o "próximo horário" do número
+  (`wa:next`), o da conversa (`wa:cnext`) nem o `wa:last`: antes movia, e todo envio seguinte do
+  número — inclusive o do atendente, em qualquer conversa — ia para depois dela (Farma Vasque,
+  26/10/2026: atendentes ~50 min sem a mensagem sair). O espaçamento a partir dela conta da entrega.
 
 A resposta do atendente **não** espera nada disso — só o perfil do número. Texto de robô colado e
 em volume é o padrão que o WhatsApp pune; conversa humana não.
