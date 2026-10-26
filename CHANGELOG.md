@@ -3,6 +3,11 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.9.1 — 2026-10-26
+
+- fix(seguranca): next 15.5.28, zod 4 e overrides das dependências vulneráveis; headers de segurança no painel
+- docs(seguranca): checklist de 20 itens com situação em produção e prioridades
+
 ## 1.9.0 — 2026-10-26
 
 - fix(equipe): adicionar várias valida o campo ao sair dele ou ao convidar, não enquanto digita
