@@ -2,7 +2,7 @@
 
 Lista, por cliente, de telefones que **nunca abrem atendimento**: diretoria, fornecedores, o
 celular da própria loja. A mensagem continua chegando e pode ser respondida, mas vira **chat
-livre**: fica em **Conversas livres** (nos filtros da tela de conversas), fora das filas e de todo relatório de desempenho.
+livre**: aparece em **Atendendo** com o selo **Livre** (e em **Conversas livres**, nos filtros), fora dos contadores, das filas e de todo relatório de desempenho.
 
 ## Regras
 
@@ -15,7 +15,8 @@ livre**: fica em **Conversas livres** (nos filtros da tela de conversas), fora d
 | Mensagem digitada no celular (`fromMe`) para um isento também não reabre atendimento | `InboundService.ingestFromDevice` |
 | Continua passando pelo ledger (`UsageService.record`) — é tráfego real e é cobrado como qualquer mensagem | `inbound.service.ts` |
 | Responder pelo painel **não assume** a conversa (conversa livre não tem dono; qualquer um da equipe responde). Quota e janela de 24h da Meta valem igual | `ConversationsService.send` |
-| As abas Aguardando/Atendendo/Encerrado e seus contadores **nunca** mostram conversa livre; a visão **Conversas livres** (`GET /conversations?free=1`) mostra só elas, em qualquer status | `ConversationsService.list` / `counts` (`free`) |
+| **Atendendo** mostra também as conversas livres, misturadas pela última mensagem, com o selo **Livre** e a faixa cinza — para responder o 2º número da loja ou a equipe sem ir ao filtro (pedido de 26/10/2026: "toda vez que preciso enviar mensagem para esse número eu tenho que filtrar"). Sem dono, então aparecem para qualquer pessoa que opere o número, sem a regra de posse; somem quando há filtro de consultor ou de desfecho. Aguardando/Encerrado e **todos os contadores** continuam sem elas. A visão **Conversas livres** (`GET /conversations?free=1`) mostra só elas, em qualquer status | `ConversationsService.list` (`comLivres`) / `counts` (`free`) |
+| Encerrar em massa ignora conversa livre (ela aparece em Atendendo e entraria na seleção) | `ConversationsService.closeMany` |
 | Relatórios: conversa `ticketExempt` sai de **todas** as métricas — volume, TMA/TMR (1ª resposta), encerramentos, perdidos, ranking, auditoria de atendimentos, mensagens enviadas/recebidas, comparativo por empresa. Vendas registradas (`sales`) continuam contando: é dinheiro que entrou | `reports.module.ts` (`not c."ticketExempt"`, `semIsento`) |
 
 ### Entrar e sair da lista

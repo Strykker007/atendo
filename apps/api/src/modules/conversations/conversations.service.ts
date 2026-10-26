@@ -208,19 +208,23 @@ export class ConversationsService {
     const dept = departmentWhere(viewer, q.departmentId);
     const ownership: Prisma.ConversationWhereInput =
       q.free ? {} : q.assigneeId && isAdmin ? { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
+    // "Atendendo" também mostra as conversas livres (contato isento: o 2º número da loja, a equipe),
+    // para responder sem ir ao filtro — sem dono, então fora da regra de posse. Não com filtro de
+    // consultor/desfecho (livre não tem nenhum dos dois). Contadores e relatórios seguem sem elas
+    const comLivres = !q.free && q.status === 'in_progress' && !q.assigneeId && !q.lastOutcome && !q.closeReasonId;
+    const fila: Prisma.ConversationWhereInput = { ticketExempt: false, ...(q.status && { status: q.status }), ...ownership };
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
       number: { deletedAt: null },
-      // aba "Livres": só os contatos isentos de ticket, em qualquer status. As abas de atendimento
-      // nunca mostram conversa livre (docs/contatos-isentos.md)
-      ...(q.free ? { ticketExempt: true } : { ticketExempt: false, ...(q.status && { status: q.status }) }),
+      // visão "Livres": só os contatos isentos de ticket, em qualquer status (docs/contatos-isentos.md)
+      // com as livres, fila OU livre vai no AND abaixo (junto do departamento: dois OR no mesmo nível se sobrescreveriam)
+      ...(q.free ? { ticketExempt: true } : comLivres ? {} : fila),
       ...(q.origin && { origin: q.origin }),
-      ...ownership,
       // o número pedido é interseccionado com o escopo do usuário; `null` = pediu um número
       // que ele não opera, e aí a lista vem vazia em vez de ignorar o pedido
       ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
-      ...(dept && { AND: [dept] }),
+      ...((dept || comLivres) && { AND: [...(comLivres ? [{ OR: [fila, { ticketExempt: true }] }] : []), ...(dept ? [dept] : [])] }),
       // tag da conversa OU tag do contato
       ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
       // nome/e-mail/telefone do contato, sem acento e por palavras (common/text-search.ts)
@@ -1594,6 +1598,8 @@ export class ConversationsService {
         // já encerrada não é erro nem reencerra: fechar duas vezes mudaria a data e estragaria
         // o tempo de atendimento no relatório
         status: { not: 'closed' },
+        // conversa livre não tem atendimento para encerrar; aparece em "Atendendo" e entraria na seleção
+        ticketExempt: false,
         ...(escopo && { numberId: escopo }),
         // departamento e posse usam OR: cada um no seu item do AND para não se sobrescreverem
         AND: [departmentWhere(viewer) ?? {}, may(viewer, 'conversations.view_all') ? {} : { OR: [{ assigneeId: viewer.id }, { assigneeId: null }] }],

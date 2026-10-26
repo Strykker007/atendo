@@ -122,7 +122,8 @@ export function ConversationList() {
     : null;
   // encerrada não fica fixada fora de "Encerradas": encerrar é sair da fila, não uma resposta
   // que muda de aba — senão ela seguia em "Em atendimento" até trocar de conversa ou dar F5
-  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') && !!fixadaAtual.ticketExempt === (status === 'free') ? fixadaAtual : null;
+  // livre fica também em "Atendendo" (lá ela aparece junto da fila, com o selo Livre)
+  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') && (!!fixadaAtual.ticketExempt === (status === 'free') || (!!fixadaAtual.ticketExempt && status === 'in_progress')) ? fixadaAtual : null;
   const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
@@ -456,7 +457,8 @@ function pagoNaConversa(c: Conversation) {
 function ConversationRow({ c, active, onClick, agora, selecionando, marcado, encerramento }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean; encerramento: 'lugar' | 'extra' | null }) {
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
-  const m = STATUS_META[c.status];
+  // livre (contato isento) em "Atendendo": cor e selo próprios, para não parecer atendimento
+  const m = c.ticketExempt ? FREE_META : STATUS_META[c.status];
   /** menu do card: clique direito no card ou os três pontos que aparecem no hover */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   // confirmação do atalho "Não abrir atendimento": fica no card porque o menu fecha ao clicar
@@ -497,6 +499,7 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
             todo card tem a mesma altura em qualquer aba. Se só aparecesse quando há badge, a fila
             "Aguardando" (quase sempre sem atendente/tag) ficava com cards mais baixos que as outras */}
         <div className="flex flex-nowrap items-center gap-1 mt-1 h-5 min-w-0">
+          {c.ticketExempt && <span className="text-[10px] font-semibold rounded-md px-1.5 py-0.5 shrink-0 bg-field text-muted" title="Contato isento de ticket: não abre atendimento, não conta na fila nem em relatório">Livre</span>}
           <DepartmentBadge department={c.department} className="max-w-[110px] shrink-0" />
           <OriginBadge origin={c.origin} data={c.originData} />
           {encerramento && c.lastClosedAt && <span className="min-w-0 shrink"><LastCloseInline conv={c} small /></span>}
