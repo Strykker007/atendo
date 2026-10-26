@@ -207,7 +207,11 @@ tempo da seção 8.3. Sem ela, qualquer atribuição (inclusive à Evolution) é
    `GROUP_PARTICIPANTS_UPDATE`, `LABELS_EDIT/ASSOCIATION`, `CALL` = `"false"`. Ligar
    `WEBHOOK_EVENTS_STATUS_INSTANCE` e `LOGOUT_INSTANCE` (forense). Baixar
    `WEBHOOK_REQUEST_TIMEOUT_MS` para ~10000 (o Atendo responde em < 1 s).
-2. **Redis próprio para a Evolution** (container `evolution-redis`, AOF, sem `maxmemory`
+2. **Redis próprio para a Evolution** — **aconteceu em 26/10/2026:** cache da Evolution (db 6)
+   com 433 MB, pico do Redis em 542 MB contra `maxmemory 512mb`; com `noeviction` o Redis recusou
+   gravações e 18 mensagens de atendentes (8h20–8h25, vários clientes) ficaram `pending` no banco
+   sem job na fila — nunca saíram. Paliativo: `maxmemory 2gb` (compose + `CONFIG SET` no ar).
+   Item original: (container `evolution-redis`, AOF, sem `maxmemory`
    compartilhado com BullMQ) **e incluí-lo no backup** — hoje restaurar o backup perde todas as
    chaves Signal. Migração: `redis-cli --rdb`/`MIGRATE` das chaves `evolution:*` com a Evolution
    parada, de madrugada. Até lá: monitorar `INFO memory` e `errorstats`.

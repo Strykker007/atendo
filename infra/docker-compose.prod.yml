@@ -87,7 +87,12 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    # 2 GB: o cache de sessão da Evolution (chaves Signal, db 6) divide este Redis com as filas e
+    # passou de 430 MB; em 26/10/2026 bateu nos 512 MB (pico 542 MB), o Redis recusou gravações e
+    # 18 mensagens de atendentes ficaram "pendentes" sem job na fila. O servidor tem 24 GB.
+    # Definitivo: Redis próprio para a Evolution (docs/24-auditoria-evolution.md, P0 item 2).
+    # Serviço protegido: mudar aqui só vale ao recriar o redis — no ar, `CONFIG SET maxmemory`.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "2gb", "--maxmemory-policy", "noeviction"]
     volumes: ["./volumes/redis:/data"]
 
   # Provider QR code. Para muitos números, repita este bloco como evolution-2, evolution-3 (shards).

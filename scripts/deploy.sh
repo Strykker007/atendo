@@ -116,6 +116,9 @@ $SSH "$HOST" "cd ~/atendo \
   && sed -i 's|^APP_VERSION=.*|APP_VERSION=$VERSION|' .env.production \
   && $(pc_app_up_cmd)"
 # shellcheck disable=SC2029
+# shellcheck disable=SC2029
+$SSH "$HOST" "cd ~/atendo && $(pc_caddy_sync_cmd)"
+# shellcheck disable=SC2029
 $SSH "$HOST" "cd ~/atendo && $(pc_drift_cmd)"
 
 echo "▶ Estado dos serviços:"

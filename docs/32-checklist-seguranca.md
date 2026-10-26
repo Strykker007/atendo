@@ -43,7 +43,10 @@ Legenda: ✅ ok · ⚠️ ok com ressalva · ❌ falta · * corrigido no código
   ficou de fora de propósito — o Next injeta scripts inline e uma política errada derruba o painel.
 - **Item 15:** `poweredByHeader: false` no painel e no site; Caddy tira o header `Server`.
 
-O deploy recria o Caddy (está em `APP_SERVICES`), que só lê o Caddyfile ao subir.
+O deploy da 1.9.1 **não** aplicou os headers: o Caddyfile é montado como arquivo, o rsync troca o
+inode e o `up -d` não recria o caddy quando o compose não mudou — o container seguiu lendo o
+Caddyfile antigo. Corrigido no `deploy.sh` (`pc_caddy_sync_cmd`: compara o Caddyfile do container
+com o do repositório e recria só o caddy se diferente).
 
 ## Prioridades
 

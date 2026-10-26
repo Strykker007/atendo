@@ -33,6 +33,15 @@ pc_require_running_cmd() {
 # recriado ou reiniciado por depends_on.
 pc_app_up_cmd() { echo "$(pc_compose) up -d --build --no-deps $APP_SERVICES"; }
 
+# Caddyfile é montado como ARQUIVO: o rsync troca o arquivo (inode novo) e o container continua
+# vendo o antigo — e o `up -d` não recria o caddy quando o compose não mudou. Em 26/10/2026 os
+# headers de segurança do painel não entraram no deploy por isso. Compara o que o container lê
+# com o do repositório e, se diferente, recria só o caddy (segundos; as conexões reconectam).
+pc_caddy_sync_cmd() {
+  local c; c=$(pc_compose)
+  echo "id=\$($c ps -q caddy | head -1); if [ -n \"\$id\" ] && ! $PC_SUDO docker exec \"\$id\" cat /etc/caddy/Caddyfile | cmp -s - infra/Caddyfile; then echo '▶ Caddyfile mudou: recriando o caddy'; $c up -d --no-deps --force-recreate caddy; fi"
+}
+
 # Aviso (não falha): serviço protegido cuja configuração no compose mudou e só será aplicada com o
 # procedimento dele. Compara o hash da configuração com o do container em execução.
 pc_drift_cmd() {
