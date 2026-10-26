@@ -47,6 +47,8 @@ suspensão funcionando.
 
 ## 2. Meta (API oficial)
 
+> **Situação atual e plano concreto:** [31 — Migração para a Meta oficial](31-migracao-meta-oficial.md).
+
 **Leia isto antes de contar com a Meta para a estreia:** a verificação do negócio pode levar
 dias ou semanas, e não depende de nós. Se o primeiro cliente entra na semana que vem, o
 caminho realista é **Evolution (QR)**, que já está rodando, e migrar para a oficial depois —

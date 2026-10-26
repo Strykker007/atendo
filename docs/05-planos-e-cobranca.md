@@ -336,13 +336,14 @@ Fatura espelhada em `invoices` com `hostedUrl` (link do Stripe para pagar/baixar
 
 ### Financeiro (dono do Atendo)
 
-Tela *Financeiro (dono)* (`GET /billing/finance`), quatro abas:
+Tela *Financeiro (dono)* (`GET /billing/finance`), seis abas. Todas as tabelas têm **Exportar CSV** (`;` e vírgula decimal, abre direto no Excel em pt-BR):
 - **Visão geral** — MRR/ARR, clientes ativos/teste/cancelados, valor em atraso, margem estimada do mês; gráfico Faturado × Recebido × Custo por mês; MRR por plano; novos clientes por mês.
   - **MRR** soma as assinaturas pagantes: `active`/`past_due`, e também `trialing` que já tenha fatura **paga** com valor > 0 na janela (o webhook que a tiraria do teste pode ter se perdido). `trialing` sem pagamento fica fora e aparece como "N em teste, fora do MRR" no MRR por plano.
   - Valor de cada assinatura: `subscriptions.priceMonth` (contratado); se for nulo **ou zero**, usa `plans.priceMonth` — zero em plano pago é resto de plano gratuito, não preço.
   - **Margem estimada do mês** = MRR + excedente − (custo Meta do ledger + infra dos números + custo cadastrado nos planos).
   - Webhook `invoice.paid`: re-sincroniza a assinatura no Stripe e promove `trialing`/`past_due`/`suspended` → `active` quando a fatura tem valor > 0.
 - **Assinaturas** — cada cliente com plano, mensalidade, status, renovação, cancelamento agendado, carência.
+- **Em teste** — a receita que ainda não entra: cada cliente `trialing` **sem pagamento** (o mesmo critério que o deixa fora do MRR), com a mensalidade que passa a valer quando converter (mesmo cálculo de valor do MRR, `× units`), há quantos dias está em teste (desde a criação do cliente), o fim do teste (`subscriptions.currentPeriodEnd`, a data que o dono edita em Clientes → Vencimento) e a situação ("termina em N dias" / "venceu há N dias" — teste vencido que ninguém converteu nem suspendeu). KPIs: receita em teste/mês (`now.trialMrr`), quantos terminam em 7 dias (`now.trialsEndingSoon`, inclui vencidos) e tempo médio em teste. A Visão geral mostra a mesma receita em teste no card de clientes. A API devolve a lista em `trials`, ordenada pelo fim do teste.
 - **Faturas** — todas as faturas (espelho do Stripe) com link.
 - **Margem por cliente** — a tabela abaixo.
 

@@ -69,10 +69,12 @@ export const useMargin = (period?: string) => useQuery({ queryKey: ['margin', pe
 
 // ---- Financeiro (dono) ----
 export interface FinanceOverview {
-  now: { mrr: number; arr: number; activeTenants: number; trialing: number; pastDue: number; suspended: number; canceled: number; overdueAmount: number; monthCost: number; monthMargin: number; /** MRR que deixa de entrar por desconto vigente */ discountMonth: number; discountedTenants: number };
+  now: { mrr: number; arr: number; activeTenants: number; trialing: number; pastDue: number; suspended: number; canceled: number; overdueAmount: number; monthCost: number; monthMargin: number; /** MRR que deixa de entrar por desconto vigente */ discountMonth: number; discountedTenants: number; /** mensalidade que entra se todo teste converter */ trialMrr: number; trialsEndingSoon: number };
   byPlan: { plan: string; count: number; trialing: number; mrr: number; cost: number; margin: number }[];
   series: { period: string; invoiced: number; received: number; overdue: number; overage: number; providerCost: number; infraCost: number; messagesSent: number; newTenants: number; canceled: number; /** desconto concedido no mês (livro de descontos) */ discounts: number }[];
   invoices: { id: string; tenant: string; period: string; total: number; overage: number; status: string; dueAt: string | null; paidAt: string | null; hostedUrl: string | null }[];
+  /** em teste sem pagamento, por fim do teste (mais próximo primeiro). daysLeft < 0 = teste vencido */
+  trials: { tenant: string; plan: string; price: number; startedAt: string; endsAt: string; daysIn: number; daysLeft: number }[];
   subscriptions: { tenant: string; plan: string; price: number; status: string; periodEnd: string; cancelAtPeriodEnd: boolean; graceUntil: string | null }[];
   /** livro de descontos inteiro, mais recente primeiro (docs/05#livro-de-descontos) */
   discounts: DiscountGrant[];
