@@ -30,6 +30,7 @@
 | [Chat interno da equipe](chat-interno.md) | Dev / Cliente | Widget flutuante de conversa direta/grupo entre a equipe, histórico permanente e auditoria |
 | [Avisos do sistema](avisos.md) | Dev / Dono | Avisos globais do super_admin: popup ao vivo, sino no menu e tela de publicação |
 | [Metas de consultores](metas.md) | Dev / Cliente | Meta mensal por consultor (padrão + individual), atingimento, ritmo esperado, projeção e ranking |
+| [Relatório diário por e-mail](relatorio-diario.md) | Produto / Dev | Resumo do dia anterior + ranking da equipe às 7h para quem marcar; funcionalidade de plano `daily_report` |
 | [Relatórios sem pico](relatorios-desempenho.md) | Dev / Ops | Limite de consultas simultâneas, cache curto, teto de período e regras para relatório novo |
 | [Pesquisa de satisfação](pesquisa-de-satisfacao.md) | Dev / Cliente | CSAT/NPS no encerramento: escalas, recusa sem insistência, interceptação da resposta, relatório por consultor |
 | [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão e contas temporárias que expiram sozinhas |

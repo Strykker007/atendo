@@ -66,7 +66,7 @@ export interface PlanLimits {
   aiMonthlyCostCap?: number;
 }
 
-export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot', CAMPAIGNS: 'campaigns', PROACTIVE_MESSAGING: 'proactive_messaging', CONSULTANT_RANKING: 'consultant_ranking', SATISFACTION_SURVEYS: 'satisfaction_surveys', PIX_PAYMENTS: 'pix_payments', GROUPS_INBOX: 'groups_inbox' } as const;
+export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot', CAMPAIGNS: 'campaigns', PROACTIVE_MESSAGING: 'proactive_messaging', CONSULTANT_RANKING: 'consultant_ranking', SATISFACTION_SURVEYS: 'satisfaction_surveys', PIX_PAYMENTS: 'pix_payments', GROUPS_INBOX: 'groups_inbox', DAILY_REPORT: 'daily_report' } as const;
 export type PlanFeature = (typeof PlanFeature)[keyof typeof PlanFeature];
 /** Lista fechada, para validar o que vem do formulário de planos. */
 export const PLAN_FEATURES = Object.values(PlanFeature);
@@ -87,6 +87,8 @@ export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
   pix_payments: 'Pix automático no orçamento (Asaas)',
   /** grupos marcados "Mostrar nas conversas" entram no painel como chat livre (docs/grupos.md#grupos-nas-conversas) */
   groups_inbox: 'Grupos nas conversas',
+  /** e-mail diário com o resumo do dia anterior e o ranking da equipe para quem marcar (docs/relatorio-diario.md) */
+  daily_report: 'Relatório diário por e-mail',
 };
 
 /** Limites de quantidade checados na criação/ativação (ver `PlanLimitGuard` na API). */

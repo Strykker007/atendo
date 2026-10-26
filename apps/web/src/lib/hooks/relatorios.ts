@@ -24,6 +24,12 @@ export interface ReportResult { definition: ReportDefinition; series: { label: s
 export interface SavedReport { id: string; name: string; definition: ReportDefinition; createdAt: string }
 
 /** `companyId` vai ao lado da definição (relatório salvo não fica preso a uma empresa) */
+// ---- Relatório diário por e-mail (docs/relatorio-diario.md) ----
+export interface DailyEmailPref { enabled: boolean; email: string | null; /** por que não pode marcar; null = pode */ blockedReason: string | null }
+export const useDailyEmail = (enabled = true) => useQuery({ queryKey: ['daily-email'], queryFn: () => api<DailyEmailPref>('/reports/daily-email'), enabled });
+export const useSetDailyEmail = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (enabled: boolean) => api<{ enabled: boolean }>('/reports/daily-email', { method: 'PUT', body: JSON.stringify({ enabled }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['daily-email'] }) }); };
+export const usePreviewDailyEmail = () => useMutation({ mutationFn: () => api<{ email: string }>('/reports/daily-email/preview', { method: 'POST' }) });
+
 export const useRunReport = () => useMutation({ mutationFn: ({ companyId, ...d }: ReportDefinition & { companyId?: string }) => api<ReportResult>('/reports/run', { method: 'POST', body: JSON.stringify({ ...d, companyId }) }) });
 export const useSavedReports = () => useQuery({ queryKey: ['saved-reports'], queryFn: () => api<SavedReport[]>('/reports/saved') });
 export const useSaveReport = () => {

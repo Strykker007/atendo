@@ -20,8 +20,8 @@ import { TransferSection } from '@/components/settings/TransferSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
 import Link from 'next/link';
-import { BellOff, CalendarClock, MessagesSquare, Smartphone } from 'lucide-react';
-import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe } from '@/lib/hooks';
+import { BellOff, CalendarClock, MessagesSquare, Smartphone, Mail } from 'lucide-react';
+import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe, useHasFeature, useDailyEmail, useSetDailyEmail, usePreviewDailyEmail } from '@/lib/hooks';
 
 type Aba = 'conta' | 'empresa' | 'atendimento';
 const ABAS: { id: Aba; label: string; icon: React.ReactNode; desc: string }[] = [
@@ -85,6 +85,7 @@ export default function ConfiguracoesPage() {
             {!me.data?.impersonatorId && me.data && <ProfileSection name={me.data.name} />}
             <AppearanceSection />
             <NotificationsSection />
+            {!me.data?.impersonatorId && <DailyReportSection />}
             {!me.data?.impersonatorId && <SecuritySection />}
           </>
         )}
@@ -181,6 +182,46 @@ function NotificationsSection() {
         {/* o teste toca mesmo com o som desligado: é justamente para conferir o volume antes de ligar */}
         <Button size="sm" variant="ghost" onClick={() => previewMessageSound('message')}>Testar som</Button>
         <Button size="sm" variant="ghost" onClick={() => previewMessageSound('alarm')}>Testar alarme de transferência</Button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Relatório diário por e-mail (docs/relatorio-diario.md): resumo de ontem + ranking da equipe às
+ * 7h. Só aparece com a funcionalidade no plano e para quem vê relatórios.
+ */
+function DailyReportSection() {
+  const feature = useHasFeature('daily_report');
+  const podeVer = useCan('reports.view');
+  const pref = useDailyEmail(feature.has && podeVer);
+  const salvar = useSetDailyEmail();
+  const previa = usePreviewDailyEmail();
+  if (!feature.has || !podeVer || !pref.data) return null;
+  const { enabled, email, blockedReason } = pref.data;
+  const ligado = enabled && !blockedReason;
+  return (
+    <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
+      <div>
+        <h2 className="font-display font-semibold text-ink flex items-center gap-2"><Mail size={16} className="text-muted" />Relatório diário por e-mail</h2>
+        <p className="text-sm text-muted">Todo dia às 7h: atendimentos, tempo de resposta, vendas e o ranking da equipe do dia anterior.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={ligado}
+          disabled={!!blockedReason || salvar.isPending}
+          onClick={() => salvar.mutate(!ligado, { onSuccess: (r) => toast.ok(r.enabled ? 'Você vai receber o relatório todo dia às 7h' : 'Relatório diário desligado'), onError: (e) => toast.err(e) })}
+          className={cn('relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50', ligado ? 'bg-accent' : 'bg-line')}
+          aria-label="Receber o relatório diário por e-mail"
+        >
+          <span className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', ligado ? 'left-[18px]' : 'left-0.5')} />
+        </button>
+        <span className="text-sm text-ink flex-1">{blockedReason ?? (ligado ? <>Recebendo em <b>{email}</b></> : 'Não recebo')}</span>
+        {!blockedReason && (
+          <Button size="sm" variant="ghost" loading={previa.isPending} onClick={() => previa.mutate(undefined, { onSuccess: (r) => toast.ok(`Relatório de ontem enviado para ${r.email}`), onError: (e) => toast.err(e) })}>Enviar um agora</Button>
+        )}
       </div>
     </section>
   );

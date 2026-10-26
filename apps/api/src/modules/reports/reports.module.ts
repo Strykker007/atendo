@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Module, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Logger, Module, OnModuleInit, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BullModule, InjectQueue, Processor } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -13,6 +15,15 @@ import { ReportCompany, reportScope } from '../../common/reports/report-scope';
 import { ReportLoadService, assertReportRange } from '../../common/reports/report-load.service';
 import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
+import { UsageService } from '../billing/usage.service';
+import { PermissionsService } from '../auth/permissions.service';
+import { MailService } from '../../common/mail/mail.service';
+import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
+import { TZ_DEFAULT, partsIn, tzOffsetMs } from '../../common/time';
+import { env } from '../../config/env';
+import { buildDailyReportEmail } from './daily-report-email';
+
+export const QUEUE_REPORTS = 'reports';
 
 /**
  * DSL de relatório: parâmetros escolhidos na UI -> query controlada -> série para gráfico.
@@ -121,7 +132,7 @@ function formatPhone(phone: string) {
 @Controller('reports')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermission('reports.view')
-class ReportsController {
+export class ReportsController {
   constructor(private readonly prisma: PrismaService, private readonly load: ReportLoadService) {}
 
   @Post('run')
@@ -153,7 +164,8 @@ class ReportsController {
   }
 
   /** Corpo da visão pronta: ~20 consultas, todas pelo limite de concorrência (`ReportLoadService`). */
-  private async overviewData(t: string, from: Date, to: Date, filtro: Filtro) {
+  /** público: o relatório diário por e-mail usa o mesmo cálculo (DailyReportService) */
+  async overviewData(t: string, from: Date, to: Date, filtro: Filtro) {
     const base = { from, to, filters: { tagIds: filtro.tagIds, agentId: filtro.agentId }, chart: 'bar' as const };
     const nums = filtro.numberIds;
     // conversa: tem a tag / está com o consultor
@@ -510,7 +522,7 @@ class ReportsController {
     return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(','), w: JSON.stringify(weights), nums: nums?.join(',') }), () => this.rankingData(u.tenantId, from, to, f.tagIds, weights, nums));
   }
 
-  private async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[], weights = normalizeRankingWeights(null), nums?: string[]) {
+  async rankingData(tenantId: string, from: Date, to: Date, tagIds?: string[], weights = normalizeRankingWeights(null), nums?: string[]) {
     const f = { tagIds };
     const conds = [Prisma.sql`e."tenantId" = ${tenantId}`, Prisma.sql`e.type = 'closed'`, Prisma.sql`not e."ignoreInReports"`, Prisma.sql`e."actorId" is not null`, Prisma.sql`not c."ticketExempt"`, Prisma.sql`e."createdAt" >= ${from}`, Prisma.sql`e."createdAt" < ${to}`];
     if (f.tagIds?.length) conds.push(this.eventoTemTag(f.tagIds));
@@ -578,6 +590,29 @@ class ReportsController {
     const won = pontuado.reduce((a, r) => a + r.won, 0);
     const revenue = Math.round(pontuado.reduce((a, r) => a + r.revenue * 100, 0)) / 100;
     return { period: { from, to }, satisfactionScale, weights, totals: { closed, won, revenue, conversionRate: closed ? (won / closed) * 100 : 0 }, ranking: pontuado.map((r, i) => ({ position: i + 1, ...r })) };
+  }
+
+  /**
+   * Relatório diário por e-mail (docs/relatorio-diario.md): a pessoa marca se quer receber. O
+   * relatório é do cliente inteiro, então só quem enxerga todos os números pode marcar.
+   */
+  @Get('daily-email')
+  async dailyEmail(@CurrentUser() u: AuthUser) {
+    const row = await this.prisma.user.findUnique({ where: { id: u.id }, select: { dailyReportEmail: true, email: true, primaryUser: { select: { email: true } } } });
+    return { enabled: !!row?.dailyReportEmail, email: row?.email ?? row?.primaryUser?.email ?? null, blockedReason: dailyEmailBlock(u) };
+  }
+
+  @Put('daily-email')
+  @UseGuards(FeatureGuard)
+  @RequireFeature('daily_report')
+  async setDailyEmail(@CurrentUser() u: AuthUser, @Body() body: unknown) {
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(body);
+    const bloqueio = dailyEmailBlock(u);
+    if (enabled && bloqueio) throw new ForbiddenException(bloqueio);
+    const row = await this.prisma.user.findUnique({ where: { id: u.id }, select: { email: true, primaryUser: { select: { email: true } } } });
+    if (enabled && !(row?.email ?? row?.primaryUser?.email)) throw new BadRequestException('Seu usuário não tem e-mail cadastrado.');
+    await this.prisma.user.update({ where: { id: u.id }, data: { dailyReportEmail: enabled } });
+    return { enabled };
   }
 
   @Get('saved')
@@ -809,5 +844,153 @@ class ReportsController {
   }
 }
 
-@Module({ imports: [AuthModule, BillingModule], controllers: [ReportsController] })
+/** Por que a pessoa não pode receber o relatório diário (null = pode). */
+function dailyEmailBlock(u: Pick<AuthUser, 'impersonatorId' | 'ownNumberIds' | 'companyRestricted'>) {
+  if (u.impersonatorId) return 'Entrando como cliente: quem marca é o próprio usuário.';
+  if (u.ownNumberIds?.length || u.companyRestricted) return 'O relatório diário é do cliente inteiro: só quem vê todos os números pode receber.';
+  return null;
+}
+
+/** Ontem no fuso do cliente: [início, fim) em UTC e o rótulo "segunda-feira, 26/10/2026". */
+export function yesterdayIn(tz: string, now = new Date()) {
+  const p = partsIn(now, tz);
+  const inicio = (y: number, m: number, d: number) => {
+    const naive = Date.UTC(y, m - 1, d);
+    return new Date(naive + tzOffsetMs(new Date(naive), tz));
+  };
+  const to = inicio(p.y, p.m, p.d);
+  const ontem = new Date(Date.UTC(p.y, p.m - 1, p.d - 1));
+  const from = inicio(ontem.getUTCFullYear(), ontem.getUTCMonth() + 1, ontem.getUTCDate());
+  const label = ontem.toLocaleDateString('pt-BR', { timeZone: 'UTC', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+  return { from, to, label };
+}
+
+/**
+ * Monta e envia o relatório diário (docs/relatorio-diario.md). Usa o MESMO cálculo da tela de
+ * Relatórios (visão geral + ranking) — o controller entra como provider só para isso.
+ */
+@Injectable()
+export class DailyReportService {
+  private readonly log = new Logger(DailyReportService.name);
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly reports: ReportsController,
+    private readonly usage: UsageService,
+    private readonly permissions: PermissionsService,
+    private readonly mail: MailService,
+  ) {}
+
+  async sendAll(now = new Date()) {
+    const marcados = await this.prisma.user.findMany({
+      where: { dailyReportEmail: true, isActive: true, tenantId: { not: null }, tenant: { isActive: true } },
+      select: { id: true, role: true, tenantId: true, email: true, primaryUser: { select: { email: true, isActive: true } } },
+    });
+    const porCliente = new Map<string, typeof marcados>();
+    for (const u of marcados) porCliente.set(u.tenantId!, [...(porCliente.get(u.tenantId!) ?? []), u]);
+    let enviados = 0;
+    for (const [tenantId, usuarios] of porCliente) {
+      try {
+        enviados += await this.sendTenant(tenantId, usuarios, now);
+      } catch (e) {
+        // um cliente com problema não pode impedir o relatório dos outros
+        this.log.error(`relatório diário do cliente ${tenantId} falhou: ${(e as Error).message}`);
+      }
+    }
+    this.log.log(`relatório diário: ${enviados} e-mail(s) para ${porCliente.size} cliente(s)`);
+    return { tenants: porCliente.size, sent: enviados };
+  }
+
+  private async sendTenant(tenantId: string, usuarios: { id: string; role: AuthUser['role']; email: string | null; primaryUser: { email: string | null; isActive: boolean } | null }[], now: Date) {
+    const plano = await this.usage.limits(tenantId);
+    if (!plano?.limits.features?.includes('daily_report') || ['suspended', 'canceled'].includes(plano.status)) return 0;
+    // a permissão e o escopo podem ter mudado depois de marcar: confere de novo na hora de enviar
+    const destinos: string[] = [];
+    for (const u of usuarios) {
+      if (u.primaryUser && !u.primaryUser.isActive) continue;
+      const email = u.email ?? u.primaryUser?.email;
+      const sc = await this.permissions.scope({ id: u.id, role: u.role });
+      if (email && sc.permissions.includes('reports.view') && !sc.numberIds.length && !sc.companyIds.length) destinos.push(email);
+    }
+    return destinos.length ? this.sendTo(tenantId, destinos, now) : 0;
+  }
+
+  /** Monta o relatório de ontem do cliente e manda para `destinos`. Devolve quantos saíram. */
+  async sendTo(tenantId: string, destinos: string[], now = new Date()) {
+    const [tenant, settings] = await Promise.all([
+      this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true } }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { timezone: true, salesEnabled: true, wonLabel: true, lostLabel: true, rankingWeights: true } }),
+    ]);
+    const { from, to, label } = yesterdayIn(settings?.timezone || TZ_DEFAULT, now);
+    const [overview, ranking] = await Promise.all([
+      this.reports.overviewData(tenantId, from, to, {}),
+      this.reports.rankingData(tenantId, from, to, undefined, normalizeRankingWeights(settings?.rankingWeights)),
+    ]);
+    const salesEnabled = settings?.salesEnabled ?? true;
+    const { subject, text, html } = buildDailyReportEmail({
+      tenantName: tenant.name,
+      dayLabel: label,
+      kpis: overview.kpis,
+      ranking: ranking.ranking,
+      lostReasons: overview.lostReasons.slice(0, 3),
+      salesEnabled,
+      wonLabel: settings?.wonLabel || (salesEnabled ? 'Comprou' : 'Resolvido'),
+      lostLabel: settings?.lostLabel || (salesEnabled ? 'Não comprou' : 'Não resolvido'),
+      reportsUrl: `${env.WEB_ORIGIN}/relatorios`,
+    });
+    let ok = 0;
+    for (const to_ of destinos) {
+      // falha de envio nunca derruba o lote (docs/12)
+      try { await this.mail.send({ to: to_, subject, text, html }); ok++; } catch { /* já logado no MailService */ }
+    }
+    return ok;
+  }
+}
+
+/** Rotas do relatório diário que precisam do serviço (o serviço depende do ReportsController). */
+@Controller('reports')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission('reports.view')
+class DailyReportController {
+  constructor(private readonly prisma: PrismaService, private readonly daily: DailyReportService) {}
+
+  /** Manda agora, só para quem pediu, o relatório de ontem — para ver como chega antes de marcar. */
+  @Post('daily-email/preview')
+  @UseGuards(FeatureGuard)
+  @RequireFeature('daily_report')
+  async previewDailyEmail(@CurrentUser() u: AuthUser) {
+    const bloqueio = dailyEmailBlock(u);
+    if (bloqueio) throw new ForbiddenException(bloqueio);
+    const row = await this.prisma.user.findUnique({ where: { id: u.id }, select: { email: true, primaryUser: { select: { email: true } } } });
+    const email = row?.email ?? row?.primaryUser?.email;
+    if (!email) throw new BadRequestException('Seu usuário não tem e-mail cadastrado.');
+    if (!(await this.daily.sendTo(u.tenantId, [email]))) throw new BadRequestException('Não foi possível enviar o e-mail agora. Tente de novo em alguns minutos.');
+    return { email };
+  }
+}
+
+/** Todo dia às 07:00 de Brasília (10:00 UTC), com o dia anterior. Idempotente entre instâncias. */
+@Injectable()
+class DailyReportScheduler implements OnModuleInit {
+  constructor(@InjectQueue(QUEUE_REPORTS) private readonly queue: Queue) {}
+  async onModuleInit() {
+    await this.queue.upsertJobScheduler('daily-report-email', { pattern: '0 10 * * *' }, { name: 'daily-report' });
+  }
+}
+
+@Processor(QUEUE_REPORTS)
+class ReportsProcessor extends TrackedWorkerHost {
+  constructor(private readonly daily: DailyReportService) {
+    super(QUEUE_REPORTS);
+  }
+  protected async handle(job: Job) {
+    if (job.name === 'daily-report') await this.daily.sendAll();
+  }
+}
+
+@Module({
+  // sem nova tentativa: o lote já isola falhas por cliente, e repetir mandaria e-mail em dobro
+  imports: [BullModule.registerQueue({ name: QUEUE_REPORTS, defaultJobOptions: { attempts: 1, removeOnComplete: 20, removeOnFail: 50 } }), AuthModule, BillingModule],
+  controllers: [ReportsController, DailyReportController],
+  providers: [ReportsController, DailyReportService, DailyReportScheduler, ReportsProcessor],
+})
 export class ReportsModule {}
