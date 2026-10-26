@@ -36,8 +36,9 @@ qualquer origem ──▶ ConversationsService.send / sendAsSystem
    2. planSend (puro, send-queue.ts):
         queuedAt + prazo vencido            → falha "Não saiu: ficou mais de N min esperando a vez"
         há pendente anterior na conversa    → espera a vez (job atrasado 5 s; promovido antes)
-          exceto: mensagem do ATENDENTE atrás de automática segurada pela proteção
-          (teto de automáticas/aquecimento, queuedAt no futuro) → passa na frente e sai já
+          ATENDENTE atrás de automática segurada pela proteção (teto de automáticas/
+          aquecimento, queuedAt no futuro) → a da frente é LIBERADA (sai já, sem o teto/h,
+          com o espaçamento normal) e a do atendente logo depois — nunca fora de ordem
         número não conectado                → pausa (job atrasado 60 s, sem chamar o provider)
    3. teto do dia — desligado (todo número com sendDailyLimit 0, sem aquecimento);
       se voltar a existir, vale só para envio proativo → falha sem retry
@@ -58,6 +59,14 @@ o recheck de 5 s é só rede de segurança. Conversas diferentes continuam em pa
 
 - Uma mensagem em retry segura as seguintes da mesma conversa — de propósito: sair a 2ª antes
   da 1ª é o que se quer evitar.
+- **Nada passa na frente, nem o atendente.** Até 26/10/2026 a mensagem do atendente pulava a
+  automática segurada pelo teto, e o cliente lia fora de ordem. Agora, quando há atendente
+  esperando atrás de automática segurada, `planSend` devolve `releaseHead` e o worker chama
+  `releaseHeld`. O job da automática ganha `released: true`, volta a reservar vaga **sem o teto de
+  automáticas/h** (a vaga antiga sai das janelas por `SendPacer.forget`) e é adiantado. Ela sai na
+  ordem e a do atendente vem em seguida. Conversa com atendente respondendo é ida e volta, o tráfego
+  de menor risco: o teto existe para o robô disparando sozinho (Farmavila Mais, 26/10/2026, com
+  atendente 30 min atrás do fluxo de encerramento).
 - Se a cabeça ficar presa (ex.: job perdido) além do prazo de expiração, o próximo job a expira.
 - **Tentar novamente** passa a mensagem **para a frente** das pendentes da conversa (`queueSeq` =
   menor pendente − 1; sem pendentes, número novo) e promove o job: a 1ª mensagem de um fluxo que
@@ -248,7 +257,19 @@ depois do início) ou se quem leu o QR é outro telefone.
 | > 7 dias | livre | padrão da conexão (80) | — |
 
 **Automáticas por hora**: vale o menor entre a fase e o configurado na conexão. A mensagem do robô
-acima do teto espera a vaga em segundo plano, sem expirar (até 6 h); a resposta do atendente não entra nessa conta. Motivo: a Drog. Nova Farma foi restrita em
+acima do teto espera a vaga em segundo plano, sem expirar (até 6 h); a resposta do atendente não entra nessa conta.
+Três exceções para não travar:
+- **Atendente atrás dela na conversa**: a automática é liberada do teto e sai na ordem (ver
+  [Ordem por conversa](#ordem-por-conversa)).
+- **Conversa já encerrada** (despedida, agradecimento do fluxo de encerramento) que só sairia mais
+  de 15 min depois da criação (`CLOSED_AUTO_MAX_DELAY_MS`): é descartada com o motivo na mensagem,
+  porque o cliente já saiu. Nada depois dela depende disso, então a ordem não muda.
+- **Textos seguidos juntos**: com o número aquecendo, os textos seguidos de um mesmo bloco Conteúdo
+  (fluxo ou mensagem automática da faixa) com até 3 s de intervalo saem **numa mensagem só**, com
+  os parágrafos separados por linha em branco (`flows/content-merge.ts`). É o mesmo texto, na mesma
+  ordem, e conta uma vez no teto. Exemplo: "Boa noite!" + "Em instantes um atendente…", a 2 s um do
+  outro, contavam 2. Mídia ou pausa maior cortam a junção. Fora do aquecimento, os balões saem como
+  a loja montou. Motivo: a Drog. Nova Farma foi restrita em
 7 h com ~50 automáticas/h — saudação de fluxo em quase toda conversa — num número recém-pareado.
 
 "Novo" = contato que ainda não recebeu nada do número **na última hora** (`wa:wconv`, janela

@@ -225,6 +225,15 @@ export class SendPacer {
     return true;
   }
 
+  /**
+   * Mensagem segurada pelo teto que não vai mais sair (descartada): tira a reserva dela das janelas
+   * de contagem (por minuto, rajada da conversa, automáticas/h) — senão ela ocupava uma vaga
+   * futura do teto à toa. O "próximo" do número não é tocado: reserva no teto não o grava.
+   */
+  async forget(i: { numberId: string; conversationId: string; messageId: string }) {
+    await this.redis.pipeline().zrem(rateKey(i.numberId), i.messageId).zrem(convBurstKey(i.conversationId), i.messageId).zrem(autoKey(i.numberId), i.messageId).exec();
+  }
+
   /** Devolve a vaga quando o envio não vai acontecer (bloqueio de quota, mensagem sumiu). */
   async release(numberId: string) {
     await this.redis.del(nextKey(numberId));

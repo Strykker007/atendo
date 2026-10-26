@@ -36,4 +36,9 @@ export interface OutboundJob {
   minGapMs?: number;
   /** automático: o tempo de reação (humanTiming) já foi esperado — não espera de novo nas reentradas */
   reacted?: boolean;
+  /**
+   * Automática liberada porque um atendente está esperando atrás dela na conversa (`releaseHeld`):
+   * reserva vaga sem o teto de automáticas/h. O espaçamento do número continua valendo.
+   */
+  released?: boolean;
 }
