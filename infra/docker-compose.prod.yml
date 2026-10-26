@@ -216,6 +216,8 @@ services:
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
       BACKUP_REMOTE_KEEP_DAYS: ${BACKUP_REMOTE_KEEP_DAYS:-${BACKUP_KEEP_DAYS:-14}}
       BACKUP_AT: ${BACKUP_AT:-03:30}
+      # dia da semana (1=seg … 7=dom) da conferência completa da mídia; nos outros, só as últimas 48 h
+      BACKUP_MEDIA_FULL_DOW: ${BACKUP_MEDIA_FULL_DOW:-7}
       # O rclone aceita a configuração por ambiente, o que evita montar um arquivo único:
       # quando o arquivo não existe no host, o Docker cria um DIRETÓRIO no lugar e o envio
       # falha em silêncio. Assim o segredo fica só no .env.production.
