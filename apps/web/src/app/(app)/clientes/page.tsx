@@ -1,8 +1,8 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal, Download } from 'lucide-react';
 import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDialog';
 import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
 import { PlanOverrideDialog } from '@/components/billing/PlanOverrideDialog';
@@ -38,6 +38,38 @@ function Vencimento({ sub }: { sub: NonNullable<TenantRow['subscription']> }) {
       {sufixo && <div className="text-[10.5px] font-normal">{sufixo}</div>}
     </div>
   );
+}
+
+/**
+ * O que o cliente paga por mês hoje — mesma regra do MRR no Financeiro (docs/05): o contratado
+ * manda; nulo ou zero em plano pago é resto de gratuito/cadastro, então vale o do plano. × unidades.
+ */
+const mensalidade = (s: NonNullable<TenantRow['subscription']>) => {
+  if (s.plan.isFree) return 0;
+  const contratado = Number(s.priceMonth ?? 0);
+  return (contratado > 0 ? contratado : Number(s.plan.priceMonth)) * Math.max(1, s.units);
+};
+
+/** CSV da lista filtrada (`;` e vírgula decimal: abre direto no Excel em pt-BR). */
+function exportarClientes(rows: TenantRow[], liveDe: Map<string, TenantLive>) {
+  const cel = (v: string) => (/[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const dia = (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const head = ['Cliente', 'Razão social', 'CPF/CNPJ', 'Admin', 'Plano', 'Mensalidade', 'Assinatura', 'Vencimento', 'Cliente desde', 'Situação', 'Números', 'Usuários', 'Conversas', 'Último acesso'];
+  const linhas = rows.map((t) => {
+    const s = t.subscription;
+    const l = liveDe.get(t.id);
+    return [
+      t.name, t.legalName ?? '', fmtDoc(t.document), t.users[0]?.email ?? '', s?.plan.name ?? 'Sem plano', s ? mensalidade(s).toFixed(2).replace('.', ',') : '',
+      s ? STATUS[s.status]?.[0] ?? s.status : '', s && !(s.plan.isFree && !s.plan.durationDays) ? dia(s.currentPeriodEnd) : '', dia(t.createdAt), t.isActive ? 'Ativo' : 'Desativado',
+      String(t._count.numbers), String(t._count.users), String(t._count.conversations), l?.onlineUsers ? 'online' : l?.lastActivityAt ? dia(l.lastActivityAt) : '',
+    ];
+  });
+  const blob = new Blob(['\ufeff' + [head, ...linhas].map((r) => r.map(cel).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `clientes-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /** CPF/CNPJ com pontuação para exibir (o banco guarda só dígitos). */
@@ -206,6 +238,11 @@ export default function ClientesPage() {
   const [personalizando, setPersonalizando] = useState<TenantRow | null>(null);
   const [filtros, setFiltros] = useState<Filtros>(FILTROS_VAZIOS);
   const set = (p: Partial<Filtros>) => setFiltros((f) => ({ ...f, ...p }));
+  // o Financeiro abre um cliente daqui com `?busca=Nome` (lido só no navegador: evita o Suspense do useSearchParams)
+  useEffect(() => {
+    const busca = new URLSearchParams(window.location.search).get('busca');
+    if (busca) setFiltros((f) => ({ ...f, busca }));
+  }, []);
   const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros, liveDe), [tenants.data, filtros, liveDe]);
   const filtrando = JSON.stringify({ ...filtros, ordem: 'nome' }) !== JSON.stringify(FILTROS_VAZIOS);
   if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
@@ -281,6 +318,7 @@ export default function ClientesPage() {
           </select>
           <span className="text-[12px] text-muted tnum ml-auto">{lista.length === tenants.data.length ? `${lista.length} clientes` : `${lista.length} de ${tenants.data.length} clientes`}</span>
           {filtrando && <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => setFiltros({ ...FILTROS_VAZIOS, ordem: filtros.ordem })}>Limpar filtros</Button>}
+          <Button size="sm" variant="ghost" icon={<Download size={13} />} disabled={!lista.length} onClick={() => exportarClientes(lista, liveDe)} title="Exporta a lista como está filtrada">Exportar CSV</Button>
         </div>
       )}
       {live.data && (
@@ -343,6 +381,12 @@ export default function ClientesPage() {
                       <select value={t.subscription?.status ?? ''} disabled={busy === t.id || !t.subscription} onChange={(e) => patch(t, { subscriptionStatus: e.target.value })} className={cn('rounded-full text-xs px-2 py-0.5 border-0', st[1])}>
                         {Object.entries(STATUS).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}
                       </select>
+                      {/* o que ele paga hoje; em teste, o que passa a pagar quando converter */}
+                      {t.subscription && !t.subscription.plan.isFree && (
+                        <div className="text-[11px] tnum text-muted mt-0.5" title={t.subscription.status === 'trialing' ? 'Mensalidade quando sair do teste' : 'Mensalidade atual'}>
+                          {brl(mensalidade(t.subscription))}/mês{t.subscription.status === 'trialing' && <span className="text-faint"> ao converter</span>}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">{t.subscription ? <Vencimento sub={t.subscription} /> : <span className="text-faint">—</span>}</td>
                     <td className="px-3 py-2.5"><NumerosDoCliente live={liveDe.get(t.id)} total={t._count.numbers} /></td>

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download, Hourglass } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -22,7 +23,7 @@ const Tip = ({ active, payload, label }: { active?: boolean; payload?: { name: s
   </div>
 ) : null;
 
-type Tab = 'visao' | 'clientes' | 'teste' | 'faturas' | 'descontos' | 'margem';
+type Tab = 'visao' | 'teste' | 'faturas' | 'descontos' | 'margem';
 
 const ORIGEM: Record<DiscountSource, string> = { checkout: 'Checkout', tenant_create: 'Novo cliente', manual: 'Dono, no cliente', bulk: 'Dono, aplicar a todos', plan_return: 'Voltou ao plano' };
 const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '');
@@ -48,6 +49,9 @@ function exportarDescontos(rows: DiscountGrant[]) {
     num(g.listPrice), num(g.priceMonth), num(g.discountPercent), String(g.units), num((g.listPrice - g.priceMonth) * g.units), dia(g.startsAt), dia(g.endsAt), dia(g.closedAt),
   ]));
 }
+
+/** Nome do cliente com atalho para ele em Clientes (onde se age: plano, status, vencimento). */
+const Cliente = ({ nome }: { nome: string }) => <Link href={`/clientes?busca=${encodeURIComponent(nome)}`} className="text-ink hover:text-accent-ink hover:underline">{nome}</Link>;
 
 /** Situação do teste em texto: "termina em 5 dias", "termina hoje", "venceu há 3 dias". */
 const prazoTeste = (dias: number) => (dias > 1 ? `termina em ${dias} dias` : dias === 1 ? 'termina amanhã' : dias === 0 ? 'termina hoje' : `venceu há ${-dias} dia${dias === -1 ? '' : 's'}`);
@@ -80,7 +84,7 @@ export default function AdminPage() {
     <PageShell width="max-w-6xl">
       <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso.`} action={
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
-          {([['visao', 'Visão geral'], ['clientes', 'Assinaturas'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
+          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>
           ))}
         </div>
@@ -146,18 +150,6 @@ export default function AdminPage() {
         </>
       )}
 
-      {d && tab === 'clientes' && (
-        <>
-          <Exportar texto="Todas as assinaturas, com o valor que cada cliente paga hoje." disabled={!d.subscriptions.length} onClick={() => baixarCsv('assinaturas', ['Cliente', 'Plano', 'Mensalidade', 'Status', 'Renova em', 'Cancela no fim do período', 'Carência até'], d.subscriptions.map((s) => [
-            s.tenant, s.plan, num(s.price), STATUS_PT[s.status] ?? s.status, dia(s.periodEnd), s.cancelAtPeriodEnd ? 'sim' : 'não', dia(s.graceUntil),
-          ]))} />
-          <Table head={['Cliente', 'Plano', 'Mensalidade', 'Status', 'Renova em', 'Obs.']} rows={d.subscriptions.map((s) => [
-          s.tenant, s.plan, brl(s.price), <Pill key="s" status={s.status} />, new Date(s.periodEnd).toLocaleDateString('pt-BR'),
-          s.cancelAtPeriodEnd ? 'cancela no fim do período' : s.graceUntil ? `carência até ${new Date(s.graceUntil).toLocaleDateString('pt-BR')}` : '',
-        ])} />
-        </>
-      )}
-
       {d && tab === 'teste' && (
         <>
           <div className="grid gap-4 sm:grid-cols-3 mb-4">
@@ -169,7 +161,7 @@ export default function AdminPage() {
             t.tenant, t.plan, num(t.price), dia(t.startedAt), String(t.daysIn), dia(t.endsAt), prazoTeste(t.daysLeft),
           ]))} />
           <Table head={['Cliente', 'Plano', 'Mensalidade', 'Em teste há', 'Fim do teste', 'Situação']} rows={d.trials.map((t) => [
-            t.tenant, t.plan, brl(t.price), `${t.daysIn} dia${t.daysIn === 1 ? '' : 's'}`, dia(t.endsAt),
+            <Cliente key="c" nome={t.tenant} />, t.plan, brl(t.price), `${t.daysIn} dia${t.daysIn === 1 ? '' : 's'}`, dia(t.endsAt),
             <span key="p" className={t.daysLeft < 0 ? 'text-danger' : t.daysLeft <= 7 ? 'text-warn' : 'text-muted'}>{prazoTeste(t.daysLeft)}</span>,
           ])} empty="Nenhum cliente em teste." />
         </>
@@ -181,7 +173,7 @@ export default function AdminPage() {
             i.tenant, i.period, num(i.total), num(i.overage), STATUS_PT[i.status] ?? i.status, dia(i.dueAt), dia(i.paidAt),
           ]))} />
           <Table head={['Cliente', 'Período', 'Total', 'Excedente', 'Status', 'Vencimento', '']} rows={d.invoices.map((i) => [
-          i.tenant, i.period, brl(i.total), brl(i.overage), <Pill key="s" status={i.status} />, i.dueAt ? new Date(i.dueAt).toLocaleDateString('pt-BR') : '—',
+          <Cliente key="c" nome={i.tenant} />, i.period, brl(i.total), brl(i.overage), <Pill key="s" status={i.status} />, i.dueAt ? new Date(i.dueAt).toLocaleDateString('pt-BR') : '—',
           i.hostedUrl ? <a key="l" href={i.hostedUrl} target="_blank" rel="noreferrer" className="text-accent-ink underline text-xs">Stripe</a> : '',
         ])} empty="Nenhuma fatura ainda — aparecem quando o Stripe gerar a primeira cobrança." />
         </>
@@ -199,7 +191,7 @@ export default function AdminPage() {
             const fim = fimDe(g);
             const correndo = !fim || new Date(fim) > new Date();
             return [
-              dia(g.createdAt), g.tenant, g.plan,
+              dia(g.createdAt), <Cliente key="c" nome={g.tenant} />, g.plan,
               g.kind === 'promotion' ? <span key="k" className="text-accent-ink">{g.promotion ?? 'Promoção'}</span> : 'Negociado',
               <span key="v">{brl(g.listPrice)} → <b className="text-ink">{brl(g.priceMonth)}</b>{g.units > 1 && <span className="text-faint"> × {g.units}</span>}</span>,
               `${g.discountPercent.toLocaleString('pt-BR')}%`,
@@ -220,7 +212,7 @@ export default function AdminPage() {
               r.name, r.plan ?? '', String(r.messagesSent), String(r.templatesSent), num(r.revenue), num(r.overage), num(r.providerCost), num(r.infraCost), num(r.margin), num(r.marginPct),
             ]))} />
             <Table head={['Cliente', 'Plano', 'Msgs', 'Templates', 'Receita', 'Custo Meta', 'Infra', 'Margem', '%']} rows={margin.data.map((r) => [
-              <span key="n" className="inline-flex items-center gap-2"><Building2 size={14} className="text-faint" />{r.name}</span>, r.plan ?? '—', r.messagesSent.toLocaleString('pt-BR'), r.templatesSent.toLocaleString('pt-BR'),
+              <span key="n" className="inline-flex items-center gap-2"><Building2 size={14} className="text-faint" /><Cliente nome={r.name} /></span>, r.plan ?? '—', r.messagesSent.toLocaleString('pt-BR'), r.templatesSent.toLocaleString('pt-BR'),
               <span key="r">{brl(r.revenue)}{r.overage > 0 && <span className="text-[10px] text-warn ml-1">+{brl(r.overage)}</span>}</span>, brl(r.providerCost), brl(r.infraCost),
               <b key="m" className={r.margin >= 0 ? 'text-ok' : 'text-danger'}>{brl(r.margin)}</b>, <span key="p" className={r.marginPct < 30 ? 'text-warn' : 'text-muted'}>{r.marginPct.toFixed(0)}%</span>,
             ])} />
