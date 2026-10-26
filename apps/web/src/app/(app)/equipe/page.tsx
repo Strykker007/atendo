@@ -324,32 +324,35 @@ function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: {
   return (
     <Modal open={open} onClose={onClose} title="Adicionar várias pessoas" width="max-w-3xl">
       <div className="space-y-3">
-        <div className="rounded-xl border border-line overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-field text-left text-xs text-muted"><tr><th className="px-3 py-2 w-8">#</th><th className="px-2 py-2">Nome</th><th className="px-2 py-2">E-mail</th><th className="px-2 py-2">Perfil de acesso</th><th className="w-8" /></tr></thead>
-            <tbody className="divide-y divide-line">
-              {linhas.map((l, i) => {
-                const problema = (l.name.trim() || l.email.trim()) ? problemaDa(l) : null;
-                return (
-                  <tr key={l.key} className="align-top">
-                    <td className="px-3 py-2 text-faint tnum">{i + 1}</td>
-                    <td className="px-2 py-1.5"><input className={cn(inputCls, 'h-8')} value={l.name} onChange={(e) => mudar(l.key, { name: e.target.value })} placeholder="Nome" maxLength={80} /></td>
-                    <td className="px-2 py-1.5">
-                      <input type="email" className={cn(inputCls, 'h-8')} value={l.email} onChange={(e) => mudar(l.key, { email: e.target.value })} placeholder="email@empresa.com.br" />
-                      {(l.erro || problema) && <p className="text-[11px] text-danger-ink mt-0.5">{l.erro ?? problema}</p>}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <select className={cn(inputCls, 'h-8')} value={l.profileId} onChange={(e) => mudar(l.key, { profileId: e.target.value })}>
-                        {!profiles.length && <option value="">Acesso padrão</option>}
-                        {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-1 py-1.5"><button type="button" onClick={() => setLinhas((xs) => (xs.length > 1 ? xs.filter((x) => x.key !== l.key) : [nova()]))} className="p-1.5 rounded-md text-faint hover:text-danger-ink hover:bg-field" title="Remover linha"><X size={14} /></button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        {/* Grade em vez de tabela: no celular cada pessoa vira um bloco (nome, e-mail e perfil um
+            embaixo do outro); da largura sm em diante, uma linha. Os campos usam a altura padrão do
+            inputCls — forçar h-8 com o py-2 dele cortava o texto do seletor ("Gerente" comido). */}
+        <div className="rounded-xl border border-line divide-y divide-line">
+          <div className="hidden sm:grid grid-cols-[1.5rem_minmax(0,1fr)_minmax(0,1.3fr)_minmax(9rem,11rem)_2rem] gap-2 px-3 py-2 bg-field rounded-t-xl text-xs text-muted">
+            <span>#</span><span>Nome</span><span>E-mail</span><span>Perfil de acesso</span><span />
+          </div>
+          {linhas.map((l, i) => {
+            const problema = (l.name.trim() || l.email.trim()) ? problemaDa(l) : null;
+            return (
+              <div key={l.key} className="grid grid-cols-[1.5rem_minmax(0,1fr)_2rem] sm:grid-cols-[1.5rem_minmax(0,1fr)_minmax(0,1.3fr)_minmax(9rem,11rem)_2rem] gap-2 px-3 py-2 items-start">
+                <span className="pt-2 text-faint tnum text-sm">{i + 1}</span>
+                <>
+                  <div className="col-start-2 sm:col-start-auto"><input className={inputCls} value={l.name} onChange={(e) => mudar(l.key, { name: e.target.value })} placeholder="Nome" maxLength={80} aria-label={`Nome da pessoa ${i + 1}`} /></div>
+                  <div className="col-start-2 sm:col-start-auto">
+                    <input type="email" className={inputCls} value={l.email} onChange={(e) => mudar(l.key, { email: e.target.value })} placeholder="email@empresa.com.br" aria-label={`E-mail da pessoa ${i + 1}`} />
+                    {(l.erro || problema) && <p className="text-[11px] text-danger-ink mt-0.5">{l.erro ?? problema}</p>}
+                  </div>
+                  <div className="col-start-2 sm:col-start-auto">
+                    <select className={inputCls} value={l.profileId} onChange={(e) => mudar(l.key, { profileId: e.target.value })} aria-label={`Perfil de acesso da pessoa ${i + 1}`}>
+                      {!profiles.length && <option value="">Acesso padrão</option>}
+                      {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                </>
+                <button type="button" onClick={() => setLinhas((xs) => (xs.length > 1 ? xs.filter((x) => x.key !== l.key) : [nova()]))} className="col-start-3 row-start-1 sm:col-start-auto sm:row-start-auto mt-1 p-1.5 rounded-md text-faint hover:text-danger-ink hover:bg-field" title="Remover linha" aria-label={`Remover a pessoa ${i + 1}`}><X size={14} /></button>
+              </div>
+            );
+          })}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* a nova linha herda o perfil da última: quem cadastra 5 atendentes seguidos não escolhe 5 vezes */}
