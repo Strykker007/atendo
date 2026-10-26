@@ -5,7 +5,7 @@ Auditoria de 26/10/2026, versão em produção **1.8.1**. Conferido no código (
 estão preenchidos, nunca o valor) e `pnpm audit`. Refazer a cada trimestre ou antes de uma
 mudança grande (Meta oficial, gateway de pagamento).
 
-Legenda: ✅ ok · ⚠️ ok com ressalva · ❌ falta
+Legenda: ✅ ok · ⚠️ ok com ressalva · ❌ falta · * corrigido no código, vale a partir do próximo deploy
 
 | # | Item | Situação | Resumo |
 |---|---|---|---|
@@ -23,19 +23,34 @@ Legenda: ✅ ok · ⚠️ ok com ressalva · ❌ falta
 | 12 | Proteção contra bots | ❌ | Sem captcha em login, "esqueci a senha" e página pública do orçamento |
 | 13 | Queries parametrizadas | ✅ | Nenhum `$queryRawUnsafe`/`$executeRawUnsafe`; tudo `Prisma.sql` |
 | 14 | Validação de inputs | ⚠️ | DTOs/zod em tudo; limite de corpo de 30 MB vale para a API inteira |
-| 15 | Evitar vazamento de conteúdo | ⚠️ | Erro 500 genérico; painel anuncia `x-powered-by: Next.js`; Sentry desligado |
+| 15 | Evitar vazamento de conteúdo | ⚠️ | Erro 500 genérico; `x-powered-by` removido no próximo deploy; Sentry desligado |
 | 16 | Restringir uploads | ✅ | Tamanho e tipo limitados, `nosniff`, comprovante por URL assinada |
 | 17 | Limitar respostas da API | ✅ | Paginação com teto, `select` explícito, nada de `passwordHash` em resposta |
-| 18 | Security headers | ⚠️ | API completa (helmet); **painel sem nenhum** (HSTS, CSP, X-Frame-Options) |
+| 18 | Security headers | ✅* | API completa (helmet); painel ganha HSTS/anti-iframe/nosniff no próximo deploy |
 | 19 | Forçar HTTPS | ✅ | Caddy + Let's Encrypt, HTTP→HTTPS 308, TLS 1.3, TLS ≤ 1.1 recusado |
-| 20 | Scan de dependências | ❌ | **1 crítica, 12 altas**; nenhum scan automático |
+| 20 | Scan de dependências | ⚠️* | Era 1 crítica + 12 altas; **0 após as atualizações** (próximo deploy); falta scan automático |
+
+## Correções feitas (26/10/2026, vão no próximo deploy)
+
+- **Item 20:** `next` 15.5.25 → **15.5.28** (painel e site) e `zod` 3 → **4.6.7** (API: 80 arquivos de
+  teste/1.024 testes passando, `env` e esquemas dos relatórios conferidos). Dependências indiretas
+  forçadas para a versão corrigida em `pnpm-workspace.yaml` (`overrides`: `postcss`,
+  `source-map-js`, `sharp`, `multer`, `body-parser`, `deepmerge-ts`). `pnpm audit --prod`: **0**
+  vulnerabilidades.
+- **Itens 18 e 19:** headers no painel pelo Caddy (`infra/Caddyfile`): HSTS de 1 ano,
+  `frame-ancestors 'self'` + `X-Frame-Options: SAMEORIGIN` (fim do clickjacking), `nosniff`,
+  `Referrer-Policy`, `Permissions-Policy` (só microfone, usado na gravação de áudio). CSP completa
+  ficou de fora de propósito — o Next injeta scripts inline e uma política errada derruba o painel.
+- **Item 15:** `poweredByHeader: false` no painel e no site; Caddy tira o header `Server`.
+
+O deploy recria o Caddy (está em `APP_SERVICES`), que só lê o Caddyfile ao subir.
 
 ## Prioridades
 
 | Prioridade | O quê | Item |
 |---|---|---|
-| 🔴 agora | Atualizar `next` para ≥ 15.5.28 (crítica: execução remota de código no otimizador de imagens) e `multer`, `body-parser`, `sharp`, `zod` | 20 |
-| 🔴 agora | Headers de segurança no painel (HSTS, X-Frame-Options/`frame-ancestors`, `nosniff`, Referrer-Policy) e tirar `x-powered-by` | 18, 19, 15 |
+| ✅ feito | Atualizar `next`, `zod` e dependências indiretas | 20 |
+| ✅ feito | Headers de segurança no painel e tirar `x-powered-by` | 18, 19, 15 |
 | 🔴 antes da Meta | Preencher `META_APP_SECRET` com o App Secret do app novo ([31](31-migracao-meta-oficial.md)) | 6 |
 | 🟡 semana | Cópia do `ENCRYPTION_KEY` (e demais segredos) num cofre fora do servidor | 5 |
 | 🟡 semana | Contador do rate limit no Redis (vale para as duas APIs e sobrevive a deploy) | 11 |

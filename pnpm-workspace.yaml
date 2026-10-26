@@ -10,3 +10,13 @@ allowBuilds:
   prisma: true
   sharp: true
   unrs-resolver: true
+# Dependências indiretas com falha de segurança (docs/32-checklist-seguranca.md#20): força a
+# versão corrigida enquanto o pacote que as traz (next, @nestjs/platform-express, prisma) não sobe.
+# Revisar a cada `pnpm audit` — sai daqui quando o pai já trouxer a versão boa.
+overrides:
+  postcss: ^8.5.31
+  source-map-js: ^1.2.2
+  sharp: ^0.35.5
+  multer: ^2.5.0
+  body-parser: ^2.4.0
+  deepmerge-ts: ^8.0.2

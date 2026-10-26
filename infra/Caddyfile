@@ -2,10 +2,27 @@
 # Este arquivo é versionado e NÃO deve ser editado por script: o deploy sincroniza a
 # versão do repositório por cima, e um Caddyfile remendado no servidor seria desfeito.
 {$APP_DOMAIN} {
+	# Headers de segurança do painel (docs/32-checklist-seguranca.md#18): a API já tem os do
+	# helmet; o painel não tinha nenhum — dava para abri-lo num iframe de outro site
+	# (clickjacking) e não havia HSTS. CSP completa fica de fora de propósito: o Next injeta
+	# scripts inline e uma política errada derruba o painel; aqui só o que não quebra nada.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "frame-ancestors 'self'"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# microfone: gravação de áudio no chat; o resto o painel não usa
+		Permissions-Policy "microphone=(self), camera=(), geolocation=(), payment=()"
+		-X-Powered-By
+		-Server
+	}
 	reverse_proxy web:3000
 }
 
 {$API_DOMAIN} {
+	# os headers de segurança vêm do helmet (apps/api/src/main.ts)
+	header -Server
 	# WebSocket (Socket.IO) passa normalmente pelo reverse_proxy
 	reverse_proxy api:4000 {
 		lb_policy round_robin
