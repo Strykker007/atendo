@@ -170,3 +170,5 @@ na primeira permitida. Configurações mantém atalhos nos lugares antigos.
 - **Plantões e liberações** (`/escalas/aprovacoes`, `team.manage`; `/schedules/approvals` redireciona): quem
   está no turno agora, botão **Autorizar plantão excepcional**, liberações ativas, modal **Gerar
   acesso temporário** (mostra login e senha uma vez, com botão de copiar) e lista dos temporários.
+- **Registro de acessos** (`/escalas/acessos`, `team.manage`): quem esteve logado em cada dia e o
+  calendário de logins de cada pessoa — ver [registro-de-acessos.md](registro-de-acessos.md).

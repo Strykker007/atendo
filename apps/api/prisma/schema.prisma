@@ -92,6 +92,7 @@ model Tenant {
   closeReasons    CloseReason[]
   pixKeys         PixKey[]
   auditLogs       AuditLog[]
+  userSessions    UserSession[]
   satisfactionSurveys SatisfactionSurvey[]
   surveyResponses     SurveyResponse[]
   salesGoals          SalesGoal[]
@@ -165,6 +166,7 @@ model User {
   tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   profile       AccessProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
   refreshTokens RefreshToken[]
+  sessions      UserSession[]
   authTokens    AuthToken[]
   /// convite pendente: usuário existe mas ainda não definiu senha
   invitedAt     DateTime?
@@ -461,12 +463,40 @@ model RefreshToken {
   revokedAt DateTime?
   userAgent String?
   ip        String?
+  /// sessão de login (registro de acessos) que este token continua; null = token anterior ao registro
+  sessionId String?
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+/// Registro de acessos (docs/registro-de-acessos.md): uma linha por login, do momento em que entrou
+/// até sair. As renovações do token (a cada ~15 min com o painel aberto) só avançam `lastSeenAt`.
+/// Tentativa barrada (senha certa, fora da escala / acesso vencido) também fica, com `outcome`.
+model UserSession {
+  id         String    @id @default(uuid())
+  tenantId   String
+  userId     String
+  /// ok = entrou | out_of_schedule = barrado pela escala | account_expired = acesso temporário vencido
+  outcome    String    @default("ok")
+  startedAt  DateTime  @default(now())
+  /// última renovação do token: sem saída registrada (fechou o navegador), o acesso vale até aqui
+  lastSeenAt DateTime  @default(now())
+  endedAt    DateTime?
+  /// logout | shift_end (turno acabou) | expired (acesso temporário venceu) | revoked (senha trocada)
+  endReason  String?
+  ip         String?
+  userAgent  String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startedAt])
+  @@index([userId, startedAt])
+  @@map("user_sessions")
 }
 
 /// Configurações gerais do cliente. Fuso vive aqui (é do negócio, não de um módulo).

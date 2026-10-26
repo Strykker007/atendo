@@ -7,7 +7,8 @@ import { env } from '../../config/env';
 import { MailService } from '../../common/mail/mail.service';
 import { Prisma, type AuthTokenKind } from '@prisma/client';
 import { refreshAcceptable } from './refresh-grace';
-import { ShiftAccessService, type SessionWindow } from './shift-access.service';
+import { ACCOUNT_EXPIRED, OUT_OF_SCHEDULE, ShiftAccessService, type SessionWindow } from './shift-access.service';
+import { AccessLogService } from './access-log.service';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const ttlMs = (ttl: string) => {
@@ -24,6 +25,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly mail: MailService,
     private readonly shift: ShiftAccessService,
+    private readonly accessLog: AccessLogService,
   ) {}
 
   // ---------- tokens de uso único (esqueci a senha, convite) ----------
@@ -140,6 +142,7 @@ Seu login será: ${user.email}`,
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await this.hashPassword(password), passwordSetAt: new Date(), isActive: true } });
     // senha nova = sessões antigas fora, em todas as empresas da pessoa
     await this.prisma.refreshToken.updateMany({ where: { revokedAt: null, user: { OR: [{ id: userId }, { primaryUserId: userId }] } }, data: { revokedAt: new Date() } });
+    await this.accessLog.endAllOfPerson(userId, 'revoked');
   }
 
   async login(email: string, password: string, meta: { userAgent?: string; ip?: string }) {
@@ -150,11 +153,11 @@ Seu login será: ${user.email}`,
     // conta temporária vencida fica inativa: com a senha certa, explica o motivo em vez de "credenciais inválidas"
     if (!user || !ok || !(user.isActive || user.isTemporary)) throw new UnauthorizedException('Credenciais inválidas');
     // validade da conta temporária + escala de trabalho: fora do turno (e sem liberação de plantão) não entra — docs/escalas.md
-    const janela = await this.shift.sessionWindow(user, 'login');
+    const janela = await this.shift.sessionWindow(user, 'login').catch((err) => this.deniedLogin(user, err, meta));
     if (!user.isActive) throw new UnauthorizedException('Credenciais inválidas');
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    return this.issue(user, meta, janela);
+    return this.issue(user, meta, janela, await this.accessLog.start(user, meta));
   }
 
   async refresh(refreshToken: string, meta: { userAgent?: string; ip?: string }) {
@@ -169,14 +172,27 @@ Seu login será: ${user.email}`,
     }
     // turno acabou há pouco: token TRAVADO (modo fim de turno). Acabou faz tempo ou a conta
     // temporária venceu: a sessão para aqui (o token não é rotacionado) — docs/escalas.md#fim-de-turno
-    const janela = await this.shift.sessionWindow(row.user, 'refresh');
+    const janela = await this.shift.sessionWindow(row.user, 'refresh').catch(async (err) => {
+      // a sessão acabou aqui: registro de acessos marca a saída pelo motivo
+      await this.accessLog.end(row.sessionId, err?.getResponse?.()?.code === ACCOUNT_EXPIRED ? 'expired' : 'shift_end');
+      throw err;
+    });
     // rotação: revoga o antigo e emite novo par
     if (!row.revokedAt) await this.prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
-    return this.issue(row.user, meta, janela);
+    return this.issue(row.user, meta, janela, await this.accessLog.touch(row.user, row.sessionId, meta));
   }
 
   async logout(refreshToken: string) {
+    const row = await this.prisma.refreshToken.findUnique({ where: { tokenHash: sha256(refreshToken) }, select: { sessionId: true } });
     await this.prisma.refreshToken.updateMany({ where: { tokenHash: sha256(refreshToken) }, data: { revokedAt: new Date() } });
+    await this.accessLog.end(row?.sessionId, 'logout');
+  }
+
+  /** Barrado pela escala ou acesso vencido (a senha já foi conferida): registra a tentativa e repassa o erro. */
+  private async deniedLogin(user: { id: string; tenantId: string | null }, err: any, meta: { userAgent?: string; ip?: string }): Promise<never> {
+    const code = err?.getResponse?.()?.code;
+    if (code === OUT_OF_SCHEDULE || code === ACCOUNT_EXPIRED) await this.accessLog.denied(user, code === OUT_OF_SCHEDULE ? 'out_of_schedule' : 'account_expired', meta);
+    throw err;
   }
 
   /**
@@ -240,13 +256,13 @@ Seu login será: ${user.email}`,
     const target = await this.prisma.user.findUnique({ where: { id: targetId } });
     if (!target || (target.id !== personId && target.primaryUserId !== personId)) throw new ForbiddenException('Esta empresa não está entre as suas.');
     if (!target.isActive) throw new ForbiddenException('Seu acesso a esta empresa foi desativado.');
-    const janela = await this.shift.sessionWindow(target, 'login');
+    const janela = await this.shift.sessionWindow(target, 'login').catch((err) => this.deniedLogin(target, err, meta));
     if (!target.isActive) throw new ForbiddenException('Seu acesso a esta empresa venceu.');
     await this.prisma.user.update({ where: { id: target.id }, data: { lastLoginAt: new Date() } });
-    return this.issue(target, meta, janela);
+    return this.issue(target, meta, janela, await this.accessLog.start(target, meta));
   }
 
-  private async issue(user: { id: string; tenantId: string | null; role: string; name: string }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow) {
+  private async issue(user: { id: string; tenantId: string | null; role: string; name: string }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow, sessionId?: string | null) {
     // Fim de turno viaja no token: o JwtAuthGuard trava as ações sem consultar o banco a cada
     // requisição. `shiftEndsAt` = a partir de quando trava; `locked` = já nasce travado (passagem)
     const sec = (d: Date) => Math.floor(d.getTime() / 1000);
@@ -265,7 +281,7 @@ Seu login será: ${user.email}`,
     );
     const refreshToken = randomBytes(48).toString('base64url');
     await this.prisma.refreshToken.create({
-      data: { userId: user.id, tokenHash: sha256(refreshToken), expiresAt: new Date(Date.now() + ttlMs(env.JWT_REFRESH_TTL)), ...meta },
+      data: { userId: user.id, tokenHash: sha256(refreshToken), expiresAt: new Date(Date.now() + ttlMs(env.JWT_REFRESH_TTL)), sessionId, ...meta },
     });
     return { accessToken, refreshToken, refreshMaxAge: ttlMs(env.JWT_REFRESH_TTL) };
   }

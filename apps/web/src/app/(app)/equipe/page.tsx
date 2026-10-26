@@ -12,7 +12,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAgents, useCreateAgent, useCreateAgentsBulk, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, type Agent, type BulkAgentResult } from '@/lib/hooks';
 import { AccessProfiles } from '@/components/settings/AccessProfiles';
 import { NumberScopeButton } from '@/components/settings/NumberScope';
-import { MailCheck, Send, Link as LinkIcon } from 'lucide-react';
+import { MailCheck, Send, Link as LinkIcon, History } from 'lucide-react';
+import NextLink from 'next/link';
 import { TYPING_SPEEDS, TYPING_SPEED_KEYS, type TypingSpeed } from '@atendo/shared';
 
 export default function EquipePage() {
@@ -80,13 +81,113 @@ export default function EquipePage() {
     && (me.data?.role === 'super_admin' || p.permissions.every((permission) => me.data?.permissions?.includes(permission))),
   );
 
+  const ROLE_LABEL = { agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' } as const;
+  const selectCls = 'max-w-full rounded-md border border-line bg-panel text-ink text-xs px-2 py-1';
+
+  const pessoa = (a: Agent) => (
+    <div className="min-w-0">
+      <p className="font-medium text-ink flex items-center gap-1.5">
+        <span className="truncate">{a.name}</span>
+        {a.id === me.data?.id && <span className="text-xs text-faint font-normal shrink-0">(você)</span>}
+        {(canRename(a) || canEditEmail(a)) && !canEditAccess(a) && <button onClick={() => setEditing(a)} className="text-faint hover:text-ink p-0.5 shrink-0" title="Editar" aria-label={`Editar ${a.name}`}><Pencil size={12} /></button>}
+      </p>
+      {a.email && <p className="text-[12.5px] text-muted truncate" title={a.email}>{a.email}</p>}
+      {a.linked && <p className="text-[11px] text-faint" title="Entra com o login de outra empresa e troca pelo seletor do menu">login de outra empresa</p>}
+    </div>
+  );
+
+  const perfil = (a: Agent) => canManageTeam && a.role !== 'tenant_admin' && a.role !== 'super_admin' ? (
+    <select
+      value={a.profile?.id ?? ''}
+      disabled={savingProfileId === a.id}
+      onChange={async (e) => {
+        setSavingProfileId(a.id);
+        try { await update.mutateAsync({ id: a.id, profileId: e.target.value }); toast.ok('Perfil atualizado'); }
+        catch (err) { toast.err(err); } finally { setSavingProfileId(null); }
+      }}
+      className={selectCls}
+    >
+      {/* sem perfil o acesso vem do papel — é o estado de quem existia antes dos perfis */}
+      <option value="">Padrão do papel ({ROLE_LABEL[a.role]})</option>
+      {profiles.data?.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+    </select>
+  ) : (
+    <span className={cn('text-xs rounded-full px-2 py-0.5 whitespace-nowrap', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{a.profile?.name ?? ROLE_LABEL[a.role]}</span>
+  );
+
+  const digitacao = (a: Agent) => canManageTeam ? (
+    <select
+      value={a.typingSpeed ?? 'normal'}
+      disabled={savingSpeedId === a.id}
+      title="Quanto tempo o contato vê &quot;digitando…&quot; antes da resposta rápida ou do texto colado chegar. Escolha o ritmo real desta pessoa."
+      onChange={async (e) => {
+        setSavingSpeedId(a.id);
+        try { await update.mutateAsync({ id: a.id, typingSpeed: e.target.value as TypingSpeed }); toast.ok('Velocidade de digitação atualizada'); }
+        catch (err) { toast.err(err); } finally { setSavingSpeedId(null); }
+      }}
+      className={selectCls}
+    >
+      {TYPING_SPEED_KEYS.map((k) => <option key={k} value={k}>{TYPING_SPEEDS[k].label}</option>)}
+    </select>
+  ) : (
+    <span className="text-xs text-muted">{TYPING_SPEEDS[a.typingSpeed ?? 'normal']?.label}</span>
+  );
+
+  const quandoAcesso = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const ultimoAcesso = (a: Agent) => a.invitedAt && !a.passwordSetAt
+    ? <span className="inline-flex items-center gap-1 text-xs rounded-full bg-warn-soft text-warn-ink px-2 py-0.5"><MailCheck size={12} /> convite pendente</span>
+    : a.lastLoginAt
+      ? canManageTeam
+        ? <NextLink href={`/escalas/acessos?pessoa=${a.id}`} className="inline-flex items-center gap-1 hover:text-accent hover:underline" title="Ver os acessos no calendário"><History size={13} /> {quandoAcesso(a.lastLoginAt)}</NextLink>
+        : quandoAcesso(a.lastLoginAt)
+      : 'nunca';
+
+  /** `compacto` (tabela): só ícones, com dica no mouse; no cartão do celular os botões do convite levam texto. */
+  const acoes = (a: Agent, compacto = false) => (
+    <>
+      {isAdmin && a.invitedAt && !a.passwordSetAt && (
+        <>
+          <Button
+            size={compacto ? 'icon' : 'sm'}
+            variant="ghost"
+            className={cn(compacto && 'border-0 bg-transparent text-faint hover:text-ink')}
+            icon={<LinkIcon size={compacto ? 15 : 12} />}
+            loading={linkId === a.id}
+            title="Copiar link do convite — para mandar pelo WhatsApp, não depende de e-mail"
+            aria-label={`Copiar link do convite de ${a.name}`}
+            onClick={async () => {
+              setLinkId(a.id);
+              try {
+                const r = await inviteLink.mutateAsync(a.id);
+                setLink({ url: r.link, name: a.name });
+                try { await navigator.clipboard.writeText(r.link); toast.ok('Link copiado — mande para o atendente'); }
+                catch { toast.ok('Link gerado abaixo'); }
+              } catch (err) { toast.err(err); } finally { setLinkId(null); }
+            }}
+          >
+            {!compacto && 'Copiar link'}
+          </Button>
+          <Button size={compacto ? 'icon' : 'sm'} variant="ghost" className={cn(compacto && 'border-0 bg-transparent text-faint hover:text-ink')} icon={<Send size={compacto ? 15 : 12} />} title="Reenviar o convite por e-mail" aria-label={`Reenviar o convite de ${a.name} por e-mail`} loading={resendingId === a.id} onClick={async () => { setResendingId(a.id); try { const r = await resend.mutateAsync(a.id); if (r.emailSent) toast.ok(`Convite reenviado para ${a.email}`); else { setLink({ url: r.inviteLink, name: a.name }); toast.ok('E-mail não configurado — use o link do convite'); } } catch (err) { toast.err(err); } finally { setResendingId(null); } }}>{!compacto && 'Reenviar'}</Button>
+        </>
+      )}
+      {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
+        <>
+          <Button size="icon" variant="ghost" className="border-0 bg-transparent text-faint hover:text-ink" title="Editar" aria-label={`Editar ${a.name}`} onClick={() => setEditing(a)} icon={<Pencil size={15} />} />
+          {!a.linked && <Button size="icon" variant="ghost" className="border-0 bg-transparent text-faint hover:text-ink" title="Redefinir senha" aria-label={`Redefinir senha de ${a.name}`} onClick={() => setResetting(a)} icon={<KeyRound size={15} />} />}
+          <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-faint hover:text-danger' : 'text-accent')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} aria-label={a.isActive ? `Desativar ${a.name}` : `Ativar ${a.name}`} icon={<Power size={15} />} />
+        </>
+      )}
+    </>
+  );
+
   return (
-    <PageShell width="max-w-4xl">
+    <PageShell width="max-w-6xl">
       <PageHeader
         title="Equipe"
         subtitle={<>Escolha o perfil de acesso de cada pessoa — ele define exatamente o que ela pode fazer. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {max === null ? `${count} membros (ilimitado)` : `${count}/${max} membros`}.</>}</>}
         action={isAdmin && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <NextLink href="/escalas/acessos" className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-medium text-ink hover:bg-field"><History size={16} /> Registro de acessos</NextLink>
             <Button variant="ghost" onClick={() => setCreatingMany(true)} disabled={full} title={full ? 'Limite do plano atingido' : 'Colar uma lista de nomes e e-mails'} icon={<UsersRound size={16} />}>Adicionar várias</Button>
             <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo membro</Button>
           </div>
@@ -99,99 +200,50 @@ export default function EquipePage() {
       {agents.data?.length === 0 && <Empty icon={<Users size={36} />} title="Nenhum usuário" text="Adicione atendentes para dividir o atendimento." />}
 
       {!!agents.data?.length && (
-        <div className="rounded-2xl bg-panel border border-line overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide">
-              <tr><th className="px-5 py-2.5">Nome</th><th className="px-5 py-2.5 hidden sm:table-cell">E-mail</th><th className="px-5 py-2.5">Perfil de acesso</th><th className="px-5 py-2.5">Números</th><th className="px-5 py-2.5 hidden lg:table-cell" title="Velocidade do &quot;digitando…&quot; que o contato vê nas mensagens que a pessoa não digitou (resposta rápida, texto colado, encaminhada, agendada). Máximo de 10 segundos por mensagem.">Digitação</th><th className="px-5 py-2.5 hidden md:table-cell">Último acesso</th><th className="px-5 py-2.5"></th></tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {agents.data.map((a) => (
-                <tr key={a.id} className={cn(!a.isActive && 'opacity-50')}>
-                  <td className="px-5 py-3 font-medium">
-                    {a.name}{a.id === me.data?.id && <span className="ml-2 text-xs text-faint">(você)</span>}
-                    {(canRename(a) || canEditEmail(a)) && !canEditAccess(a) && <button onClick={() => setEditing(a)} className="ml-1.5 align-middle text-faint hover:text-ink p-0.5" title="Editar" aria-label={`Editar ${a.name}`}><Pencil size={12} /></button>}
-                  </td>
-                  <td className="px-5 py-3 text-muted hidden sm:table-cell">{a.email}{a.linked && <span className="block text-[11px] text-faint" title="Entra com o login de outra empresa e troca pelo seletor do menu">login de outra empresa</span>}</td>
-                  <td className="px-5 py-3">
-                    {canManageTeam && a.role !== 'tenant_admin' && a.role !== 'super_admin' ? (
-                      <select
-                        value={a.profile?.id ?? ''}
-                        disabled={savingProfileId === a.id}
-                        onChange={async (e) => {
-                          setSavingProfileId(a.id);
-                          try { await update.mutateAsync({ id: a.id, profileId: e.target.value }); toast.ok('Perfil atualizado'); }
-                          catch (err) { toast.err(err); } finally { setSavingProfileId(null); }
-                        }}
-                        className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1"
-                      >
-                        {/* sem perfil o acesso vem do papel — é o estado de quem existia antes dos perfis */}
-                        <option value="">Padrão do papel ({{ agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' }[a.role]})</option>
-                        {profiles.data?.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
-                      </select>
-                    ) : (
-                      <span className={cn('text-xs rounded-full px-2 py-0.5', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{a.profile?.name ?? { agent: 'Atendente', manager: 'Gerente', tenant_admin: 'Admin', super_admin: 'Dono' }[a.role]}</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3"><NumberScopeButton agent={a} /></td>
-                  <td className="px-5 py-3 hidden lg:table-cell">
-                    {canManageTeam ? (
-                      <select
-                        value={a.typingSpeed ?? 'normal'}
-                        disabled={savingSpeedId === a.id}
-                        title="Quanto tempo o contato vê &quot;digitando…&quot; antes da resposta rápida ou do texto colado chegar. Escolha o ritmo real desta pessoa."
-                        onChange={async (e) => {
-                          setSavingSpeedId(a.id);
-                          try { await update.mutateAsync({ id: a.id, typingSpeed: e.target.value as TypingSpeed }); toast.ok('Velocidade de digitação atualizada'); }
-                          catch (err) { toast.err(err); } finally { setSavingSpeedId(null); }
-                        }}
-                        className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1"
-                      >
-                        {TYPING_SPEED_KEYS.map((k) => <option key={k} value={k}>{TYPING_SPEEDS[k].label}</option>)}
-                      </select>
-                    ) : (
-                      <span className="text-xs text-muted">{TYPING_SPEEDS[a.typingSpeed ?? 'normal']?.label}</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-muted hidden md:table-cell">
-                    {a.invitedAt && !a.passwordSetAt ? <span className="inline-flex items-center gap-1 text-xs rounded-full bg-warn-soft text-warn-ink px-2 py-0.5"><MailCheck size={12} /> convite pendente</span> : a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}
-                  </td>
-                  <td className="px-5 py-3 text-right whitespace-nowrap">
-                    {isAdmin && a.invitedAt && !a.passwordSetAt && (
-                      <>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<LinkIcon size={12} />}
-                        loading={linkId === a.id}
-                        title="Gera um link para você mandar pelo WhatsApp — não depende de e-mail"
-                        onClick={async () => {
-                          setLinkId(a.id);
-                          try {
-                            const r = await inviteLink.mutateAsync(a.id);
-                            setLink({ url: r.link, name: a.name });
-                            try { await navigator.clipboard.writeText(r.link); toast.ok('Link copiado — mande para o atendente'); }
-                            catch { toast.ok('Link gerado abaixo'); }
-                          } catch (err) { toast.err(err); } finally { setLinkId(null); }
-                        }}
-                      >
-                        Copiar link do convite
-                      </Button>
-                      <Button size="sm" variant="ghost" icon={<Send size={12} />} loading={resendingId === a.id} onClick={async () => { setResendingId(a.id); try { const r = await resend.mutateAsync(a.id); if (r.emailSent) toast.ok(`Convite reenviado para ${a.email}`); else { setLink({ url: r.inviteLink, name: a.name }); toast.ok('E-mail não configurado — use o link do convite'); } } catch (err) { toast.err(err); } finally { setResendingId(null); } }}>Reenviar por e-mail</Button>
-                      </>
-                    )}
-                    {isAdmin && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager')) && (
-                      <>
-                        <Button size="sm" variant="ghost" icon={<Pencil size={12} />} onClick={() => setEditing(a)}>Editar</Button>
-                        {!a.linked && <button onClick={() => setResetting(a)} className="text-faint hover:text-ink p-1" title="Redefinir senha"><KeyRound size={15} /></button>}
-                        <Button size="icon" variant="ghost" className={cn('border-0 bg-transparent', a.isActive ? 'text-faint hover:text-danger' : 'text-accent')} onClick={() => toggle(a)} loading={togglingId === a.id} title={a.isActive ? 'Desativar' : 'Ativar'} icon={<Power size={15} />} />
-                      </>
-                    )}
-                  </td>
+        <>
+          {/* tela larga: tabela; celular: cartões — nada escondido atrás de rolagem lateral */}
+          <div className="hidden md:block rounded-2xl bg-panel border border-line overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide">
+                <tr>
+                  <th className="px-4 py-2.5">Pessoa</th>
+                  <th className="px-4 py-2.5">Perfil de acesso</th>
+                  <th className="px-4 py-2.5">Números</th>
+                  <th className="px-4 py-2.5 hidden lg:table-cell" title="Velocidade do &quot;digitando…&quot; que o contato vê nas mensagens que a pessoa não digitou (resposta rápida, texto colado, encaminhada, agendada). Máximo de 10 segundos por mensagem.">Digitação</th>
+                  <th className="px-4 py-2.5">Último acesso</th>
+                  <th className="px-4 py-2.5"><span className="sr-only">Ações</span></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {agents.data.map((a) => (
+                  <tr key={a.id} className={cn('align-middle', !a.isActive && 'opacity-50')}>
+                    <td className="px-4 py-3 min-w-48">{pessoa(a)}</td>
+                    <td className="px-4 py-3">{perfil(a)}</td>
+                    <td className="px-4 py-3"><NumberScopeButton agent={a} /></td>
+                    <td className="px-4 py-3 hidden lg:table-cell">{digitacao(a)}</td>
+                    <td className="px-4 py-3 text-muted whitespace-nowrap">{ultimoAcesso(a)}</td>
+                    <td className="px-4 py-3"><div className="flex items-center justify-end gap-0.5 whitespace-nowrap">{acoes(a, true)}</div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <ul className="md:hidden space-y-2">
+            {agents.data.map((a) => (
+              <li key={a.id} className={cn('rounded-2xl bg-panel border border-line p-4 space-y-3', !a.isActive && 'opacity-50')}>
+                {pessoa(a)}
+                <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm">
+                  <dt className="text-xs text-muted">Perfil</dt><dd className="min-w-0">{perfil(a)}</dd>
+                  <dt className="text-xs text-muted">Números</dt><dd className="min-w-0"><NumberScopeButton agent={a} /></dd>
+                  <dt className="text-xs text-muted">Digitação</dt><dd className="min-w-0">{digitacao(a)}</dd>
+                  <dt className="text-xs text-muted">Último acesso</dt><dd className="min-w-0 text-muted">{ultimoAcesso(a)}</dd>
+                </dl>
+                <div className="flex flex-wrap items-center gap-1 border-t border-line pt-3 empty:hidden">{acoes(a)}</div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       {links.length > 0 && (
