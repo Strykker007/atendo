@@ -95,12 +95,29 @@ tela é conveniência, não segurança.
 | PATCH | `/profiles/:id` | `profiles.manage` | Edita (filtra por `grantable`) |
 | DELETE | `/profiles/:id` | `profiles.manage` | Exclui (recusa só o Administrador) |
 | PATCH | `/tenants/me/agents/:id` | `team.manage` | `profileId` vincula; `""` desvincula. `name`: admin da conta renomeia qualquer pessoa; gerente, só atendentes. `email`/`role` (`agent`\|`manager`): mesma regra de alcance, `role` só pelo admin; revogam as sessões e invalidam o cache de permissões |
+| POST | `/tenants/me/agents/bulk` | `team.manage` | Cadastro em massa: `{ profileId?, people: [{ name, email }] }` (1–50) — ver [Cadastro em massa](#cadastro-em-massa) |
 | PATCH | `/auth/me` | — | `{name}`: cada um edita o próprio nome (Configurações → Meu perfil) |
 
 ## Interface
 
 **Equipe** ganhou a seção **Perfis de acesso** e a coluna "Papel" virou **Perfil de acesso**,
 com seletor por pessoa. `useCan('x')` esconde o que a pessoa não pode fazer.
+
+### Cadastro em massa
+
+**Equipe → Adicionar várias**: escolhe um perfil e cola a lista, uma pessoa por linha —
+`Nome; e-mail`, com `;`, `,` ou tab (colar de planilha), em qualquer ordem (o e-mail é achado
+pelo `@`). A tela mostra quantas entram, as linhas inválidas e se a lista passa do limite do plano.
+
+Todas entram no mesmo perfil e **sempre por convite** (e-mail + link copiável, que aparece na lista
+de links da Equipe, um por pessoa). Mesmas regras do cadastro individual: perfil do cliente, sem
+Administrador, sem dar permissão que quem cria não tem, gerente não cria gerente.
+
+Cada linha é independente: e-mail já usado na plataforma ("E-mail já cadastrado") ou repetido na
+lista ("Repetido na lista", sem diferenciar maiúsculas) volta como erro daquela linha, e as demais
+são criadas. O limite de usuários do plano (`maxAgents`) é conferido para o **lote inteiro antes de
+criar qualquer uma** — passou, nada é criado. Na tela, ficam na caixa só as linhas que deram erro,
+para corrigir e mandar de novo. Até 50 por vez; convites saem em sequência.
 
 ## Perfis na criação do cliente
 

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, KeyRound, Power, Users, Pencil } from 'lucide-react';
+import { Plus, KeyRound, Power, Users, Pencil, UsersRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { refresh } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAgents, useCreateAgent, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, type Agent } from '@/lib/hooks';
+import { useAgents, useCreateAgent, useCreateAgentsBulk, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, type Agent, type BulkAgentResult } from '@/lib/hooks';
 import { AccessProfiles } from '@/components/settings/AccessProfiles';
 import { NumberScopeButton } from '@/components/settings/NumberScope';
 import { MailCheck, Send, Link as LinkIcon } from 'lucide-react';
@@ -28,6 +28,8 @@ export default function EquipePage() {
   const create = useCreateAgent();
   const update = useUpdateAgent();
   const [creating, setCreating] = useState(false);
+  const [creatingMany, setCreatingMany] = useState(false);
+  const createMany = useCreateAgentsBulk();
   const [resetting, setResetting] = useState<Agent | null>(null);
   const [editing, setEditing] = useState<Agent | null>(null);
   const qc = useQueryClient();
@@ -83,7 +85,12 @@ export default function EquipePage() {
       <PageHeader
         title="Equipe"
         subtitle={<>Escolha o perfil de acesso de cada pessoa — ele define exatamente o que ela pode fazer. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {max === null ? `${count} membros (ilimitado)` : `${count}/${max} membros`}.</>}</>}
-        action={isAdmin && <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo membro</Button>}
+        action={isAdmin && (
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setCreatingMany(true)} disabled={full} title={full ? 'Limite do plano atingido' : 'Colar uma lista de nomes e e-mails'} icon={<UsersRound size={16} />}>Adicionar várias</Button>
+            <Button onClick={() => setCreating(true)} disabled={full} title={full ? 'Limite do plano atingido' : undefined} icon={<Plus size={16} />}>Novo membro</Button>
+          </div>
+        )}
       />
 
       {full && <p className="rounded-lg bg-warn-soft border border-warn/30 px-4 py-2 text-sm text-warn-ink">Limite de atendentes do plano atingido. Desative alguém ou faça upgrade em <b>Plano e uso</b>.</p>}
@@ -207,6 +214,20 @@ export default function EquipePage() {
       <AccessProfiles />
 
       <CreateAgentModal open={creating} onClose={() => setCreating(false)} profiles={selectableProfiles} onSubmit={(b) => create.mutateAsync(b).then((r) => { if (r.invited) { setLink(r.inviteLink ? { url: r.inviteLink, name: b.name } : null); toast.ok(r.emailSent ? `Convite enviado para ${b.email}` : 'Membro criado — mande o link do convite'); } else toast.ok('Membro criado'); setCreating(false); }).catch(toast.err)} pending={create.isPending} />
+      <BulkAgentsModal
+        open={creatingMany}
+        onClose={() => setCreatingMany(false)}
+        profiles={selectableProfiles}
+        room={max == null ? null : Math.max(0, max - count)}
+        pending={createMany.isPending}
+        onSubmit={(b) => createMany.mutateAsync(b).then((r) => {
+          // os links entram na mesma lista do convite individual, um por pessoa
+          setLinks((xs) => [...xs.filter((x) => !r.results.some((y) => y.ok && y.name === x.name)), ...r.results.filter((y) => y.ok && y.inviteLink).map((y) => ({ url: y.inviteLink!, name: y.name }))]);
+          const falhas = r.results.length - r.created;
+          if (r.created) toast.ok(`${r.created} convite${r.created === 1 ? '' : 's'} criado${r.created === 1 ? '' : 's'}${falhas ? ` · ${falhas} com erro` : ''}`);
+          return r.results;
+        }).catch((err) => { toast.err(err); return null; })}
+      />
       <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditEmail={!!editing && canEditEmail(editing)} isSelf={editing?.id === me.data?.id} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
@@ -239,6 +260,71 @@ function CreateAgentModal({ open, onClose, onSubmit, pending, profiles }: { open
         )}
         <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText={manual ? 'Criando…' : 'Enviando…'}>{manual ? 'Criar' : 'Enviar convite'}</Button></div>
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * Várias pessoas de uma vez: uma por linha, "Nome; e-mail" (também aceita tab — colar do Excel —,
+ * vírgula ou o e-mail primeiro). Todas no mesmo perfil, por convite.
+ */
+function parsePessoas(texto: string) {
+  return texto.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((linha) => {
+    const partes = linha.split(/[\t;,]/).map((x) => x.trim()).filter(Boolean);
+    const email = partes.find((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) ?? '';
+    const name = partes.filter((x) => x !== email).join(' ').slice(0, 80);
+    return { linha, name, email, erro: !email ? 'sem e-mail válido' : !name ? 'sem nome' : null };
+  });
+}
+
+function BulkAgentsModal({ open, onClose, onSubmit, pending, profiles, room }: { open: boolean; onClose: () => void; onSubmit: (b: { profileId?: string; people: { name: string; email: string }[] }) => Promise<BulkAgentResult[] | null>; pending: boolean; profiles: { id: string; name: string; systemRole?: 'tenant_admin' | 'manager' | 'agent' | null }[]; room: number | null }) {
+  const defaultProfileId = profiles.find((p) => p.systemRole === 'agent')?.id ?? profiles[0]?.id ?? '';
+  const [profileId, setProfileId] = useState('');
+  const [texto, setTexto] = useState('');
+  const [resultado, setResultado] = useState<BulkAgentResult[] | null>(null);
+  useEffect(() => {
+    if (open) { setProfileId(defaultProfileId); setTexto(''); setResultado(null); }
+  }, [open, defaultProfileId]);
+  const pessoas = parsePessoas(texto);
+  const validas = pessoas.filter((p) => !p.erro);
+  const passaDoPlano = room !== null && validas.length > room;
+  async function enviar() {
+    const r = await onSubmit({ profileId: profileId || undefined, people: validas.map(({ name, email }) => ({ name, email })) });
+    if (!r) return;
+    // só os que deram erro continuam na caixa, para corrigir e mandar de novo
+    const falhas = r.filter((x) => !x.ok);
+    if (!falhas.length) return onClose();
+    setResultado(r);
+    setTexto(falhas.map((x) => `${x.name}; ${x.email}`).join('\n'));
+  }
+  return (
+    <Modal open={open} onClose={onClose} title="Adicionar várias pessoas" width="max-w-lg">
+      <div className="space-y-4">
+        <Field label="Perfil de acesso" hint="Todas as pessoas desta lista entram neste perfil. Dá para trocar depois, uma a uma.">
+          <select className={inputCls} value={profileId} onChange={(e) => setProfileId(e.target.value)} required={profiles.length > 0}>
+            {!profiles.length && <option value="">Acesso padrão</option>}
+            {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Pessoas" hint="Uma por linha: nome e e-mail separados por ponto e vírgula, vírgula ou tab. Dá para colar direto de uma planilha.">
+          <textarea className={cn(inputCls, 'h-40 font-mono text-[12.5px]')} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={'Maria Souza; maria@loja.com.br\nJoão Lima; joao@loja.com.br'} autoFocus />
+        </Field>
+        {pessoas.length > 0 && (
+          <div className="text-[12.5px] space-y-1">
+            <p className="text-muted"><b className="text-ink tnum">{validas.length}</b> pessoa{validas.length === 1 ? '' : 's'} para convidar (máx. 50 por vez){room !== null && <> · o plano ainda comporta <b className="text-ink tnum">{room}</b></>}</p>
+            {pessoas.filter((p) => p.erro).map((p) => <p key={p.linha} className="text-danger-ink truncate">“{p.linha}” — {p.erro}</p>)}
+            {passaDoPlano && <p className="text-warn-ink">A lista passa do limite do plano: tire {validas.length - room!} pessoa{validas.length - room! === 1 ? '' : 's'} ou faça upgrade em Plano e uso.</p>}
+          </div>
+        )}
+        {resultado && (
+          <div className="rounded-lg bg-field px-3 py-2 text-[12.5px] space-y-0.5">
+            <p className="font-medium text-ink">{resultado.filter((r) => r.ok).length} criada(s). Ficaram na caixa as que não entraram:</p>
+            {resultado.filter((r) => !r.ok).map((r) => <p key={r.email} className="text-danger-ink">{r.name} ({r.email}) — {r.error}</p>)}
+          </div>
+        )}
+        <p className="text-xs text-muted rounded-lg bg-field px-3 py-2">Cada pessoa recebe um e-mail com o link (válido por 3 dias) para criar a própria senha. Os links também aparecem aqui na Equipe para você mandar pelo WhatsApp.</p>
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Fechar</Button><Button onClick={enviar} disabled={!validas.length || validas.length > 50 || passaDoPlano} loading={pending} loadingText="Convidando…">Convidar {validas.length || ''}</Button></div>
+      </div>
     </Modal>
   );
 }

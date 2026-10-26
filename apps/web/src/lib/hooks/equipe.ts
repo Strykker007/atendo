@@ -16,6 +16,12 @@ export const useCreateAgent = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (b: { name: string; email: string; password?: string; role?: 'agent' | 'manager'; profileId?: string }) => api<Agent & { invited?: boolean; inviteLink?: string; emailSent?: boolean }>('/tenants/me/agents', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
 };
+/** Cadastro em massa (docs/18-perfis-de-acesso.md#cadastro-em-massa): mesmo perfil, sempre por convite; erro é por linha. */
+export interface BulkAgentResult { name: string; email: string; ok: boolean; error?: string; inviteLink?: string; emailSent?: boolean }
+export const useCreateAgentsBulk = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (b: { profileId?: string; people: { name: string; email: string }[] }) => api<{ created: number; results: BulkAgentResult[] }>('/tenants/me/agents/bulk', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+};
 export const useResendInvite = () => useMutation({ mutationFn: (id: string) => api<{ ok: boolean; emailSent: boolean; inviteLink: string }>(`/tenants/me/agents/${id}/resend-invite`, { method: 'POST' }) });
 /** Link de convite para mandar por WhatsApp — não depende de e-mail configurado. */
 export const useInviteLink = () => useMutation({ mutationFn: (id: string) => api<{ link: string; expiresInHours: number }>(`/tenants/me/agents/${id}/invite-link`, { method: 'POST' }) });

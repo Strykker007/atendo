@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
@@ -22,6 +22,7 @@ import { StripeService } from '../billing/stripe.service';
 import { DuesService } from '../billing/dues.service';
 import { PromotionsService } from '../billing/promotions.service';
 import { DiscountLedgerService } from '../billing/discount-ledger.service';
+import { UsageService } from '../billing/usage.service';
 import { freePeriod } from '../billing/plan-rules';
 import { TYPING_SPEED_KEYS, countLimit, type Permission, type PlanLimits, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
@@ -86,6 +87,16 @@ class CreateAgentDto {
   /** Perfil escolhido para a pessoa. Ele decide as permissões; o papel técnico é derivado dele. */
   @IsOptional() @IsUUID() profileId?: string;
 }
+class BulkPersonDto {
+  @IsEmail() @MaxLength(120) email: string;
+  @IsString() @MinLength(1) @MaxLength(80) name: string;
+}
+/** Várias pessoas de uma vez, todas no mesmo perfil e sempre por convite (docs/18-perfis-de-acesso.md#cadastro-em-massa). */
+class BulkAgentsDto {
+  @IsOptional() @IsIn(['agent', 'manager']) role?: 'agent' | 'manager';
+  @IsOptional() @IsUUID() profileId?: string;
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => BulkPersonDto) people: BulkPersonDto[];
+}
 class UpdateAgentDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
   /** E-mail é o login (único na plataforma): trocar encerra as sessões da pessoa. */
@@ -134,6 +145,7 @@ class TenantsController {
     private readonly promotions: PromotionsService,
     private readonly ledger: DiscountLedgerService,
     private readonly shift: ShiftAccessService,
+    private readonly usage: UsageService,
   ) {}
 
   @Get()
@@ -285,8 +297,59 @@ class TenantsController {
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxAgents')
   async createAgent(@CurrentUser() u: AuthUser, @Body() dto: CreateAgentDto) {
-    // O perfil é o que define o acesso. O papel técnico só preserva compatibilidade com filas
-    // e dados legados: perfil padrão de gerente vira manager; todo outro perfil vira agent.
+    const { profileId, role } = await this.agentAccess(u, dto);
+    if (!dto.password) {
+      const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
+      return this.inviteAgent(u, tenant.name, dto, profileId, role);
+    }
+    const created = await this.prisma.user.create({
+      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, ...(profileId && { profileId }), passwordHash: await this.auth.hashPassword(dto.password), passwordSetAt: new Date() },
+      select: { id: true, name: true, email: true, role: true },
+    });
+    if (!profileId) await this.provisioning.linkRoleProfile(u.tenantId, created.id, role);
+    return created;
+  }
+
+  /**
+   * Cadastro em massa: todas no mesmo perfil, por convite. Cada pessoa é independente — e-mail
+   * repetido ou já usado vira erro só daquela linha. O limite do plano vale para o lote inteiro
+   * (antes de criar qualquer uma), para não deixar metade da equipe de fora sem aviso.
+   */
+  @Post('me/agents/bulk')
+  @RequirePermission('team.manage')
+  async createAgentsBulk(@CurrentUser() u: AuthUser, @Body() dto: BulkAgentsDto) {
+    const { profileId, role } = await this.agentAccess(u, dto);
+    const norm = (e: string) => e.trim().toLowerCase();
+    const vistos = new Set<string>();
+    const existentes = new Set((await this.prisma.user.findMany({ where: { email: { in: dto.people.map((p) => p.email.trim()), mode: 'insensitive' } }, select: { email: true } })).map((x) => norm(x.email!)));
+    const linhas = dto.people.map((p) => {
+      const email = p.email.trim();
+      const erro = existentes.has(norm(email)) ? 'E-mail já cadastrado' : vistos.has(norm(email)) ? 'Repetido na lista' : null;
+      vistos.add(norm(email));
+      return { name: p.name.trim(), email, erro };
+    });
+    await this.usage.assertRoom(u.tenantId, 'maxAgents', linhas.filter((l) => !l.erro).length);
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
+    const results = [];
+    // em sequência: cada convite é um e-mail, e o provedor não gosta de rajada
+    for (const l of linhas) {
+      if (l.erro) { results.push({ name: l.name, email: l.email, ok: false, error: l.erro }); continue; }
+      try {
+        const r = await this.inviteAgent(u, tenant.name, l, profileId, role);
+        results.push({ name: l.name, email: l.email, ok: true, inviteLink: r.inviteLink, emailSent: r.emailSent });
+      } catch (err) {
+        results.push({ name: l.name, email: l.email, ok: false, error: err instanceof Error ? err.message : 'Falha ao criar' });
+      }
+    }
+    return { created: results.filter((r) => r.ok).length, results };
+  }
+
+  /**
+   * Perfil e papel de quem está sendo criado. O perfil é o que define o acesso; o papel técnico
+   * só preserva compatibilidade com filas e dados legados: perfil padrão de gerente vira manager;
+   * todo outro perfil vira agent.
+   */
+  private async agentAccess(u: AuthUser, dto: { profileId?: string; role?: 'agent' | 'manager' }) {
     let profileId: string | undefined;
     let role: 'agent' | 'manager' = dto.role === 'manager' ? 'manager' : 'agent';
     if (dto.profileId) {
@@ -300,21 +363,17 @@ class TenantsController {
     }
     // gerente só cria pessoas do nível operacional
     if (role === 'manager' && u.role === 'manager') throw new BadRequestException('Só o admin da conta pode criar um perfil de gerente.');
-    if (!dto.password) {
-      const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } });
-      const { user, link } = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: dto.email, name: dto.name, role }, tenant.name);
-      if (profileId) await this.prisma.user.update({ where: { id: user.id }, data: { profileId } });
-      else await this.provisioning.linkRoleProfile(u.tenantId, user.id, role);
-      // devolve o link mesmo quando o e-mail saiu: e-mail cai em spam e some
-      const invite = link ?? (await this.auth.inviteLink(user.id)).link;
-      return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true, inviteLink: invite, emailSent: !!link };
-    }
-    const created = await this.prisma.user.create({
-      data: { tenantId: u.tenantId, email: dto.email, name: dto.name, role, ...(profileId && { profileId }), passwordHash: await this.auth.hashPassword(dto.password), passwordSetAt: new Date() },
-      select: { id: true, name: true, email: true, role: true },
-    });
-    if (!profileId) await this.provisioning.linkRoleProfile(u.tenantId, created.id, role);
-    return created;
+    return { profileId, role };
+  }
+
+  /** Cria a pessoa por convite (e-mail + link copiável). */
+  private async inviteAgent(u: AuthUser, tenantName: string, person: { email: string; name: string }, profileId: string | undefined, role: 'agent' | 'manager') {
+    const { user, link } = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: person.email, name: person.name, role }, tenantName);
+    if (profileId) await this.prisma.user.update({ where: { id: user.id }, data: { profileId } });
+    else await this.provisioning.linkRoleProfile(u.tenantId, user.id, role);
+    // devolve o link mesmo quando o e-mail saiu: e-mail cai em spam e some
+    const invite = link ?? (await this.auth.inviteLink(user.id)).link;
+    return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true, inviteLink: invite, emailSent: !!link };
   }
 
   /** Reenvia o convite (usuário que ainda não definiu senha). */
