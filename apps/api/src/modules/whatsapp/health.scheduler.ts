@@ -12,6 +12,7 @@ import { isReceiveStalled, isSilentTooLong, silenceVsLastWeek, unackedSinceLastS
 import type { NumberStatus } from '@prisma/client';
 import { ConnectionEventsService } from './connection-events';
 import { SessionProbe, shouldProbe } from './session-probe';
+import { OutboundSweeper } from './outbound-sweep';
 
 /** números conferidos em paralelo: cada chamada à Evolution tem prazo de 15 s (evolution.provider.ts) */
 const HEALTH_CONCURRENCY = 5;
@@ -24,6 +25,8 @@ export class NumbersHealthScheduler implements OnModuleInit {
   constructor(@InjectQueue(QUEUE_HEALTH) private readonly queue: Queue) {}
   async onModuleInit() {
     await this.queue.upsertJobScheduler('numbers-health', { every: 5 * 60_000 }, { name: 'check' });
+    // mensagem pendente sem job na fila (outbound-sweep.ts): a cada minuto
+    await this.queue.upsertJobScheduler('outbound-sweep', { every: 60_000 }, { name: 'outbound-sweep' });
   }
 }
 
@@ -37,10 +40,15 @@ export class NumbersHealthProcessor extends TrackedWorkerHost {
     @InjectQueue(QUEUE_OUTBOUND) private readonly outbound: Queue<OutboundJob>,
     private readonly connectionEvents: ConnectionEventsService,
     private readonly probe: SessionProbe,
+    private readonly sweeper: OutboundSweeper,
   ) {
     super(QUEUE_HEALTH);
   }
-  protected async handle(_job: Job) {
+  protected async handle(job: Job) {
+    if (job.name === 'outbound-sweep') {
+      await this.sweeper.run();
+      return;
+    }
     // `pending_qr` entra também: depois de um reinício a Evolution manda 'connecting' e às vezes não
     // manda o 'open' (ou ele chega antes) — o número fica conectado de verdade e o painel preso em
     // "aguardando QR". Nele só promove para `connected`: com o QR na tela o estado é 'connecting'.

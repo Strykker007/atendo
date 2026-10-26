@@ -17,6 +17,7 @@ import { GapRecoveryProcessor } from './gap-recovery';
 import { SendPacer } from './send-pacer';
 import { OUTBOUND_JOB_OPTS } from './send-queue';
 import { NumbersHealthScheduler, NumbersHealthProcessor, QUEUE_HEALTH } from './health.scheduler';
+import { OutboundSweeper } from './outbound-sweep';
 import { ContactsSyncProcessor, ContactsSyncScheduler, QUEUE_CONTACTS_SYNC } from './contacts-sync';
 import { HistoryMediaProcessor, HistorySyncService, QUEUE_HISTORY_MEDIA } from './history-sync';
 import { ConversationsModule } from '../conversations/conversations.module';
@@ -42,7 +43,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
     forwardRef(() => SchedulingModule),
   ],
   controllers: [NumbersController, WebhooksController, GroupsController],
-  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor, ContactsSyncScheduler, ContactsSyncProcessor, HistorySyncService, HistoryMediaProcessor, GapRecoveryProcessor, SendPacer, ConnectionEventsService, SessionProbe, GroupInboxRegistry],
+  providers: [MetaProvider, EvolutionProvider, ProviderRegistry, NumbersService, InboundProcessor, OutboundProcessor, NumbersHealthScheduler, NumbersHealthProcessor, ContactsSyncScheduler, ContactsSyncProcessor, HistorySyncService, HistoryMediaProcessor, GapRecoveryProcessor, SendPacer, ConnectionEventsService, SessionProbe, GroupInboxRegistry, OutboundSweeper],
   exports: [ProviderRegistry, NumbersService, HistorySyncService, SendPacer, BullModule],
 })
 export class WhatsAppModule {}

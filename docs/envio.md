@@ -144,6 +144,23 @@ Expira só o que está preso de verdade: número desconectado ou job perdido. **
 criação (`PROTECTION_HOLD_MAX_MS`): depois disso volta o prazo normal, porque uma boas-vindas 6 h
 depois já não faz sentido. Antes, no aquecimento, o fluxo acima do teto virava falha em 30 min.
 
+### Mensagem sem job
+
+Toda mensagem nasce `pending` no banco e só sai se houver job dela na fila (`wa-outbound`). Se a
+gravação do job falhar — Redis cheio recusando escrita, como em 26/10/2026 (18 mensagens de
+atendentes paradas desde as 8h20, achadas à mão e corrigidas com SQL em produção) —, ela fica com o
+relógio para sempre. A **varredura** (`whatsapp/outbound-sweep.ts`, job `outbound-sweep` da fila
+`wa-health`, a cada minuto, no worker) procura `pending` com mais de 2 min sem job vivo
+(sem job, ou job `completed`/`failed` com a mensagem ainda pendente):
+
+- dentro do prazo da fila (`maxQueueAgeMin`, contado do `queuedAt`): **volta para a fila** com o
+  mesmo `jobId` (o job velho é removido antes);
+- passou do prazo: vira **não enviada** ("Não enviada: a mensagem ficou fora da fila de envio…"),
+  e o painel é avisado na hora.
+
+Até 500 por rodada. Quando acha alguma, log `warn` "varredura da fila de envio: N … voltaram para a
+fila, M marcadas como não enviadas" — só aparece se algo deu errado (Redis, worker).
+
 ### Na tela: ✓ na hora
 
 Mensagem `pending` (na fila, esperando o ritmo do número, o aquecimento ou o "digitando…") já
