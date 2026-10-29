@@ -65,7 +65,7 @@ describe('planoDaRecuperacao', () => {
     expect(planoDaRecuperacao(null, false, [env('16:10')]).status).toBe('in_progress');
   });
 
-  it('chat livre (isento/grupo): nunca fila nem espera', () => {
+  it('chat livre (grupo): nunca fila nem espera', () => {
     const p = planoDaRecuperacao(conv({ status: 'closed', closedAt: t('12:00') }), true, [rec('16:10')]);
     expect(p.status).toBe('in_progress');
     expect(p.awaitingSince).toBeUndefined();

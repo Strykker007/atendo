@@ -334,8 +334,8 @@ export interface StartConversationInput {
 export const useStartConversation = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: StartConversationInput) => api<{ conversationId: string; message: Message }>('/conversations/start', { method: 'POST', body: JSON.stringify(b) }),
-    onSuccess: (r) => { upsertMessageInCache(qc, r.message); invConv(qc, r.conversationId); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['cold-quota'] }); },
+    mutationFn: (b: StartConversationInput) => api<{ conversationId: string; status: ConversationStatus; message: Message | null }>('/conversations/start', { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: (r) => { if (r.message) upsertMessageInCache(qc, r.message); invConv(qc, r.conversationId); qc.invalidateQueries({ queryKey: ['contacts-list'] }); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['cold-quota'] }); },
   });
 };
 

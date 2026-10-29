@@ -49,10 +49,10 @@ export class CampaignsService {
   ) {}
 
   /** Quantos contatos o disparo atingiria — mostrado antes de criar, para não haver surpresa. */
-  async preview(tenantId: string, a: Audience) {
+  async preview(tenantId: string, a: Audience, numbers?: { in: string[] }) {
     const [contatos, grupos] = await Promise.all([
-      this.segmentation.preview(tenantId, a),
-      a.groupIds?.length ? this.prisma.whatsAppGroup.count({ where: { tenantId, id: { in: a.groupIds }, authorized: true } }) : Promise.resolve(0),
+      this.segmentation.preview(tenantId, a, numbers),
+      a.groupIds?.length ? this.prisma.whatsAppGroup.count({ where: { tenantId, id: { in: a.groupIds }, authorized: true, ...(numbers && { numberId: numbers }) } }) : Promise.resolve(0),
     ]);
     return { ...contatos, groups: grupos };
   }
@@ -70,8 +70,9 @@ export class CampaignsService {
    * Cria a transmissão como rascunho, com o público **materializado agora** (filtros +
    * seleção + importados). Iniciar é outro passo (`start`) — no QR, com o aceite do risco.
    */
-  async create(tenantId: string, userId: string, dto: CreateCampaign) {
-    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: dto.numberId, tenantId, deletedAt: null } });
+  async create(tenantId: string, userId: string, dto: CreateCampaign, numbers?: { in: string[] }) {
+    // restrito a empresas: só dispara pelos números dele (docs/empresas.md#transmissões)
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { tenantId, deletedAt: null, AND: [{ id: dto.numberId }, ...(numbers ? [{ id: numbers }] : [])] } });
     if (!number) throw new NotFoundException('Número não encontrado');
     if (this.segmentation.isEmpty(dto.audience)) throw new BadRequestException('Escolha o público: filtros, contatos ou uma lista de telefones (ou "todos os contatos").');
 
@@ -92,7 +93,7 @@ export class CampaignsService {
     if (dto.mediaKey && !dto.mediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException('Anexo inválido');
 
     const groups = await this.gruposDoPublico(tenantId, number, dto.audience.groupIds);
-    const contacts = await this.segmentation.resolve(tenantId, dto.audience);
+    const contacts = await this.segmentation.resolve(tenantId, dto.audience, numbers);
     if (!contacts.length && !groups.length) throw new BadRequestException('Nenhum contato nesta seleção (descadastrados e números sem WhatsApp ficam de fora).');
 
     const campaign = await this.prisma.campaign.create({
@@ -120,8 +121,8 @@ export class CampaignsService {
   }
 
   /** Inicia (ou agenda). No QR exige o aceite do aviso de risco — gravado com quem e quando. */
-  async start(tenantId: string, userId: string, id: string, acceptRisk?: boolean) {
-    const campaign = await this.prisma.campaign.findFirst({ where: { id, tenantId }, include: { number: true } });
+  async start(tenantId: string, userId: string, id: string, acceptRisk?: boolean, numbers?: { in: string[] }) {
+    const campaign = await this.prisma.campaign.findFirst({ where: { id, tenantId, ...(numbers && { numberId: numbers }) }, include: { number: true } });
     if (!campaign) throw new NotFoundException('Campanha não encontrada');
     if (campaign.status === 'done' || campaign.status === 'canceled') throw new BadRequestException('Esta campanha já terminou.');
     if (campaign.number.status !== 'connected') throw new BadRequestException(`O número "${campaign.number.label}" está desconectado.`);
@@ -143,8 +144,8 @@ export class CampaignsService {
     return updated;
   }
 
-  async setStatus(tenantId: string, id: string, status: 'paused' | 'running' | 'canceled') {
-    const atual = await this.prisma.campaign.findFirst({ where: { id, tenantId } });
+  async setStatus(tenantId: string, id: string, status: 'paused' | 'running' | 'canceled', numbers?: { in: string[] }) {
+    const atual = await this.prisma.campaign.findFirst({ where: { id, tenantId, ...(numbers && { numberId: numbers }) } });
     if (!atual) throw new NotFoundException('Campanha não encontrada');
     if (atual.status === 'done' || atual.status === 'canceled') throw new BadRequestException('Esta campanha já terminou.');
     if (status === 'running' && atual.status === 'draft') throw new BadRequestException('Use "Iniciar" para começar a transmissão.');
@@ -200,9 +201,9 @@ export class CampaignsService {
     return new Map(rows.map((r) => [r.id, { total: r.total, pending: r.pending, sent: r.sent, delivered: r.delivered, read: r.read, failed: r.failed, skipped: r.skipped }]));
   }
 
-  async list(tenantId: string) {
+  async list(tenantId: string, numbers?: { in: string[] }) {
     const rows = await this.prisma.campaign.findMany({
-      where: { tenantId },
+      where: { tenantId, ...(numbers && { numberId: numbers }) },
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: { number: { select: { label: true, provider: true } } },
@@ -211,8 +212,8 @@ export class CampaignsService {
     return rows.map((c) => ({ ...c, stats: stats.get(c.id) ?? { total: 0, pending: 0, sent: 0, delivered: 0, read: 0, failed: 0, skipped: 0 } }));
   }
 
-  async one(tenantId: string, id: string) {
-    const campaign = await this.prisma.campaign.findFirst({ where: { id, tenantId }, include: { number: { select: { id: true, label: true, phone: true, provider: true } } } });
+  async one(tenantId: string, id: string, numbers?: { in: string[] }) {
+    const campaign = await this.prisma.campaign.findFirst({ where: { id, tenantId, ...(numbers && { numberId: numbers }) }, include: { number: { select: { id: true, label: true, phone: true, provider: true } } } });
     if (!campaign) throw new NotFoundException('Campanha não encontrada');
     const [stats, amostra, dia] = await Promise.all([
       this.stats([id]),

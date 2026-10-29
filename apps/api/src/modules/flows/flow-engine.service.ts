@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, START_MAX_DELAY_SEC, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -246,7 +246,7 @@ export class FlowEngineService {
     let porTempo = false;
     if (run.waitUntil && run.currentNodeId) {
       const { def } = await this.load(run.id);
-      porTempo = def.nodes.find((n) => n.id === run.currentNodeId)?.type === 'wait' || contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined;
+      porTempo = ['wait', 'start'].includes(def.nodes.find((n) => n.id === run.currentNodeId)?.type ?? '') || contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined;
     }
     const plano = planejarRetomada(run, porTempo);
     const ok = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'paused' }, data: { status: plano.status, pausedFrom: null } });
@@ -474,9 +474,18 @@ export class FlowEngineService {
 
       try {
         switch (node.type) {
-          case 'start':
+          case 'start': {
+            // atraso antes da 1ª mensagem: espera como o Aguardar; a retomada segue para o próximo bloco
+            const sec = Math.min(START_MAX_DELAY_SEC, Math.max(0, Number(node.data?.delaySec) || 0));
+            if (sec > 0) {
+              const until = new Date(Date.now() + sec * 1000);
+              await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: until } });
+              await this.queue.add('resume', { runId }, { delay: sec * 1000, jobId: `resume-${runId}-${node.id}-${Date.now()}` });
+              return;
+            }
             await this.goNext(runId, def, node.id);
             continue;
+          }
           case 'message': {
             const items = normalizeContent(node.data);
             const resumeAt = contentCursor(vars, node.id);

@@ -36,12 +36,12 @@ export function TransferSection() {
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
       <div>
         <h2 className="font-display font-semibold text-ink flex items-center gap-1.5"><ArrowRightLeft size={16} className="text-accent" /> Transferência de atendimento</h2>
-        <p className="text-sm text-muted">Avisa o cliente no chat quando a conversa passa para outra pessoa ou outro setor. Quem recebe a transferência sempre ganha um alerta com som na tela.</p>
+        <p className="text-sm text-muted">Avisa o contato no chat quando a conversa passa para outra pessoa ou outro setor. Quem recebe a transferência sempre ganha um alerta com som na tela.</p>
       </div>
       <Regra on={on} disabled={update.isPending}
-        onToggle={() => update.mutateAsync({ transferMessageEnabled: !on }).then(() => toast.ok(!on ? 'O cliente será avisado nas transferências' : 'Transferências sem aviso ao cliente')).catch(toast.err)}
-        titulo="Avisar o cliente ao transferir"
-        desc={on ? 'Ligado: a mensagem abaixo vai para o cliente a cada transferência.' : 'Desligado: a transferência acontece sem mensagem ao cliente.'} />
+        onToggle={() => update.mutateAsync({ transferMessageEnabled: !on }).then(() => toast.ok(!on ? 'O contato será avisado nas transferências' : 'Transferências sem aviso ao contato')).catch(toast.err)}
+        titulo="Avisar o contato ao transferir"
+        desc={on ? 'Ligado: a mensagem abaixo vai para o contato a cada transferência.' : 'Desligado: a transferência acontece sem mensagem ao contato.'} />
       {on && (
         <div className="space-y-3">
           <label className="block space-y-1">

@@ -52,8 +52,8 @@ export function PublicPagesSection() {
   return (
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-4">
       <div>
-        <h2 className="font-display font-semibold text-ink flex items-center gap-1.5"><ImageIcon size={16} className="text-accent" /> Páginas para o cliente</h2>
-        <p className="text-sm text-muted">O que o seu cliente vê ao abrir o link de uma foto protegida ou de um orçamento.</p>
+        <h2 className="font-display font-semibold text-ink flex items-center gap-1.5"><ImageIcon size={16} className="text-accent" /> Páginas para o contato</h2>
+        <p className="text-sm text-muted">O que o seu contato vê ao abrir o link de uma foto protegida ou de um orçamento.</p>
       </div>
 
       <div className="space-y-2">

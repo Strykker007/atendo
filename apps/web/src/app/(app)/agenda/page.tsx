@@ -46,7 +46,7 @@ export default function AgendaPage() {
   }, [pros.data, appts.data, proFilter]);
 
   if (!feature.loading && !feature.has) return (
-    <PageShell width="max-w-3xl"><PageHeader title="Agenda" /><div className="rounded-2xl border border-line bg-panel p-8 text-center space-y-3"><div className="mx-auto w-12 h-12 rounded-2xl bg-accent-soft text-accent-ink grid place-items-center"><Lock size={22} /></div><p className="font-display font-semibold text-ink">Agendamento está nos planos Pro e Business</p><p className="text-sm text-muted max-w-md mx-auto">Agenda por profissional, marcação pelo WhatsApp com o robô, lembretes ao cliente e aviso ao profissional antes de cada horário.</p>{isAdmin && <Link href="/plano"><Button>Ver planos</Button></Link>}</div></PageShell>
+    <PageShell width="max-w-3xl"><PageHeader title="Agenda" /><div className="rounded-2xl border border-line bg-panel p-8 text-center space-y-3"><div className="mx-auto w-12 h-12 rounded-2xl bg-accent-soft text-accent-ink grid place-items-center"><Lock size={22} /></div><p className="font-display font-semibold text-ink">Agendamento está nos planos Pro e Business</p><p className="text-sm text-muted max-w-md mx-auto">Agenda por profissional, marcação pelo WhatsApp com o robô, lembretes ao contato e aviso ao profissional antes de cada horário.</p>{isAdmin && <Link href="/plano"><Button>Ver planos</Button></Link>}</div></PageShell>
   );
 
   const shift = (n: number) => setDay(ymd(new Date(dayStart.getTime() + n * 86_400_000)));

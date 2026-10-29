@@ -40,7 +40,8 @@ export function AccessProfiles() {
         {canManage && <Button variant="ghost" icon={<Plus size={16} />} onClick={() => setEditing({ permissions: [] })}>Novo perfil</Button>}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* items-start: abrir as permissões de um cartão não estica os vizinhos da linha (ficavam altos e vazios) */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 items-start">
         {profiles.data?.map((p) => <ProfileCard key={p.id} profile={p} canManage={canManage} onEdit={() => setEditing(p)} onDelete={() => setDeleting(p)} />)}
       </div>
 

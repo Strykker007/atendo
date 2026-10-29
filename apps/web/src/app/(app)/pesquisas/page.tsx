@@ -24,9 +24,9 @@ const EXEMPLO: Record<string, string> = { 'contact.first_name': 'Maria', 'contac
 const comExemplo = (t: string) => t.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (m, k: string) => EXEMPLO[k.replace(/\s*\|\s*/g, ' | ')] ?? m);
 
 const ESCALA_DICA: Record<SurveyScale, string> = {
-  scale_5: 'O cliente digita uma nota de 1 a 5.',
-  scale_10: 'O cliente digita de 1 a 10. O relatório calcula o NPS.',
-  csat_3: 'O cliente toca em Ruim, Neutro ou Bom.',
+  scale_5: 'O contato digita uma nota de 1 a 5.',
+  scale_10: 'O contato digita de 1 a 10. O relatório calcula o NPS.',
+  csat_3: 'O contato toca em Ruim, Neutro ou Bom.',
 };
 
 /**
@@ -44,13 +44,13 @@ export default function SurveysPage() {
   const alternar = (s: SatisfactionSurvey, patch: SurveyInput, msg: string) =>
     update.mutateAsync({ id: s.id, ...patch }).then(() => toast.ok(msg), toast.err);
 
-  if (!feature.loading && !feature.has) return <FeatureLocked title="Pesquisas de satisfação" text="Pergunte ao cliente como foi o atendimento logo depois de encerrar e acompanhe a nota de cada consultor (CSAT/NPS)." />;
+  if (!feature.loading && !feature.has) return <FeatureLocked title="Pesquisas de satisfação" text="Pergunte ao contato como foi o atendimento logo depois de encerrar e acompanhe a nota de cada consultor (CSAT/NPS)." />;
 
   return (
     <PageShell>
       <PageHeader
         title="Pesquisas de satisfação"
-        subtitle="Enviadas ao encerrar o atendimento. O cliente pode recusar com um toque e nunca recebe a pergunta de novo."
+        subtitle="Enviadas ao encerrar o atendimento. O contato pode recusar com um toque e nunca recebe a pergunta de novo."
         action={
           <div className="flex gap-2">
             <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><BarChart3 size={15} className="text-accent" /> Relatório</Link>
@@ -169,13 +169,13 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
               </div>
             ))}
             {f.extraQuestions.length > 0 && (
-              <p className="text-[11.5px] text-muted">Uma pergunta por vez, só depois que o cliente responder a anterior.</p>
+              <p className="text-[11.5px] text-muted">Uma pergunta por vez, só depois que o contato responder a anterior.</p>
             )}
           </div>
 
           <label className="flex items-start gap-2 text-[13px] cursor-pointer">
             <input type="checkbox" className="mt-0.5" checked={f.allowDecline} onChange={(e) => set('allowDecline', e.target.checked)} />
-            <span><b className="font-medium text-ink">Permitir recusar</b><span className="block text-xs text-muted">O cliente digita 0 {f.scale === 'csat_3' ? 'ou toca no botão ' : ''}e a pesquisa termina na hora, sem insistir.</span></span>
+            <span><b className="font-medium text-ink">Permitir recusar</b><span className="block text-xs text-muted">O contato digita 0 {f.scale === 'csat_3' ? 'ou toca no botão ' : ''}e a pesquisa termina na hora, sem insistir.</span></span>
           </label>
           {f.allowDecline && (
             <div className="grid gap-3 sm:grid-cols-2 pl-6">
@@ -192,7 +192,7 @@ function SurveyEditor({ survey, onClose }: { survey: SatisfactionSurvey | null; 
 
           <label className="flex items-start gap-2 text-[13px] cursor-pointer">
             <input type="checkbox" className="mt-0.5" checked={f.askComment} onChange={(e) => set('askComment', e.target.checked)} />
-            <span><b className="font-medium text-ink">Pedir um comentário depois da nota</b><span className="block text-xs text-muted">Opcional para o cliente: “0” ou “não” pula.</span></span>
+            <span><b className="font-medium text-ink">Pedir um comentário depois da nota</b><span className="block text-xs text-muted">Opcional para o contato: “0” ou “não” pula.</span></span>
           </label>
           {f.askComment && (
             <div className="pl-6">

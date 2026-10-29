@@ -45,7 +45,7 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   // de todos sem poder agendar). Sem nenhuma das duas, a lista seria só das próprias — que não existem
   { href: '/agendadas', label: 'Mensagens agendadas', icon: AlarmClock, need: ['conversations.schedule_message', 'conversations.view_all'] },
   { href: '/tags', label: 'Tags', icon: Tags, need: ['tags.manage'] },
-  { href: '/contatos', label: 'Contatos', icon: BookUser, need: ['contacts.import_export'] },
+  { href: '/contatos', label: 'Contatos', icon: BookUser },
   { href: '/transmissoes', label: 'Transmissões', icon: Send, need: ['campaigns.manage'], feature: 'campaigns' },
   { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: ['settings.manage'], feature: 'satisfaction_surveys' },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: ['reports.view'] },

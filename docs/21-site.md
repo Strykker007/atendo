@@ -23,6 +23,7 @@ Página voltada a **farmácias**, migrada do site antigo em WordPress/Elementor.
 | Peça | Arquivo |
 |---|---|
 | Página (`/`) e layout (fontes, tema, SEO, dados estruturados) | `src/app/page.tsx`, `src/app/layout.tsx` |
+| **Política de privacidade** (`/privacidade`, LGPD; exigida pela Meta no app da API oficial). Exclusão de dados em `/privacidade#exclusao-de-dados`. Data da versão em `ATUALIZADA_EM`; link no rodapé | `src/app/privacidade/page.tsx` |
 | Seções, na ordem | `src/components/landing/` — `LandingHeader`, `Hero` (+ `ChatMockup`), `Demo` (vídeo), `Pains`, `Features`, `SocialProof` (logos + contadores), `Extras` (+ vídeo de depoimentos), `Pricing` (oferta + aviso de qualificação), `Faq`, `LandingFooter` — montadas em `LandingPage` |
 | **Todos os textos** (hero, dores, recursos, números, oferta, FAQ…) | `src/components/landing/content.ts` |
 | Nome, SEO, CNPJ, redes, `APP_URL`, **WhatsApp do consultor** (`WHATSAPP_URL`), IDs dos pixels (`TRACKING`) | `src/lib/site.ts` |

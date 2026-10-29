@@ -14,6 +14,7 @@ export interface SettingsUpdate {
   lostFlowId?: string | null;
   requireSaleValue?: boolean;
   salesEnabled?: boolean;
+  companyIsolation?: boolean;
   requireSignature?: boolean;
   requireReasonOnWon?: boolean;
   requireReasonOnLost?: boolean;

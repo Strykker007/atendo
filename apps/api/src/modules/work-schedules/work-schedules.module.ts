@@ -10,6 +10,7 @@ import { AuthService } from '../auth/auth.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { creatorCompanyIds, teamWhere } from '../auth/team-scope';
 import { ShiftAccessService } from '../auth/shift-access.service';
 import { isCyclic, isWithinShift, shiftDuration, type ShiftRule } from '../auth/shift-window';
 import { localOf } from '../tenants/schedule-clock';
@@ -154,7 +155,7 @@ class WorkSchedulesController {
     const local = localOf(now, settings?.timezone ?? TZ_DEFAULT);
     const onShift = new Map(schedules.map((s) => [s.id, isWithinShift(s as ShiftRule, local)]));
     const users = await this.prisma.user.findMany({
-      where: { tenantId: u.tenantId, isActive: true },
+      where: { tenantId: u.tenantId, isActive: true, ...teamWhere(u) },
       orderBy: { name: 'asc' },
       select: {
         id: true, name: true, email: true, role: true, scheduleId: true, isTemporary: true, accessExpiresAt: true,
@@ -174,7 +175,7 @@ class WorkSchedulesController {
   @Get('overrides')
   overrides(@CurrentUser() u: AuthUser) {
     return this.prisma.scheduleOverride.findMany({
-      where: { tenantId: u.tenantId, revokedAt: null, validUntil: { gt: new Date() } },
+      where: { tenantId: u.tenantId, revokedAt: null, validUntil: { gt: new Date() }, user: teamWhere(u) },
       orderBy: { validUntil: 'asc' },
       select: { id: true, validFrom: true, validUntil: true, reason: true, createdAt: true, user: { select: { id: true, name: true } }, approvedBy: { select: { id: true, name: true } } },
     });
@@ -184,7 +185,7 @@ class WorkSchedulesController {
   @Post('overrides')
   async createOverride(@CurrentUser() u: AuthUser, @Body() dto: OverrideDto) {
     // colaborador de outro cliente não entra: o id vem do corpo da requisição
-    const target = await this.prisma.user.findFirst({ where: { id: dto.userId, tenantId: u.tenantId }, select: { id: true } });
+    const target = await this.prisma.user.findFirst({ where: { id: dto.userId, tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true } });
     if (!target) throw new NotFoundException('Colaborador não encontrado.');
     const now = new Date();
     // impersonação: o dono não é usuário do tenant, a liberação fica sem aprovador
@@ -201,7 +202,7 @@ class WorkSchedulesController {
   /** Encerra a liberação antes do fim. A sessão aberta cai na próxima renovação do token. */
   @Delete('overrides/:id')
   async revokeOverride(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const o = await this.prisma.scheduleOverride.findFirst({ where: { id, tenantId: u.tenantId, revokedAt: null }, select: { id: true, userId: true } });
+    const o = await this.prisma.scheduleOverride.findFirst({ where: { id, tenantId: u.tenantId, revokedAt: null, user: teamWhere(u) }, select: { id: true, userId: true } });
     if (!o) throw new NotFoundException('Liberação não encontrada.');
     await this.prisma.scheduleOverride.update({ where: { id }, data: { revokedAt: new Date() } });
     // encerrou o plantão: trava AGORA (antes, o token já emitido seguia liberado por até 15 min)
@@ -231,7 +232,7 @@ class UsersScheduleController {
       if (!ok) throw new BadRequestException('Escala não encontrada.');
     }
     const roles = u.role === 'manager' ? ['agent' as const] : ['agent' as const, 'manager' as const];
-    const { count } = await this.prisma.user.updateMany({ where: { id, tenantId: u.tenantId, role: { in: roles } }, data: { scheduleId: dto.scheduleId ?? null } });
+    const { count } = await this.prisma.user.updateMany({ where: { id, tenantId: u.tenantId, role: { in: roles }, ...teamWhere(u) }, data: { scheduleId: dto.scheduleId ?? null } });
     if (!count) throw new BadRequestException('Este colaborador não pode receber escala (admins nunca são travados por horário).');
     // escala nova pode deixar a pessoa fora do turno: reavalia já
     await this.shift.cutSessions([id]);
@@ -242,7 +243,7 @@ class UsersScheduleController {
   @Get('temporary')
   async temporary(@CurrentUser() u: AuthUser) {
     const rows = await this.prisma.user.findMany({
-      where: { tenantId: u.tenantId, isTemporary: true },
+      where: { tenantId: u.tenantId, isTemporary: true, ...teamWhere(u) },
       orderBy: { createdAt: 'desc' },
       take: 100,
       select: { id: true, name: true, email: true, isActive: true, accessExpiresAt: true, expiredAt: true, lastLoginAt: true, createdAt: true, schedule: { select: { id: true, name: true } }, temporaryCreatedBy: { select: { id: true, name: true } } },
@@ -280,6 +281,9 @@ class UsersScheduleController {
       select: { id: true, name: true, email: true },
     });
     await this.provisioning.linkRoleProfile(u.tenantId, user.id, 'agent');
+    // criado por quem é restrito: nasce no(s) condomínio(s) dele (docs/empresas.md#equipe)
+    const empresas = creatorCompanyIds(u);
+    if (empresas.length) await this.prisma.userCompany.createMany({ data: empresas.map((companyId) => ({ userId: user.id, companyId })), skipDuplicates: true });
     if (dto.numberIds?.length) {
       const valid = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: dto.numberIds }, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
       await this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: user.id, numberId: n.id })), skipDuplicates: true });
@@ -290,7 +294,7 @@ class UsersScheduleController {
   /** Encerra o acesso temporário antes do prazo (status EXPIRED, sessões derrubadas). */
   @Post('temporary/:id/expire')
   async expireTemporary(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const target = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, isTemporary: true, expiredAt: null }, select: { id: true } });
+    const target = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, isTemporary: true, expiredAt: null, ...teamWhere(u) }, select: { id: true } });
     if (!target) throw new NotFoundException('Acesso temporário não encontrado ou já expirado.');
     await this.shift.expire(target.id);
     await this.shift.cutSessions([target.id]);

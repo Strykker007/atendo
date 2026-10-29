@@ -5,6 +5,7 @@ import { localOf } from '../tenants/schedule-clock';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from './permissions.guard';
 import { CurrentUser, type AuthUser } from './current-user.decorator';
+import { teamWhere } from './team-scope';
 import { deviceLabel, onlineMinutes, sessionEnd } from './access-log';
 
 const YMD = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -51,7 +52,7 @@ export class AccessLogController {
   @Get('people')
   people(@CurrentUser() u: AuthUser) {
     return this.prisma.user.findMany({
-      where: { tenantId: u.tenantId },
+      where: { tenantId: u.tenantId, ...teamWhere(u) },
       select: { id: true, name: true, email: true, role: true, isActive: true, isTemporary: true },
       orderBy: { name: 'asc' },
       take: 1000,
@@ -68,7 +69,7 @@ export class AccessLogController {
     const from = localToUtc(ymd, '00:00', tz);
     const to = localToUtc(addDays(ymd, 1), '00:00', tz);
     const rows = await this.overlapping(u.tenantId, from, to);
-    const users = await this.prisma.user.findMany({ where: { tenantId: u.tenantId, id: { in: [...new Set(rows.map((r) => r.userId))] } }, select: { id: true, name: true, role: true, isTemporary: true } });
+    const users = await this.prisma.user.findMany({ where: { tenantId: u.tenantId, id: { in: [...new Set(rows.map((r) => r.userId))] }, ...teamWhere(u) }, select: { id: true, name: true, role: true, isTemporary: true } });
     const people = users.map((user) => {
       const mine = rows.filter((r) => r.userId === user.id);
       const ok = mine.filter((r) => r.outcome === 'ok');
@@ -92,7 +93,7 @@ export class AccessLogController {
   /** Calendário de uma pessoa no mês: tempo online por dia + a lista de logins. */
   @Get('user/:id')
   async user(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Query('month') month?: string) {
-    const user = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId }, select: { id: true, name: true, email: true, role: true, isActive: true, isTemporary: true, lastLoginAt: true } });
+    const user = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true, name: true, email: true, role: true, isActive: true, isTemporary: true, lastLoginAt: true } });
     if (!user) throw new NotFoundException('Pessoa não encontrada.');
     const tz = await this.tz(u.tenantId);
     const now = new Date();

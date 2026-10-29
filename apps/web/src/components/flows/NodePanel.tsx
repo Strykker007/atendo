@@ -5,12 +5,12 @@ import { useContext } from 'react';
 import { Trash2, Plus, X, ExternalLink, Lock, LockOpen } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { NODE_META, TRANSFORM_META, isTransform, DELAY_UNIT, FlowEditorRefs } from './nodes';
+import { NODE_META, TRANSFORM_META, isTransform, DELAY_UNIT, FlowEditorRefs, fmtAtraso } from './nodes';
 import { OpOptions, TransformPreview } from './TransformPreview';
 import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useSurveys, reasonsFor } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
-import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
+import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, START_DELAY_OPTIONS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
 import { ContentPanel } from './ContentPanel';
 import { HttpPanel } from './HttpPanel';
@@ -93,7 +93,16 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         {node.type !== 'start' && <button onClick={onDelete} className="text-faint hover:text-danger p-1" title="Remover bloco"><Trash2 size={15} /></button>}
       </div>
       <div className="flex-1 min-w-0 overflow-y-auto p-4 break-words space-y-4 text-sm">
-        {node.type === 'start' && <p className="text-muted">O gatilho (manual, nova conversa ou palavra-chave) é definido nas configurações do fluxo, no topo da tela.</p>}
+        {node.type === 'start' && (
+          <>
+            <p className="text-muted">O gatilho (manual, nova conversa ou palavra-chave) é definido nas configurações do fluxo, no topo da tela.</p>
+            <Field label="Atraso antes da 1ª mensagem" hint="Espera depois do gatilho, antes do primeiro bloco. Para esperas maiores, use o Atraso inteligente.">
+              <select className={inputCls} value={node.data.delaySec ?? 0} onChange={(e) => set({ delaySec: Number(e.target.value) || undefined })}>
+                {START_DELAY_OPTIONS.map((s) => <option key={s} value={s}>{fmtAtraso(s)}</option>)}
+              </select>
+            </Field>
+          </>
+        )}
 
         {node.type === 'message' && (
           <ContentPanel

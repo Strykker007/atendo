@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -12,6 +12,8 @@ import { PermissionsService } from '../auth/permissions.service';
 import { ShiftAccessService } from '../auth/shift-access.service';
 import { ProfilesController } from './profiles.controller';
 import { NoTenantOk } from '../auth/tenant.guard';
+import { creatorCompanyIds, teamCompanyIds, teamWhere } from '../auth/team-scope';
+import { canUseNumber } from '../auth/number-scope';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { BillingModule } from '../billing/billing.module';
 import { TenantSettingsService } from './tenant-settings.service';
@@ -286,10 +288,13 @@ class TenantsController {
     return tenant;
   }
 
-  /** Todos podem listar (precisam para transferir); só admin gerencia. */
+  /**
+   * Todos podem listar (filtros, nomes na tela); só admin gerencia. Quem é vinculado a empresas vê
+   * só a equipe delas (docs/empresas.md#equipe) — transferir usa outra lista, com régua própria.
+   */
   @Get('me/agents')
   async agents(@CurrentUser() u: AuthUser) {
-    const rows = await this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true, ...LOGIN_EMAIL_SELECT, primaryUserId: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, scheduleId: true, isTemporary: true, accessExpiresAt: true, expiredAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
+    const rows = await this.prisma.user.findMany({ where: { tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true, name: true, ...LOGIN_EMAIL_SELECT, primaryUserId: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, scheduleId: true, isTemporary: true, accessExpiresAt: true, expiredAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
     // vínculo (pessoa de outra empresa, docs/multiempresa.md): mostra o login dela; não tem convite pendente
     return rows.map(({ primaryUser: _p, primaryUserId, ...r }) => ({ ...r, email: loginEmail({ email: r.email, primaryUser: _p }) ?? '', linked: !!primaryUserId }));
   }
@@ -309,6 +314,7 @@ class TenantsController {
       select: { id: true, name: true, email: true, role: true },
     });
     if (!profileId) await this.provisioning.linkRoleProfile(u.tenantId, created.id, role);
+    await this.linkToCreatorCompanies(u, created.id);
     return created;
   }
 
@@ -379,11 +385,27 @@ class TenantsController {
     return { profileId, role };
   }
 
+  /** Quem é vinculado a empresas cria gente já vinculada (`creatorCompanyIds`). */
+  private async linkToCreatorCompanies(u: AuthUser, userId: string) {
+    const alvo = creatorCompanyIds(u);
+    if (!alvo.length) return;
+    await this.prisma.userCompany.createMany({ data: alvo.map((companyId) => ({ userId, companyId })), skipDuplicates: true });
+    this.permissions.invalidate();
+  }
+
+  /** Alguém da equipe que quem pede enxerga; fora do escopo = 404 (não confirma que existe). */
+  private async teamMember(u: AuthUser, id: string) {
+    const row = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true, passwordSetAt: true, primaryUserId: true } });
+    if (!row) throw new NotFoundException('Pessoa não encontrada na sua equipe.');
+    return row;
+  }
+
   /** Cria a pessoa por convite (e-mail + link copiável). */
   private async inviteAgent(u: AuthUser, tenantName: string, person: { email: string; name: string }, profileId: string | undefined, role: 'agent' | 'manager') {
     const { user, link } = await this.auth.invite({ name: u.name, tenantId: u.tenantId }, { email: person.email, name: person.name, role }, tenantName);
     if (profileId) await this.prisma.user.update({ where: { id: user.id }, data: { profileId } });
     else await this.provisioning.linkRoleProfile(u.tenantId, user.id, role);
+    await this.linkToCreatorCompanies(u, user.id);
     // devolve o link mesmo quando o e-mail saiu: e-mail cai em spam e some
     const invite = link ?? (await this.auth.inviteLink(user.id)).link;
     return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true, inviteLink: invite, emailSent: !!link };
@@ -394,7 +416,7 @@ class TenantsController {
   @RequirePermission('team.manage')
   async resendInvite(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     const [target, tenant] = await Promise.all([
-      this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId } }),
+      this.teamMember(u, id),
       this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId } }),
     ]);
     if (target.primaryUserId) throw new BadRequestException(VINCULO_SEM_CONVITE);
@@ -409,7 +431,7 @@ class TenantsController {
   @Post('me/agents/:id/invite-link')
   @RequirePermission('team.manage')
   async inviteLink(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const target = await this.prisma.user.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { id: true, passwordSetAt: true, primaryUserId: true } });
+    const target = await this.teamMember(u, id);
     if (target.primaryUserId) throw new BadRequestException(VINCULO_SEM_CONVITE);
     if (target.passwordSetAt) throw new BadRequestException('Este usuário já definiu a senha. Para trocar, use "Redefinir senha".');
     return this.auth.inviteLink(target.id);
@@ -419,6 +441,7 @@ class TenantsController {
   @RequirePermission('team.manage')
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
     const { password, profileId, numberIds, ...rest } = dto;
+    await this.teamMember(u, id);
     if (dto.name !== undefined && !dto.name.trim()) throw new BadRequestException('Informe o nome.');
     if (dto.name !== undefined) rest.name = dto.name.trim();
     // gerente não promove ninguém a gerente (mesma regra do convite)
@@ -473,9 +496,12 @@ class TenantsController {
 
     if (numberIds) {
       // só números deste cliente: os ids vêm do corpo da requisição
-      const valid = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: numberIds }, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
+      // quem é restrito só mexe nos números que opera: o vínculo da pessoa com números de outro
+      // condomínio (gerente de contrato) fica como está
+      const restrito = teamCompanyIds(u) !== null;
+      const valid = (await this.prisma.whatsAppNumber.findMany({ where: { id: { in: numberIds }, tenantId: u.tenantId, deletedAt: null }, select: { id: true } })).filter((n) => !restrito || canUseNumber(u, n.id));
       await this.prisma.$transaction([
-        this.prisma.userNumber.deleteMany({ where: { userId: id } }),
+        this.prisma.userNumber.deleteMany({ where: { userId: id, ...(restrito && { numberId: { in: u.numberIds ?? [] } }) } }),
         this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: id, numberId: n.id })), skipDuplicates: true }),
       ]);
     }

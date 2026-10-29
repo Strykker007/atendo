@@ -18,7 +18,7 @@ import type { Permission } from '@atendo/shared';
 export class PermissionsService {
   private readonly cache = new Map<string, { at: number; permissions: string[] | null; numberIds: string[]; departmentIds: string[]; companyIds: string[]; systemOwner: boolean }>();
   /** empresas de cada cliente → números delas (docs/empresas.md) */
-  private readonly companies = new Map<string, { at: number; map: Map<string, string[]> }>();
+  private readonly companies = new Map<string, { at: number; map: Map<string, string[]>; isolated: boolean }>();
   private static readonly TTL_MS = 15_000;
 
   constructor(private readonly prisma: PrismaService) {}
@@ -44,12 +44,27 @@ export class PermissionsService {
 
   /** Empresas do cliente e os números de cada uma. Mapa vazio = cliente não usa empresas. */
   async companyNumbers(tenantId: string): Promise<Map<string, string[]>> {
+    return (await this.companiesOf(tenantId)).map;
+  }
+
+  /**
+   * `tenant_settings.companyIsolation`: o recorte por empresa vale também para equipe, planilha de
+   * contatos e transmissões (docs/empresas.md#separar-por-empresa). Mesmo cache das empresas.
+   */
+  async companyIsolation(tenantId: string): Promise<boolean> {
+    return (await this.companiesOf(tenantId)).isolated;
+  }
+
+  private async companiesOf(tenantId: string) {
     const hit = this.companies.get(tenantId);
-    if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit.map;
-    const rows = await this.prisma.company.findMany({ where: { tenantId, deletedAt: null }, select: { id: true, numbers: { where: { deletedAt: null }, select: { id: true } } } });
-    const map = new Map(rows.map((c) => [c.id, c.numbers.map((n) => n.id)]));
-    this.companies.set(tenantId, { at: Date.now(), map });
-    return map;
+    if (hit && Date.now() - hit.at < PermissionsService.TTL_MS) return hit;
+    const [rows, settings] = await Promise.all([
+      this.prisma.company.findMany({ where: { tenantId, deletedAt: null }, select: { id: true, numbers: { where: { deletedAt: null }, select: { id: true } } } }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { companyIsolation: true } }),
+    ]);
+    const entry = { at: Date.now(), map: new Map(rows.map((c) => [c.id, c.numbers.map((n) => n.id)])), isolated: !!settings?.companyIsolation };
+    this.companies.set(tenantId, entry);
+    return entry;
   }
 
   private async load(userId: string) {

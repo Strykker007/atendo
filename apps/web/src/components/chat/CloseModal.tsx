@@ -171,7 +171,41 @@ const FLUXO_DO_DESFECHO = { won: 'wonFlowId', lost: 'lostFlowId' } as const;
  * opcionais); sem valor, fica só o desfecho. A venda abre em lista de itens (valor + descrição,
  * total somado; item só com valor vale); quem preferir troca para texto livre e informa o total.
  */
-export function CloseModal({ conversationId, onClose, onClosed }: { conversationId: string; onClose: () => void; /** encerrou de fato (a tela leva a aba junto) */ onClosed?: () => void }) {
+type CloseProps = { conversationId: string; onClose: () => void; /** encerrou de fato (a tela leva a aba junto) */ onClosed?: () => void };
+
+/**
+ * Contato isento (docs/contatos-isentos.md) encerra sem resultado, sem venda e sem pesquisa — o
+ * atendimento não entra em relatório. A API aplica o mesmo; a tela só não pergunta o que não vale.
+ */
+export function CloseModal(props: CloseProps) {
+  const isento = useConversation(props.conversationId).data?.ticketExempt;
+  return isento ? <ExemptCloseModal {...props} /> : <FullCloseModal {...props} />;
+}
+
+function ExemptCloseModal({ conversationId, onClose, onClosed }: CloseProps) {
+  const setStatus = useSetStatus();
+  async function encerrar() {
+    try {
+      await setStatus.mutateAsync({ id: conversationId, status: 'closed', flowId: null });
+      toast.ok('Atendimento encerrado (fora dos relatórios)');
+      onClose();
+      onClosed?.();
+    } catch (err) { toast.err(err); }
+  }
+  return (
+    <Modal open onClose={onClose} title="Encerrar atendimento" width="max-w-md">
+      <div className="space-y-4">
+        <p className="flex items-start gap-2 text-sm text-muted"><EyeOff size={15} className="mt-0.5 shrink-0" />Este número está marcado como <b className="text-ink font-medium">não gera relatório</b>: encerra sem resultado, sem pesquisa e fica fora dos relatórios.</p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button type="button" variant="success" loading={setStatus.isPending} onClick={encerrar}>Encerrar</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function FullCloseModal({ conversationId, onClose, onClosed }: CloseProps) {
   const setStatus = useSetStatus();
   const labels = useOutcomeLabels();
   const flowsFeature = useHasFeature('flows');

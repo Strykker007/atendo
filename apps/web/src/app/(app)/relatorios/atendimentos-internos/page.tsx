@@ -51,7 +51,7 @@ export default function AtendimentosInternosPage() {
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Atendimentos internos"
-        subtitle="Conversas que não são atendimento de cliente (gestor com a equipe, fornecedor, teste): não entram em nenhum relatório. Aqui fica quem encerrou assim e quando — o registro não pode ser alterado."
+        subtitle="Conversas que não são atendimento ao público (gestor com a equipe, fornecedor, teste): não entram em nenhum relatório. Aqui fica quem encerrou assim e quando — o registro não pode ser alterado."
         action={<Link href="/relatorios" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink"><ArrowLeft size={15} /> Relatórios</Link>}
       />
 

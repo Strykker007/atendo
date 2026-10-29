@@ -98,23 +98,20 @@ class IgnoredContactsController {
   }
 
   /**
-   * Aplica a regra às conversas que já existem com este telefone.
-   * - Entrou na lista: vira chat livre na hora — sai da fila e de quem estava atendendo (conversa
-   *   livre não tem dono; qualquer um da equipe responde).
-   * - Saiu da lista: a conversa livre é guardada como encerrada, sem evento de encerramento (não
-   *   foi atendimento). A próxima mensagem do contato abre ticket normalmente.
+   * Aplica a regra às conversas que já existem com este telefone: só troca a marca. Status, dono
+   * e espera ficam como estão — aguardando continua aguardando até alguém assumir, e daí segue
+   * Atendendo → Encerrado normalmente; a marca só tira dos relatórios (docs/contatos-isentos.md).
+   * Saindo da lista, a conversa "livre" de antes (aberta sem dono, que ninguém via) volta para a fila.
    */
   private async marcarConversas(tenantId: string, phone: string, exempt: boolean) {
     const convs = await this.prisma.conversation.findMany({
       where: { tenantId, ticketExempt: !exempt, contact: { phone: { in: phoneVariants(phone) } } },
-      select: { id: true, status: true },
+      select: { id: true, status: true, assigneeId: true },
     });
     for (const c of convs) {
       const updated = await this.prisma.conversation.update({
         where: { id: c.id },
-        data: exempt
-          ? { ticketExempt: true, status: 'in_progress', assigneeId: null, awaitingSince: null }
-          : { ticketExempt: false, ...(c.status !== 'closed' && { status: 'closed', closedAt: new Date(), assigneeId: null, awaitingSince: null }) },
+        data: { ticketExempt: exempt, ...(!exempt && c.status === 'in_progress' && !c.assigneeId && { status: 'waiting' as const }) },
       });
       this.gateway.emitConversation(tenantId, updated);
     }

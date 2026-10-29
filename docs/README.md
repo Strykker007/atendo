@@ -59,5 +59,6 @@
 | [31 — Migração para a Meta oficial](31-migracao-meta-oficial.md) | Negócio / Ops | App novo no portfólio já verificado do sócio, convivendo com o sistema antigo; primeiro número de teste e migração cliente a cliente |
 | [32 — Checklist de segurança](32-checklist-seguranca.md) | Dev / Ops | 20 itens auditados (código + produção), prioridades e o que falta |
 | [33 — Operação segura em produção](33-operacao-segura-producao.md) | Dev / Ops | Leitura só com `atendo_ro`, escrita só pelo `write.sh` (simulação, contagem esperada, registro) |
+| [34 — Condomínios e operações sem venda](34-condominios.md) | Produto / Dev | Análise do produto para operação sem venda (condomínio) e plano por fases: unidades, chamados com protocolo, comunicados, relatórios do síndico |
 
 Convenção: código em inglês, comentários e documentação em português.

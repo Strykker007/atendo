@@ -36,6 +36,8 @@ export interface AuthUser {
   ownNumberIds?: string[];
   /** a pessoa é vinculada a empresas específicas (`user_companies`); false = enxerga todas */
   companyRestricted?: boolean;
+  /** o cliente separa também equipe, planilha de contatos e transmissões por empresa (`tenant_settings.companyIsolation`) */
+  companyIsolation?: boolean;
   /** modo fim de turno (docs/escalas.md#fim-de-turno): só rotas `@ShiftLockOk` passam */
   shiftLocked?: boolean;
   /** epoch (s) do fim do turno/liberação, quando a sessão tem escala */

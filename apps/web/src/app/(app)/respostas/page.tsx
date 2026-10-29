@@ -164,7 +164,7 @@ export default function RespostasPage() {
     <PageShell width="max-w-4xl">
       <PageHeader
         title="Respostas rápidas"
-        subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Use “Inserir variável” para nome do cliente, saudação, empresa e campos da ficha.</>}
+        subtitle={<>Organize em pastas. No chat, o atendente clica e o texto vai para o campo de digitação. Use “Inserir variável” para nome do contato, saudação, empresa e campos da ficha.</>}
         action={podeEditar && (
           <div className="flex gap-2">
             <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onImport(f); }} />

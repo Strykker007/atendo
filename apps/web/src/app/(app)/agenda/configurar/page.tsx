@@ -57,7 +57,7 @@ export default function ConfigurarAgendaPage() {
             {pros.data?.map((p) => (
               <li key={p.id} className={cn('px-4 py-3 flex items-center gap-3', !p.isActive && 'opacity-50')}>
                 <span className="w-3 h-3 rounded-full shrink-0" style={{ background: p.color }} />
-                <div className="min-w-0 flex-1"><div className="text-sm font-medium text-ink">{p.name}{!p.isActive && <span className="text-xs text-muted"> · inativo</span>}</div><div className="text-xs text-muted">{p.phone ? `WhatsApp ${formatPhone(p.phone)}` : <span className="text-warn">sem WhatsApp — não recebe o aviso do próximo cliente</span>} · {new Set(p.hours.map((h) => h.weekday)).size} dias/semana</div></div>
+                <div className="min-w-0 flex-1"><div className="text-sm font-medium text-ink">{p.name}{!p.isActive && <span className="text-xs text-muted"> · inativo</span>}</div><div className="text-xs text-muted">{p.phone ? `WhatsApp ${formatPhone(p.phone)}` : <span className="text-warn">sem WhatsApp — não recebe o aviso do próximo atendimento</span>} · {new Set(p.hours.map((h) => h.weekday)).size} dias/semana</div></div>
                 <button onClick={() => setProModal(p)} className="text-faint hover:text-ink p-1"><Pencil size={15} /></button>
                 <button title="Excluir" onClick={() => setConfirm({ kind: 'pro', id: p.id, name: p.name, isActive: p.isActive })} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
               </li>
@@ -104,21 +104,21 @@ export default function ConfigurarAgendaPage() {
   );
 }
 
-/** Lembretes ao cliente: marca as antecedências em vez de digitar minutos. */
+/** Lembretes ao contato: marca as antecedências em vez de digitar minutos. */
 function ReminderPicker({ value, onChange, pending }: { value: number[]; onChange: (v: number[]) => void; pending: boolean }) {
   // valor antigo fora das opções (digitado na versão anterior) continua aparecendo e pode ser desmarcado
   const options = [...new Set([...REMINDER_PRESETS, ...value])].sort((a, b) => b - a);
   const toggle = (m: number) => onChange(value.includes(m) ? value.filter((x) => x !== m) : [...value, m]);
   return (
     <div className="space-y-1.5">
-      <div className="text-sm font-medium text-ink">Lembretes ao cliente</div>
+      <div className="text-sm font-medium text-ink">Lembretes ao contato</div>
       <div className="flex flex-wrap gap-1.5">
         {options.map((m) => {
           const on = value.includes(m);
           return <button key={m} type="button" disabled={pending} onClick={() => toggle(m)} aria-pressed={on} className={cn('rounded-full border px-3 py-1 text-xs transition', on ? 'border-accent bg-accent-soft text-accent-ink font-medium' : 'border-line text-muted hover:text-ink hover:border-ink/30')}>{reminderLabel(m)}</button>;
         })}
       </div>
-      <p className="text-xs text-muted">{value.length ? `O cliente recebe ${value.length} lembrete${value.length > 1 ? 's' : ''}.` : 'Nenhum lembrete: o cliente não é avisado antes do horário.'}</p>
+      <p className="text-xs text-muted">{value.length ? `O contato recebe ${value.length} lembrete${value.length > 1 ? 's' : ''}.` : 'Nenhum lembrete: o contato não é avisado antes do horário.'}</p>
     </div>
   );
 }
@@ -142,7 +142,7 @@ function DeleteDialog({ target, onClose, onDelete, onDeactivate }: { target: Del
           {u.future > 0
             ? <><b className="text-ink">“{target?.name}”</b> tem {u.future} agendamento{u.future > 1 ? 's' : ''} futuro{u.future > 1 ? 's' : ''}. Cancele ou remarque antes de excluir — ou desative para não receber novos.</>
             : u.past > 0
-              ? <><b className="text-ink">“{target?.name}”</b> tem {u.past} agendamento{u.past > 1 ? 's' : ''} no histórico. Excluir apaga esse histórico junto (some também da ficha dos clientes). Para só tirar da agenda e guardar o histórico, desative.</>
+              ? <><b className="text-ink">“{target?.name}”</b> tem {u.past} agendamento{u.past > 1 ? 's' : ''} no histórico. Excluir apaga esse histórico junto (some também da ficha dos contatos). Para só tirar da agenda e guardar o histórico, desative.</>
               : <><b className="text-ink">“{target?.name}”</b> nunca foi usado em agendamentos e será excluído definitivamente.</>}
         </p>
       )}
@@ -165,7 +165,7 @@ function ReminderTemplate({ numberId, saved }: { numberId: string; saved: Templa
   return (
     <div className="border-t border-line pt-3 space-y-3">
       <div className="flex items-center gap-2"><FileCheck2 size={15} className="text-muted" /><span className="text-sm font-semibold text-ink">Template do lembrete (API oficial)</span></div>
-      <p className="text-xs text-muted">Usado quando o cliente não escreveu nas últimas 24h — fora disso a Meta recusa mensagem livre. Para o cliente confirmar pelo próprio lembrete, crie os botões de resposta rápida <b>Confirmar</b> e <b>Remarcar</b> no template.{!saved && <b className="text-warn-ink"> Sem template, esses lembretes não são enviados.</b>}</p>
+      <p className="text-xs text-muted">Usado quando o contato não escreveu nas últimas 24h — fora disso a Meta recusa mensagem livre. Para o contato confirmar pelo próprio lembrete, crie os botões de resposta rápida <b>Confirmar</b> e <b>Remarcar</b> no template.{!saved && <b className="text-warn-ink"> Sem template, esses lembretes não são enviados.</b>}</p>
       <div className="max-w-xl space-y-3">
         <TemplateFields choice={choice} hint={<>Variáveis do agendamento: {'{{servico}}'}, {'{{profissional}}'}, {'{{data}}'}, {'{{hora}}'}, {'{{agendamento}}'} — e as do contato, como {'{{contact.first_name}}'}.</>} />
         <div className="flex gap-2">
@@ -189,7 +189,7 @@ function ProfessionalModal({ value, onClose, onSave, pending }: { value: Partial
       <form onSubmit={(e) => { e.preventDefault(); onSave(f); }} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome"><input className={inputCls} value={f.name ?? ''} onChange={(e) => setF({ ...f, name: e.target.value })} required autoFocus /></Field>
-          <Field label="WhatsApp" hint="recebe o aviso do próximo cliente"><PhoneInput value={f.phone ?? ''} onChange={(d) => setF({ ...f, phone: d })} /></Field>
+          <Field label="WhatsApp" hint="recebe o aviso do próximo atendimento"><PhoneInput value={f.phone ?? ''} onChange={(d) => setF({ ...f, phone: d })} /></Field>
         </div>
         <Field label="Cor na agenda"><div className="flex gap-2">{PALETTE.map((c) => <button type="button" key={c} onClick={() => setF({ ...f, color: c })} className="w-7 h-7 rounded-full" style={{ background: c, boxShadow: f.color === c ? `0 0 0 2px var(--panel), 0 0 0 4px ${c}` : undefined }} />)}</div></Field>
         <Field label="Horários de trabalho" hint="Marque os dias e ajuste os intervalos (o robô só oferece horários dentro deles)">

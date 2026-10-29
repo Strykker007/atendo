@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Facebook, Instagram } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { APP_URL, SITE } from '@/lib/site';
@@ -19,7 +20,7 @@ export function LandingFooter() {
           <p className="text-sm font-semibold text-ink">Navegação</p>
           <ul className="mt-3 space-y-2">
             {NAV_LINKS.map((l) => (
-              <li key={l.href}><a href={l.href} className="text-sm text-muted transition-colors hover:text-ink">{l.label}</a></li>
+              <li key={l.href}><Link href={`/${l.href}`} className="text-sm text-muted transition-colors hover:text-ink">{l.label}</Link></li>
             ))}
           </ul>
         </div>
@@ -28,6 +29,7 @@ export function LandingFooter() {
           <ul className="mt-3 space-y-2">
             <li><a href={`${APP_URL}/login`} className="text-sm text-muted transition-colors hover:text-ink">Entrar no painel</a></li>
             <li><a href={`mailto:${SITE.supportEmail}`} className="text-sm text-muted transition-colors hover:text-ink">{SITE.supportEmail}</a></li>
+            <li><Link href="/privacidade" className="text-sm text-muted transition-colors hover:text-ink">Política de privacidade</Link></li>
           </ul>
         </div>
       </div>

@@ -334,6 +334,14 @@ saldo — e usar o resultado nas mensagens e condições seguintes.
 - **Exportação**: URL e headers sensíveis saem como no webhook (`scrubFlowDefinition`); na
   importação o card vem marcado "revisar configuração".
 
+## Atraso antes da 1ª mensagem (Início)
+
+Bloco **Início** → seletor "Atraso antes da 1ª mensagem": Na hora (padrão), 3, 5, 10, 15, 30 s, 1, 2, 5 ou 10 min (`START_DELAY_OPTIONS`; dado `start.data.delaySec`, teto `START_MAX_DELAY_SEC` = 600 s). O card mostra "Começa aqui · espera …".
+
+- Motor: ao passar pelo Início com atraso, o run fica `waiting` com `waitUntil` e um job `resume` (o mesmo do Atraso inteligente); a retomada segue para o bloco ligado ao Início. Pausa do robô reagenda (`porTempo` inclui `start`); conversa encerrada ou robô pausado no vencimento seguem as regras do `resume`.
+- Vale para qualquer gatilho e também quando outro fluxo conecta a este (o run novo passa pelo Início).
+- Mensagem do contato durante a espera é ignorada, como no Atraso inteligente. Fluxo antigo (sem `delaySec`) não muda.
+
 ## Atraso inteligente
 
 Dados: `{ mode?, minutes, unit?, businessHours? }`.

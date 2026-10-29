@@ -1,11 +1,15 @@
 'use client';
 /** Importar e exportar a base de contatos (planilha). */
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ConversationStatus } from '@atendo/shared';
+import type { Conversation } from './core';
 import { api, ApiError, getAccessToken, refresh } from '../api';
 import { useUI } from '../store';
 
 export interface ContactImportReport {
   total: number; created: number; updated: number; unchanged: number; duplicates: number;
+  /** já existiam em outro condomínio/empresa: não alterados */
+  outOfScope?: number;
   invalid: { line: number; value: string; reason: string }[]; invalidCount: number;
   unknownTags: string[]; dryRun: boolean;
 }
@@ -45,3 +49,17 @@ export async function downloadContactsCsv() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/** Linha da tela Contatos: a ficha + a conversa mais recente no escopo de quem vê (ação "Abrir conversa"). */
+export type ContactRow = Conversation['contact'] & {
+  lastConversation: { id: string; status: ConversationStatus; lastMessageAt: string | null; number: { id: string; label: string }; assignee: { id: string; name: string } | null } | null;
+};
+
+/** Base de contatos que a pessoa enxerga, com busca no servidor, de 50 em 50. */
+export const useContactsList = (q: string) =>
+  useInfiniteQuery({
+    queryKey: ['contacts-list', q],
+    queryFn: ({ pageParam }) => api<{ items: ContactRow[]; nextCursor: string | null }>(`/conversations/contacts?q=${encodeURIComponent(q)}${pageParam ? `&cursor=${pageParam}` : ''}`),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });

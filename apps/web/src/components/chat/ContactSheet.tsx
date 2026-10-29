@@ -94,7 +94,7 @@ export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: 
             A checagem do WhatsApp disse que este telefone <b>não tem WhatsApp</b>. Confira o número — mensagens automáticas não saem para ele até o contato escrever.
           </p>
         )}
-        <Field label="Nome"><input readOnly={!podeEditar} className={inputCls} value={form.name} onChange={set('name')} maxLength={80} placeholder="Como o cliente se chama" /></Field>
+        <Field label="Nome"><input readOnly={!podeEditar} className={inputCls} value={form.name} onChange={set('name')} maxLength={80} placeholder="Como o contato se chama" /></Field>
         <Field label="E-mail"><input readOnly={!podeEditar} className={inputCls} type="email" value={form.email} onChange={set('email')} maxLength={160} placeholder="para orçamento, nota fiscal…" /></Field>
         <Field label="CPF / CNPJ" hint="Usado no Pix automático do orçamento.">
           <input readOnly={!podeEditar} className={inputCls} inputMode="numeric" value={form.document} onChange={(e) => setForm((f) => ({ ...f, document: formatDoc(e.target.value) }))} maxLength={18} placeholder="000.000.000-00" />
@@ -103,9 +103,9 @@ export function ContactSheet({ contact, onClose }: { contact: Contato; onClose: 
         <Field label="Observação 1"><textarea readOnly={!podeEditar} className={inputCls} rows={2} value={form.note1} onChange={set('note1')} maxLength={1000} placeholder="Preferências, histórico, o que evitar…" /></Field>
         <Field label="Observação 2"><textarea readOnly={!podeEditar} className={inputCls} rows={2} value={form.note2} onChange={set('note2')} maxLength={1000} /></Field>
         <div className="space-y-2 border-t border-line pt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">Outras informações deste cliente</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">Outras informações deste contato</div>
           {extras.length === 0 && !atributos.isLoading && (
-            <p className="text-[11.5px] text-muted">Nenhum campo extra. Adicione o que for útil para este cliente: CPF, placa do carro, plano, aniversário…</p>
+            <p className="text-[11.5px] text-muted">Nenhum campo extra. Adicione o que for útil para este contato: CPF, placa do carro, plano, aniversário…</p>
           )}
           {extras.map((a, i) => (
             <div key={i} className="flex items-start gap-1.5">

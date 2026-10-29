@@ -35,8 +35,8 @@ export interface PlanoDaRecuperacao {
   awaitingSince?: Date | null;
 }
 
-/** `msgs` em ordem cronológica. `isento`: chat livre (contato isento ou grupo) — nunca fila nem espera. */
-export function planoDaRecuperacao(conv: ConversaAtual | null, isento: boolean, msgs: Recuperada[]): PlanoDaRecuperacao {
+/** `msgs` em ordem cronológica. `livre`: chat livre (grupo) — nunca fila nem espera. Contato isento segue a fila. */
+export function planoDaRecuperacao(conv: ConversaAtual | null, livre: boolean, msgs: Recuperada[]): PlanoDaRecuperacao {
   const plano: PlanoDaRecuperacao = { unreadIncrement: 0 };
   const corte = conv?.lastMessageAt?.getTime() ?? -Infinity;
 
@@ -54,7 +54,7 @@ export function planoDaRecuperacao(conv: ConversaAtual | null, isento: boolean, 
   novas.forEach((m, i) => { if (m.fromMe) ultimaEnviada = i; });
   const semResposta = novas.slice(ultimaEnviada + 1);
 
-  if (isento) {
+  if (livre) {
     if (!conv || conv.status !== 'in_progress') plano.status = 'in_progress';
     if (semResposta.length) plano.unreadIncrement = semResposta.length;
     return plano;

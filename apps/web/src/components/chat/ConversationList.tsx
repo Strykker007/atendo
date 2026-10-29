@@ -19,7 +19,7 @@ import { BulkCloseModal } from './BulkCloseModal';
 import { NewConversationModal } from './NewConversationModal';
 import { Button } from '@/components/ui/Button';
 import { usePersistedState } from '@/lib/persisted';
-import { useCan } from '@/lib/hooks';
+import { isFreeChat, useCan } from '@/lib/hooks';
 
 /** Semáforo: cada status tem cor (texto/faixa) e fundo suave. */
 export const STATUS_META: Record<ConversationStatus, { label: string; short: string; color: string; soft: string; bar: string }> = {
@@ -122,8 +122,9 @@ export function ConversationList() {
     : null;
   // encerrada não fica fixada fora de "Encerradas": encerrar é sair da fila, não uma resposta
   // que muda de aba — senão ela seguia em "Em atendimento" até trocar de conversa ou dar F5
-  // livre fica também em "Atendendo" (lá ela aparece junto da fila, com o selo Livre)
-  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') && (!!fixadaAtual.ticketExempt === (status === 'free') || (!!fixadaAtual.ticketExempt && status === 'in_progress')) ? fixadaAtual : null;
+  // livre (grupo, isenta antiga sem dono) fica também em "Atendendo" (junto da fila, com o selo Livre);
+  // contato isento comum segue as abas como qualquer conversa
+  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') && (status === 'free' ? !!fixadaAtual.ticketExempt : !isFreeChat(fixadaAtual) || status === 'in_progress') ? fixadaAtual : null;
   const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
@@ -458,7 +459,8 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
   const name = c.contact.name ?? `+${c.contact.phone}`;
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   // livre (contato isento) em "Atendendo": cor e selo próprios, para não parecer atendimento
-  const m = c.ticketExempt ? FREE_META : STATUS_META[c.status];
+  const livre = isFreeChat(c);
+  const m = livre ? FREE_META : STATUS_META[c.status];
   /** menu do card: clique direito no card ou os três pontos que aparecem no hover */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   // confirmação do atalho "Não abrir atendimento": fica no card porque o menu fecha ao clicar
@@ -499,7 +501,7 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
             todo card tem a mesma altura em qualquer aba. Se só aparecesse quando há badge, a fila
             "Aguardando" (quase sempre sem atendente/tag) ficava com cards mais baixos que as outras */}
         <div className="flex flex-nowrap items-center gap-1 mt-1 h-5 min-w-0">
-          {c.ticketExempt && <span className="text-[10px] font-semibold rounded-md px-1.5 py-0.5 shrink-0 bg-field text-muted" title="Contato isento de ticket: não abre atendimento, não conta na fila nem em relatório">Livre</span>}
+          {c.ticketExempt && <span className="text-[10px] font-semibold rounded-md px-1.5 py-0.5 shrink-0 bg-field text-muted" title={livre ? 'Conversa livre: sem dono, fora da fila e dos relatórios' : 'Contato isento: atendimento normal, mas fora dos relatórios'}>{livre ? 'Livre' : 'Sem relatório'}</span>}
           <DepartmentBadge department={c.department} className="max-w-[110px] shrink-0" />
           <OriginBadge origin={c.origin} data={c.originData} />
           {encerramento && c.lastClosedAt && <span className="min-w-0 shrink"><LastCloseInline conv={c} small /></span>}
@@ -581,10 +583,10 @@ function MenuDoCard({ c, active, pos, onFechar, onIsentar }: { c: Conversation; 
           role="menuitem"
           onClick={() => { onIsentar(); onFechar(); }}
           className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-ink hover:bg-field"
-          title={isencao.isento ? 'Tira o número da lista de isentos' : 'Diretoria, fornecedor, celular da equipe: conversa livre, fora da fila e dos relatórios'}
+          title={isencao.isento ? 'Tira o número da lista de isentos' : 'Diretoria, fornecedor, celular da equipe: atendimento normal, mas fora dos relatórios'}
         >
           {isencao.isento ? <Bell size={14} className="text-muted" /> : <BellOff size={14} className="text-muted" />}
-          {isencao.isento ? 'Voltar a abrir atendimento' : 'Não abrir atendimento'}
+          {isencao.isento ? 'Voltar a gerar relatório' : 'Não gerar relatório'}
         </button>
       )}
     </div>,

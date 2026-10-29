@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { useAgents, useNumbers, useUsage, useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, useAdminCompanies, useAdminCompanyOptions, useAdminCreateCompany, useAdminUpdateCompany, useAdminDeleteCompany, useAdminCompanyBilling, usePlans, type Company, type CompanyInput, type CompanyBillingInput } from '@/lib/hooks';
+import { cn } from '@/lib/utils';
+import { useMe, useTenantSettings, useUpdateTenantSettings, useAgents, useNumbers, useUsage, useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany, useAdminCompanies, useAdminCompanyOptions, useAdminCreateCompany, useAdminUpdateCompany, useAdminDeleteCompany, useAdminCompanyBilling, usePlans, type Company, type CompanyInput, type CompanyBillingInput } from '@/lib/hooks';
 
 type Draft = { id?: string; name: string; cnpj: string; description: string; numberIds: string[]; userIds: string[] };
 
@@ -22,6 +23,8 @@ function mascaraCnpj(v: string) {
 
 type Mut<T> = { mutateAsync: (v: T) => Promise<unknown>; isPending: boolean };
 interface Source {
+  /** embaixo da lista (tela do cliente: a chave de separação por empresa) */
+  footer?: React.ReactNode;
   companies: Company[];
   loading: boolean;
   numbers: { id: string; label: string; phone: string }[];
@@ -55,7 +58,34 @@ function TenantCompanies() {
   const create = useCreateCompany();
   const update = useUpdateCompany();
   const remove = useDeleteCompany();
-  return <CompaniesView companies={companies.data ?? []} loading={companies.isLoading} numbers={numbers.data ?? []} people={agents.data ?? []} max={usage.data?.limits?.maxCompanies ?? null} create={create} update={update} remove={remove} />;
+  return <CompaniesView footer={<SeparacaoPorEmpresa temEmpresas={!!companies.data?.length} />} companies={companies.data ?? []} loading={companies.isLoading} numbers={numbers.data ?? []} people={agents.data ?? []} max={usage.data?.limits?.maxCompanies ?? null} create={create} update={update} remove={remove} />;
+}
+
+/**
+ * `companyIsolation` (docs/empresas.md#separar-por-empresa): quem é vinculado a empresas passa a ver
+ * só a equipe, a planilha de contatos e as transmissões delas. Desligado = como sempre foi. Só o
+ * admin da conta muda (a API recusa os demais) — quem é restrito não pode tirar a própria trava.
+ */
+function SeparacaoPorEmpresa({ temEmpresas }: { temEmpresas: boolean }) {
+  const me = useMe().data;
+  const settings = useTenantSettings().data;
+  const salvar = useUpdateTenantSettings();
+  const admin = me?.role === 'tenant_admin' || !!me?.impersonatorId;
+  if (!settings || !temEmpresas) return null;
+  const on = !!settings.companyIsolation;
+  return (
+    <label className={cn('flex items-start gap-3 rounded-xl border border-line px-3 py-2.5', admin ? 'cursor-pointer' : 'opacity-70')}>
+      <input type="checkbox" className="mt-1" checked={on} disabled={!admin || salvar.isPending}
+        onChange={(e) => salvar.mutateAsync({ companyIsolation: e.target.checked }).then(() => toast.ok(e.target.checked ? 'Equipe, contatos e transmissões separados por empresa' : 'Separação desligada')).catch(toast.err)} />
+      <span className="text-sm">
+        <span className="font-medium text-ink">Separar também equipe, contatos e transmissões por empresa</span>
+        <span className="block text-[12.5px] text-muted">
+          Ligado: quem é vinculado a empresas vê só a equipe delas (lista, escalas, registro de acessos), exporta só os contatos delas e faz transmissões só pelos números delas.
+          Desligado: o vínculo separa só as conversas e os relatórios.{!admin && ' Só o administrador da conta muda.'}
+        </span>
+      </span>
+    </label>
+  );
 }
 
 function OwnerCompanies({ tenantId }: { tenantId: string }) {
@@ -68,7 +98,7 @@ function OwnerCompanies({ tenantId }: { tenantId: string }) {
   return <CompaniesView owner billing={billing} companies={companies.data ?? []} loading={companies.isLoading} numbers={opts.data?.numbers ?? []} people={opts.data?.users ?? []} max={opts.data?.maxCompanies ?? null} create={create} update={update} remove={remove} />;
 }
 
-function CompaniesView({ companies: lista, loading, numbers, people, max, create, update, remove, owner, billing }: Source) {
+function CompaniesView({ footer, companies: lista, loading, numbers, people, max, create, update, remove, owner, billing }: Source) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [cobranca, setCobranca] = useState<Company | null>(null);
   const [deleting, setDeleting] = useState<Company | null>(null);
@@ -136,6 +166,7 @@ function CompaniesView({ companies: lista, loading, numbers, people, max, create
           </li>
         ))}
       </ul>
+      {footer}
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? 'Editar empresa' : 'Nova empresa'}>
         {editing && (

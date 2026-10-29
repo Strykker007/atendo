@@ -7,7 +7,7 @@ import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { cn, formatDoc } from '@/lib/utils';
-import { budgetLink, useBudgets, useCan, useConversation, useCreateBudget, usePaymentGateway, usePixKeys, useRefundBudget, useSetBudgetStatus, type Budget } from '@/lib/hooks';
+import { budgetLink, useBudgets, useCan, useConversation, useCreateBudget, usePaymentGateway, usePixKeys, useRefundBudget, useSetBudgetStatus, useTenantSettings, type Budget } from '@/lib/hooks';
 
 /**
  * Orçamento rápido no chat (docs/orcamentos.md).
@@ -53,7 +53,14 @@ function Aba({ ativa, onClick, children }: { ativa: boolean; onClick: () => void
   );
 }
 
+/** rótulos dos itens: quem vende (farmácia) mantém os de sempre; operação sem venda, genéricos */
+const ROTULOS_ITEM = {
+  venda: { detalhe: 'Dosagem / apresentação', exNome: 'Ex.: Dipirona', exDetalhe: 'Ex.: 500 mg, 30 comp.' },
+  servico: { detalhe: 'Detalhe', exNome: 'Ex.: Manutenção do portão', exDetalhe: 'Ex.: modelo, tamanho, prazo' },
+} as const;
+
 function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; onCriado: (b: Budget) => void }) {
+  const rot = ROTULOS_ITEM[(useTenantSettings().data?.salesEnabled ?? true) ? 'venda' : 'servico'];
   const pix = usePixKeys();
   const gw = usePaymentGateway();
   const criar = useCreateBudget();
@@ -84,7 +91,7 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
     if (!auto && chave === 'none' && !url) return toast.warn('Escolha uma chave Pix ou informe um link de pagamento');
     if (url && !/^https:\/\//i.test(url)) return toast.warn('O link de pagamento precisa começar com https://');
     const digitos = documento.replace(/\D/g, '');
-    if (auto && digitos.length !== 11 && digitos.length !== 14) return toast.warn('Informe o CPF (11 dígitos) ou CNPJ (14 dígitos) do cliente para o Pix automático');
+    if (auto && digitos.length !== 11 && digitos.length !== 14) return toast.warn('Informe o CPF (11 dígitos) ou CNPJ (14 dígitos) do contato para o Pix automático');
     try {
       const b = await criar.mutateAsync({
         conversationId,
@@ -105,12 +112,12 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
     <div className="space-y-4">
       <div className="space-y-2">
         <div className="hidden sm:grid grid-cols-[1fr_1fr_4.5rem_8rem_2rem] gap-2 text-xs text-muted px-0.5">
-          <span>Item</span><span>Dosagem / apresentação</span><span>Qtd.</span><span>Valor unit.</span><span />
+          <span>Item</span><span>{rot.detalhe}</span><span>Qtd.</span><span>Valor unit.</span><span />
         </div>
         {itens.map((it, i) => (
           <div key={i} className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_4.5rem_8rem_2rem] gap-2 items-center">
-            <input className={cn(inputCls, 'col-span-2 sm:col-span-1')} placeholder="Ex.: Dipirona" value={it.name} maxLength={120} onChange={(e) => mudar(i, { name: e.target.value })} />
-            <input className={cn(inputCls, 'col-span-2 sm:col-span-1')} placeholder="Ex.: 500 mg, 30 comp." value={it.dosage ?? ''} maxLength={120} onChange={(e) => mudar(i, { dosage: e.target.value })} />
+            <input className={cn(inputCls, 'col-span-2 sm:col-span-1')} placeholder={rot.exNome} value={it.name} maxLength={120} onChange={(e) => mudar(i, { name: e.target.value })} />
+            <input className={cn(inputCls, 'col-span-2 sm:col-span-1')} placeholder={rot.exDetalhe} value={it.dosage ?? ''} maxLength={120} onChange={(e) => mudar(i, { dosage: e.target.value })} />
             <input className={cn(inputCls, 'text-right tnum')} type="number" min={1} max={9999} value={it.quantity} onChange={(e) => mudar(i, { quantity: Math.max(1, Math.min(9999, Math.floor(Number(e.target.value) || 1))) })} aria-label="Quantidade" />
             <MoneyInput value={it.unitPrice} onChange={(v) => mudar(i, { unitPrice: v ?? 0 })} aria-label="Valor unitário" />
             <button type="button" onClick={() => setItens((l) => (l.length > 1 ? l.filter((_, j) => j !== i) : [vazio()]))} className="text-faint hover:text-danger justify-self-center" title="Remover item" aria-label="Remover item">
@@ -134,7 +141,7 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
         </label>
       )}
       {auto && (
-        <Field label="CPF / CNPJ do cliente" hint={docFicha ? 'Da ficha do contato. Alterado aqui, a ficha é atualizada.' : 'O Asaas exige para gerar o Pix. Fica salvo na ficha do contato.'}>
+        <Field label="CPF / CNPJ do contato" hint={docFicha ? 'Da ficha do contato. Alterado aqui, a ficha é atualizada.' : 'O Asaas exige para gerar o Pix. Fica salvo na ficha do contato.'}>
           <input className={cn(inputCls, 'tnum')} inputMode="numeric" placeholder="000.000.000-00" value={documento} maxLength={18} onChange={(e) => setDoc(formatDoc(e.target.value))} />
         </Field>
       )}
@@ -149,12 +156,12 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
         {!auto && <Field label="Link de pagamento (opcional)">
           <input className={inputCls} placeholder="https://…" value={paymentUrl} maxLength={500} onChange={(e) => setPaymentUrl(e.target.value)} />
         </Field>}
-        <Field label="Validade do link" hint={`No vencimento o cliente não vê mais o Pix${auto ? `; a cobrança é cancelada ${BUDGET_GRACE_MINUTES} min depois` : ''}.`}>
+        <Field label="Validade do link" hint={`No vencimento o contato não vê mais o Pix${auto ? `; a cobrança é cancelada ${BUDGET_GRACE_MINUTES} min depois` : ''}.`}>
           <select className={inputCls} value={validity} onChange={(e) => setValidity(e.target.value as BudgetValidity)}>
             {BUDGET_VALIDITY.map((v) => <option key={v} value={v}>{BUDGET_VALIDITY_LABEL[v]}</option>)}
           </select>
         </Field>
-        <Field label="Observação (opcional)" hint="Aparece na página do cliente.">
+        <Field label="Observação (opcional)" hint="Aparece na página do contato.">
           <input className={inputCls} placeholder="Ex.: entrega amanhã pela manhã" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
         </Field>
       </div>
@@ -215,7 +222,7 @@ function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { c
             )}
             {b.status === 'PAID' && podeEstornar && (
               <Button variant="subtle" size="sm" loading={estornar.isPending && estornar.variables?.id === b.id}
-                onClick={() => { if (confirm(b.paidVia === 'asaas' ? 'Estornar? O Asaas devolve o dinheiro ao cliente e a venda sai da meta.' : 'Registrar estorno? A venda sai da meta e do faturamento.')) estornar.mutateAsync({ conversationId, id: b.id }).then(() => toast.ok('Estorno registrado'), toast.err); }}>
+                onClick={() => { if (confirm(b.paidVia === 'asaas' ? 'Estornar? O Asaas devolve o dinheiro ao contato e a venda sai da meta.' : 'Registrar estorno? A venda sai da meta e do faturamento.')) estornar.mutateAsync({ conversationId, id: b.id }).then(() => toast.ok('Estorno registrado'), toast.err); }}>
                 Estornar
               </Button>
             )}

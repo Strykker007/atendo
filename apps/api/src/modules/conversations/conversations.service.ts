@@ -44,6 +44,13 @@ type Viewer = { id: string; role: string; permissions?: readonly Permission[]; n
 /** O que a lista e o cabeçalho do chat mostram do departamento (etiqueta com cor). */
 export const DEPARTMENT_SELECT = { id: true, name: true, color: true, isActive: true } as const;
 const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permissions?.includes(p);
+/**
+ * Conversa livre: aberta e sem dono, fora da fila — o grupo (docs/grupos.md) e as de contato isento
+ * marcadas antes de o isento passar a seguir a fila. Contato isento hoje é atendimento comum, só
+ * fora dos relatórios (docs/contatos-isentos.md).
+ */
+export const LIVRE = { ticketExempt: true, status: 'in_progress', assigneeId: null } satisfies Prisma.ConversationWhereInput;
+const ehLivre = (c: { ticketExempt: boolean; status: string; assigneeId: string | null }) => c.ticketExempt && c.status === 'in_progress' && !c.assigneeId;
 
 
 const META_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -208,11 +215,12 @@ export class ConversationsService {
     const dept = departmentWhere(viewer, q.departmentId);
     const ownership: Prisma.ConversationWhereInput =
       q.free ? {} : q.assigneeId && isAdmin ? { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId } : !isAdmin && q.status === 'in_progress' ? { assigneeId: viewer.id } : {};
-    // "Atendendo" também mostra as conversas livres (contato isento: o 2º número da loja, a equipe),
-    // para responder sem ir ao filtro — sem dono, então fora da regra de posse. Não com filtro de
-    // consultor/desfecho (livre não tem nenhum dos dois). Contadores e relatórios seguem sem elas
+    // Contato isento (docs/contatos-isentos.md) segue as abas como qualquer atendimento — só fica
+    // fora dos relatórios. "Atendendo" mostra também as conversas livres (grupo; e as isentas de
+    // antes, abertas sem dono) para responder sem ir ao filtro — sem dono, então fora da regra de
+    // posse. Não com filtro de consultor/desfecho (livre não tem nenhum dos dois)
     const comLivres = !q.free && q.status === 'in_progress' && !q.assigneeId && !q.lastOutcome && !q.closeReasonId;
-    const fila: Prisma.ConversationWhereInput = { ticketExempt: false, ...(q.status && { status: q.status }), ...ownership };
+    const fila: Prisma.ConversationWhereInput = { ...(q.status && { status: q.status }), ...ownership, NOT: LIVRE };
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
@@ -224,7 +232,7 @@ export class ConversationsService {
       // o número pedido é interseccionado com o escopo do usuário; `null` = pediu um número
       // que ele não opera, e aí a lista vem vazia em vez de ignorar o pedido
       ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
-      ...((dept || comLivres) && { AND: [...(comLivres ? [{ OR: [fila, { ticketExempt: true }] }] : []), ...(dept ? [dept] : [])] }),
+      ...((dept || comLivres) && { AND: [...(comLivres ? [{ OR: [fila, LIVRE] }] : []), ...(dept ? [dept] : [])] }),
       // tag da conversa OU tag do contato
       ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
       // nome/e-mail/telefone do contato, sem acento e por palavras (common/text-search.ts)
@@ -260,8 +268,9 @@ export class ConversationsService {
     const scoped = narrowTo(viewer, numberId);
     const dept = departmentWhere(viewer, departmentId);
     const escopo: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
-    // conversa livre (contato isento) não é fila: conta só na aba "Livres"
-    const base: Prisma.ConversationWhereInput = { ...escopo, ticketExempt: false };
+    // conversa livre (grupo, aberta sem dono) não é fila: conta só na aba "Livres". Contato
+    // isento conta nas abas como qualquer atendimento (relatório é que não o vê)
+    const base: Prisma.ConversationWhereInput = { ...escopo, NOT: LIVRE };
     const [waiting, closed, mine, all, free] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
@@ -812,8 +821,9 @@ export class ConversationsService {
     // Responder = assumir. Atômico: se outra atendente assumiu no meio tempo, falha com o nome dela.
     // Conversa de OUTRA pessoa: ninguém (nem admin) responde ao cliente por ela — admin/gerente usa
     // nota interna (cadeado). Para atender, transfere para si.
-    // Conversa livre (contato isento, docs/contatos-isentos.md) não tem dono: responder não assume.
-    if (conv.assigneeId !== authorId && !conv.ticketExempt) {
+    // Conversa livre (grupo, docs/grupos.md) não tem dono: responder não assume. Contato isento
+    // assume como qualquer atendimento (docs/contatos-isentos.md).
+    if (conv.assigneeId !== authorId && !ehLivre(conv)) {
       const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, OR: [{ assigneeId: null }, { assigneeId: authorId }] }, data: { assigneeId: authorId, status: 'in_progress' } });
       if (r.count === 0) {
         const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
@@ -890,6 +900,34 @@ export class ConversationsService {
    * ainda não são contato. Usuário restrito a números/departamentos só vê contato que já falou
    * por eles, e só a agenda dos números que opera — a busca não pode furar o escopo da lista.
    */
+  /**
+   * Tela Contatos: a base que a pessoa enxerga (mesma régua do "Iniciar conversa": conversou por
+   * um número dela, num departamento que ela vê), com busca e a conversa mais recente de cada um
+   * — é o que a ação "Abrir conversa" usa. Paginada por `cursor` (id do último da página).
+   */
+  async listContacts(tenantId: string, viewer: Viewer, q: { search?: string; cursor?: string; take?: number }) {
+    const take = Math.min(100, Math.max(1, q.take ?? 50));
+    const numeros = numberFilter(viewer);
+    const dept = departmentWhere(viewer);
+    const escopo = { ...(numeros && { numberId: numeros }), ...dept };
+    const rows = await this.prisma.contact.findMany({
+      where: { tenantId, isGroup: false, ...(q.search?.trim() ? textSearch(q.search) : {}), ...((numeros || dept) && { conversations: { some: escopo } }) },
+      select: {
+        id: true, name: true, phone: true, avatarUrl: true, email: true, document: true, address: true, note1: true, note2: true, optOutAt: true, waInvalidAt: true,
+        tags: { select: { tag: true } },
+        conversations: {
+          where: escopo, orderBy: { lastMessageAt: 'desc' }, take: 1,
+          select: { id: true, status: true, lastMessageAt: true, number: { select: { id: true, label: true } }, assignee: { select: { id: true, name: true } } },
+        },
+      },
+      orderBy: [{ name: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
+      take: take + 1,
+      ...(q.cursor && { cursor: { id: q.cursor }, skip: 1 }),
+    });
+    const items = rows.slice(0, take).map(({ conversations, ...c }) => ({ ...this.presentContact({ contact: c }).contact, lastConversation: conversations[0] ?? null }));
+    return { items, nextCursor: rows.length > take ? items[items.length - 1].id : null };
+  }
+
   async startCandidates(tenantId: string, viewer: Viewer, q: string) {
     if (q.trim().length < 2) return { contacts: [], phonebook: [] };
     const match = textSearch(q);
@@ -971,9 +1009,10 @@ export class ConversationsService {
     if (!canUseNumber(author, input.numberId)) throw new ForbiddenException('Você não opera este número.');
     const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: input.numberId, tenantId, isActive: true } });
     if (!number) throw new NotFoundException('Número não encontrado');
-    if (number.status !== 'connected') throw new UnprocessableEntityException(`O número "${number.label}" está desconectado. Conecte-o em Números para enviar.`);
+    // sem texto e sem template: só abre a conversa (nada é enviado) — docs/07-api.md › start
+    const soAbrir = !input.template && !input.text?.trim();
+    if (!soAbrir && number.status !== 'connected') throw new UnprocessableEntityException(`O número "${number.label}" está desconectado. Conecte-o em Números para enviar.`);
     if (input.template && number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
-    if (!input.template && !input.text?.trim()) throw new BadRequestException('Escreva a mensagem ou escolha um template.');
 
     // contato: o escolhido na lista, ou pelo telefone digitado (reaproveita quem já existe)
     let contact = input.contactId ? await this.prisma.contact.findFirst({ where: { id: input.contactId, tenantId } }) : null;
@@ -997,6 +1036,16 @@ export class ConversationsService {
     if (conv && conv.status !== 'closed' && conv.assigneeId && conv.assigneeId !== author.id) {
       const owner = await this.prisma.user.findUnique({ where: { id: conv.assigneeId }, select: { name: true } });
       throw new ConflictException({ code: 'already_assigned', conversationId: conv.id, message: `${owner?.name ?? 'Outro atendente'} já está atendendo este contato neste número.` });
+    }
+    if (soAbrir) {
+      // conversa nova nasce com quem abriu (assumida), fora da fila: vazia na fila, outro pegaria.
+      // Existente fica como está — encerrada continua encerrada até alguém reabrir ou escrever.
+      if (!conv) {
+        conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date() } });
+        await this.claim(tenantId, conv.id, author);
+        return { conversationId: conv.id, status: 'in_progress' as const, message: null };
+      }
+      return { conversationId: conv.id, status: conv.status, message: null };
     }
     if (number.provider === 'meta' && !input.template) {
       const inWindow = conv?.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
@@ -1023,7 +1072,7 @@ export class ConversationsService {
     }
     const { systemMedia: _m, ...msg } = message;
     const sent = await this.send(tenantId, author, conv.id, { ...msg, idempotencyKey: input.idempotencyKey });
-    return { conversationId: conv.id, message: sent };
+    return { conversationId: conv.id, status: 'in_progress' as const, message: sent };
   }
 
   /**
@@ -1497,7 +1546,7 @@ export class ConversationsService {
             }
           : {};
 
-    const antes = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true, botPausedAt: true } });
+    const antes = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true, botPausedAt: true, ticketExempt: true } });
     // tags da conversa = do atendimento (transitórias): congeladas no evento e retiradas ao encerrar
     const transitorias = status === 'closed' ? await this.tagsDoAtendimento([id]) : new Map<string, { ids: string[]; stage: string | null }>();
     if (motivo?.requiresTag && !tagsFim.length && !transitorias.get(id)?.ids.length) {
@@ -1537,7 +1586,8 @@ export class ConversationsService {
         closeReasonId: motivo?.id ?? null,
         stageTagId: transitorias.get(id)?.stage ?? null,
         tagSnapshot: [...new Set([...(transitorias.get(id)?.ids ?? []), ...tagsFim.map((t) => t.id)])],
-        ignoreInReports: interno,
+        // contato isento: encerra de verdade, mas fora dos relatórios (docs/contatos-isentos.md)
+        ignoreInReports: interno || !!antes?.ticketExempt,
       }),
     });
     if (interno) await this.audit.record(tenantId, 'conversation.closed_internal', userId, [{ conversationId: id, data: { closeReasonId: motivo?.id ?? null, reason: motivo?.name ?? null } }]);
@@ -1599,12 +1649,12 @@ export class ConversationsService {
         // o tempo de atendimento no relatório
         status: { not: 'closed' },
         // conversa livre não tem atendimento para encerrar; aparece em "Atendendo" e entraria na seleção
-        ticketExempt: false,
+        NOT: LIVRE,
         ...(escopo && { numberId: escopo }),
         // departamento e posse usam OR: cada um no seu item do AND para não se sobrescreverem
         AND: [departmentWhere(viewer) ?? {}, may(viewer, 'conversations.view_all') ? {} : { OR: [{ assigneeId: viewer.id }, { assigneeId: null }] }],
       },
-      select: { id: true, status: true, botPausedAt: true, lastClosedAt: true },
+      select: { id: true, status: true, botPausedAt: true, lastClosedAt: true, ticketExempt: true },
     });
     // com pagamento confirmado no atendimento, fica de fora: em massa não dá para absorver o
     // pagamento (valor é por conversa) e "Não comprou" com dinheiro recebido seria furo. Uma a uma
@@ -1660,7 +1710,8 @@ export class ConversationsService {
         closeReasonId: motivo?.id ?? null,
         stageTagId: transitorias.get(a.id)?.stage ?? null,
         tagSnapshot: [...new Set([...(transitorias.get(a.id)?.ids ?? []), ...tagsFim.map((t) => t.id)])],
-        ignoreInReports: interno,
+        // contato isento: o encerramento existe (a conversa segue o fluxo), mas não é relatório
+        ignoreInReports: interno || a.ticketExempt,
       })),
     });
     if (interno) await this.audit.record(tenantId, 'conversation.closed_internal', ator, idsAlvo.map((conversationId) => ({ conversationId, data: { closeReasonId: motivo?.id ?? null, reason: motivo?.name ?? null, bulk: true } })));

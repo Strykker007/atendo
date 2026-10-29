@@ -531,6 +531,11 @@ model TenantSettings {
   /// atendimento (condomínio, suporte, órgão público): o encerramento só tem resultado, motivo e
   /// tags — nada vira venda nem faturamento (docs/06-modelo-de-dados.md#encerramento-sem-venda)
   salesEnabled Boolean @default(true)
+  /// Separar por empresa também a equipe (lista, escalas, registro de acessos), a planilha de
+  /// contatos e as transmissões de quem é vinculado a empresas (docs/empresas.md#separar-por-empresa).
+  /// Desligado (padrão) = como sempre foi: o recorte por empresa vale só para conversas e relatórios.
+  /// Só o admin da conta muda
+  companyIsolation Boolean @default(false)
   /// assinatura do atendente (`*Nome:*` na 1ª linha) obrigatória: a API acrescenta quando falta
   requireSignature Boolean @default(false)
   /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na

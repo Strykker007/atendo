@@ -88,16 +88,16 @@ function CloseMessageFields() {
   return (
     <div className="space-y-2.5 border-t border-line pt-3">
       <Regra on={on} disabled={update.isPending}
-        onToggle={() => update.mutateAsync({ closeMessageEnabled: !on }).then(() => toast.ok(!on ? 'O cliente será avisado ao encerrar' : 'Encerramento sem aviso ao cliente')).catch(toast.err)}
-        titulo="Avisar o cliente ao encerrar"
-        desc={on ? 'Ligado: a mensagem abaixo vai para o cliente quando o atendente encerra (antes da pesquisa de satisfação, se houver). Não sai no encerramento interno nem no em massa.' : 'Desligado: o atendimento é encerrado sem mensagem ao cliente.'} />
+        onToggle={() => update.mutateAsync({ closeMessageEnabled: !on }).then(() => toast.ok(!on ? 'O contato será avisado ao encerrar' : 'Encerramento sem aviso ao contato')).catch(toast.err)}
+        titulo="Avisar o contato ao encerrar"
+        desc={on ? 'Ligado: a mensagem abaixo vai para o contato quando o atendente encerra (antes da pesquisa de satisfação, se houver). Não sai no encerramento interno nem no em massa.' : 'Desligado: o atendimento é encerrado sem mensagem ao cliente.'} />
       {on && (
         <div className="space-y-2">
           <label className="block space-y-1">
             <span className="text-xs font-semibold text-muted">Mensagem — use <code className="font-mono">{'{{atendente}}'}</code> (primeiro nome de quem atendeu)</span>
             <textarea className={inputCls} rows={2} maxLength={500} value={texto} onChange={(e) => setTexto(e.target.value)} />
           </label>
-          <p className="text-[11px] text-faint">Deixe em branco para voltar ao texto padrão. Se o cliente responder “ok” ou “obrigado” logo depois, o atendimento continua encerrado.</p>
+          <p className="text-[11px] text-faint">Deixe em branco para voltar ao texto padrão. Se o contato responder “ok” ou “obrigado” logo depois, o atendimento continua encerrado.</p>
           <Button size="sm" onClick={salvar} disabled={!mudou} loading={update.isPending}>Salvar mensagem</Button>
         </div>
       )}

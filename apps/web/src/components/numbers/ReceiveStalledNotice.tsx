@@ -19,7 +19,7 @@ export function ReceiveStalledCard({ number }: { number: NumberItem }) {
     <div className="rounded-xl border border-danger/40 bg-danger-soft p-3 space-y-2 text-[13px] text-ink">
       <p className="flex items-center gap-1.5 font-semibold text-sm text-danger-ink"><MessageSquareOff size={16} /> Este número parou de receber mensagens</p>
       <p>
-        Desde <b>{hora(number.receiveStalledAt!)}</b> as mensagens enviadas saem, mas <b>nenhuma mensagem de cliente chega</b> e nenhuma
+        Desde <b>{hora(number.receiveStalledAt!)}</b> as mensagens enviadas saem, mas <b>nenhuma mensagem de contato chega</b> e nenhuma
         confirmação de entrega volta — mesmo aparecendo &quot;Conectado&quot;. A conexão com o WhatsApp perdeu a chave que abre as mensagens
         recebidas. Não é bloqueio do WhatsApp e nada foi apagado.
       </p>
@@ -32,7 +32,7 @@ export function ReceiveStalledCard({ number }: { number: NumberItem }) {
         </li>
       </ol>
       <p className="text-muted">
-        As conversas e o histórico continuam. As mensagens que os clientes mandaram enquanto o número estava assim <b>não aparecem depois</b> —
+        As conversas e o histórico continuam. As mensagens que os contatos mandaram enquanto o número estava assim <b>não aparecem depois</b> —
         confira no próprio celular quem escreveu nesse período.
       </p>
       {!number.manageable && <p className="text-muted">Você não gerencia a conexão deste número: peça ao administrador da conta.</p>}
@@ -67,7 +67,7 @@ export function ReceiveStalledBanner() {
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-danger text-white">
       <MessageSquareOff size={16} className="shrink-0" />
-      <span className="flex-1">{parados.length > 1 ? 'Os números' : 'O número'} {nomes} {parados.length > 1 ? 'pararam' : 'parou'} de receber mensagens de clientes. É preciso ler o QR de novo.</span>
+      <span className="flex-1">{parados.length > 1 ? 'Os números' : 'O número'} {nomes} {parados.length > 1 ? 'pararam' : 'parou'} de receber mensagens de contatos. É preciso ler o QR de novo.</span>
       <Link href="/numeros" className="underline font-medium whitespace-nowrap">Como resolver</Link>
       <button type="button" onClick={ocultar} className="p-0.5 rounded hover:bg-white/15" title="Ocultar este aviso (volta se acontecer de novo)" aria-label="Ocultar aviso"><X size={15} /></button>
     </div>

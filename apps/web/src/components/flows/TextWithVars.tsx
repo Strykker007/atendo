@@ -150,7 +150,7 @@ export function VarSyntaxHint() {
     <div className="mt-1 border-t border-line px-3 pt-2 pb-1.5 text-[11px] text-muted leading-relaxed">
       Filtros: <code className="font-mono text-ink">{'{{contact.name | upper}}'}</code> · <code className="font-mono">first</code> <code className="font-mono">last</code> <code className="font-mono">title</code> <code className="font-mono">upper</code> <code className="font-mono">lower</code> <code className="font-mono">formatted</code>
       <br />
-      Se vazio: <code className="font-mono text-ink">{"{{contact.first_name || 'Cliente'}}"}</code>
+      Se vazio: <code className="font-mono text-ink">{"{{contact.first_name || 'olá'}}"}</code>
     </div>
   );
 }

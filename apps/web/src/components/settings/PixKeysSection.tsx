@@ -58,7 +58,7 @@ export function PixKeysSection({ podeEditar }: { podeEditar: boolean }) {
       <div className="flex items-end justify-between gap-3 mb-3">
         <div>
           <h2 className="font-display font-semibold text-ink flex items-center gap-2"><QrCode size={16} className="text-ok" /> Chaves Pix</h2>
-          <p className="text-xs text-muted mt-0.5">Aparecem na pasta “Pix” do chat. Um clique envia ao cliente o cartão com o botão “Copiar chave Pix”.</p>
+          <p className="text-xs text-muted mt-0.5">Aparecem na pasta “Pix” do chat. Um clique envia ao contato o cartão com o botão “Copiar chave Pix”.</p>
         </div>
         {podeEditar && <Button size="sm" icon={<Plus size={14} />} onClick={() => setDraft({ title: '', keyType: 'cnpj', key: '', holderName: '' })}>Nova chave</Button>}
       </div>
