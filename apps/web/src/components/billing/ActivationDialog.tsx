@@ -5,6 +5,7 @@ import { isValidCpfCnpj } from '@atendo/shared';
 import { cn, formatDoc } from '@/lib/utils';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { MoneyInput } from '@/components/ui/MoneyInput';
+import { DateInput } from '@/components/ui/DatePicker';
 import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
@@ -83,7 +84,7 @@ export function ActivationDialog({ tenantId, onClose }: { tenantId: string; onCl
               </div>
               <div className="grid sm:grid-cols-3 gap-3">
                 <Field label="Desconto (opcional)"><MoneyInput value={desconto} onChange={(v) => setDesconto(v ?? 0)} aria-label="Desconto" /></Field>
-                <Field label="Vencimento"><input type="date" className={inputCls} min={hojeSP()} value={vence} onChange={(e) => setVence(e.target.value)} /></Field>
+                <Field label="Vencimento"><DateInput value={vence} min={hojeSP()} onChange={setVence} aria-label="Vencimento" /></Field>
                 <Field label="CPF / CNPJ do cliente" hint={d.document ? 'Do cadastro.' : 'Vai para o cadastro do cliente.'}>
                   <input className={cn(inputCls, 'tnum')} inputMode="numeric" value={doc} maxLength={18} placeholder="00.000.000/0000-00" onChange={(e) => setDoc(formatDoc(e.target.value))} />
                 </Field>

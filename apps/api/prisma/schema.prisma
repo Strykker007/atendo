@@ -75,6 +75,7 @@ model Tenant {
   usageCounters UsageCounter[]
   invoices      Invoice[]
   activationCharges ActivationCharge[]
+  financeEntries FinanceEntry[]
   alerts        UsageAlert[]
   aiUsage       AiUsage[]
   settings      TenantSettings?
@@ -2710,3 +2711,186 @@ model SupportTicket {
   @@index([chatId, status])
   @@map("support_tickets")
 }
+
+// ---------- Fechamento financeiro do dono (docs/36-fechamento-financeiro.md) ----------
+
+/// Lançamento do caixa da plataforma: entrada (mensalidade recebida por fora, serviço avulso) ou
+/// saída (servidor, Meta, folha, pró-labore, imposto…). O que vem do Asaas/Stripe NÃO entra aqui:
+/// sai de `invoices` pagas.
+model FinanceEntry {
+  id          String    @id @default(uuid())
+  /// income | expense
+  kind        String
+  /// `FINANCE_CATEGORIES` (packages/shared/src/finance.ts)
+  category    String
+  description String
+  amount      Decimal   @db.Decimal(12, 2)
+  /// dia em que o dinheiro entrou/saiu
+  date        DateTime
+  /// mês do lançamento (`AAAA-MM`, Brasília) — é por ele que o fechamento soma
+  period      String
+  /// recebimento de um cliente (mensalidade por fora): a assinatura anda um ciclo
+  tenantId    String?
+  /// gerado de um custo fixo/folha (`finance_recurring`) — um por mês
+  recurringId String?
+  /// fixo que não houve neste mês: fica riscado, fora das somas
+  skipped     Boolean   @default(false)
+  /// pago/recebido em; null = em aberto (conta a pagar). O caixa anda por esta data, o fechamento pelo `period`
+  paidAt           DateTime?
+  /// `FINANCE_PAYMENT_METHODS`
+  paymentMethod    String?
+  /// nº da nota fiscal, guia ou boleto
+  documentNumber   String?
+  notes            String?
+  supplierId       String?
+  /// parcelas de uma mesma compra compartilham o grupo
+  installmentGroup String?
+  installmentNo    Int?
+  installmentTotal Int?
+  /// imposto automático sobre o faturamento do mês (`finance_tax_rules`) — um por mês
+  taxRuleId        String?
+  /// valor do imposto automático corrigido à mão (a guia real): não recalcula mais
+  amountLocked     Boolean   @default(false)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant    Tenant?           @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  recurring FinanceRecurring? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+  supplier  FinanceSupplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  taxRule   FinanceTaxRule?   @relation(fields: [taxRuleId], references: [id], onDelete: SetNull)
+
+  @@unique([recurringId, period])
+  @@unique([taxRuleId, period])
+  @@index([period])
+  @@index([tenantId])
+  @@index([paidAt])
+  @@map("finance_entries")
+}
+
+/// Custo fixo ou pessoa da folha: vira um lançamento por mês, sozinho, ao abrir o mês.
+model FinanceRecurring {
+  id          String   @id @default(uuid())
+  /// income | expense (folha e pró-labore são expense com a categoria própria)
+  kind        String   @default("expense")
+  category    String
+  description String
+  amount      Decimal  @db.Decimal(12, 2)
+  /// dia do mês em que costuma ser pago (1–28)
+  dayOfMonth  Int      @default(5)
+  isActive    Boolean  @default(true)
+  /// primeiro mês em que vale (`AAAA-MM`)
+  startPeriod String
+  /// último mês (`AAAA-MM`); null = sem fim
+  endPeriod     String?
+  /// `FINANCE_FREQUENCIES`: monthly | quarterly | semiannual | yearly (conta a partir do `startPeriod`)
+  frequency     String   @default("monthly")
+  /// débito automático/cartão: o lançamento do mês já nasce pago no dia
+  autoPaid      Boolean  @default(false)
+  paymentMethod String?
+  supplierId    String?
+  notes         String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entries  FinanceEntry[]
+  supplier FinanceSupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@map("finance_recurring")
+}
+
+/// Categoria de lançamento do fechamento. O `section` decide a linha do fechamento (`FINANCE_SECTIONS`).
+model FinanceCategory {
+  id        String   @id @default(uuid())
+  name      String
+  /// revenue | tax | cost | expense | payroll | prolabore
+  section   String
+  /// de fábrica: renomeia e desativa, não apaga
+  system    Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  /// default no banco: as de fábrica nascem pela migration
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("finance_categories")
+}
+
+/// Fornecedor / favorecido dos lançamentos (contador, Oracle, Meta, Receita…).
+model FinanceSupplier {
+  id        String   @id @default(uuid())
+  name      String
+  /// CPF/CNPJ só dígitos
+  document  String?
+  pixKey    String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries   FinanceEntry[]
+  recurring FinanceRecurring[]
+
+  @@map("finance_suppliers")
+}
+
+/// Imposto automático: % sobre o que entrou no mês; vira um lançamento a pagar no mês (vence no seguinte).
+model FinanceTaxRule {
+  id          String   @id @default(uuid())
+  name        String
+  categoryId  String
+  percent     Decimal  @db.Decimal(6, 3)
+  /// `FINANCE_TAX_BASES`: all | clients
+  base        String   @default("all")
+  /// dia do vencimento no mês seguinte (DAS: 20)
+  dueDay      Int      @default(20)
+  isActive    Boolean  @default(true)
+  startPeriod String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entries FinanceEntry[]
+
+  @@map("finance_tax_rules")
+}
+
+/// Sócio e a parte dele no que sobra do mês (soma dos ativos = 100%).
+model FinancePartner {
+  id           String   @id @default(uuid())
+  name         String
+  sharePercent Decimal  @db.Decimal(5, 2)
+  pixKey       String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("finance_partners")
+}
+
+/// Mês fechado: números congelados e quanto cada sócio recebe. Fechado, os lançamentos do mês travam.
+model FinanceClosing {
+  id         String   @id @default(uuid())
+  period     String   @unique
+  /// `{ receivedClients, otherIncome, expenses, payroll, prolabore, result, reservePercent, reserve, distributable }`
+  summary    Json
+  /// `{ partnerId, name, percent, amount, paidAt }[]`
+  payouts    Json
+  notes      String?
+  closedById String?
+  closedAt   DateTime @default(now())
+
+  @@map("finance_closings")
+}
+
+/// Uma linha (`id = default`): reserva do caixa e saldo inicial.
+model FinanceSettings {
+  id             String    @id @default("default")
+  /// % do resultado que fica no caixa antes de dividir entre os sócios
+  reservePercent Decimal   @default(0) @db.Decimal(5, 2)
+  /// saldo do caixa no dia em que começou a usar o fechamento
+  openingBalance Decimal   @default(0) @db.Decimal(12, 2)
+  openingDate    DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@map("finance_settings")
+}
+
