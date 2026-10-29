@@ -26,6 +26,9 @@ interface UIState {
   conversationId: string | null;
   /** filtro "último encerramento" das conversas (todas as abas): resultado e/ou motivo */
   closeFilter: { outcome: 'won' | 'lost' | null; reasonId: string | null };
+  /** filtro "Gera ticket": só contatos que abrem atendimento. "Não gera" é o modo `status: 'free'` */
+  onlyTickets: boolean;
+  setOnlyTickets: (on: boolean) => void;
   /** som de mensagem nova desligado neste navegador (preferência de quem atende) */
   soundMuted: boolean;
   toggleSidebar: () => void;
@@ -66,6 +69,7 @@ export const useUI = create<UIState>()(
       soundMuted: false,
       securePhotos: false,
       closeFilter: { outcome: null, reasonId: null },
+      onlyTickets: false,
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
       setCompany: (companyId) => set({ companyId, numberId: null, conversationId: null }),
@@ -80,6 +84,7 @@ export const useUI = create<UIState>()(
       setSoundMuted: (soundMuted) => set({ soundMuted }),
       setSecurePhotos: (securePhotos) => set({ securePhotos }),
       setCloseFilter: (closeFilter) => set({ closeFilter }),
+      setOnlyTickets: (onlyTickets) => set({ onlyTickets }),
     }),
     // `status` não é lembrado: a tela de conversas abre sempre em 'Aguardando' (a fila nova)
     {

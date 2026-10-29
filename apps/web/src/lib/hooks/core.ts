@@ -158,7 +158,7 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export type ConversationsQuery = { status: ConversationTab; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null };
+export type ConversationsQuery = { status: ConversationTab; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null; onlyTickets?: boolean };
 /** Tamanho da página no servidor (`take` padrão de GET /conversations). Página cheia = pode haver mais. */
 export const CONVERSATIONS_PAGE = 50;
 
@@ -167,6 +167,7 @@ function conversationsParams(q: ConversationsQuery) {
   const p = new URLSearchParams(q.status === 'free' ? { free: '1' } : { status: q.status });
   if (q.numberId) p.set('numberId', q.numberId);
   if (q.departmentId) p.set('departmentId', q.departmentId);
+  if (q.onlyTickets && q.status !== 'free') p.set('ticket', '1');
   if (q.assigneeId) p.set('assigneeId', q.assigneeId);
   if (q.origin) p.set('origin', q.origin);
   if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
@@ -230,13 +231,14 @@ export const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
   qc.invalidateQueries({ queryKey: ['conversation-counts'] });
 };
 
-export const useConversationCounts = (numberId: string | null, departmentId: string | null = null) =>
+export const useConversationCounts = (numberId: string | null, departmentId: string | null = null, onlyTickets = false) =>
   useQuery({
-    queryKey: ['conversation-counts', numberId, departmentId],
+    queryKey: ['conversation-counts', numberId, departmentId, onlyTickets],
     queryFn: () => {
       const p = new URLSearchParams();
       if (numberId) p.set('numberId', numberId);
       if (departmentId) p.set('departmentId', departmentId);
+      if (onlyTickets) p.set('ticket', '1');
       return api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number; free: number }>(`/conversations/counts${p.toString() ? `?${p}` : ''}`);
     },
     refetchInterval: 30_000,

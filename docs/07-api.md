@@ -228,7 +228,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 
 ### Contatos isentos de ticket e chat interno
 
-Rotas em [Contatos isentos](contatos-isentos.md#api) (`/ignored-contacts`, `settings.manage`; `GET /conversations?free=1` = Conversas livres, nos filtros da lista) e
+Rotas em [Contatos isentos](contatos-isentos.md#api) (`/ignored-contacts`, `settings.manage`; `GET /conversations?free=1` = Não gera ticket / Conversas livres; `?ticket=1` = Gera ticket, nos filtros da lista) e
 [Chat interno](chat-interno.md#api) (`/internal-chat/*`; auditoria com `internal_chat.audit`).
 
 ### Escalas, plantões e acessos temporários (`team.manage`)

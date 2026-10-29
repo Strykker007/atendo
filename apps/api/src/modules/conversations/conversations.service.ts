@@ -206,7 +206,7 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; free?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
+    q: { status?: ConversationStatus; free?: boolean; ticket?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
@@ -221,8 +221,9 @@ export class ConversationsService {
     // fora dos relatórios. "Atendendo" mostra também as conversas livres (grupo; e as isentas de
     // antes, abertas sem dono) para responder sem ir ao filtro — sem dono, então fora da regra de
     // posse. Não com filtro de consultor/desfecho (livre não tem nenhum dos dois)
-    const comLivres = !q.free && q.status === 'in_progress' && !q.assigneeId && !q.lastOutcome && !q.closeReasonId;
-    const fila: Prisma.ConversationWhereInput = { ...(q.status && { status: q.status }), ...ownership, NOT: LIVRE };
+    // "Gera ticket" (filtro da lista) tira os isentos: as livres também saem, porque toda livre é isenta
+    const comLivres = !q.free && !q.ticket && q.status === 'in_progress' && !q.assigneeId && !q.lastOutcome && !q.closeReasonId;
+    const fila: Prisma.ConversationWhereInput = { ...(q.status && { status: q.status }), ...ownership, NOT: LIVRE, ...(q.ticket && { ticketExempt: false }) };
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
@@ -266,13 +267,14 @@ export class ConversationsService {
   }
 
   /** Contadores dos três filtros principais (opcionalmente por número e departamento). */
-  async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string) {
+  async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string, onlyTickets = false) {
     const scoped = narrowTo(viewer, numberId);
     const dept = departmentWhere(viewer, departmentId);
     const escopo: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
     // conversa livre (grupo, aberta sem dono) não é fila: conta só na aba "Livres". Contato
     // isento conta nas abas como qualquer atendimento (relatório é que não o vê)
-    const base: Prisma.ConversationWhereInput = { ...escopo, NOT: LIVRE };
+    // com o filtro "Gera ticket", as abas contam só quem abre atendimento
+    const base: Prisma.ConversationWhereInput = { ...escopo, NOT: LIVRE, ...(onlyTickets && { ticketExempt: false }) };
     const [waiting, closed, mine, all, free] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),

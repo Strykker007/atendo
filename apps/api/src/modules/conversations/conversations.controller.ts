@@ -24,6 +24,8 @@ class ListDto {
   @IsOptional() @IsEnum(ConversationStatus) status?: ConversationStatus;
   /** aba "Livres": conversas de contatos isentos de ticket (ignora `status`) */
   @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() free?: boolean;
+  /** filtro "Gera ticket": só contatos que abrem atendimento (tira os isentos e as livres) */
+  @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() ticket?: boolean;
   @IsOptional() @IsUUID() numberId?: string;
   /** id do departamento ou `none` (só as sem departamento) */
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;
@@ -304,10 +306,10 @@ export class ConversationsController {
   }
 
   @Get('counts')
-  counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string, @Query('departmentId') departmentId?: string) {
+  counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string, @Query('departmentId') departmentId?: string, @Query('ticket') ticket?: string) {
     // fora do DTO: valida aqui o mesmo formato do filtro da lista
     const dept = departmentId === 'none' || (departmentId && /^[0-9a-f-]{36}$/i.test(departmentId)) ? departmentId : undefined;
-    return this.conversations.counts(u.tenantId, u, numberId || undefined, dept);
+    return this.conversations.counts(u.tenantId, u, numberId || undefined, dept, ticket === '1');
   }
 
   @Get(':id')
