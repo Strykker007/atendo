@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.10.1 — 2026-10-29
+
+- feat(cobranca): botão do dono para liberar/esconder dos clientes a cobrança por Pix (Asaas)
+- docs(retomada): chave do Asaas comentada até o webhook; como reativar no passo 4
+- docs(retomada): v1.10.0 no ar; próximo passo é o webhook do Asaas
+- docs: roteiro para retomar o deploy v1.10.0 e a mensalidade por Pix (Asaas)
+
 ## 1.10.0 — 2026-10-29
 
 - chore(site): tsconfig.tsbuildinfo regenerado no build
