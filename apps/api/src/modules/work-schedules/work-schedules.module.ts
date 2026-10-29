@@ -10,6 +10,7 @@ import { AuthService } from '../auth/auth.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { creatorCompanyIds, teamWhere } from '../auth/team-scope';
 import { ShiftAccessService } from '../auth/shift-access.service';
 import { isCyclic, isWithinShift, shiftDuration, type ShiftRule } from '../auth/shift-window';
 import { localOf } from '../tenants/schedule-clock';
@@ -38,6 +39,7 @@ class ScheduleDto {
   @IsOptional() @IsInt() @Min(0) @Max(168) restHours?: number;
   @IsOptional() @Matches(YMD) anchorDate?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(120) toleranceMinutes?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(30) exitGraceMinutes?: number;
 }
 class UpdateScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(80) name?: string;
@@ -48,6 +50,7 @@ class UpdateScheduleDto {
   @IsOptional() @IsInt() @Min(0) @Max(168) restHours?: number;
   @IsOptional() @Matches(YMD) anchorDate?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(120) toleranceMinutes?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(30) exitGraceMinutes?: number;
 }
 class AssignScheduleDto {
   /** null/ausente = tira da escala (sem trava de horário) */
@@ -75,7 +78,7 @@ class TemporaryUserDto {
  */
 function cleanSchedule(dto: ScheduleDto) {
   const restHours = dto.type === 'FIXED_12X36' ? (dto.restHours || 36) : dto.type === 'COMMERCIAL_44H' ? 0 : (dto.restHours ?? 0);
-  const rule = { ...dto, name: dto.name.trim(), restHours, workDays: [...new Set(dto.workDays ?? [])].sort((a, b) => a - b), anchorDate: dto.anchorDate || null, toleranceMinutes: dto.toleranceMinutes ?? 15 };
+  const rule = { ...dto, name: dto.name.trim(), restHours, workDays: [...new Set(dto.workDays ?? [])].sort((a, b) => a - b), anchorDate: dto.anchorDate || null, toleranceMinutes: dto.toleranceMinutes ?? 15, exitGraceMinutes: dto.exitGraceMinutes ?? 0 };
   if (!rule.name) throw new BadRequestException('Informe o nome da escala.');
   if (isCyclic(rule)) {
     if (!rule.anchorDate) throw new BadRequestException('Informe um dia em que o turno começa (referência do ciclo).');
@@ -85,10 +88,12 @@ function cleanSchedule(dto: ScheduleDto) {
     rule.anchorDate = null;
   }
   if (rule.toleranceMinutes >= shiftDuration(rule)) throw new BadRequestException('A tolerância precisa ser menor que o turno.');
+  // a saída de um turno não pode encostar na entrada do próximo
+  if (isCyclic(rule) && rule.toleranceMinutes + rule.exitGraceMinutes >= rule.restHours * 60) throw new BadRequestException('As tolerâncias de entrada e saída precisam caber no descanso.');
   return rule;
 }
 
-const scheduleSelect = { id: true, name: true, type: true, startTime: true, endTime: true, workDays: true, restHours: true, anchorDate: true, toleranceMinutes: true, users: { select: { id: true, name: true } } } as const;
+const scheduleSelect = { id: true, name: true, type: true, startTime: true, endTime: true, workDays: true, restHours: true, anchorDate: true, toleranceMinutes: true, exitGraceMinutes: true, users: { select: { id: true, name: true } } } as const;
 
 /** Modelos de escala do tenant e vínculo com colaboradores (docs/escalas.md). */
 @Controller('work-schedules')
@@ -121,7 +126,7 @@ class WorkSchedulesController {
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateScheduleDto) {
     const cur = await this.prisma.workSchedule.findFirst({ where: { id, tenantId: u.tenantId } });
     if (!cur) throw new NotFoundException('Escala não encontrada.');
-    const merged = { name: cur.name, type: cur.type, startTime: cur.startTime, endTime: cur.endTime, workDays: cur.workDays, restHours: cur.restHours, anchorDate: cur.anchorDate, toleranceMinutes: cur.toleranceMinutes, ...dto };
+    const merged = { name: cur.name, type: cur.type, startTime: cur.startTime, endTime: cur.endTime, workDays: cur.workDays, restHours: cur.restHours, anchorDate: cur.anchorDate, toleranceMinutes: cur.toleranceMinutes, exitGraceMinutes: cur.exitGraceMinutes, ...dto };
     const updated = await this.prisma.workSchedule.update({ where: { id }, data: cleanSchedule(merged), select: scheduleSelect });
     // horário mudou: quem está nesta escala é reavaliado na hora
     await this.cortar(u.tenantId, updated.users.map((x) => x.id));
@@ -150,7 +155,7 @@ class WorkSchedulesController {
     const local = localOf(now, settings?.timezone ?? TZ_DEFAULT);
     const onShift = new Map(schedules.map((s) => [s.id, isWithinShift(s as ShiftRule, local)]));
     const users = await this.prisma.user.findMany({
-      where: { tenantId: u.tenantId, isActive: true },
+      where: { tenantId: u.tenantId, isActive: true, ...teamWhere(u) },
       orderBy: { name: 'asc' },
       select: {
         id: true, name: true, email: true, role: true, scheduleId: true, isTemporary: true, accessExpiresAt: true,
@@ -170,7 +175,7 @@ class WorkSchedulesController {
   @Get('overrides')
   overrides(@CurrentUser() u: AuthUser) {
     return this.prisma.scheduleOverride.findMany({
-      where: { tenantId: u.tenantId, revokedAt: null, validUntil: { gt: new Date() } },
+      where: { tenantId: u.tenantId, revokedAt: null, validUntil: { gt: new Date() }, user: teamWhere(u) },
       orderBy: { validUntil: 'asc' },
       select: { id: true, validFrom: true, validUntil: true, reason: true, createdAt: true, user: { select: { id: true, name: true } }, approvedBy: { select: { id: true, name: true } } },
     });
@@ -180,7 +185,7 @@ class WorkSchedulesController {
   @Post('overrides')
   async createOverride(@CurrentUser() u: AuthUser, @Body() dto: OverrideDto) {
     // colaborador de outro cliente não entra: o id vem do corpo da requisição
-    const target = await this.prisma.user.findFirst({ where: { id: dto.userId, tenantId: u.tenantId }, select: { id: true } });
+    const target = await this.prisma.user.findFirst({ where: { id: dto.userId, tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true } });
     if (!target) throw new NotFoundException('Colaborador não encontrado.');
     const now = new Date();
     // impersonação: o dono não é usuário do tenant, a liberação fica sem aprovador
@@ -197,7 +202,7 @@ class WorkSchedulesController {
   /** Encerra a liberação antes do fim. A sessão aberta cai na próxima renovação do token. */
   @Delete('overrides/:id')
   async revokeOverride(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const o = await this.prisma.scheduleOverride.findFirst({ where: { id, tenantId: u.tenantId, revokedAt: null }, select: { id: true, userId: true } });
+    const o = await this.prisma.scheduleOverride.findFirst({ where: { id, tenantId: u.tenantId, revokedAt: null, user: teamWhere(u) }, select: { id: true, userId: true } });
     if (!o) throw new NotFoundException('Liberação não encontrada.');
     await this.prisma.scheduleOverride.update({ where: { id }, data: { revokedAt: new Date() } });
     // encerrou o plantão: trava AGORA (antes, o token já emitido seguia liberado por até 15 min)
@@ -227,7 +232,7 @@ class UsersScheduleController {
       if (!ok) throw new BadRequestException('Escala não encontrada.');
     }
     const roles = u.role === 'manager' ? ['agent' as const] : ['agent' as const, 'manager' as const];
-    const { count } = await this.prisma.user.updateMany({ where: { id, tenantId: u.tenantId, role: { in: roles } }, data: { scheduleId: dto.scheduleId ?? null } });
+    const { count } = await this.prisma.user.updateMany({ where: { id, tenantId: u.tenantId, role: { in: roles }, ...teamWhere(u) }, data: { scheduleId: dto.scheduleId ?? null } });
     if (!count) throw new BadRequestException('Este colaborador não pode receber escala (admins nunca são travados por horário).');
     // escala nova pode deixar a pessoa fora do turno: reavalia já
     await this.shift.cutSessions([id]);
@@ -238,7 +243,7 @@ class UsersScheduleController {
   @Get('temporary')
   async temporary(@CurrentUser() u: AuthUser) {
     const rows = await this.prisma.user.findMany({
-      where: { tenantId: u.tenantId, isTemporary: true },
+      where: { tenantId: u.tenantId, isTemporary: true, ...teamWhere(u) },
       orderBy: { createdAt: 'desc' },
       take: 100,
       select: { id: true, name: true, email: true, isActive: true, accessExpiresAt: true, expiredAt: true, lastLoginAt: true, createdAt: true, schedule: { select: { id: true, name: true } }, temporaryCreatedBy: { select: { id: true, name: true } } },
@@ -276,6 +281,9 @@ class UsersScheduleController {
       select: { id: true, name: true, email: true },
     });
     await this.provisioning.linkRoleProfile(u.tenantId, user.id, 'agent');
+    // criado por quem é restrito: nasce no(s) condomínio(s) dele (docs/empresas.md#equipe)
+    const empresas = creatorCompanyIds(u);
+    if (empresas.length) await this.prisma.userCompany.createMany({ data: empresas.map((companyId) => ({ userId: user.id, companyId })), skipDuplicates: true });
     if (dto.numberIds?.length) {
       const valid = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: dto.numberIds }, tenantId: u.tenantId, deletedAt: null }, select: { id: true } });
       await this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: user.id, numberId: n.id })), skipDuplicates: true });
@@ -286,7 +294,7 @@ class UsersScheduleController {
   /** Encerra o acesso temporário antes do prazo (status EXPIRED, sessões derrubadas). */
   @Post('temporary/:id/expire')
   async expireTemporary(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    const target = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, isTemporary: true, expiredAt: null }, select: { id: true } });
+    const target = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, isTemporary: true, expiredAt: null, ...teamWhere(u) }, select: { id: true } });
     if (!target) throw new NotFoundException('Acesso temporário não encontrado ou já expirado.');
     await this.shift.expire(target.id);
     await this.shift.cutSessions([target.id]);

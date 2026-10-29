@@ -128,30 +128,32 @@ export class InboundService {
     // satisfação do encerramento) fica de fora: aquela resposta é dele.
     // resposta da pesquisa de satisfação do encerramento: entra no histórico sem reabrir
     // (docs/pesquisa-de-satisfacao.md). Não sendo resposta, a pesquisa sai do caminho e segue normal.
-    // contato isento (docs/contatos-isentos.md): chat livre — não reabre, não entra na fila,
-    // não marca espera e não aciona automação (o `quiet` já cobre tudo isso)
-    // grupo nas conversas é sempre chat livre (docs/grupos.md#grupos-nas-conversas)
-    const isento = contact.isGroup || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    // grupo nas conversas é sempre chat livre (docs/grupos.md#grupos-nas-conversas): não reabre,
+    // não entra na fila, não marca espera. Contato isento (docs/contatos-isentos.md) segue a fila
+    // como qualquer atendimento — Aguardando, Atendendo, Encerrado — e só fica fora dos relatórios
+    // (`ticketExempt`); dos dois, nenhum aciona automação nem pesquisa
+    const livre = contact.isGroup;
+    const isento = livre || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
     const pesquisa = !isento && decisao.acao === 'reabrir' ? await this.surveys.claim(conversation!.id, { type: msg.type, text: msg.text, interactiveReplyId: msg.interactiveReplyId }, msg.timestamp) : null;
-    const quieta = isento || !!pesquisa || (decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
+    const quieta = livre || !!pesquisa || (decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
       && !(await this.prisma.flowRun.findFirst({ where: { conversationId: conversation!.id, status: { in: ['running', 'waiting'] } }, select: { id: true } })));
     if (decisao.acao === 'reabrir' && !quieta) {
       // atendimento novo na mesma conversa: volta para a fila, sem dono e sem o desfecho do
       // atendimento anterior — aquele já está congelado no histórico (conversation_events)
       conversation = await this.conversations.setStatusSystem(conversation!.id, 'waiting');
     }
-    if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento);
+    if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento, livre);
     // "em atendimento" sem dono (legado da resposta pelo celular): ninguém a via — volta para a fila
-    if (conversation && !isento && conversation.status === 'in_progress' && !conversation.assigneeId) {
+    if (conversation && !livre && conversation.status === 'in_progress' && !conversation.assigneeId) {
       conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'waiting' } });
     }
-    if (conversation && isento && conversation.status !== 'in_progress') {
+    if (conversation && livre && conversation.status !== 'in_progress') {
       // conversa livre fica sempre "aberta" e sem dono: qualquer um da equipe responde
       conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
     }
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
-        data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: isento ? 'in_progress' : 'waiting', ticketExempt: isento, origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
+        data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: livre ? 'in_progress' : 'waiting', ticketExempt: isento, origin, originData: msg.referral ? (msg.referral as unknown as Prisma.InputJsonValue) : undefined },
       });
       if (origin === 'ad') await this.autoTagAd(conversation.id, number.tenantId, msg.referral?.headline);
     } else if (msg.referral && conversation.origin === 'organic') {
@@ -210,8 +212,9 @@ export class InboundService {
 
     this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
     this.gateway.emitConversation(number.tenantId, conversation);
-    // quieta: nada de fluxo, boas-vindas nem agenda — é só o "ok" de quem já foi atendido
-    return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed: returningAfterClosed && !quieta, hoursSinceLastMessage, quiet: quieta, ...(pesquisa && { survey: pesquisa }) };
+    // quieta: nada de fluxo, boas-vindas nem agenda — é só o "ok" de quem já foi atendido.
+    // Contato isento também não aciona automação, mas entra na fila (acima) como atendimento
+    return { message, conversation, isNew: decisao.acao === 'criar', isNewContact, returningAfterClosed: returningAfterClosed && !quieta && !isento, hoursSinceLastMessage, quiet: quieta || isento, ...(pesquisa && { survey: pesquisa }) };
   }
 
   /**
@@ -260,16 +263,17 @@ export class InboundService {
     // Encerrada: falar de novo começa outro atendimento, com a mesma regra. Exceção: a despedida
     // pelo celular logo depois de encerrar ("eu que agradeço", "atendimento finalizado ✅") entra
     // no histórico sem reabrir (carência, reopen.ts).
-    // contato isento: chat livre, sem reabrir atendimento (docs/contatos-isentos.md)
-    const isento = contact.isGroup || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
-    if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento);
-    if (isento && conversation && conversation.status !== 'in_progress') conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
+    // grupo: chat livre, sem reabrir atendimento; contato isento segue a regra comum (docs/contatos-isentos.md)
+    const livre = contact.isGroup;
+    const isento = livre || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento, livre);
+    if (livre && conversation && conversation.status !== 'in_progress') conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
     else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, conversation.assigneeId ? 'in_progress' : 'waiting');
-    else if (!isento && conversation?.status === 'in_progress' && !conversation.assigneeId) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'waiting' } });
+    else if (!livre && conversation?.status === 'in_progress' && !conversation.assigneeId) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'waiting' } });
     conversation ??= await this.prisma.conversation.create({
-      data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: isento ? 'in_progress' : 'waiting', ticketExempt: isento },
+      data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: livre ? 'in_progress' : 'waiting', ticketExempt: isento },
     });
-    const semDono = !isento && conversation.status === 'waiting';
+    const semDono = !livre && conversation.status === 'waiting';
 
     const message = await this.prisma.message.create({
       data: {
@@ -395,15 +399,16 @@ export class InboundService {
     }
     if (!msgs.length) return null;
 
-    const isento = contact.isGroup || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
-    const plano = planoDaRecuperacao(conversation, isento, msgs);
+    const livre = contact.isGroup;
+    const isento = livre || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    const plano = planoDaRecuperacao(conversation, livre, msgs);
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
         data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: plano.status ?? 'waiting', ticketExempt: isento },
       });
     } else if (plano.status && plano.status !== conversation.status) {
-      // chat livre fica sempre aberto e sem dono; o resto reabre como a entrada ao vivo
-      conversation = isento
+      // chat livre (grupo) fica sempre aberto e sem dono; o resto reabre como a entrada ao vivo
+      conversation = livre
         ? await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } })
         : await this.conversations.setStatusSystem(conversation.id, plano.status);
     }
@@ -599,15 +604,16 @@ export class InboundService {
 
   /**
    * A lista de isentos mudou desde a última mensagem (a tela já marca as conversas existentes,
-   * isto cobre corrida e lista editada direto no banco). Entrando: sai da fila e de quem atendia.
-   * Saindo: a conversa livre aberta (sem dono) volta para a fila como atendimento comum.
+   * isto cobre corrida e lista editada direto no banco). Contato isento só troca a marca: status,
+   * dono e espera continuam (docs/contatos-isentos.md). Grupo (chat livre) sai da fila e de quem
+   * atendia; deixando de ser livre, a conversa aberta sem dono volta para a fila.
    */
-  private aplicarIsencao(conv: Conversation, isento: boolean) {
+  private aplicarIsencao(conv: Conversation, isento: boolean, livre: boolean) {
     return this.prisma.conversation.update({
       where: { id: conv.id },
-      data: isento
+      data: livre
         ? { ticketExempt: true, assigneeId: null, awaitingSince: null }
-        : { ticketExempt: false, ...(conv.status === 'in_progress' && !conv.assigneeId && { status: 'waiting' as const }) },
+        : { ticketExempt: isento, ...(conv.status === 'in_progress' && !conv.assigneeId && { status: 'waiting' as const }) },
     });
   }
 

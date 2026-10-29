@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { inputCls, Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { fmtBRL } from '@/components/reports/ReportChart';
-import { useAttendances, useAttendanceMessages, useTags, useCloseReasons, useOutcomeLabels, type AttendanceRow } from '@/lib/hooks';
+import { useAgents, useAttendances, useAttendanceMessages, useTags, useCloseReasons, useOutcomeLabels, type AttendanceRow } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 
 const PAGE_SIZE = 25;
@@ -22,13 +22,19 @@ const RESULTADO = {
 } as const;
 /** nome do resultado na empresa (Configurações → Encerramento) */
 const rotuloDe = (o: AttendanceRow['outcome'], labels: { won: string; lost: string }) => (o === 'won' || o === 'lost' ? labels[o] : 'Sem resultado');
+/** ISO do início do dia (como o topo manda) ↔ AAAA-MM-DD no fuso do navegador */
+const diaDe = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const inicioDe = (dia: string) => new Date(`${dia}T00:00:00`).toISOString();
+const somaDias = (dia: string, n: number) => { const d = new Date(`${dia}T12:00:00`); d.setDate(d.getDate() + n); return diaDe(d.toISOString()); };
 
 /**
  * Auditoria de atendimentos: cada encerramento do período, com resultado, quem encerrou e as tags
  * escolhidas NELE (não as que a conversa tem hoje). É a ponte entre o número do relatório
  * ("12 não compraram por Achou caro") e o que de fato aconteceu: clicar abre só aquele
  * atendimento — do encerramento anterior até este —, sem os outros dias do cliente misturados.
- * Período e atendente vêm do topo da tela; resultado, tag e busca ficam aqui.
+ * Período e atendente começam com os do topo da tela, mas dá para trocar aqui sem mexer no resto
+ * do relatório (achar "o atendimento de quinta do 27 99999-…, com a Ana"); resultado, tag, motivo
+ * e busca por nome/número também ficam aqui.
  */
 export function Attendances({ from, to, userId, focus, companyId }: { from: string; to: string; userId?: string; focus?: AttendanceFocus | null; companyId?: string }) {
   const [outcome, setOutcome] = useState<'' | 'won' | 'lost'>('');
@@ -41,6 +47,13 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [aberto, setAberto] = useState<AttendanceRow | null>(null);
+  // atendente e período: seguem o topo até serem trocados aqui
+  const [atendente, setAtendente] = useState(userId ?? '');
+  const [de, setDe] = useState(() => diaDe(from));
+  const [ate, setAte] = useState(() => somaDias(diaDe(to), -1));
+  useEffect(() => setAtendente(userId ?? ''), [userId]);
+  useEffect(() => { setDe(diaDe(from)); setAte(somaDias(diaDe(to), -1)); }, [from, to]);
+  const agents = useAgents();
   const tags = useTags();
   const ref = useRef<HTMLElement>(null);
 
@@ -58,9 +71,9 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
     const t = setTimeout(() => setSearch(busca.trim()), 350);
     return () => clearTimeout(t);
   }, [busca]);
-  useEffect(() => setPage(1), [from, to, userId, outcome, tagId, closeReasonId, reason, search, companyId]);
+  useEffect(() => setPage(1), [de, ate, atendente, outcome, tagId, closeReasonId, reason, search, companyId]);
 
-  const q = useAttendances({ startDate: from, endDate: to, companyId, userId, outcome: outcome || undefined, tagIds: tagId || undefined, closeReasonId: closeReasonId || undefined, reason: reason?.value, search: search || undefined, page, pageSize: PAGE_SIZE });
+  const q = useAttendances({ startDate: inicioDe(de), endDate: inicioDe(somaDias(ate, 1)), companyId, userId: atendente || undefined, outcome: outcome || undefined, tagIds: tagId || undefined, closeReasonId: closeReasonId || undefined, reason: reason?.value, search: search || undefined, page, pageSize: PAGE_SIZE });
   const d = q.data;
   const paginas = d ? Math.max(1, Math.ceil(d.total / PAGE_SIZE)) : 1;
   // tags que fazem sentido filtrar: as do resultado escolhido (ou as de qualquer encerramento)
@@ -72,6 +85,25 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
       <div>
         <h2 className="font-display font-semibold text-ink">Atendimentos encerrados</h2>
         <p className="text-[12.5px] text-muted">Cada encerramento do período. Clique para ver a conversa daquele atendimento e o que o atendente fez.</p>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="relative sm:col-span-2 lg:col-span-1">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+          <input className={cn(inputCls, 'pl-8')} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Nome ou número do contato" aria-label="Buscar por nome ou número do contato" inputMode="search" />
+        </div>
+        <select className={inputCls} value={atendente} onChange={(e) => setAtendente(e.target.value)} aria-label="Quem atendeu">
+          <option value="">Qualquer atendente</option>
+          {agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
+        </select>
+        <label className="flex items-center gap-2 text-[12.5px] text-muted">
+          <span className="w-6 shrink-0">De</span>
+          <input type="date" className={inputCls} value={de} max={ate} onChange={(e) => e.target.value && setDe(e.target.value)} aria-label="Encerrado a partir de" />
+        </label>
+        <label className="flex items-center gap-2 text-[12.5px] text-muted">
+          <span className="w-6 shrink-0">Até</span>
+          <input type="date" className={inputCls} value={ate} min={de} onChange={(e) => e.target.value && setAte(e.target.value)} aria-label="Encerrado até" />
+        </label>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -94,11 +126,7 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
             <button type="button" onClick={() => setReason(null)} aria-label="Tirar o filtro de motivo" className="text-faint hover:text-ink"><X size={12} /></button>
           </span>
         )}
-        <div className="relative flex-1 min-w-[12rem]">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
-          <input className={cn(inputCls, 'pl-8 py-1.5 text-[12.5px]')} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Cliente ou número" aria-label="Buscar cliente ou número" />
-        </div>
-        {d && <span className="text-[12px] text-muted tnum">{d.summary.count} atendimento(s) · {d.summary.won} {labels.won.toLowerCase()} · {d.summary.lost} {labels.lost.toLowerCase()}</span>}
+        {d && <span className="ml-auto text-[12px] text-muted tnum">{d.summary.count} atendimento(s) · {d.summary.won} {labels.won.toLowerCase()} · {d.summary.lost} {labels.lost.toLowerCase()}</span>}
       </div>
 
       <div className={cn('rounded-2xl bg-panel border border-line overflow-hidden', q.isFetching && 'opacity-70')}>
@@ -107,7 +135,7 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
             <thead>
               <tr className="text-left text-xs text-muted border-b border-line">
                 <th className="px-4 py-2 font-medium">Encerrado em</th>
-                <th className="px-4 py-2 font-medium">Cliente</th>
+                <th className="px-4 py-2 font-medium">Contato</th>
                 <th className="px-4 py-2 font-medium">Atendente</th>
                 <th className="px-4 py-2 font-medium">Resultado</th>
                 <th className="px-4 py-2 font-medium">Motivo</th>
@@ -169,6 +197,17 @@ function TagPill({ t }: { t: { id: string; name: string; color: string } }) {
   );
 }
 
+/** divisória de início/fim da janela do atendimento */
+function Marco({ texto }: { texto: string }) {
+  return (
+    <div className="flex items-center gap-2 py-1 select-none">
+      <span className="h-px flex-1 bg-line" />
+      <span className="text-[11px] font-semibold text-muted">{texto}</span>
+      <span className="h-px flex-1 bg-line" />
+    </div>
+  );
+}
+
 /** motivo cadastrado; encerramento antigo sem cadastro mostra o texto gravado */
 function Motivo({ a }: { a: AttendanceRow }) {
   if (a.closeReason) return <TagPill t={a.closeReason} />;
@@ -209,6 +248,7 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
           {msgs.isLoading && <p className="py-8 text-center text-sm text-muted">Carregando mensagens…</p>}
           {msgs.isError && <p className="py-8 text-center text-sm text-muted">Não foi possível carregar — você pode não ter acesso a esta conversa.</p>}
           {msgs.data && lista.length === 0 && <p className="py-8 text-center text-sm text-muted">Nenhuma mensagem neste atendimento.</p>}
+          {lista.length > 0 && <Marco texto={a.startedAt ? `Início do atendimento · ${fmt(a.startedAt)}` : 'Início do atendimento'} />}
           {lista.map((m) => {
             const nota = !!m.internal;
             const sai = m.direction === 'out';
@@ -228,10 +268,12 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
               </div>
             );
           })}
+          {lista.length > 0 && <Marco texto={`Encerrado${a.user ? ` por ${a.user.name}` : ''} · ${rotuloDe(a.outcome, labels)} · ${fmt(a.closedAt)}`} />}
           {lista.length >= 1000 && <p className="text-center text-[11.5px] text-muted">Mostrando as primeiras 1000 mensagens deste atendimento.</p>}
         </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-2">
+          <span className="mr-auto text-[11.5px] text-faint">Na conversa, cada atendimento termina numa linha “Atendimento encerrado”.</span>
           <Button variant="ghost" onClick={onClose}>Fechar</Button>
           <Button icon={<ExternalLink size={14} />} onClick={() => { setConversation(a.conversationId); router.push('/conversas'); }}>Abrir conversa</Button>
         </div>

@@ -38,7 +38,7 @@ export function SalesDetails({ from, to, userId, tagIds, companyId }: { from: st
     <section className="space-y-3">
       <div>
         <h2 className="font-display font-semibold text-ink">Detalhamento de vendas</h2>
-        <p className="text-[12px] text-muted">Cada venda encerrada como {labels.won}, com cliente, atendente e itens.</p>
+        <p className="text-[12px] text-muted">Cada venda encerrada como {labels.won}, com contato, atendente e itens.</p>
       </div>
 
       {/* filtros */}
@@ -46,7 +46,7 @@ export function SalesDetails({ from, to, userId, tagIds, companyId }: { from: st
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative flex-1 min-w-[220px]">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input className={cn(inputCls, 'pl-9')} placeholder="Buscar por cliente, número ou produto" value={busca} onChange={(e) => setBusca(e.target.value)} maxLength={120} />
+            <input className={cn(inputCls, 'pl-9')} placeholder="Buscar por contato, número ou produto" value={busca} onChange={(e) => setBusca(e.target.value)} maxLength={120} />
           </div>
         </div>
       </div>
@@ -65,7 +65,7 @@ export function SalesDetails({ from, to, userId, tagIds, companyId }: { from: st
             <thead>
               <tr className="text-left text-xs text-muted border-b border-line">
                 <th className="px-4 py-2 font-medium">Data/hora</th>
-                <th className="px-4 py-2 font-medium">Cliente</th>
+                <th className="px-4 py-2 font-medium">Contato</th>
                 <th className="px-4 py-2 font-medium">Atendente</th>
                 <th className="px-4 py-2 font-medium text-right">Total</th>
                 <th className="px-4 py-2" />

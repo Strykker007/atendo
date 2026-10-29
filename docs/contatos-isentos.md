@@ -1,8 +1,16 @@
-# Contatos isentos de ticket
+# Contatos isentos ("não gera relatório")
 
-Lista, por cliente, de telefones que **nunca abrem atendimento**: diretoria, fornecedores, o
-celular da própria loja. A mensagem continua chegando e pode ser respondida, mas vira **chat
-livre**: aparece em **Atendendo** com o selo **Livre** (e em **Conversas livres**, nos filtros), fora dos contadores, das filas e de todo relatório de desempenho.
+Lista, por cliente, de telefones cujos atendimentos **não entram em relatório**: diretoria,
+fornecedores, o celular da própria loja. A conversa segue o **atendimento normal** — Aguardando →
+Atendendo (com dono) → Encerrado —, mas fica fora de todo relatório de desempenho, não aciona
+automação nem pesquisa e encerra sem resultado. Na tela aparece com o selo **Sem relatório**.
+
+Até 27/10/2026 o isento virava "chat livre" (sempre aberto, sem dono, fora da fila). Mudou a pedido
+do cliente: "se o número está aguardando atendimento e é marcado como não gera relatório, ele não pode
+mudar de status ou fila por ser marcado — aguardando continua aguardando até que comecem a atender".
+**Chat livre** (aberto, sem dono, fora da fila) ficou só para **grupo** ([Grupos](grupos.md)) e para as
+conversas isentas marcadas antes da mudança que ainda estão abertas sem dono (`LIVRE` na API,
+`isFreeChat` no front).
 
 ## Regras
 
@@ -10,23 +18,23 @@ livre**: aparece em **Atendendo** com o selo **Livre** (e em **Conversas livres*
 |---|---|
 | Na entrada (`InboundService.ingestInbound`), o telefone do remetente é conferido na lista **com e sem o nono dígito** (`phoneVariants`) | `ignored-contacts/ignored-contacts.ts` (`isTicketExempt`) |
 | **Números da própria conta** são isentos automaticamente, sem cadastro: quando um número conectado da loja escreve para outro (`whatsapp_numbers` do tenant, não excluído, com e sem o nono dígito), é a equipe conversando — sem isto o robô de um responderia o outro, em pingue-pongue | `isTicketExempt` |
-| Isento: a conversa nasce/fica `ticketExempt = true`, `status = in_progress`, **sem dono** e sem `awaitingSince`. Não reabre atendimento (nada de `setStatusSystem`, nada de evento `reopened`), não cai na fila, não roda pesquisa de satisfação | `inbound.service.ts` |
-| Sem automação: a entrada volta como `quiet`, então o processor não dispara fluxo, boas-vindas, horário ou agenda | `inbound.processor.ts` (já respeitava `quiet`) |
-| Mensagem digitada no celular (`fromMe`) para um isento também não reabre atendimento | `InboundService.ingestFromDevice` |
+| Isento: a conversa nasce/fica `ticketExempt = true` e segue a regra comum de status — nasce em **Aguardando**, reabre ao voltar a falar depois de encerrada, marca espera (`awaitingSince`), tem dono ao assumir/responder | `inbound.service.ts` |
+| Sem automação: a entrada volta como `quiet`, então o processor não dispara fluxo, boas-vindas, horário ou agenda; pesquisa de satisfação não é reivindicada | `inbound.service.ts` / `inbound.processor.ts` |
 | Continua passando pelo ledger (`UsageService.record`) — é tráfego real e é cobrado como qualquer mensagem | `inbound.service.ts` |
-| Responder pelo painel **não assume** a conversa (conversa livre não tem dono; qualquer um da equipe responde). Quota e janela de 24h da Meta valem igual | `ConversationsService.send` |
-| **Atendendo** mostra também as conversas livres, misturadas pela última mensagem, com o selo **Livre** e a faixa cinza — para responder o 2º número da loja ou a equipe sem ir ao filtro (pedido de 26/10/2026: "toda vez que preciso enviar mensagem para esse número eu tenho que filtrar"). Sem dono, então aparecem para qualquer pessoa que opere o número, sem a regra de posse; somem quando há filtro de consultor ou de desfecho. Aguardando/Encerrado e **todos os contadores** continuam sem elas. A visão **Conversas livres** (`GET /conversations?free=1`) mostra só elas, em qualquer status | `ConversationsService.list` (`comLivres`) / `counts` (`free`) |
-| Encerrar em massa ignora conversa livre (ela aparece em Atendendo e entraria na seleção) | `ConversationsService.closeMany` |
+| Responder pelo painel **assume** como qualquer atendimento (só a conversa livre — grupo — não assume) | `ConversationsService.send` (`ehLivre`) |
+| Encerrar: **sem resultado** (`outcome = none`), sem venda, sem pesquisa e sem o fluxo padrão de encerramento (só o escolhido explicitamente); o evento `closed` sai com `ignoreInReports = true`. Não exige `conversations.close_internal` — a marca já foi decidida por quem tem `settings.manage`. O aviso de encerramento (Configurações → Encerramento), se ligado, sai normalmente. Em massa: entra com o resultado escolhido, mas o evento também vai com `ignoreInReports` | `conversations.controller.ts` (`status`) / `ConversationsService.setStatus` / `closeMany` |
+| Abas e contadores: isento aparece e conta em Aguardando/Atendendo/Encerrado como qualquer conversa (regra de posse inclusa). **Atendendo** mostra também as conversas livres (grupo; isentas antigas sem dono), com o selo **Livre**; a visão **Conversas livres** (`GET /conversations?free=1`) lista todos os isentos e livres, em qualquer status | `ConversationsService.list` (`LIVRE`, `comLivres`) / `counts` |
 | Relatórios: conversa `ticketExempt` sai de **todas** as métricas — volume, TMA/TMR (1ª resposta), encerramentos, perdidos, ranking, auditoria de atendimentos, mensagens enviadas/recebidas, comparativo por empresa. Vendas registradas (`sales`) continuam contando: é dinheiro que entrou | `reports.module.ts` (`not c."ticketExempt"`, `semIsento`) |
 
 ### Entrar e sair da lista
 
-- **Entrou**: as conversas que já existem com aquele telefone viram livres na hora
-  (`ticketExempt = true`, `in_progress`, sem dono, sem espera) e o painel recebe o evento `conversation`.
-- **Saiu**: a conversa livre é guardada como encerrada (`closed`, sem evento de encerramento — não
-  foi atendimento). A próxima mensagem do contato abre ticket normalmente.
+- **Entrou**: as conversas que já existem com aquele telefone só ganham `ticketExempt = true`.
+  **Status, dono e espera não mudam** — aguardando continua aguardando; quem estava atendendo
+  continua. O painel recebe o evento `conversation`.
+- **Saiu**: só tira a marca. A conversa livre de antes (aberta sem dono, que ninguém via na aba)
+  volta para **Aguardando**.
 - A entrada confere a lista a cada mensagem, então uma lista mexida por fora (banco) se acerta
-  sozinha na próxima mensagem (`aplicarIsencao`).
+  sozinha na próxima mensagem (`aplicarIsencao`, com a mesma regra).
 
 ## Tela
 
@@ -35,23 +43,24 @@ Adicionar por telefone digitado (com DDI) ou buscando um contato existente e cli
 Exige `settings.manage`.
 
 **Atalhos** (mesma permissão; grupo não tem, porque é sempre livre), com confirmação (`components/chat/ExemptConfirm.tsx`):
-- **Menu do card** na lista de conversas (clique direito ou ⋮): *Não abrir atendimento* / *Voltar a abrir atendimento*.
-- **Cabeçalho da conversa aberta**: botão *Não abrir atendimento* (sino cortado); na conversa livre, o selo **Livre · sem ticket** é clicável e oferece voltar a abrir atendimento.
+- **Menu do card** na lista de conversas (clique direito ou ⋮): *Não gerar relatório* / *Voltar a gerar relatório*.
+- **Cabeçalho da conversa aberta**: botão *Não gerar relatório* (sino cortado); na conversa isenta, o selo **Sem relatório** (ao lado do status) é clicável e oferece voltar a gerar relatório.
 
-Na lista de conversas, **não é aba**: ficava como 4ª aba ao lado de Aguardando/Atendendo/Encerrado,
-espremia as quatro na coluna de 320px e não dizia o que era. Agora é o botão **Conversas livres (sem
-ticket)** dentro dos filtros (ícone de ajustes), com o contador, e só aparece quando o cliente tem
-alguma. Aberta, conta como filtro ligado (número no ícone) e mostra a faixa "Conversas livres ·
-contatos isentos de ticket — Voltar à fila"; *Limpar filtros* também volta para a fila.
+Na lista, o card do isento tem o status normal e o selo **Sem relatório**; a conversa livre tem a
+faixa cinza e o selo **Livre**. O botão **Conversas livres (sem ticket)** fica dentro dos filtros
+(ícone de ajustes), com o contador, e só aparece quando o cliente tem alguma.
 
-Na conversa aberta, o selo **Livre · sem ticket** substitui o status e o botão **Encerrar** some.
+Na conversa aberta, **Encerrar** abre uma confirmação curta (`CloseModal` → `ExemptCloseModal`): sem
+resultado, sem pesquisa, fora dos relatórios. Na conversa livre (grupo) não há Encerrar.
 
 ## Dados
 
 - `ignored_contacts` — `{tenantId, phone (só dígitos), label, createdById, createdAt}`, único por `(tenantId, phone)`.
 - `conversations.ticketExempt` — índice `(tenantId, ticketExempt, lastMessageAt desc)` para a visão Conversas livres.
 
-Migração: `20261230000000_ignored_contacts_internal_chat`.
+Migração: `20261230000000_ignored_contacts_internal_chat`. A mudança de 27/10/2026 não tem migration:
+as isentas antigas abertas sem dono continuam livres até a próxima mensagem do contato (aí voltam para
+Aguardando) ou até alguém **Assumir** (responder sem assumir não muda, como no grupo).
 
 ## API
 
@@ -59,6 +68,6 @@ Migração: `20261230000000_ignored_contacts_internal_chat`.
 |---|---|---|---|
 | GET | `/ignored-contacts` | `settings.manage` | Lista, mais novos primeiro, com o contato do painel (`contact`) quando o telefone já existe |
 | POST | `/ignored-contacts` | `settings.manage` | `{phone}` ou `{contactId}`, `label?`. 409 se o telefone (com/sem nono dígito) já está |
-| DELETE | `/ignored-contacts/:id` | `settings.manage` | Tira da lista e devolve as conversas ao fluxo normal |
+| DELETE | `/ignored-contacts/:id` | `settings.manage` | Tira da lista (só a marca; a livre antiga volta para Aguardando) |
 | DELETE | `/ignored-contacts/contact/:contactId` | `settings.manage` | O mesmo, pelo contato (atalho da conversa). 404 se não está na lista; 409 se é número da própria conta (isento sem cadastro) |
 | GET | `/conversations?free=1` | (escopo normal da lista) | Visão Conversas livres. `/conversations/counts` devolve `free` |

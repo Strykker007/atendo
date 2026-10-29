@@ -35,6 +35,53 @@ Cliente sem empresas: nenhuma consulta extra além do cache (`PermissionsService
 O tempo real não muda: o socket só avisa "algo mudou" e o painel refaz a consulta, que já
 vai com o header.
 
+## Separar por empresa
+
+<a id="separar-por-empresa"></a>`tenant_settings.companyIsolation` (padrão **desligado**). Com ele desligado, o vínculo
+a empresas separa só **conversas e relatórios**, como sempre foi — é o caso das farmácias com
+filiais. Ligado (administradora de condomínios), separa também **equipe, planilha de contatos e
+transmissões** (seções abaixo). Fica em Configurações → Empresa → Empresas e unidades (aparece com
+ao menos uma empresa) e **só o admin da conta muda** (`PATCH /settings` com `companyIsolation` por
+outro papel = 403): quem é restrito, mesmo com `settings.manage`, não tira a própria trava. Vai no
+cache de empresas do `PermissionsService` (lido pelo guard em `AuthUser.companyIsolation`) e é
+invalidado ao salvar.
+
+## Equipe
+
+Só com a [separação por empresa](#separar-por-empresa) ligada. Quem é vinculado a empresas (`user_companies`) vê e gerencia **só quem divide ao menos uma empresa
+com ele** (`auth/team-scope.ts`): o gestor predial vê a equipe do condomínio dele; o gerente de
+contrato, a dos condomínios em que atua. Quem não tem vínculo, o admin da conta e o dono do sistema
+entrando como o cliente veem a equipe toda.
+
+- Vale para `GET /tenants/me/agents` (tela Equipe, filtros de atendente), convite/link/edição
+  (`/tenants/me/agents/:id…` — fora do escopo = 404), Escalas (`/work-schedules/team`, liberações,
+  `PATCH /users/:id/schedule`, contas temporárias) e Registro de acessos (`/access-log`).
+- Gente **sem vínculo** (gerente da administradora) não aparece para quem é restrito, mas continua
+  recebendo transferência de qualquer empresa — a lista de transferência tem régua própria (ver abaixo).
+- Pessoa criada por quem é restrito (convite, cadastro em massa, conta temporária) **nasce vinculada**
+  à empresa selecionada no topo, ou a todas as de quem criou (`creatorCompanyIds`). Sem isso nasceria
+  sem vínculo, vendo todas.
+- Ao editar os números de alguém, quem é restrito só liga/desliga números que ele mesmo opera; os
+  vínculos da pessoa com números de outra empresa ficam como estão.
+- Perfis de acesso continuam definindo **o que** cada um faz (ex.: gestor predial sem `team.manage`);
+  o vínculo define **de quais empresas**.
+
+## Contatos (importar/exportar)
+
+Só com a [separação por empresa](#separar-por-empresa) ligada (`isolatedNumbers`); desligada, a
+planilha é a base inteira, como antes. `GET /contacts/export` e `POST /contacts/import` usam os números de quem pede (`numberFilter`): a
+base exportada tem só quem **conversou por um desses números ou está na agenda** de um deles
+(`phonebook_entries`). Na importação, contato novo é criado normalmente; contato que já existe fora
+do escopo **não é alterado** e conta em `outOfScope` no relatório ("de outra empresa"). Sem restrição
+(ou "todas as empresas" sem vínculo), a base inteira, como antes.
+
+## Transmissões
+
+Só com a [separação por empresa](#separar-por-empresa) ligada (`isolatedNumbers`). Lista, detalhe, iniciar e pausar/cancelar só enxergam transmissões dos números de quem pede; criar
+exige número no escopo. Os **filtros e a seleção manual** do público ficam nos contatos do escopo
+(mesma régua dos contatos); telefones digitados/importados na lista entram como estão. Grupos: só os
+dos números do escopo.
+
 ## Transferência
 
 Só recebe um atendimento quem conseguiria abri-lo: tem acesso ao **número** da conversa (e ao

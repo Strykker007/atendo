@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { type ScheduleConfig, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
 import { StorageService } from '../../common/storage/storage.service';
@@ -7,6 +7,7 @@ import { TenantGuard } from '../auth/tenant.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { PermissionsService } from '../auth/permissions.service';
 import { assertOwnMedia, contentItemErrors } from '../flows/flow-validation';
 import { TenantSettingsService } from './tenant-settings.service';
 import { SchedulesService } from './schedules.service';
@@ -37,6 +38,8 @@ class SettingsDto {
   @IsOptional() @IsBoolean() requireSaleValue?: boolean;
   /** encerramento com venda (valor/itens); desligado = só resultado, motivo e tags */
   @IsOptional() @IsBoolean() salesEnabled?: boolean;
+  /** separar também equipe, planilha de contatos e transmissões por empresa — só o admin da conta */
+  @IsOptional() @IsBoolean() companyIsolation?: boolean;
   /** assinatura do atendente obrigatória nas mensagens */
   @IsOptional() @IsBoolean() requireSignature?: boolean;
   /** motivo de encerramento obrigatório em "Comprou" / "Não comprou" (cada um separado) */
@@ -91,6 +94,7 @@ export class TenantSettingsController {
     private readonly settings: TenantSettingsService,
     private readonly schedules: SchedulesService,
     private readonly storage: StorageService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   @Get()
@@ -101,7 +105,11 @@ export class TenantSettingsController {
 
   @Patch()
   @RequirePermission('settings.manage')
-  update(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
+  async update(@CurrentUser() u: AuthUser, @Body() dto: SettingsDto) {
+    // quem configura (gerente de contrato, gerente de filial) não pode desligar a própria restrição
+    if (dto.companyIsolation !== undefined && u.role !== 'tenant_admin' && u.role !== 'super_admin' && !u.impersonatorId) {
+      throw new ForbiddenException('Só o administrador da conta muda a separação por empresa.');
+    }
     if (dto.timezone && !isTimezone(dto.timezone)) throw new BadRequestException('Fuso horário inválido.');
     // sem {{link}} o contato receberia a frase e nenhum jeito de abrir a foto: o link vai no final
     const frase = dto.secureMediaText?.trim();
@@ -116,7 +124,10 @@ export class TenantSettingsController {
       });
       if (errors.length) throw new BadRequestException(errors.join(' '));
     }
-    return this.settings.update(u.tenantId, dto);
+    const saved = await this.settings.update(u.tenantId, dto);
+    // o guard lê a separação do cache de empresas: sem isto valeria só em 15 s
+    if (dto.companyIsolation !== undefined) this.permissions.invalidate();
+    return saved;
   }
 
   // ---------- quadros de horários ----------

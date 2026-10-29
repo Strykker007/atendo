@@ -45,7 +45,8 @@ function auth(rows = pessoas()) {
   const prisma = fakePrisma(rows);
   const jwt = new JwtService();
   const shift = { sessionWindow: async () => ({ shiftEndsAt: null, lockedUntil: null }) };
-  return { svc: new AuthService(prisma as never, jwt, {} as never, shift as never), jwt, rows, prisma };
+  const accessLog = { start: async () => null, touch: async () => null, end: async () => undefined, denied: async () => undefined, endAllOfPerson: async () => undefined };
+  return { svc: new AuthService(prisma as never, jwt, {} as never, shift as never, accessLog as never), jwt, rows, prisma };
 }
 const decode = (jwt: JwtService, token: string) => jwt.verify(token, { secret: env.JWT_ACCESS_SECRET });
 

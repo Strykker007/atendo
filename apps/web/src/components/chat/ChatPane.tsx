@@ -10,7 +10,7 @@ import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, R
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
-import { useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings } from '@/lib/hooks';
+import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
@@ -148,6 +148,13 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const tags = useTags();
   const messages = useMessages(conversationId);
   const mensagens = useMemo(() => mensagensEmOrdem(messages.data), [messages.data]);
+  // cada encerramento fecha um atendimento: vira divisória entre as mensagens, para saber onde um
+  // termina e o próximo começa (a mesma janela que a auditoria de Relatórios usa)
+  const eventos = useConversationEvents(conversationId ?? null);
+  const encerramentos = useMemo(() => (eventos.data ?? []).filter((e) => e.type === 'closed').sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [eventos.data]);
+  /** encerramentos entre a mensagem anterior e esta; antes da 1ª carregada só se não houver página anterior */
+  const encerradosAntes = (anterior: Message | undefined, atual: Message) => encerramentos.filter((e) => e.createdAt <= atual.createdAt && (anterior ? e.createdAt > anterior.createdAt : !messages.hasNextPage));
+  const ultima = mensagens[mensagens.length - 1];
   // o canal mostrado na tela vai junto: se a conversa mudou de número, a API recusa (409) em vez de enviar
   const send = useSendMessage(conversationId, conv?.number.id);
   // janela de 24h da Meta: o relógio da lista re-renderiza para a barra aparecer quando ela fecha
@@ -607,27 +614,31 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           </div>
           )}
         </div>
-        {conv.ticketExempt ? (
-          // contato isento: chat livre, sem fila, sem dono e fora dos relatórios (docs/contatos-isentos.md).
-          // Com permissão, o selo é o atalho para voltar a abrir atendimento
-          podeIsentar && !conv.contact.isGroup ? (
-            <button type="button" onClick={() => setIsentando(true)} className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted hover:text-ink hover:ring-1 hover:ring-line" title="Contato isento de ticket: não entra na fila nem nos relatórios. Clique para voltar a abrir atendimento">
-              <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre · sem ticket
-            </button>
-          ) : (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted" title="Contato isento de ticket: não entra na fila nem nos relatórios">
-              <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre · sem ticket
-            </span>
-          )
+        {isFreeChat(conv) ? (
+          // conversa livre (grupo; isenta antiga sem dono): sem fila, sem dono, fora dos relatórios
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted" title="Conversa livre: sem dono, fora da fila e dos relatórios">
+            <span className="w-1.5 h-1.5 rounded-full bg-current" />Livre
+          </span>
         ) : (
           <span className={cn('hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1', STATUS_META[conv.status].soft, STATUS_META[conv.status].color)}>
             <span className="w-1.5 h-1.5 rounded-full bg-current" />{STATUS_META[conv.status].short}
           </span>
         )}
+        {/* contato isento: atendimento normal, só fora dos relatórios (docs/contatos-isentos.md).
+            Com permissão, o selo é o atalho para voltar a gerar relatório */}
+        {conv.ticketExempt && !conv.contact.isGroup && (podeIsentar ? (
+          <button type="button" onClick={() => setIsentando(true)} className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted hover:text-ink hover:ring-1 hover:ring-line" title="Contato isento: fora dos relatórios, sem robô e sem pesquisa. Clique para voltar a gerar relatório">
+            <EyeOff size={11} />Sem relatório
+          </button>
+        ) : (
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-field text-muted" title="Contato isento: fora dos relatórios, sem robô e sem pesquisa">
+            <EyeOff size={11} />Sem relatório
+          </span>
+        ))}
         {/* Encerrar é a ação que fecha o atendimento (e alimenta o relatório de vendas): verde, com
             texto sempre visível e a PRIMEIRA das ações — no fim da fila, ela ia para a segunda linha
             ou ficava atrás do painel da direita e o atendente não achava */}
-        {conv.status !== 'closed' ? (conv.ticketExempt ? null : (
+        {conv.status !== 'closed' ? (isFreeChat(conv) ? null : (
           <Button size="sm" variant="success" className="shrink-0" icon={<CheckCircle2 size={14} />} onClick={() => setClosing(true)} title="Encerrar atendimento e registrar o resultado">
             Encerrar
           </Button>
@@ -637,7 +648,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           </Button>
         )}
         {sched.has && (
-          <Button size="sm" variant="ghost" icon={<CalendarPlus size={14} />} onClick={() => setScheduling(true)} title="Agendar horário para este cliente"><span className="hidden sm:inline">Agendar</span></Button>
+          <Button size="sm" variant="ghost" icon={<CalendarPlus size={14} />} onClick={() => setScheduling(true)} title="Agendar horário para este contato"><span className="hidden sm:inline">Agendar</span></Button>
         )}
         {conv.status === 'waiting' && (
           <Button size="sm" icon={<Hand size={14} />} loading={claim.isPending} loadingText="Assumindo…" onClick={() => claim.mutateAsync(conv.id).then(() => { toast.ok('Você assumiu este atendimento'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Assumir atendimento">
@@ -699,8 +710,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           <span className="hidden lg:inline">Histórico</span>
         </Button>
         {podeIsentar && !conv.ticketExempt && !conv.contact.isGroup && (
-          <Button size="sm" variant="ghost" icon={<BellOff size={14} />} onClick={() => setIsentando(true)} title="Não abrir atendimento para este número (diretoria, fornecedor, celular da equipe): vira conversa livre, fora da fila e dos relatórios">
-            <span className="hidden xl:inline">Não abrir atendimento</span>
+          <Button size="sm" variant="ghost" icon={<BellOff size={14} />} onClick={() => setIsentando(true)} title="Não gerar relatório para este número (diretoria, fornecedor, celular da equipe): o atendimento segue normal, mas fica fora dos relatórios">
+            <span className="hidden xl:inline">Não gerar relatório</span>
           </Button>
         )}
         {isentando && <ExemptConfirm conv={conv} open onClose={() => setIsentando(false)} />}
@@ -760,7 +771,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{encerradosAntes(mensagens[i - 1], m).map((e) => <MarcoDeAtendimento key={e.id} e={e} seguinte />)}{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {ultima && encerramentos.filter((e) => e.createdAt > ultima.createdAt).map((e) => <MarcoDeAtendimento key={e.id} e={e} />)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
       </div>
@@ -848,7 +860,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
               }}
               rows={1}
-              placeholder={ownedByOther ? `Nota para ${conv.assignee?.name} — o cliente não vê` : 'Nota para a equipe — o cliente não vê'}
+              placeholder={ownedByOther ? `Nota para ${conv.assignee?.name} — o contato não vê` : 'Nota para a equipe — o contato não vê'}
               className="flex-1 resize-none min-h-[38px] max-h-40 overflow-y-hidden scrollbar-thin rounded-xl bg-panel border border-warn/40 text-ink placeholder:text-warn-ink/60 px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-warn/50"
             />
             <Button type="submit" className="h-9 rounded-full px-3.5 bg-warn hover:bg-warn/90 text-white border-0" disabled={!textoNota.trim()} loading={sendNote.isPending} icon={<StickyNote size={15} />}>Adicionar nota</Button>
@@ -996,7 +1008,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 }
 
 /**
- * Abas logo acima do campo: "Mensagem para o cliente" | "Nota interna". Antes a nota era um
+ * Abas logo acima do campo: "Mensagem para o contato" | "Nota interna". Antes a nota era um
  * ícone perdido na barra de atalhos e pouca gente achava — a aba deixa o modo sempre à vista.
  */
 function AbasDoEnvio({ nota, onNota, podeNota, onOrcamento }: { nota: boolean; onNota: (v: boolean) => void; podeNota: boolean; /** abre o orçamento (o link vai para o campo da mensagem) */ onOrcamento?: () => void }) {
@@ -1008,7 +1020,7 @@ function AbasDoEnvio({ nota, onNota, podeNota, onOrcamento }: { nota: boolean; o
     <div role="tablist" className="flex items-end gap-1 border-b border-line/70">
       {/* mousedown sem default: clicar na aba não tira o foco do campo (o efeito foca o do modo novo) */}
       <button type="button" role="tab" aria-selected={!nota} onMouseDown={(e) => e.preventDefault()} onClick={() => onNota(false)} className={aba(!nota, 'border-accent text-accent-ink')}>
-        <Send size={12} /> Mensagem para o cliente
+        <Send size={12} /> Mensagem para o contato
       </button>
       {podeNota && (
         <button type="button" role="tab" aria-selected={nota} onMouseDown={(e) => e.preventDefault()} onClick={() => onNota(true)} title="Só a equipe vê — nunca vai para o WhatsApp (Alt+N)" className={aba(nota, 'border-warn bg-warn/15 text-warn-ink')}>
@@ -1168,6 +1180,28 @@ function MensagemApagada({ m, podeVer }: { m: Message; podeVer: boolean }) {
  * Sem ele a conversa é um rolo contínuo: o atendente lê "às 14:20" e não sabe se foi hoje ou
  * há três semanas — e essa diferença muda o que ele responde.
  */
+/**
+ * Fim de um atendimento no meio da conversa: quem encerrou, com que resultado e quando. Com
+ * `seguinte`, avisa que as mensagens de baixo já são outro atendimento.
+ */
+function MarcoDeAtendimento({ e, seguinte }: { e: ConversationEvent; seguinte?: boolean }) {
+  const labels = useOutcomeLabels();
+  const resultado = e.outcome === 'won' || e.outcome === 'lost' ? labels[e.outcome] : null;
+  const quando = new Date(e.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  return (
+    <div className="flex flex-col items-center gap-1 py-2 select-none">
+      <div className="flex w-full items-center gap-2">
+        <span className="h-px flex-1 bg-line" />
+        <span className="text-[11px] font-semibold text-muted bg-panel/90 rounded-full px-2.5 py-0.5 shadow-sm text-center">
+          Atendimento encerrado{resultado && ` · ${resultado}`}{e.actor && ` · ${e.actor.name}`} · {quando}
+        </span>
+        <span className="h-px flex-1 bg-line" />
+      </div>
+      {seguinte && <span className="text-[10.5px] uppercase tracking-wider text-faint">novo atendimento</span>}
+    </div>
+  );
+}
+
 function SeparadorDeDia({ data }: { data: string }) {
   return (
     <div className="dia-sep flex items-center gap-3 py-2 select-none">

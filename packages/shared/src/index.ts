@@ -16,3 +16,4 @@ export * from './json-path.js';
 export * from './budgets.js';
 export * from './secure-media.js';
 export * from './ranking.js';
+export * from './documents.js';

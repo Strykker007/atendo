@@ -234,6 +234,12 @@ export class ConversationsController {
   }
 
   /** Busca do "Nova conversa": contatos da base + agenda do aparelho (Evolution). */
+  /** Tela Contatos: base no escopo de quem pede, com a conversa mais recente de cada um. */
+  @Get('contacts')
+  listContacts(@CurrentUser() u: AuthUser, @Query('q') q = '', @Query('cursor') cursor?: string) {
+    return this.conversations.listContacts(u.tenantId, u, { search: String(q).slice(0, 100), cursor: cursor || undefined });
+  }
+
   @Get('start/contacts')
   startCandidates(@CurrentUser() u: AuthUser, @Query('q') q = '') {
     return this.conversations.startCandidates(u.tenantId, u, String(q).slice(0, 100));
@@ -446,9 +452,13 @@ export class ConversationsController {
 
   @Patch(':id/status')
   async status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
+    // contato isento (docs/contatos-isentos.md): encerra sem resultado, sem pesquisa e fora dos
+    // relatórios — como o interno, mas sem exigir a permissão (a marca já foi decidida antes)
+    const isento = dto.status === 'closed' && !dto.internal && !!(await this.prisma.conversation.findFirst({ where: { id, tenantId: u.tenantId }, select: { ticketExempt: true } }))?.ticketExempt;
+    if (isento) Object.assign(dto, { outcome: 'none', value: undefined, items: undefined, products: undefined, notes: undefined, surveyId: null });
     const interno = dto.status === 'closed' && !!dto.internal;
     if (interno) assertCanCloseInternal(u);
-    else if (dto.status === 'closed') {
+    else if (dto.status === 'closed' && !isento) {
       const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { requireSaleValue: true, salesEnabled: true, wonLabel: true, lostLabel: true } });
       // sem venda (empresa de atendimento): o resultado continua obrigatório, mas valor, itens e
       // observação de venda não existem — descartados aqui para nenhum caminho gravar venda
@@ -457,7 +467,7 @@ export class ConversationsController {
       assertOutcome(dto, (s?.requireSaleValue ?? true) && s?.salesEnabled !== false, s ? { won: s.wonLabel, lost: s.lostLabel } : undefined, pago);
     }
     // pesquisa: conferida ANTES de encerrar (id inválido não pode fechar sem ela). Interno não tem
-    const pesquisa = dto.status === 'closed' && !interno ? await this.surveys.resolve(u.tenantId, dto.surveyId) : null;
+    const pesquisa = dto.status === 'closed' && !interno && !isento ? await this.surveys.resolve(u.tenantId, dto.surveyId) : null;
     // consultor do atendimento: o dono antes de encerrar (gerente encerrando pelo time não leva a nota)
     const dono = pesquisa ? await this.prisma.conversation.findFirst({ where: { id, tenantId: u.tenantId }, select: { assigneeId: true } }) : null;
     const conv = await this.conversations.setStatus(u.tenantId, id, dto.status, u.id, dto.status === 'closed' ? { outcome: dto.outcome ?? 'none', value: dto.value, tagIds: dto.tagIds, products: dto.products, items: dto.items, notes: dto.notes, closeReasonId: dto.closeReasonId, internal: interno } : undefined);
@@ -470,7 +480,7 @@ export class ConversationsController {
     if (dto.status === 'closed') {
       let fluxo = dto.flowId;
       // interno não tem resultado nem pesquisa padrão: só dispara o fluxo escolhido explicitamente
-      if (fluxo === undefined && interno) fluxo = null;
+      if (fluxo === undefined && (interno || isento)) fluxo = null;
       if (fluxo === undefined) {
         const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { onCloseFlowId: true, wonFlowId: true, lostFlowId: true } });
         const porDesfecho = dto.outcome === 'won' ? s?.wonFlowId : s?.lostFlowId;

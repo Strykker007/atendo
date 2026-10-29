@@ -22,13 +22,13 @@ export function ExemptConfirm({ conv, open, onClose }: { conv: Pick<Conversation
     <ConfirmDialog
       open={open}
       onClose={onClose}
-      title={isento ? 'Voltar a abrir atendimento?' : 'Não abrir atendimento para este número?'}
+      title={isento ? 'Voltar a entrar nos relatórios?' : 'Não gerar relatório para este número?'}
       text={isento
-        ? `${nome} sai da lista de isentos. A conversa livre é guardada como encerrada e a próxima mensagem dele abre atendimento normalmente.`
-        : `${nome} vira conversa livre: as mensagens continuam chegando e podem ser respondidas, mas não entram na fila, não têm dono, não acionam robô e ficam fora dos relatórios. Use para diretoria, fornecedores e celulares da equipe.`}
-      confirmLabel={isento ? 'Voltar a abrir atendimento' : 'Não abrir atendimento'}
+        ? `${nome} sai da lista de isentos. Os próximos atendimentos dele voltam a contar nos relatórios e a receber robô e pesquisa.`
+        : `${nome} continua no atendimento normal — Aguardando, Atendendo, Encerrado, com dono — mas fica fora dos relatórios, não aciona robô nem pesquisa e encerra sem resultado. Nada muda no status agora. Use para diretoria, fornecedores e celulares da equipe.`}
+      confirmLabel={isento ? 'Voltar a gerar relatório' : 'Não gerar relatório'}
       onConfirm={() => (isento ? remove.mutateAsync(conv.contact.id) : add.mutateAsync({ contactId: conv.contact.id }))
-        .then(() => toast.ok(isento ? 'O número volta a abrir atendimento' : 'Número isento: fica em Conversas livres'))
+        .then(() => toast.ok(isento ? 'O número volta a entrar nos relatórios' : 'Número fora dos relatórios — a conversa continua onde está'))
         .catch((err) => { toast.err(err); throw err; })}
     />
   );

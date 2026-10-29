@@ -10,6 +10,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { isolatedNumbers } from '../auth/team-scope';
 import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { TenantsModule } from '../tenants/tenants.module';
@@ -70,34 +71,34 @@ class CampaignsController {
 
   @Get()
   list(@CurrentUser() u: AuthUser) {
-    return this.campaigns.list(u.tenantId);
+    return this.campaigns.list(u.tenantId, isolatedNumbers(u));
   }
 
   @Get(':id')
   one(@CurrentUser() u: AuthUser, @Param('id') id: string) {
-    return this.campaigns.one(u.tenantId, id);
+    return this.campaigns.one(u.tenantId, id, isolatedNumbers(u));
   }
 
   /** Quantos contatos a seleção atinge — mostrado antes de criar, para não haver surpresa. */
   @Post('preview')
   preview(@CurrentUser() u: AuthUser, @Body() body: AudienceDto) {
     // contagem para a tela: sem critério, zero (não "todos")
-    return this.campaigns.preview(u.tenantId, body);
+    return this.campaigns.preview(u.tenantId, body, isolatedNumbers(u));
   }
 
   @Post()
   create(@CurrentUser() u: AuthUser, @Body() dto: CreateCampaignDto) {
-    return this.campaigns.create(u.tenantId, u.id, dto);
+    return this.campaigns.create(u.tenantId, u.id, dto, isolatedNumbers(u));
   }
 
   @Post(':id/start')
   start(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StartDto) {
-    return this.campaigns.start(u.tenantId, u.id, id, dto.acceptRisk);
+    return this.campaigns.start(u.tenantId, u.id, id, dto.acceptRisk, isolatedNumbers(u));
   }
 
   @Post(':id/status')
   status(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: StatusDto) {
-    return this.campaigns.setStatus(u.tenantId, id, dto.status);
+    return this.campaigns.setStatus(u.tenantId, id, dto.status, isolatedNumbers(u));
   }
 }
 

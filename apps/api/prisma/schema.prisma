@@ -92,6 +92,7 @@ model Tenant {
   closeReasons    CloseReason[]
   pixKeys         PixKey[]
   auditLogs       AuditLog[]
+  userSessions    UserSession[]
   satisfactionSurveys SatisfactionSurvey[]
   surveyResponses     SurveyResponse[]
   salesGoals          SalesGoal[]
@@ -165,6 +166,7 @@ model User {
   tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   profile       AccessProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
   refreshTokens RefreshToken[]
+  sessions      UserSession[]
   authTokens    AuthToken[]
   /// convite pendente: usuário existe mas ainda não definiu senha
   invitedAt     DateTime?
@@ -239,6 +241,8 @@ model WorkSchedule {
   anchorDate String?
   /// minutos antes do início em que o login já é aceito
   toleranceMinutes Int       @default(15)
+  /// minutos DEPOIS do fim em que a sessão ainda funciona (tolerância para sair); 0 = trava na hora
+  exitGraceMinutes Int       @default(0)
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
@@ -459,12 +463,40 @@ model RefreshToken {
   revokedAt DateTime?
   userAgent String?
   ip        String?
+  /// sessão de login (registro de acessos) que este token continua; null = token anterior ao registro
+  sessionId String?
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+/// Registro de acessos (docs/registro-de-acessos.md): uma linha por login, do momento em que entrou
+/// até sair. As renovações do token (a cada ~15 min com o painel aberto) só avançam `lastSeenAt`.
+/// Tentativa barrada (senha certa, fora da escala / acesso vencido) também fica, com `outcome`.
+model UserSession {
+  id         String    @id @default(uuid())
+  tenantId   String
+  userId     String
+  /// ok = entrou | out_of_schedule = barrado pela escala | account_expired = acesso temporário vencido
+  outcome    String    @default("ok")
+  startedAt  DateTime  @default(now())
+  /// última renovação do token: sem saída registrada (fechou o navegador), o acesso vale até aqui
+  lastSeenAt DateTime  @default(now())
+  endedAt    DateTime?
+  /// logout | shift_end (turno acabou) | expired (acesso temporário venceu) | revoked (senha trocada)
+  endReason  String?
+  ip         String?
+  userAgent  String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startedAt])
+  @@index([userId, startedAt])
+  @@map("user_sessions")
 }
 
 /// Configurações gerais do cliente. Fuso vive aqui (é do negócio, não de um módulo).
@@ -499,6 +531,11 @@ model TenantSettings {
   /// atendimento (condomínio, suporte, órgão público): o encerramento só tem resultado, motivo e
   /// tags — nada vira venda nem faturamento (docs/06-modelo-de-dados.md#encerramento-sem-venda)
   salesEnabled Boolean @default(true)
+  /// Separar por empresa também a equipe (lista, escalas, registro de acessos), a planilha de
+  /// contatos e as transmissões de quem é vinculado a empresas (docs/empresas.md#separar-por-empresa).
+  /// Desligado (padrão) = como sempre foi: o recorte por empresa vale só para conversas e relatórios.
+  /// Só o admin da conta muda
+  companyIsolation Boolean @default(false)
   /// assinatura do atendente (`*Nome:*` na 1ª linha) obrigatória: a API acrescenta quando falta
   requireSignature Boolean @default(false)
   /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na
@@ -2070,6 +2107,10 @@ model Invoice {
   hostedUrl     String?
   dueAt         DateTime?
   paidAt        DateTime?
+  /// lembretes da mensalidade (e-mail com o Pix + aviso no painel) já enviados: "vence em breve"
+  /// e "vence hoje" — um de cada por cobrança (docs/05-planos-e-cobranca.md#lembretes-da-mensalidade)
+  remindedSoonAt DateTime?
+  remindedDueAt  DateTime?
   /// Cobrança consolidada do painel de vencimentos: o que ela quita (grupo e/ou empresas),
   /// congelado na emissão. Formato `ConsolidatedItem[]` (billing/dues.service.ts). Null = fatura comum.
   items         Json?

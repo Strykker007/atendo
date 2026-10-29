@@ -70,6 +70,9 @@ export class MailService {
   }
 }
 
+/** Nome do remetente (`MAIL_FROM`) — a marca que assina os e-mails. */
+export const senderName = () => parseSender(env.MAIL_FROM).name || 'Atendo';
+
 /** "Atendo <no-reply@dominio>" → { name, email }; aceita também só o e-mail. */
 const parseSender = (from: string) => {
   const m = from.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);

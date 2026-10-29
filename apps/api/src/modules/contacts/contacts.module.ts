@@ -9,6 +9,8 @@ import { TenantGuard } from '../auth/tenant.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { isolatedNumbers } from '../auth/team-scope';
+import type { Prisma } from '@prisma/client';
 import { phoneVariants } from '../conversations/phone-variants';
 import { EXPORT_HEADER, EXPORT_MAX_ROWS, IMPORT_MAX_ROWS, mergeContact, parseCsv, readImportRows, toCsv, type ImportRecord } from './contacts-io';
 
@@ -31,6 +33,8 @@ export interface ImportReport {
   duplicates: number;
   invalid: { line: number; value: string; reason: string }[];
   invalidCount: number;
+  /** já existiam, mas são de outro condomínio/empresa (fora dos números de quem importou): não mexidos */
+  outOfScope: number;
   /** tags da planilha que não existem no cliente (não são criadas: isso é de quem gerencia tags) */
   unknownTags: string[];
   dryRun: boolean;
@@ -42,11 +46,21 @@ export class ContactsIoService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Base inteira do cliente em CSV, com as tags e os campos personalizados como colunas. */
-  async exportCsv(tenantId: string) {
+  /**
+   * Contatos que a pessoa enxerga (docs/empresas.md#contatos): quem conversou por um número dela
+   * ou está na agenda de um desses números. `numbers` indefinido = sem restrição (base inteira).
+   */
+  private async scopeWhere(tenantId: string, numbers: { in: string[] } | undefined): Promise<Prisma.ContactWhereInput> {
+    if (!numbers) return {};
+    const agenda = await this.prisma.phonebookEntry.findMany({ where: { tenantId, numberId: numbers }, select: { phone: true }, distinct: ['phone'] });
+    return { OR: [{ conversations: { some: { numberId: numbers } } }, { phone: { in: agenda.map((a) => a.phone) } }] };
+  }
+
+  /** Base do cliente (ou só a dos números de quem exporta) em CSV, com tags e campos personalizados como colunas. */
+  async exportCsv(tenantId: string, numbers?: { in: string[] }) {
     const contacts = await this.prisma.contact.findMany({
       // grupo nas conversas não é pessoa: fica fora da base exportada
-      where: { tenantId, isGroup: false },
+      where: { tenantId, isGroup: false, ...(await this.scopeWhere(tenantId, numbers)) },
       orderBy: { createdAt: 'asc' },
       take: EXPORT_MAX_ROWS,
       select: {
@@ -70,7 +84,12 @@ export class ContactsIoService {
     return toCsv([[...EXPORT_HEADER, ...labels], ...rows]);
   }
 
-  async import(tenantId: string, dto: ImportDto): Promise<ImportReport> {
+  /**
+   * Contato novo entra na base do cliente (só aparece para a pessoa quando conversar por um número
+   * dela). Contato que já existe fora do escopo de quem importa não é alterado — a ficha é do
+   * outro condomínio.
+   */
+  async import(tenantId: string, dto: ImportDto, numbers?: { in: string[] }): Promise<ImportReport> {
     const matrix = dto.rows ? dto.rows.map((r) => (Array.isArray(r) ? r.map((v) => String(v ?? '')) : [])) : dto.csv ? parseCsv(dto.csv) : null;
     if (!matrix?.length) throw new BadRequestException('Envie uma planilha com ao menos uma linha.');
     if (matrix.length > IMPORT_MAX_ROWS + 1) throw new BadRequestException(`Planilha grande demais: o máximo é ${IMPORT_MAX_ROWS.toLocaleString('pt-BR')} contatos por importação. Divida o arquivo.`);
@@ -84,6 +103,9 @@ export class ContactsIoService {
       where: { tenantId, phone: { in: [...variantes.keys()] } },
       select: { id: true, phone: true, name: true, nameSource: true, email: true, document: true, address: true, note1: true, note2: true },
     });
+    const visiveis = numbers && existentes.length
+      ? new Set((await this.prisma.contact.findMany({ where: { tenantId, id: { in: existentes.map((c) => c.id) }, ...(await this.scopeWhere(tenantId, numbers)) }, select: { id: true } })).map((c) => c.id))
+      : null;
     const porTelefone = new Map<string, (typeof existentes)[number]>();
     for (const c of existentes) {
       const dono = variantes.get(c.phone);
@@ -100,9 +122,11 @@ export class ContactsIoService {
     });
 
     const novos = records.filter((r) => !porTelefone.has(r.phone));
+    let outOfScope = 0;
     const atualizacoes = records.flatMap((r) => {
       const cur = porTelefone.get(r.phone);
       if (!cur) return [];
+      if (visiveis && !visiveis.has(cur.id)) { outOfScope++; return []; }
       return [{ id: cur.id, data: mergeContact(cur, r, !!dto.overwrite), tags: tagIds(r) }];
     });
     const tagsDosNovos = new Map(novos.map((r) => [r.phone, tagIds(r)]));
@@ -114,6 +138,7 @@ export class ContactsIoService {
       duplicates,
       invalid: invalid.slice(0, 50),
       invalidCount: invalid.length,
+      outOfScope,
       unknownTags: [...unknownTags].slice(0, 50),
       dryRun: !!dto.dryRun,
     };
@@ -153,12 +178,12 @@ class ContactsIoController {
   async export(@CurrentUser() u: AuthUser, @Res({ passthrough: true }) res: Response) {
     const dia = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
     res.setHeader('Content-Disposition', `attachment; filename="contatos-${dia}.csv"`);
-    return this.io.exportCsv(u.tenantId);
+    return this.io.exportCsv(u.tenantId, isolatedNumbers(u));
   }
 
   @Post('import')
   import(@CurrentUser() u: AuthUser, @Body() dto: ImportDto) {
-    return this.io.import(u.tenantId, dto);
+    return this.io.import(u.tenantId, dto, isolatedNumbers(u));
   }
 }
 

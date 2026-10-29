@@ -60,7 +60,7 @@ export default function SatisfactionReportPage() {
   const max = SURVEY_SCALE_MAX[escala];
 
   if (!podeVer) return <PageShell><p className="text-sm text-muted">Seu perfil de acesso não inclui relatórios.</p></PageShell>;
-  if (!feature.loading && !feature.has) return <FeatureLocked title="Satisfação dos clientes" text="Nota média, NPS e feedbacks dos clientes por consultor, a partir da pesquisa enviada no encerramento." />;
+  if (!feature.loading && !feature.has) return <FeatureLocked title="Satisfação no atendimento" text="Nota média, NPS e feedbacks dos contatos por consultor, a partir da pesquisa enviada no encerramento." />;
 
   const totalDist = d ? Math.max(1, ...d.totals.distribution.map((x) => x.count)) : 1;
   const chip = (on: boolean) => cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field');
@@ -68,7 +68,7 @@ export default function SatisfactionReportPage() {
   return (
     <PageShell width="max-w-6xl">
       <PageHeader
-        title="Satisfação dos clientes"
+        title="Satisfação no atendimento"
         subtitle="Notas das pesquisas enviadas ao encerrar o atendimento, da equipe e de cada consultor."
         action={
           <div className="flex items-center gap-3">
@@ -201,7 +201,7 @@ export default function SatisfactionReportPage() {
 
           <section className="rounded-2xl bg-panel border border-line">
             <div className="flex flex-wrap items-end gap-3 px-4 pt-4 pb-3 border-b border-line">
-              <h2 className="text-sm font-semibold text-ink mr-auto inline-flex items-center gap-1.5"><MessageSquareQuote size={15} className="text-accent" /> Feedbacks dos clientes</h2>
+              <h2 className="text-sm font-semibold text-ink mr-auto inline-flex items-center gap-1.5"><MessageSquareQuote size={15} className="text-accent" /> Feedbacks dos contatos</h2>
               <div className="flex flex-wrap items-center gap-1 text-xs">
                 <span className="text-muted mr-1">Nota:</span>
                 <button type="button" onClick={() => setNota([undefined, undefined])} className={chip(!nota[0] && !nota[1])}>Todas</button>

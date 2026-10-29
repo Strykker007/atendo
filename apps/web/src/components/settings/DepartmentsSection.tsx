@@ -100,7 +100,7 @@ export function DepartmentsSection() {
         {editing && (
           <form onSubmit={(e) => { e.preventDefault(); void salvar(); }} className="space-y-3">
             <Field label="Nome"><input className={inputCls} value={editing.name} maxLength={40} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Vendas" required autoFocus /></Field>
-            <Field label="Descrição (opcional)"><input className={inputCls} value={editing.description} maxLength={200} onChange={(e) => setEditing({ ...editing, description: e.target.value })} placeholder="Orçamentos e novos clientes" /></Field>
+            <Field label="Descrição (opcional)"><input className={inputCls} value={editing.description} maxLength={200} onChange={(e) => setEditing({ ...editing, description: e.target.value })} placeholder="Orçamentos e novos contatos" /></Field>
             <Field label="Cor">
               <div className="flex flex-wrap gap-2 pt-1">
                 {PALETTE.map((c) => (

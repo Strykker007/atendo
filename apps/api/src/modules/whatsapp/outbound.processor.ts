@@ -16,7 +16,7 @@ import { enrichContext } from '../../common/observability/request-context';
 import { SendPacer } from './send-pacer';
 import { countsTowardDailyLimit } from './sending-policy';
 import { isTransientSendError, retryDelayMs } from './providers/provider-error';
-import { expiredReason, headOf, holdForProtection, planSend, promoteNext } from './send-queue';
+import { expiredReason, headOf, holdForProtection, planSend, promoteNext, releaseHeld } from './send-queue';
 import { humanTiming, typingMs, warmupPhase } from './number-warmup';
 import type { NumberContext } from './providers/provider.interface';
 
@@ -26,6 +26,10 @@ import type { NumberContext } from './providers/provider.interface';
  * caiu, expira o que ficou tempo demais na fila, reserva o ritmo (número + conversa) e envia.
  * Retry só para erro transitório, com backoff exponencial e jitter (`send-jitter`).
  */
+/** Automática de conversa encerrada (despedida, agradecimento) só espera o teto até aqui; depois é descartada. */
+export const CLOSED_AUTO_MAX_DELAY_MS = 15 * 60_000;
+export const CLOSED_AUTO_DROPPED = 'Não enviada: era a mensagem automática de uma conversa já encerrada e o limite de proteção do número a atrasaria mais de 15 min — o cliente já tinha saído.';
+
 @Processor(QUEUE_OUTBOUND, {
   concurrency: 20,
   settings: { backoffStrategy: (attemptsMade: number) => retryDelayMs(attemptsMade, SEND_RETRY) },
@@ -103,6 +107,9 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
             if (m) this.gateway.emitMessage(tenantId, this.conversations.present(m));
           }
         }
+        if (plan.releaseHead && (await releaseHeld(this.prisma, this.outboundQueue, plan.releaseHead))) {
+          this.log.log(`Conversa ${message.conversationId}: automática ${plan.releaseHead} liberada do teto — atendente esperando atrás (envio ${message.id})`);
+        }
         return this.later(job, token, Date.now() + plan.delayMs, job.data);
       case 'pause':
         // número desconectado: não insiste no provider. A vaga reservada é descartada — ao
@@ -147,13 +154,25 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
     if (!job.data.pacedUntil) {
       // sem autor = automático (fluxo, boas-vindas, lembrete, campanha): espaçamento de 4–10 s e teto por hora
       const automated = !message.authorId;
-      // aquecendo: o robô tem teto por hora menor (o menor entre a fase e o configurado na conexão)
-      const ritmo = aquecendo ? { ...limits, autoPerHour: Math.min(limits.autoPerHour, aquecendo.autoPerHour) } : limits;
+      // aquecendo: o robô tem teto por hora menor (o menor entre a fase e o configurado na conexão);
+      // liberada por um atendente esperando atrás: sem teto por hora (0 = sem teto), só o espaçamento
+      const ritmo = job.data.released ? { ...limits, autoPerHour: 0 } : aquecendo ? { ...limits, autoPerHour: Math.min(limits.autoPerHour, aquecendo.autoPerHour) } : limits;
+      // a vaga antiga no teto (até 1 h à frente) sai da conta; a nova é reservada logo abaixo
+      if (job.data.released) await this.pacer.forget({ numberId: num.id, conversationId: message.conversationId, messageId: message.id });
       const { waitMs, burst, autoCapped } = await this.pacer.reserve({ numberId: num.id, conversationId: message.conversationId, messageId: message.id, profile: num.sendDelay, limits: ritmo, minGapMs: job.data.minGapMs, automated, provider: num.provider, warmupGapMs: aquecendo?.minGapMs });
       if (autoCapped) this.log.warn(`Número ${num.id}: teto de ${ritmo.autoPerHour} automáticas/h atingido, envio ${message.id} adiado ${Math.round(waitMs / 1000)}s`);
       if (burst) this.log.warn(`Rajada na conversa ${message.conversationId}: envio ${message.id} adiado ${Math.round(waitMs / 1000)}s (limite ${limits.convBurstMax}/${limits.convBurstWindowSec}s)`);
       if (waitMs > 0) {
         const until = Date.now() + waitMs;
+        // despedida de conversa já encerrada que só sairia muito depois (teto de automáticas): o
+        // cliente já foi embora — descarta em vez de chegar fora de hora. Nada depois dela na conversa
+        // depende disto (encerrada), então a ordem não muda; e o número manda menos.
+        if (autoCapped && message.conversation.status === 'closed' && until - message.createdAt.getTime() > CLOSED_AUTO_MAX_DELAY_MS) {
+          await this.pacer.forget({ numberId: num.id, conversationId: message.conversationId, messageId: message.id });
+          this.log.warn(`Número ${num.id}: automática ${message.id} de conversa encerrada descartada (sairia ${Math.round((until - message.createdAt.getTime()) / 60_000)} min depois)`);
+          await this.fail(message, tenantId, CLOSED_AUTO_DROPPED);
+          return this.next(message.conversationId);
+        }
         await holdForProtection(this.prisma, message, until);
         this.log.debug(`Envio ${message.id} adiado ${waitMs}ms (perfil ${num.sendDelay})`);
         // devolve o job para a fila com atraso em vez de segurar o worker parado

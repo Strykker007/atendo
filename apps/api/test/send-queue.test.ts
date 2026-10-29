@@ -18,9 +18,17 @@ const base = (over: Partial<PlanInput> = {}): PlanInput => ({
 });
 
 describe('planSend — decisão do worker', () => {
-  it('atendente passa na frente de automática segurada pela proteção', () => {
+  it('atendente NÃO passa na frente de automática segurada: ela é liberada e sai antes, na ordem', () => {
     const held = { id: 'bot', queuedAt: new Date(now + 180_000), authorId: null };
-    expect(planSend(base({ message: { ...base().message, authorId: 'agente' }, head: held }))).toEqual({ action: 'send' });
+    expect(planSend(base({ message: { ...base().message, authorId: 'agente' }, head: held }))).toEqual({ action: 'wait_turn', delayMs: TURN_RECHECK_MS, releaseHead: 'bot' });
+  });
+  it('número desconectado: não libera a automática da frente (não teria como sair)', () => {
+    const held = { id: 'bot', queuedAt: new Date(now + 180_000), authorId: null };
+    expect(planSend(base({ message: { ...base().message, authorId: 'agente' }, head: held, numberStatus: 'disconnected' }))).toEqual({ action: 'wait_turn', delayMs: DISCONNECTED_RECHECK_MS });
+  });
+  it('atendente atrás de outro atendente: espera a vez sem liberar nada', () => {
+    const outro = { id: 'm0', queuedAt: new Date(now + 60_000), authorId: 'agente2' };
+    expect(planSend(base({ message: { ...base().message, authorId: 'agente' }, head: outro }))).toEqual({ action: 'wait_turn', delayMs: TURN_RECHECK_MS });
   });
   it('automática atrás de automática segurada continua esperando a vez', () => {
     const held = { id: 'bot', queuedAt: new Date(now + 180_000), authorId: null };

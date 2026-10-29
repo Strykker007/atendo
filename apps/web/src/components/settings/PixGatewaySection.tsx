@@ -36,7 +36,7 @@ export function PixGatewaySection() {
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
       <div>
         <h2 className="font-display font-semibold text-ink flex items-center gap-2"><Zap size={16} className="text-ok" /> Pix automático (Asaas)</h2>
-        <p className="text-xs text-muted mt-0.5">O orçamento sai com Pix no valor exato; quando o cliente paga, o Asaas avisa e o orçamento fica “Pago” sozinho. O dinheiro cai direto na sua conta do Asaas.</p>
+        <p className="text-xs text-muted mt-0.5">O orçamento sai com Pix no valor exato; quando o contato paga, o Asaas avisa e o orçamento fica “Pago” sozinho. O dinheiro cai direto na sua conta do Asaas.</p>
       </div>
 
       {s && !s.feature && <p className="rounded-xl bg-field px-4 py-3 text-sm text-muted">Não incluído no seu plano. Fale com o suporte para liberar.</p>}

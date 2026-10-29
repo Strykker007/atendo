@@ -61,14 +61,14 @@ export function AppointmentModal({ open, onClose, contact, conversationId, editi
     <Modal open={open} onClose={onClose} title={editing ? 'Remarcar' : 'Novo agendamento'} width="max-w-2xl">
       <div className="grid md:grid-cols-2 gap-4">
         <div className="space-y-3">
-          <Field label="Cliente">
+          <Field label="Contato">
             {contactSel ? (
               <div className="flex items-center justify-between rounded-lg bg-field px-3 py-2 text-sm"><span className="text-ink">{contactSel.name ?? '—'} <span className="text-muted">+{contactSel.phone}</span></span>{!contact && !editing && <button className="text-xs text-accent-ink" onClick={() => { setContactSel(null); setSearch(''); }}>trocar</button>}</div>
             ) : (
               <div className="relative">
                 <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nome ou telefone" autoFocus />
                 {results.length > 0 && <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-line bg-panel shadow-lg py-1 max-h-48 overflow-y-auto">{results.map((r) => <button key={r.id} onClick={() => { setContactSel(r); setResults([]); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-field"><span className="text-ink">{r.name ?? '—'}</span> <span className="text-muted">+{r.phone}</span></button>)}</div>}
-                <p className="text-[11px] text-faint mt-1">Só contatos que já conversaram. Cliente novo: peça para mandar um “oi” no WhatsApp.</p>
+                <p className="text-[11px] text-faint mt-1">Só contatos que já conversaram. Contato novo: peça para mandar um “oi” no WhatsApp.</p>
               </div>
             )}
           </Field>

@@ -202,11 +202,15 @@ function Shell({ type, selected, children, summary, data }: { type: FlowNodeType
   );
 }
 
+/** atraso do Início: 0 → "Na hora"; 90 → "1 min 30 s" */
+export const fmtAtraso = (s: number) => (!s ? 'Na hora' : s < 60 ? `${s} segundos` : s % 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s / 60} min`);
+
 type P = NodeProps & { data: FlowNode['data'] & Record<string, unknown> };
 
-export function StartNodeView({ selected }: P) {
+export function StartNodeView({ data, selected }: P) {
+  const sec = Number((data as { delaySec?: number }).delaySec) || 0;
   return (
-    <Shell type="start" selected={selected} summary="Começa aqui">
+    <Shell type="start" selected={selected} summary={sec ? `Começa aqui · espera ${fmtAtraso(sec)}` : 'Começa aqui'}>
       <Out />
     </Shell>
   );

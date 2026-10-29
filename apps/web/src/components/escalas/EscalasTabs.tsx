@@ -14,6 +14,7 @@ export const ESCALAS_ABAS: { href: string; label: string; need: Permission }[] =
   { href: '/escalas/aprovacoes', label: 'Plantões e liberações', need: 'team.manage' },
   { href: '/escalas/turnos', label: 'Escalas de trabalho', need: 'team.manage' },
   { href: '/escalas/horario-atendimento', label: 'Horário de atendimento', need: 'settings.manage' },
+  { href: '/escalas/acessos', label: 'Registro de acessos', need: 'team.manage' },
 ];
 
 /** Primeira aba que a pessoa pode abrir (destino do item do menu); null = nenhuma. */
@@ -25,10 +26,10 @@ export function EscalasTabs() {
   const abas = ESCALAS_ABAS.filter((a) => perms.includes(a.need));
   if (abas.length < 2) return null;
   return (
-    <nav aria-label="Seções de escalas e horários" className="flex gap-1 rounded-xl border border-line bg-panel p-1">
+    <nav aria-label="Seções de escalas e horários" className="flex gap-1 rounded-xl border border-line bg-panel p-1 overflow-x-auto">
       {abas.map((a) => (
         <Link key={a.href} href={a.href} aria-current={path.startsWith(a.href) ? 'page' : undefined}
-          className={cn('flex-1 text-center rounded-lg px-3 py-2 text-[13px] font-medium transition-colors', path.startsWith(a.href) ? 'bg-accent-soft text-accent-ink' : 'text-muted hover:text-ink hover:bg-field')}>
+          className={cn('flex-1 shrink-0 whitespace-nowrap text-center rounded-lg px-3 py-2 text-[13px] font-medium transition-colors', path.startsWith(a.href) ? 'bg-accent-soft text-accent-ink' : 'text-muted hover:text-ink hover:bg-field')}>
           {a.label}
         </Link>
       ))}

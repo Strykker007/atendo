@@ -74,6 +74,18 @@ describe('currentShift / lastShift', () => {
     expect(lastShift(plantao, at('2026-10-21', '20:00'))?.end).toBe(m('2026-10-20', '07:00'));
   });
 
+  it('tolerância para sair: a sessão vai até fim + tolerância, o turno não', () => {
+    const comSaida: ShiftRule = { ...plantao, exitGraceMinutes: 5 };
+    expect(currentShift(comSaida, at('2026-10-20', '07:03'))).toEqual({ start: m('2026-10-19', '19:00'), end: m('2026-10-20', '07:05'), graceFrom: m('2026-10-20', '07:00') });
+    expect(currentShift(comSaida, at('2026-10-20', '07:05'))).toBeNull();
+    expect(isWithinShift(comSaida, at('2026-10-20', '07:03'))).toBe(false);
+    expect(lastShift(comSaida, at('2026-10-20', '07:03'))?.end).toBe(m('2026-10-18', '07:05'));
+    expect(lastShift(comSaida, at('2026-10-20', '07:10'))?.end).toBe(m('2026-10-20', '07:05'));
+    const comercialSaida: ShiftRule = { ...comercial, exitGraceMinutes: 5 };
+    expect(currentShift(comercialSaida, at('2026-10-19', '17:50'))?.graceFrom).toBe(m('2026-10-19', '17:48'));
+    expect(currentShift(comercialSaida, at('2026-10-19', '17:53'))).toBeNull();
+  });
+
   it('splitLocal volta para data e hora', () => {
     expect(splitLocal(m('2026-10-20', '07:05'))).toEqual({ ymd: '2026-10-20', hm: '07:05' });
   });

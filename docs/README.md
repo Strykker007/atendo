@@ -34,6 +34,7 @@
 | [Relatórios sem pico](relatorios-desempenho.md) | Dev / Ops | Limite de consultas simultâneas, cache curto, teto de período e regras para relatório novo |
 | [Pesquisa de satisfação](pesquisa-de-satisfacao.md) | Dev / Cliente | CSAT/NPS no encerramento: escalas, recusa sem insistência, interceptação da resposta, relatório por consultor |
 | [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão e contas temporárias que expiram sozinhas |
+| [Registro de acessos](registro-de-acessos.md) | Dev / Cliente | Auditoria de login: quem esteve logado em cada dia, calendário por pessoa, tentativas barradas pela escala |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
@@ -58,5 +59,6 @@
 | [31 — Migração para a Meta oficial](31-migracao-meta-oficial.md) | Negócio / Ops | App novo no portfólio já verificado do sócio, convivendo com o sistema antigo; primeiro número de teste e migração cliente a cliente |
 | [32 — Checklist de segurança](32-checklist-seguranca.md) | Dev / Ops | 20 itens auditados (código + produção), prioridades e o que falta |
 | [33 — Operação segura em produção](33-operacao-segura-producao.md) | Dev / Ops | Leitura só com `atendo_ro`, escrita só pelo `write.sh` (simulação, contagem esperada, registro) |
+| [34 — Condomínios e operações sem venda](34-condominios.md) | Produto / Dev | Análise do produto para operação sem venda (condomínio) e plano por fases: unidades, chamados com protocolo, comunicados, relatórios do síndico |
 
 Convenção: código em inglês, comentários e documentação em português.

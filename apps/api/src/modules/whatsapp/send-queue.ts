@@ -87,6 +87,22 @@ async function promote(queue: Queue<OutboundJob>, m: { id: string; queueSeq: big
   if (job && (await job.isDelayed())) await job.promote().catch(() => undefined);
 }
 
+/**
+ * Libera a automática segurada pela proteção que está na frente de um atendente: o job dela
+ * volta a reservar vaga **sem o teto de automáticas/h** (`released`) e é adiantado. Continua com o
+ * espaçamento normal do número (nada sai em rajada). Devolve false se já estava liberada.
+ */
+export async function releaseHeld(prisma: PrismaService, queue: Queue<OutboundJob>, messageId: string) {
+  const m = await prisma.message.findFirst({ where: { id: messageId, status: 'pending' }, select: { id: true, queueSeq: true } });
+  if (!m) return false;
+  const job = await queue.getJob(outboundJobId(m));
+  if (!job || job.data.released || !(await job.isDelayed())) return false;
+  await job.updateData({ messageId: m.id, minGapMs: job.data.minGapMs, reacted: job.data.reacted, released: true });
+  await prisma.message.updateMany({ where: { id: m.id, status: 'pending' }, data: { queuedAt: new Date() } });
+  await job.promote().catch(() => undefined);
+  return true;
+}
+
 /** A da frente terminou: chama a próxima da conversa. */
 export async function promoteNext(prisma: PrismaService, queue: Queue<OutboundJob>, conversationId: string) {
   const next = await headOf(prisma, conversationId);
@@ -117,8 +133,12 @@ export async function resumeNumber(prisma: PrismaService, queue: Queue<OutboundJ
 export type SendPlan =
   | { action: 'skip' }
   | { action: 'expire'; reason: string }
-  /** outra mensagem da conversa está na frente; `staleHead` = a da frente expirou e trava a fila */
-  | { action: 'wait_turn'; delayMs: number; staleHead?: string }
+  /**
+   * outra mensagem da conversa está na frente; `staleHead` = a da frente expirou e trava a fila;
+   * `releaseHead` = a da frente é automática segurada pela proteção e há atendente esperando atrás:
+   * ela sai agora (sem o teto de automáticas/h), na ordem, e a do atendente logo depois
+   */
+  | { action: 'wait_turn'; delayMs: number; staleHead?: string; releaseHead?: string }
   | { action: 'pause'; delayMs: number }
   | { action: 'send' };
 
@@ -152,15 +172,18 @@ export function planSend(i: PlanInput): SendPlan {
   if (i.message.status !== 'pending' || i.message.internal) return { action: 'skip' };
   const maxAge = i.maxQueueAgeMin * 60_000;
   if (i.now - i.message.queuedAt.getTime() > maxAge) return { action: 'expire', reason: expiredReason(i.maxQueueAgeMin) };
-  // Mensagem do atendente não espera atrás de automática segurada pela proteção (teto de
-  // automáticas/aquecimento: `queuedAt` no futuro). O robô continua no ritmo dele; quem está no
-  // balcão não fica minutos sem a mensagem sair (Drogaria Balneário, 16/10/2026).
-  const humanoPassaNaFrente = !!i.head && !!i.message.authorId && !i.head.authorId && i.head.queuedAt.getTime() > i.now;
-  if (i.head && i.head.id !== i.message.id && !humanoPassaNaFrente) {
+  // A ordem da conversa nunca muda: o cliente lê na sequência em que as mensagens foram criadas.
+  // Mas o atendente também não fica preso atrás de automática segurada pela proteção (teto de
+  // automáticas/aquecimento: `queuedAt` no futuro) — a da frente é LIBERADA e sai já, na ordem.
+  // Conversa com atendente respondendo é tráfego de ida e volta, o de menor risco; o teto existe
+  // para o robô disparando sozinho (Farmavila Mais, 26/10/2026: atendente 30 min atrás do fluxo).
+  if (i.head && i.head.id !== i.message.id) {
     const stale = i.now - i.head.queuedAt.getTime() > maxAge;
     // número parado: ninguém da conversa vai sair tão cedo, não precisa olhar a cada 5 s
     const recheck = i.numberStatus === 'connected' ? TURN_RECHECK_MS : DISCONNECTED_RECHECK_MS;
-    return { action: 'wait_turn', delayMs: stale ? 0 : recheck, ...(stale && { staleHead: i.head.id }) };
+    const segurada = !i.head.authorId && i.head.queuedAt.getTime() > i.now;
+    const liberar = !stale && segurada && !!i.message.authorId && i.numberStatus === 'connected';
+    return { action: 'wait_turn', delayMs: stale ? 0 : recheck, ...(stale && { staleHead: i.head.id }), ...(liberar && { releaseHead: i.head.id }) };
   }
   if (i.numberStatus !== 'connected') return { action: 'pause', delayMs: DISCONNECTED_RECHECK_MS };
   return { action: 'send' };

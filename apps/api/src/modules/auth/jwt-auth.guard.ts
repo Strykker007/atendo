@@ -77,6 +77,7 @@ export class JwtAuthGuard implements CanActivate {
         req.user.numberIds = efetivo.numberIds;
         req.user.companyId = efetivo.companyId;
         req.user.companyIds = allowedCompanies(scope.companyIds, companyNumbers);
+        req.user.companyIsolation = await this.permissions.companyIsolation(req.user.tenantId);
       }
     }
 

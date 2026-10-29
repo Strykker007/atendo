@@ -43,9 +43,14 @@ export interface Conversation {
   departmentId?: string | null;
   department?: { id: string; name: string; color: string; isActive: boolean } | null;
   number: { id: string; label: string; phone?: string; color?: string; provider?: 'meta' | 'evolution'; status?: string };
-  /** contato isento de ticket: chat livre, fora da fila e dos relatórios (docs/contatos-isentos.md) */
+  /** contato isento: segue a fila normalmente, só fica fora dos relatórios (docs/contatos-isentos.md) */
   ticketExempt?: boolean;
 }
+/**
+ * Conversa livre: aberta e sem dono, fora da fila — o grupo (docs/grupos.md) e as de contato isento
+ * marcadas antes de o isento seguir a fila. Mesma regra de `LIVRE` na API.
+ */
+export const isFreeChat = (c: Pick<Conversation, 'ticketExempt' | 'status' | 'assignee'>) => !!c.ticketExempt && c.status === 'in_progress' && !c.assignee;
 export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
   text: string | null; mediaUrl: string | null; mediaMime: string | null; mediaName: string | null; createdAt: string; error?: string | null;
@@ -141,6 +146,11 @@ export interface Usage {
     templatesBlocked: boolean;
     overage: boolean;
   } | null;
+  /**
+   * Mensalidade por Pix (só para quem paga): falta o CPF/CNPJ para entrar na cobrança automática,
+   * ou a mensalidade vence nos próximos dias (`daysLeft` 0 = hoje). docs/05#lembretes-da-mensalidade
+   */
+  billingNotice?: { kind: 'needs_document' } | { kind: 'payment_due'; value: number; dueDate: string; daysLeft: number } | null;
 }
 export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/billing/usage'), refetchInterval: 60_000 });
 
@@ -665,7 +675,7 @@ export const useUpdateContact = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ contactId, ...b }: { contactId: string; name?: string; email?: string; address?: string; document?: string; note1?: string; note2?: string; resubscribe?: true }) => api(`/conversations/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify(b) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['conversation'] }); qc.invalidateQueries({ queryKey: ['conversations'] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['conversation'] }); qc.invalidateQueries({ queryKey: ['conversations'] }); qc.invalidateQueries({ queryKey: ['contacts-list'] }); },
   });
 };
 export const useSetContactTags = () => {

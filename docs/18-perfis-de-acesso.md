@@ -85,6 +85,11 @@ atendimentos.
 A tela desabilita as caixas que o editor não pode conceder, mas **a API corta de novo**: a
 tela é conveniência, não segurança.
 
+Na Equipe, cada perfil é um cartão (`components/settings/AccessProfiles.tsx`): pessoas no perfil,
+"N de 25 permissões" (ou "Acesso total"), uma barra por área (Atendimento, Conteúdo, Gestão, Conta)
+e "Ver permissões" com a lista por extenso. O editor agrupa as permissões por área, com contador,
+"Marcar área" e "Marcar todas / Limpar" — o marcar em bloco só mexe no que o editor pode conceder.
+
 ## API
 
 | Método | Rota | Permissão | Descrição |

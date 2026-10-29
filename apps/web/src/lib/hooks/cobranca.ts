@@ -144,3 +144,23 @@ export const useApplyPromotionToAll = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['promotions'] }); qc.invalidateQueries({ queryKey: ['tenants'] }); qc.invalidateQueries({ queryKey: ['finance'] }); },
   });
 };
+
+/** CPF/CNPJ informado pelo aviso do painel: grava e já põe o cliente na cobrança automática por Pix. */
+export const useSetBillingDocument = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (cpfCnpj: string) => api<{ enrolled: boolean }>('/billing/monthly/document', { method: 'POST', body: JSON.stringify({ cpfCnpj }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['asaas-pending'] }); },
+  });
+};
+
+/** Linha da migração para a mensalidade por Pix no Asaas (dono do sistema). */
+export interface PixEnrollRow { tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null; result: 'enrolled' | 'would_enroll' | 'already' | 'free' | 'no_price' | 'not_live' | 'no_document' | 'error'; error?: string }
+/** `dryRun: true` = só a prévia (nada é criado no Asaas). */
+export const usePixEnroll = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dryRun: boolean) => api<PixEnrollRow[]>('/billing/monthly/enroll', { method: 'POST', body: JSON.stringify({ dryRun }) }),
+    onSuccess: (_, dryRun) => { if (!dryRun) qc.invalidateQueries({ queryKey: ['finance'] }); },
+  });
+};

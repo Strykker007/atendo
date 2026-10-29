@@ -2,6 +2,9 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
+/** números de quem monta o público (`numberFilter`); ausente = base inteira do cliente */
+type NumberScope = { in: string[] };
+
 /** teto de um público: acima disso é base inteira, e base inteira não se dispara de uma vez */
 export const AUDIENCE_MAX = 20_000;
 
@@ -60,11 +63,16 @@ export class SegmentationService {
    * Ids dos contatos que os FILTROS selecionam (sem a seleção manual/importada). Sempre do
    * tenant, nunca descadastrados nem sem WhatsApp. SQL parametrizado (Prisma.sql).
    */
-  private async filtrados(tenantId: string, a: Audience): Promise<string[]> {
+  private async filtrados(tenantId: string, a: Audience, numbers?: NumberScope): Promise<string[]> {
     if (!this.temFiltro(a) && !a.all) return [];
     const conds: Prisma.Sql[] = [Prisma.sql`ct."tenantId" = ${tenantId}`, Prisma.sql`ct."optOutAt" is null`, Prisma.sql`ct."waInvalidAt" is null`,
       // grupo nas conversas não é contato de transmissão: grupo entra só pelos autorizados (docs/grupos.md)
       Prisma.sql`not ct."isGroup"`];
+    // restrito a empresas: só quem conversou por um número dele ou está na agenda de um deles
+    if (numbers) {
+      conds.push(Prisma.sql`(exists (select 1 from conversations cn where cn."contactId" = ct.id and cn."numberId" in (${Prisma.join(numbers.in)}))
+        or exists (select 1 from phonebook_entries pb where pb."tenantId" = ${tenantId} and pb.phone = ct.phone and pb."numberId" in (${Prisma.join(numbers.in)})))`);
+    }
     if (a.tagIds?.length) {
       conds.push(Prisma.sql`(exists (select 1 from contact_tags x where x."contactId" = ct.id and x."tagId" in (${Prisma.join(a.tagIds)}))
         or exists (select 1 from conversation_tags y join conversations cy on cy.id = y."conversationId" where cy."contactId" = ct.id and y."tagId" in (${Prisma.join(a.tagIds)})))`);
@@ -97,10 +105,17 @@ export class SegmentationService {
   }
 
   /** Seleção manual: só contatos do tenant que podem receber. */
-  private async manuais(tenantId: string, ids?: string[]) {
+  private async manuais(tenantId: string, ids?: string[], numbers?: NumberScope) {
     if (!ids?.length) return [];
-    const rows = await this.prisma.contact.findMany({ where: { tenantId, id: { in: ids }, optOutAt: null, waInvalidAt: null, isGroup: false }, select: { id: true } });
+    const rows = await this.prisma.contact.findMany({ where: { tenantId, id: { in: ids }, optOutAt: null, waInvalidAt: null, isGroup: false, ...(await this.escopo(tenantId, numbers)) }, select: { id: true } });
     return rows.map((r) => r.id);
+  }
+
+  /** Mesma régua do SQL de `filtrados`, para as consultas do Prisma. */
+  private async escopo(tenantId: string, numbers?: NumberScope): Promise<Prisma.ContactWhereInput> {
+    if (!numbers) return {};
+    const agenda = await this.prisma.phonebookEntry.findMany({ where: { tenantId, numberId: numbers }, select: { phone: true }, distinct: ['phone'] });
+    return { OR: [{ conversations: { some: { numberId: numbers } } }, { phone: { in: agenda.map((x) => x.phone) } }] };
   }
 
   /** Telefones importados, normalizados e sem repetição; inválidos à parte. */
@@ -116,8 +131,8 @@ export class SegmentationService {
   }
 
   /** Quantos receberiam — mostrado antes de criar. Não cria nada (telefone novo conta como novo). */
-  async preview(tenantId: string, a: Audience) {
-    const [filtrados, manuais] = await Promise.all([this.filtrados(tenantId, a), this.manuais(tenantId, a.contactIds)]);
+  async preview(tenantId: string, a: Audience, numbers?: NumberScope) {
+    const [filtrados, manuais] = await Promise.all([this.filtrados(tenantId, a, numbers), this.manuais(tenantId, a.contactIds, numbers)]);
     const { validos, invalidos } = this.telefones(a);
     const existentes = validos.length ? await this.prisma.contact.findMany({ where: { tenantId, phone: { in: validos } }, select: { id: true, optOutAt: true, waInvalidAt: true } }) : [];
     const ids = new Set([...filtrados, ...manuais, ...existentes.filter((c) => !c.optOutAt && !c.waInvalidAt).map((c) => c.id)]);
@@ -125,7 +140,7 @@ export class SegmentationService {
     const bloqueados = existentes.filter((c) => c.optOutAt || c.waInvalidAt).length;
     // descadastrados que os filtros pegariam: mostrado para o cliente entender por que o número é menor
     const optOut = a.tagIds?.length || a.all
-      ? await this.prisma.contact.count({ where: { tenantId, optOutAt: { not: null }, ...(a.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: a.tagIds } } } }, { conversations: { some: { tags: { some: { tagId: { in: a.tagIds } } } } } }] }) } })
+      ? await this.prisma.contact.count({ where: { tenantId, optOutAt: { not: null }, AND: [await this.escopo(tenantId, numbers)], ...(a.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: a.tagIds } } } }, { conversations: { some: { tags: { some: { tagId: { in: a.tagIds } } } } } }] }) } })
       : 0;
     return { total: ids.size + novos, novos, invalidos, optOut: optOut + bloqueados, excedeu: ids.size + novos > AUDIENCE_MAX, max: AUDIENCE_MAX };
   }
@@ -134,8 +149,8 @@ export class SegmentationService {
    * A lista final, materializada na criação da transmissão: filtros + manuais + importados (que
    * viram contatos agora). Quem entrar no filtro depois não recebe um disparo que já começou.
    */
-  async resolve(tenantId: string, a: Audience): Promise<string[]> {
-    const [filtrados, manuais] = await Promise.all([this.filtrados(tenantId, a), this.manuais(tenantId, a.contactIds)]);
+  async resolve(tenantId: string, a: Audience, numbers?: NumberScope): Promise<string[]> {
+    const [filtrados, manuais] = await Promise.all([this.filtrados(tenantId, a, numbers), this.manuais(tenantId, a.contactIds, numbers)]);
     const { validos } = this.telefones(a);
     let importados: string[] = [];
     if (validos.length) {

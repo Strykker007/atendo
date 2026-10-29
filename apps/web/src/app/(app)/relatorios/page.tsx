@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useReportCompanyOptions, useOutcomeLabels, useHasFeature, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useReportCompanyOptions, useOutcomeLabels, useHasFeature, useTenantSettings, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 import { Building2 } from 'lucide-react';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp, Wallet, EyeOff } from 'lucide-react';
@@ -68,8 +68,13 @@ export default function RelatoriosPage() {
   // atendimentos internos: auditoria de quem tirou atendimento dos relatórios (mesma regra da API)
   const podeAuditar = useCan('profiles.manage');
   const labels = useOutcomeLabels();
-  // "Não comprou" leva o nome que a empresa deu ao resultado
-  const metricLabel = { ...METRIC_LABEL, lost: labels.lost };
+  // encerramento sem venda (condomínio, suporte): some faturamento, ticket e pagamentos; o resto
+  // (resultado, conversão, motivos) segue com os nomes da empresa (docs/06-modelo-de-dados.md#encerramento-sem-venda)
+  const vendas = useTenantSettings().data?.salesEnabled ?? true;
+  // "Comprou"/"Não comprou" levam o nome que a empresa deu ao resultado
+  const metricLabel = vendas
+    ? { ...METRIC_LABEL, lost: labels.lost }
+    : { ...METRIC_LABEL, won: labels.won, lost: labels.lost, win_rate: `Taxa de “${labels.won}”` };
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<SavedReport | null>(null);
@@ -122,7 +127,7 @@ export default function RelatoriosPage() {
         action={
           <div className="flex flex-wrap gap-2">
             {temSatisfacao && <Link href="/relatorios/satisfacao" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><ThumbsUp size={15} className="text-accent" /> Satisfação</Link>}
-            <Link href="/relatorios/pagamentos" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Wallet size={15} className="text-accent" /> Pagamentos</Link>
+            {vendas && <Link href="/relatorios/pagamentos" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Wallet size={15} className="text-accent" /> Pagamentos</Link>}
             {podeAuditar && <Link href="/relatorios/atendimentos-internos" title="Conversas fora dos relatórios (gestor com a equipe, fornecedor): quem encerrou assim e quando" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><EyeOff size={15} className="text-accent" /> Atendimentos internos</Link>}
             {temRanking && <Link href="/relatorios/ranking" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm font-medium text-ink hover:bg-field"><Trophy size={15} className="text-accent" /> Ranking e metas</Link>}
           </div>
@@ -178,10 +183,10 @@ export default function RelatoriosPage() {
             <Kpi icon={<CheckCircle2 size={15} />} label="Encerradas" value={`${Math.round(overview.data.kpis.closeRate * 100)}%`} sub={`${overview.data.kpis.closed} de ${overview.data.kpis.conversations}`} />
           </div>
 
-          {empresa === 'all' && porEmpresa.data && porEmpresa.data.rows.length > 1 && <PorEmpresa rows={porEmpresa.data.rows} onAbrir={setEmpresa} />}
+          {empresa === 'all' && porEmpresa.data && porEmpresa.data.rows.length > 1 && <PorEmpresa rows={porEmpresa.data.rows} onAbrir={setEmpresa} vendas={vendas} />}
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card title="Atendimentos por dia" hint="Conversas novas + clientes que voltaram"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
+            <Card title="Atendimentos por dia" hint="Conversas novas + contatos que voltaram"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
             <Card title="Atendimentos por atendente" hint="Encerrados no período, por quem encerrou"><ReportChart def={{ metric: 'closed', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byAgent} height={220} /></Card>
             <Card title="De onde vêm os leads" hint="Orgânico × anúncio × link"><ReportChart def={{ metric: 'conversations', groupBy: 'origin', from: range[0], to: range[1], filters: {}, chart: 'pie' }} series={overview.data.series.byOrigin} height={220} /></Card>
             <Card title={overview.data.series.byCampaign.length ? 'Leads por campanha (anúncio)' : 'Tags mais usadas'} hint={overview.data.series.byCampaign.length ? 'Qual anúncio está trazendo conversa' : 'Como a equipe está classificando'}>
@@ -189,8 +194,8 @@ export default function RelatoriosPage() {
             </Card>
           </div>
 
-          <Vendas overview={overview.data} range={range} onAuditar={(f) => setFoco({ ...f, seq: Date.now() })} />
-          <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} companyId={filtros.companyId} />
+          <Vendas overview={overview.data} range={range} vendas={vendas} onAuditar={(f) => setFoco({ ...f, seq: Date.now() })} />
+          {vendas && <SalesDetails from={periodo.from} to={periodo.to} userId={filtros.agentId} tagIds={filtros.tagIds} companyId={filtros.companyId} />}
           <Attendances from={periodo.from} to={periodo.to} userId={filtros.agentId} focus={foco} companyId={filtros.companyId} />
         </>
       )}
@@ -209,7 +214,7 @@ export default function RelatoriosPage() {
           <section className="rounded-2xl bg-panel border border-line p-4 space-y-4">
             <Field label="Medir">
               <select className={inputCls} value={def.metric} onChange={(e) => set('metric', e.target.value as ReportDefinition['metric'])}>
-                {Object.entries(metricLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                {Object.entries(metricLabel).filter(([k]) => vendas || k !== 'revenue').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </Field>
             <Field label="Agrupar por">
@@ -330,19 +335,28 @@ export default function RelatoriosPage() {
 /** origem da venda (`sales`): orçamento pago no Asaas, orçamento marcado como pago, ou digitada no encerramento */
 const ORIGEM_VENDA = { asaas: 'Pix automático (Asaas)', manual: 'Orçamento pago por fora', close: 'Informada no encerramento' } as const;
 
-function Vendas({ overview, range, onAuditar }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string]; onAuditar: (f: Omit<AttendanceFocus, 'seq'>) => void }) {
+function Vendas({ overview, range, vendas, onAuditar }: { overview: NonNullable<ReturnType<typeof useReportOverview>['data']>; range: [string, string]; vendas: boolean; onAuditar: (f: Omit<AttendanceFocus, 'seq'>) => void }) {
   const v = overview.sales;
   const { won, lost, winRate } = overview.kpis;
   const labels = useOutcomeLabels();
   return (
     <section className="space-y-3">
-      <h2 className="font-display font-semibold text-ink">Vendas</h2>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <h2 className="font-display font-semibold text-ink">{vendas ? 'Vendas' : 'Resultados'}</h2>
+      {/* sem venda: só o resultado do encerramento (conversão e motivos), nada de faturamento */}
+      {!vendas && (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Kpi icon={<CheckCircle2 size={15} />} label={labels.won} value={won.toLocaleString('pt-BR')} sub="encerrados com esse resultado" />
+          <Kpi icon={<Target size={15} />} label={labels.lost} value={lost.toLocaleString('pt-BR')} sub="encerrados com esse resultado" />
+          <Kpi icon={<Target size={15} />} label={`Taxa de “${labels.won}”`} value={winRate != null ? `${Math.round(winRate * 100)}%` : '—'} sub={`${labels.won.toLowerCase()} ÷ (${labels.won.toLowerCase()} + ${labels.lost.toLowerCase()})`} />
+        </div>
+      )}
+      {vendas && <div className="grid gap-3 sm:grid-cols-3">
         <Kpi icon={<DollarSign size={15} />} label="Faturado no período" value={fmtBRL(v.total)} sub={`${v.count} venda${v.count === 1 ? '' : 's'}`} />
         <Kpi icon={<Receipt size={15} />} label="Ticket médio" value={v.avgTicket != null ? fmtBRL(v.avgTicket) : '—'} sub="faturado ÷ vendas" />
         <Kpi icon={<Target size={15} />} label="Taxa de conversão" value={winRate != null ? `${Math.round(winRate * 100)}%` : '—'} sub={`${won} ${labels.won.toLowerCase()} · ${lost} ${labels.lost.toLowerCase()}`} />
-      </div>
+      </div>}
       <div className="grid gap-4 lg:grid-cols-2">
+        {vendas && <>
         <Card title="Faturamento por dia" hint="Pelo dia do fechamento da venda">
           <ReportChart def={{ metric: 'revenue', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={v.byDay} height={220} />
         </Card>
@@ -382,6 +396,7 @@ function Vendas({ overview, range, onAuditar }: { overview: NonNullable<ReturnTy
             Estornos no período: <b className="tnum">{v.refunds.count}</b> · <b className="tnum">{fmtBRL(v.refunds.value)}</b> — já fora do faturado.
           </p>
         </Card>
+        </>}
         <Card title={`${labels.lost}, por motivo`} hint='Onde o negócio escapa. Clique num motivo para ver os atendimentos'>
           {overview.lostReasons.length ? (
             <>
@@ -425,8 +440,9 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
 const fmtMin = (m: number) => (m < 60 ? `${m.toFixed(0)} min` : `${(m / 60).toFixed(1)} h`);
 
 /** Indicadores principais por empresa, lado a lado. Clicar numa empresa abre a tela só dela. */
-function PorEmpresa({ rows, onAbrir }: { rows: CompanyReportRow[]; onAbrir: (id: string) => void }) {
+function PorEmpresa({ rows, onAbrir, vendas }: { rows: CompanyReportRow[]; onAbrir: (id: string) => void; vendas: boolean }) {
   const pct = (v: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+  const labels = useOutcomeLabels();
   return (
     <section className="rounded-2xl bg-panel border border-line p-4">
       <div className="mb-2">
@@ -442,10 +458,10 @@ function PorEmpresa({ rows, onAbrir }: { rows: CompanyReportRow[]; onAbrir: (id:
               <th className="py-2 pr-4 text-right">Encerrados</th>
               <th className="py-2 pr-4 text-right">Na fila</th>
               <th className="py-2 pr-4 text-right">1ª resposta</th>
-              <th className="py-2 pr-4 text-right">Vendas</th>
-              <th className="py-2 pr-4 text-right">Faturamento</th>
-              <th className="py-2 pr-4 text-right">Ticket médio</th>
-              <th className="py-2 text-right">Conversão</th>
+              <th className="py-2 pr-4 text-right">{vendas ? 'Vendas' : labels.won}</th>
+              {vendas && <th className="py-2 pr-4 text-right">Faturamento</th>}
+              {vendas && <th className="py-2 pr-4 text-right">Ticket médio</th>}
+              <th className="py-2 text-right">{vendas ? 'Conversão' : `Taxa de “${labels.won}”`}</th>
             </tr>
           </thead>
           <tbody>
@@ -461,8 +477,8 @@ function PorEmpresa({ rows, onAbrir }: { rows: CompanyReportRow[]; onAbrir: (id:
                 <td className={cn('py-2 pr-4 text-right tabular-nums', r.waitingNow > 5 && 'text-warn-ink font-semibold')}>{r.waitingNow}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{r.avgFirstResponseMin != null ? fmtMin(r.avgFirstResponseMin) : '—'}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{r.won.toLocaleString('pt-BR')}</td>
-                <td className="py-2 pr-4 text-right tabular-nums">{fmtBRL(r.revenue)}</td>
-                <td className="py-2 pr-4 text-right tabular-nums">{r.avgTicket != null ? fmtBRL(r.avgTicket) : '—'}</td>
+                {vendas && <td className="py-2 pr-4 text-right tabular-nums">{fmtBRL(r.revenue)}</td>}
+                {vendas && <td className="py-2 pr-4 text-right tabular-nums">{r.avgTicket != null ? fmtBRL(r.avgTicket) : '—'}</td>}
                 <td className="py-2 text-right tabular-nums">{pct(r.winRate)}</td>
               </tr>
             ))}

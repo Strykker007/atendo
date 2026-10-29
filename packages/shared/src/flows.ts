@@ -11,7 +11,11 @@ export interface FlowNodeBase<T extends FlowNodeType, D> {
   data: D;
 }
 
-export type StartNode = FlowNodeBase<'start', Record<string, never>>;
+/** Início. `delaySec`: espera antes do primeiro bloco (vale também quando outro fluxo conecta a este). */
+export type StartNode = FlowNodeBase<'start', { delaySec?: number }>;
+/** Opções do seletor "Atraso antes da 1ª mensagem" (segundos). Esperas maiores: Atraso inteligente. */
+export const START_DELAY_OPTIONS = [0, 3, 5, 10, 15, 30, 60, 120, 300, 600] as const;
+export const START_MAX_DELAY_SEC = 600;
 /**
  * Conteúdo: várias mensagens enviadas em ordem (`items`). Os campos soltos `text`/`mediaKey`/
  * `mediaType`/`mediaName` são o formato antigo (um texto + um anexo); `normalizeContent` lê os dois.

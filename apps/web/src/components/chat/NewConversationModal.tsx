@@ -16,20 +16,24 @@ const SEM_RESULTADOS: StartCandidates = { contacts: [], phonebook: [] };
 /**
  * Iniciar conversa (disparo ativo). Contato da base ou telefone novo, número de saída e a
  * mensagem: na API oficial é template aprovado (texto livre só se o contato escreveu nas
- * últimas 24h); na Evolution, texto livre. Enviou → abre a conversa.
+ * últimas 24h); na Evolution, texto livre. A mensagem é opcional: sem ela, só abre a
+ * conversa (assumida por quem abriu) e a pessoa escreve no chat. `contact` = já vem escolhido
+ * (tela Contatos).
  */
-export function NewConversationModal({ onClose }: { onClose: () => void }) {
+export function NewConversationModal({ onClose, contact: inicial, onOpened }: { onClose: () => void; contact?: ContatoSel; onOpened?: (conversationId: string) => void }) {
   const { numberId: filtroNumero, setStatus, setConversation } = useUI();
   const numbers = useNumbers();
-  const conectados = useMemo(() => (numbers.data ?? []).filter((n) => n.isActive && n.status === 'connected'), [numbers.data]);
+  // desconectado também aparece (no fim): serve para só abrir a conversa, sem enviar
+  const conectados = useMemo(() => (numbers.data ?? []).filter((n) => n.isActive).sort((a, b) => Number(b.status === 'connected') - Number(a.status === 'connected')), [numbers.data]);
   const [numberId, setNumberId] = useState<string>('');
   const number = conectados.find((n) => n.id === numberId);
+  const desconectado = !!number && number.status !== 'connected';
   const isMeta = number?.provider === 'meta';
   const cotaFria = useColdQuota(number?.id, !!number && !isMeta);
   // envio frio (docs/envio.md#envio-frio): no oficial, template + recurso no plano; no QR, até 10 contatos frios por dia
   const proativo = useHasFeature('proactive_messaging');
 
-  const [contato, setContato] = useState<ContatoSel | null>(null);
+  const [contato, setContato] = useState<ContatoSel | null>(inicial ?? null);
   const [busca, setBusca] = useState('');
   const [novoTelefone, setNovoTelefone] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState('');
@@ -74,7 +78,9 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
   const telefoneIncompleto = soNumeros && digitos.length > 0 && !pareceTelefone;
   const usandoTemplate = isMeta && modo === 'template';
   const destinoOk = !!contato || (!!novoTelefone && novoTelefone.length >= 12);
-  const mensagemOk = usandoTemplate ? choice.valid : !!texto.trim();
+  // sem template escolhido / sem texto = só abrir; com algo preenchido, tem de estar completo
+  const semMensagem = desconectado || (usandoTemplate ? !choice.value : !texto.trim());
+  const mensagemOk = semMensagem || (usandoTemplate ? choice.valid : true);
   const podeEnviar = !!number && destinoOk && mensagemOk;
 
   async function enviar() {
@@ -83,12 +89,14 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
       const r = await start.mutateAsync({
         numberId: number.id,
         ...(contato ? { contactId: contato.id } : { phone: novoTelefone!, name: novoNome.trim() || undefined }),
-        ...(usandoTemplate && choice.value ? { template: choice.value } : { text: texto }),
+        ...(semMensagem ? {} : usandoTemplate && choice.value ? { template: choice.value } : { text: texto }),
         idempotencyKey,
       });
-      toast.ok('Mensagem enviada');
-      setStatus('in_progress');
+      toast.ok(r.message ? 'Mensagem enviada' : 'Conversa aberta');
+      // só abrir uma conversa já encerrada não a reabre: abre na aba em que ela está
+      setStatus(r.status ?? 'in_progress');
       setConversation(r.conversationId);
+      onOpened?.(r.conversationId);
       onClose();
     } catch (err) { toast.err(err); }
   }
@@ -165,10 +173,10 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        <Field label="Enviar pelo número" hint={!numbers.isLoading && !conectados.length ? 'Nenhum número conectado. Conecte um em Números.' : undefined}>
+        <Field label="Pelo número" hint={!numbers.isLoading && !conectados.length ? 'Nenhum número ativo. Cadastre um em Números.' : desconectado ? 'Número desconectado: dá para abrir a conversa, mas mensagem só sai depois de conectar em Números.' : undefined}>
           <div className="relative">
             <select value={numberId} onChange={(e) => setNumberId(e.target.value)} className={cn(inputCls, 'pr-20')}>
-              {conectados.map((n) => <option key={n.id} value={n.id}>{n.label} · {n.phone.slice(-4)}</option>)}
+              {conectados.map((n) => <option key={n.id} value={n.id}>{n.label} · {n.phone.slice(-4)}{n.status === 'connected' ? '' : ' (desconectado)'}</option>)}
             </select>
             {number && (
               <span className={cn('absolute right-8 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-wider rounded px-1.5 py-0.5 pointer-events-none', isMeta ? 'bg-meta-soft text-meta-ink' : 'bg-evo-soft text-evo-ink')}>
@@ -202,17 +210,17 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
           </p>
         )}
 
-        {usandoTemplate ? (
+        {desconectado ? null : usandoTemplate ? (
           <TemplateFields choice={choice} />
         ) : (
-          <Field label="Mensagem" hint={isMeta ? 'Só é entregue se o contato escreveu para este número nas últimas 24h.' : 'Aceita variáveis como {{contact.first_name}}.'}>
+          <Field label="Mensagem (opcional)" hint={isMeta ? 'Só é entregue se o contato escreveu para este número nas últimas 24h. Em branco: só abre a conversa.' : 'Aceita variáveis como {{contact.first_name}}. Em branco: só abre a conversa e você escreve no chat.'}>
             <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} maxLength={4096} className={cn(inputCls, 'resize-none')} />
           </Field>
         )}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={enviar} disabled={!podeEnviar} loading={start.isPending} loadingText="Enviando…">Enviar e abrir conversa</Button>
+          <Button onClick={enviar} disabled={!podeEnviar} loading={start.isPending} loadingText={semMensagem ? 'Abrindo…' : 'Enviando…'}>{semMensagem ? 'Abrir conversa' : 'Enviar e abrir conversa'}</Button>
         </div>
       </div>
     </Modal>

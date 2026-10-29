@@ -13,22 +13,25 @@ interface ShiftSession {
   endsAt: number | null;
   /** epoch (ms) em que a passagem acaba e a sessão cai de vez */
   lockedUntil: number | null;
+  /** epoch (ms) do fim real do turno quando há tolerância para sair: daqui até `endsAt` corre o contador */
+  graceFrom: number | null;
 }
-export const useShiftSession = create<ShiftSession>(() => ({ locked: false, endsAt: null, lockedUntil: null }));
+export const useShiftSession = create<ShiftSession>(() => ({ locked: false, endsAt: null, lockedUntil: null, graceFrom: null }));
 
-function claims(t: string): { shiftEndsAt?: number; locked?: boolean; lockedUntil?: number } {
+function claims(t: string): { shiftEndsAt?: number; locked?: boolean; lockedUntil?: number; graceFrom?: number } {
   try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch { return {}; }
 }
 
 /** Token novo: atualiza o estado do turno. Token sem trava destrava (liberação aprovada, turno estendido). */
 export function applyShiftToken(t: string | null) {
-  if (!t) { useShiftSession.setState({ locked: false, endsAt: null, lockedUntil: null }); return; }
+  if (!t) { useShiftSession.setState({ locked: false, endsAt: null, lockedUntil: null, graceFrom: null }); return; }
   const c = claims(t);
   const endsAt = c.shiftEndsAt ? c.shiftEndsAt * 1000 : null;
   useShiftSession.setState({
     locked: !!c.locked || (!!endsAt && Date.now() >= endsAt),
     endsAt,
     lockedUntil: c.lockedUntil ? c.lockedUntil * 1000 : null,
+    graceFrom: c.graceFrom ? c.graceFrom * 1000 : null,
   });
 }
 

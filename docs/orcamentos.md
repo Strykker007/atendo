@@ -8,7 +8,7 @@ O atendente monta um orçamento/pedido no chat e o contato recebe **só um link*
 
 Atalho **Orçamento** na linha das abas acima do campo, ao lado de *Mensagem para o cliente* | *Nota interna* (aparece para todos; na conversa de outra pessoa, não). O link sempre entra no campo da **mensagem** — se estava na nota, o composer volta para a mensagem. O modal tem duas abas:
 
-- **Novo orçamento:** itens (nome, dosagem/apresentação, quantidade, valor unitário), chave Pix cadastrada (a primeira já vem escolhida) e/ou link de pagamento `https://`, validade (1h, 2h, 4h, 8h, **até o fim do dia** — padrão —, 24h ou 48h; ver [Vencimento](#vencimento)) e observação. Pelo menos uma forma de pagamento é obrigatória.
+- **Novo orçamento:** itens (nome, dosagem/apresentação — com o encerramento sem venda o rótulo vira "Detalhe", com exemplos genéricos; o campo da API é sempre `dosage` —, quantidade, valor unitário), chave Pix cadastrada (a primeira já vem escolhida) e/ou link de pagamento `https://`, validade (1h, 2h, 4h, 8h, **até o fim do dia** — padrão —, 24h ou 48h; ver [Vencimento](#vencimento)) e observação. Pelo menos uma forma de pagamento é obrigatória.
 - **Gerar link** salva o orçamento e **insere no campo** (não envia):
   > Olá {primeiro nome}, acesse o link para visualizar os detalhes do seu orçamento e opções de pagamento: https://<domínio do painel>/o/<hash>
 

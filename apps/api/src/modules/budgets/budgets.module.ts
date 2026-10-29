@@ -173,7 +173,7 @@ export class BudgetsService {
     if (dto.autoPix && !account) throw new BadRequestException('Pix automático indisponível: conecte a conta do Asaas em Configurações → Empresa (recurso do plano).');
     // mini cadastro: o CPF digitado no orçamento fica na ficha; sem ele, vale o da ficha
     const doc = (dto.cpfCnpj ?? conv.contact.document ?? '').replace(/\D/g, '');
-    if (dto.autoPix && !isCpfCnpjLength(doc)) throw new BadRequestException('Informe o CPF (11 dígitos) ou CNPJ (14 dígitos) do cliente — o Asaas exige para gerar o Pix.');
+    if (dto.autoPix && !isCpfCnpjLength(doc)) throw new BadRequestException('Informe o CPF (11 dígitos) ou CNPJ (14 dígitos) do contato — o Asaas exige para gerar o Pix.');
     if (!dto.autoPix && !pix && !dto.paymentUrl) throw new BadRequestException('Informe uma chave Pix ou um link de pagamento');
 
     const items: BudgetItem[] = dto.items.map((i) => ({

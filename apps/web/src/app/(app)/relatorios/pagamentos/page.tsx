@@ -102,7 +102,7 @@ export default function PagamentosPage() {
         )}
         <div className="relative flex-1 min-w-[12rem]">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
-          <input className={cn(inputCls, 'pl-8 py-1.5 text-[12.5px]')} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Cliente ou número" aria-label="Buscar cliente ou número" />
+          <input className={cn(inputCls, 'pl-8 py-1.5 text-[12.5px]')} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Contato ou número" aria-label="Buscar contato ou número" />
         </div>
       </div>
 
@@ -134,7 +134,7 @@ export default function PagamentosPage() {
             <thead>
               <tr className="text-left text-xs text-muted border-b border-line">
                 <th className="px-4 py-2 font-medium">Gerado em</th>
-                <th className="px-4 py-2 font-medium">Cliente</th>
+                <th className="px-4 py-2 font-medium">Contato</th>
                 {verEquipe && <th className="px-4 py-2 font-medium">Atendente</th>}
                 <th className="px-4 py-2 font-medium">Itens</th>
                 <th className="px-4 py-2 font-medium text-right">Valor</th>

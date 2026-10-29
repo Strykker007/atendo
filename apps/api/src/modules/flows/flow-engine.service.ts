@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, START_MAX_DELAY_SEC, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -29,6 +29,8 @@ import { callWebhook } from './webhook';
 import { DISTRIBUTION_REASON, leastBusy, nextInRotation, pickWeighted } from './distribution';
 import { pickDefaultFlow, type InboundSituation } from './default-flows';
 import { planejarRetomada } from './flow-pause';
+import { mergedItem, quickTextRun } from './content-merge';
+import { warmupPhase } from '../whatsapp/number-warmup';
 
 export const QUEUE_FLOWS = 'flows';
 /** `until` (ISO, opcional): só vale se o run ainda espera com esse `waitUntil` — o job reagendado ao continuar uma pausa não pode adiantar outra espera. */
@@ -244,7 +246,7 @@ export class FlowEngineService {
     let porTempo = false;
     if (run.waitUntil && run.currentNodeId) {
       const { def } = await this.load(run.id);
-      porTempo = def.nodes.find((n) => n.id === run.currentNodeId)?.type === 'wait' || contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined;
+      porTempo = ['wait', 'start'].includes(def.nodes.find((n) => n.id === run.currentNodeId)?.type ?? '') || contentCursor(run.vars as Record<string, string>, run.currentNodeId) !== undefined;
     }
     const plano = planejarRetomada(run, porTempo);
     const ok = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'paused' }, data: { status: plano.status, pausedFrom: null } });
@@ -356,16 +358,25 @@ export class FlowEngineService {
    * Não cria FlowRun — não aparece em execuções de fluxo.
    */
   async deliverAuto(conversationId: string, items: ContentItem[], waited = false) {
+    const juntar = await this.warming(conversationId);
     for (let i = 0; i < items.length; i++) {
       const gap = i > 0 || waited ? contentDelaySec(items[i]) : 0;
       if (gap > 0 && !(waited && i === 0)) {
         await this.queue.add('auto-content', { conversationId, items: items.slice(i), waited: true }, { delay: gap * 1000, removeOnComplete: true });
         return;
       }
-      await this.sendItem(conversationId, items[i], null, gap * 1000).catch((err) => {
+      const n = juntar ? quickTextRun(items, i) : 1;
+      await this.sendItem(conversationId, mergedItem(items, i, n), null, gap * 1000).catch((err) => {
         this.log.warn(`Mensagem automática não enviada: ${err instanceof Error ? err.message : err}`);
       });
+      i += n - 1;
     }
+  }
+
+  /** O número da conversa está em aquecimento (QR recém-lido)? Aí textos seguidos saem juntos (content-merge.ts). */
+  private async warming(conversationId: string) {
+    const c = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { number: { select: { provider: true, sessionStartedAt: true } } } });
+    return !!c && !!warmupPhase(c.number);
   }
 
   /** Job do intervalo entre mensagens automáticas. */
@@ -463,12 +474,22 @@ export class FlowEngineService {
 
       try {
         switch (node.type) {
-          case 'start':
+          case 'start': {
+            // atraso antes da 1ª mensagem: espera como o Aguardar; a retomada segue para o próximo bloco
+            const sec = Math.min(START_MAX_DELAY_SEC, Math.max(0, Number(node.data?.delaySec) || 0));
+            if (sec > 0) {
+              const until = new Date(Date.now() + sec * 1000);
+              await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: until } });
+              await this.queue.add('resume', { runId }, { delay: sec * 1000, jobId: `resume-${runId}-${node.id}-${Date.now()}` });
+              return;
+            }
             await this.goNext(runId, def, node.id);
             continue;
+          }
           case 'message': {
             const items = normalizeContent(node.data);
             const resumeAt = contentCursor(vars, node.id);
+            const juntar = await this.warming(run.conversationId);
             let paused = false;
             for (let i = resumeAt ?? 0; i < items.length; i++) {
               // intervalo antes da mensagem i (a primeira sai na hora; a retomada já esperou)
@@ -480,8 +501,12 @@ export class FlowEngineService {
                 paused = true;
                 break;
               }
+              // número aquecendo: textos seguidos a poucos segundos saem numa mensagem só (mesma ordem,
+              // metade dos envios no teto de automáticas/h). O cursor continua no índice original.
+              const n = juntar ? quickTextRun(items, i) : 1;
               // o atraso também vale como piso desde a ENTREGA da anterior (mídia lenta não o encurta)
-              await this.sendItem(run.conversationId, items[i], ctx, gap * 1000);
+              await this.sendItem(run.conversationId, mergedItem(items, i, n), ctx, gap * 1000);
+              i += n - 1;
             }
             if (paused) return;
             if (resumeAt !== undefined) {
