@@ -193,9 +193,11 @@ então (`conversations/cold-send.ts`, `ConversationsService.assertColdAllowed`):
 
 | Número | Contato escreveu < 24 h | Contato frio |
 |---|---|---|
-| **Evolution — atendente** | sai normal | até **10 contatos frios por dia** no número (`COLD_CONTACTS_PER_DAY`); acabou → 409 `cold_quota_exhausted`, com quando libera |
+| **Evolution — atendente** | sai normal | até **10 contatos frios por dia** no número (`sendLimits.coldPerDay`, padrão `COLD_CONTACTS_PER_DAY`); acabou → 409 `cold_quota_exhausted`, com quando libera |
 | **Evolution — automático** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
 | **Meta** | sai normal | só template (regra da Meta) **e** o recurso `proactive_messaging` no plano (403 `feature_proactive`) — só para envio do atendente |
+
+**Limite por número:** o dono do sistema ajusta em Números → cartão de envio → *Limites da fila de envio* → **Contatos novos por dia** (1–500; vazio = 10). Só em número QR. Serve para o número que fala com quem já conhece (ex.: a cobrança da própria empresa aos clientes); subir em número que prospecta é pedir banimento.
 
 **Fluxo disparado à mão** conta como o atendente: `FlowEngineService.start` com `startedById` chama
 `ConversationsService.assertFlowCanStart` antes de criar o run. Contato frio no QR gasta uma vaga

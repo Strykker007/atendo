@@ -21,11 +21,18 @@ export interface SendLimits {
   maxQueueAgeMin: number;
   /** envio AUTOMÁTICO (fluxo, boas-vindas, lembrete…) por hora no número; resposta do atendente não conta */
   autoPerHour: number;
+  /**
+   * QR Code: contatos frios (sem mensagem dele nas últimas 24 h) com quem o atendente pode falar
+   * primeiro por dia, no número. É a principal proteção contra banimento — subir só em número que
+   * fala com quem já conhece (ex.: cobrança de clientes). docs/envio.md#envio-frio
+   */
+  coldPerDay: number;
 }
 
 export const SEND_LIMIT_DEFAULTS: Record<SendProvider, SendLimits> = {
-  evolution: { ratePerMinute: 40, convMinIntervalSec: 1, convBurstMax: 6, convBurstWindowSec: 30, maxQueueAgeMin: 30, autoPerHour: 80 },
-  meta: { ratePerMinute: 80, convMinIntervalSec: 1, convBurstMax: 10, convBurstWindowSec: 30, maxQueueAgeMin: 30, autoPerHour: 5000 },
+  evolution: { ratePerMinute: 40, convMinIntervalSec: 1, convBurstMax: 6, convBurstWindowSec: 30, maxQueueAgeMin: 30, autoPerHour: 80, coldPerDay: 10 },
+  // no oficial não vale (a Meta exige template para contato frio): o valor só completa o tipo
+  meta: { ratePerMinute: 80, convMinIntervalSec: 1, convBurstMax: 10, convBurstWindowSec: 30, maxQueueAgeMin: 30, autoPerHour: 5000, coldPerDay: 10 },
 };
 
 /** Faixas aceitas na configuração (API valida, tela usa como min/max dos campos). */
@@ -36,6 +43,7 @@ export const SEND_LIMIT_RANGES: Record<keyof SendLimits, [number, number]> = {
   convBurstWindowSec: [5, 600],
   maxQueueAgeMin: [1, 1440],
   autoPerHour: [1, 5000],
+  coldPerDay: [1, 500],
 };
 
 export const SEND_LIMIT_LABEL: Record<keyof SendLimits, string> = {
@@ -45,6 +53,7 @@ export const SEND_LIMIT_LABEL: Record<keyof SendLimits, string> = {
   convBurstWindowSec: 'Rajada: janela (s)',
   maxQueueAgeMin: 'Expirar na fila após (min)',
   autoPerHour: 'Automáticas por hora (número)',
+  coldPerDay: 'Contatos novos por dia (falar primeiro, QR)',
 };
 
 /**
@@ -90,4 +99,4 @@ export const TYPING_MAX_MS = 10_000;
  * Número QR pode falar primeiro com até N contatos frios (sem mensagem dele nas últimas
  * 24 h) por dia — janela deslizante de 24 h, só envio do atendente. Ver docs/envio.md#envio-frio.
  */
-export const COLD_CONTACTS_PER_DAY = 10;
+export const COLD_CONTACTS_PER_DAY = SEND_LIMIT_DEFAULTS.evolution.coldPerDay;

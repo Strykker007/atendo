@@ -117,7 +117,8 @@ function QueueLimits({ number }: { number: NumberItem }) {
       </button>
       {aberto && (
         <div className="grid grid-cols-2 gap-2 mt-1.5 items-end">
-          {(Object.keys(SEND_LIMIT_RANGES) as (keyof SendLimits)[]).map((k) => (
+          {/* contato frio no oficial é regra da Meta (template), não deste limite */}
+          {(Object.keys(SEND_LIMIT_RANGES) as (keyof SendLimits)[]).filter((k) => number.provider !== 'meta' || k !== 'coldPerDay').map((k) => (
             <label key={k} className="flex flex-col gap-1">
               <span className="text-[11px] text-faint leading-tight">{SEND_LIMIT_LABEL[k]}</span>
               <input
