@@ -32,6 +32,32 @@ export function downloadJson(data: unknown, fileName: string) {
 export const safeFileName = (name: string, fallback: string) => name.replace(/[^a-z0-9\-_ ]/gi, '').trim() || fallback;
 
 /** Máscara de CPF (até 11 dígitos) ou CNPJ (12–14), enquanto digita. */
+/** Telefone brasileiro "(11) 99999-9999" / "(11) 3333-4444". Com DDI 55 na frente, tira (a API põe de volta). */
+export function formatPhoneBR(v: string) {
+  let d = v.replace(/\D/g, '');
+  if (d.length > 11 && d.startsWith('55')) d = d.slice(2);
+  d = d.slice(0, 11);
+  if (!d) return '';
+  if (d.length <= 2) return `(${d}`;
+  const n = d.slice(2);
+  return n.length <= 4 ? `(${d.slice(0, 2)}) ${n}` : `(${d.slice(0, 2)}) ${n.slice(0, -4)}-${n.slice(-4)}`;
+}
+
+/** CEP "00000-000". */
+export function formatCep(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 8);
+  return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
+}
+
+/** Número do cartão em blocos de 4. */
+export const formatCardNumber = (v: string) => v.replace(/\D/g, '').slice(0, 19).replace(/(\d{4})(?=\d)/g, '$1 ');
+
+/** Validade do cartão "MM/AAAA" (aceita digitar "1228" → "12/28"). */
+export function formatCardExpiry(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 6);
+  return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+}
+
 export function formatDoc(v: string) {
   const d = v.replace(/\D/g, '').slice(0, 14);
   if (d.length <= 11) return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/(\d{3})\.(\d{3})\.(\d{3})(\d{1,2})$/, '$1.$2.$3-$4');

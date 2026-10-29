@@ -43,7 +43,8 @@ function PlanoInner() {
   // Asaas: checkout em modal (PIX/cartão) em vez de redirecionar
   const [asaasPlan, setAsaasPlan] = useState<Plan | null>(null);
   const [asaasPay, setAsaasPay] = useState<AsaasPayment | null>(null);
-  const asaasSub = u?.subscriptionGateway === 'asaas';
+  // conta nova com a ativação em aberto: o Pix dela é a "cobrança em aberto" do Asaas (docs/05#cobrança-de-ativação)
+  const asaasSub = u?.subscriptionGateway === 'asaas' || u?.billingNotice?.kind === 'activation_due';
   const pending = useAsaasPending(isAdmin && asaasSub);
   const openPayment = pending.data?.payment ?? null;
   const closeAsaas = useCallback(() => { setAsaasPlan(null); setAsaasPay(null); }, []);

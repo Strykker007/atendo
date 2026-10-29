@@ -1,6 +1,9 @@
 import type { BillingUnit, PlanLimits } from '@atendo/shared';
 
 export type QuotaKind = 'messages' | 'templates' | 'conversations';
+
+/** `limits().status` da conta nova com a cobrança de ativação em aberto (docs/05#cobrança-de-ativação). */
+export const AWAITING_ACTIVATION = 'awaiting_activation';
 export interface QuotaDecision {
   ok: boolean;
   reason?: string;
@@ -31,6 +34,7 @@ export function decideCanSend(
 ): QuotaDecision {
   if (!plan) return { ok: false, reason: 'Sem assinatura ativa' };
   if (plan.status === 'suspended' || plan.status === 'canceled') return { ok: false, reason: 'Assinatura suspensa' };
+  if (plan.status === AWAITING_ACTIVATION) return { ok: false, reason: 'Conta aguardando ativação: pague a cobrança de ativação em Plano e uso para liberar o envio.' };
 
   // template tem limite próprio; fora isso, quem limita é a unidade do plano — o ledger
   // registra mensagens E conversas sempre, mas só uma delas bloqueia o envio

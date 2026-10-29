@@ -285,6 +285,27 @@ Liberar **só depois do webhook configurado** no painel do Asaas.
 - **Por cliente**: cria/atualiza o Customer (razão social ou nome, CPF/CNPJ, `billingEmail`, telefone, CEP) e a assinatura `PIX` com `nextDueDate` = vencimento atual. Só grava `gateway = 'asaas'` se ainda estava sem gateway (`updateMany`); se outra rodada ganhou, a assinatura duplicada é cancelada no Asaas. O lembrete sai logo em seguida se o vencimento estiver a até 5 dias.
 - **Depois de migrado vale o fluxo do Asaas**: pagou → `active` e o vencimento anda (webhook); venceu sem pagar → `past_due` com a carência do plano (`graceDays`, padrão 5) e **suspensão do envio** quando ela acaba — na cobrança manual nada suspendia sozinho. A 1ª cobrança não cobra excedente; a partir da 2ª, excedente do mês anterior vira cobrança avulsa (`addOverage`).
 
+### Cobrança de ativação
+
+<a id="cobrança-de-ativação"></a>Cliente novo paga a entrada (instalação + 1ª mensalidade + o que mais houver) por Pix **antes de enviar**; pago, a conta ativa sozinha e a mensalidade recorrente já nasce no Asaas. Código: `billing/activation.service.ts` (+ `activation.controller.ts`, `AsaasService.completeActivation`), tela `components/billing/ActivationDialog.tsx`.
+
+- **Onde**: Clientes → **Ativação** na linha (ou o selo *Aguardando ativação*). Criar cliente com plano pago já abre o modal. Só `super_admin`; não depende de "Liberar para os clientes".
+- **Itens**: vêm sugeridos *Instalação e configuração* (valor a digitar) e *1ª mensalidade — Plano* (valor contratado: personalizado, senão o do plano × unidades). Lista livre (até 20, `kind` `setup`/`first_month`/`other`), desconto, vencimento (padrão +3 dias) e CPF/CNPJ (exigido pelo Asaas; vai para o cadastro). Total mínimo R$ 5,00. Uma cobrança em aberto por cliente.
+- **Gerar**: cria/atualiza o Customer, Pix avulso (`billingType: PIX`, `externalReference = activation:<id>`), espelha em `invoices` (entra no Faturado × Recebido) e liga `subscriptions.awaitingActivation`. E-mail para os admins com os itens e o link `/plano?pagar=1`.
+- **Enquanto não paga**: o cliente entra e configura tudo (números, equipe, fluxos), mas **não envia** — `UsageService.limits` devolve `status = awaiting_activation` e `decideCanSend` recusa ("Conta aguardando ativação…"). O admin (`billing.manage`) vê a faixa **Ative sua conta** (`billingNotice.kind = activation_due`) com **Pagar com Pix**, que abre o QR em Plano e uso (é a cobrança em aberto do Customer); os demais veem "Conta aguardando ativação" no lugar do aviso de uso. A migração para o Asaas (`enrollAll`/automática) pula quem aguarda ativação.
+- **Pago** (webhook `PAYMENT_RECEIVED/CONFIRMED`, ou a consulta do modal do Pix — quem vira a ativação para `paid` primeiro aplica): `awaitingActivation = false`, assinatura `active` de hoje até +1 ciclo, e — se ainda sem gateway, com CPF/CNPJ e valor > 0 — **assinatura Pix recorrente no Asaas** com 1º vencimento no fim desse ciclo (daí valem lembretes, carência e suspensão). Falha ao criar a recorrente só gera log: usar *Migrar só este*. E-mail "Sua conta está ativa".
+- **Pagou por fora**: botão no modal — ativa igual e cancela o Pix no Asaas.
+- **Cancelar Pix**: apaga no Asaas, fatura `void`, tira o bloqueio. Se o Asaas já recebeu, ativa em vez de cancelar.
+
+| Método | Rota | O quê |
+|---|---|---|
+| GET | `/billing/activation/:tenantId` | sugestão (`firstMonthValue`, `planName`, `document`), `awaitingActivation` e histórico |
+| POST | `/billing/activation/:tenantId` | `{items: {description, value, kind}[], discount?, dueDate? (AAAA-MM-DD), document?}` |
+| POST | `/billing/activation/:tenantId/:id/cancel` | cancela o Pix em aberto |
+| POST | `/billing/activation/:tenantId/:id/paid` | pagou por fora |
+
+Modelo: `activation_charges` (`items` jsonb, `discount`, `totalValue`, `firstMonthValue`, `dueDate`, `status` pending/paid/canceled, `externalId` único, `invoiceUrl`, `paidAt`, `paidVia` asaas/manual) e `subscriptions.awaitingActivation`. Migração `20270120000000_activation_charges` (aditiva).
+
 ### Lembretes da mensalidade
 
 <a id="lembretes-da-mensalidade"></a>Job `monthly-reminders` da fila de cobrança, todo dia às **12:00 UTC (9h em Brasília)**. Para cada assinatura no Asaas, busca a cobrança em aberto **no Asaas** (não depende do webhook ter chegado), espelha em `invoices` e decide (`reminderKind`):

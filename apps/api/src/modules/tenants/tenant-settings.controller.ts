@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { type ScheduleConfig, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
+import { BUDGET_QUOTE_ITEMS, type BudgetQuoteItems, type ScheduleConfig, type WelcomeMessage, type WelcomeMode } from '@atendo/shared';
 import { StorageService } from '../../common/storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
@@ -42,6 +42,8 @@ class SettingsDto {
   @IsOptional() @IsBoolean() companyIsolation?: boolean;
   /** assinatura do atendente obrigatória nas mensagens */
   @IsOptional() @IsBoolean() requireSignature?: boolean;
+  /** orçamento por mensagem: quando os itens vão no texto (`BUDGET_QUOTE_ITEMS`) */
+  @IsOptional() @IsIn(BUDGET_QUOTE_ITEMS) budgetQuoteItems?: BudgetQuoteItems;
   /** motivo de encerramento obrigatório em "Comprou" / "Não comprou" (cada um separado) */
   @IsOptional() @IsBoolean() requireReasonOnWon?: boolean;
   @IsOptional() @IsBoolean() requireReasonOnLost?: boolean;

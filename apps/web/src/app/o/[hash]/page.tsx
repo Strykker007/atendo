@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Check, ExternalLink, Upload, Clock, CircleCheck, CircleAlert, Loader2, Zap } from 'lucide-react';
-import { BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, PIX_KEY_TYPE_LABEL, type PublicBudget } from '@atendo/shared';
+import { BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, PIX_KEY_TYPE_LABEL, budgetApprovalPhrase, type PublicBudget } from '@atendo/shared';
 import { MarcaHorizontal } from '@/components/ui/Marca';
 import { useBrand } from '@/lib/brand-context';
 
@@ -31,7 +31,8 @@ export default function OrcamentoPublicoPage() {
     queryFn: () => fetchBudget(hash),
     retry: false,
     // Pix gerado e ainda pendente: confere a cada 5 s para mostrar "Pagamento confirmado" sozinho
-    refetchInterval: (query) => (query.state.data?.pixCharge && query.state.data.status === 'PENDING' ? 5000 : false),
+    // Pix na tela: confere a baixa; esperando aprovação: a página vira pagamento quando o atendente libera
+    refetchInterval: (query) => (query.state.data?.status !== 'PENDING' ? false : query.state.data.pixCharge ? 5000 : query.state.data.awaitingApproval ? 15000 : false),
     refetchOnWindowFocus: (query) => !!query.state.data?.pixCharge,
   });
 
@@ -68,7 +69,7 @@ function Orcamento({ hash, b: recebido }: { hash: string; b: PublicBudget }) {
       <Cartao>
         <p className="text-xs text-muted">{b.tenantName || brand.brandName}</p>
         <h1 className="font-display text-lg font-semibold mt-0.5">
-          {b.contactFirstName ? `Olá, ${b.contactFirstName}! ` : ''}Seu orçamento
+          {b.contactFirstName ? `Olá, ${b.contactFirstName}! ` : ''}Seu orçamento{b.number ? ` Nº ${b.number}` : ''}
         </h1>
         {b.agentName && <p className="text-xs text-faint mt-0.5">Preparado por {b.agentName}</p>}
         <Situacao b={b} validade={validade} agora={agora} />
@@ -95,7 +96,16 @@ function Orcamento({ hash, b: recebido }: { hash: string; b: PublicBudget }) {
 
       {b.note && <Cartao><p className="text-xs text-muted mb-1">Observação</p><p className="text-sm whitespace-pre-wrap break-words">{b.note}</p></Cartao>}
 
-      {b.status === 'PENDING' && b.autoPix && <PixAutomatico b={b} />}
+      {b.awaitingApproval && b.status === 'PENDING' && b.number && (
+        <Cartao className="text-center space-y-1">
+          <p className="text-sm font-semibold">Gostou do orçamento?</p>
+          <p className="text-sm text-muted">Para aprovar, responda no WhatsApp:</p>
+          <p className="text-lg font-semibold tnum">{budgetApprovalPhrase(b.number)}</p>
+          <p className="text-xs text-faint">Depois da aprovação, o pagamento aparece aqui nesta mesma página.</p>
+        </Cartao>
+      )}
+
+      {b.status === 'PENDING' && b.autoPix && !b.awaitingApproval && <PixAutomatico b={b} />}
 
       {b.status === 'PENDING' && !b.autoPix && (b.pix || b.paymentUrl) && (
         <Cartao className="space-y-3">
@@ -110,7 +120,7 @@ function Orcamento({ hash, b: recebido }: { hash: string; b: PublicBudget }) {
       )}
 
       {/* Pix automático dá baixa sozinho: comprovante só para quem paga por chave/link */}
-      {b.status !== 'EXPIRED' && b.status !== 'REFUNDED' && !b.autoPix && <Comprovante hash={hash} enviado={b.receiptSent} />}
+      {b.status !== 'EXPIRED' && b.status !== 'REFUNDED' && !b.autoPix && !b.awaitingApproval && <Comprovante hash={hash} enviado={b.receiptSent} />}
 
       <p className="text-center text-[11px] text-faint pt-2">Página segura de {b.tenantName || brand.brandName}. Não compartilhe este link.</p>
     </>
@@ -121,6 +131,7 @@ function Situacao({ b, validade, agora }: { b: PublicBudget; validade: string; a
   if (b.status === 'PAID') return <Selo cls="bg-ok-soft text-ok" icone={<CircleCheck size={14} />}>Pagamento confirmado. Obrigado!</Selo>;
   if (b.status === 'REFUNDED') return <Selo cls="bg-field text-muted" icone={<CircleAlert size={14} />}>Pagamento estornado. Fale com o atendimento se tiver dúvida.</Selo>;
   if (b.status === 'EXPIRED') return <Selo cls="bg-field text-muted" icone={<CircleAlert size={14} />}>Este orçamento expirou em {validade}. Peça um novo ao atendimento.</Selo>;
+  if (b.awaitingApproval) return <Selo cls="bg-accent-soft text-accent-ink" icone={<Clock size={14} />}>Aguardando sua aprovação · válido até {validade}</Selo>;
   // última hora: contagem regressiva — quem vai pagar no limite sabe que está no limite
   const faltam = Math.ceil((new Date(b.expiresAt).getTime() - agora) / 60_000);
   if (faltam <= 60) return <Selo cls="bg-warn-soft text-warn-ink" icone={<Clock size={14} />}>Vence às {new Date(b.expiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {faltam <= 1 ? 'menos de 1 minuto' : `faltam ${faltam} min`}. Pague antes disso.</Selo>;

@@ -7,6 +7,7 @@ import { useSetBillingDocument, useUsage, type Usage } from '@/lib/hooks';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
+import { formatDoc } from '@/lib/utils';
 
 const NOME = { messages: 'mensagens', conversations: 'conversas', templates: 'templates' } as const;
 
@@ -21,19 +22,14 @@ export function UsageBanner() {
   return (
     <>
       <MensalidadeBanner notice={u.billingNotice ?? null} atrasada={u.status === 'past_due' || u.status === 'suspended'} />
-      <UsoBanner u={u} />
+      {/* o aviso da ativação já diz que o envio está bloqueado */}
+      {u.billingNotice?.kind !== 'activation_due' && <UsoBanner u={u} />}
     </>
   );
 }
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
-const mascara = (v: string) => {
-  const d = v.replace(/\D/g, '').slice(0, 14);
-  return d.length <= 11
-    ? d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2')
-    : d.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
-};
 
 /**
  * Mensalidade por Pix (docs/05#lembretes-da-mensalidade), só para quem paga: pede o CPF/CNPJ
@@ -43,6 +39,17 @@ const mascara = (v: string) => {
 function MensalidadeBanner({ notice, atrasada }: { notice: Usage['billingNotice'] | null; atrasada: boolean }) {
   const [aberto, setAberto] = useState(false);
   if (!notice || (notice.kind === 'payment_due' && atrasada)) return null;
+  if (notice.kind === 'activation_due') {
+    return (
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2 text-[13px] bg-accent text-white">
+        <QrCode size={16} className="shrink-0" />
+        <span className="flex-1 min-w-[200px]">
+          <b>Ative sua conta:</b> pague {brl(notice.value)} ({notice.items.map((i) => i.description).join(' + ')}) por Pix. Você já pode configurar tudo; o envio de mensagens é liberado assim que o pagamento cair.
+        </span>
+        <Link href="/plano?pagar=1" className="rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1 font-medium whitespace-nowrap">Pagar com Pix</Link>
+      </div>
+    );
+  }
   if (notice.kind === 'needs_document') {
     return (
       <>
@@ -82,7 +89,7 @@ function DocumentoModal({ onClose }: { onClose: () => void }) {
       <form onSubmit={enviar} className="space-y-4">
         <p className="text-sm text-muted">A mensalidade passa a ser cobrada por Pix: antes de cada vencimento você recebe por e-mail (e vê aqui no painel) o valor, o QR Code e o código para copiar. O valor e a data de vencimento continuam os mesmos.</p>
         <Field label="CPF ou CNPJ da empresa" hint={doc && !valido ? 'Confira os números: CPF tem 11 dígitos e CNPJ, 14.' : undefined}>
-          <input className={inputCls} value={doc} onChange={(e) => setDoc(mascara(e.target.value))} inputMode="numeric" placeholder="00.000.000/0000-00" autoFocus required />
+          <input className={inputCls} value={doc} onChange={(e) => setDoc(formatDoc(e.target.value))} inputMode="numeric" placeholder="00.000.000/0000-00" autoFocus required />
         </Field>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Depois</Button>
@@ -102,7 +109,8 @@ function UsoBanner({ u }: { u: Usage }) {
 
   const what = q.metric ? NOME[q.metric] : NOME[q.unit];
   const text =
-    u.status === 'suspended' ? 'Assinatura suspensa — envio bloqueado.'
+    q.blocked && q.reason?.startsWith('Conta aguardando ativação') ? 'Conta aguardando ativação — o envio de mensagens é liberado quando o administrador pagar a ativação.'
+    : u.status === 'suspended' ? 'Assinatura suspensa — envio bloqueado.'
     : u.status === 'canceled' ? 'Assinatura cancelada — envio bloqueado.'
     : u.status === 'past_due' ? 'Pagamento pendente — regularize para evitar suspensão.'
     : q.blocked ? `Limite de ${NOME[q.unit]} do plano ${u.plan} atingido — envio bloqueado até o próximo mês.`

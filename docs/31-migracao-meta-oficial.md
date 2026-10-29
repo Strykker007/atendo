@@ -56,6 +56,7 @@ recebe resposta dobrada. Para cada cliente:
 2. Desligar a automação do número no sistema antigo.
 3. Conectar o número no Atendo e conferir envio/recebimento/templates.
 4. Tirar o número do sistema antigo (desinscrever o app antigo da WABA, se ela for compartilhada).
+5. Revisar **Configurações → Atendimento → Orçamento por mensagem**: farmácia/remédio em número oficial → manter o padrão *Não enviar os itens na mensagem* (a Meta lê o conteúdo; ver [Orçamentos — itens sensíveis](orcamentos.md#itens-sensíveis)).
 
 ## Riscos
 

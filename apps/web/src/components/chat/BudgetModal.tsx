@@ -1,36 +1,70 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Trash2, Copy, FileText, Check, Undo2, CornerDownLeft, Zap } from 'lucide-react';
-import { BUDGET_DEFAULT_VALIDITY, BUDGET_GRACE_MINUTES, BUDGET_MAX_ITEMS, BUDGET_STATUS_LABEL, BUDGET_VALIDITY, BUDGET_VALIDITY_LABEL, budgetTotal, type BudgetItem, type BudgetStatus, type BudgetValidity } from '@atendo/shared';
+import { Plus, Trash2, Copy, FileText, Check, Undo2, CornerDownLeft, Zap, Send, Link2, X, Receipt, Lock } from 'lucide-react';
+import { BUDGET_DEFAULT_VALIDITY, BUDGET_GRACE_MINUTES, BUDGET_MAX_ITEMS, BUDGET_STATUS_LABEL, BUDGET_VALIDITY, BUDGET_VALIDITY_LABEL, budgetApprovalPhrase, budgetLinkText, budgetQuoteLinkText, budgetQuoteShowsItems, budgetQuoteText, budgetRiskTerms, budgetTotal, type BudgetItem, type BudgetStatus, type BudgetValidity } from '@atendo/shared';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { cn, formatDoc } from '@/lib/utils';
-import { budgetLink, useBudgets, useCan, useConversation, useCreateBudget, usePaymentGateway, usePixKeys, useRefundBudget, useSetBudgetStatus, useTenantSettings, type Budget } from '@/lib/hooks';
+import { budgetLink, useApproveBudget, useBudgets, useCan, useConversation, useCreateBudget, usePaymentGateway, usePixKeys, useRefundBudget, useSetBudgetStatus, useTenantSettings, type Budget } from '@/lib/hooks';
 
 /**
- * Orçamento rápido no chat (docs/orcamentos.md).
+ * Orçamento rápido no chat (docs/orcamentos.md). Dois jeitos:
  *
- * Itens, valores e chave Pix ficam numa página pública; no WhatsApp vai só um texto genérico
- * com o link. Mensagem com lista de medicamento e valor é o tipo de conteúdo que derruba
- * número — o link não. O texto entra no campo, não sai sozinho: o atendente revisa e envia.
+ * - **Enviar orçamento**: a mensagem com itens e valores vai na hora, com o número ("Nº 42"). O
+ *   cliente aprova, o atalho acima do campo (`OrcamentosAguardando`) libera o link DAQUELE número.
+ *   Item sensível (`budgetRiskTerms`: dosagem, controlado, emagrecedor…) tira os itens do texto:
+ *   vão só número e total, e os itens ficam no link (sem pagamento até a aprovação).
+ * - **Só o link**: itens, valores e chave Pix ficam na página; no WhatsApp vai um texto genérico.
+ *   Mensagem com lista de medicamento e valor é o tipo de conteúdo que derruba número — o link não.
+ *
+ * Chave Pix e link nunca vão junto do orçamento por texto.
  */
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const vazio = (): BudgetItem => ({ name: '', dosage: '', quantity: 1, unitPrice: 0 });
+const primeiroNomeDe = (nome?: string | null) => nome?.trim().split(/\s+/)[0] ?? '';
+const resumoItens = (b: Budget) => b.items.map((i) => `${i.quantity}× ${i.name}`).join(', ');
 
-export function BudgetModal({ open, onClose, conversationId, onInserir }: { open: boolean; onClose: () => void; conversationId: string; onInserir: (texto: string) => void }) {
+/** Texto com o link: aprovado por texto leva número e total (o cliente confere antes de pagar); só o link, o genérico. */
+function textoDoLink(b: Budget, primeiroNome: string) {
+  if (b.number && b.quotedAt) return budgetLinkText({ number: b.number, totalValue: b.totalValue }, budgetLink(b.hash), primeiroNome || undefined);
+  // texto genérico: nada de item, valor ou chave na conversa
+  return `Olá${primeiroNome ? ` ${primeiroNome}` : ''}, acesse o link para visualizar os detalhes do seu orçamento e opções de pagamento: ${budgetLink(b.hash)}`;
+}
+
+/**
+ * Cliente aprovou → libera o link do orçamento ESCOLHIDO e envia. A confirmação repete número,
+ * total e itens: com dois orçamentos na conversa, mandar o link do outro é cobrança errada.
+ */
+function useEnviarLink(conversationId: string, onEnviar: (texto: string) => Promise<unknown>) {
+  const aprovar = useApproveBudget();
+  const primeiroNome = primeiroNomeDe(useConversation(conversationId).data?.contact.name);
+  const enviar = async (b: Budget) => {
+    if (!confirm(`Enviar o link de pagamento do ORÇAMENTO Nº ${b.number} — ${brl(b.totalValue)}?\n\n${b.items.map((i) => `${i.quantity}× ${i.name}`).join('\n')}`)) return false;
+    let aprovado: Budget;
+    try { aprovado = await aprovar.mutateAsync({ conversationId, id: b.id }); } catch (e) { toast.err(e); return false; }
+    try {
+      await onEnviar(textoDoLink(aprovado, primeiroNome));
+      toast.ok(`Link do orçamento Nº ${b.number} enviado`);
+      return true;
+    } catch (e) {
+      toast.err(e);
+      toast.warn('O link foi liberado mas não saiu. Em Orçamento → Desta conversa, use “Inserir no campo”.');
+      return false;
+    }
+  };
+  return { enviar, enviando: aprovar.isPending ? aprovar.variables?.id : undefined };
+}
+
+export function BudgetModal({ open, onClose, conversationId, onInserir, onEnviar }: { open: boolean; onClose: () => void; conversationId: string; onInserir: (texto: string) => void; onEnviar: (texto: string) => Promise<unknown> }) {
   const [aba, setAba] = useState<'novo' | 'lista'>('novo');
   const lista = useBudgets(open ? conversationId : null);
   const n = lista.data?.length ?? 0;
-  const conv = useConversation(conversationId).data;
-  const primeiroNome = conv?.contact.name?.trim().split(/\s+/)[0] ?? '';
-
-  // texto genérico: nada de item, valor ou chave na conversa
-  const mensagem = (hash: string) =>
-    `Olá${primeiroNome ? ` ${primeiroNome}` : ''}, acesse o link para visualizar os detalhes do seu orçamento e opções de pagamento: ${budgetLink(hash)}`;
-  const inserir = (hash: string) => { onInserir(mensagem(hash)); onClose(); };
+  const primeiroNome = primeiroNomeDe(useConversation(conversationId).data?.contact.name);
+  const inserir = (b: Budget) => { onInserir(textoDoLink(b, primeiroNome)); onClose(); };
+  const link = useEnviarLink(conversationId, onEnviar);
 
   return (
     <Modal open={open} onClose={onClose} title="Orçamento / pedido" width="max-w-2xl">
@@ -39,9 +73,54 @@ export function BudgetModal({ open, onClose, conversationId, onInserir }: { open
         <Aba ativa={aba === 'lista'} onClick={() => setAba('lista')}>Desta conversa{n ? ` (${n})` : ''}</Aba>
       </div>
       {aba === 'novo'
-        ? <NovoOrcamento conversationId={conversationId} onCriado={(b) => inserir(b.hash)} />
-        : <ListaOrcamentos conversationId={conversationId} budgets={lista.data ?? []} carregando={lista.isLoading} onInserir={inserir} />}
+        ? <NovoOrcamento conversationId={conversationId} onLink={inserir} onEnviar={onEnviar} onEnviado={onClose} />
+        : <ListaOrcamentos conversationId={conversationId} budgets={lista.data ?? []} carregando={lista.isLoading} onInserir={inserir} link={link} />}
     </Modal>
+  );
+}
+
+/**
+ * Atalho acima do campo: orçamentos enviados por texto esperando o cliente aprovar. Um clique
+ * envia o link do orçamento daquela linha. Com mais de um, o número do "APROVO 42" que o cliente
+ * respondeu fica destacado — é ele que decide qual link vai.
+ */
+export function OrcamentosAguardando({ conversationId, ultimaDoContato, onEnviar }: { conversationId: string; ultimaDoContato?: string | null; onEnviar: (texto: string) => Promise<unknown> }) {
+  const lista = useBudgets(conversationId);
+  const status = useSetBudgetStatus();
+  const link = useEnviarLink(conversationId, onEnviar);
+  const abertos = (lista.data ?? []).filter((b) => b.awaitingApproval && b.status === 'PENDING' && b.number);
+  if (!abertos.length) return null;
+  const resposta = ultimaDoContato ?? '';
+  const aprovou = /aprov/i.test(resposta);
+  // "APROVO 42": o número citado manda; com um só orçamento aberto, basta o "aprovo"
+  const citado = (b: Budget) => aprovou && (new RegExp(`(^|\\D)${b.number}(\\D|$)`).test(resposta) || abertos.length === 1);
+  const descartar = (b: Budget) => {
+    if (confirm(`Descartar o orçamento Nº ${b.number}? Ele sai daqui e o link dele não pode mais ser enviado.`)) status.mutateAsync({ conversationId, id: b.id, status: 'EXPIRED' }).catch(toast.err);
+  };
+
+  return (
+    <div className="space-y-1">
+      {abertos.length > 1 && <p className="text-[11px] text-warn-ink px-1">{abertos.length} orçamentos esperando aprovação — envie o link do número que o cliente aprovou.</p>}
+      {abertos.map((b) => (
+        <div key={b.id} className={cn('flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-sm', citado(b) ? 'border-ok bg-ok-soft' : 'border-line bg-field')}>
+          <Receipt size={15} className={citado(b) ? 'text-ok shrink-0' : 'text-muted shrink-0'} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <b className="tnum">Nº {b.number}</b>
+              <span className="tnum">{brl(b.totalValue)}</span>
+              <span className={cn('text-[11px] rounded-full px-2 py-0.5', citado(b) ? 'bg-ok text-white' : 'bg-warn-soft text-warn-ink')}>{citado(b) ? 'Cliente aprovou' : 'Aguardando aprovação'}</span>
+            </div>
+            <p className="text-xs text-muted truncate">{resumoItens(b)}</p>
+          </div>
+          <Button size="sm" variant={citado(b) ? 'success' : 'ghost'} icon={<Link2 size={13} />} loading={link.enviando === b.id} onClick={() => link.enviar(b)}>
+            <span className="hidden sm:inline">Enviar link</span><span className="sm:hidden">Link</span>
+          </Button>
+          <button type="button" onClick={() => descartar(b)} className="text-faint hover:text-danger p-1" title="Descartar orçamento" aria-label={`Descartar orçamento Nº ${b.number}`}>
+            <X size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -59,7 +138,23 @@ const ROTULOS_ITEM = {
   servico: { detalhe: 'Detalhe', exNome: 'Ex.: Manutenção do portão', exDetalhe: 'Ex.: modelo, tamanho, prazo' },
 } as const;
 
-function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; onCriado: (b: Budget) => void }) {
+/** Vencimento aproximado só para a prévia — o de verdade vem da API, no fuso da empresa. */
+function vencimentoPrevia(v: BudgetValidity) {
+  if (v !== 'end_of_day') return new Date(Date.now() + Number(v.replace('h', '')) * 3600_000);
+  const d = new Date();
+  d.setHours(23, 59, 0, 0);
+  return d;
+}
+
+function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conversationId: string; onLink: (b: Budget) => void; onEnviar: (texto: string) => Promise<unknown>; onEnviado: () => void }) {
+  const ajustes = useTenantSettings().data;
+  const tz = ajustes?.timezone;
+  // Configurações → Atendimento → Orçamento por mensagem
+  const modoItens = ajustes?.budgetQuoteItems ?? 'link';
+  const setStatus = useSetBudgetStatus();
+  const [enviando, setEnviando] = useState(false);
+  const [verPrevia, setVerPrevia] = useState(false);
+  const primeiroNome = primeiroNomeDe(useConversation(conversationId).data?.contact.name);
   const rot = ROTULOS_ITEM[(useTenantSettings().data?.salesEnabled ?? true) ? 'venda' : 'servico'];
   const pix = usePixKeys();
   const gw = usePaymentGateway();
@@ -84,8 +179,11 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
   const mudar = (i: number, p: Partial<BudgetItem>) => setItens((l) => l.map((it, j) => (j === i ? { ...it, ...p } : it)));
   const validos = itens.filter((i) => i.name.trim());
   const total = budgetTotal(validos);
+  const sensiveis = budgetRiskTerms(validos, note);
+  const itensNoTexto = budgetQuoteShowsItems(modoItens, validos, note);
 
-  async function gerar() {
+  /** `quote`: envia o orçamento por texto (link só depois da aprovação); senão, só o link no campo. */
+  async function gerar(quote: boolean) {
     if (!validos.length) return toast.warn('Adicione ao menos um item com nome');
     const url = paymentUrl.trim();
     if (!auto && chave === 'none' && !url) return toast.warn('Escolha uma chave Pix ou informe um link de pagamento');
@@ -102,11 +200,32 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
         cpfCnpj: auto && digitos !== docFicha ? digitos : undefined,
         note: note.trim() || undefined,
         validity,
+        quote: quote || undefined,
       });
-      toast.ok('Link gerado — revise a mensagem no campo e envie');
-      onCriado(b);
+      if (!quote) {
+        toast.ok('Link gerado — revise a mensagem no campo e envie');
+        return onLink(b);
+      }
+      setEnviando(true);
+      try {
+        // decide pelo que foi salvo (o mesmo que a tela mostrou)
+        const opts = { firstName: primeiroNome || undefined, timeZone: tz };
+        await onEnviar(!budgetQuoteShowsItems(modoItens, b.items, b.note)
+          ? budgetQuoteLinkText({ ...b, number: b.number! }, budgetLink(b.hash), opts)
+          : budgetQuoteText({ ...b, number: b.number! }, opts));
+      } catch (e) {
+        // não saiu (janela, cota, número): descarta para não ficar no atalho um orçamento que o cliente nunca viu
+        await setStatus.mutateAsync({ conversationId, id: b.id, status: 'EXPIRED' }).catch(() => undefined);
+        throw e;
+      } finally { setEnviando(false); }
+      toast.ok(`Orçamento Nº ${b.number} enviado — quando o cliente aprovar, o link sai pelo atalho acima do campo`);
+      onEnviado();
     } catch (e) { toast.err(e); }
   }
+
+  const rascunho = { number: '…', items: validos, totalValue: total, expiresAt: vencimentoPrevia(validity), note: note.trim() || null };
+  const optsPrevia = { firstName: primeiroNome || undefined, timeZone: tz };
+  const previa = !itensNoTexto ? budgetQuoteLinkText(rascunho, budgetLink('…'), optsPrevia) : budgetQuoteText(rascunho, optsPrevia);
 
   return (
     <div className="space-y-4">
@@ -156,18 +275,37 @@ function NovoOrcamento({ conversationId, onCriado }: { conversationId: string; o
         {!auto && <Field label="Link de pagamento (opcional)">
           <input className={inputCls} placeholder="https://…" value={paymentUrl} maxLength={500} onChange={(e) => setPaymentUrl(e.target.value)} />
         </Field>}
-        <Field label="Validade do link" hint={`No vencimento o contato não vê mais o Pix${auto ? `; a cobrança é cancelada ${BUDGET_GRACE_MINUTES} min depois` : ''}.`}>
+        <Field label="Validade" hint={`Do orçamento e, depois da aprovação, do link (recomeça ao aprovar). No vencimento o contato não vê mais o Pix${auto ? `; a cobrança é cancelada ${BUDGET_GRACE_MINUTES} min depois` : ''}.`}>
           <select className={inputCls} value={validity} onChange={(e) => setValidity(e.target.value as BudgetValidity)}>
             {BUDGET_VALIDITY.map((v) => <option key={v} value={v}>{BUDGET_VALIDITY_LABEL[v]}</option>)}
           </select>
         </Field>
-        <Field label="Observação (opcional)" hint="Aparece na página do contato.">
+        <Field label="Observação (opcional)" hint="Vai no orçamento e na página do contato.">
           <input className={inputCls} placeholder="Ex.: entrega amanhã pela manhã" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
         </Field>
       </div>
 
-      <div className="flex justify-end">
-        <Button onClick={gerar} loading={criar.isPending} loadingText={auto ? 'Gerando Pix…' : 'Gerando…'}>Gerar link</Button>
+      {modoItens === 'link' && validos.length > 0 && (
+        <p className="flex items-start gap-1.5 rounded-xl bg-accent-soft text-accent-ink px-3 py-2 text-xs">
+          <Lock size={13} className="mt-px shrink-0" />
+          <span>A empresa envia o orçamento só com número e total — os itens o cliente vê no link, que mostra o pagamento depois da aprovação.</span>
+        </p>
+      )}
+      {modoItens === 'protect' && sensiveis.length > 0 && (
+        <p className="flex items-start gap-1.5 rounded-xl bg-accent-soft text-accent-ink px-3 py-2 text-xs">
+          <Lock size={13} className="mt-px shrink-0" />
+          <span>Itens sensíveis ({sensiveis.slice(0, 4).join(', ')}{sensiveis.length > 4 ? '…' : ''}): o orçamento vai pelo WhatsApp só com número e total — os itens o cliente vê no link, que mostra o pagamento depois da aprovação. Protege o número de bloqueio.</span>
+        </p>
+      )}
+
+      {verPrevia && validos.length > 0 && (
+        <pre className="rounded-xl bg-field p-3 text-xs text-ink whitespace-pre-wrap font-sans max-h-64 overflow-y-auto">{previa}</pre>
+      )}
+
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        <button type="button" className="text-xs text-muted hover:text-ink mr-auto" onClick={() => setVerPrevia((v) => !v)}>{verPrevia ? 'Esconder prévia' : 'Ver prévia da mensagem'}</button>
+        <Button variant="ghost" icon={<Link2 size={14} />} onClick={() => gerar(false)} disabled={criar.isPending || enviando} title="Sem orçamento por texto: itens e valores só na página do link">Só o link</Button>
+        <Button icon={<Send size={14} />} onClick={() => gerar(true)} loading={criar.isPending || enviando} loadingText="Enviando…" title={`O cliente aprova respondendo ${budgetApprovalPhrase('Nº')}; o link sai pelo atalho acima do campo`}>Enviar orçamento</Button>
       </div>
     </div>
   );
@@ -180,7 +318,7 @@ const STATUS_CLS: Record<BudgetStatus, string> = {
   REFUNDED: 'bg-danger-soft text-danger-ink',
 };
 
-function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { conversationId: string; budgets: Budget[]; carregando: boolean; onInserir: (hash: string) => void }) {
+function ListaOrcamentos({ conversationId, budgets, carregando, onInserir, link }: { conversationId: string; budgets: Budget[]; carregando: boolean; onInserir: (b: Budget) => void; link: ReturnType<typeof useEnviarLink> }) {
   const status = useSetBudgetStatus();
   const estornar = useRefundBudget();
   const podeEstornar = useCan('settings.manage');
@@ -196,8 +334,11 @@ function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { c
       {budgets.map((b) => (
         <li key={b.id} className="rounded-xl border border-line p-3 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
+            {b.number && <span className="text-xs text-muted tnum">Nº {b.number}</span>}
             <b className="tnum">{brl(b.totalValue)}</b>
-            <span className={cn('text-[11px] rounded-full px-2 py-0.5', STATUS_CLS[b.status])}>{BUDGET_STATUS_LABEL[b.status]}</span>
+            {b.awaitingApproval && b.status === 'PENDING'
+              ? <span className="text-[11px] rounded-full px-2 py-0.5 bg-accent-soft text-accent-ink">Aguardando aprovação</span>
+              : <span className={cn('text-[11px] rounded-full px-2 py-0.5', STATUS_CLS[b.status])}>{BUDGET_STATUS_LABEL[b.status]}</span>}
             {b.status === 'PENDING' && <span className="text-[11px] text-muted">vence {new Date(b.expiresAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span>}
             {(b.status === 'PAID' || b.status === 'REFUNDED') && b.paidAt && new Date(b.paidAt) > new Date(b.expiresAt) && <span className="text-[11px] rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink" title="O pagamento chegou depois do vencimento — confira se o pedido ainda vale">Pago após o vencimento</span>}
             {b.status === 'PAID' && b.paidVia === 'asaas' && <span className="text-[11px] rounded-full px-2 py-0.5 bg-ok-soft text-ok">Baixa automática</span>}
@@ -208,10 +349,14 @@ function ListaOrcamentos({ conversationId, budgets, carregando, onInserir }: { c
               {new Date(b.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · {b.user.name.split(' ')[0]}
             </span>
           </div>
-          <p className="text-xs text-muted truncate">{b.items.map((i) => `${i.quantity}× ${i.name}`).join(', ')}</p>
+          <p className="text-xs text-muted truncate">{resumoItens(b)}</p>
           <div className="flex items-center gap-1.5 flex-wrap">
-            {b.status === 'PENDING' && <Button variant="ghost" size="sm" icon={<CornerDownLeft size={13} />} onClick={() => onInserir(b.hash)}>Inserir no campo</Button>}
-            <Button variant="ghost" size="sm" icon={<Copy size={13} />} onClick={() => copiar(b.hash)}>Copiar link</Button>
+            {b.awaitingApproval && b.status === 'PENDING' && (
+              <Button variant="success" size="sm" icon={<Link2 size={13} />} loading={link.enviando === b.id} onClick={() => link.enviar(b)}>Aprovado: enviar link</Button>
+            )}
+            {/* sem aprovação o link não vale: nada de copiar/inserir */}
+            {!b.awaitingApproval && b.status === 'PENDING' && <Button variant="ghost" size="sm" icon={<CornerDownLeft size={13} />} onClick={() => onInserir(b)}>Inserir no campo</Button>}
+            {!b.awaitingApproval && <Button variant="ghost" size="sm" icon={<Copy size={13} />} onClick={() => copiar(b.hash)}>Copiar link</Button>}
             {b.receipt && (
               <a href={b.receipt.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-line text-ink hover:bg-field">
                 <FileText size={13} /> Ver comprovante

@@ -205,7 +205,7 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 
 **pix_keys** — chaves Pix da empresa (`title`, `keyType` em `PIX_KEY_TYPES`, `key` normalizada pelo tipo, `holderName`, `position`). Enviadas pelo painel do chat como cartão "Copiar chave Pix" (até 30 por empresa).
 
-**budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`). Ver [Orçamentos](orcamentos.md).
+**budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`; `number` sequencial por empresa e `quotedAt`/`approvedAt` do orçamento enviado por texto que espera aprovação; quando os itens vão no texto é `tenant_settings.budgetQuoteItems`). Ver [Orçamentos](orcamentos.md).
 
 **secure_media** — foto protegida: mídia do chat atrás de um link com validade (`/f/:hash`, `hash` único, `mediaKey`, `caption` só na página, `validHours`, `expiresAt`, `revokedAt`, `viewCount`/`firstViewedAt`). Pelo WhatsApp vai só o texto com o link. Ver [Foto protegida](foto-protegida.md).
 
@@ -220,3 +220,7 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 **contacts.optOutAt / waInvalidAt** — descadastro de todo envio automático e telefone que a checagem disse não ter WhatsApp ([Envio](envio.md#descadastro)). **whatsapp_numbers.sessionStartedAt** — QR lido, base do aquecimento de 72 h; `waRemovedAt`/`waRemovedCount`/`reconnectBlockedUntil` — queda forçada pelo WhatsApp. Migrações `20261029000600_number_wa_removed` e `20261029000700_warmup_optout`.
 
 **system_notices** — avisos globais do dono (`SystemNotice`): `title`, `message`, `type` (`INFO`/`WARNING`/`CRITICAL`), `active`, `createdAt`. Sem `tenantId` — vale para todos os clientes. Ver [avisos.md](avisos.md).
+
+**activation_charges** — cobrança de ativação do cliente novo (instalação + 1ª mensalidade + itens livres) num Pix avulso do Asaas; enquanto `pending`, `subscriptions.awaitingActivation` bloqueia o envio. Ver [05 — Cobrança de ativação](05-planos-e-cobranca.md#cobrança-de-ativação).
+
+**finance_entries / finance_recurring / finance_partners / finance_closings / finance_settings** — fechamento financeiro do dono: lançamentos (entradas por fora, custos, folha, pró-labore; `recurringId` + `period` único para os fixos; `skipped` = não houve), custos fixos/folha, sócios com %, meses fechados (números e partes congelados) e reserva/saldo inicial. Lançamento tem `period` (competência), `date` (vencimento), `paidAt` (nulo = conta a pagar), fornecedor, forma de pagamento, nº do documento, parcelas (`installmentGroup/No/Total`) e `taxRuleId` (`@@unique([taxRuleId, period])`, `amountLocked`). **finance_categories** (categorias cadastráveis; `section` = linha do fechamento; as de fábrica com id legível), **finance_suppliers** (fornecedores) e **finance_tax_rules** (imposto automático: % sobre o que entrou no mês). Fixo ganhou `frequency`, `endPeriod`, `autoPaid`, fornecedor e forma. Ver [36 — Fechamento financeiro](36-fechamento-financeiro.md).

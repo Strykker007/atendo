@@ -29,8 +29,8 @@ const quando = (d: Date) => {
 };
 
 /** Atendente sem vaga de contato frio no número. */
-export const coldQuotaMessage = (resetsAt: Date | null) =>
-  `Este contato não escreve neste número há mais de 24 horas, e o número já falou primeiro com ${COLD_CONTACTS_PER_DAY} ` +
+export const coldQuotaMessage = (resetsAt: Date | null, max = COLD_CONTACTS_PER_DAY) =>
+  `Este contato não escreve neste número há mais de 24 horas, e o número já falou primeiro com ${max} ` +
   'contatos assim nas últimas 24 horas — é o limite diário para proteger o número de bloqueio. ' +
   (resetsAt ? `Uma nova vaga libera ${quando(resetsAt)}. ` : '') +
   'Se o contato responder, a conversa volta a funcionar normalmente. Para falar com muitos contatos, use o número oficial (API da Meta).';
@@ -63,12 +63,13 @@ if oldest[2] then resets = tonumber(oldest[2]) + win end
 return { ok, redis.call('ZCARD', KEYS[1]), resets }
 `;
 
-async function runClaim(redis: Redis, numberId: string, contactId: string) {
-  const [ok, used, resets] = (await redis.eval(CLAIM, 1, coldKey(numberId), Date.now(), COLD_WINDOW_MS, COLD_CONTACTS_PER_DAY, contactId)) as [number, number, number];
-  return { ok: ok === 1, used, max: COLD_CONTACTS_PER_DAY, resetsAt: resets ? new Date(resets) : null };
+/** `max` = vagas por dia do número (`sendLimits.coldPerDay`, padrão `COLD_CONTACTS_PER_DAY`). */
+async function runClaim(redis: Redis, numberId: string, contactId: string, max: number) {
+  const [ok, used, resets] = (await redis.eval(CLAIM, 1, coldKey(numberId), Date.now(), COLD_WINDOW_MS, max, contactId)) as [number, number, number];
+  return { ok: ok === 1, used, max, resetsAt: resets ? new Date(resets) : null };
 }
 
-export const claimColdContact = (redis: Redis, numberId: string, contactId: string) => runClaim(redis, numberId, contactId);
+export const claimColdContact = (redis: Redis, numberId: string, contactId: string, max = COLD_CONTACTS_PER_DAY) => runClaim(redis, numberId, contactId, max);
 
 /**
  * O contato já tem vaga de contato frio no número (um atendente falou primeiro com ele nas últimas
@@ -80,4 +81,4 @@ export async function hasColdSlot(redis: Redis, numberId: string, contactId: str
 }
 
 /** Só consulta (contato vazio não reserva): quantas vagas o número usou nas últimas 24 h. */
-export const coldQuota = (redis: Redis, numberId: string) => runClaim(redis, numberId, '');
+export const coldQuota = (redis: Redis, numberId: string, max = COLD_CONTACTS_PER_DAY) => runClaim(redis, numberId, '', max);

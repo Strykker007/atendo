@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { InvoiceStatus, Plan, SubscriptionStatus } from '@prisma/client';
-import { isStripeBillable } from '@atendo/shared';
+import { cpfCnpjDigits, isStripeBillable } from '@atendo/shared';
 import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailService, senderName } from '../../common/mail/mail.service';
@@ -93,6 +93,15 @@ export const chargeOf = (p: Plan, units = 1) =>
   p.billingCycle === 'yearly'
     ? { value: Number(p.priceYear ?? 0) * Math.max(1, units), cycle: 'YEARLY' as const }
     : { value: Number(p.priceMonth) * Math.max(1, units), cycle: 'MONTHLY' as const };
+
+/** Valor contratado (negociado, senão o do plano) × unidades, no ciclo do plano. */
+export const contractedCharge = (s: { priceMonth: unknown; units: number; plan: Plan }) =>
+  s.priceMonth !== null && s.priceMonth !== undefined
+    ? { value: cycleValue(Number(s.priceMonth), s.plan.billingCycle, s.units), cycle: s.plan.billingCycle === 'yearly' ? 'YEARLY' as const : 'MONTHLY' as const }
+    : chargeOf(s.plan, s.units);
+
+/** cobrança de ativação (instalação + 1ª mensalidade): `activation:<activation_charges.id>` */
+export const ACTIVATION_REF = 'activation:';
 
 /**
  * Integração com o Asaas (API v3) — PIX e cartão recorrentes.
@@ -203,6 +212,33 @@ export class AsaasService {
   /** Cobrança avulsa (boleto ou PIX, à escolha do cliente no link) — usada no "Pagar todos". */
   async createCharge(dto: { customer: string; value: number; dueDate: string; description: string; externalReference: string }) {
     return this.request<AsaasPayment>('POST', '/payments', { ...dto, billingType: 'UNDEFINED' });
+  }
+
+  /** Cobrança avulsa só por Pix (ativação): o cliente paga pelo QR do painel. */
+  async createPixCharge(dto: { customer: string; value: number; dueDate: string; description: string; externalReference: string }) {
+    return this.request<AsaasPayment>('POST', '/payments', { ...dto, billingType: 'PIX' });
+  }
+
+  async getPayment(paymentId: string) {
+    return this.request<AsaasPayment>('GET', `/payments/${encodeURIComponent(paymentId)}`);
+  }
+
+  /** Espelha em `invoices` (entra no Faturado × Recebido do Financeiro). */
+  async mirrorPayment(tenantId: string, p: AsaasPayment, force?: InvoiceStatus) {
+    await this.syncInvoice(tenantId, p, force);
+  }
+
+  /** Customer do tenant com os dados cadastrais (razão social, CPF/CNPJ, e-mail de cobrança…). */
+  async customerFromProfile(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    return this.createOrUpdateCustomer(tenantId, {
+      name: tenant.legalName || tenant.name,
+      cpfCnpj: cpfCnpjDigits(tenant.document),
+      email: tenant.billingEmail || undefined,
+      mobilePhone: tenant.phone || undefined,
+      postalCode: tenant.zipCode || undefined,
+      addressNumber: tenant.addressNumber || undefined,
+    });
   }
 
   async deletePayment(paymentId: string) {
@@ -377,6 +413,10 @@ export class AsaasService {
   /** Pagou: assinatura volta a `active` e o próximo vencimento vem do Asaas. Idempotente. */
   private async onPaid(tenantId: string, p: AsaasPayment) {
     if (p.externalReference?.startsWith(BULK_REF)) return this.settleConsolidated(tenantId, p);
+    if (p.externalReference?.startsWith(ACTIVATION_REF)) {
+      await this.syncInvoice(tenantId, p, 'paid');
+      return this.completeActivation(p.externalReference.slice(ACTIVATION_REF.length), 'asaas', p.paymentDate ? fromYmd(p.paymentDate) : new Date());
+    }
     await this.syncInvoice(tenantId, p, 'paid');
     if (!p.subscription) return; // avulsa (excedente): só a fatura muda
     await this.activateSubscription(tenantId, p.subscription, p.dueDate, p.id);
@@ -413,6 +453,59 @@ export class AsaasService {
       }
     }
     this.log.log(`cobrança consolidada ${p.id} paga: ${items.map((i) => i.label).join(', ')}`);
+  }
+
+  /**
+   * Cobrança de ativação paga (webhook, consulta do modal do Pix ou o dono marcou): libera o envio,
+   * a assinatura fica `active` por um ciclo a partir de hoje e a mensalidade recorrente por Pix nasce
+   * no Asaas com o 1º vencimento no fim desse ciclo. Webhook e polling chegam juntos — só quem vira
+   * a ativação para `paid` aplica (docs/05-planos-e-cobranca.md#cobrança-de-ativação).
+   */
+  async completeActivation(chargeId: string, via: 'asaas' | 'manual', paidAt = new Date()) {
+    const claimed = await this.prisma.activationCharge.updateMany({ where: { id: chargeId, status: 'pending' }, data: { status: 'paid', paidAt, paidVia: via } });
+    if (!claimed.count) return false;
+    const charge = await this.prisma.activationCharge.findUniqueOrThrow({ where: { id: chargeId } });
+    const tenantId = charge.tenantId;
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true, tenant: { select: { name: true, document: true } } } });
+    if (!sub) { this.log.error(`ativação ${chargeId} paga, mas o tenant ${tenantId} não tem assinatura`); return true; }
+    const start = new Date();
+    const end = nextPeriodEnd(start, sub.plan.billingCycle === 'yearly' ? 'yearly' : 'monthly');
+    await this.prisma.subscription.update({ where: { tenantId }, data: { awaitingActivation: false, status: 'active', graceUntil: null, currentPeriodStart: start, currentPeriodEnd: end } });
+    this.log.log(`tenant ${tenantId} (${sub.tenant.name}) ativado: cobrança de ativação ${chargeId} paga (${via})`);
+
+    // pago por fora: o Pix em aberto no Asaas não pode continuar valendo (cobraria duas vezes)
+    if (via === 'manual' && charge.externalId) {
+      await this.deletePayment(charge.externalId).catch((err) => this.log.warn(`ativação ${chargeId}: Pix ${charge.externalId} não cancelado no Asaas: ${err?.message ?? err}`));
+      await this.prisma.invoice.updateMany({ where: { externalId: charge.externalId }, data: { status: 'paid', paidAt } });
+    }
+
+    // mensalidade recorrente: só para quem ainda não tem gateway e paga algo
+    const { value, cycle } = contractedCharge(sub);
+    if (this.enabled && !sub.gateway && !sub.plan.isFree && value > 0 && sub.tenant.document) {
+      try {
+        const customer = await this.customerFromProfile(tenantId);
+        const remote = await this.createSubscription({ customer, billingType: 'PIX', value, cycle, description: `${senderName()} ${sub.plan.name}`, externalReference: tenantId, nextDueDate: ymd(end) });
+        const ok = await this.prisma.subscription.updateMany({ where: { tenantId, gateway: null }, data: { gateway: 'asaas', externalId: remote.id } });
+        if (!ok.count) await this.cancelSubscription(remote.id).catch(() => undefined);
+        else this.log.log(`tenant ${tenantId}: mensalidade por Pix no Asaas ${remote.id}, ${value} ${cycle}, 1º vencimento ${ymd(end)}`);
+      } catch (err) {
+        this.log.error(`tenant ${tenantId}: ativado, mas a mensalidade recorrente não foi criada no Asaas (${(err as Error)?.message ?? err}) — use Financeiro → Cobrança por Pix → Migrar só este`);
+      }
+    }
+
+    const to = await this.usage.adminEmails(tenantId);
+    if (to.length) {
+      this.mail.send({
+        to,
+        subject: `Sua conta ${senderName()} está ativa`,
+        text: `Recebemos o pagamento de ${brl(Number(charge.totalValue))}. Sua conta está ativa e o envio de mensagens já está liberado.
+
+A próxima mensalidade vence em ${end.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} — avisamos por e-mail com o Pix alguns dias antes.
+
+${env.WEB_ORIGIN}`,
+      }).catch(() => undefined);
+    }
+    return true;
   }
 
   private async activateSubscription(tenantId: string, subscriptionId: string, dueDate: string, paymentId: string) {

@@ -47,8 +47,13 @@ Exige `settings.manage`.
 - **Cabeçalho da conversa aberta**: botão *Não gerar relatório* (sino cortado); na conversa isenta, o selo **Sem relatório** (ao lado do status) é clicável e oferece voltar a gerar relatório.
 
 Na lista, o card do isento tem o status normal e o selo **Sem relatório**; a conversa livre tem a
-faixa cinza e o selo **Livre**. O botão **Conversas livres (sem ticket)** fica dentro dos filtros
-(ícone de ajustes), com o contador, e só aparece quando o cliente tem alguma.
+faixa cinza e o selo **Livre**. Nos filtros (ícone de ajustes), o seletor **Ticket** tem três opções:
+
+- **Todos** (padrão): as abas como descrito acima, isentos e livres juntos.
+- **Gera ticket**: só contatos que abrem atendimento, na aba escolhida; isentos e livres saem da lista
+  e dos contadores das abas (`GET /conversations?ticket=1`, `/conversations/counts?ticket=1`).
+- **Não gera ticket**: a visão Conversas livres — todos os isentos e livres, em qualquer status
+  (`?free=1`), com o contador ao lado.
 
 Na conversa aberta, **Encerrar** abre uma confirmação curta (`CloseModal` → `ExemptCloseModal`): sem
 resultado, sem pesquisa, fora dos relatórios. Na conversa livre (grupo) não há Encerrar.
@@ -70,4 +75,5 @@ Aguardando) ou até alguém **Assumir** (responder sem assumir não muda, como n
 | POST | `/ignored-contacts` | `settings.manage` | `{phone}` ou `{contactId}`, `label?`. 409 se o telefone (com/sem nono dígito) já está |
 | DELETE | `/ignored-contacts/:id` | `settings.manage` | Tira da lista (só a marca; a livre antiga volta para Aguardando) |
 | DELETE | `/ignored-contacts/contact/:contactId` | `settings.manage` | O mesmo, pelo contato (atalho da conversa). 404 se não está na lista; 409 se é número da própria conta (isento sem cadastro) |
-| GET | `/conversations?free=1` | (escopo normal da lista) | Visão Conversas livres. `/conversations/counts` devolve `free` |
+| GET | `/conversations?free=1` | (escopo normal da lista) | Visão Conversas livres ("Não gera ticket"). `/conversations/counts` devolve `free` |
+| GET | `/conversations?ticket=1` | (escopo normal da lista) | Filtro "Gera ticket": tira isentos e livres. Vale também em `/conversations/counts?ticket=1` (contadores das abas; `free` não muda) |

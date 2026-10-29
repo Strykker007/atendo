@@ -23,7 +23,7 @@ import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { ComposerBar, QuickReplyPopover } from './ComposerBar';
-import { BudgetModal } from './BudgetModal';
+import { BudgetModal, OrcamentosAguardando } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
@@ -469,6 +469,13 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
    * para a resposta rápida — antes a rápida saía pelo timer sem passar por aqui e ia sem nome.
    */
   const assinar = (t: string) => (assinando && t.trim() ? `*${me.data?.name ?? ''}:*\n${t.trim()}` : t.trim());
+  /** Orçamento e link de pagamento (docs/orcamentos.md): saem direto, pelo mesmo envio do campo. */
+  const enviarTexto = (t: string) => {
+    const texto = assinar(t);
+    return send.mutateAsync({ type: 'text', text: texto, simulateTypingChars: texto.length, idempotencyKey: crypto.randomUUID() });
+  };
+  // o atalho do orçamento destaca o número que o cliente aprovou ("APROVO 42")
+  const ultimaDoContato = useMemo(() => [...mensagens].reverse().find((m) => m.direction === 'in')?.text ?? null, [mensagens]);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent<QuickReplyEventDetail>).detail;
@@ -832,7 +839,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
       {/* prévia do que vai ser enviado, sobre o chat — nada sobe antes de confirmar */}
       {/* o link entra no campo da MENSAGEM (sai da nota, se estava nela) — o atendente revisa e envia */}
-      <BudgetModal open={orcando} onClose={() => setOrcando(false)} conversationId={conv.id} onInserir={(t) => { setModoNota(false); inserirNoTexto(t); }} />
+      <BudgetModal open={orcando} onClose={() => setOrcando(false)} conversationId={conv.id} onInserir={(t) => { setModoNota(false); inserirNoTexto(t); }} onEnviar={enviarTexto} />
       {previa && (
         <MediaPreview
           file={previa}
@@ -900,6 +907,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           <AbasDoEnvio nota={false} onNota={setModoNota} podeNota={podeNota} onOrcamento={() => setOrcando(true)} />
+          <OrcamentosAguardando conversationId={conv.id} ultimaDoContato={ultimaDoContato} onEnviar={enviarTexto} />
           {contatoFrio && <ColdContactNotice numberId={conv.number.id} />}
           {attachment && (
             <div className="flex items-center gap-3 rounded-xl bg-field px-3 py-2 text-sm">

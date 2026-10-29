@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download, Hourglass } from 'lucide-react';
+import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download, Hourglass, Landmark } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { SkeletonCards, SkeletonRows } from '@/components/ui/Skeleton';
@@ -84,10 +84,14 @@ export default function AdminPage() {
   return (
     <PageShell width="max-w-6xl">
       <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso.`} action={
+        <div className="flex items-center gap-2 flex-wrap">
+        {/* fechamento do mês: a receber, atrasados, custos, folha e parte de cada sócio (docs/36) */}
+        <Link href="/admin/fechamento" className="inline-flex items-center gap-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white px-3 py-2 text-sm font-medium"><Landmark size={15} /> Fechamento</Link>
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
           {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente'], ['pix', 'Cobrança por Pix']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>
           ))}
+        </div>
         </div>
       } />
 
@@ -100,7 +104,10 @@ export default function AdminPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Kpi icon={<Wallet size={16} />} label="MRR (receita recorrente/mês)" value={brl(d.now.mrr)} sub={`ARR ${brl(d.now.arr)}${d.now.discountMonth ? ` · ${brl(d.now.discountMonth)} em descontos` : ''}`} />
             <Kpi icon={<Users size={16} />} label="Clientes ativos" value={String(d.now.activeTenants)} sub={`${d.now.trialing} em teste (${brl(d.now.trialMrr)}/mês a converter) · ${d.now.canceled} cancelados`} />
-            <Kpi icon={<AlertTriangle size={16} />} label="Em atraso" value={brl(d.now.overdueAmount)} sub={`${d.now.pastDue} pendentes · ${d.now.suspended} suspensos`} tone={d.now.overdueAmount > 0 ? 'warn' : undefined} />
+            {/* quem deve, com filtros e ações: Fechamento → Em atraso */}
+            <Link href="/admin/fechamento?aba=atraso" className="block hover:opacity-90" title="Ver quem está em atraso">
+              <Kpi icon={<AlertTriangle size={16} />} label="Em atraso → ver clientes" value={brl(d.now.overdueAmount)} sub={`${d.now.pastDue} pendentes · ${d.now.suspended} suspensos`} tone={d.now.overdueAmount > 0 ? 'warn' : undefined} />
+            </Link>
             <Kpi icon={<TrendingUp size={16} />} label="Margem estimada do mês" value={brl(d.now.monthMargin)} sub={`custo ${brl(d.now.monthCost)}`} tone={d.now.monthMargin < 0 ? 'danger' : 'ok'} />
           </div>
 

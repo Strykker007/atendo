@@ -1,11 +1,11 @@
 'use client';
 /** Planos, assinatura e financeiro do dono. */
 'use client';
-import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { BillingCycle, ConversationStatus, PlanLimits, PlanLimitsOverride, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import type { BillingCycle, ConversationStatus, PlanLimits, PlanLimitsOverride, FlowDefinition, FlowTrigger, Permission, FinanceSection, FinanceFrequency } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
 // ---- Cobrança (Stripe) ----
@@ -174,4 +174,81 @@ export const useSetPixSettings = () => {
     mutationFn: (clientBilling: boolean) => api<PixSettings>('/billing/monthly/settings', { method: 'PUT', body: JSON.stringify({ clientBilling }) }),
     onSuccess: (r) => { qc.setQueryData(['pix-settings'], r); qc.invalidateQueries({ queryKey: ['usage'] }); },
   });
+};
+
+// ---- Cobrança de ativação (docs/05-planos-e-cobranca.md#cobrança-de-ativação) ----
+export type ActivationItemKind = 'setup' | 'first_month' | 'other';
+export interface ActivationItem { description: string; value: number; kind: ActivationItemKind }
+export interface ActivationCharge {
+  id: string; items: ActivationItem[]; discount: number; totalValue: number; dueDate: string;
+  status: 'pending' | 'paid' | 'canceled'; invoiceUrl: string | null; paidAt: string | null; paidVia: 'asaas' | 'manual' | null; canceledAt: string | null; createdAt: string;
+}
+export interface ActivationInfo { asaasConfigured: boolean; tenantName: string; document: string | null; planName: string; firstMonthValue: number; awaitingActivation: boolean; charges: ActivationCharge[] }
+export const useActivation = (tenantId: string | null) =>
+  useQuery({ queryKey: ['activation', tenantId], enabled: !!tenantId, queryFn: () => api<ActivationInfo>(`/billing/activation/${tenantId}`) });
+const ativacaoMudou = (qc: ReturnType<typeof useQueryClient>, tenantId: string) => (d: ActivationInfo) => {
+  qc.setQueryData(['activation', tenantId], d);
+  qc.invalidateQueries({ queryKey: ['tenants'] });
+  qc.invalidateQueries({ queryKey: ['finance'] });
+};
+export const useCreateActivation = (tenantId: string) => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (b: { items: ActivationItem[]; discount?: number; dueDate?: string; document?: string }) => api<ActivationInfo>(`/billing/activation/${tenantId}`, { method: 'POST', body: JSON.stringify(b) }), onSuccess: ativacaoMudou(qc, tenantId) });
+};
+export const useActivationAction = (tenantId: string) => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'paid' }) => api<ActivationInfo>(`/billing/activation/${tenantId}/${id}/${action}`, { method: 'POST' }), onSuccess: ativacaoMudou(qc, tenantId) });
+};
+
+// ---- Fechamento financeiro do dono (docs/36-fechamento-financeiro.md) ----
+export type ReceivableOrigin = 'asaas' | 'stripe' | 'manual' | 'ativacao';
+export interface ReceivableRow {
+  key: string; tenantId: string; tenant: string; origin: ReceivableOrigin; dueDate: string; amount: number;
+  status: 'paid' | 'open' | 'overdue'; paidAt: string | null; hostedUrl: string | null; subscriptionStatus: string | null; daysLate: number;
+  contact: { name: string | null; phone: string | null; email: string | null }; canReceive: boolean;
+}
+/** `taxes`, `costs` e `unpaid` não existem em fechamento antigo (lê com `?? 0`) */
+export interface ClosingSummary { receivedClients: number; otherIncome: number; taxes?: number; costs?: number; expenses: number; payroll: number; prolabore: number; result: number; reservePercent: number; reserve: number; distributable: number; unpaid?: number }
+export interface PayoutRow { partnerId: string; name: string; percent: number; amount: number; pixKey: string | null; paidAt: string | null }
+export interface FinanceEntryRow {
+  id: string; kind: 'income' | 'expense'; category: string; categoryName: string; section: FinanceSection; description: string; amount: number;
+  /** vencimento (saída) / recebimento (entrada) */
+  date: string;
+  /** competência */
+  period: string;
+  paidAt: string | null; status: 'paid' | 'open' | 'overdue';
+  paymentMethod: string | null; documentNumber: string | null; notes: string | null; supplierId: string | null; supplier: string | null;
+  tenantId: string | null; tenant: string | null; recurringId: string | null; taxRuleId: string | null; amountLocked: boolean;
+  installmentGroup: string | null; installmentNo: number | null; installmentTotal: number | null; skipped: boolean;
+}
+export interface ClosingMonth {
+  period: string; current: boolean; canClose: boolean; previousOpen: string | null; closed: { closedAt: string; notes: string | null } | null;
+  summary: ClosingSummary; liveSummary: ClosingSummary | null; payouts: PayoutRow[]; partnersPercent: number;
+  expected: number; pending: number; receivables: ReceivableRow[]; entries: FinanceEntryRow[];
+  cash: { balance: number; since: string | null; received: number; spent: number; paidToPartners: number; toPay: number; toPayCount: number; overdue: number; overdueCount: number };
+}
+export interface ClosingConfig {
+  partners: { id: string; name: string; sharePercent: number; pixKey: string | null; isActive: boolean }[];
+  recurring: {
+    id: string; category: string; description: string; amount: number; dayOfMonth: number; isActive: boolean; startPeriod: string;
+    endPeriod: string | null; frequency: FinanceFrequency; autoPaid: boolean; paymentMethod: string | null; supplierId: string | null; supplier: string | null; notes: string | null;
+  }[];
+  categories: { id: string; name: string; section: FinanceSection; system: boolean; isActive: boolean }[];
+  suppliers: { id: string; name: string; document: string | null; pixKey: string | null; notes: string | null; isActive: boolean }[];
+  taxRules: { id: string; name: string; categoryId: string; percent: number; base: 'all' | 'clients'; dueDay: number; isActive: boolean; startPeriod: string }[];
+  settings: { reservePercent: number; openingBalance: number; openingDate: string | null };
+}
+const fechamentoMudou = (qc: ReturnType<typeof useQueryClient>) => () => {
+  qc.invalidateQueries({ queryKey: ['closing'] });
+  qc.invalidateQueries({ queryKey: ['finance'] });
+  qc.invalidateQueries({ queryKey: ['tenants'] });
+};
+export const useClosingMonth = (period: string) => useQuery({ queryKey: ['closing', 'month', period], queryFn: () => api<ClosingMonth>(`/billing/closing/month/${period}`), placeholderData: keepPreviousData });
+export const useOverdue = () => useQuery({ queryKey: ['closing', 'overdue'], queryFn: () => api<ReceivableRow[]>('/billing/closing/overdue') });
+export const usePayables = () => useQuery({ queryKey: ['closing', 'payables'], queryFn: () => api<FinanceEntryRow[]>('/billing/closing/payables') });
+export const useClosingConfig = () => useQuery({ queryKey: ['closing', 'config'], queryFn: () => api<ClosingConfig>('/billing/closing/config') });
+/** Qualquer escrita do fechamento: `path` + método + corpo; tudo invalida o fechamento inteiro. */
+export const useClosingWrite = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ path, method = 'POST', body }: { path: string; method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown }) => api<unknown>(`/billing/closing/${path}`, { method, ...(body !== undefined && { body: JSON.stringify(body) }) }), onSuccess: fechamentoMudou(qc) });
 };

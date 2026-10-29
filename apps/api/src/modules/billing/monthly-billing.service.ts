@@ -4,8 +4,7 @@ import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailService, senderName } from '../../common/mail/mail.service';
 import { UsageService } from './usage.service';
-import { AsaasService, chargeOf } from './asaas.service';
-import { cycleValue } from './plan-override';
+import { AsaasService, chargeOf, contractedCharge } from './asaas.service';
 import { REMINDER_DAYS, diaSP, diasEntre, enrollSkip, firstDueDate, qrSignature, reminderKind, reminderMail, type EnrollSkip } from './monthly-billing';
 
 export interface EnrollResult { tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null; result: 'enrolled' | 'would_enroll' | EnrollSkip | 'error'; error?: string }
@@ -68,7 +67,8 @@ export class MonthlyBillingService {
 
   private async candidates(tenantId?: string) {
     return this.prisma.subscription.findMany({
-      where: { ...(tenantId && { tenantId }), tenant: { isActive: true } },
+      // aguardando a ativação: a recorrente nasce quando ela for paga (asaas.completeActivation)
+      where: { ...(tenantId && { tenantId }), awaitingActivation: false, tenant: { isActive: true } },
       include: { plan: true, tenant: true },
       orderBy: { currentPeriodEnd: 'asc' },
     });
@@ -76,7 +76,7 @@ export class MonthlyBillingService {
 
   /** valor contratado (negociado, senão o do plano) × unidades, no ciclo do plano */
   private charge(s: { priceMonth: unknown; units: number; plan: Parameters<typeof chargeOf>[0] }) {
-    return s.priceMonth !== null ? { value: cycleValue(Number(s.priceMonth), s.plan.billingCycle, s.units), cycle: s.plan.billingCycle === 'yearly' ? 'YEARLY' as const : 'MONTHLY' as const } : chargeOf(s.plan, s.units);
+    return contractedCharge(s);
   }
 
   /**
@@ -204,6 +204,11 @@ export class MonthlyBillingService {
     if (!this.enabled) return null;
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true, tenant: { select: { document: true } } } });
     if (!sub) return null;
+    if (sub.awaitingActivation) {
+      // conta nova: o admin paga a ativação (instalação + 1ª mensalidade) para liberar o envio
+      const a = await this.prisma.activationCharge.findFirst({ where: { tenantId, status: 'pending' }, orderBy: { createdAt: 'desc' } });
+      if (a) return { kind: 'activation_due' as const, value: Number(a.totalValue), dueDate: diaSP(a.dueDate), daysLeft: diasEntre(diaSP(), diaSP(a.dueDate)), items: a.items as unknown as { description: string; value: number }[] };
+    }
     if (!sub.gateway) {
       // pedir o CPF/CNPJ só quando a cobrança por Pix estiver liberada para os clientes
       if (!(await this.clientBilling())) return null;

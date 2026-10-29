@@ -1,6 +1,6 @@
 # Orçamentos com link seguro
 
-O atendente monta um orçamento/pedido no chat e o contato recebe **só um link** pelo WhatsApp. Itens, dosagens, valores e chave Pix ficam numa página pública (`/o/:hash`), e o comprovante sobe direto para o storage pela página — sem foto aberta trafegando na conversa.
+O atendente monta um orçamento/pedido no chat. Dois jeitos de mandar: **Enviar orçamento** (a mensagem com itens e valores vai por texto, o cliente aprova e só então o link sai — ver [Orçamento com aprovação](#orçamento-com-aprovação)) ou **Só o link**, em que o contato recebe **só um link** pelo WhatsApp. Itens, dosagens, valores e chave Pix ficam numa página pública (`/o/:hash`), e o comprovante sobe direto para o storage pela página — sem foto aberta trafegando na conversa.
 
 > **Por quê:** mensagem com lista de medicamento, preço e chave Pix é o tipo de conteúdo que leva número a banimento. Um texto genérico com link, não.
 
@@ -9,13 +9,79 @@ O atendente monta um orçamento/pedido no chat e o contato recebe **só um link*
 Atalho **Orçamento** na linha das abas acima do campo, ao lado de *Mensagem para o cliente* | *Nota interna* (aparece para todos; na conversa de outra pessoa, não). O link sempre entra no campo da **mensagem** — se estava na nota, o composer volta para a mensagem. O modal tem duas abas:
 
 - **Novo orçamento:** itens (nome, dosagem/apresentação — com o encerramento sem venda o rótulo vira "Detalhe", com exemplos genéricos; o campo da API é sempre `dosage` —, quantidade, valor unitário), chave Pix cadastrada (a primeira já vem escolhida) e/ou link de pagamento `https://`, validade (1h, 2h, 4h, 8h, **até o fim do dia** — padrão —, 24h ou 48h; ver [Vencimento](#vencimento)) e observação. Pelo menos uma forma de pagamento é obrigatória.
-- **Gerar link** salva o orçamento e **insere no campo** (não envia):
+- **Enviar orçamento** (principal): envia na hora a mensagem formatada com número, itens e total — ver [Orçamento com aprovação](#orçamento-com-aprovação). *Ver prévia da mensagem* mostra o texto antes.
+- **Só o link** salva o orçamento e **insere no campo** (não envia):
   > Olá {primeiro nome}, acesse o link para visualizar os detalhes do seu orçamento e opções de pagamento: https://<domínio do painel>/o/<hash>
 
   O envio segue o caminho normal do chat — quota, janela de 24h da Meta e ledger (`UsageService`) valem igual. O domínio é o que o atendente está usando, então o link sai com a marca certa ([19 — Marcas](19-marcas-e-vertentes.md)).
 - **Desta conversa:** orçamentos gerados, com status, "Comprovante recebido", **Ver comprovante** (URL assinada), **Copiar link**, **Inserir no campo** (pendentes) e **Marcar como pago / Desfazer pago**. Atualiza sozinha pelo socket `budgets` quando o comprovante chega.
 
 Não há permissão nem recurso de plano próprio: quem pode abrir a conversa pode gerar orçamento (o `ConversationScopeGuard` barra número/departamento de fora).
+
+## Orçamento com aprovação
+
+> Por padrão os itens **não** vão no texto (`budgetQuoteItems = link`): a mensagem leva número, total e o link — ver [Itens sensíveis](#itens-sensíveis). O texto completo abaixo só sai com a opção ligada.
+
+Para quem prefere mandar o orçamento escrito e só cobrar depois do "ok" do cliente — sem o atendente voltar ao modal.
+
+1. **Enviar orçamento** cria o orçamento com **número sequencial por empresa** (`number`) e `quotedAt`, e envia direto (mesmo envio do campo: assinatura, quota, janela da Meta e ledger) a mensagem `budgetQuoteText` (packages/shared):
+   ```
+   🧾 *ORÇAMENTO Nº 42*
+   Cliente: João
+   ━━━━━━━━━━━━━━━
+   *1. Dipirona*
+        _500 mg, 30 comp._
+        2 × R$ 10,00 = R$ 20,00
+   ━━━━━━━━━━━━━━━
+   *TOTAL: R$ 20,00*
+   📅 Válido até 29/10 às 23:59
+   📝 observação
+
+   ✅ Para aprovar, responda *APROVO 42*
+   ```
+   Chave Pix e link **nunca** vão nesta mensagem. Se o envio falhar, o orçamento é descartado na hora (não fica no atalho algo que o cliente não viu).
+2. Enquanto espera, o link **não cobra**: `/o/:hash` mostra itens e total com "Para aprovar, responda *APROVO 42*" (`awaitingApproval`), sem Pix, link de pagamento nem envio de comprovante (o upload responde 400), e o Pix automático **não** é gerado. A página confere a cada 15 s e vira pagamento quando o atendente libera.
+3. **Atalho acima do campo** (`OrcamentosAguardando`): cada orçamento esperando aprovação vira uma linha com número, total, itens, **Enviar link** e ✕ (descartar). Se a última mensagem do contato tem "aprov…" e o número (ou só "aprov…" com um único orçamento aberto), a linha fica verde **Cliente aprovou**. Com mais de um aberto, aviso para conferir o número.
+4. **Enviar link** pede confirmação repetindo número, total e itens, chama `POST …/budgets/:id/approve` e envia `budgetLinkText`: "✅ João, seu orçamento *Nº 42* foi aprovado. Total: R$ 20,00 — Para pagar, acesse: …". A página `/o/:hash` também mostra "Seu orçamento Nº 42".
+
+**Por que não erra de orçamento:** a aprovação é sempre por **id** (a linha clicada), nunca "o último"; a mensagem do link repete número e total; e o Pix automático é gerado na aprovação com o `totalValue` daquele orçamento (`externalReference` = id). Aprovar de novo (clique duplo, outra aba) devolve o mesmo orçamento sem segunda cobrança.
+
+**Validade:** vale para o orçamento enquanto espera; **na aprovação recomeça** (mesma opção escolhida, `validity`). Orçamento vencido antes da aprovação não libera link — gerar outro com o preço do dia. Descartar (✕ ou PATCH `EXPIRED`) só vale para quem ainda espera aprovação.
+
+**Se a aprovação falhar** (Asaas recusou, CPF): volta a esperar aprovação e o erro aparece para o atendente. Se o link foi liberado mas o envio falhou, ele fica em *Desta conversa → Inserir no campo* (já com o texto do número).
+
+### Itens sensíveis
+
+Mensagem com nome de remédio, dosagem e preço é o que derruba número ([aviso acima](#orçamentos-com-link-seguro)). Por isso o modal confere os itens e a observação com `budgetRiskTerms` (packages/shared) antes de enviar:
+
+Com a opção *Enviar itens, protegendo os sensíveis*:
+
+- **Nada sensível** → orçamento completo no texto (acima).
+- **Algo sensível** → aviso 🔒 no modal com os termos achados, e a mensagem vai **sem os itens** (`budgetQuoteLinkText`):
+  ```
+  🧾 *ORÇAMENTO Nº 42*
+  Cliente: João
+  ━━━━━━━━━━━━━━━
+  3 itens · *TOTAL: R$ 350,00*
+  📅 Válido até 29/10 às 23:59
+
+  🔒 Veja os itens do orçamento: https://…/o/<hash>
+
+  ✅ Para aprovar, responda *APROVO 42*
+  ```
+  O link é o mesmo que depois recebe o pagamento — a aprovação e o "Enviar link" funcionam igual.
+
+O que conta como sensível: quantidade com unidade (`500 mg`, `10 ml`, `5 g`, `ui`), forma farmacêutica e prescrição (comprimido, cápsula, ampola, gotas, xarope, injetável, receita, tarja, controlado, manipulado, medicamento/remédio, genérico) e uma lista de nomes que costumam gerar bloqueio (emagrecedores como Ozempic/Mounjaro, controlados, disfunção erétil, anabolizantes, cannabis). Sem acento e sem diferença de maiúscula. Na dúvida, esconde — o cliente vê tudo no link do mesmo jeito. Ampliar a lista é editar `RISCO_PALAVRAS`.
+
+**Configurável por empresa** — Configurações → Atendimento → *Orçamento por mensagem* (`tenant_settings.budgetQuoteItems`, `settings.manage`):
+
+| Opção | Itens no texto |
+|---|---|
+| `link` — Não enviar os itens (**padrão**, toda empresa começa assim) | nunca: só número, total e link |
+| `protect` — Enviar itens, protegendo os sensíveis | só quando `budgetRiskTerms` não acha nada |
+| `always` — Sempre | sempre, inclusive sensíveis (pede confirmação: risco de bloqueio por conta da empresa) |
+
+O modal mostra o aviso e a prévia conforme a opção (`budgetQuoteShowsItems`). **Na migração para a API oficial da Meta**, revisar esta opção com cada cliente de farmácia: a Meta lê o conteúdo e a política de comércio proíbe *oferecer* remédio com receita/controlado — orçamento com preço já conta como oferta. Para esses, `link`.
 
 ## Relatórios
 
@@ -103,8 +169,9 @@ A chave Pix é **copiada** para o orçamento na geração: editar ou apagar a ch
 | Método | Rota | Quem | O quê |
 |---|---|---|---|
 | GET | `/conversations/:id/budgets` | todos (escopo da conversa) | Últimos 30 orçamentos da conversa, com `receipt.url` assinada |
-| POST | `/conversations/:id/budgets` | todos (escopo da conversa) | `{items: {name, dosage?, quantity, unitPrice}[] (1–50), pixKeyId?, paymentUrl? (https), note?, validity? (1h\|2h\|4h\|8h\|end_of_day\|24h\|48h; padrão end_of_day), validHours? (1–720), autoPix?, cpfCnpj?}`. Sem Pix e sem link = 400 (exceto `autoPix`). `autoPix` gera a cobrança no Asaas na hora; sem CPF/CNPJ (do body ou da ficha) = 400; `cpfCnpj` informado vai para a ficha |
-| PATCH | `/conversations/:id/budgets/:budgetId` | todos (escopo da conversa) | `{status: 'PAID' \| 'PENDING'}` — PAID cria a venda; PENDING desfaz só o pago por fora ainda não encerrado. Socket `budgets` |
+| POST | `/conversations/:id/budgets` | todos (escopo da conversa) | `{items: {name, dosage?, quantity, unitPrice}[] (1–50), pixKeyId?, paymentUrl? (https), note?, quote? (orçamento por texto, espera aprovação), validity? (1h\|2h\|4h\|8h\|end_of_day\|24h\|48h; padrão end_of_day), validHours? (1–720), autoPix?, cpfCnpj?}`. Sem Pix e sem link = 400 (exceto `autoPix`). `autoPix` gera a cobrança no Asaas na hora; sem CPF/CNPJ (do body ou da ficha) = 400; `cpfCnpj` informado vai para a ficha |
+| PATCH | `/conversations/:id/budgets/:budgetId` | todos (escopo da conversa) | `{status: 'PAID' \| 'PENDING' \| 'EXPIRED'}` — PAID cria a venda; PENDING desfaz só o pago por fora ainda não encerrado; EXPIRED descarta orçamento que ainda espera aprovação. Socket `budgets` |
+| POST | `/conversations/:id/budgets/:budgetId/approve` | todos (escopo da conversa) | Cliente aprovou o orçamento por texto: `approvedAt`, validade recomeça, gera o Pix automático. Idempotente. 400 se vencido/pago; 409 se o Pix ainda está sendo gerado |
 | POST | `/conversations/:id/budgets/:budgetId/refund` | `settings.manage` | Estorno (Asaas devolve no Pix automático) — ver [Venda](#venda) |
 | GET | `/budgets?from=&to=&status=&via=auto\|fora&userId=&search=&page=` | `reports.view` (os seus; `conversations.view_all` = equipe) | Relatórios → Pagamentos: `{page, pageSize (30), total, totals{byStatus{STATUS:{count,value}}, paidByVia{asaas,manual}}, rows[…, conversationId, contact, paidAfterExpiry]}` — os totais ignoram o filtro de `status` |
 | GET | `/budgets/public/:hash` | público (30/min por IP) | `PublicBudget` (packages/shared) |
@@ -118,7 +185,7 @@ Código: `apps/api/src/modules/budgets/budgets.module.ts`, `apps/web/src/compone
 
 ## Modelo
 
-`budgets` ([06 — Modelo de dados](06-modelo-de-dados.md)): `tenantId`, `conversationId`, `contactId`, `userId` (atendente), `hash` (único), `items` (jsonb), `totalValue` (decimal 12,2, soma em centavos), cópia da chave Pix (`pixKey`, `pixKeyType`, `pixHolderName`), `paymentUrl`, `note`, `status`, `expiresAt`, comprovante (`receiptKey` no storage, `receiptMime`, `receiptName`, `receiptAt`), `paidAt`, `paidById`, `paidVia` (`manual` | `asaas`), Pix automático (`autoPix`, `gatewayPaymentId` único, `pixPayload`, `pixQrImage`). `payment_gateways`: uma conta por empresa (`provider` = asaas, `credentials` criptografado, `sandbox`, `webhookToken`, `webhookId`, `accountName`). Migrações `20261202000000_budgets`, `20261203000000_pix_gateway`, `20261203000100_contact_document` (`contacts.document`), `20261205000000_budget_sale_refund` e `20261206000000_budget_gateway_cancel` (`gatewayCancelledAt`).
+`budgets` ([06 — Modelo de dados](06-modelo-de-dados.md)): `tenantId`, `conversationId`, `contactId`, `userId` (atendente), `hash` (único), `items` (jsonb), `totalValue` (decimal 12,2, soma em centavos), cópia da chave Pix (`pixKey`, `pixKeyType`, `pixHolderName`), `paymentUrl`, `note`, `status`, `expiresAt`, comprovante (`receiptKey` no storage, `receiptMime`, `receiptName`, `receiptAt`), `paidAt`, `paidById`, `paidVia` (`manual` | `asaas`), Pix automático (`autoPix`, `gatewayPaymentId` único, `pixPayload`, `pixQrImage`), aprovação (`number` — único por empresa, nulo nos antigos —, `quotedAt`, `approvedAt`, `approvedById`, `validity`). `payment_gateways`: uma conta por empresa (`provider` = asaas, `credentials` criptografado, `sandbox`, `webhookToken`, `webhookId`, `accountName`). Migrações `20261202000000_budgets`, `20261203000000_pix_gateway`, `20261203000100_contact_document` (`contacts.document`), `20261205000000_budget_sale_refund` `20261206000000_budget_gateway_cancel` (`gatewayCancelledAt`) e `20270119000000_budget_quote` (aprovação; só colunas opcionais).
 
 ## Limites atuais
 

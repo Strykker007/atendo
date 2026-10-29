@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, QrCode, ArrowUp, ArrowDown } from 'lucide-react';
 import { PIX_KEY_TYPES, PIX_KEY_TYPE_LABEL, type PixKeyType } from '@atendo/shared';
+import { formatDoc, formatPhoneBR } from '@/lib/utils';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
@@ -15,6 +16,9 @@ const PLACEHOLDER: Record<PixKeyType, string> = {
   phone: '(11) 99999-9999',
   random: '123e4567-e89b-12d3-a456-426614174000',
 };
+
+/** CPF/CNPJ/telefone com máscara; a API guarda só os dígitos (telefone com +55). */
+const mascaraChave = (t: PixKeyType, v: string) => (t === 'cpf' || t === 'cnpj' ? formatDoc(v) : t === 'phone' ? formatPhoneBR(v) : v);
 
 type Draft = { id?: string; title: string; keyType: PixKeyType; key: string; holderName: string };
 
@@ -80,7 +84,7 @@ export function PixKeysSection({ podeEditar }: { podeEditar: boolean }) {
                       <button onClick={() => move(i, 1)} disabled={i === keys.data!.length - 1} className="text-faint hover:text-ink disabled:opacity-30 disabled:hover:text-faint" title="Descer" aria-label={`Descer ${k.title}`}><ArrowDown size={13} /></button>
                     </span>
                   )}
-                  <button onClick={() => setDraft({ id: k.id, title: k.title, keyType: k.keyType, key: k.key, holderName: k.holderName })} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={15} /></button>
+                  <button onClick={() => setDraft({ id: k.id, title: k.title, keyType: k.keyType, key: mascaraChave(k.keyType, k.key), holderName: k.holderName })} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={15} /></button>
                   <button onClick={() => setDeleting(k)} className="text-faint hover:text-danger p-1" title="Excluir"><Trash2 size={15} /></button>
                 </>
               )}
@@ -98,7 +102,7 @@ export function PixKeysSection({ podeEditar }: { podeEditar: boolean }) {
                 {PIX_KEY_TYPES.map((t) => <option key={t} value={t}>{PIX_KEY_TYPE_LABEL[t]}</option>)}
               </select>
             </Field>
-            <Field label="Chave"><input className={inputCls} value={draft.key} onChange={(e) => setDraft({ ...draft, key: e.target.value })} placeholder={PLACEHOLDER[draft.keyType]} maxLength={77} required /></Field>
+            <Field label="Chave"><input className={inputCls} value={draft.key} onChange={(e) => setDraft({ ...draft, key: mascaraChave(draft.keyType, e.target.value) })} placeholder={PLACEHOLDER[draft.keyType]} inputMode={draft.keyType === 'email' || draft.keyType === 'random' ? undefined : draft.keyType === 'phone' ? 'tel' : 'numeric'} maxLength={77} required /></Field>
             <Field label="Nome do recebedor (opcional)"><input className={inputCls} value={draft.holderName} onChange={(e) => setDraft({ ...draft, holderName: e.target.value })} placeholder="Como aparece no cartão; vazio = o título" maxLength={60} /></Field>
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="ghost" onClick={() => setDraft(null)}>Cancelar</Button>

@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import type { Conversation, ConversationEventType, ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { CloseReasonsService } from '../close-reasons/close-reasons.module';
 import { AuditService } from '../audit/audit.module';
-import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, isCpfCnpjLength, messagePreview } from '@atendo/shared';
+import { DELETED_MESSAGE_LABEL, MESSAGE_EDIT_WINDOW_MS, MESSAGE_REVOKE_WINDOW_MS, OWN_MESSAGE_DELETE_WINDOW_MS, PLAN_FEATURE_LABEL, isCpfCnpjLength, messagePreview, resolveSendLimits, type SendLimits } from '@atendo/shared';
 import type { DeletedMessageOriginal, MessageContent, MessageReaction, MessageTemplate, OutboundMessage, QuotedRef, TemplateChoice, TemplateValues } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsageService } from '../billing/usage.service';
@@ -43,6 +43,8 @@ type Viewer = { id: string; role: string; permissions?: readonly Permission[]; n
 
 /** O que a lista e o cabeçalho do chat mostram do departamento (etiqueta com cor). */
 export const DEPARTMENT_SELECT = { id: true, name: true, color: true, isActive: true } as const;
+/** Vagas de contato frio por dia no número QR: o `coldPerDay` que o dono ajustou, senão o padrão. */
+const coldPerDay = (sendLimits: Prisma.JsonValue | null | undefined) => resolveSendLimits('evolution', sendLimits as Partial<SendLimits> | null).coldPerDay;
 const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permissions?.includes(p);
 /**
  * Conversa livre: aberta e sem dono, fora da fila — o grupo (docs/grupos.md) e as de contato isento
@@ -204,7 +206,7 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; free?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
+    q: { status?: ConversationStatus; free?: boolean; ticket?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
@@ -219,8 +221,9 @@ export class ConversationsService {
     // fora dos relatórios. "Atendendo" mostra também as conversas livres (grupo; e as isentas de
     // antes, abertas sem dono) para responder sem ir ao filtro — sem dono, então fora da regra de
     // posse. Não com filtro de consultor/desfecho (livre não tem nenhum dos dois)
-    const comLivres = !q.free && q.status === 'in_progress' && !q.assigneeId && !q.lastOutcome && !q.closeReasonId;
-    const fila: Prisma.ConversationWhereInput = { ...(q.status && { status: q.status }), ...ownership, NOT: LIVRE };
+    // "Gera ticket" (filtro da lista) tira os isentos: as livres também saem, porque toda livre é isenta
+    const comLivres = !q.free && !q.ticket && q.status === 'in_progress' && !q.assigneeId && !q.lastOutcome && !q.closeReasonId;
+    const fila: Prisma.ConversationWhereInput = { ...(q.status && { status: q.status }), ...ownership, NOT: LIVRE, ...(q.ticket && { ticketExempt: false }) };
     const where: Prisma.ConversationWhereInput = {
       tenantId,
       // número excluído: as conversas ficam guardadas para voltar quando ele for recadastrado
@@ -264,13 +267,14 @@ export class ConversationsService {
   }
 
   /** Contadores dos três filtros principais (opcionalmente por número e departamento). */
-  async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string) {
+  async counts(tenantId: string, viewer: Viewer, numberId?: string, departmentId?: string, onlyTickets = false) {
     const scoped = narrowTo(viewer, numberId);
     const dept = departmentWhere(viewer, departmentId);
     const escopo: Prisma.ConversationWhereInput = { tenantId, number: { deletedAt: null }, ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}), ...dept };
     // conversa livre (grupo, aberta sem dono) não é fila: conta só na aba "Livres". Contato
     // isento conta nas abas como qualquer atendimento (relatório é que não o vê)
-    const base: Prisma.ConversationWhereInput = { ...escopo, NOT: LIVRE };
+    // com o filtro "Gera ticket", as abas contam só quem abre atendimento
+    const base: Prisma.ConversationWhereInput = { ...escopo, NOT: LIVRE, ...(onlyTickets && { ticketExempt: false }) };
     const [waiting, closed, mine, all, free] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
@@ -496,7 +500,7 @@ export class ConversationsService {
    * Oficial → a Meta já exige template (checado antes); para o atendente entra também o recurso
    * do plano. Envio do sistema não confere o recurso: campanha e agenda têm os próprios.
    */
-  private async assertColdAllowed(c: { tenantId: string; contactId: string; numberId: string; lastInboundAt: Date | null; number: { provider: string } }, author?: Viewer) {
+  private async assertColdAllowed(c: { tenantId: string; contactId: string; numberId: string; lastInboundAt: Date | null; number: { provider: string; sendLimits?: Prisma.JsonValue | null } }, author?: Viewer) {
     if (isWarm(await this.lastInboundOnNumber(c))) return;
     // grupo nas conversas: o admin liberou o grupo, não é "contato frio" (docs/grupos.md#grupos-nas-conversas)
     if ((await this.prisma.contact.findUnique({ where: { id: c.contactId }, select: { isGroup: true } }))?.isGroup) return;
@@ -506,8 +510,8 @@ export class ConversationsService {
         if (await hasColdSlot(this.redis, c.numberId, c.contactId)) return;
         throw new ConflictException({ code: 'cold_send_unofficial', message: COLD_UNOFFICIAL_MESSAGE });
       }
-      const vaga = await claimColdContact(this.redis, c.numberId, c.contactId);
-      if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
+      const vaga = await claimColdContact(this.redis, c.numberId, c.contactId, coldPerDay(c.number.sendLimits));
+      if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt, vaga.max), resetsAt: vaga.resetsAt });
       return;
     }
     if (!author || author.role === 'super_admin') return;
@@ -523,23 +527,23 @@ export class ConversationsService {
    * tivesse escrito) — depois disso as mensagens do fluxo passam (`hasColdSlot`).
    */
   async assertFlowCanStart(conversationId: string) {
-    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: { select: { provider: true, status: true } }, contact: { select: { optOutAt: true } } } });
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: { select: { provider: true, status: true, sendLimits: true } }, contact: { select: { optOutAt: true } } } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
     if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para iniciar um fluxo.');
     if (conv.number.status !== 'connected') throw new BadRequestException('O número está desconectado: o fluxo não teria como enviar. Conecte de novo em Números.');
     if (conv.contact.optOutAt) throw new BadRequestException('O contato pediu para não receber mensagens automáticas, então o fluxo não pode ser enviado. Responda pelo campo de mensagem.');
     if (isWarm(await this.lastInboundOnNumber(conv))) return;
     if (conv.number.provider === 'meta') throw new BadRequestException('O contato não escreve há mais de 24 horas: na API oficial, depois disso só sai template aprovado. Use "Enviar template".');
-    const vaga = await claimColdContact(this.redis, conv.numberId, conv.contactId);
-    if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt), resetsAt: vaga.resetsAt });
+    const vaga = await claimColdContact(this.redis, conv.numberId, conv.contactId, coldPerDay(conv.number.sendLimits));
+    if (!vaga.ok) throw new ConflictException({ code: 'cold_quota_exhausted', message: coldQuotaMessage(vaga.resetsAt, vaga.max), resetsAt: vaga.resetsAt });
   }
 
   /** Vagas de contato frio usadas no número (só QR; o oficial fala primeiro por template). */
   async coldQuota(tenantId: string, numberId: string) {
-    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: numberId, tenantId, deletedAt: null }, select: { provider: true } });
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: numberId, tenantId, deletedAt: null }, select: { provider: true, sendLimits: true } });
     if (!number) throw new NotFoundException('Número não encontrado');
     if (number.provider === 'meta') return null;
-    return coldQuota(this.redis, numberId);
+    return coldQuota(this.redis, numberId, coldPerDay(number.sendLimits));
   }
 
   /**

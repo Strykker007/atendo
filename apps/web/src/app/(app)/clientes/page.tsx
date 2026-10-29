@@ -2,11 +2,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal, Download } from 'lucide-react';
+import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal, Download, QrCode } from 'lucide-react';
 import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDialog';
 import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
 import { PlanOverrideDialog } from '@/components/billing/PlanOverrideDialog';
-import { cn } from '@/lib/utils';
+import { ActivationDialog } from '@/components/billing/ActivationDialog';
+import { cn, formatDoc, formatPhoneBR, formatCep } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -236,6 +237,8 @@ export default function ClientesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   // valor/limites/vigência negociados para um cliente (docs/05-planos-e-cobranca.md#personalização-por-cliente)
   const [personalizando, setPersonalizando] = useState<TenantRow | null>(null);
+  // instalação + 1ª mensalidade num Pix (docs/05-planos-e-cobranca.md#cobrança-de-ativação)
+  const [ativando, setAtivando] = useState<string | null>(null);
   const [filtros, setFiltros] = useState<Filtros>(FILTROS_VAZIOS);
   const set = (p: Partial<Filtros>) => setFiltros((f) => ({ ...f, ...p }));
   // o Financeiro abre um cliente daqui com `?busca=Nome` (lido só no navegador: evita o Suspense do useSearchParams)
@@ -381,6 +384,9 @@ export default function ClientesPage() {
                       <select value={t.subscription?.status ?? ''} disabled={busy === t.id || !t.subscription} onChange={(e) => patch(t, { subscriptionStatus: e.target.value })} className={cn('rounded-full text-xs px-2 py-0.5 border-0', st[1])}>
                         {Object.entries(STATUS).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}
                       </select>
+                      {t.subscription?.awaitingActivation && (
+                        <button type="button" onClick={() => setAtivando(t.id)} className="block mt-0.5 text-[11px] rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink hover:underline" title="Pix de ativação em aberto: configura, mas não envia">Aguardando ativação</button>
+                      )}
                       {/* o que ele paga hoje; em teste, o que passa a pagar quando converter */}
                       {t.subscription && !t.subscription.plan.isFree && (
                         <div className="text-[11px] tnum text-muted mt-0.5" title={t.subscription.status === 'trialing' ? 'Mensalidade quando sair do teste' : 'Mensalidade atual'}>
@@ -394,6 +400,7 @@ export default function ClientesPage() {
                     <td className="px-3 py-2.5 text-right tnum">{t._count.conversations}</td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                       <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditando(t)} title="Editar dados do cliente">Editar</Button>
+                      <Button size="sm" variant="ghost" className="ml-1" icon={<QrCode size={13} />} onClick={() => setAtivando(t.id)} title="Cobrança de ativação: instalação + 1ª mensalidade por Pix">Ativação</Button>
                       <Button size="sm" variant="ghost" className="ml-1" icon={<Store size={13} />} onClick={() => setEmpresasDe(t)} title="Empresas e unidades do cliente">Empresas</Button>
                       <Button size="sm" variant="ghost" className="ml-1" icon={<Power size={13} />} onClick={() => patch(t, { isActive: !t.isActive })} loading={busy === t.id && update.isPending} title={t.isActive ? 'Desativar cliente' : 'Ativar cliente'}>{t.isActive ? 'Desativar' : 'Ativar'}</Button>
                       <Button size="sm" className="ml-1" icon={<Eye size={13} />} onClick={() => enter(t)} loading={busy === t.id && impersonate.isPending} loadingText="Entrando…">Entrar como</Button>
@@ -405,7 +412,8 @@ export default function ClientesPage() {
           </table>
         </div>
       )}
-      <CreateTenantModal open={creating} onClose={() => setCreating(false)} />
+      <CreateTenantModal open={creating} onClose={() => setCreating(false)} onCriado={setAtivando} />
+      {ativando && <ActivationDialog tenantId={ativando} onClose={() => setAtivando(null)} />}
       {editando && <EditTenantModal tenant={editando} onClose={() => setEditando(null)} />}
       <Modal open={!!empresasDe} onClose={() => setEmpresasDe(null)} title={`Empresas — ${empresasDe?.name ?? ''}`} width="max-w-2xl">
         {empresasDe && <CompaniesSection tenantId={empresasDe.id} />}
@@ -432,7 +440,8 @@ function planoDaEmpresa(c: TenantRow['companies'][number]): [string, string] {
   return [c.subscription.plan.name, 'text-ink'];
 }
 
-function CreateTenantModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Criado com plano pago: já abre a cobrança de ativação (instalação + 1ª mensalidade). */
+function CreateTenantModal({ open, onClose, onCriado }: { open: boolean; onClose: () => void; onCriado: (tenantId: string) => void }) {
   const plans = usePlans();
   const create = useCreateTenant();
   const templates = useTenantTemplates(open);
@@ -443,7 +452,7 @@ function CreateTenantModal({ open, onClose }: { open: boolean; onClose: () => vo
   const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   return (
     <Modal open={open} onClose={onClose} title="Novo cliente">
-      <form onSubmit={(e) => { e.preventDefault(); create.mutateAsync({ ...f, adminPassword: f.adminPassword || undefined, templateId: templateId === 'none' ? null : templateId, planId: f.planId || (plans.data?.[0]?.id ?? '') }).then(() => { toast.ok(f.adminPassword ? 'Cliente criado' : `Cliente criado — convite enviado para ${f.adminEmail}`); onClose(); }).catch(toast.err); }} className="space-y-4">
+      <form onSubmit={(e) => { e.preventDefault(); create.mutateAsync({ ...f, adminPassword: f.adminPassword || undefined, templateId: templateId === 'none' ? null : templateId, planId: f.planId || (plans.data?.[0]?.id ?? '') }).then((t) => { toast.ok(f.adminPassword ? 'Cliente criado' : `Cliente criado — convite enviado para ${f.adminEmail}`); onClose(); const plano = plans.data?.find((p) => p.id === (f.planId || plans.data?.[0]?.id)); if (plano && !plano.isFree) onCriado(t.id); }).catch(toast.err); }} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome da empresa" hint="Como o cliente é conhecido. Aparece para ele no painel.">
             <input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, slug: slugify(e.target.value) })} required autoFocus placeholder="Farmácia Bem Estar" />
@@ -506,7 +515,7 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
     phone: tenant.phone ?? '', zipCode: tenant.zipCode ?? '', street: tenant.street ?? '', addressNumber: tenant.addressNumber ?? '', complement: tenant.complement ?? '',
     district: tenant.district ?? '', city: tenant.city ?? '', state: tenant.state ?? '', notes: tenant.notes ?? '',
   }));
-  const campo = (k: keyof TenantProfile) => ({ value: perfil[k], onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setPerfil({ ...perfil, [k]: e.target.value }) });
+  const campo = (k: keyof TenantProfile, mascara?: (v: string) => string) => ({ value: mascara ? mascara(perfil[k] ?? '') : perfil[k], onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setPerfil({ ...perfil, [k]: mascara ? mascara(e.target.value) : e.target.value }) });
   // com gateway, a data vem do Stripe/Asaas e o webhook sobrescreveria a edição
   const gateway = tenant.subscription?.gateway;
   return (
@@ -566,11 +575,11 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
         <div className="text-xs font-semibold uppercase tracking-wider text-muted pt-1">Dados cadastrais</div>
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Razão social"><input className={inputCls} {...campo('legalName')} maxLength={150} /></Field>
-          <Field label="CPF / CNPJ"><input className={inputCls} {...campo('document')} maxLength={20} inputMode="numeric" placeholder="00.000.000/0000-00" /></Field>
+          <Field label="CPF / CNPJ"><input className={inputCls} {...campo('document', formatDoc)} maxLength={18} inputMode="numeric" placeholder="00.000.000/0000-00" /></Field>
           <Field label="Responsável" hint="Quem responde pela conta."><input className={inputCls} {...campo('contactName')} maxLength={80} /></Field>
-          <Field label="Telefone"><input className={inputCls} {...campo('phone')} maxLength={20} inputMode="tel" placeholder="(11) 99999-9999" /></Field>
+          <Field label="Telefone"><input className={inputCls} {...campo('phone', formatPhoneBR)} maxLength={15} inputMode="tel" placeholder="(11) 99999-9999" /></Field>
           <Field label="E-mail financeiro" hint="Para cobrança e avisos. Não é o login."><input type="email" className={inputCls} {...campo('billingEmail')} maxLength={120} /></Field>
-          <Field label="CEP"><input className={inputCls} {...campo('zipCode')} maxLength={10} inputMode="numeric" placeholder="00000-000" /></Field>
+          <Field label="CEP"><input className={inputCls} {...campo('zipCode', formatCep)} maxLength={9} inputMode="numeric" placeholder="00000-000" /></Field>
         </div>
         <div className="grid sm:grid-cols-[1fr_7rem] gap-3">
           <Field label="Endereço"><input className={inputCls} {...campo('street')} maxLength={150} placeholder="Rua, avenida…" /></Field>

@@ -16,6 +16,7 @@ export interface SettingsUpdate {
   salesEnabled?: boolean;
   companyIsolation?: boolean;
   requireSignature?: boolean;
+  budgetQuoteItems?: string;
   requireReasonOnWon?: boolean;
   requireReasonOnLost?: boolean;
   rankingWeights?: Record<string, number> | null;

@@ -49,7 +49,7 @@ export function useMinuto() {
 }
 
 export function ConversationList() {
-  const { companyId, numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation, groupByAssignee, toggleGroupByAssignee, soundMuted, setSoundMuted, closeFilter, setCloseFilter } = useUI();
+  const { companyId, numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation, groupByAssignee, toggleGroupByAssignee, soundMuted, setSoundMuted, closeFilter, setCloseFilter, onlyTickets, setOnlyTickets } = useUI();
   const motivos = useCloseReasons();
   const labels = useOutcomeLabels();
   // motivo filtrado: aparece como etiqueta em cada conversa (todas foram encerradas por ele)
@@ -65,7 +65,7 @@ export function ConversationList() {
   const departments = useDepartments();
   // desativado sai do seletor, a não ser que seja o filtro atual (senão o select ficaria vazio)
   const deptOptions = (departments.data ?? []).filter((d) => d.isActive || d.id === departmentId);
-  const counts = useConversationCounts(numberId, departmentId);
+  const counts = useConversationCounts(numberId, departmentId, onlyTickets && status !== 'free');
   const agora = useMinuto();
   /**
    * Filtros escondidos atrás do ícone.
@@ -81,10 +81,15 @@ export function ConversationList() {
   const [marcados, setMarcados] = useState<string[]>([]);
   const [encerrando, setEncerrando] = useState(false);
   const [iniciando, setIniciando] = useState(false);
-  // "Livres" não é aba: é exceção (diretoria, fornecedor) e fica nos filtros, só quando existe alguma
-  const temLivres = !!counts.data?.free || status === 'free';
+  // ticket: Todos | Gera (só quem abre atendimento) | Não gera ("Livres": contatos isentos, em qualquer status)
+  const filtroTicket = status === 'free' ? 'no' : onlyTickets ? 'yes' : 'all';
+  const escolherTicket = (t: 'all' | 'yes' | 'no') => {
+    setOnlyTickets(t === 'yes');
+    if (t === 'no') setStatus('free');
+    else if (status === 'free') setStatus('in_progress');
+  };
   const abaMeta = status === 'free' ? FREE_META : STATUS_META[status];
-  const filtroLista = { status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome };
+  const filtroLista = { status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome, onlyTickets };
   const conversations = useConversations(filtroLista);
   // rolou até o fim: páginas seguintes (a primeira é a que o tempo real atualiza)
   const anteriores = useOlderConversations(filtroLista, conversations.data);
@@ -102,7 +107,7 @@ export function ConversationList() {
   const numerosDaEmpresa = (numbers.data ?? []).filter((n) => !companyId || n.companyId === companyId);
   // seções do modo agrupado que a pessoa recolheu (chave = id do atendente ou FILA)
   const [recolhidos, setRecolhidos] = usePersistedState<string[]>('grupos-recolhidos', []);
-  const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0) + (closeFilter.outcome || closeFilter.reasonId ? 1 : 0) + (status === 'free' ? 1 : 0);
+  const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0) + (closeFilter.outcome || closeFilter.reasonId ? 1 : 0) + (filtroTicket !== 'all' ? 1 : 0);
 
   const visiveis = useMemo(() => [...(conversations.data ?? []), ...anteriores.itens], [conversations.data, anteriores.itens]);
 
@@ -315,20 +320,22 @@ export function ConversationList() {
             </button>
           ))}
         </div>
-        {/* conversas livres: contatos isentos de ticket (docs/contatos-isentos.md) — exceção, então
-            fica aqui, discreta, e só existe quando o cliente tem alguma */}
-        {temLivres && (
-          <button
-            onClick={() => setStatus(status === 'free' ? 'in_progress' : 'free')}
-            title="Contatos isentos de ticket (diretoria, fornecedores…): conversam sem abrir atendimento"
-            className={cn('w-full flex items-center justify-between gap-2 text-[11px] font-semibold px-2 py-1 rounded-md border transition-colors', status === 'free' ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}
-          >
-            <span className="truncate">Conversas livres (sem ticket)</span>
-            {counts.data?.free !== undefined && <span className="shrink-0 tnum text-[10px] font-bold">{counts.data.free}</span>}
-          </button>
-        )}
+        {/* ticket: quem abre atendimento, quem é isento (docs/contatos-isentos.md) ou todos */}
+        <div className="space-y-1">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-faint">Ticket</div>
+          <div className="flex flex-wrap gap-1">
+            {([['all', 'Todos'], ['yes', 'Gera ticket'], ['no', 'Não gera ticket']] as const).map(([t, l]) => (
+              <button key={t} onClick={() => escolherTicket(t)}
+                title={t === 'yes' ? 'Só contatos que abrem atendimento' : t === 'no' ? 'Contatos isentos de ticket (diretoria, fornecedores…), em qualquer status' : undefined}
+                className={cn('inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-md border transition-colors', filtroTicket === t ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>
+                {l}
+                {t === 'no' && counts.data?.free !== undefined && <span className="tnum text-[10px] font-bold">{counts.data.free}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
         {filtrosAtivos > 0 && (
-          <button onClick={() => { setTags([]); setOrigin(null); setAssignee(null); setOrdem('recent'); setCloseFilter({ outcome: null, reasonId: null }); if (status === 'free') setStatus('in_progress'); }} className="text-[11px] text-accent-ink hover:underline">
+          <button onClick={() => { setTags([]); setOrigin(null); setAssignee(null); setOrdem('recent'); setCloseFilter({ outcome: null, reasonId: null }); escolherTicket('all'); }} className="text-[11px] text-accent-ink hover:underline">
             Limpar filtros
           </button>
         )}
