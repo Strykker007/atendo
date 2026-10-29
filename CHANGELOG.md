@@ -3,6 +3,20 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.10.0 — 2026-10-29
+
+- chore(site): tsconfig.tsbuildinfo regenerado no build
+- feat(cobranca): mensalidade por Pix no Asaas — migração automática da cobrança manual, lembretes por e-mail (Brevo) com QR e copia e cola, aviso no painel
+- fix(relatorios): aspas tipográficas no aviso da auditoria (lint react/no-unescaped-entities quebrava o next build)
+- feat(condominios): separação por empresa opcional (equipe, contatos, transmissões); contatos com lista e ações; abrir conversa sem mensagem; atraso da 1ª mensagem no fluxo; relatórios sem venda; política de privacidade
+- feat(equipe): registro de acessos (quem esteve logado por dia e calendário por pessoa); tabela da Equipe responsiva; perfis de acesso em cartões e editor por área
+- fix(envio): ordem estrita na conversa; atendente libera a automática segurada à frente; textos seguidos juntos no aquecimento; despedida atrasada de conversa encerrada é descartada
+- feat(escalas): tolerância para sair configurável por escala, com contador na tela até travar
+- feat(ops): leitura de produção só com papel atendo_ro e escrita manual só pelo write.sh (simulação, contagem esperada, registro)
+- feat(conversas): conversas livres aparecem em Atendendo com o selo Livre (fora dos contadores e relatórios)
+- feat(envio): varredura a cada minuto de mensagem pendente sem job na fila (volta para a fila ou vira não enviada)
+- fix(infra): deploy recria o caddy quando o Caddyfile muda; Redis com maxmemory 2gb
+
 ## 1.9.1 — 2026-10-26
 
 - fix(seguranca): next 15.5.28, zod 4 e overrides das dependências vulneráveis; headers de segurança no painel
