@@ -273,7 +273,7 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <span className="mr-auto text-[11.5px] text-faint">Na conversa, cada atendimento termina numa linha "Atendimento encerrado".</span>
+          <span className="mr-auto text-[11.5px] text-faint">Na conversa, cada atendimento termina numa linha “Atendimento encerrado”.</span>
           <Button variant="ghost" onClick={onClose}>Fechar</Button>
           <Button icon={<ExternalLink size={14} />} onClick={() => { setConversation(a.conversationId); router.push('/conversas'); }}>Abrir conversa</Button>
         </div>
