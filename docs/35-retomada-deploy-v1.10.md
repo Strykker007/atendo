@@ -10,7 +10,8 @@
 | `.env.production` no servidor | ✅ chave e token do Asaas preenchidos, `ASAAS_AUTO_ENROLL=false` |
 | Deploy v1.10.0 | ✅ no ar (29/10), com a chave do Asaas carregada na API — conferido pelo usuário. Passos 1 a 3 abaixo ficam só como referência |
 | Cobrança por Pix para os clientes | ✅ **v1.10.1 no ar (29/10)**: escondida dos clientes (botão do dono em Financeiro → Cobrança por Pix, desligado). 0 clientes e 0 assinaturas no Asaas. A chave do Asaas fica ativa no `.env.production` |
-| Webhook no painel do Asaas | ❌ **próximo passo** (passo 4) — precisa da conta do sócio |
+| Webhook no painel do Asaas | ✅ configurado em 29/10; token novo (48 hex) no `.env.production` e na API; teste com evento ignorado: token errado → 403, certo → 200 |
+| Liberar para os clientes | ❌ **próximo passo** (fim do passo 4) — Financeiro → Cobrança por Pix |
 | Migração dos clientes para o Pix | ❌ passo 5, **depois** do webhook |
 
 > ⚠️ Sem o webhook, o pagamento só é reconhecido enquanto o cliente está com a tela do QR aberta. Por
