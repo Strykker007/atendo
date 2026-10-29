@@ -9,6 +9,7 @@ import { SkeletonCards, SkeletonRows } from '@/components/ui/Skeleton';
 import { useFinance, useMargin, useMe, type DiscountGrant, type DiscountSource } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { useBrand } from '@/lib/brand-context';
+import { PixMigration } from '@/components/billing/PixMigration';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const brlK = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
@@ -23,7 +24,7 @@ const Tip = ({ active, payload, label }: { active?: boolean; payload?: { name: s
   </div>
 ) : null;
 
-type Tab = 'visao' | 'teste' | 'faturas' | 'descontos' | 'margem';
+type Tab = 'visao' | 'teste' | 'faturas' | 'descontos' | 'margem' | 'pix';
 
 const ORIGEM: Record<DiscountSource, string> = { checkout: 'Checkout', tenant_create: 'Novo cliente', manual: 'Dono, no cliente', bulk: 'Dono, aplicar a todos', plan_return: 'Voltou ao plano' };
 const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '');
@@ -84,13 +85,15 @@ export default function AdminPage() {
     <PageShell width="max-w-6xl">
       <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso.`} action={
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
-          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente']] as [Tab, string][]).map(([t, l]) => (
+          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente'], ['pix', 'Cobrança por Pix']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>
           ))}
         </div>
       } />
 
       {fin.isLoading && <SkeletonCards count={4} />}
+
+      {tab === 'pix' && <PixMigration />}
 
       {d && tab === 'visao' && (
         <>

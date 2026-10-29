@@ -11,6 +11,7 @@ import { StripeService } from './stripe.service';
 import { AsaasService } from './asaas.service';
 import { FinanceService } from './finance.service';
 import { PromotionsService } from './promotions.service';
+import { MonthlyBillingService } from './monthly-billing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { UsageService, periodOf } from './usage.service';
@@ -87,6 +88,7 @@ export class BillingController {
     private readonly asaas: AsaasService,
     private readonly finance: FinanceService,
     private readonly promotions: PromotionsService,
+    private readonly monthly: MonthlyBillingService,
   ) {}
 
   /** Financeiro completo do dono: MRR, faturado/recebido/atrasado, custos, margem, por plano, série mensal. */
@@ -270,9 +272,11 @@ export class BillingController {
   async current(@CurrentUser() user: AuthUser) {
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, customPlan: null, overageAmount: 0, quota: null, noTenant: true };
+      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, customPlan: null, overageAmount: 0, quota: null, billingNotice: null, noTenant: true };
     }
-    const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies, tenant] = await Promise.all([
+    // aviso da mensalidade só para quem paga (e só lê o banco: esta rota roda a cada minuto)
+    const podePagar = user.role === 'super_admin' || !!user.impersonatorId || !!user.permissions?.includes('billing.manage');
+    const [used, plan, sub, numbers, agents, counter, flows, quickReplies, companies, tenant, billingNotice] = await Promise.all([
       this.usage.current(user.tenantId),
       this.usage.limits(user.tenantId),
       this.prisma.subscription.findUnique({ where: { tenantId: user.tenantId }, include: { plan: true, tenant: { select: { planOverride: true } } } }),
@@ -283,6 +287,7 @@ export class BillingController {
       this.prisma.quickReply.count({ where: { folder: { tenantId: user.tenantId } } }),
       this.prisma.company.count({ where: { tenantId: user.tenantId, deletedAt: null } }),
       this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { billingType: true } }),
+      podePagar ? this.monthly.notice(user.tenantId).catch(() => null) : null,
     ]);
     return {
       period: periodOf(),
@@ -318,6 +323,8 @@ export class BillingController {
       overageAmount: counter ? Number(counter.overageAmount) : 0,
       /** uso x limite pela unidade do plano — o front NÃO recalcula (é a mesma regra do envio) */
       quota: quotaStatus(plan, used),
+      /** mensalidade por Pix: falta o CPF/CNPJ para entrar no automático, ou vence nos próximos dias (docs/05#lembretes-da-mensalidade) */
+      billingNotice,
     };
   }
 }

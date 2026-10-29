@@ -146,6 +146,11 @@ export interface Usage {
     templatesBlocked: boolean;
     overage: boolean;
   } | null;
+  /**
+   * Mensalidade por Pix (só para quem paga): falta o CPF/CNPJ para entrar na cobrança automática,
+   * ou a mensalidade vence nos próximos dias (`daysLeft` 0 = hoje). docs/05#lembretes-da-mensalidade
+   */
+  billingNotice?: { kind: 'needs_document' } | { kind: 'payment_due'; value: number; dueDate: string; daysLeft: number } | null;
 }
 export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/billing/usage'), refetchInterval: 60_000 });
 

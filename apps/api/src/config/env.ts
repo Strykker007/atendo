@@ -89,6 +89,12 @@ const schema = z.object({
   ASAAS_BASE_URL: z.string().url().default('https://api.asaas.com/v3'),
   /** token cadastrado no webhook do Asaas; chega no header `asaas-access-token` */
   ASAAS_WEBHOOK_TOKEN: z.string().optional().default(''),
+  /**
+   * Migração automática para a cobrança recorrente por Pix: o job diário põe no Asaas quem paga
+   * hoje sem gateway (cobrança manual) e já tem CPF/CNPJ. Desligado: só pelo botão do dono
+   * (com prévia) ou quando o próprio cliente informa o CPF/CNPJ no painel (docs/05#migração-para-o-asaas).
+   */
+  ASAAS_AUTO_ENROLL: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   RESEND_API_KEY: z.string().optional().default(''),
   /** Brevo (ex-Sendinblue): se preenchida, tem prioridade sobre o Resend */
   BREVO_API_KEY: z.string().optional().default(''),

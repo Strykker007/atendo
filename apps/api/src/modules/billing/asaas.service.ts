@@ -3,7 +3,7 @@ import type { InvoiceStatus, Plan, SubscriptionStatus } from '@prisma/client';
 import { isStripeBillable } from '@atendo/shared';
 import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { MailService } from '../../common/mail/mail.service';
+import { MailService, senderName } from '../../common/mail/mail.service';
 import { UsageService, periodOf } from './usage.service';
 import { nextPeriodEnd, type ConsolidatedItem } from './dues';
 import { cycleValue, overridePrice } from './plan-override';
@@ -153,7 +153,9 @@ export class AsaasService {
       postalCode: onlyDigits(data.postalCode),
       addressNumber: data.addressNumber,
       externalReference: tenantId,
-      notificationDisabled: false,
+      // quem avisa é o painel + o nosso e-mail com o Pix (docs/05#lembretes-da-mensalidade): o
+      // Asaas mandando também duplicaria a cobrança (e SMS/WhatsApp dele custam por envio)
+      notificationDisabled: true,
     };
     if (tenant.asaasCustomerId) {
       await this.request('PUT', `/customers/${tenant.asaasCustomerId}`, body);
@@ -184,9 +186,9 @@ export class AsaasService {
     });
   }
 
-  /** Assinatura recorrente. Primeiro vencimento hoje: o cliente paga para começar. */
-  async createSubscription(dto: { customer: string; billingType: AsaasBillingType; value: number; cycle: 'MONTHLY' | 'YEARLY'; description: string; externalReference: string; creditCardToken?: string; remoteIp?: string }) {
-    return this.request<AsaasSubscription>('POST', '/subscriptions', { ...dto, nextDueDate: ymd() });
+  /** Assinatura recorrente. Primeiro vencimento hoje (o cliente paga para começar) ou `nextDueDate` (migração: mantém o vencimento que ele já tinha). */
+  async createSubscription(dto: { customer: string; billingType: AsaasBillingType; value: number; cycle: 'MONTHLY' | 'YEARLY'; description: string; externalReference: string; creditCardToken?: string; remoteIp?: string; nextDueDate?: string }) {
+    return this.request<AsaasSubscription>('POST', '/subscriptions', { ...dto, nextDueDate: dto.nextDueDate ?? ymd() });
   }
 
   async getPixQrCode(paymentId: string) {
@@ -248,7 +250,7 @@ export class AsaasService {
 
     const customer = await this.createOrUpdateCustomer(tenantId, input.customer);
     const token = input.billingType === 'CREDIT_CARD' ? (await this.tokenizeCreditCard({ customer, card: input.card!, holder: input.holder!, remoteIp: input.remoteIp })).creditCardToken : undefined;
-    const description = `Atendo ${plan.name}`;
+    const description = `${senderName()} ${plan.name}`;
 
     let subscriptionId: string;
     if (sub?.gateway === 'asaas' && sub.externalId && LIVE.includes(sub.status)) {
@@ -445,7 +447,7 @@ export class AsaasService {
     if (!to.length) return;
     this.mail.send({
       to,
-      subject: 'Sua mensalidade do Atendo venceu',
+      subject: `Sua mensalidade ${senderName()} venceu`,
       text: `A cobrança de ${brl(p.value)} com vencimento em ${fromYmd(p.dueDate).toLocaleDateString('pt-BR')} não foi paga.
 
 Pague até ${graceUntil.toLocaleDateString('pt-BR')} para não ter o envio de mensagens suspenso. PIX e cartão em:

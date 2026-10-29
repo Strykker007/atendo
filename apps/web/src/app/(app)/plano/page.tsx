@@ -50,6 +50,11 @@ function PlanoInner() {
   // com empresas, trocar de plano pede confirmação dizendo para quais empresas vale
   const [confirmar, setConfirmar] = useState<Plan | null>(null);
   const companies = useCompanies();
+  // "Pagar com Pix" do aviso do topo / do e-mail: abre direto o QR da mensalidade em aberto
+  const [pagarAberto, setPagarAberto] = useState(false);
+  useEffect(() => {
+    if (params.get('pagar') && openPayment && !pagarAberto) { setPagarAberto(true); setAsaasPay(openPayment); }
+  }, [params, openPayment, pagarAberto]);
   useEffect(() => {
     if (params.get('success')) { toast.ok('Assinatura confirmada! Obrigado.'); refetch(); }
     if (params.get('changed')) { toast.ok('Plano alterado. A diferença é ajustada na próxima fatura.'); refetch(); }

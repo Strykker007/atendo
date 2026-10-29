@@ -257,6 +257,34 @@ Código: `apps/api/src/modules/billing/asaas.service.ts` (+ `asaas.controller.ts
 1. `ASAAS_API_KEY` (sandbox: crie conta em sandbox.asaas.com e use `ASAAS_BASE_URL=https://api-sandbox.asaas.com/v3`; produção: `https://api.asaas.com/v3`, o padrão).
 2. Webhook no painel do Asaas → `https://<api>/webhooks/asaas`, com um token de autenticação qualquer, copiado para `ASAAS_WEBHOOK_TOKEN`. Eventos de cobrança (`PAYMENT_*`) e de assinatura (`SUBSCRIPTION_DELETED`/`INACTIVATED`).
 3. Cartão: a tokenização (`/creditCard/tokenizeCreditCard`) precisa estar habilitada na conta do Asaas — em produção é pedida ao gerente da conta. No sandbox já vem ligada.
+4. `ASAAS_AUTO_ENROLL=true` (opcional, padrão `false`): o job diário migra sozinho para o Asaas quem paga sem gateway e já tem CPF/CNPJ ([Migração](#migração-para-o-asaas)). Ligue depois da primeira migração conferida pela prévia.
+
+Os clientes no Asaas são criados com `notificationDisabled: true`: quem avisa da cobrança é o painel e o **nosso** e-mail (Brevo), com o Pix ([Lembretes](#lembretes-da-mensalidade)) — o Asaas mandando também duplicaria a cobrança, e SMS/WhatsApp dele custam por envio.
+
+### Migração para o Asaas
+
+<a id="migração-para-o-asaas"></a>Quem paga hoje **sem gateway** (cobrança manual) passa para uma assinatura recorrente por **Pix** no Asaas, **sem ação do cliente**, mantendo o **valor contratado** (`subscriptions.priceMonth`, senão o do plano, × unidades) e o **vencimento** que já tinha (`currentPeriodEnd`; se já passou, hoje). Código: `billing/monthly-billing.service.ts` (+ regras puras em `monthly-billing.ts`).
+
+- **Quem entra** (`enrollSkip`): sem gateway, plano pago mensal/anual, assinatura `active`/`trialing`/`past_due` e `tenants.document` com **CPF/CNPJ válido** (dígitos verificadores, `isValidCpfCnpj` no shared). Fica de fora: gratuito/personalizado, sem valor, suspenso/cancelado, e **sem documento** — esse vê no topo do painel *"Ative o pagamento automático… falta só o CPF ou CNPJ"*; ao salvar (`POST /billing/monthly/document`), é migrado na hora.
+- **Como rodar**: Financeiro → **Cobrança por Pix** (`PixMigration`, só o dono do sistema): **Ver prévia** (`POST /billing/monthly/enroll {dryRun:true}` — quem entra, valor, 1º vencimento, quem fica de fora e por quê) e **Migrar N cliente(s)**. Depois, `ASAAS_AUTO_ENROLL=true` mantém a migração diária de quem completar o cadastro.
+- **Por cliente**: cria/atualiza o Customer (razão social ou nome, CPF/CNPJ, `billingEmail`, telefone, CEP) e a assinatura `PIX` com `nextDueDate` = vencimento atual. Só grava `gateway = 'asaas'` se ainda estava sem gateway (`updateMany`); se outra rodada ganhou, a assinatura duplicada é cancelada no Asaas. O lembrete sai logo em seguida se o vencimento estiver a até 5 dias.
+- **Depois de migrado vale o fluxo do Asaas**: pagou → `active` e o vencimento anda (webhook); venceu sem pagar → `past_due` com a carência do plano (`graceDays`, padrão 5) e **suspensão do envio** quando ela acaba — na cobrança manual nada suspendia sozinho. A 1ª cobrança não cobra excedente; a partir da 2ª, excedente do mês anterior vira cobrança avulsa (`addOverage`).
+
+### Lembretes da mensalidade
+
+<a id="lembretes-da-mensalidade"></a>Job `monthly-reminders` da fila de cobrança, todo dia às **12:00 UTC (9h em Brasília)**. Para cada assinatura no Asaas, busca a cobrança em aberto **no Asaas** (não depende do webhook ter chegado), espelha em `invoices` e decide (`reminderKind`):
+
+| Quando | Lembrete | Marca |
+|---|---|---|
+| de 5 dias antes até a véspera (uma vez — quem migrou a 3 dias do vencimento recebe já) | "vence em dd/mm" | `invoices.remindedSoonAt` |
+| no dia do vencimento | "vence hoje" | `invoices.remindedDueAt` |
+| vencida | o aviso de atraso que já existia (`onOverdue`) | — |
+
+A marca é reservada **antes** do envio (`updateMany` onde ainda é nula): duas instâncias do job não mandam o mesmo e-mail; se o provedor falhar, a marca volta e o próximo job tenta de novo. Cartão não recebe lembrete (debita sozinho).
+
+**E-mail** (`reminderMail`, pelo `MailService` — Brevo): para o `billingEmail` e os admins do cliente; assunto *"Sua mensalidade {marca} de R$ X vence em dd/mm"*; valor, vencimento, **QR Code** (imagem servida por `GET /billing/pix/:paymentId/qr.png?s=…` — URL assinada por cobrança com HMAC da `ENCRYPTION_KEY`; o Gmail bloqueia imagem em base64), **Pix copia e cola**, botão *Pagar pelo painel* (`/plano?pagar=1`, que abre direto o QR) e o link da cobrança no Asaas. A marca é o nome do remetente do `MAIL_FROM`.
+
+**Aviso no painel** (`GET /billing/usage` → `billingNotice`, só para quem tem `billing.manage`; lido das faturas espelhadas, sem ir ao Asaas): `needs_document` (pede o CPF/CNPJ) ou `payment_due` (*"Sua mensalidade de R$ X vence em dd/mm"* + **Pagar com Pix**, a partir de 5 dias antes). Vencida, fica o aviso de pagamento pendente que já existia.
 
 ### Fluxo
 
