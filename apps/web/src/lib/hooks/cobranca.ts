@@ -175,3 +175,27 @@ export const useSetPixSettings = () => {
     onSuccess: (r) => { qc.setQueryData(['pix-settings'], r); qc.invalidateQueries({ queryKey: ['usage'] }); },
   });
 };
+
+// ---- Cobrança de ativação (docs/05-planos-e-cobranca.md#cobrança-de-ativação) ----
+export type ActivationItemKind = 'setup' | 'first_month' | 'other';
+export interface ActivationItem { description: string; value: number; kind: ActivationItemKind }
+export interface ActivationCharge {
+  id: string; items: ActivationItem[]; discount: number; totalValue: number; dueDate: string;
+  status: 'pending' | 'paid' | 'canceled'; invoiceUrl: string | null; paidAt: string | null; paidVia: 'asaas' | 'manual' | null; canceledAt: string | null; createdAt: string;
+}
+export interface ActivationInfo { asaasConfigured: boolean; tenantName: string; document: string | null; planName: string; firstMonthValue: number; awaitingActivation: boolean; charges: ActivationCharge[] }
+export const useActivation = (tenantId: string | null) =>
+  useQuery({ queryKey: ['activation', tenantId], enabled: !!tenantId, queryFn: () => api<ActivationInfo>(`/billing/activation/${tenantId}`) });
+const ativacaoMudou = (qc: ReturnType<typeof useQueryClient>, tenantId: string) => (d: ActivationInfo) => {
+  qc.setQueryData(['activation', tenantId], d);
+  qc.invalidateQueries({ queryKey: ['tenants'] });
+  qc.invalidateQueries({ queryKey: ['finance'] });
+};
+export const useCreateActivation = (tenantId: string) => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (b: { items: ActivationItem[]; discount?: number; dueDate?: string; document?: string }) => api<ActivationInfo>(`/billing/activation/${tenantId}`, { method: 'POST', body: JSON.stringify(b) }), onSuccess: ativacaoMudou(qc, tenantId) });
+};
+export const useActivationAction = (tenantId: string) => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'paid' }) => api<ActivationInfo>(`/billing/activation/${tenantId}/${id}/${action}`, { method: 'POST' }), onSuccess: ativacaoMudou(qc, tenantId) });
+};

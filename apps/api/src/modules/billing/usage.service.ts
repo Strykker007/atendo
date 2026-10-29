@@ -6,7 +6,7 @@ import { RedisService } from '../../common/redis/redis.service';
 import { PricingService } from './pricing.service';
 import { MailService } from '../../common/mail/mail.service';
 import { env } from '../../config/env';
-import { decideCanSend, unitOf, type QuotaDecision, type QuotaKind } from './quota';
+import { AWAITING_ACTIVATION, decideCanSend, unitOf, type QuotaDecision, type QuotaKind } from './quota';
 import { effectiveLimits } from './plan-override';
 import { ownerLimits } from './owner-limits';
 import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
@@ -129,7 +129,8 @@ export class UsageService {
     const plan = sub ? effectiveLimits(sub.plan.limits as unknown as PlanLimits, sub.tenant.planOverride, sub.planId) : null;
     if (owner) return { limits: ownerLimits(plan), status: 'active' };
     if (!sub || !plan) return null;
-    return { limits: plan, status: sub.status };
+    // cobrança de ativação em aberto: configura tudo, não envia (quota.ts)
+    return { limits: plan, status: sub.awaitingActivation ? AWAITING_ACTIVATION : sub.status };
   }
 
   /** Quanto o tenant já usa de um limite de quantidade (o que conta para `CountLimit`). */

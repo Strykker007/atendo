@@ -74,6 +74,7 @@ model Tenant {
   usage         MessageUsage[]
   usageCounters UsageCounter[]
   invoices      Invoice[]
+  activationCharges ActivationCharge[]
   alerts        UsageAlert[]
   aiUsage       AiUsage[]
   settings      TenantSettings?
@@ -1801,6 +1802,9 @@ model Subscription {
   cancelAtPeriodEnd  Boolean   @default(false)
   graceUntil         DateTime?
   canceledAt         DateTime?
+  /// cobrança de ativação (instalação + 1ª mensalidade) em aberto: configura tudo, mas não envia
+  /// até pagar (docs/05-planos-e-cobranca.md#cobrança-de-ativação)
+  awaitingActivation Boolean   @default(false)
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -1808,6 +1812,38 @@ model Subscription {
   plan   Plan   @relation(fields: [planId], references: [id])
 
   @@map("subscriptions")
+}
+
+/// Cobrança de ativação de um cliente novo (docs/05-planos-e-cobranca.md#cobrança-de-ativação):
+/// instalação, 1ª mensalidade e o que mais o dono lançar, num Pix avulso no Asaas da plataforma.
+/// Paga → conta ativa e a mensalidade recorrente por Pix nasce no Asaas.
+model ActivationCharge {
+  id          String    @id @default(uuid())
+  tenantId    String
+  /// `{ description, value }[]` — congelado na emissão
+  items       Json
+  discount    Decimal   @default(0) @db.Decimal(12, 2)
+  totalValue  Decimal   @db.Decimal(12, 2)
+  /// quanto dos itens é a 1ª mensalidade (a recorrente começa um ciclo depois do pagamento)
+  firstMonthValue Decimal @default(0) @db.Decimal(12, 2)
+  dueDate     DateTime
+  /// pending | paid | canceled
+  status      String    @default("pending")
+  /// cobrança no Asaas (`pay_…`); o webhook acha a ativação por ela
+  externalId  String?   @unique
+  invoiceUrl  String?
+  paidAt      DateTime?
+  /// asaas (webhook/consulta) | manual (dono marcou: pagou por fora)
+  paidVia     String?
+  canceledAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("activation_charges")
 }
 
 /// Personalização do plano para UM cliente (docs/05-planos-e-cobranca.md#personalização-por-cliente):

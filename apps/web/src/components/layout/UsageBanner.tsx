@@ -21,7 +21,8 @@ export function UsageBanner() {
   return (
     <>
       <MensalidadeBanner notice={u.billingNotice ?? null} atrasada={u.status === 'past_due' || u.status === 'suspended'} />
-      <UsoBanner u={u} />
+      {/* o aviso da ativação já diz que o envio está bloqueado */}
+      {u.billingNotice?.kind !== 'activation_due' && <UsoBanner u={u} />}
     </>
   );
 }
@@ -43,6 +44,17 @@ const mascara = (v: string) => {
 function MensalidadeBanner({ notice, atrasada }: { notice: Usage['billingNotice'] | null; atrasada: boolean }) {
   const [aberto, setAberto] = useState(false);
   if (!notice || (notice.kind === 'payment_due' && atrasada)) return null;
+  if (notice.kind === 'activation_due') {
+    return (
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2 text-[13px] bg-accent text-white">
+        <QrCode size={16} className="shrink-0" />
+        <span className="flex-1 min-w-[200px]">
+          <b>Ative sua conta:</b> pague {brl(notice.value)} ({notice.items.map((i) => i.description).join(' + ')}) por Pix. Você já pode configurar tudo; o envio de mensagens é liberado assim que o pagamento cair.
+        </span>
+        <Link href="/plano?pagar=1" className="rounded-lg bg-white/15 hover:bg-white/25 px-2.5 py-1 font-medium whitespace-nowrap">Pagar com Pix</Link>
+      </div>
+    );
+  }
   if (notice.kind === 'needs_document') {
     return (
       <>
@@ -102,7 +114,8 @@ function UsoBanner({ u }: { u: Usage }) {
 
   const what = q.metric ? NOME[q.metric] : NOME[q.unit];
   const text =
-    u.status === 'suspended' ? 'Assinatura suspensa — envio bloqueado.'
+    q.blocked && q.reason?.startsWith('Conta aguardando ativação') ? 'Conta aguardando ativação — o envio de mensagens é liberado quando o administrador pagar a ativação.'
+    : u.status === 'suspended' ? 'Assinatura suspensa — envio bloqueado.'
     : u.status === 'canceled' ? 'Assinatura cancelada — envio bloqueado.'
     : u.status === 'past_due' ? 'Pagamento pendente — regularize para evitar suspensão.'
     : q.blocked ? `Limite de ${NOME[q.unit]} do plano ${u.plan} atingido — envio bloqueado até o próximo mês.`

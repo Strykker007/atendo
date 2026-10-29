@@ -220,3 +220,5 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 **contacts.optOutAt / waInvalidAt** — descadastro de todo envio automático e telefone que a checagem disse não ter WhatsApp ([Envio](envio.md#descadastro)). **whatsapp_numbers.sessionStartedAt** — QR lido, base do aquecimento de 72 h; `waRemovedAt`/`waRemovedCount`/`reconnectBlockedUntil` — queda forçada pelo WhatsApp. Migrações `20261029000600_number_wa_removed` e `20261029000700_warmup_optout`.
 
 **system_notices** — avisos globais do dono (`SystemNotice`): `title`, `message`, `type` (`INFO`/`WARNING`/`CRITICAL`), `active`, `createdAt`. Sem `tenantId` — vale para todos os clientes. Ver [avisos.md](avisos.md).
+
+**activation_charges** — cobrança de ativação do cliente novo (instalação + 1ª mensalidade + itens livres) num Pix avulso do Asaas; enquanto `pending`, `subscriptions.awaitingActivation` bloqueia o envio. Ver [05 — Cobrança de ativação](05-planos-e-cobranca.md#cobrança-de-ativação).
