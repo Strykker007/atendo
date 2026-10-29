@@ -3,6 +3,12 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.10.2 — 2026-10-29
+
+- feat(cobranca): "Migrar só este" na prévia da cobrança por Pix (um cliente por vez)
+- docs(retomada): webhook do Asaas configurado e testado
+- docs(retomada): v1.10.1 no ar com a cobrança por Pix escondida dos clientes
+
 ## 1.10.1 — 2026-10-29
 
 - feat(cobranca): botão do dono para liberar/esconder dos clientes a cobrança por Pix (Asaas)
