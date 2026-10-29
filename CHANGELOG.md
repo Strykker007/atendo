@@ -3,6 +3,15 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.11.0 — 2026-10-29
+
+- feat(conversas): filtro de ticket com Todos, Gera ticket e Não gera ticket
+- feat(financeiro): fechamento do mês com contas a pagar, impostos e parte dos sócios
+- fix(web): máscara em CPF/CNPJ, telefone, CEP e cartão nos formulários
+- feat(cobranca): cobrança de ativação (instalação + 1ª mensalidade) por Pix
+- feat(orcamentos): orçamento numerado com aprovação antes do link de pagamento
+- feat(envio): contatos novos por dia ajustável por número (QR), pelo dono do sistema
+
 ## 1.10.2 — 2026-10-29
 
 - feat(cobranca): "Migrar só este" na prévia da cobrança por Pix (um cliente por vez)
