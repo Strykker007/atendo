@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Copy, CreditCard, ExternalLink, QrCode } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatCardExpiry, formatCardNumber, formatCep, formatDoc, formatPhoneBR } from '@/lib/utils';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
@@ -39,7 +39,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
   // preenche com o que já está no Asaas: renovar não pode exigir redigitar CPF
   useEffect(() => {
     const c = customer.data;
-    if (c?.cpfCnpj) setDoc((d) => d || c.cpfCnpj);
+    if (c?.cpfCnpj) setDoc((d) => d || formatDoc(c.cpfCnpj));
     setHolder((h) => ({
       email: h.email || c?.email || me.data?.email || '',
       postalCode: h.postalCode || c?.postalCode || '',
@@ -104,7 +104,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
           </div>
 
           <Field label="CPF ou CNPJ de quem paga" hint="Exigido para emitir a cobrança.">
-            <input className={inputCls} value={doc} onChange={(e) => setDoc(e.target.value)} inputMode="numeric" required placeholder="000.000.000-00" />
+            <input className={inputCls} value={doc} onChange={(e) => setDoc(formatDoc(e.target.value))} inputMode="numeric" maxLength={18} required placeholder="000.000.000-00" />
           </Field>
 
           {method === 'CREDIT_CARD' && (
@@ -113,11 +113,11 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
                 <input className={inputCls} value={card.holderName} onChange={(e) => setCard({ ...card, holderName: e.target.value })} required autoComplete="cc-name" />
               </Field>
               <Field label="Número do cartão">
-                <input className={inputCls} value={card.number} onChange={(e) => setCard({ ...card, number: e.target.value })} required inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" />
+                <input className={inputCls} value={card.number} onChange={(e) => setCard({ ...card, number: formatCardNumber(e.target.value) })} required inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" />
               </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Validade">
-                  <input className={inputCls} value={card.expiry} onChange={(e) => setCard({ ...card, expiry: e.target.value })} required autoComplete="cc-exp" placeholder="MM/AAAA" />
+                  <input className={inputCls} value={card.expiry} onChange={(e) => setCard({ ...card, expiry: formatCardExpiry(e.target.value) })} inputMode="numeric" required autoComplete="cc-exp" placeholder="MM/AAAA" />
                 </Field>
                 <Field label="CVV">
                   <input className={inputCls} value={card.ccv} onChange={(e) => setCard({ ...card, ccv: e.target.value })} required inputMode="numeric" autoComplete="cc-csc" maxLength={4} />
@@ -128,13 +128,13 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
               </Field>
               <div className="grid grid-cols-3 gap-3">
                 <Field label="CEP">
-                  <input className={inputCls} value={holder.postalCode} onChange={(e) => setHolder({ ...holder, postalCode: e.target.value })} required inputMode="numeric" autoComplete="postal-code" />
+                  <input className={inputCls} value={holder.postalCode} onChange={(e) => setHolder({ ...holder, postalCode: formatCep(e.target.value) })} placeholder="00000-000" required inputMode="numeric" autoComplete="postal-code" />
                 </Field>
                 <Field label="Número">
                   <input className={inputCls} value={holder.addressNumber} onChange={(e) => setHolder({ ...holder, addressNumber: e.target.value })} required />
                 </Field>
                 <Field label="Telefone">
-                  <input className={inputCls} value={holder.phone} onChange={(e) => setHolder({ ...holder, phone: e.target.value })} required inputMode="tel" autoComplete="tel" />
+                  <input className={inputCls} value={holder.phone} onChange={(e) => setHolder({ ...holder, phone: formatPhoneBR(e.target.value) })} placeholder="(11) 99999-9999" required inputMode="tel" autoComplete="tel" />
                 </Field>
               </div>
               <p className="text-xs text-faint">A cobrança se renova sozinha no cartão a cada ciclo. Os dados do cartão vão direto para o Asaas e não ficam salvos no {brandName}.</p>

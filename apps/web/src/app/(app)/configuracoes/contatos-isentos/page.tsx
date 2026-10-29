@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { inputCls } from '@/components/ui/Modal';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import { useAddIgnoredContact, useCan, useIgnoredContacts, useRemoveIgnoredContact, useStartCandidates } from '@/lib/hooks';
 
 /** "5511999998888" → "+55 11 99999-8888". Fora do padrão BR devolve só com o "+". */
@@ -57,7 +58,7 @@ export default function ContatosIsentosPage() {
         <section className="rounded-2xl border border-line bg-panel p-4 space-y-3">
           <h2 className="font-display font-semibold text-ink text-sm">Adicionar</h2>
           <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (phone.trim()) void adicionar({ phone, label: label || undefined }); }}>
-            <input className={cn(inputCls, 'flex-1 min-w-40')} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone com DDI (5511999998888)" aria-label="Telefone" inputMode="tel" />
+            <PhoneInput className="flex-1 min-w-40" value={phone} onChange={setPhone} />
             <input className={cn(inputCls, 'flex-1 min-w-40')} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Apelido (opcional)" aria-label="Apelido" maxLength={80} />
             <Button type="submit" loading={add.isPending} disabled={!phone.trim()}><Plus size={14} /> Adicionar</Button>
           </form>

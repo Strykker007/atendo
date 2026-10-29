@@ -7,7 +7,7 @@ import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDial
 import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
 import { PlanOverrideDialog } from '@/components/billing/PlanOverrideDialog';
 import { ActivationDialog } from '@/components/billing/ActivationDialog';
-import { cn } from '@/lib/utils';
+import { cn, formatDoc, formatPhoneBR, formatCep } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -515,7 +515,7 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
     phone: tenant.phone ?? '', zipCode: tenant.zipCode ?? '', street: tenant.street ?? '', addressNumber: tenant.addressNumber ?? '', complement: tenant.complement ?? '',
     district: tenant.district ?? '', city: tenant.city ?? '', state: tenant.state ?? '', notes: tenant.notes ?? '',
   }));
-  const campo = (k: keyof TenantProfile) => ({ value: perfil[k], onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setPerfil({ ...perfil, [k]: e.target.value }) });
+  const campo = (k: keyof TenantProfile, mascara?: (v: string) => string) => ({ value: mascara ? mascara(perfil[k] ?? '') : perfil[k], onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setPerfil({ ...perfil, [k]: mascara ? mascara(e.target.value) : e.target.value }) });
   // com gateway, a data vem do Stripe/Asaas e o webhook sobrescreveria a edição
   const gateway = tenant.subscription?.gateway;
   return (
@@ -575,11 +575,11 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
         <div className="text-xs font-semibold uppercase tracking-wider text-muted pt-1">Dados cadastrais</div>
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Razão social"><input className={inputCls} {...campo('legalName')} maxLength={150} /></Field>
-          <Field label="CPF / CNPJ"><input className={inputCls} {...campo('document')} maxLength={20} inputMode="numeric" placeholder="00.000.000/0000-00" /></Field>
+          <Field label="CPF / CNPJ"><input className={inputCls} {...campo('document', formatDoc)} maxLength={18} inputMode="numeric" placeholder="00.000.000/0000-00" /></Field>
           <Field label="Responsável" hint="Quem responde pela conta."><input className={inputCls} {...campo('contactName')} maxLength={80} /></Field>
-          <Field label="Telefone"><input className={inputCls} {...campo('phone')} maxLength={20} inputMode="tel" placeholder="(11) 99999-9999" /></Field>
+          <Field label="Telefone"><input className={inputCls} {...campo('phone', formatPhoneBR)} maxLength={15} inputMode="tel" placeholder="(11) 99999-9999" /></Field>
           <Field label="E-mail financeiro" hint="Para cobrança e avisos. Não é o login."><input type="email" className={inputCls} {...campo('billingEmail')} maxLength={120} /></Field>
-          <Field label="CEP"><input className={inputCls} {...campo('zipCode')} maxLength={10} inputMode="numeric" placeholder="00000-000" /></Field>
+          <Field label="CEP"><input className={inputCls} {...campo('zipCode', formatCep)} maxLength={9} inputMode="numeric" placeholder="00000-000" /></Field>
         </div>
         <div className="grid sm:grid-cols-[1fr_7rem] gap-3">
           <Field label="Endereço"><input className={inputCls} {...campo('street')} maxLength={150} placeholder="Rua, avenida…" /></Field>

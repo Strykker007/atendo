@@ -7,6 +7,7 @@ import { useSetBillingDocument, useUsage, type Usage } from '@/lib/hooks';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
+import { formatDoc } from '@/lib/utils';
 
 const NOME = { messages: 'mensagens', conversations: 'conversas', templates: 'templates' } as const;
 
@@ -29,12 +30,6 @@ export function UsageBanner() {
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
-const mascara = (v: string) => {
-  const d = v.replace(/\D/g, '').slice(0, 14);
-  return d.length <= 11
-    ? d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2')
-    : d.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
-};
 
 /**
  * Mensalidade por Pix (docs/05#lembretes-da-mensalidade), só para quem paga: pede o CPF/CNPJ
@@ -94,7 +89,7 @@ function DocumentoModal({ onClose }: { onClose: () => void }) {
       <form onSubmit={enviar} className="space-y-4">
         <p className="text-sm text-muted">A mensalidade passa a ser cobrada por Pix: antes de cada vencimento você recebe por e-mail (e vê aqui no painel) o valor, o QR Code e o código para copiar. O valor e a data de vencimento continuam os mesmos.</p>
         <Field label="CPF ou CNPJ da empresa" hint={doc && !valido ? 'Confira os números: CPF tem 11 dígitos e CNPJ, 14.' : undefined}>
-          <input className={inputCls} value={doc} onChange={(e) => setDoc(mascara(e.target.value))} inputMode="numeric" placeholder="00.000.000/0000-00" autoFocus required />
+          <input className={inputCls} value={doc} onChange={(e) => setDoc(formatDoc(e.target.value))} inputMode="numeric" placeholder="00.000.000/0000-00" autoFocus required />
         </Field>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Depois</Button>

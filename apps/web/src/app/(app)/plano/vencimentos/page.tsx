@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowLeft, CalendarClock, CornerDownRight, QrCode, Wallet } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatDoc } from '@/lib/utils';
 import { ApiError } from '@/lib/api';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { SkeletonCards } from '@/components/ui/Skeleton';
@@ -199,7 +199,7 @@ export default function VencimentosPage() {
             </ul>
             {pedirDoc && (
               <Field label="CPF ou CNPJ de quem paga" hint="Exigido pelo Asaas para emitir a cobrança. Fica salvo para as próximas.">
-                <input className={inputCls} value={doc} onChange={(e) => setDoc(e.target.value)} inputMode="numeric" placeholder="00.000.000/0000-00" required autoFocus />
+                <input className={inputCls} value={doc} onChange={(e) => setDoc(formatDoc(e.target.value))} inputMode="numeric" maxLength={18} placeholder="00.000.000/0000-00" required autoFocus />
               </Field>
             )}
             <div className="flex justify-end gap-2 pt-1">
