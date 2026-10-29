@@ -261,6 +261,21 @@ Código: `apps/api/src/modules/billing/asaas.service.ts` (+ `asaas.controller.ts
 
 Os clientes no Asaas são criados com `notificationDisabled: true`: quem avisa da cobrança é o painel e o **nosso** e-mail (Brevo), com o Pix ([Lembretes](#lembretes-da-mensalidade)) — o Asaas mandando também duplicaria a cobrança, e SMS/WhatsApp dele custam por envio.
 
+### Liberar para os clientes
+
+<a id="liberar-para-os-clientes"></a>Ter a `ASAAS_API_KEY` no servidor **não** mostra nada aos clientes. O que o cliente vê depende do botão do dono em **Financeiro → Cobrança por Pix → Liberar para os clientes** (`platform_settings.asaasClientBilling`, padrão desligado; `GET`/`PUT /billing/monthly/settings`, só `super_admin`; cache de 30 s por instância):
+
+| | Escondida (padrão) | Liberada |
+|---|---|---|
+| Aviso "informe o CPF/CNPJ" no topo | não aparece | aparece para quem paga sem gateway e não tem documento |
+| `POST /billing/monthly/document` | 400 | grava e migra na hora |
+| "Assinar"/"Mudar para este" em `/plano` (`gateway` dos checkouts novos) | Stripe, se houver chave; senão "fale com o suporte". `POST /billing/asaas/checkout` = 400, exceto para quem já assina pelo Asaas | Asaas |
+| Migração diária automática (`ASAAS_AUTO_ENROLL`) | não roda | roda |
+| Migração pelo botão do dono (prévia → migrar) | funciona | funciona |
+| Quem já foi migrado: mensalidade, lembretes, aviso "vence em…", "Pagar" | continua | continua |
+
+Liberar **só depois do webhook configurado** no painel do Asaas.
+
 ### Migração para o Asaas
 
 <a id="migração-para-o-asaas"></a>Quem paga hoje **sem gateway** (cobrança manual) passa para uma assinatura recorrente por **Pix** no Asaas, **sem ação do cliente**, mantendo o **valor contratado** (`subscriptions.priceMonth`, senão o do plano, × unidades) e o **vencimento** que já tinha (`currentPeriodEnd`; se já passou, hoje). Código: `billing/monthly-billing.service.ts` (+ regras puras em `monthly-billing.ts`).

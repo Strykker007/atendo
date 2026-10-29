@@ -60,5 +60,6 @@
 | [32 — Checklist de segurança](32-checklist-seguranca.md) | Dev / Ops | 20 itens auditados (código + produção), prioridades e o que falta |
 | [33 — Operação segura em produção](33-operacao-segura-producao.md) | Dev / Ops | Leitura só com `atendo_ro`, escrita só pelo `write.sh` (simulação, contagem esperada, registro) |
 | [34 — Condomínios e operações sem venda](34-condominios.md) | Produto / Dev | Análise do produto para operação sem venda (condomínio) e plano por fases: unidades, chamados com protocolo, comunicados, relatórios do síndico |
+| [35 — Retomada do deploy v1.10.0](35-retomada-deploy-v1.10.md) | Ops | Onde paramos em 29/10 e o passo a passo para terminar o deploy, o webhook do Asaas e a migração da mensalidade por Pix |
 
 Convenção: código em inglês, comentários e documentação em português.

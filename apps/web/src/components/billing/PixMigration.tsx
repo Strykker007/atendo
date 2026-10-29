@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { usePixEnroll, type PixEnrollRow } from '@/lib/hooks';
+import { usePixEnroll, usePixSettings, useSetPixSettings, type PixEnrollRow } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
@@ -27,6 +27,10 @@ const RESULTADO: Record<PixEnrollRow['result'], { label: string; cls: string }> 
  */
 export function PixMigration() {
   const enroll = usePixEnroll();
+  const settings = usePixSettings();
+  const setSettings = useSetPixSettings();
+  const cfg = settings.data;
+  const [confirmarLiberar, setConfirmarLiberar] = useState<boolean | null>(null);
   const [linhas, setLinhas] = useState<PixEnrollRow[] | null>(null);
   const [previa, setPrevia] = useState(true);
   const [confirmar, setConfirmar] = useState(false);
@@ -60,6 +64,22 @@ export function PixMigration() {
         </div>
       </div>
 
+      {cfg && (
+        <div className={cn('rounded-xl border px-3 py-2.5 flex flex-wrap items-center gap-3', cfg.clientBilling ? 'border-ok/40 bg-ok/5' : 'border-line bg-field/50')}>
+          <div className="flex-1 min-w-[240px] text-[12.5px]">
+            <div className="font-medium text-ink text-sm">{cfg.clientBilling ? 'Liberada para os clientes' : 'Escondida dos clientes'}</div>
+            {!cfg.asaasConfigured
+              ? <p className="text-warn-ink">Sem chave do Asaas no servidor (ASAAS_API_KEY): nada funciona até configurar.</p>
+              : cfg.clientBilling
+                ? <p className="text-muted">Quem não tem CPF/CNPJ vê o aviso para informar e entra no Pix automático; o “Assinar” do plano cobra pelo Asaas{cfg.autoEnroll ? '; a migração diária automática está ligada' : ''}.</p>
+                : <p className="text-muted">Nenhum aviso de pagamento automático para os clientes e o “Assinar” não usa o Asaas. Quem você já migrou continua com a mensalidade e os lembretes.</p>}
+          </div>
+          <Button size="sm" variant={cfg.clientBilling ? 'ghost' : 'primary'} disabled={!cfg.asaasConfigured} loading={setSettings.isPending} onClick={() => setConfirmarLiberar(!cfg.clientBilling)}>
+            {cfg.clientBilling ? 'Esconder dos clientes' : 'Liberar para os clientes'}
+          </Button>
+        </div>
+      )}
+
       {linhas && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -79,6 +99,17 @@ export function PixMigration() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmarLiberar !== null}
+        onClose={() => setConfirmarLiberar(null)}
+        title={confirmarLiberar ? 'Liberar a cobrança por Pix' : 'Esconder a cobrança por Pix'}
+        confirmLabel={confirmarLiberar ? 'Liberar' : 'Esconder'}
+        text={confirmarLiberar
+          ? 'Os clientes sem CPF/CNPJ passam a ver o aviso para ativar o pagamento automático (ao informar, a assinatura é criada no Asaas) e o “Assinar” do plano cobra pelo Asaas. Confirme que o webhook já está configurado no painel do Asaas.'
+          : 'O aviso de pagamento automático some para os clientes e o “Assinar” deixa de usar o Asaas. Quem já foi migrado continua com a mensalidade, os lembretes e o “Pagar”.'}
+        onConfirm={() => setSettings.mutateAsync(!!confirmarLiberar).then(() => toast.ok(confirmarLiberar ? 'Cobrança por Pix liberada para os clientes' : 'Cobrança por Pix escondida dos clientes')).catch(toast.err)}
+      />
 
       <ConfirmDialog
         open={confirmar}

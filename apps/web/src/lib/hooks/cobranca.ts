@@ -164,3 +164,14 @@ export const usePixEnroll = () => {
     onSuccess: (_, dryRun) => { if (!dryRun) qc.invalidateQueries({ queryKey: ['finance'] }); },
   });
 };
+
+/** Cobrança por Pix liberada para os clientes (botão do dono). `asaasConfigured` = há chave do Asaas no servidor. */
+export interface PixSettings { asaasConfigured: boolean; clientBilling: boolean; autoEnroll: boolean }
+export const usePixSettings = () => useQuery({ queryKey: ['pix-settings'], queryFn: () => api<PixSettings>('/billing/monthly/settings') });
+export const useSetPixSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clientBilling: boolean) => api<PixSettings>('/billing/monthly/settings', { method: 'PUT', body: JSON.stringify({ clientBilling }) }),
+    onSuccess: (r) => { qc.setQueryData(['pix-settings'], r); qc.invalidateQueries({ queryKey: ['usage'] }); },
+  });
+};
