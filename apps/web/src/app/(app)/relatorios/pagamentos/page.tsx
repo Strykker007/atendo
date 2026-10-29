@@ -156,7 +156,10 @@ export default function PagamentosPage() {
                   <td className="px-4 py-2.5 whitespace-nowrap text-[12px]">{r.autoPix ? <span className="inline-flex items-center gap-1 text-ok"><Zap size={12} /> Pix automático</span> : <span className="text-muted">Por fora</span>}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-wrap gap-1">
-                      <span className={cn('text-[11px] rounded-full px-2 py-0.5 whitespace-nowrap', STATUS_CLS[r.status])}>{BUDGET_STATUS_LABEL[r.status]}</span>
+                      {r.awaitingApproval && r.status === 'PENDING'
+                        ? <span className="text-[11px] rounded-full px-2 py-0.5 whitespace-nowrap bg-accent-soft text-accent-ink" title="Orçamento enviado por texto; o cliente ainda não aprovou">Aguardando aprovação</span>
+                        : <span className={cn('text-[11px] rounded-full px-2 py-0.5 whitespace-nowrap', STATUS_CLS[r.status])}>{BUDGET_STATUS_LABEL[r.status]}</span>}
+                      {r.number && <span className="text-[11px] text-faint tnum whitespace-nowrap">Nº {r.number}</span>}
                       {r.paidAfterExpiry && <span className="text-[11px] rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink whitespace-nowrap" title="Pago depois do vencimento — confira se o pedido ainda vale">Após o vencimento</span>}
                       {r.absorbed && <span className="text-[11px] rounded-full px-2 py-0.5 bg-field text-muted whitespace-nowrap" title="Já entrou num encerramento como venda">No encerramento</span>}
                       {r.receipt && <span className="text-[11px] rounded-full px-2 py-0.5 bg-accent-soft text-accent-ink whitespace-nowrap">Comprovante</span>}

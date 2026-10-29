@@ -7,6 +7,12 @@ import { api } from '../api';
 export interface Budget {
   id: string;
   hash: string;
+  /** "Orçamento Nº 42"; null nos anteriores à numeração */
+  number: number | null;
+  /** enviado por texto, esperando o cliente aprovar — o link ainda não vale */
+  awaitingApproval: boolean;
+  quotedAt: string | null;
+  approvedAt: string | null;
   items: BudgetItem[];
   totalValue: number;
   status: BudgetStatus;
@@ -25,7 +31,7 @@ export interface Budget {
   user: { id: string; name: string };
   receipt: { url: string; mimeType: string; fileName: string; at: string } | null;
 }
-type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validity?: BudgetValidity; autoPix?: boolean; cpfCnpj?: string };
+type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validity?: BudgetValidity; autoPix?: boolean; cpfCnpj?: string; quote?: boolean };
 
 /** Link público do orçamento — no domínio aberto agora, para sair com a marca certa. */
 export const budgetLink = (hash: string) => `${typeof window === 'undefined' ? '' : window.location.origin}/o/${hash}`;
@@ -60,10 +66,20 @@ export const useRefundBudget = () => {
   });
 };
 
+/** Cliente aprovou o orçamento por texto: libera o link DESTE orçamento (e gera o Pix automático). */
+export const useApproveBudget = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, id }: { conversationId: string; id: string }) => api<Budget>(`/conversations/${conversationId}/budgets/${id}/approve`, { method: 'POST' }),
+    onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ['budgets', v.conversationId] }),
+  });
+};
+
+/** PAID/PENDING = pago por fora e desfazer; EXPIRED = descartar orçamento ainda sem aprovação. */
 export const useSetBudgetStatus = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ conversationId, id, status }: { conversationId: string; id: string; status: 'PENDING' | 'PAID' }) =>
+    mutationFn: ({ conversationId, id, status }: { conversationId: string; id: string; status: 'PENDING' | 'PAID' | 'EXPIRED' }) =>
       api<Budget>(`/conversations/${conversationId}/budgets/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
     onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ['budgets', v.conversationId] }),
   });

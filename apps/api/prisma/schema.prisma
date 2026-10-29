@@ -538,6 +538,9 @@ model TenantSettings {
   companyIsolation Boolean @default(false)
   /// assinatura do atendente (`*Nome:*` na 1ª linha) obrigatória: a API acrescenta quando falta
   requireSignature Boolean @default(false)
+  /// orçamento por mensagem (docs/orcamentos.md#itens-sensíveis): `link` (padrão) = itens nunca no
+  /// texto (só número, total e link); `protect` = itens sensíveis só no link; `always` = sempre no texto
+  budgetQuoteItems String @default("link")
   /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na
   /// conversão, não soma faturamento (sem linha em `sales`)
   requireSaleValue Boolean @default(true)
@@ -2410,6 +2413,16 @@ model Budget {
   /// Pix copia e cola e QR (PNG em base64) da cobrança
   pixPayload       String?
   pixQrImage       String?
+  /// número sequencial por empresa ("Orçamento Nº 42") — é o que o cliente cita ao aprovar.
+  /// Nulo nos orçamentos anteriores a ele (docs/orcamentos.md#orçamento-com-aprovação)
+  number           Int?
+  /// enviado como orçamento por texto, esperando a aprovação do cliente — sem link até `approvedAt`
+  quotedAt         DateTime?
+  /// cliente aprovou e o atendente enviou o link (aí a validade recomeça e o Pix automático é gerado)
+  approvedAt       DateTime?
+  approvedById     String?
+  /// validade escolhida (`BUDGET_VALIDITY`) — reaplicada na aprovação
+  validity         String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -2422,6 +2435,7 @@ model Budget {
   @@index([conversationId, status])
   @@index([tenantId, status])
   @@index([autoPix, status, expiresAt])
+  @@unique([tenantId, number])
   @@map("budgets")
 }
 

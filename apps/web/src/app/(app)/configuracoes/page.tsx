@@ -16,6 +16,7 @@ import { CompaniesSection } from '@/components/settings/CompaniesSection';
 import { GlobalVariablesSection } from '@/components/settings/GlobalVariablesSection';
 import { ClosingSection } from '@/components/settings/ClosingSection';
 import { SignatureSection } from '@/components/settings/SignatureSection';
+import { BudgetQuoteSection } from '@/components/settings/BudgetQuoteSection';
 import { TransferSection } from '@/components/settings/TransferSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
@@ -112,6 +113,7 @@ export default function ConfiguracoesPage() {
             <LinkSection href="/escalas/horario-atendimento" icon={<CalendarClock size={20} />} title="Horários de atendimento" text="Agora em Escalas e plantões: quadros, faixas de horário e exceções (feriados)." action="Abrir horários" />
             <WelcomeSection />
             <SignatureSection />
+            <BudgetQuoteSection />
             <TransferSection />
             <ClosingSection />
             <LinkSection href="/configuracoes/contatos-isentos" icon={<BellOff size={20} />} title="Contatos isentos de ticket" text="Números que nunca abrem atendimento (diretoria, fornecedores): ficam na aba Livres e fora dos relatórios." action="Gerenciar lista" />

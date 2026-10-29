@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Body, Controller, Get, Headers, HttpCode, Injectable, Logger, Module, NotFoundException, OnModuleInit, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors,
+  BadRequestException, Body, ConflictException, Controller, Get, Headers, HttpCode, Injectable, Logger, Module, NotFoundException, OnModuleInit, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BullModule, InjectQueue, Processor } from '@nestjs/bullmq';
@@ -55,11 +55,13 @@ class CreateBudgetDto {
   @IsOptional() @IsBoolean() autoPix?: boolean;
   /** CPF/CNPJ de quem paga (o Asaas exige). Ausente = o da ficha do contato; informado = grava na ficha */
   @IsOptional() @IsString() @MaxLength(20) cpfCnpj?: string;
+  /** orçamento por texto: fica esperando a aprovação do cliente, sem link (e sem cobrança) até `approve` */
+  @IsOptional() @IsBoolean() quote?: boolean;
 }
 
 class UpdateBudgetDto {
-  /** atendente confirma o pagamento (ou desfaz, voltando a pendente) */
-  @IsIn(['PENDING', 'PAID']) status: 'PENDING' | 'PAID';
+  /** atendente confirma o pagamento (ou desfaz, voltando a pendente); EXPIRED descarta orçamento ainda sem aprovação */
+  @IsIn(['PENDING', 'PAID', 'EXPIRED']) status: 'PENDING' | 'PAID' | 'EXPIRED';
 }
 
 class ListBudgetsDto {
@@ -78,14 +80,16 @@ class ListBudgetsDto {
 const newHash = () => randomBytes(16).toString('base64url');
 const HASH_RE = /^[A-Za-z0-9_-]{22}$/;
 
+/** Enviado por texto e ainda sem aprovação: não tem link válido nem cobrança. */
+const awaitingApproval = (b: Pick<Budget, 'quotedAt' | 'approvedAt'>) => !!b.quotedAt && !b.approvedAt;
+
 /** PENDING vencido conta como EXPIRED mesmo antes de alguém gravar isso. */
 const effectiveStatus = (b: Pick<Budget, 'status' | 'expiresAt'>): BudgetStatus =>
   b.status === 'PENDING' && b.expiresAt.getTime() < Date.now() ? 'EXPIRED' : b.status;
 
 /**
- * Orçamentos com link público (docs/orcamentos.md). Nada aqui envia mensagem: o painel só
- * recebe o link e coloca o texto no campo — o envio segue o caminho normal do chat (quota,
- * janela da Meta e ledger).
+ * Orçamentos com link público (docs/orcamentos.md). Nada aqui envia mensagem: o painel monta o
+ * texto (orçamento ou link) e envia pelo caminho normal do chat (quota, janela da Meta e ledger).
  */
 @Injectable()
 export class BudgetsService {
@@ -184,39 +188,35 @@ export class BudgetsService {
     }));
     if (items.some((i) => !i.name)) throw new BadRequestException('Todo item precisa de nome');
 
-    const b = await this.prisma.budget.create({
-      data: {
-        tenantId: user.tenantId,
-        conversationId,
-        contactId: conv.contactId,
-        userId: user.id,
-        hash: newHash(),
-        items: items as unknown as Prisma.InputJsonValue,
-        totalValue: budgetTotal(items),
-        pixKey: pix?.key,
-        pixKeyType: pix?.keyType,
-        pixHolderName: pix?.holderName,
-        paymentUrl: dto.paymentUrl?.trim() || null,
-        note: dto.note?.trim() || null,
-        expiresAt: await this.vencimento(user.tenantId, dto),
-        autoPix: !!dto.autoPix,
-      },
-      include: { user: { select: { id: true, name: true } } },
-    });
+    const validity = dto.validity ?? (dto.validHours ? null : BUDGET_DEFAULT_VALIDITY);
+    const data = {
+      tenantId: user.tenantId,
+      conversationId,
+      contactId: conv.contactId,
+      userId: user.id,
+      items: items as unknown as Prisma.InputJsonValue,
+      totalValue: budgetTotal(items),
+      pixKey: pix?.key,
+      pixKeyType: pix?.keyType,
+      pixHolderName: pix?.holderName,
+      paymentUrl: dto.paymentUrl?.trim() || null,
+      note: dto.note?.trim() || null,
+      expiresAt: await this.vencimento(user.tenantId, dto),
+      autoPix: !!dto.autoPix,
+      validity,
+      quotedAt: dto.quote ? new Date() : null,
+    };
+    const b = await this.criarNumerado(data);
     if (!account) return this.present(b);
 
-    // cobrança já na criação: erro do Asaas (CPF inválido, conta bloqueada…) aparece para o
-    // atendente corrigir, nunca para o cliente na página — e o orçamento sem Pix não fica para trás
+    // orçamento por texto: CPF já vai para a ficha (o erro de digitação aparece agora), mas a
+    // cobrança só nasce na aprovação — com o valor e a validade daquele momento
+    if (dto.quote) {
+      if (doc !== conv.contact.document) await this.prisma.contact.update({ where: { id: conv.contactId }, data: { document: doc } });
+      return this.present(b);
+    }
     try {
-      const charge = await account.pixCharge({
-        customer: await account.customerId(doc, conv.contact.name?.trim() || 'Cliente'),
-        value: Number(b.totalValue),
-        // vencimento = dia em que o link expira, no fuso de Brasília
-        dueDate: toLocal(b.expiresAt, await this.fuso(user.tenantId)).ymd,
-        description: `Orçamento ${(await this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { name: true } }))?.name ?? ''}`.trim().slice(0, 500),
-        externalReference: b.id,
-      });
-      const comPix = await this.prisma.budget.update({ where: { id: b.id }, data: { gatewayPaymentId: charge.id, pixPayload: charge.payload, pixQrImage: charge.qrImage }, include: { user: { select: { id: true, name: true } } } });
+      const comPix = await this.gerarCobranca(b, account, doc, conv.contact.name);
       if (doc !== conv.contact.document) await this.prisma.contact.update({ where: { id: conv.contactId }, data: { document: doc } });
       return this.present(comPix);
     } catch (e) {
@@ -225,10 +225,98 @@ export class BudgetsService {
     }
   }
 
+  /**
+   * Número sequencial por empresa ("Orçamento Nº 42"): dois atendentes ao mesmo tempo disputam o
+   * mesmo número — o índice único recusa um deles, que tenta o seguinte.
+   */
+  private async criarNumerado(data: Omit<Prisma.BudgetUncheckedCreateInput, 'hash' | 'number'>) {
+    for (let tentativa = 0; ; tentativa++) {
+      const ultimo = await this.prisma.budget.aggregate({ where: { tenantId: data.tenantId }, _max: { number: true } });
+      try {
+        return await this.prisma.budget.create({ data: { ...data, hash: newHash(), number: (ultimo._max.number ?? 0) + 1 }, include: { user: { select: { id: true, name: true } } } });
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'P2002' || tentativa >= 4) throw e;
+      }
+    }
+  }
+
+  /**
+   * Cobrança Pix no Asaas da empresa. Erro (CPF inválido, conta bloqueada…) sobe para o atendente
+   * corrigir, nunca para o cliente na página — quem chama desfaz o que gravou.
+   */
+  private async gerarCobranca(b: Budget, account: AsaasAccount, doc: string, nomeContato: string | null) {
+    const charge = await account.pixCharge({
+      customer: await account.customerId(doc, nomeContato?.trim() || 'Cliente'),
+      value: Number(b.totalValue),
+      // vencimento = dia em que o link expira, no fuso de Brasília
+      dueDate: toLocal(b.expiresAt, await this.fuso(b.tenantId)).ymd,
+      description: `Orçamento${b.number ? ` Nº ${b.number}` : ''} ${(await this.prisma.tenant.findUnique({ where: { id: b.tenantId }, select: { name: true } }))?.name ?? ''}`.trim().slice(0, 500),
+      externalReference: b.id,
+    });
+    return this.prisma.budget.update({ where: { id: b.id }, data: { gatewayPaymentId: charge.id, pixPayload: charge.payload, pixQrImage: charge.qrImage }, include: { user: { select: { id: true, name: true } } } });
+  }
+
+  /**
+   * Cliente aprovou o orçamento enviado por texto (docs/orcamentos.md#orçamento-com-aprovação):
+   * o link passa a valer, a validade recomeça agora e o Pix automático é gerado com o valor do
+   * orçamento aprovado — é sempre o deste id, nunca "o último". Repetir devolve o mesmo, sem nova cobrança.
+   */
+  async approve(user: AuthUser, conversationId: string, id: string) {
+    const b = await this.prisma.budget.findFirst({ where: { id, conversationId, tenantId: user.tenantId } });
+    if (!b) throw new NotFoundException('Orçamento não encontrado');
+    if (!b.quotedAt) throw new BadRequestException('Este orçamento já foi enviado como link.');
+    const inclui = { user: { select: { id: true, name: true } } } as const;
+    if (b.approvedAt) {
+      // clique duplo / outra aba: o mesmo orçamento, a cobrança que já existe
+      if (b.autoPix && !b.gatewayPaymentId) throw new ConflictException('O Pix deste orçamento ainda está sendo gerado. Aguarde alguns segundos.');
+      return this.present(await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: inclui }));
+    }
+    const status = effectiveStatus(b);
+    if (status === 'EXPIRED') throw new BadRequestException(`O Orçamento Nº ${b.number} venceu antes da aprovação. Gere um novo com os valores de hoje.`);
+    if (status !== 'PENDING') throw new BadRequestException(`O Orçamento Nº ${b.number} já está ${status === 'PAID' ? 'pago' : 'estornado'}.`);
+
+    const account = b.autoPix ? await this.payments.accountFor(user.tenantId) : null;
+    if (b.autoPix && !account) throw new BadRequestException('Pix automático indisponível: conecte a conta do Asaas em Configurações → Empresa (recurso do plano).');
+    const contato = await this.prisma.contact.findUnique({ where: { id: b.contactId }, select: { name: true, document: true } });
+    const doc = (contato?.document ?? '').replace(/\D/g, '');
+    if (b.autoPix && !isCpfCnpjLength(doc)) throw new BadRequestException('Informe o CPF/CNPJ do contato na ficha — o Asaas exige para gerar o Pix.');
+
+    const validity = (BUDGET_VALIDITY as readonly string[]).includes(b.validity ?? '') ? (b.validity as BudgetValidity) : BUDGET_DEFAULT_VALIDITY;
+    const expiresAt = await this.vencimento(user.tenantId, { validity });
+    // só um clique ganha: o segundo cai no "já aprovado" acima
+    const ok = await this.prisma.budget.updateMany({ where: { id: b.id, approvedAt: null, status: 'PENDING' }, data: { approvedAt: new Date(), approvedById: user.id, expiresAt } });
+    if (!ok.count) {
+      // outro clique aprovou (ou pagou) entre a leitura e aqui: devolve o que ficou, sem nova cobrança
+      const atual = await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: inclui });
+      if (!atual.approvedAt) throw new BadRequestException(`O Orçamento Nº ${b.number} mudou de situação. Confira em Desta conversa.`);
+      if (atual.autoPix && !atual.gatewayPaymentId) throw new ConflictException('O Pix deste orçamento ainda está sendo gerado. Aguarde alguns segundos.');
+      return this.present(atual);
+    }
+    const aprovado = await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: inclui });
+    if (account) {
+      try {
+        const comPix = await this.gerarCobranca(aprovado, account, doc, contato?.name ?? null);
+        this.gateway.emitBudgets(user.tenantId, conversationId);
+        return this.present(comPix);
+      } catch (e) {
+        // volta a esperar aprovação: o atendente corrige (CPF, conta) e clica de novo
+        await this.prisma.budget.update({ where: { id: b.id }, data: { approvedAt: null, approvedById: null, expiresAt: b.expiresAt } });
+        throw e;
+      }
+    }
+    this.gateway.emitBudgets(user.tenantId, conversationId);
+    return this.present(aprovado);
+  }
+
   async update(user: AuthUser, conversationId: string, id: string, dto: UpdateBudgetDto) {
     const b = await this.prisma.budget.findFirst({ where: { id, conversationId, tenantId: user.tenantId } });
     if (!b) throw new NotFoundException('Orçamento não encontrado');
-    if (dto.status === 'PAID') {
+    if (dto.status === 'EXPIRED') {
+      // descartar: o cliente pediu outro orçamento — o antigo sai do atalho e não vira link por engano
+      if (!awaitingApproval(b)) throw new BadRequestException('Só dá para descartar orçamento que ainda espera aprovação.');
+      await this.prisma.budget.updateMany({ where: { id: b.id, status: 'PENDING', approvedAt: null }, data: { status: 'EXPIRED', expiresAt: new Date() } });
+      this.gateway.emitBudgets(user.tenantId, conversationId);
+    } else if (dto.status === 'PAID') {
       // pago vale mesmo depois de vencido (o cliente pagou no prazo e mandou o comprovante tarde)
       if (b.status === 'REFUNDED') throw new BadRequestException('Orçamento estornado não volta a ser pago. Gere um novo.');
       await this.registrarPagamento(b, 'manual', user.id);
@@ -390,7 +478,8 @@ export class BudgetsService {
 
     if (agora.getUTCMinutes() % 5 !== 0) return;
     const abertos = await this.prisma.budget.findMany({
-      where: { autoPix: true, gatewayPaymentId: { not: null }, status: { in: ['PENDING', 'EXPIRED'] }, createdAt: { gt: new Date(agora.getTime() - 48 * 60 * MIN) } },
+      // orçamento aprovado dias depois de criado: a cobrança nasceu na aprovação
+      where: { autoPix: true, gatewayPaymentId: { not: null }, status: { in: ['PENDING', 'EXPIRED'] }, OR: [{ createdAt: { gt: new Date(agora.getTime() - 48 * 60 * MIN) } }, { approvedAt: { gt: new Date(agora.getTime() - 48 * 60 * MIN) } }] },
       take: 200,
     });
     for (const b of abertos) {
@@ -419,8 +508,12 @@ export class BudgetsService {
       // logo da empresa no topo da página (Configurações → Páginas públicas); sem ela, a marca do painel
       this.prisma.tenantSettings.findUnique({ where: { tenantId: b.tenantId }, select: { publicLogoKey: true } }),
     ]);
-    const payable = status === 'PENDING';
+    // esperando aprovação (itens sensíveis vão só no link): mostra o orçamento, nada de pagamento
+    const aguardando = awaitingApproval(b);
+    const payable = status === 'PENDING' && !aguardando;
     return {
+      number: b.number,
+      awaitingApproval: aguardando && status === 'PENDING',
       tenantName: tenant?.name ?? '',
       logoUrl: settings?.publicLogoKey ? this.storage.signedUrl(settings.publicLogoKey, 600) : null,
       contactFirstName: contact?.name?.trim().split(/\s+/)[0] || null,
@@ -471,6 +564,7 @@ export class BudgetsService {
     const mimeType = file.mimetype.split(';')[0].trim().toLowerCase();
     if (!(BUDGET_RECEIPT_MIMES as readonly string[]).includes(mimeType)) throw new BadRequestException('Envie uma foto (JPG, PNG, WEBP) ou um PDF');
     const b = await this.findByHash(hash);
+    if (awaitingApproval(b)) throw new BadRequestException('Este orçamento ainda não foi aprovado. Responda a aprovação no WhatsApp para receber o pagamento.');
     // pago ainda aceita: o cliente pode mandar o comprovante depois de o atendente confirmar
     if ((await this.expireIfDue(b)) === 'EXPIRED') throw new BadRequestException('Este orçamento expirou. Peça um novo ao atendimento.');
 
@@ -503,6 +597,11 @@ export class BudgetsService {
     return {
       id: b.id,
       hash: b.hash,
+      number: b.number,
+      /** enviado por texto, esperando o cliente aprovar (o link ainda não vale) */
+      awaitingApproval: awaitingApproval(b),
+      quotedAt: b.quotedAt,
+      approvedAt: b.approvedAt,
       items: b.items as unknown as BudgetItem[],
       totalValue: Number(b.totalValue),
       status: effectiveStatus(b),
@@ -544,6 +643,12 @@ class BudgetsController {
   @Patch(':budgetId')
   update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('budgetId') budgetId: string, @Body() dto: UpdateBudgetDto) {
     return this.budgets.update(u, id, budgetId, dto);
+  }
+
+  /** Cliente aprovou o orçamento por texto: libera o link deste orçamento (e gera o Pix automático). */
+  @Post(':budgetId/approve')
+  approve(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('budgetId') budgetId: string) {
+    return this.budgets.approve(u, id, budgetId);
   }
 
   /** Estorno é dinheiro voltando: gestão (`settings.manage`). */

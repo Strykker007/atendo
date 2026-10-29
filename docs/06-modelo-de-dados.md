@@ -205,7 +205,7 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 
 **pix_keys** — chaves Pix da empresa (`title`, `keyType` em `PIX_KEY_TYPES`, `key` normalizada pelo tipo, `holderName`, `position`). Enviadas pelo painel do chat como cartão "Copiar chave Pix" (até 30 por empresa).
 
-**budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`). Ver [Orçamentos](orcamentos.md).
+**budgets** — orçamento/pedido gerado no chat, visto pelo contato na página pública `/o/:hash` (`hash` único, `items` jsonb, `totalValue`, cópia da chave Pix, `paymentUrl`, `status` `PENDING`/`PAID`/`EXPIRED`, `expiresAt`, comprovante em `receiptKey`; `number` sequencial por empresa e `quotedAt`/`approvedAt` do orçamento enviado por texto que espera aprovação; quando os itens vão no texto é `tenant_settings.budgetQuoteItems`). Ver [Orçamentos](orcamentos.md).
 
 **secure_media** — foto protegida: mídia do chat atrás de um link com validade (`/f/:hash`, `hash` único, `mediaKey`, `caption` só na página, `validHours`, `expiresAt`, `revokedAt`, `viewCount`/`firstViewedAt`). Pelo WhatsApp vai só o texto com o link. Ver [Foto protegida](foto-protegida.md).
 
