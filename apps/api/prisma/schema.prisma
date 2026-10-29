@@ -2330,6 +2330,19 @@ enum SystemNoticeType {
 }
 
 /// Aviso global do dono do sistema (manutenção, instabilidade, novidade) — vale para todos os clientes
+/// Configurações da plataforma inteira (não de um cliente) — uma linha só, `id = 'default'`.
+/// Mudadas pelo dono do sistema na tela (sem mexer no .env nem reiniciar)
+model PlatformSettings {
+  id        String   @id @default("default")
+  /// Cobrança por Pix (Asaas) visível para os clientes: aviso para informar o CPF/CNPJ, "Assinar"
+  /// pelo Asaas e a migração automática diária. Desligado: nada disso aparece — só quem já foi
+  /// migrado pelo dono continua com a mensalidade e os lembretes (docs/05#liberar-para-os-clientes)
+  asaasClientBilling Boolean @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
 model SystemNotice {
   id        String           @id @default(uuid())
   title     String

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, HttpCode, NotFoundException, Param, Post, Query, StreamableFile, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, NotFoundException, Param, Post, Put, Query, StreamableFile, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 import { env } from '../../config/env';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -12,6 +12,10 @@ import { qrSignatureOk } from './monthly-billing';
 class EnrollDto {
   /** só a prévia: quem entraria, com que valor e vencimento, e quem fica de fora e por quê */
   @IsOptional() @IsBoolean() dryRun?: boolean;
+}
+
+class ClientBillingDto {
+  @IsBoolean() clientBilling: boolean;
 }
 
 class DocumentDto {
@@ -31,6 +35,21 @@ export class MonthlyBillingController {
   @Roles('super_admin')
   enroll(@Body() dto: EnrollDto) {
     return this.monthly.enrollAll({ dryRun: dto.dryRun ?? true });
+  }
+
+  /** Dono do sistema: a cobrança por Pix está liberada para os clientes? (botão em Financeiro) */
+  @Get('settings')
+  @NoTenantOk()
+  @Roles('super_admin')
+  settings() {
+    return this.monthly.settings();
+  }
+
+  @Put('settings')
+  @NoTenantOk()
+  @Roles('super_admin')
+  setSettings(@Body() dto: ClientBillingDto) {
+    return this.monthly.setClientBilling(dto.clientBilling);
   }
 
   /** Admin do cliente: informa o CPF/CNPJ pelo aviso do painel e entra na cobrança automática. */

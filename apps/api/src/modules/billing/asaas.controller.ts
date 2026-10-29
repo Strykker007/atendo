@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Headers, HttpCode, Param, Post, Query, Req, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, HttpCode, Param, Post, Query, Req, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { IsEmail, IsIn, IsOptional, IsString, IsUUID, Length, Matches, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -6,6 +6,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { Request } from 'express';
 import { env } from '../../config/env';
 import { AsaasService, type AsaasBillingType } from './asaas.service';
+import { MonthlyBillingService } from './monthly-billing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -49,7 +50,7 @@ class AsaasCheckoutDto {
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @RequirePermission('billing.manage')
 export class AsaasController {
-  constructor(private readonly asaas: AsaasService) {}
+  constructor(private readonly asaas: AsaasService, private readonly monthly: MonthlyBillingService) {}
 
   @Get('customer')
   customer(@CurrentUser() user: AuthUser) {
@@ -58,7 +59,9 @@ export class AsaasController {
 
   /** Assina (ou troca de plano/forma de pagamento) e devolve a cobrança a pagar, com o PIX. */
   @Post('checkout')
-  checkout(@CurrentUser() user: AuthUser, @Body() dto: AsaasCheckoutDto, @Req() req: Request) {
+  async checkout(@CurrentUser() user: AuthUser, @Body() dto: AsaasCheckoutDto, @Req() req: Request) {
+    // cobrança por Pix escondida dos clientes (botão do dono): só quem já assina pelo Asaas troca de plano
+    if (!(await this.monthly.checkoutAllowed(user.tenantId))) throw new BadRequestException('Assinatura online indisponível no momento. Fale com o suporte.');
     return this.asaas.checkout(user.tenantId, { ...dto, remoteIp: req.ip ?? '0.0.0.0' });
   }
 

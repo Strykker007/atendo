@@ -110,7 +110,7 @@ export class BillingController {
     const [plans, abertas, atual] = await Promise.all([
       this.prisma.plan.findMany({ where: { isActive: true, ...(user.role !== 'super_admin' && { billingCycle: { in: ['monthly', 'yearly'] } }) }, orderBy: { priceMonth: 'asc' } }),
       // no Stripe o valor é o price do catálogo: a promoção só existe com Asaas (ou sem gateway, atribuída pelo dono)
-      this.gateway() === 'stripe' ? [] : this.promotions.open(),
+      (await this.gateway()) === 'stripe' ? [] : this.promotions.open(),
       user.tenantId ? this.prisma.planOverride.findUnique({ where: { tenantId: user.tenantId } }) : null,
     ]);
     // promoção que ESTE cliente ganharia ao assinar cada plano (mesma regra do checkout) — docs/05#promoções
@@ -262,17 +262,19 @@ export class BillingController {
   }
 
   /** Asaas tem precedência quando as duas chaves existem (docs/05 — coexistência). */
-  private gateway(): 'asaas' | 'stripe' | null {
-    return this.asaas.enabled ? 'asaas' : this.stripe.enabled ? 'stripe' : null;
+  /** Gateway dos checkouts novos. Asaas só com a cobrança por Pix liberada para os clientes (botão do dono). */
+  private async gateway(): Promise<'asaas' | 'stripe' | null> {
+    return (await this.monthly.clientBilling()) ? 'asaas' : this.stripe.enabled ? 'stripe' : null;
   }
 
   /** Uso do mês corrente vs limites do plano — alimenta o banner de 80%/100% no painel. */
   @Get('usage')
   @NoTenantOk()
   async current(@CurrentUser() user: AuthUser) {
+    const gw = await this.gateway();
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: !!this.gateway(), gateway: this.gateway(), subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, customPlan: null, overageAmount: 0, quota: null, billingNotice: null, noTenant: true };
+      return { period: periodOf(), billingEnabled: !!gw, gateway: gw, subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, customPlan: null, overageAmount: 0, quota: null, billingNotice: null, noTenant: true };
     }
     // aviso da mensalidade só para quem paga (e só lê o banco: esta rota roda a cada minuto)
     const podePagar = user.role === 'super_admin' || !!user.impersonatorId || !!user.permissions?.includes('billing.manage');
@@ -291,9 +293,9 @@ export class BillingController {
     ]);
     return {
       period: periodOf(),
-      billingEnabled: !!this.gateway(),
+      billingEnabled: !!gw,
       /** gateway dos checkouts novos (asaas = PIX/cartão no modal; stripe = redireciona) */
-      gateway: this.gateway(),
+      gateway: gw,
       /** gateway onde a assinatura atual nasceu — decide portal do Stripe x cobrança do Asaas */
       subscriptionGateway: sub?.gateway ?? null,
       cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,

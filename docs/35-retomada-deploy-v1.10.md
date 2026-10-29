@@ -9,13 +9,12 @@
 |---|---|
 | `.env.production` no servidor | ✅ chave e token do Asaas preenchidos, `ASAAS_AUTO_ENROLL=false` |
 | Deploy v1.10.0 | ✅ no ar (29/10), com a chave do Asaas carregada na API — conferido pelo usuário. Passos 1 a 3 abaixo ficam só como referência |
-| `ASAAS_API_KEY` | ⏸️ **comentada** (`#ASAAS_API_KEY=…`) desde 29/10 para esconder dos clientes o aviso de “pagamento automático” e o checkout pelo Asaas até o webhook existir. Ninguém tinha migrado (0 clientes/assinaturas no Asaas) |
+| Cobrança por Pix para os clientes | ⏸️ a partir da **v1.10.1** fica **escondida** por padrão (botão do dono em Financeiro → Cobrança por Pix). A chave do Asaas pode ficar ativa no `.env.production` — **não precisa comentar**. Até a v1.10.1 subir, os clientes sem CPF/CNPJ veem o aviso (0 tinham migrado em 29/10) |
 | Webhook no painel do Asaas | ❌ **próximo passo** (passo 4) — precisa da conta do sócio |
 | Migração dos clientes para o Pix | ❌ passo 5, **depois** do webhook |
 
-> ⚠️ Com a chave ativa, o “Assinar” de `/plano` cobra pelo Asaas e o aviso de CPF/CNPJ aparece. Sem
-> o webhook, o pagamento só é reconhecido enquanto o cliente está com a tela do QR aberta. Por isso a
-> chave fica comentada até o dia do webhook.
+> ⚠️ Sem o webhook, o pagamento só é reconhecido enquanto o cliente está com a tela do QR aberta. Por
+> isso a cobrança fica escondida dos clientes (botão do dono) até o webhook existir.
 
 ## Passo 1 — Conferir o Mac
 
@@ -62,20 +61,8 @@ ssh -i ~/.ssh/atendo-prod.key ubuntu@163.176.200.252 \
 
 ## Passo 4 — Webhook no painel do Asaas (conta do sócio)
 
-**Antes**, reative a chave no servidor e recrie API e worker (o painel volta a mostrar o Pix):
-
-```bash
-ssh -i ~/.ssh/atendo-prod.key ubuntu@163.176.200.252
-cd ~/atendo
-sed -i 's/^#ASAAS_API_KEY=/ASAAS_API_KEY=/' .env.production
-docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --no-build api
-docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --no-build worker
-docker exec atendo-prod-api-1 sh -c 'echo "$ASAAS_API_KEY" | cut -c1-6'   # $aact_
-```
-
-Faça o webhook e o passo 5 **na mesma sessão**: com a chave ativa, quem não tem CPF/CNPJ já vê o
-aviso para informar — e é bom que o webhook já exista quando a primeira cobrança nascer.
-
+Não há nada a reativar no servidor: a chave já está no `.env.production`. Se em algum momento ela
+foi comentada (`#ASAAS_API_KEY=`), tire o `#` e recrie api e worker.
 
 No **site do Asaas** (asaas.com, conta de produção) → menu do usuário → **Integrações → Webhooks →
 Adicionar**:
@@ -89,6 +76,9 @@ Adicionar**:
 
 Confira também: a conta tem **chave Pix cadastrada** (Pix → Minhas chaves) — sem ela o Asaas não gera
 o QR.
+
+Depois do webhook, em **Financeiro → Cobrança por Pix → Liberar para os clientes** — só então o
+aviso de CPF/CNPJ e o “Assinar” pelo Asaas aparecem. Faça o passo 5 na mesma sessão.
 
 ## Passo 5 — Migrar os clientes para o Pix automático
 

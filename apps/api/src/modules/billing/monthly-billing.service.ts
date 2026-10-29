@@ -32,6 +32,40 @@ export class MonthlyBillingService {
     return !!env.ASAAS_API_KEY;
   }
 
+  private liberada: { at: number; on: boolean } | null = null;
+
+  /**
+   * Cobrança por Pix liberada para os clientes (`platform_settings.asaasClientBilling`, botão do
+   * dono em Financeiro → Cobrança por Pix): aviso de CPF/CNPJ, "Assinar" pelo Asaas e migração
+   * automática. Com a chave do Asaas mas desligada, o cliente não vê nada disso. Cache de 30 s
+   * (esta leitura está no `GET /billing/usage`, que roda a cada minuto em cada aba aberta).
+   */
+  async clientBilling(): Promise<boolean> {
+    if (!this.enabled) return false;
+    if (this.liberada && Date.now() - this.liberada.at < 30_000) return this.liberada.on;
+    const row = await this.prisma.platformSettings.findUnique({ where: { id: 'default' } });
+    this.liberada = { at: Date.now(), on: !!row?.asaasClientBilling };
+    return this.liberada.on;
+  }
+
+  async settings() {
+    return { asaasConfigured: this.enabled, clientBilling: await this.clientBilling(), autoEnroll: env.ASAAS_AUTO_ENROLL };
+  }
+
+  async setClientBilling(on: boolean) {
+    await this.prisma.platformSettings.upsert({ where: { id: 'default' }, create: { id: 'default', asaasClientBilling: on }, update: { asaasClientBilling: on } });
+    this.liberada = null;
+    this.log.log(`cobrança por Pix para os clientes ${on ? 'liberada' : 'escondida'}`);
+    return this.settings();
+  }
+
+  /** Checkout pelo Asaas: liberado para todos, ou para quem já assina pelo Asaas (trocar de plano). */
+  async checkoutAllowed(tenantId: string) {
+    if (await this.clientBilling()) return true;
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, select: { gateway: true } });
+    return sub?.gateway === 'asaas';
+  }
+
   private async candidates(tenantId?: string) {
     return this.prisma.subscription.findMany({
       where: { ...(tenantId && { tenantId }), tenant: { isActive: true } },
@@ -96,6 +130,7 @@ export class MonthlyBillingService {
 
   /** O cliente informou o CPF/CNPJ no aviso do painel: grava e migra na hora. */
   async setDocumentAndEnroll(tenantId: string, raw: string) {
+    if (!(await this.clientBilling())) throw new BadRequestException('O pagamento automático ainda não está disponível.');
     if (!isValidCpfCnpj(raw)) throw new BadRequestException('CPF ou CNPJ inválido. Confira os números.');
     await this.prisma.tenant.update({ where: { id: tenantId }, data: { document: cpfCnpjDigits(raw) } });
     if (!this.enabled) return { enrolled: false };
@@ -170,6 +205,8 @@ export class MonthlyBillingService {
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true, tenant: { select: { document: true } } } });
     if (!sub) return null;
     if (!sub.gateway) {
+      // pedir o CPF/CNPJ só quando a cobrança por Pix estiver liberada para os clientes
+      if (!(await this.clientBilling())) return null;
       const skip = enrollSkip({ gateway: null, status: sub.status, billingCycle: sub.plan.billingCycle, isFree: sub.plan.isFree, value: this.charge(sub).value, document: sub.tenant.document });
       return skip === 'no_document' ? { kind: 'needs_document' as const } : null;
     }
