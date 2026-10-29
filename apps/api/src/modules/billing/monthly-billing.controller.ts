@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, HttpCode, NotFoundException, Param, Post, Put, Query, StreamableFile, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { env } from '../../config/env';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
@@ -12,6 +12,8 @@ import { qrSignatureOk } from './monthly-billing';
 class EnrollDto {
   /** só a prévia: quem entraria, com que valor e vencimento, e quem fica de fora e por quê */
   @IsOptional() @IsBoolean() dryRun?: boolean;
+  /** só este cliente (botão "Migrar só este" da prévia); ausente = todos que podem */
+  @IsOptional() @IsUUID() tenantId?: string;
 }
 
 class ClientBillingDto {
@@ -34,7 +36,7 @@ export class MonthlyBillingController {
   @NoTenantOk()
   @Roles('super_admin')
   enroll(@Body() dto: EnrollDto) {
-    return this.monthly.enrollAll({ dryRun: dto.dryRun ?? true });
+    return this.monthly.enrollAll({ dryRun: dto.dryRun ?? true, tenantId: dto.tenantId });
   }
 
   /** Dono do sistema: a cobrança por Pix está liberada para os clientes? (botão em Financeiro) */

@@ -34,11 +34,22 @@ export function PixMigration() {
   const [linhas, setLinhas] = useState<PixEnrollRow[] | null>(null);
   const [previa, setPrevia] = useState(true);
   const [confirmar, setConfirmar] = useState(false);
+  /** "Migrar só este": um cliente da prévia (ex.: quem vence primeiro, para testar de verdade) */
+  const [umSo, setUmSo] = useState<PixEnrollRow | null>(null);
   const aMigrar = linhas?.filter((l) => l.result === 'would_enroll') ?? [];
+
+  const migrarUm = async (l: PixEnrollRow) => {
+    try {
+      const [r] = await enroll.mutateAsync({ dryRun: false, tenantId: l.tenantId });
+      if (r) setLinhas((ls) => ls?.map((x) => (x.tenantId === r.tenantId ? r : x)) ?? null);
+      if (r?.result === 'enrolled') toast.ok(`${l.tenant} migrado para o Pix automático`);
+      else toast.err(r?.error ?? 'Não foi possível migrar este cliente');
+    } catch (err) { toast.err(err); }
+  };
 
   const rodar = async (dryRun: boolean) => {
     try {
-      const r = await enroll.mutateAsync(dryRun);
+      const r = await enroll.mutateAsync({ dryRun });
       setLinhas(r); setPrevia(dryRun);
       if (!dryRun) {
         const ok = r.filter((l) => l.result === 'enrolled').length;
@@ -83,7 +94,7 @@ export function PixMigration() {
       {linhas && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-[11px] uppercase tracking-wide text-muted"><tr><th className="py-2 pr-4">Cliente</th><th className="py-2 pr-4">Plano</th><th className="py-2 pr-4 text-right">Valor</th><th className="py-2 pr-4">1º vencimento</th><th className="py-2">Situação</th></tr></thead>
+            <thead className="text-left text-[11px] uppercase tracking-wide text-muted"><tr><th className="py-2 pr-4">Cliente</th><th className="py-2 pr-4">Plano</th><th className="py-2 pr-4 text-right">Valor</th><th className="py-2 pr-4">1º vencimento</th><th className="py-2">Situação</th><th className="py-2" /></tr></thead>
             <tbody className="divide-y divide-line">
               {linhas.map((l) => (
                 <tr key={l.tenantId}>
@@ -92,9 +103,10 @@ export function PixMigration() {
                   <td className="py-2 pr-4 text-right tabular-nums">{brl(l.value)}</td>
                   <td className="py-2 pr-4 tabular-nums">{l.dueDate ? dataBR(l.dueDate) : '—'}</td>
                   <td className={cn('py-2', RESULTADO[l.result].cls)}>{RESULTADO[l.result].label}{l.error ? `: ${l.error}` : ''}</td>
+                  <td className="py-2 text-right">{l.result === 'would_enroll' && <Button size="sm" variant="ghost" onClick={() => setUmSo(l)}>Migrar só este</Button>}</td>
                 </tr>
               ))}
-              {!linhas.length && <tr><td colSpan={5} className="py-6 text-center text-muted">Ninguém na cobrança manual para migrar.</td></tr>}
+              {!linhas.length && <tr><td colSpan={6} className="py-6 text-center text-muted">Ninguém na cobrança manual para migrar.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -109,6 +121,15 @@ export function PixMigration() {
           ? 'Os clientes sem CPF/CNPJ passam a ver o aviso para ativar o pagamento automático (ao informar, a assinatura é criada no Asaas) e o “Assinar” do plano cobra pelo Asaas. Confirme que o webhook já está configurado no painel do Asaas.'
           : 'O aviso de pagamento automático some para os clientes e o “Assinar” deixa de usar o Asaas. Quem já foi migrado continua com a mensalidade, os lembretes e o “Pagar”.'}
         onConfirm={() => setSettings.mutateAsync(!!confirmarLiberar).then(() => toast.ok(confirmarLiberar ? 'Cobrança por Pix liberada para os clientes' : 'Cobrança por Pix escondida dos clientes')).catch(toast.err)}
+      />
+
+      <ConfirmDialog
+        open={!!umSo}
+        onClose={() => setUmSo(null)}
+        title={`Migrar ${umSo?.tenant ?? ''}`}
+        confirmLabel="Migrar"
+        text={umSo ? `Cria a assinatura Pix no Asaas de ${brl(umSo.value)}/mês com 1º vencimento em ${umSo.dueDate ? dataBR(umSo.dueDate) : '—'}. Se vence em até 5 dias, o e-mail com o Pix sai agora. Os outros clientes não mudam.` : ''}
+        onConfirm={() => (umSo ? migrarUm(umSo) : undefined)}
       />
 
       <ConfirmDialog
