@@ -156,12 +156,12 @@ export const useSetBillingDocument = () => {
 
 /** Linha da migração para a mensalidade por Pix no Asaas (dono do sistema). */
 export interface PixEnrollRow { tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null; result: 'enrolled' | 'would_enroll' | 'already' | 'free' | 'no_price' | 'not_live' | 'no_document' | 'error'; error?: string }
-/** `dryRun: true` = só a prévia (nada é criado no Asaas). */
+/** `dryRun: true` = só a prévia (nada é criado no Asaas); `tenantId` = só aquele cliente. */
 export const usePixEnroll = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (dryRun: boolean) => api<PixEnrollRow[]>('/billing/monthly/enroll', { method: 'POST', body: JSON.stringify({ dryRun }) }),
-    onSuccess: (_, dryRun) => { if (!dryRun) qc.invalidateQueries({ queryKey: ['finance'] }); },
+    mutationFn: ({ dryRun, tenantId }: { dryRun: boolean; tenantId?: string }) => api<PixEnrollRow[]>('/billing/monthly/enroll', { method: 'POST', body: JSON.stringify({ dryRun, tenantId }) }),
+    onSuccess: (_, v) => { if (!v.dryRun) qc.invalidateQueries({ queryKey: ['finance'] }); },
   });
 };
 
