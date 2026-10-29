@@ -3,22 +3,18 @@
 > Roteiro para continuar de onde paramos em **29/10/2026, madrugada**. Siga na ordem e marque cada
 > passo. Nada aqui mexe em dado de cliente até o passo 5 — e o passo 5 começa por uma prévia.
 
-## Onde paramos (conferido em produção, só leitura)
+## Onde paramos
 
 | Item | Situação |
 |---|---|
-| `.env.production` no servidor | ✅ `ASAAS_API_KEY` e `ASAAS_WEBHOOK_TOKEN` preenchidos, `ASAAS_BASE_URL=https://api.asaas.com/v3`, `ASAAS_AUTO_ENROLL=false` |
-| Versão no ar | ⚠️ **1.9.1** — o deploy da 1.10.0 **não terminou** (API e worker não foram recriados; migrações `20270116000000_company_isolation` e `20270117000000_invoice_reminders` **não aplicadas**) |
-| No seu Mac | ⚠️ `main` tem o merge da develop + `chore(release): v1.10.0` + a tag `v1.10.0`, **só local** (não foram para o GitHub). `develop` está em `961a6e0`, sem esses dois commits |
-| Webhook no painel do Asaas | ❌ não feito — precisa da conta do sócio |
-| Migração dos clientes para o Pix | ❌ não feita |
+| `.env.production` no servidor | ✅ chave e token do Asaas preenchidos, `ASAAS_AUTO_ENROLL=false` |
+| Deploy v1.10.0 | ✅ no ar (29/10), com a chave do Asaas carregada na API — conferido pelo usuário. Passos 1 a 3 abaixo ficam só como referência |
+| Webhook no painel do Asaas | ❌ **próximo passo** (passo 4) — precisa da conta do sócio |
+| Migração dos clientes para o Pix | ❌ passo 5, **depois** do webhook |
 
-Enquanto o deploy não roda, **nada mudou para os clientes**: a API que está no ar não leu a chave do
-Asaas (só lê ao ser recriada).
-
-> ⚠️ Não recrie a API/worker "na mão" (`docker compose up -d api`) antes do passo 2: a versão
-> antiga subiria já com a chave do Asaas e o "Assinar" de `/plano` passaria a cobrar pelo Asaas
-> sem os lembretes e sem a tela de migração.
+> ⚠️ Com a chave carregada, o “Assinar” de `/plano` já cobra pelo Asaas. Sem o webhook, o pagamento
+> só é reconhecido enquanto o cliente está com a tela do QR aberta (o modal consulta o Asaas). Por
+> isso o webhook vem antes da migração.
 
 ## Passo 1 — Conferir o Mac
 
