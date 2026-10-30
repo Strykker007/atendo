@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 /**
  * Política de privacidade (LGPD) — exigida pela Meta para o app da API oficial do WhatsApp,
- * com as instruções de exclusão de dados em `#exclusao-de-dados` (docs/21-site.md).
+ * com as instruções de exclusão de dados em `#exclusao-de-dados` e em `/exclusao-de-dados` (a Meta não aceita URL com `#`; docs/21-site.md). Mudou a seção 9, muda a página também.
  */
 export default function PrivacidadePage() {
   const email = SITE.supportEmail;
