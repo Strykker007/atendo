@@ -248,6 +248,7 @@ export default function ClientesPage() {
   }, []);
   const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros, liveDe), [tenants.data, filtros, liveDe]);
   const filtrando = JSON.stringify({ ...filtros, ordem: 'nome' }) !== JSON.stringify(FILTROS_VAZIOS);
+  const acesso = useSetTenantActive();
   if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
   async function enter(t: TenantRow) {
@@ -260,7 +261,6 @@ export default function ClientesPage() {
       router.push('/conversas');
     } catch (err) { toast.err(err); } finally { setBusy(null); }
   }
-  const acesso = useSetTenantActive();
   async function patch(t: TenantRow, body: { name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) {
     setBusy(t.id);
     try { await update.mutateAsync({ ...body, id: t.id }); toast.ok('Cliente atualizado'); } catch (err) { toast.err(err); } finally { setBusy(null); }

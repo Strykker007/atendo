@@ -211,7 +211,7 @@ function ScheduleEditor({ schedule, attendanceActive, canDelete }: { schedule: B
       <BandsEditor cfg={cfg} setCfg={setCfg} issues={[...issuesAt('bands'), ...issuesAt('closed')]} />
 
       <div className={cn('space-y-1.5', cfg.alwaysOpen && 'opacity-50 pointer-events-none')} aria-disabled={cfg.alwaysOpen}>
-        <h4 className="text-[13px] font-semibold text-ink">Grade semanal{cfg.alwaysOpen && <span className="font-normal text-muted"> — sem efeito no "sempre aberto"</span>}</h4>
+        <h4 className="text-[13px] font-semibold text-ink">Grade semanal{cfg.alwaysOpen && <span className="font-normal text-muted"> — sem efeito no “sempre aberto”</span>}</h4>
         <p className="text-[11px] text-faint">Fora de qualquer intervalo vale <b>Fechado</b>. Intervalo com fim menor que o início atravessa a meia-noite (22:00–02:00); 00:00–00:00 é o dia inteiro.</p>
         {WEEKDAY_NAMES.map((nome, d) => (
           <DayRow
