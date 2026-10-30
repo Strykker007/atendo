@@ -68,6 +68,11 @@ export interface ScheduleConfig {
   /** índice = dia da semana (0 = domingo) */
   week: ScheduleInterval[][];
   exceptions: ScheduleException[];
+  /**
+   * Sempre aberto (24h): vale a primeira faixa que conta como atendimento o tempo todo — grade,
+   * exceções e Fechado ficam guardados, mas não valem. Nunca envia a mensagem de fechado.
+   */
+  alwaysOpen?: boolean;
 }
 
 export const CLOSED_BAND_ID = 'closed';
@@ -159,10 +164,17 @@ function spillSegs(cfg: ScheduleConfig, ymd: string): Seg[] {
 
 /** Id da faixa num ponto do relógio local (sem olhar "atendimento ativo"). */
 export function bandIdAt(cfg: ScheduleConfig, t: LocalTime): string {
+  const sempre = alwaysOpenBand(cfg);
+  if (sempre) return sempre.id;
   const hit = (segs: Seg[]) => segs.find((s) => t.minute >= s.from && t.minute < s.to);
   const seg = hit(ownSegs(cfg, t.ymd)) ?? hit(spillSegs(cfg, t.ymd));
   // faixa apagada mas ainda referenciada: trata como fechado (a validação impede salvar assim)
   return seg && cfg.bands.some((b) => b.id === seg.bandId) ? seg.bandId : CLOSED_BAND_ID;
+}
+
+/** Faixa que vale o tempo todo no "sempre aberto" (null = quadro normal). */
+export function alwaysOpenBand(cfg: ScheduleConfig): ScheduleBand | null {
+  return cfg.alwaysOpen ? cfg.bands.find((b) => b.open) ?? null : null;
 }
 
 export function bandById(cfg: ScheduleConfig, id: string): ScheduleBand {
@@ -349,6 +361,7 @@ export function validateSchedule(cfg: ScheduleConfig): ScheduleIssue[] {
     reply(b, name || 'Faixa', 'bands');
   }
   reply(cfg.closed, CLOSED_BAND_NAME, 'closed');
+  if (cfg.alwaysOpen && !cfg.bands.some((b) => b.open)) issues.push({ path: 'bands', message: 'Sempre aberto: marque uma faixa como horário de atendimento.' });
 
   cfg.week.forEach((list, d) => checkIntervals(list ?? [], ids, WEEKDAY_NAMES[d], `week.${d}`, issues));
   cfg.week.forEach((list, d) => {

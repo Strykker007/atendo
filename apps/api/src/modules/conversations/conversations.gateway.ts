@@ -295,6 +295,14 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
     this.room(tenantId).emit('messages_cleared', { conversationId });
   }
   /** Colunas do Kanban mudaram (ordem, tag virou/deixou de ser etapa, renomeada, excluída). */
+  /**
+   * Ticket interno mudou (docs/tickets.md): a lista de quem está com a tela aberta se atualiza;
+   * `alert` vai só para quem passou a atuar (incluído, transferido, comentário) — toast + sino.
+   */
+  emitTicket(tenantId: string, payload: { id: string }, userIds: string[], alert?: { id: string; number: number; title: string; message: string }) {
+    this.room(tenantId).emit('ticket', payload);
+    if (alert) for (const id of userIds) this.to(`user:${tenantId}:${id}`).emit('ticket_alert', alert);
+  }
   emitKanban(tenantId: string) {
     this.room(tenantId).emit('kanban', {});
   }

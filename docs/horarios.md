@@ -14,6 +14,7 @@ O conteúdo do quadro é `config: ScheduleConfig` (JSON, `packages/shared/src/sc
 | `closed` | Faixa fixa **Fechado** (`CLOSED_BAND_ID = 'closed'`): só comportamento e resposta. Vale fora de qualquer intervalo e com "atendimento ativo" desligado. Nunca conta como atendimento |
 | `week: ScheduleInterval[][]` | Grade semanal (índice 0 = domingo). Intervalo `{ id, start, end, bandId }` em HH:MM no fuso do quadro |
 | `exceptions` | **Exceções por data** `{ id, date: 'YYYY-MM-DD', label?, closed, intervals }`: dia fechado ou com intervalos próprios, no lugar da grade |
+| `alwaysOpen?` | **Sempre aberto (24 horas)** — caixa no topo do quadro: vale a primeira faixa com `open` o tempo todo (`alwaysOpenBand`); grade, exceções e Fechado ficam salvos, mas não valem, e a mensagem de fechado nunca sai. Exige uma faixa com `open` |
 
 ### Regras de horário
 - `end <= start` atravessa a meia-noite: `22:00–02:00` vale até 02:00 do **dia seguinte**; `22:00–00:00` vai até a meia-noite; `00:00–00:00` é o dia inteiro.

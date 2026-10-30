@@ -145,6 +145,13 @@ Seu login será: ${user.email}`,
     await this.accessLog.endAllOfPerson(userId, 'revoked');
   }
 
+  /** Cliente desativado (docs/desativar-cliente.md): a equipe não entra; dono do sistema continua. */
+  private async assertTenantActive(user: { tenantId: string | null; role: string; isSystemOwner: boolean }) {
+    if (!user.tenantId || user.role === 'super_admin' || user.isSystemOwner) return;
+    const t = await this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { isActive: true } });
+    if (t && !t.isActive) throw new ForbiddenException('Esta empresa está desativada. Fale com o suporte.');
+  }
+
   async login(email: string, password: string, meta: { userAgent?: string; ip?: string }) {
     const user = await this.prisma.user.findUnique({ where: { email } });
     // argon2.verify em hash fake evita timing attack de enumeração de e-mail
@@ -155,6 +162,7 @@ Seu login será: ${user.email}`,
     // validade da conta temporária + escala de trabalho: fora do turno (e sem liberação de plantão) não entra — docs/escalas.md
     const janela = await this.shift.sessionWindow(user, 'login').catch((err) => this.deniedLogin(user, err, meta));
     if (!user.isActive) throw new UnauthorizedException('Credenciais inválidas');
+    await this.assertTenantActive(user);
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     return this.issue(user, meta, janela, await this.accessLog.start(user, meta));
@@ -170,6 +178,7 @@ Seu login será: ${user.email}`,
       const principal = await this.prisma.user.findUnique({ where: { id: row.user.primaryUserId }, select: { isActive: true } });
       if (!principal?.isActive) throw new UnauthorizedException('Refresh inválido');
     }
+    await this.assertTenantActive(row.user);
     // turno acabou há pouco: token TRAVADO (modo fim de turno). Acabou faz tempo ou a conta
     // temporária venceu: a sessão para aqui (o token não é rotacionado) — docs/escalas.md#fim-de-turno
     const janela = await this.shift.sessionWindow(row.user, 'refresh').catch(async (err) => {
@@ -256,6 +265,7 @@ Seu login será: ${user.email}`,
     const target = await this.prisma.user.findUnique({ where: { id: targetId } });
     if (!target || (target.id !== personId && target.primaryUserId !== personId)) throw new ForbiddenException('Esta empresa não está entre as suas.');
     if (!target.isActive) throw new ForbiddenException('Seu acesso a esta empresa foi desativado.');
+    await this.assertTenantActive(target);
     const janela = await this.shift.sessionWindow(target, 'login').catch((err) => this.deniedLogin(target, err, meta));
     if (!target.isActive) throw new ForbiddenException('Seu acesso a esta empresa venceu.');
     await this.prisma.user.update({ where: { id: target.id }, data: { lastLoginAt: new Date() } });

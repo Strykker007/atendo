@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Check, ExternalLink, Upload, Clock, CircleCheck, CircleAlert, Loader2, Zap } from 'lucide-react';
-import { BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, PIX_KEY_TYPE_LABEL, budgetApprovalPhrase, type PublicBudget } from '@atendo/shared';
+import { BUDGET_RECEIPT_MAX_MB, BUDGET_RECEIPT_MIMES, PIX_KEY_TYPE_LABEL, BUDGET_APPROVAL_TEXT, type PublicBudget } from '@atendo/shared';
 import { MarcaHorizontal } from '@/components/ui/Marca';
 import { useBrand } from '@/lib/brand-context';
 
@@ -99,9 +99,8 @@ function Orcamento({ hash, b: recebido }: { hash: string; b: PublicBudget }) {
       {b.awaitingApproval && b.status === 'PENDING' && b.number && (
         <Cartao className="text-center space-y-1">
           <p className="text-sm font-semibold">Gostou do orçamento?</p>
-          <p className="text-sm text-muted">Para aprovar, responda no WhatsApp:</p>
-          <p className="text-lg font-semibold tnum">{budgetApprovalPhrase(b.number)}</p>
-          <p className="text-xs text-faint">Depois da aprovação, o pagamento aparece aqui nesta mesma página.</p>
+          <p className="text-sm text-muted">{BUDGET_APPROVAL_TEXT} no WhatsApp.</p>
+          <p className="text-xs text-faint">No Pix, depois da aprovação o pagamento aparece aqui nesta mesma página.</p>
         </Cartao>
       )}
 

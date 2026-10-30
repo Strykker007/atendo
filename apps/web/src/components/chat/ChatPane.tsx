@@ -474,7 +474,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     const texto = assinar(t);
     return send.mutateAsync({ type: 'text', text: texto, simulateTypingChars: texto.length, idempotencyKey: crypto.randomUUID() });
   };
-  // o atalho do orçamento destaca o número que o cliente aprovou ("APROVO 42")
+  // o atalho do orçamento destaca o que o cliente aprovou (forma de pagamento e, com mais de um, o número)
   const ultimaDoContato = useMemo(() => [...mensagens].reverse().find((m) => m.direction === 'in')?.text ?? null, [mensagens]);
   useEffect(() => {
     const h = (e: Event) => {

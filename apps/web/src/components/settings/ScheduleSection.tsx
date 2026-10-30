@@ -199,10 +199,19 @@ function ScheduleEditor({ schedule, attendanceActive, canDelete }: { schedule: B
         {canDelete && <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setConfirmDel(true)}>Excluir</Button>}
       </div>
 
+      {/* sempre aberto: a grade fica guardada, mas não vale — nunca manda a mensagem de fechado */}
+      <label className={cn('flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer', cfg.alwaysOpen ? 'border-ok bg-ok-soft' : 'border-line')}>
+        <input type="checkbox" className="mt-0.5" checked={!!cfg.alwaysOpen} onChange={(e) => setCfg({ alwaysOpen: e.target.checked })} />
+        <span className="text-[13px]">
+          <b className="text-ink">Sempre aberto (24 horas, todos os dias)</b>
+          <span className="block text-[11px] text-muted">Ignora a grade e as exceções: nunca fica fechado nem envia a mensagem de fechado. A grade continua salva para quando desligar.</span>
+        </span>
+      </label>
+
       <BandsEditor cfg={cfg} setCfg={setCfg} issues={[...issuesAt('bands'), ...issuesAt('closed')]} />
 
-      <div className="space-y-1.5">
-        <h4 className="text-[13px] font-semibold text-ink">Grade semanal</h4>
+      <div className={cn('space-y-1.5', cfg.alwaysOpen && 'opacity-50 pointer-events-none')} aria-disabled={cfg.alwaysOpen}>
+        <h4 className="text-[13px] font-semibold text-ink">Grade semanal{cfg.alwaysOpen && <span className="font-normal text-muted"> — sem efeito no "sempre aberto"</span>}</h4>
         <p className="text-[11px] text-faint">Fora de qualquer intervalo vale <b>Fechado</b>. Intervalo com fim menor que o início atravessa a meia-noite (22:00–02:00); 00:00–00:00 é o dia inteiro.</p>
         {WEEKDAY_NAMES.map((nome, d) => (
           <DayRow
@@ -218,7 +227,7 @@ function ScheduleEditor({ schedule, attendanceActive, canDelete }: { schedule: B
         ))}
       </div>
 
-      <ExceptionsEditor cfg={cfg} setCfg={setCfg} issuesAt={issuesAt} />
+      <div className={cn(cfg.alwaysOpen && 'opacity-50 pointer-events-none')}><ExceptionsEditor cfg={cfg} setCfg={setCfg} issuesAt={issuesAt} /></div>
 
       <Simulator cfg={cfg} attendanceActive={attendanceActive} />
 

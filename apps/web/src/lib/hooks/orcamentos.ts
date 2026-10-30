@@ -66,11 +66,12 @@ export const useRefundBudget = () => {
   });
 };
 
-/** Cliente aprovou o orçamento por texto: libera o link DESTE orçamento (e gera o Pix automático). */
+/** Cliente aprovou o orçamento por texto: libera o link DESTE orçamento (e gera o Pix automático). `link: false` = cartão/dinheiro, sem Pix. */
 export const useApproveBudget = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ conversationId, id }: { conversationId: string; id: string }) => api<Budget>(`/conversations/${conversationId}/budgets/${id}/approve`, { method: 'POST' }),
+    mutationFn: ({ conversationId, id, link = true }: { conversationId: string; id: string; link?: boolean }) =>
+      api<Budget>(`/conversations/${conversationId}/budgets/${id}/approve`, { method: 'POST', body: JSON.stringify({ link }) }),
     onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ['budgets', v.conversationId] }),
   });
 };

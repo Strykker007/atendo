@@ -16,6 +16,10 @@ model Tenant {
   name      String
   slug      String   @unique
   isActive  Boolean  @default(true)
+  tickets            Ticket[]
+  ticketHoldReasons  TicketHoldReason[]
+  /// quando foi desativado (docs/desativar-cliente.md); nulo = ativo
+  deactivatedAt DateTime?
   /// id do Customer no Stripe (criado no primeiro checkout)
   stripeCustomerId String? @unique
   /// cliente no Asaas (cus_…) — criado no primeiro checkout quando o gateway é o Asaas
@@ -174,6 +178,11 @@ model User {
   invitedAt     DateTime?
   passwordSetAt DateTime?
   assigned      Conversation[] @relation("assignee")
+  ticketsCreated     Ticket[]            @relation("ticketCreator")
+  ticketRoles        TicketParticipant[]
+  ticketEvents       TicketEvent[]
+  /// sócio no fechamento financeiro (docs/36-fechamento-financeiro.md)
+  financePartner FinancePartner? @relation("financePartner")
   messages      Message[]
   numbers       UserNumber[]
   events        ConversationEvent[] @relation("eventActor")
@@ -389,6 +398,7 @@ model Department {
   tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users         UserDepartment[]
   conversations Conversation[]
+  tickets       Ticket[]
 
   @@unique([tenantId, name])
   @@map("departments")
@@ -643,6 +653,9 @@ model WhatsAppNumber {
   provider WhatsAppProvider @default(evolution)
   /// Identificador do número dentro do provider: phone_number_id (Meta) ou instanceName (Evolution)
   externalId     String
+  /// desligado junto com o cliente (docs/desativar-cliente.md): instância QR excluída; reativar o
+  /// cliente devolve o número (desconectado, para ler o QR de novo). Nulo = não foi o cliente
+  suspendedAt    DateTime?
   /// Credenciais do provider ativo, criptografadas (AES-256-GCM) pelo CryptoService
   providerConfig String
   status         NumberStatus @default(disconnected)
@@ -1136,6 +1149,7 @@ model Conversation {
   aiUsage   AiUsage[]
 
   @@map("conversations")
+  tickets           Ticket[]
 }
 
 enum MessageDirection {
@@ -2856,7 +2870,11 @@ model FinanceTaxRule {
 /// Sócio e a parte dele no que sobra do mês (soma dos ativos = 100%).
 model FinancePartner {
   id           String   @id @default(uuid())
+  /// nome mostrado; vinculado a uma conta, acompanha o nome do usuário
   name         String
+  /// conta do sócio no sistema (dono do sistema): evita cadastrar a mesma pessoa duas vezes
+  userId       String?  @unique
+  user         User?    @relation("financePartner", fields: [userId], references: [id], onDelete: SetNull)
   sharePercent Decimal  @db.Decimal(5, 2)
   pixKey       String?
   isActive     Boolean  @default(true)
@@ -2894,3 +2912,94 @@ model FinanceSettings {
   @@map("finance_settings")
 }
 
+/// Ticket interno (docs/tickets.md): um setor pede algo a outro. Número sequencial por empresa.
+model Ticket {
+  id             String    @id @default(uuid())
+  tenantId       String
+  number         Int
+  title          String
+  description    String?
+  /// TICKET_STATUSES (packages/shared/tickets.ts)
+  status         String    @default("open")
+  /// TICKET_PRIORITIES
+  priority       String    @default("normal")
+  /// setor de destino; nulo = sem setor (vê quem participa)
+  departmentId   String?
+  /// aberto a partir de um atendimento
+  conversationId String?
+  createdById    String?
+  dueAt          DateTime?
+  /// em espera: motivo, observação e quando retomar
+  holdReasonId   String?
+  holdNote       String?
+  holdUntil      DateTime?
+  holdSince      DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  department   Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  conversation Conversation?       @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  createdBy    User?               @relation("ticketCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  holdReason   TicketHoldReason?   @relation(fields: [holdReasonId], references: [id], onDelete: SetNull)
+  participants TicketParticipant[]
+  events       TicketEvent[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status])
+  @@index([departmentId])
+  @@index([conversationId])
+  @@map("tickets")
+}
+
+/// Quem atua no ticket: um `responsible` e quantos `participant` precisar (adm + portaria…).
+model TicketParticipant {
+  ticketId String
+  userId   String
+  /// TICKET_ROLES
+  role     String   @default("participant")
+  addedAt  DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
+  @@index([userId])
+  @@map("ticket_participants")
+}
+
+/// Linha do tempo: comentários e ações (status, espera, transferência, pessoas).
+model TicketEvent {
+  id        String   @id @default(uuid())
+  ticketId  String
+  tenantId  String
+  /// TICKET_EVENT_TYPES
+  type      String
+  actorId   String?
+  body      String?
+  data      Json?
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_events")
+}
+
+/// Motivo de "Em espera" (prestador, peça, aprovação…), cadastrável por empresa.
+model TicketHoldReason {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  isActive  Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tickets Ticket[]
+
+  @@unique([tenantId, name])
+  @@map("ticket_hold_reasons")
+}

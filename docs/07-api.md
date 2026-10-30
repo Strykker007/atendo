@@ -31,7 +31,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/tenants` | super_admin | Lista clientes com plano, contagens e `companies` (cada empresa com `billingType`, `isActive` e a assinatura própria, se houver) |
 | POST | `/tenants` | super_admin | Cria cliente + assinatura + admin + tags de encerramento padrão (`DEFAULT_LOSS_REASONS`, packages/shared — tags fora do Kanban) + perfis padrão, numa transação só. `templateId?` = modelo de perfil (ausente = o marcado como padrão; `null` = nenhum): perfis, respostas, fluxos (desligados) e tags de encerramento do modelo — ver [20](20-modelos-de-perfil.md). E-mail de admin em uso = 400. Plano gratuito nasce `active`; pago, `trialing` |
 | — | `/tenant-templates/*` | super_admin | Modelos de perfil (listar, ler, criar, editar conteúdo/padrão, exportar, importar, carregar, gerar de um cliente) — ver [20](20-modelos-de-perfil.md#api-super_admin) |
-| PATCH | `/tenants/:id` | super_admin | `name`, `isActive`, `planId`, `subscriptionStatus` (ajuste manual sem Stripe), `currentPeriodEnd` (`AAAA-MM-DD`, vale até 23:59 de Brasília; 400 se a assinatura tem gateway), `profile` (dados cadastrais; string vazia limpa; CPF 11 / CNPJ 14 dígitos), `billingType` (`INDIVIDUAL`\|`CONSOLIDATED_GROUP`; grupo com assinatura viva no Stripe = 400). Trocar para plano gratuito: assinatura `active`, preço 0, e a assinatura paga no Stripe (se houver) é cancelada |
+| POST | `/tenants/:id/deactivate` · `/tenants/:id/reactivate` | super_admin | Desativar (`{cancelBilling?}`) / reativar cliente — [Desativar cliente](desativar-cliente.md) |
+| PATCH | `/tenants/:id` | super_admin | `name`, `isActive` (só o valor atual; mudar = 400, use deactivate/reactivate), `planId`, `subscriptionStatus` (ajuste manual sem Stripe), `currentPeriodEnd` (`AAAA-MM-DD`, vale até 23:59 de Brasília; 400 se a assinatura tem gateway), `profile` (dados cadastrais; string vazia limpa; CPF 11 / CNPJ 14 dígitos), `billingType` (`INDIVIDUAL`\|`CONSOLIDATED_GROUP`; grupo com assinatura viva no Stripe = 400). Trocar para plano gratuito: assinatura `active`, preço 0, e a assinatura paga no Stripe (se houver) é cancelada |
 | GET | `/notices/active` | todos (inclusive dono) | Avisos globais ativos, mais novos primeiro (até 30) — ver [avisos.md](avisos.md) |
 | GET | `/super-admin/notices` | super_admin | Todos os avisos (ativos e desativados) |
 | POST | `/super-admin/notices` | super_admin | `{title, message, type?: INFO \| WARNING \| CRITICAL}` — grava e emite `system_notice` para todos os conectados |
@@ -225,6 +226,10 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/webhooks/evolution` | — | Eventos Evolution (token de instância) |
 | POST | `/webhooks/stripe` | — | Eventos Stripe (assinatura `stripe-signature`) |
 | POST | `/webhooks/asaas` | — | Eventos Asaas (header `asaas-access-token` = `ASAAS_WEBHOOK_TOKEN`; 403 se não bater) |
+
+### Tickets internos
+
+Rotas `/tickets/*` (recurso `tickets`; permissões `tickets.create/handle/view_all/manage`) em [Tickets internos](tickets.md#api-tickets-recurso-tickets).
 
 ### Contatos isentos de ticket e chat interno
 

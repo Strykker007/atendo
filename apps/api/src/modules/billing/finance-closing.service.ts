@@ -18,6 +18,9 @@ function monthRange(period: string) {
   return { start: new Date(`${period}-01T00:00:00-03:00`), end: new Date(`${next}-01T00:00:00-03:00`) };
 }
 const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+/** sócio vinculado a uma conta: o nome vem do usuário (uma pessoa, um cadastro) */
+const partnerInclude = { user: { select: { name: true, email: true } } } as const;
+const partnerName = (p: { name: string; user?: { name: string } | null }) => p.user?.name ?? p.name;
 /** mês anterior (`AAAA-MM`) */
 function prevPeriod(period: string) {
   const [y, m] = period.split('-').map(Number);
@@ -122,7 +125,7 @@ export class FinanceClosingService {
     const [receivables, entries, partners, settings, cash, cats] = await Promise.all([
       this.receivables(period),
       this.prisma.financeEntry.findMany({ where: { period }, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }], include: { tenant: { select: { name: true } }, supplier: { select: { name: true } } } }),
-      this.prisma.financePartner.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+      this.prisma.financePartner.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, include: partnerInclude }),
       this.settings(),
       this.cash(),
       this.categories(),
@@ -247,8 +250,8 @@ export class FinanceClosingService {
   }
 
   /** Divide pelos %; o centavo que sobra do arredondamento vai para o último. */
-  private split(distributable: number, partners: { id: string; name: string; sharePercent: unknown; pixKey: string | null }[]): PayoutRow[] {
-    const rows = partners.map((p) => ({ partnerId: p.id, name: p.name, percent: Number(p.sharePercent), amount: cents((distributable * Number(p.sharePercent)) / 100), pixKey: p.pixKey, paidAt: null }));
+  private split(distributable: number, partners: { id: string; name: string; sharePercent: unknown; pixKey: string | null; user?: { name: string } | null }[]): PayoutRow[] {
+    const rows = partners.map((p) => ({ partnerId: p.id, name: partnerName(p), percent: Number(p.sharePercent), amount: cents((distributable * Number(p.sharePercent)) / 100), pixKey: p.pixKey, paidAt: null }));
     const total = cents((distributable * rows.reduce((s, r) => s + r.percent, 0)) / 100);
     if (rows.length) rows[rows.length - 1].amount = cents(rows[rows.length - 1].amount + total - rows.reduce((s, r) => s + r.amount, 0));
     return rows;
@@ -396,6 +399,14 @@ export class FinanceClosingService {
     return { section: c.section as FinanceSection, kind: financeKindOf(c.section as FinanceSection) };
   }
 
+  /** Cliente da entrada: só em entrada, e precisa existir. */
+  private async client(id: string | null | undefined, kind: string) {
+    if (!id) return null;
+    if (kind !== 'income') throw new BadRequestException('Cliente só vale em entrada.');
+    if (!(await this.prisma.tenant.findUnique({ where: { id }, select: { id: true } }))) throw new BadRequestException('Cliente não encontrado');
+    return id;
+  }
+
   private async supplier(id?: string | null) {
     if (!id) return null;
     if (!(await this.prisma.financeSupplier.findUnique({ where: { id }, select: { id: true } }))) throw new BadRequestException('Fornecedor não encontrado');
@@ -409,6 +420,7 @@ export class FinanceClosingService {
   async createEntry(userId: string, dto: EntryDto) {
     const { kind } = await this.category(dto.category);
     const supplierId = await this.supplier(dto.supplierId);
+    const tenantId = await this.client(dto.tenantId, kind);
     const n = Math.max(1, Math.min(60, dto.installments ?? 1));
     const comp = dto.period && PERIOD_RE.test(dto.period) ? dto.period : dto.date.slice(0, 7);
     const dia = Number(dto.date.slice(8, 10));
@@ -417,7 +429,7 @@ export class FinanceClosingService {
       kind, category: dto.category, description: n > 1 ? `${dto.description.trim()} (${i + 1}/${n})` : dto.description.trim(), amount: cents(dto.amount),
       date: i ? dateIn(addMonths(dto.date.slice(0, 7), i), dia) : noon(dto.date), period: addMonths(comp, i),
       paidAt: i === 0 && dto.paidAt ? noon(dto.paidAt) : null,
-      paymentMethod: dto.paymentMethod || null, documentNumber: dto.documentNumber?.trim() || null, notes: dto.notes?.trim() || null, supplierId,
+      paymentMethod: dto.paymentMethod || null, documentNumber: dto.documentNumber?.trim() || null, notes: dto.notes?.trim() || null, supplierId, tenantId,
       installmentGroup: group, installmentNo: n > 1 ? i + 1 : null, installmentTotal: n > 1 ? n : null, createdById: userId,
     }));
     for (const p of new Set(rows.map((r) => r.period))) await this.assertOpen(p);
@@ -448,6 +460,7 @@ export class FinanceClosingService {
         ...(dto.documentNumber !== undefined && { documentNumber: dto.documentNumber?.trim() || null }),
         ...(dto.notes !== undefined && { notes: dto.notes?.trim() || null }),
         ...(dto.supplierId !== undefined && { supplierId: await this.supplier(dto.supplierId) }),
+        ...(dto.tenantId !== undefined && { tenantId: await this.client(dto.tenantId, cat?.kind ?? e.kind) }),
         ...(dto.skipped !== undefined && { skipped: dto.skipped }),
       },
     });
@@ -505,16 +518,18 @@ export class FinanceClosingService {
   // ---------- sócios, fixos, configuração ----------
 
   async config() {
-    const [partners, recurring, settings, categories, suppliers, taxRules] = await Promise.all([
-      this.prisma.financePartner.findMany({ orderBy: [{ isActive: 'desc' }, { name: 'asc' }] }),
+    const [partners, recurring, settings, categories, suppliers, taxRules, accounts] = await Promise.all([
+      this.prisma.financePartner.findMany({ orderBy: [{ isActive: 'desc' }, { name: 'asc' }], include: partnerInclude }),
       this.prisma.financeRecurring.findMany({ orderBy: [{ isActive: 'desc' }, { category: 'asc' }, { description: 'asc' }], include: { supplier: { select: { name: true } } } }),
       this.settings(),
       this.prisma.financeCategory.findMany({ orderBy: [{ section: 'asc' }, { name: 'asc' }] }),
       this.prisma.financeSupplier.findMany({ orderBy: [{ isActive: 'desc' }, { name: 'asc' }] }),
       this.prisma.financeTaxRule.findMany({ orderBy: [{ isActive: 'desc' }, { name: 'asc' }] }),
+      this.ownerAccounts(),
     ]);
     return {
-      partners: partners.map((p) => ({ id: p.id, name: p.name, sharePercent: Number(p.sharePercent), pixKey: p.pixKey, isActive: p.isActive })),
+      partners: partners.map((p) => ({ id: p.id, name: partnerName(p), userId: p.userId, email: p.user?.email ?? null, sharePercent: Number(p.sharePercent), pixKey: p.pixKey, isActive: p.isActive })),
+      accounts,
       recurring: recurring.map((r) => ({
         id: r.id, category: r.category, description: r.description, amount: Number(r.amount), dayOfMonth: r.dayOfMonth, isActive: r.isActive, startPeriod: r.startPeriod,
         endPeriod: r.endPeriod, frequency: r.frequency, autoPaid: r.autoPaid, paymentMethod: r.paymentMethod, supplierId: r.supplierId, supplier: r.supplier?.name ?? null, notes: r.notes,
@@ -622,8 +637,28 @@ export class FinanceClosingService {
     return this.config();
   }
 
-  async savePartner(id: string | null, dto: { name: string; sharePercent: number; pixKey?: string | null; isActive?: boolean }) {
-    const data = { name: dto.name.trim(), sharePercent: dto.sharePercent, pixKey: dto.pixKey?.trim() || null, ...(dto.isActive !== undefined && { isActive: dto.isActive }) };
+  /** Contas que podem ser sócio: donos do sistema (login principal, ativos) — docs/donos-do-sistema.md. */
+  private async ownerAccounts() {
+    const rows = await this.prisma.user.findMany({
+      where: { isActive: true, primaryUserId: null, OR: [{ role: 'super_admin' }, { isSystemOwner: true }, { memberships: { some: { isSystemOwner: true, isActive: true } } }] },
+      select: { id: true, name: true, email: true },
+      orderBy: { name: 'asc' },
+    });
+    return rows;
+  }
+
+  async savePartner(id: string | null, dto: { name?: string; userId?: string | null; sharePercent: number; pixKey?: string | null; isActive?: boolean }) {
+    let name = dto.name?.trim() ?? '';
+    const userId = dto.userId || null;
+    if (userId) {
+      const conta = (await this.ownerAccounts()).find((u) => u.id === userId);
+      if (!conta) throw new BadRequestException('Conta não encontrada entre os donos do sistema.');
+      const outro = await this.prisma.financePartner.findUnique({ where: { userId }, select: { id: true, name: true } });
+      if (outro && outro.id !== id) throw new BadRequestException(`${conta.name} já é sócio cadastrado.`);
+      name = conta.name;
+    }
+    if (!name) throw new BadRequestException('Escolha a conta do sócio ou informe o nome.');
+    const data = { name, userId, sharePercent: dto.sharePercent, pixKey: dto.pixKey?.trim() || null, ...(dto.isActive !== undefined && { isActive: dto.isActive }) };
     if (id) await this.prisma.financePartner.update({ where: { id }, data });
     else await this.prisma.financePartner.create({ data });
     return this.config();
@@ -677,7 +712,7 @@ export class FinanceClosingService {
     await this.assertOpen(period);
     await this.materializeRecurring(period);
     await this.materializeTaxes(period);
-    const [settings, partners] = await Promise.all([this.settings(), this.prisma.financePartner.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } })]);
+    const [settings, partners] = await Promise.all([this.settings(), this.prisma.financePartner.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, include: partnerInclude })]);
     const summary = await this.summary(period, settings.reservePercent);
     const pct = cents(partners.reduce((s, p) => s + Number(p.sharePercent), 0));
     if (summary.distributable > 0 && pct !== 100) throw new BadRequestException(`A soma dos sócios ativos é ${pct}%: ajuste para 100% em Sócios e custos antes de fechar.`);

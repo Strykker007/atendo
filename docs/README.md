@@ -62,5 +62,7 @@
 | [34 — Condomínios e operações sem venda](34-condominios.md) | Produto / Dev | Análise do produto para operação sem venda (condomínio) e plano por fases: unidades, chamados com protocolo, comunicados, relatórios do síndico |
 | [35 — Retomada do deploy v1.10.0](35-retomada-deploy-v1.10.md) | Ops | Onde paramos em 29/10 e o passo a passo para terminar o deploy, o webhook do Asaas e a migração da mensalidade por Pix |
 | [36 — Fechamento financeiro](36-fechamento-financeiro.md) | Produto / Dono | A receber × recebido do mês, clientes em atraso (filtros e ações), custos fixos, folha, pró-labore, caixa e a parte de cada sócio no fechamento |
+| [Desativar cliente](desativar-cliente.md) | Produto / Dev | O que para quando o dono desativa um cliente (sessões, números QR, envio, robô, cobrança) e como reativar |
+| [Tickets internos](tickets.md) | Produto / Dev | Pedidos entre setores: responsável + participantes, congelar por motivo externo, transferir, linha do tempo e permissões |
 
 Convenção: código em inglês, comentários e documentação em português.

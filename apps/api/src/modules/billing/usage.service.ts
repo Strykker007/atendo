@@ -162,6 +162,9 @@ export class UsageService {
 
   /** Verifica se o tenant pode enviar mais uma mensagem/template. */
   async canSend(tenantId: string, kind: QuotaKind, numberId?: string): Promise<QuotaDecision> {
+    // cliente desativado não envia nada (docs/desativar-cliente.md)
+    const t = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { isActive: true } });
+    if (t && !t.isActive) return { ok: false, reason: 'Cliente desativado: o envio está bloqueado.' };
     // empresa com assinatura própria suspensa/cancelada: os números dela param de enviar, e só
     // eles — o resto do grupo segue normal (docs/empresas.md#cobrança)
     if (numberId) {

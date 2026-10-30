@@ -104,7 +104,10 @@ export function NewConversationModal({ onClose, contact: inicial, onOpened }: { 
   return (
     <Modal open onClose={onClose} title="Nova conversa">
       <div className="space-y-4">
-        <Field label="Contato">
+        {/* div, não <Field> (label): o clique num item da lista era repassado pelo label ao
+            primeiro controle de dentro — que, já trocado, é o "trocar" — e desfazia a escolha */}
+        <div className="block text-sm space-y-1">
+          <span className="text-ink font-medium">Contato</span>
           {contato || novoTelefone ? (
             <div className="flex items-center justify-between rounded-lg bg-field px-3 py-2 text-sm">
               <span className="text-ink truncate">
@@ -116,10 +119,18 @@ export function NewConversationModal({ onClose, contact: inicial, onOpened }: { 
             <div className="relative">
               <input
                 autoFocus
+                // é busca, não cadastro: sem o preenchimento automático do navegador (no Safari, a
+                // lista de contatos do iPhone abria por cima dos resultados)
+                type="search"
+                name="busca-conversa"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                data-1p-ignore
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
                 // Enter num telefone válido já escolhe o número avulso — não precisa achar o item na lista
-                onKeyDown={(e) => { if (e.key === 'Enter' && !agendaAberta && pareceTelefone) { e.preventDefault(); setNovoTelefone(telefoneDigitado); } }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && pareceTelefone) { e.preventDefault(); setNovoTelefone(telefoneDigitado); setAgendaAberta(false); } }}
                 placeholder={agendaAberta ? 'Filtrar a agenda por nome ou telefone' : 'Buscar por nome ou digitar o telefone (ex.: 5562999999999)'}
                 className={cn(inputCls, 'pr-8')}
               />
@@ -146,7 +157,13 @@ export function NewConversationModal({ onClose, contact: inicial, onOpened }: { 
               )}
             </div>
           )}
-          {!contato && !novoTelefone && !agendaAberta && telefoneIncompleto && (
+          {/* agenda aberta filtra a lista dela, mas número novo (fora da agenda) também inicia */}
+          {agendaAberta && !contato && !novoTelefone && pareceTelefone && (
+            <button type="button" onClick={() => { setNovoTelefone(telefoneDigitado); setAgendaAberta(false); }} className="mt-1.5 w-full flex items-center gap-2 rounded-lg border border-line text-left px-3 py-1.5 text-sm hover:bg-field text-accent-ink">
+              <UserPlus size={14} /> Iniciar com {formatPhone(telefoneDigitado)} <span className="ml-auto text-[10.5px] text-faint">Enter</span>
+            </button>
+          )}
+          {!contato && !novoTelefone && telefoneIncompleto && (
             <p className="mt-1 text-[11.5px] text-warn-ink">{digitos.length > 15 ? 'Número longo demais.' : 'Digite DDD + número, ou DDI + DDD + número (ex.: 5562999999999).'}</p>
           )}
           {!contato && !novoTelefone && number && !isMeta && (
@@ -165,7 +182,7 @@ export function NewConversationModal({ onClose, contact: inicial, onOpened }: { 
               }}
             />
           )}
-        </Field>
+        </div>
         {novoTelefone && !contato && (
           <div className="grid grid-cols-2 gap-2">
             <Field label="Telefone"><PhoneInput value={novoTelefone} onChange={setNovoTelefone} /></Field>

@@ -67,6 +67,8 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
         this.log.warn(`Mensagem para número desconhecido ${job.data.provider}:${msg.externalNumberId}`);
         continue;
       }
+      // cliente desativado: nada é gravado nem respondido (docs/desativar-cliente.md)
+      if (number.suspendedAt) continue;
       enrichContext({ tenantId: number.tenantId }); // daqui para a frente o log sai com o tenant
       const result = await this.inbound.ingestInbound(number, msg);
       const saved = result?.message;
