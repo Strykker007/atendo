@@ -58,6 +58,19 @@ services:
     expose: ["3000"]
     cpu_shares: 1024
 
+  # Site público (docs/21-site.md): landing + /privacidade (URL exigida pela Meta no app)
+  site:
+    build:
+      context: ..
+      dockerfile: apps/site/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: https://${APP_DOMAIN}
+        NEXT_PUBLIC_SITE_URL: https://${SITE_DOMAIN:-vogochatplus.com.br}
+    image: atendo/site:latest
+    restart: unless-stopped
+    expose: ["3000"]
+    cpu_shares: 256
+
   # Proxy reverso com HTTPS automático (Let's Encrypt). Domínios vêm do .env.production.
   caddy:
     image: caddy:2-alpine
@@ -65,12 +78,13 @@ services:
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?defina APP_DOMAIN}
       API_DOMAIN: ${API_DOMAIN:?defina API_DOMAIN}
+      SITE_DOMAIN: ${SITE_DOMAIN:-vogochatplus.com.br}
     ports: ["80:80", "443:443"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./volumes/caddy-data:/data
       - ./volumes/caddy-config:/config
-    depends_on: [api, web]
+    depends_on: [api, web, site]
 
   postgres:
     image: postgres:16-alpine

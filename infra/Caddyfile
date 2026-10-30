@@ -20,6 +20,23 @@
 	reverse_proxy web:3000
 }
 
+# Site público (docs/21-site.md). www vai para o domínio sem www.
+{$SITE_DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-X-Powered-By
+		-Server
+	}
+	reverse_proxy site:3000
+}
+
+www.{$SITE_DOMAIN} {
+	redir https://{$SITE_DOMAIN}{uri} permanent
+}
+
 {$API_DOMAIN} {
 	# os headers de segurança vêm do helmet (apps/api/src/main.ts)
 	header -Server
