@@ -12,7 +12,7 @@ export type Provider = 'meta' | 'evolution';
  * Evolution: não precisa de credencial (a instância é criada pela API e conectada por QR).
  * Meta: precisa de phone_number_id, WABA id e token permanente do System User.
  */
-export function ProviderForm({ value, onChange, config, onConfig }: { value: Provider; onChange: (p: Provider) => void; config: Record<string, string>; onConfig: (c: Record<string, string>) => void }) {
+export function ProviderForm({ value, onChange, config, onConfig, hideMetaFields }: { value: Provider; onChange: (p: Provider) => void; config: Record<string, string>; onConfig: (c: Record<string, string>) => void; /** cadastro incorporado: a janela da Meta substitui os campos */ hideMetaFields?: boolean }) {
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => onConfig({ ...config, [k]: e.target.value });
   return (
     <div className="space-y-4">
@@ -26,7 +26,7 @@ export function ProviderForm({ value, onChange, config, onConfig }: { value: Pro
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <span>Este modo conecta lendo o QR Code, como no WhatsApp Web: o celular precisa continuar com a conta ativa. Indicado para atendimento do dia a dia.</span>
         </div>
-      ) : (
+      ) : hideMetaFields ? null : (
         <div className="space-y-3">
           <Field label="Phone Number ID" hint="Meta Business → WhatsApp → Configuração da API"><input className={inputCls} value={config.phoneNumberId ?? ''} onChange={set('phoneNumberId')} required /></Field>
           <Field label="WABA ID (conta comercial)"><input className={inputCls} value={config.wabaId ?? ''} onChange={set('wabaId')} required /></Field>

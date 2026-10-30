@@ -230,6 +230,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 
 ### Tickets internos
 
+`GET /numbers/meta-signup/config` (`numbers.manage`) → `{enabled, appId, configId, graphVersion}` e `POST /numbers/meta-signup` `{code, wabaId, phoneNumberId, label}` (cadastro pela janela da Meta) em [Cadastro incorporado](meta-cadastro-incorporado.md).
+
 Rotas `/billing/meta-costs`, `/billing/meta-costs/refresh` e `/billing/meta-budget` em [Gasto com a Meta](gasto-meta.md#api).
 
 Rotas `/tickets/*` (recurso `tickets`; permissões `tickets.create/handle/view_all/manage`) em [Tickets internos](tickets.md#api-tickets-recurso-tickets).

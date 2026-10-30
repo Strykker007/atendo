@@ -20,6 +20,8 @@ import { ContactsSyncScheduler } from './contacts-sync';
 import { textSearch } from '../../common/text-search';
 import { phoneVariants } from '../conversations/phone-variants';
 import { evolutionClientConfig, type EvolutionNumberConfig } from './providers/evolution.provider';
+import { MetaProvider } from './providers/meta.provider';
+import { env } from '../../config/env';
 
 class CreateNumberDto {
   @Matches(/^\+?[1-9]\d{7,14}$/) phone: string;
@@ -28,6 +30,14 @@ class CreateNumberDto {
   @IsOptional() @Matches(/^#[0-9a-fA-F]{6}$/) color?: string;
   @IsEnum(ProviderKind) provider: ProviderKind;
   @IsObject() config: Record<string, unknown>;
+}
+/** Fim da janela da Meta (cadastro incorporado): código de 30 s + ids que a janela devolveu. */
+class MetaSignupDto {
+  @IsString() @MaxLength(1024) code: string;
+  @Matches(/^\d{5,25}$/) wabaId: string;
+  @Matches(/^\d{5,25}$/) phoneNumberId: string;
+  @IsString() @MaxLength(60) label: string;
+  @IsOptional() @Matches(/^#[0-9a-fA-F]{6}$/) color?: string;
 }
 class SwitchProviderDto {
   @IsEnum(ProviderKind) provider: ProviderKind;
@@ -71,6 +81,7 @@ export class NumbersController {
     private readonly contactsSync: ContactsSyncScheduler,
     private readonly permissions: PermissionsService,
     private readonly registry: ProviderRegistry,
+    private readonly meta: MetaProvider,
   ) {}
 
   @Get()
@@ -97,7 +108,36 @@ export class NumbersController {
   @RequirePermission('numbers.manage')
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxNumbers')
-  async create(@CurrentUser() user: AuthUser, @Body() dto: CreateNumberDto) {
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateNumberDto) {
+    return this.createNumber(user, dto);
+  }
+
+  /** O que o front precisa para abrir a janela da Meta; `enabled: false` = só o cadastro manual. */
+  @Get('meta-signup/config')
+  @RequirePermission('numbers.manage')
+  metaSignupConfig() {
+    const enabled = !!(env.META_APP_ID && env.META_ES_CONFIG_ID && env.META_APP_SECRET);
+    return { enabled, appId: enabled ? env.META_APP_ID : null, configId: enabled ? env.META_ES_CONFIG_ID : null, graphVersion: env.META_GRAPH_VERSION };
+  }
+
+  /**
+   * Cadastro incorporado (docs/meta-cadastro-incorporado.md): o cliente escolheu/criou a conta e o
+   * número na janela da Meta; aqui o código vira token, o número é registrado e entra no painel
+   * pelo mesmo caminho do cadastro manual (inscrição do app na WABA no `connect`).
+   */
+  @Post('meta-signup')
+  @RequirePermission('numbers.manage')
+  @UseGuards(PlanLimitGuard)
+  @RequireLimit('maxNumbers')
+  async metaSignup(@CurrentUser() user: AuthUser, @Body() dto: MetaSignupDto) {
+    const r = await this.meta.embeddedSignup(dto.code, dto.wabaId, dto.phoneNumberId);
+    if (!r.phone) throw new BadRequestException('A Meta não informou o telefone deste número. Tente de novo.');
+    const n = await this.createNumber(user, { phone: r.phone, label: dto.label, color: dto.color, provider: 'meta', config: r.config as unknown as Record<string, unknown> });
+    if (r.registerError) this.log.warn(`cadastro incorporado ${r.phone}: registro na Cloud API recusado (${r.registerError})`);
+    return { ...n, verifiedName: r.verifiedName, registerError: r.registerError ?? null };
+  }
+
+  private async createNumber(user: AuthUser, dto: CreateNumberDto) {
     const evo = dto.provider === 'evolution' ? evolutionClientConfig(dto.config, user.tenantId) : undefined;
     const externalId = String((evo ? evo.instanceName : (dto.config.phoneNumberId ?? dto.config.instanceName)) ?? `atendo-${user.tenantId.slice(0, 8)}-${dto.phone}`);
     const config = evo ? { instanceName: externalId } : dto.config;

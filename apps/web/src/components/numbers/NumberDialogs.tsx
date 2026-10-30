@@ -4,7 +4,9 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import { ProviderForm, toConfig, useProviderState } from './ProviderForm';
-import { useCreateNumber, useSwitchProvider, type NumberItem } from '@/lib/hooks';
+import { MetaSignupButton } from './MetaSignupButton';
+import { useCreateNumber, useSwitchProvider, useMetaSignupConfig, type NumberItem } from '@/lib/hooks';
+import { toast } from '@/components/ui/Toast';
 
 type Done = (r: { id: string; qrCode?: string; provider: 'meta' | 'evolution' }) => void;
 
@@ -14,6 +16,11 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
   const [error, setError] = useState<string | null>(null);
   const ps = useProviderState();
   const create = useCreateNumber();
+  // Meta com o cadastro incorporado configurado: a janela da Meta é o caminho; o manual fica recolhido
+  const signupCfg = useMetaSignupConfig(open);
+  const incorporado = ps.provider === 'meta' && !!signupCfg.data?.enabled;
+  const [manual, setManual] = useState(false);
+  const formularioManual = !incorporado || manual;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,13 +39,28 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
       <form onSubmit={submit} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome (como aparece no painel)"><input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Vendas, Suporte…" required /></Field>
-          <Field label="Telefone do WhatsApp"><PhoneInput value={phone} onChange={setPhone} required /></Field>
+          {formularioManual && <Field label="Telefone do WhatsApp"><PhoneInput value={phone} onChange={setPhone} required /></Field>}
         </div>
-        <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} />
+        <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} hideMetaFields={!formularioManual} />
+        {incorporado && !manual && (
+          <>
+            <MetaSignupButton
+              label={label}
+              onError={setError}
+              onDone={(r) => {
+                if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}`);
+                else toast.ok('Número conectado pela Meta');
+                onDone({ id: r.id, provider: 'meta' });
+                onClose();
+              }}
+            />
+            <button type="button" onClick={() => setManual(true)} className="text-xs text-accent-ink hover:underline">Já tenho o token e os IDs: preencher manualmente</button>
+          </>
+        )}
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={create.isPending}>Cancelar</Button>
-          <Button type="submit" loading={create.isPending} loadingText={ps.provider === 'evolution' ? 'Criando e gerando QR…' : 'Validando na Meta…'}>{ps.provider === 'evolution' ? 'Criar e gerar QR' : 'Criar e validar'}</Button>
+          {formularioManual && <Button type="submit" loading={create.isPending} loadingText={ps.provider === 'evolution' ? 'Criando e gerando QR…' : 'Validando na Meta…'}>{ps.provider === 'evolution' ? 'Criar e gerar QR' : 'Criar e validar'}</Button>}
         </div>
       </form>
     </Modal>

@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { MessageStatus, MessageType, NumberStatus, BillingCategory, templateParams } from '@atendo/shared';
 import type { InboundMessage, MessageTemplate, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
 import { env } from '../../../config/env';
@@ -12,6 +12,8 @@ export interface MetaNumberConfig {
   accessToken: string; // token permanente do System User
   phoneNumberId: string;
   wabaId: string;
+  /** PIN da verificação em duas etapas definido no registro (cadastro incorporado) */
+  pin?: string;
 }
 
 /** um ponto do `pricing_analytics` (granularidade diária) */
@@ -58,6 +60,32 @@ export class MetaProvider implements WhatsAppProvider {
     await this.graph(cfg, `${cfg.phoneNumberId}?fields=display_phone_number`);
     if (cfg.wabaId) await this.graph(cfg, `${cfg.wabaId}/subscribed_apps`, { method: 'POST' });
     return { status: NumberStatus.CONNECTED };
+  }
+
+  /**
+   * Cadastro incorporado (docs/meta-cadastro-incorporado.md), depois que o cliente terminou a janela
+   * da Meta: troca o código (vale 30 s) pelo token de negócio do cliente, lê o número e o registra
+   * na Cloud API com um PIN novo. A inscrição do app na WABA fica no `connect`, como no manual.
+   * Registro recusado (número com PIN de outro sistema) não impede o cadastro: volta em `registerError`.
+   */
+  async embeddedSignup(code: string, wabaId: string, phoneNumberId: string) {
+    if (!env.META_APP_ID || !env.META_APP_SECRET) throw new BadRequestException('Cadastro pela Meta não está configurado neste servidor.');
+    const q = new URLSearchParams({ client_id: env.META_APP_ID, client_secret: env.META_APP_SECRET, code });
+    const res = await fetch(`${this.base}/oauth/access_token?${q}`);
+    const tok = (await res.json()) as { access_token?: string; error?: { message?: string; code?: number } };
+    if (!res.ok || !tok.access_token) throw new BadRequestException(describeMetaError(tok.error, 'A Meta não liberou o acesso. Abra a janela da Meta de novo.'));
+    const cfg: MetaNumberConfig = { accessToken: tok.access_token, phoneNumberId, wabaId };
+    const info = await this.graph<{ display_phone_number?: string; verified_name?: string }>(cfg, `${phoneNumberId}?fields=display_phone_number,verified_name`);
+    const pin = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    let registerError: string | undefined;
+    await this.graph(cfg, `${phoneNumberId}/register`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', pin }) })
+      .catch((err) => { registerError = err instanceof Error ? err.message : String(err); });
+    return {
+      config: { ...cfg, ...(!registerError && { pin }) },
+      phone: (info.display_phone_number ?? '').replace(/\D/g, ''),
+      verifiedName: info.verified_name ?? null,
+      registerError,
+    };
   }
 
   /**

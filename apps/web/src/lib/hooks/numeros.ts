@@ -35,6 +35,19 @@ export const useCreateNumber = () => {
     onSuccess: invalidateNumbers(qc),
   });
 };
+/** Cadastro incorporado da Meta (docs/meta-cadastro-incorporado.md): o servidor diz se está configurado. */
+export const useMetaSignupConfig = (enabled = true) =>
+  useQuery({ queryKey: ['meta-signup-config'], enabled, staleTime: 10 * 60_000, retry: false, queryFn: () => api<{ enabled: boolean; appId: string | null; configId: string | null; graphVersion: string }>('/numbers/meta-signup/config') });
+
+export const useMetaSignup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { code: string; wabaId: string; phoneNumberId: string; label: string }) =>
+      api<NumberItem & { verifiedName: string | null; registerError: string | null }>('/numbers/meta-signup', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: invalidateNumbers(qc),
+  });
+};
+
 export const useSwitchProvider = () => {
   const qc = useQueryClient();
   return useMutation({
