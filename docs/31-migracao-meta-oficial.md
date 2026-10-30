@@ -49,6 +49,10 @@ cadastrar no Atendo (`accessToken`, `phoneNumberId`, `wabaId`). Validar envio, r
 templates e mídia antes de mexer em qualquer cliente.
 
 ### 4. Migrar cliente a cliente
+
+O mesmo passo a passo está no próprio sistema: **Números → Adicionar número → Meta Cloud API →
+Passo a passo: onde pegar o token e os IDs** (`components/numbers/MetaManualGuide.tsx`).
+
 Ao conectar, o Atendo inscreve o app novo na WABA (`subscribed_apps`). A partir daí **os dois
 sistemas recebem as mensagens do número** — se o robô do antigo também responder, o contato
 recebe resposta dobrada. Para cada cliente:

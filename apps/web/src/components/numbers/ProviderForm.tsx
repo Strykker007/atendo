@@ -4,6 +4,7 @@ import { ShieldCheck, QrCode, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Field, inputCls } from '@/components/ui/Modal';
 import type { ProviderConfig } from '@/lib/hooks';
+import { MetaManualGuide } from './MetaManualGuide';
 
 export type Provider = 'meta' | 'evolution';
 
@@ -28,6 +29,7 @@ export function ProviderForm({ value, onChange, config, onConfig, hideMetaFields
         </div>
       ) : hideMetaFields ? null : (
         <div className="space-y-3">
+          <MetaManualGuide />
           <Field label="Phone Number ID" hint="Meta Business → WhatsApp → Configuração da API"><input className={inputCls} value={config.phoneNumberId ?? ''} onChange={set('phoneNumberId')} required /></Field>
           <Field label="WABA ID (conta comercial)"><input className={inputCls} value={config.wabaId ?? ''} onChange={set('wabaId')} required /></Field>
           <Field label="Token permanente" hint="Token de System User com permissão whatsapp_business_messaging. Fica criptografado no banco."><input type="password" className={inputCls} value={config.accessToken ?? ''} onChange={set('accessToken')} required /></Field>
