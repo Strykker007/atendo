@@ -18,6 +18,23 @@ Atalho **Orçamento** na linha das abas acima do campo, ao lado de *Mensagem par
 
 Não há permissão nem recurso de plano próprio: quem pode abrir a conversa pode gerar orçamento (o `ConversationScopeGuard` barra número/departamento de fora).
 
+## Orçamento por mensagem
+
+**Configurações → Atendimento → Orçamento por mensagem → Permitir enviar o orçamento na mensagem**
+(`tenant_settings.budgetQuoteEnabled`). **Desligado é o padrão para todas as empresas** (a
+migração `20270127000000_budget_discount_quote` desligou inclusive as que já usavam): o modal só
+tem **Gerar link do orçamento** — itens, valores e desconto ficam na página. Ligado, aparecem
+**Só o link** e **Enviar orçamento** (com aprovação, abaixo), e a escolha de quando os itens vão no
+texto (`budgetQuoteItems`). A API recusa `quote: true` com a opção desligada.
+
+## Desconto
+
+Campo **Desconto (R$)** no modal, abaixo do total (`budgets.discountValue`; `totalValue` já sai
+descontado). Precisa ser menor que a soma dos itens. Aparece para o cliente em todo lugar: no
+texto do orçamento (*Subtotal / 🏷️ Desconto / TOTAL*), na mensagem do link aprovado e da aprovação
+em cartão/dinheiro ("já com desconto de R$ X") e na página pública (subtotal e desconto acima do
+total). O Pix automático cobra o total com desconto.
+
 ## Orçamento com aprovação
 
 > Por padrão os itens **não** vão no texto (`budgetQuoteItems = link`): a mensagem leva número, total e o link — ver [Itens sensíveis](#itens-sensíveis). O texto completo abaixo só sai com a opção ligada.

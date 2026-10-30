@@ -48,6 +48,19 @@ export const budgetTotal = (items: Pick<BudgetItem, 'quantity' | 'unitPrice'>[])
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+/**
+ * Linhas do total com o desconto à vista (docs/orcamentos.md#desconto): sem mostrar, o cliente não
+ * sabe que já ganhou desconto e pede de novo. `totalValue` já vem descontado.
+ */
+function linhasDoTotal(totalValue: number, discountValue?: number | null) {
+  const d = Number(discountValue ?? 0);
+  if (!(d > 0)) return [`*TOTAL: ${brl(totalValue)}*`];
+  return [`Subtotal: ${brl(totalValue + d)}`, `🏷️ Desconto: -${brl(d)}`, `*TOTAL: ${brl(totalValue)}*`];
+}
+/** "Total: R$ 90,00 (com desconto de R$ 10,00)" — uma linha, para o link e a aprovação */
+const totalComDesconto = (totalValue: number, discountValue?: number | null) =>
+  `Total: *${brl(totalValue)}*${Number(discountValue ?? 0) > 0 ? ` (já com desconto de ${brl(Number(discountValue))})` : ''}`;
+
 /** Pedido de aprovação: o cliente aprova respondendo a forma de pagamento (só Pix leva link). */
 export const BUDGET_APPROVAL_TEXT = 'Para aprovar o orçamento, me informe qual a forma de pagamento';
 
@@ -55,7 +68,7 @@ export const BUDGET_APPROVAL_TEXT = 'Para aprovar o orçamento, me informe qual 
  * Orçamento com aprovação (docs/orcamentos.md#orçamento-com-aprovação): a mensagem com os itens
  * vai por texto, sem chave Pix nem link. Formatação do WhatsApp (*negrito*, _itálico_).
  */
-export function budgetQuoteText(b: { number: number | string; items: BudgetItem[]; totalValue: number; expiresAt: string | Date; note?: string | null }, opts: { firstName?: string; timeZone?: string } = {}) {
+export function budgetQuoteText(b: { number: number | string; items: BudgetItem[]; totalValue: number; discountValue?: number | null; expiresAt: string | Date; note?: string | null }, opts: { firstName?: string; timeZone?: string } = {}) {
   const linha = '━━━━━━━━━━━━━━━';
   const venc = new Date(b.expiresAt);
   const fmt = (o: Intl.DateTimeFormatOptions) => venc.toLocaleString('pt-BR', { ...o, ...(opts.timeZone && { timeZone: opts.timeZone }) });
@@ -70,7 +83,7 @@ export function budgetQuoteText(b: { number: number | string; items: BudgetItem[
     linha,
     itens.join('\n\n'),
     linha,
-    `*TOTAL: ${brl(b.totalValue)}*`,
+    ...linhasDoTotal(b.totalValue, b.discountValue),
     `📅 Válido até ${fmt({ day: '2-digit', month: '2-digit' })} às ${fmt({ hour: '2-digit', minute: '2-digit' })}`,
     ...(b.note ? [`📝 ${b.note}`] : []),
     '',
@@ -134,7 +147,7 @@ export function budgetRiskTerms(items: Pick<BudgetItem, 'name' | 'dosage'>[], no
  * Orçamento por texto com itens sensíveis: vai só número, quantidade de itens e total; os itens
  * ficam no link (que mostra o orçamento sem pagamento até a aprovação).
  */
-export function budgetQuoteLinkText(b: { number: number | string; items: BudgetItem[]; totalValue: number; expiresAt: string | Date }, link: string, opts: { firstName?: string; timeZone?: string } = {}) {
+export function budgetQuoteLinkText(b: { number: number | string; items: BudgetItem[]; totalValue: number; discountValue?: number | null; expiresAt: string | Date }, link: string, opts: { firstName?: string; timeZone?: string } = {}) {
   const venc = new Date(b.expiresAt);
   const fmt = (o: Intl.DateTimeFormatOptions) => venc.toLocaleString('pt-BR', { ...o, ...(opts.timeZone && { timeZone: opts.timeZone }) });
   const n = b.items.length;
@@ -142,7 +155,8 @@ export function budgetQuoteLinkText(b: { number: number | string; items: BudgetI
     `🧾 *ORÇAMENTO Nº ${b.number}*`,
     ...(opts.firstName ? [`Cliente: ${opts.firstName}`] : []),
     '━━━━━━━━━━━━━━━',
-    `${n} ${n === 1 ? 'item' : 'itens'} · *TOTAL: ${brl(b.totalValue)}*`,
+    `${n} ${n === 1 ? 'item' : 'itens'}`,
+    ...linhasDoTotal(b.totalValue, b.discountValue),
     `📅 Válido até ${fmt({ day: '2-digit', month: '2-digit' })} às ${fmt({ hour: '2-digit', minute: '2-digit' })}`,
     '',
     `🔒 Veja os itens do orçamento: ${link}`,
@@ -152,12 +166,12 @@ export function budgetQuoteLinkText(b: { number: number | string; items: BudgetI
 }
 
 /** Mensagem do link depois da aprovação: número e total junto, para o cliente conferir antes de pagar. */
-export const budgetLinkText = (b: { number: number; totalValue: number }, link: string, firstName?: string) =>
-  `✅ ${firstName ? `${firstName}, seu orçamento` : 'Orçamento'} *Nº ${b.number}* foi aprovado.\nTotal: *${brl(b.totalValue)}*\n\nPara pagar, acesse: ${link}`;
+export const budgetLinkText = (b: { number: number; totalValue: number; discountValue?: number | null }, link: string, firstName?: string) =>
+  `✅ ${firstName ? `${firstName}, seu orçamento` : 'Orçamento'} *Nº ${b.number}* foi aprovado.\n${totalComDesconto(b.totalValue, b.discountValue)}\n\nPara pagar, acesse: ${link}`;
 
 /** Aprovado para cartão ou dinheiro: confirma número e total, sem link nem Pix. */
-export const budgetApprovedText = (b: { number: number; totalValue: number }, firstName?: string) =>
-  `✅ ${firstName ? `${firstName}, seu orçamento` : 'Orçamento'} *Nº ${b.number}* foi aprovado.\nTotal: *${brl(b.totalValue)}*`;
+export const budgetApprovedText = (b: { number: number; totalValue: number; discountValue?: number | null }, firstName?: string) =>
+  `✅ ${firstName ? `${firstName}, seu orçamento` : 'Orçamento'} *Nº ${b.number}* foi aprovado.\n${totalComDesconto(b.totalValue, b.discountValue)}`;
 
 /** O que a página pública recebe — nada do contato além do primeiro nome. */
 export interface PublicBudget {
@@ -171,7 +185,10 @@ export interface PublicBudget {
   contactFirstName: string | null;
   agentName: string;
   items: BudgetItem[];
+  /** já com o desconto */
   totalValue: number;
+  /** desconto em R$ (0 = sem desconto) */
+  discountValue: number;
   status: BudgetStatus;
   expiresAt: string;
   createdAt: string;

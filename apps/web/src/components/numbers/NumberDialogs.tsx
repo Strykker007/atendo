@@ -4,7 +4,9 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import { ProviderForm, toConfig, useProviderState } from './ProviderForm';
-import { useCreateNumber, useSwitchProvider, type NumberItem } from '@/lib/hooks';
+import { MetaSignupButton } from './MetaSignupButton';
+import { useCreateNumber, useSwitchProvider, useMetaSignupConfig, type NumberItem } from '@/lib/hooks';
+import { toast } from '@/components/ui/Toast';
 
 type Done = (r: { id: string; qrCode?: string; provider: 'meta' | 'evolution' }) => void;
 
@@ -14,6 +16,11 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
   const [error, setError] = useState<string | null>(null);
   const ps = useProviderState();
   const create = useCreateNumber();
+  // Meta com o cadastro incorporado configurado: a janela da Meta é o caminho; o manual fica recolhido
+  const signupCfg = useMetaSignupConfig(open);
+  const incorporado = ps.provider === 'meta' && !!signupCfg.data?.enabled;
+  const [manual, setManual] = useState(false);
+  const formularioManual = !incorporado || manual;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,13 +39,33 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
       <form onSubmit={submit} className="space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nome (como aparece no painel)"><input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Vendas, Suporte…" required /></Field>
-          <Field label="Telefone do WhatsApp"><PhoneInput value={phone} onChange={setPhone} required /></Field>
+          {formularioManual && <Field label="Telefone do WhatsApp"><PhoneInput value={phone} onChange={setPhone} required /></Field>}
         </div>
-        <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} />
+        <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} hideMetaFields={!formularioManual} />
+        {incorporado && !manual && (
+          <>
+            {([false, true] as const).map((coexist) => (
+              <MetaSignupButton
+                key={String(coexist)}
+                label={label}
+                coexist={coexist}
+                onError={setError}
+                onDone={(r) => {
+                  if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}`);
+                  else if (r.syncErrors.length) toast.err(`Número conectado, mas a Meta recusou parte da sincronização (${r.syncErrors.join('; ')})`);
+                  else toast.ok(coexist ? 'Número conectado; contatos e histórico chegam nos próximos minutos' : 'Número conectado pela Meta');
+                  onDone({ id: r.id, provider: 'meta' });
+                  onClose();
+                }}
+              />
+            ))}
+            <button type="button" onClick={() => setManual(true)} className="text-xs text-accent-ink hover:underline">Já tenho o token e os IDs: preencher manualmente</button>
+          </>
+        )}
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={create.isPending}>Cancelar</Button>
-          <Button type="submit" loading={create.isPending} loadingText={ps.provider === 'evolution' ? 'Criando e gerando QR…' : 'Validando na Meta…'}>{ps.provider === 'evolution' ? 'Criar e gerar QR' : 'Criar e validar'}</Button>
+          {formularioManual && <Button type="submit" loading={create.isPending} loadingText={ps.provider === 'evolution' ? 'Criando e gerando QR…' : 'Validando na Meta…'}>{ps.provider === 'evolution' ? 'Criar e gerar QR' : 'Criar e validar'}</Button>}
         </div>
       </form>
     </Modal>
@@ -47,9 +74,12 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
 
 /** A troca Meta Cloud API <-> Conexão Web. Uma tela, um clique. */
 export function SwitchProviderModal({ number, onClose, onDone }: { number: NumberItem | null; onClose: () => void; onDone: Done }) {
-  const ps = useProviderState(number?.provider === 'meta' ? 'evolution' : 'meta');
+  // número Meta abre na Meta (atualizar token); QR abre na Meta (migrar para a oficial)
+  const ps = useProviderState('meta');
   const [error, setError] = useState<string | null>(null);
   const sw = useSwitchProvider();
+  // Meta → Meta = trocar o token/IDs (token expirado, System User novo); a API aceita o mesmo provider
+  const soCredenciais = ps.provider === 'meta' && number?.provider === 'meta';
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -65,7 +95,7 @@ export function SwitchProviderModal({ number, onClose, onDone }: { number: Numbe
   }
 
   return (
-    <Modal open={!!number} onClose={onClose} title={`Trocar provider · ${number?.label ?? ''}`}>
+    <Modal open={!!number} onClose={onClose} title={`${number?.provider === 'meta' ? 'Credenciais / provider' : 'Trocar provider'} · ${number?.label ?? ''}`}>
       <form onSubmit={submit} className="space-y-4">
         <p className="text-sm text-muted">
           Atualmente em <b>{number?.provider === 'meta' ? 'Meta Cloud API' : 'Conexão Web (QR Code)'}</b>. As conversas e o histórico continuam intactos; só a forma de enviar e receber muda.
@@ -77,7 +107,7 @@ export function SwitchProviderModal({ number, onClose, onDone }: { number: Numbe
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={sw.isPending}>Cancelar</Button>
-          <Button type="submit" loading={sw.isPending} loadingText="Trocando…" disabled={ps.provider === number?.provider}>Trocar agora</Button>
+          <Button type="submit" loading={sw.isPending} loadingText={soCredenciais ? 'Salvando…' : 'Trocando…'} disabled={ps.provider === number?.provider && !soCredenciais}>{soCredenciais ? 'Salvar e reconectar' : 'Trocar agora'}</Button>
         </div>
       </form>
     </Modal>

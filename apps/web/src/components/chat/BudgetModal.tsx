@@ -29,7 +29,7 @@ const resumoItens = (b: Budget) => b.items.map((i) => `${i.quantity}× ${i.name}
 
 /** Texto com o link: aprovado por texto leva número e total (o cliente confere antes de pagar); só o link, o genérico. */
 function textoDoLink(b: Budget, primeiroNome: string) {
-  if (b.number && b.quotedAt) return budgetLinkText({ number: b.number, totalValue: b.totalValue }, budgetLink(b.hash), primeiroNome || undefined);
+  if (b.number && b.quotedAt) return budgetLinkText({ number: b.number, totalValue: b.totalValue, discountValue: b.discountValue }, budgetLink(b.hash), primeiroNome || undefined);
   // texto genérico: nada de item, valor ou chave na conversa
   return `Olá${primeiroNome ? ` ${primeiroNome}` : ''}, acesse o link para visualizar os detalhes do seu orçamento e opções de pagamento: ${budgetLink(b.hash)}`;
 }
@@ -60,7 +60,7 @@ function useEnviarLink(conversationId: string, onEnviar: (texto: string) => Prom
     if (!confirm(`Aprovar o ORÇAMENTO Nº ${b.number} — ${brl(b.totalValue)} para pagamento em cartão ou dinheiro?\n\nO link não é enviado; marque como pago quando receber.`)) return false;
     try { await aprovar.mutateAsync({ conversationId, id: b.id, link: false }); } catch (e) { toast.err(e); return false; }
     try {
-      await onEnviar(budgetApprovedText({ number: b.number!, totalValue: b.totalValue }, primeiroNome || undefined));
+      await onEnviar(budgetApprovedText({ number: b.number!, totalValue: b.totalValue, discountValue: b.discountValue }, primeiroNome || undefined));
       toast.ok(`Orçamento Nº ${b.number} aprovado`);
       return true;
     } catch (e) { toast.err(e); return false; }
@@ -167,6 +167,8 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
   const tz = ajustes?.timezone;
   // Configurações → Atendimento → Orçamento por mensagem
   const modoItens = ajustes?.budgetQuoteItems ?? 'link';
+  // orçamento por mensagem é opcional da empresa: desligado (padrão) = só o link
+  const porMensagem = !!ajustes?.budgetQuoteEnabled;
   const setStatus = useSetBudgetStatus();
   const [enviando, setEnviando] = useState(false);
   const [verPrevia, setVerPrevia] = useState(false);
@@ -194,13 +196,18 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
 
   const mudar = (i: number, p: Partial<BudgetItem>) => setItens((l) => l.map((it, j) => (j === i ? { ...it, ...p } : it)));
   const validos = itens.filter((i) => i.name.trim());
-  const total = budgetTotal(validos);
+  const subtotal = budgetTotal(validos);
+  // desconto em R$: aparece no texto e na página, para o cliente ver que já ganhou (e não pedir de novo)
+  const [desconto, setDesconto] = useState(0);
+  const descontoOk = desconto >= 0 && (desconto === 0 || desconto < subtotal);
+  const total = Math.round((subtotal - (descontoOk ? desconto : 0)) * 100) / 100;
   const sensiveis = budgetRiskTerms(validos, note);
   const itensNoTexto = budgetQuoteShowsItems(modoItens, validos, note);
 
   /** `quote`: envia o orçamento por texto (link só depois da aprovação); senão, só o link no campo. */
   async function gerar(quote: boolean) {
     if (!validos.length) return toast.warn('Adicione ao menos um item com nome');
+    if (!descontoOk) return toast.warn('O desconto precisa ser menor que a soma dos itens');
     const url = paymentUrl.trim();
     if (!auto && chave === 'none' && !url) return toast.warn('Escolha uma chave Pix ou informe um link de pagamento');
     if (url && !/^https:\/\//i.test(url)) return toast.warn('O link de pagamento precisa começar com https://');
@@ -217,6 +224,7 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
         note: note.trim() || undefined,
         validity,
         quote: quote || undefined,
+        discount: desconto > 0 ? desconto : undefined,
       });
       if (!quote) {
         toast.ok('Link gerado — revise a mensagem no campo e envie');
@@ -239,7 +247,7 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
     } catch (e) { toast.err(e); }
   }
 
-  const rascunho = { number: '…', items: validos, totalValue: total, expiresAt: vencimentoPrevia(validity), note: note.trim() || null };
+  const rascunho = { number: '…', items: validos, totalValue: total, discountValue: desconto > 0 ? desconto : 0, expiresAt: vencimentoPrevia(validity), note: note.trim() || null };
   const optsPrevia = { firstName: primeiroNome || undefined, timeZone: tz };
   const previa = !itensNoTexto ? budgetQuoteLinkText(rascunho, budgetLink('…'), optsPrevia) : budgetQuoteText(rascunho, optsPrevia);
 
@@ -262,8 +270,13 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
         ))}
         <div className="flex items-center justify-between pt-1">
           <Button variant="ghost" size="sm" icon={<Plus size={14} />} disabled={itens.length >= BUDGET_MAX_ITEMS} onClick={() => setItens((l) => [...l, vazio()])}>Adicionar item</Button>
-          <span className="text-sm text-muted">Total <b className="text-ink tnum text-base ml-1">{brl(total)}</b></span>
+          <span className="text-sm text-muted">{desconto > 0 && descontoOk ? <>Subtotal <span className="tnum">{brl(subtotal)}</span> · </> : null}Total <b className="text-ink tnum text-base ml-1">{brl(total)}</b></span>
         </div>
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-sm text-muted">Desconto (R$)</span>
+          <div className="w-32"><MoneyInput value={desconto} onChange={(v) => setDesconto(v ?? 0)} aria-label="Desconto em reais" /></div>
+        </div>
+        {!descontoOk && <p className="text-xs text-danger-ink text-right">O desconto precisa ser menor que a soma dos itens.</p>}
       </div>
 
       {podeAuto && (
@@ -301,27 +314,33 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
         </Field>
       </div>
 
-      {modoItens === 'link' && validos.length > 0 && (
+      {porMensagem && modoItens === 'link' && validos.length > 0 && (
         <p className="flex items-start gap-1.5 rounded-xl bg-accent-soft text-accent-ink px-3 py-2 text-xs">
           <Lock size={13} className="mt-px shrink-0" />
           <span>A empresa envia o orçamento só com número e total — os itens o cliente vê no link, que mostra o pagamento depois da aprovação.</span>
         </p>
       )}
-      {modoItens === 'protect' && sensiveis.length > 0 && (
+      {porMensagem && modoItens === 'protect' && sensiveis.length > 0 && (
         <p className="flex items-start gap-1.5 rounded-xl bg-accent-soft text-accent-ink px-3 py-2 text-xs">
           <Lock size={13} className="mt-px shrink-0" />
           <span>Itens sensíveis ({sensiveis.slice(0, 4).join(', ')}{sensiveis.length > 4 ? '…' : ''}): o orçamento vai pelo WhatsApp só com número e total — os itens o cliente vê no link, que mostra o pagamento depois da aprovação. Protege o número de bloqueio.</span>
         </p>
       )}
 
-      {verPrevia && validos.length > 0 && (
+      {porMensagem && verPrevia && validos.length > 0 && (
         <pre className="rounded-xl bg-field p-3 text-xs text-ink whitespace-pre-wrap font-sans max-h-64 overflow-y-auto">{previa}</pre>
       )}
 
       <div className="flex items-center justify-end gap-2 flex-wrap">
-        <button type="button" className="text-xs text-muted hover:text-ink mr-auto" onClick={() => setVerPrevia((v) => !v)}>{verPrevia ? 'Esconder prévia' : 'Ver prévia da mensagem'}</button>
-        <Button variant="ghost" icon={<Link2 size={14} />} onClick={() => gerar(false)} disabled={criar.isPending || enviando} title="Sem orçamento por texto: itens e valores só na página do link">Só o link</Button>
-        <Button icon={<Send size={14} />} onClick={() => gerar(true)} loading={criar.isPending || enviando} loadingText="Enviando…" title="O cliente aprova respondendo a forma de pagamento; no Pix, o link sai pelo atalho acima do campo">Enviar orçamento</Button>
+        {porMensagem && <button type="button" className="text-xs text-muted hover:text-ink mr-auto" onClick={() => setVerPrevia((v) => !v)}>{verPrevia ? 'Esconder prévia' : 'Ver prévia da mensagem'}</button>}
+        {porMensagem ? (
+          <>
+            <Button variant="ghost" icon={<Link2 size={14} />} onClick={() => gerar(false)} disabled={criar.isPending || enviando} title="Sem orçamento por texto: itens e valores só na página do link">Só o link</Button>
+            <Button icon={<Send size={14} />} onClick={() => gerar(true)} loading={criar.isPending || enviando} loadingText="Enviando…" title="O cliente aprova respondendo a forma de pagamento; no Pix, o link sai pelo atalho acima do campo">Enviar orçamento</Button>
+          </>
+        ) : (
+          <Button icon={<Link2 size={14} />} onClick={() => gerar(false)} loading={criar.isPending} title="Itens, valores e desconto na página do link">Gerar link do orçamento</Button>
+        )}
       </div>
     </div>
   );

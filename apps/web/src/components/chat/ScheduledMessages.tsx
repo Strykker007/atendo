@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlarmClock, ChevronDown, ChevronRight, X, AlertTriangle } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -65,8 +66,10 @@ export function ScheduleMessageModal({ open, onClose, conversationId, textoInici
   const quando = data && hora ? new Date(`${data}T${hora}:00`) : null;
   const noPassado = !!quando && quando.getTime() < Date.now() + 60_000;
 
-  async function salvar(e: React.FormEvent) {
-    e.preventDefault();
+  // Sem <form> de propósito: o modal é desenhado DENTRO do <form> do campo de mensagem
+  // (ComposerBar), e formulário dentro de formulário fazia o navegador enviar a página
+  // (recarregava sem agendar) ou mandar a mensagem na hora. O botão chama isto direto.
+  async function salvar() {
     if (!quando || noPassado || !texto.trim()) return;
     try {
       await agendar.mutateAsync({ conversationId, content: texto, scheduledFor: quando.toISOString() });
@@ -76,9 +79,11 @@ export function ScheduleMessageModal({ open, onClose, conversationId, textoInici
     } catch (err) { toast.err(err); }
   }
 
-  return (
+  // portal: fora do <form> do campo de mensagem também no DOM — Enter num campo daqui não envia a conversa
+  if (typeof document === 'undefined') return null;
+  return createPortal(
     <Modal open={open} onClose={onClose} title="Agendar mensagem">
-      <form onSubmit={salvar} className="space-y-4">
+      <div className="space-y-4">
         <Field label="Mensagem" hint="As variáveis são preenchidas na hora do envio.">
           <TextWithVars value={texto} onChange={setTexto} vars={[]} flowVarsGroup={false} formatting maxLength={4096} required />
         </Field>
@@ -97,10 +102,11 @@ export function ScheduleMessageModal({ open, onClose, conversationId, textoInici
         <p className="text-[11.5px] text-muted">Sai em seu nome, pelo número desta conversa. Se a conversa estiver encerrada na hora, ela é reaberta com você.</p>
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" icon={<AlarmClock size={15} />} disabled={!quando || noPassado || !texto.trim()} loading={agendar.isPending} loadingText="Agendando…">Agendar</Button>
+          <Button type="button" onClick={() => void salvar()} icon={<AlarmClock size={15} />} disabled={!quando || noPassado || !texto.trim()} loading={agendar.isPending} loadingText="Agendando…">Agendar</Button>
         </div>
-      </form>
-    </Modal>
+      </div>
+    </Modal>,
+    document.body,
   );
 }
 

@@ -66,6 +66,10 @@ const schema = z.object({
   EVOLUTION_MENU_BUTTONS: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   META_GRAPH_VERSION: z.string().default('v21.0'),
   META_APP_SECRET: z.string().optional().default(''),
+  /** Cadastro incorporado (docs/meta-cadastro-incorporado.md): id do app e da configuração do
+   * "Login do Facebook para Empresas" (variação WhatsApp Embedded Signup). Vazios = botão some */
+  META_APP_ID: z.string().optional().default(''),
+  META_ES_CONFIG_ID: z.string().optional().default(''),
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(1),
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage'),

@@ -188,7 +188,7 @@ export default function NumerosPage() {
                     {n.provider === 'evolution' && n.status === 'connected' && (
                       <Button size="sm" variant="ghost" icon={<Unplug size={14} />} title="Encerra a sessão do WhatsApp; o número e as conversas ficam" onClick={() => setDisconnecting(n)} disabled={busyId === n.id}>Desconectar</Button>
                     )}
-                    <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)} disabled={busyId === n.id}>Trocar provider</Button>
+                    <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={14} />} onClick={() => setSwitching(n)} disabled={busyId === n.id}>{n.provider === 'meta' ? 'Credenciais' : 'Trocar provider'}</Button>
                     <Button size="sm" variant="ghost" icon={<Power size={14} />} onClick={() => toggleActive(n)} loading={busyId === n.id && update.isPending}>{n.isActive ? 'Desativar' : 'Ativar'}</Button>
                     <Button size="sm" variant="subtle" icon={<Trash2 size={14} />} onClick={() => setDeleting(n)} disabled={busyId === n.id}>Excluir</Button>
                   </>}

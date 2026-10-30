@@ -24,6 +24,8 @@ export interface TenantSettings {
   requireSignature: boolean;
   /** orçamento por mensagem: quando os itens vão no texto (docs/orcamentos.md#itens-sensíveis) */
   budgetQuoteItems: BudgetQuoteItems;
+  /** "Enviar orçamento" por mensagem liberado (padrão: só link) */
+  budgetQuoteEnabled: boolean;
   /** motivo obrigatório em "Comprou" / "Não comprou" (cada um separado; padrão true) */
   requireReasonOnWon: boolean; requireReasonOnLost: boolean;
   /** pesos da pontuação do ranking; null = padrão (`RANKING_WEIGHTS_DEFAULT`) */
@@ -44,7 +46,7 @@ export interface TenantSettings {
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'companyIsolation' | 'requireSignature' | 'budgetQuoteItems' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText' | 'closeMessageEnabled' | 'closeMessageText'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'companyIsolation' | 'requireSignature' | 'budgetQuoteItems' | 'budgetQuoteEnabled' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText' | 'closeMessageEnabled' | 'closeMessageText'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

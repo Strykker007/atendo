@@ -15,6 +15,8 @@ export interface Budget {
   approvedAt: string | null;
   items: BudgetItem[];
   totalValue: number;
+  /** desconto em R$ (o total já vem descontado) */
+  discountValue: number;
   status: BudgetStatus;
   expiresAt: string;
   createdAt: string;
@@ -31,7 +33,7 @@ export interface Budget {
   user: { id: string; name: string };
   receipt: { url: string; mimeType: string; fileName: string; at: string } | null;
 }
-type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validity?: BudgetValidity; autoPix?: boolean; cpfCnpj?: string; quote?: boolean };
+type CreateBody = { items: BudgetItem[]; pixKeyId?: string; paymentUrl?: string; note?: string; validity?: BudgetValidity; autoPix?: boolean; cpfCnpj?: string; quote?: boolean; discount?: number };
 
 /** Link público do orçamento — no domínio aberto agora, para sair com a marca certa. */
 export const budgetLink = (hash: string) => `${typeof window === 'undefined' ? '' : window.location.origin}/o/${hash}`;

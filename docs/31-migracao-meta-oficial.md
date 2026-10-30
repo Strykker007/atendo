@@ -49,6 +49,10 @@ cadastrar no Atendo (`accessToken`, `phoneNumberId`, `wabaId`). Validar envio, r
 templates e mídia antes de mexer em qualquer cliente.
 
 ### 4. Migrar cliente a cliente
+
+O mesmo passo a passo está no próprio sistema: **Números → Adicionar número → Meta Cloud API →
+Passo a passo: onde pegar o token e os IDs** (`components/numbers/MetaManualGuide.tsx`).
+
 Ao conectar, o Atendo inscreve o app novo na WABA (`subscribed_apps`). A partir daí **os dois
 sistemas recebem as mensagens do número** — se o robô do antigo também responder, o contato
 recebe resposta dobrada. Para cada cliente:
@@ -57,6 +61,11 @@ recebe resposta dobrada. Para cada cliente:
 3. Conectar o número no Atendo e conferir envio/recebimento/templates.
 4. Tirar o número do sistema antigo (desinscrever o app antigo da WABA, se ela for compartilhada).
 5. Revisar **Configurações → Atendimento → Orçamento por mensagem**: farmácia/remédio em número oficial → manter o padrão *Não enviar os itens na mensagem* (a Meta lê o conteúdo; ver [Orçamentos — itens sensíveis](orcamentos.md#itens-sensíveis)).
+
+## Cliente novo, com conta própria
+
+Quem não está no portfólio do sócio conecta o número sozinho pela janela da Meta — ver
+[Cadastro incorporado](meta-cadastro-incorporado.md) (exige o app como Tech Provider).
 
 ## Riscos
 

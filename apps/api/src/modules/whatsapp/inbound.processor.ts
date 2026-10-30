@@ -1,3 +1,4 @@
+import type { InboundMessage } from '@atendo/shared';
 import { Processor } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { ProviderRegistry } from './providers/provider.registry';
@@ -165,6 +166,18 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     for (const e of parsed.edits ?? []) {
       const number = await this.numbers.findByExternal(job.data.provider, e.externalNumberId);
       if (number) await this.inbound.applyEdit(number, e);
+    }
+
+    // coexistência: histórico do celular (docs/meta-cadastro-incorporado.md#coexistência)
+    if (parsed.history?.length) {
+      const porNumero = new Map<string, InboundMessage[]>();
+      for (const m of parsed.history) porNumero.set(m.externalNumberId, [...(porNumero.get(m.externalNumberId) ?? []), m]);
+      for (const [externalId, lista] of porNumero) {
+        const number = await this.numbers.findByExternal(job.data.provider, externalId);
+        if (!number || number.suspendedAt) continue;
+        const n = await this.inbound.importBackfill(number, lista);
+        this.log.log(`histórico do aplicativo (coexistência) ${number.label}: ${n} mensagem(ns) importada(s)`);
+      }
     }
 
     for (const c of parsed.contactNames ?? []) {

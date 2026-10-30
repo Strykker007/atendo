@@ -57,6 +57,8 @@ class CreateBudgetDto {
   @IsOptional() @IsString() @MaxLength(20) cpfCnpj?: string;
   /** orçamento por texto: fica esperando a aprovação do cliente, sem link (e sem cobrança) até `approve` */
   @IsOptional() @IsBoolean() quote?: boolean;
+  /** desconto em R$ sobre a soma dos itens (o total já sai descontado) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000_000) discount?: number;
 }
 
 class ApproveBudgetDto {
@@ -192,6 +194,14 @@ export class BudgetsService {
       unitPrice: i.unitPrice,
     }));
     if (items.some((i) => !i.name)) throw new BadRequestException('Todo item precisa de nome');
+    // orçamento por mensagem é opcional da empresa (Configurações → Atendimento); desligado = só link
+    if (dto.quote) {
+      const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: user.tenantId }, select: { budgetQuoteEnabled: true } });
+      if (!s?.budgetQuoteEnabled) throw new BadRequestException('Orçamento por mensagem está desligado nesta empresa: envie pelo link (Configurações → Atendimento → Orçamento).');
+    }
+    const subtotal = budgetTotal(items);
+    const discount = Math.round((dto.discount ?? 0) * 100) / 100;
+    if (discount >= subtotal) throw new BadRequestException('O desconto precisa ser menor que a soma dos itens.');
 
     const validity = dto.validity ?? (dto.validHours ? null : BUDGET_DEFAULT_VALIDITY);
     const data = {
@@ -200,7 +210,8 @@ export class BudgetsService {
       contactId: conv.contactId,
       userId: user.id,
       items: items as unknown as Prisma.InputJsonValue,
-      totalValue: budgetTotal(items),
+      totalValue: Math.round((subtotal - discount) * 100) / 100,
+      discountValue: discount,
       pixKey: pix?.key,
       pixKeyType: pix?.keyType,
       pixHolderName: pix?.holderName,
@@ -527,6 +538,7 @@ export class BudgetsService {
       agentName: agent?.name?.trim().split(/\s+/)[0] ?? '',
       items: b.items as unknown as BudgetItem[],
       totalValue: Number(b.totalValue),
+      discountValue: Number(b.discountValue ?? 0),
       status,
       expiresAt: b.expiresAt.toISOString(),
       createdAt: b.createdAt.toISOString(),
@@ -611,6 +623,7 @@ export class BudgetsService {
       approvedAt: b.approvedAt,
       items: b.items as unknown as BudgetItem[],
       totalValue: Number(b.totalValue),
+      discountValue: Number(b.discountValue ?? 0),
       status: effectiveStatus(b),
       expiresAt: b.expiresAt,
       createdAt: b.createdAt,

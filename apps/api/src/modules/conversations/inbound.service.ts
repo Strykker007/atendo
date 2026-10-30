@@ -342,6 +342,31 @@ export class InboundService {
   }
 
   /**
+   * Histórico do aplicativo WhatsApp Business que a Meta manda na coexistência (até 6 meses,
+   * docs/meta-cadastro-incorporado.md#coexistência). Igual ao `importHistory` — sem cobrança, sem
+   * fluxo, sem não-lidas, sem socket —, mas por número: cria contato e conversa quando faltam, e a
+   * conversa nova nasce **encerrada** (é passado; a próxima mensagem do contato abre o atendimento).
+   */
+  async importBackfill(number: WhatsAppNumber, msgs: InboundMessage[]) {
+    const porContato = new Map<string, InboundMessage[]>();
+    for (const m of msgs) {
+      if (!m.from || isGroupJid(m.from)) continue;
+      porContato.set(m.from, [...(porContato.get(m.from) ?? []), m]);
+    }
+    let imported = 0;
+    for (const [phone, lista] of porContato) {
+      const nome = lista.find((m) => !m.fromMe && m.contactName)?.contactName;
+      const contact = (await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone } } })) ?? (await this.createContact(number, phone, nome));
+      const ultima = lista.reduce((a, b) => (a.timestamp > b.timestamp ? a : b)).timestamp;
+      const conversation = (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
+        ?? (await this.prisma.conversation.create({ data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'closed', lastMessageAt: ultima } }));
+      const r = await this.importHistory({ id: conversation.id, tenantId: number.tenantId, numberId: number.id }, lista);
+      imported += r.imported;
+    }
+    return imported;
+  }
+
+  /**
    * Mensagens que o WhatsApp não entregou ao vivo — número "surdo" ou fora do ar — e que só
    * apareceram no provider depois (lote de histórico do QR; docs/historico-de-mensagens.md#recuperação).
    *

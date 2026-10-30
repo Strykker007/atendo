@@ -88,6 +88,12 @@ function Orcamento({ hash, b: recebido }: { hash: string; b: PublicBudget }) {
             </li>
           ))}
         </ul>
+        {b.discountValue > 0 && (
+          <div className="px-4 py-2.5 space-y-1 text-sm border-t border-line">
+            <div className="flex justify-between text-muted"><span>Subtotal</span><span className="tnum">{brl(b.totalValue + b.discountValue)}</span></div>
+            <div className="flex justify-between text-ok font-medium"><span>Desconto</span><span className="tnum">- {brl(b.discountValue)}</span></div>
+          </div>
+        )}
         <div className="flex items-center justify-between px-4 py-3 bg-field">
           <span className="text-sm text-muted">Total</span>
           <span className="text-xl font-semibold tnum">{brl(b.totalValue)}</span>

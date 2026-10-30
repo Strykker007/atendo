@@ -44,6 +44,8 @@ class SettingsDto {
   @IsOptional() @IsBoolean() requireSignature?: boolean;
   /** orçamento por mensagem: quando os itens vão no texto (`BUDGET_QUOTE_ITEMS`) */
   @IsOptional() @IsIn(BUDGET_QUOTE_ITEMS) budgetQuoteItems?: BudgetQuoteItems;
+  /** "Enviar orçamento" por mensagem liberado; desligado = só link */
+  @IsOptional() @IsBoolean() budgetQuoteEnabled?: boolean;
   /** motivo de encerramento obrigatório em "Comprou" / "Não comprou" (cada um separado) */
   @IsOptional() @IsBoolean() requireReasonOnWon?: boolean;
   @IsOptional() @IsBoolean() requireReasonOnLost?: boolean;

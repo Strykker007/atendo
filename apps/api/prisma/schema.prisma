@@ -556,6 +556,9 @@ model TenantSettings {
   /// orçamento por mensagem (docs/orcamentos.md#itens-sensíveis): `link` (padrão) = itens nunca no
   /// texto (só número, total e link); `protect` = itens sensíveis só no link; `always` = sempre no texto
   budgetQuoteItems String @default("link")
+  /// "Enviar orçamento" (por texto, com aprovação) liberado. Desligado (padrão) = orçamento só por
+  /// link; `budgetQuoteItems` só vale com isto ligado (docs/orcamentos.md#orçamento-por-mensagem)
+  budgetQuoteEnabled Boolean @default(false)
   /// "Comprou" exige valor (> 0). Desligado: dá para encerrar como Comprou sem valor — conta na
   /// conversão, não soma faturamento (sem linha em `sales`)
   requireSaleValue Boolean @default(true)
@@ -2462,6 +2465,8 @@ model Budget {
   /// BudgetItem[] (packages/shared): nome, dosagem, quantidade, valor unitário
   items          Json
   totalValue     Decimal      @db.Decimal(12, 2)
+  /// desconto em R$ sobre a soma dos itens; `totalValue` já vem com ele descontado
+  discountValue  Decimal      @default(0) @db.Decimal(12, 2)
   /// cópia da chave Pix no momento da geração — editar/apagar a chave depois não muda o orçamento
   pixKey         String?
   pixKeyType     String?
