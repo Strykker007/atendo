@@ -67,6 +67,9 @@ export function ScheduleMessageModal({ open, onClose, conversationId, textoInici
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
+    // o modal é desenhado DENTRO do <form> do campo de mensagem (ComposerBar): sem isto o submit
+    // sobe até ele e a mensagem saía na hora, além de agendada
+    e.stopPropagation();
     if (!quando || noPassado || !texto.trim()) return;
     try {
       await agendar.mutateAsync({ conversationId, content: texto, scheduledFor: quando.toISOString() });
