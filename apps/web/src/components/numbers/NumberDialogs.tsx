@@ -47,9 +47,12 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
 
 /** A troca Meta Cloud API <-> Conexão Web. Uma tela, um clique. */
 export function SwitchProviderModal({ number, onClose, onDone }: { number: NumberItem | null; onClose: () => void; onDone: Done }) {
-  const ps = useProviderState(number?.provider === 'meta' ? 'evolution' : 'meta');
+  // número Meta abre na Meta (atualizar token); QR abre na Meta (migrar para a oficial)
+  const ps = useProviderState('meta');
   const [error, setError] = useState<string | null>(null);
   const sw = useSwitchProvider();
+  // Meta → Meta = trocar o token/IDs (token expirado, System User novo); a API aceita o mesmo provider
+  const soCredenciais = ps.provider === 'meta' && number?.provider === 'meta';
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -65,7 +68,7 @@ export function SwitchProviderModal({ number, onClose, onDone }: { number: Numbe
   }
 
   return (
-    <Modal open={!!number} onClose={onClose} title={`Trocar provider · ${number?.label ?? ''}`}>
+    <Modal open={!!number} onClose={onClose} title={`${number?.provider === 'meta' ? 'Credenciais / provider' : 'Trocar provider'} · ${number?.label ?? ''}`}>
       <form onSubmit={submit} className="space-y-4">
         <p className="text-sm text-muted">
           Atualmente em <b>{number?.provider === 'meta' ? 'Meta Cloud API' : 'Conexão Web (QR Code)'}</b>. As conversas e o histórico continuam intactos; só a forma de enviar e receber muda.
@@ -77,7 +80,7 @@ export function SwitchProviderModal({ number, onClose, onDone }: { number: Numbe
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={sw.isPending}>Cancelar</Button>
-          <Button type="submit" loading={sw.isPending} loadingText="Trocando…" disabled={ps.provider === number?.provider}>Trocar agora</Button>
+          <Button type="submit" loading={sw.isPending} loadingText={soCredenciais ? 'Salvando…' : 'Trocando…'} disabled={ps.provider === number?.provider && !soCredenciais}>{soCredenciais ? 'Salvar e reconectar' : 'Trocar agora'}</Button>
         </div>
       </form>
     </Modal>
