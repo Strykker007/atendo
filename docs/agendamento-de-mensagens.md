@@ -25,6 +25,21 @@ visível para todos da conversa.
   ficam em vermelho com o motivo até alguém dispensar (X).
 - Hoje o modal agenda **só texto**. A API já aceita anexo (`mediaKey`…), a tela ainda não.
 
+## Para quem ainda não é conversa
+
+Em **Nova conversa** (`NewConversationModal`), com `conversations.schedule_message` e número por
+QR Code, aparece **Enviar agora / Agendar envio**. Agendando, dá para digitar um telefone que não
+é contato nem tem conversa: o modal abre a conversa **sem mandar nada** (`POST
+/conversations/start` sem texto — contato criado na hora, conversa assumida por quem agendou) e
+agenda a mensagem nela (`POST /conversations/:id/scheduled-messages`). No horário, ela sai pelo
+caminho normal e inicia o atendimento.
+
+- Contato que nunca escreveu é **envio frio**: no QR conta no limite de contatos novos do número
+  por dia ([Envio frio](envio.md#envio-frio)) — sem vaga na hora, não sai e vira nota na conversa.
+  Telefone sem WhatsApp também falha na hora do envio.
+- **API oficial (Meta):** a opção não aparece. Falar primeiro só com template, e template
+  agendado ainda não existe.
+
 ## Tela "Mensagens agendadas"
 
 Item **Mensagens agendadas** no menu lateral (`app/(app)/agendadas/page.tsx`): todas as mensagens agendadas,

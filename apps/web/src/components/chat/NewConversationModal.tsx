@@ -1,14 +1,15 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ShieldCheck, QrCode, UserPlus, BookUser, Loader2 } from 'lucide-react';
+import { ShieldCheck, QrCode, UserPlus, BookUser, Loader2, AlarmClock } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { PhoneInput, formatPhone } from '@/components/ui/PhoneInput';
 import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
-import { useDebounced, useHasFeature, useNumbers, usePhonebook, useStartCandidates, useStartConversation, useColdQuota, type PhonebookItem, type StartCandidates } from '@/lib/hooks';
+import { useDebounced, useHasFeature, useNumbers, usePhonebook, useStartCandidates, useStartConversation, useColdQuota, useScheduleMessage, useCan, type PhonebookItem, type StartCandidates } from '@/lib/hooks';
 import { TemplateFields, useTemplateChoice } from './TemplateFields';
+import { atalhos, dataLocal, horaLocal, quandoBR } from './ScheduledMessages';
 
 type ContatoSel = { id: string; name: string | null; phone: string };
 const SEM_RESULTADOS: StartCandidates = { contacts: [], phonebook: [] };
@@ -46,6 +47,13 @@ export function NewConversationModal({ onClose, contact: inicial, onOpened }: { 
   // uma chave por abertura do modal: clique duplo não manda duas vezes
   const [idempotencyKey] = useState(() => crypto.randomUUID());
   const start = useStartConversation();
+  // agendar em vez de mandar agora (docs/agendamento-de-mensagens.md#para-quem-ainda-não-é-conversa):
+  // abre a conversa sem mensagem e agenda nela — vale para número novo, digitado na hora
+  const podeAgendar = useCan('conversations.schedule_message');
+  const agendarMsg = useScheduleMessage();
+  const [quandoEnviar, setQuandoEnviar] = useState<'agora' | 'agendar'>('agora');
+  const [data, setData] = useState(() => dataLocal(atalhos(new Date())[0].quando));
+  const [hora, setHora] = useState(() => horaLocal(atalhos(new Date())[0].quando));
 
   // número padrão: o do filtro da lista, se estiver conectado; senão o primeiro conectado
   useEffect(() => {
@@ -81,10 +89,33 @@ export function NewConversationModal({ onClose, contact: inicial, onOpened }: { 
   // sem template escolhido / sem texto = só abrir; com algo preenchido, tem de estar completo
   const semMensagem = desconectado || (usandoTemplate ? !choice.value : !texto.trim());
   const mensagemOk = semMensagem || (usandoTemplate ? choice.valid : true);
-  const podeEnviar = !!number && destinoOk && mensagemOk;
+  // agendado: só texto livre no QR (na API oficial, falar primeiro é template, e template agendado não existe)
+  const agendando = quandoEnviar === 'agendar' && !isMeta;
+  const horarioAgendado = data && hora ? new Date(`${data}T${hora}:00`) : null;
+  const agendaOk = !!horarioAgendado && horarioAgendado.getTime() >= Date.now() + 60_000 && !!texto.trim();
+  const podeEnviar = !!number && destinoOk && (agendando ? agendaOk : mensagemOk);
+
+  async function agendar() {
+    if (!number || !horarioAgendado) return;
+    try {
+      // 1) abre (ou acha) a conversa sem mandar nada; 2) agenda nela
+      const r = await start.mutateAsync({
+        numberId: number.id,
+        ...(contato ? { contactId: contato.id } : { phone: novoTelefone!, name: novoNome.trim() || undefined }),
+        idempotencyKey,
+      });
+      await agendarMsg.mutateAsync({ conversationId: r.conversationId, content: texto, scheduledFor: horarioAgendado.toISOString() });
+      toast.ok(`Mensagem agendada para ${quandoBR(horarioAgendado.toISOString())}`);
+      setStatus(r.status ?? 'in_progress');
+      setConversation(r.conversationId);
+      onOpened?.(r.conversationId);
+      onClose();
+    } catch (err) { toast.err(err); }
+  }
 
   async function enviar() {
     if (!number) return;
+    if (agendando) return agendar();
     try {
       const r = await start.mutateAsync({
         numberId: number.id,
@@ -227,17 +258,41 @@ export function NewConversationModal({ onClose, contact: inicial, onOpened }: { 
           </p>
         )}
 
-        {desconectado ? null : usandoTemplate ? (
+        {podeAgendar && number && !isMeta && (
+          <div className="grid grid-cols-2 rounded-lg bg-field p-1 text-xs font-semibold">
+            {(['agora', 'agendar'] as const).map((m) => (
+              <button key={m} type="button" onClick={() => setQuandoEnviar(m)} className={cn('rounded-md py-1', quandoEnviar === m ? 'bg-panel text-ink shadow-sm' : 'text-muted hover:text-ink')}>
+                {m === 'agora' ? 'Enviar agora' : 'Agendar envio'}
+              </button>
+            ))}
+          </div>
+        )}
+        {agendando && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {atalhos(new Date()).map((a) => (
+                <button key={a.rotulo} type="button" onClick={() => { setData(dataLocal(a.quando)); setHora(horaLocal(a.quando)); }} className="rounded-full border border-line px-2.5 py-1 text-[12px] text-ink hover:bg-field">{a.rotulo}</button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Data"><input type="date" className={inputCls} value={data} min={dataLocal(new Date())} onChange={(e) => setData(e.target.value)} /></Field>
+              <Field label="Hora"><input type="time" className={inputCls} value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
+            </div>
+            {horarioAgendado && horarioAgendado.getTime() < Date.now() + 60_000 && <p className="text-[12px] text-danger-ink">Escolha um horário pelo menos 1 minuto à frente.</p>}
+          </div>
+        )}
+
+        {desconectado && !agendando ? null : usandoTemplate ? (
           <TemplateFields choice={choice} />
         ) : (
-          <Field label="Mensagem (opcional)" hint={isMeta ? 'Só é entregue se o contato escreveu para este número nas últimas 24h. Em branco: só abre a conversa.' : 'Aceita variáveis como {{contact.first_name}}. Em branco: só abre a conversa e você escreve no chat.'}>
+          <Field label={agendando ? 'Mensagem' : 'Mensagem (opcional)'} hint={agendando ? 'Sai em seu nome no horário escolhido e inicia a conversa com este contato. Aceita variáveis como {{contact.first_name}}.' : isMeta ? 'Só é entregue se o contato escreveu para este número nas últimas 24h. Em branco: só abre a conversa.' : 'Aceita variáveis como {{contact.first_name}}. Em branco: só abre a conversa e você escreve no chat.'}>
             <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} maxLength={4096} className={cn(inputCls, 'resize-none')} />
           </Field>
         )}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={enviar} disabled={!podeEnviar} loading={start.isPending} loadingText={semMensagem ? 'Abrindo…' : 'Enviando…'}>{semMensagem ? 'Abrir conversa' : 'Enviar e abrir conversa'}</Button>
+          <Button onClick={enviar} disabled={!podeEnviar} loading={start.isPending || agendarMsg.isPending} loadingText={agendando ? 'Agendando…' : semMensagem ? 'Abrindo…' : 'Enviando…'} icon={agendando ? <AlarmClock size={15} /> : undefined}>{agendando ? 'Agendar mensagem' : semMensagem ? 'Abrir conversa' : 'Enviar e abrir conversa'}</Button>
         </div>
       </div>
     </Modal>

@@ -17,11 +17,11 @@ import { useScheduledMessages, useScheduleMessage, useCancelScheduledMessage, us
  */
 
 const pad = (n: number) => String(n).padStart(2, '0');
-const dataLocal = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const horaLocal = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+export const dataLocal = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+export const horaLocal = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 /** Atalhos de horário: o caso comum é "daqui a pouco" ou "amanhã cedo". */
-function atalhos(agora: Date): { rotulo: string; quando: Date }[] {
+export function atalhos(agora: Date): { rotulo: string; quando: Date }[] {
   const em = (min: number) => new Date(Math.ceil((agora.getTime() + min * 60_000) / 300_000) * 300_000);
   const amanha = (h: number) => { const d = new Date(agora); d.setDate(d.getDate() + 1); d.setHours(h, 0, 0, 0); return d; };
   return [
