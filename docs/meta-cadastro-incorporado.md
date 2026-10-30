@@ -29,6 +29,36 @@ do sócio ([31](31-migracao-meta-oficial.md)).
 A forma de pagamento é do cliente, no WhatsApp Manager (*Visão geral → Adicionar forma de
 pagamento*): sem ela só sai resposta dentro de 24 h, nada de template.
 
+## Coexistência (manter o WhatsApp Business do celular)
+
+Botão **Conectar mantendo o WhatsApp Business do celular**: o número continua no aplicativo
+WhatsApp Business (2.24.17+) e passa a funcionar também pela API oficial — é a coexistência
+**oficial** da Meta. Não confundir com QR Code (Evolution): somar o QR ao mesmo número não é
+suportado e duplicaria tudo.
+
+- Janela: `extras.featureType = 'whatsapp_business_app_onboarding'`, `sessionInfoVersion: '3'`;
+  termina com `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` (pode vir só o `waba_id` — o servidor acha
+  o número em `/{waba}/phone_numbers`). O cliente confirma um código no celular.
+- Servidor: troca o código pelo token e **não** chama `/register` (o número já está registrado
+  pelo app; registrar derrubaria o celular). `providerConfig.coexist = true`. Depois do `connect`
+  (inscrição na WABA) pede `POST /{phone_number_id}/smb_app_data` com `sync_type`
+  `smb_app_state_sync` (contatos) e depois `history`. **Cada um só uma vez e até 24 h** após o
+  cadastro; perdeu o prazo, o cliente desconecta no app (*Configurações → Conta → Plataforma
+  comercial*) e refaz a janela. Falha aqui não desfaz o cadastro: volta em `syncErrors` e no log.
+- Webhook (`MetaProvider.parseWebhook`):
+
+  | Campo | Vira |
+  |---|---|
+  | `smb_message_echoes` | mensagem **enviada pelo celular** (`fromMe`, contato = `to`) — histórico sem automação, como no QR |
+  | `history` | `ParsedWebhook.history` → `InboundService.importBackfill`: contato e conversa (nova nasce **encerrada**) criados quando faltam, mensagens importadas sem cobrança, fluxo, não-lidas nem socket. `media_placeholder` é ignorado (a mídia só vem dos últimos 14 dias, em outro webhook). Grupos não vêm |
+  | `smb_app_state_sync` | nomes da agenda do aplicativo → `applyContactName` (mesma regra da agenda do QR) |
+
+- Limites da Meta: grupos, listas de transmissão, mensagens temporárias, de visualização única,
+  localização em tempo real, chamadas e ferramentas do app (catálogo, etiquetas, saudação e
+  ausência) não passam pela API; vazão fixa de 20 mensagens/s. Mensagem do celular não abre nem
+  mexe na janela de 24 h da API. Erro `131060` = mensagem para aparelho não suportado — o cliente
+  vê no app. Para sair, só pelo app (a API de descadastro não vale).
+
 ## O que configurar na Meta (uma vez)
 
 1. **Tornar-se Tech Provider** no app (painel do app → WhatsApp → *Tech Provider* / "Torne-se um
@@ -41,7 +71,8 @@ pagamento*): sem ela só sai resposta dentro de 24 h, nada de template.
 3. Em *Login do Facebook para Empresas → Configurações*: **domínios permitidos para o SDK JS** =
    o domínio do painel (`app.vogochatplus.com.br`), com "Login com o SDK do JavaScript" ligado.
 4. Webhook do app: além de `messages`, assinar `account_update` (a Meta avisa quando o cliente
-   termina o cadastro).
+   termina o cadastro) e, para a coexistência, `smb_message_echoes`, `history` e
+   `smb_app_state_sync`.
 
 ## Variáveis (`.env.production`)
 

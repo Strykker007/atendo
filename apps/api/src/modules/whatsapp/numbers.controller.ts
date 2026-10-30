@@ -35,8 +35,11 @@ class CreateNumberDto {
 class MetaSignupDto {
   @IsString() @MaxLength(1024) code: string;
   @Matches(/^\d{5,25}$/) wabaId: string;
-  @Matches(/^\d{5,25}$/) phoneNumberId: string;
+  /** coexistência: a janela pode devolver só a WABA */
+  @IsOptional() @Matches(/^\d{5,25}$/) phoneNumberId?: string;
   @IsString() @MaxLength(60) label: string;
+  /** manter o número no aplicativo WhatsApp Business do celular (coexistência) */
+  @IsOptional() @IsBoolean() coexist?: boolean;
   @IsOptional() @Matches(/^#[0-9a-fA-F]{6}$/) color?: string;
 }
 class SwitchProviderDto {
@@ -130,11 +133,14 @@ export class NumbersController {
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxNumbers')
   async metaSignup(@CurrentUser() user: AuthUser, @Body() dto: MetaSignupDto) {
-    const r = await this.meta.embeddedSignup(dto.code, dto.wabaId, dto.phoneNumberId);
+    const r = await this.meta.embeddedSignup(dto.code, dto.wabaId, dto.phoneNumberId, !!dto.coexist);
     if (!r.phone) throw new BadRequestException('A Meta não informou o telefone deste número. Tente de novo.');
     const n = await this.createNumber(user, { phone: r.phone, label: dto.label, color: dto.color, provider: 'meta', config: r.config as unknown as Record<string, unknown> });
     if (r.registerError) this.log.warn(`cadastro incorporado ${r.phone}: registro na Cloud API recusado (${r.registerError})`);
-    return { ...n, verifiedName: r.verifiedName, registerError: r.registerError ?? null };
+    // coexistência: o app já está inscrito na WABA (connect) — agora pede contatos e histórico
+    const syncErrors = dto.coexist ? await this.meta.startCoexistenceSync(await this.numbers.context(n.id)) : [];
+    if (syncErrors.length) this.log.warn(`coexistência ${r.phone}: ${syncErrors.join('; ')}`);
+    return { ...n, verifiedName: r.verifiedName, registerError: r.registerError ?? null, syncErrors };
   }
 
   private async createNumber(user: AuthUser, dto: CreateNumberDto) {

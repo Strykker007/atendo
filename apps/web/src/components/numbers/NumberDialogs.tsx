@@ -44,16 +44,21 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
         <ProviderForm value={ps.provider} onChange={ps.setProvider} config={ps.config} onConfig={ps.setConfig} hideMetaFields={!formularioManual} />
         {incorporado && !manual && (
           <>
-            <MetaSignupButton
-              label={label}
-              onError={setError}
-              onDone={(r) => {
-                if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}`);
-                else toast.ok('Número conectado pela Meta');
-                onDone({ id: r.id, provider: 'meta' });
-                onClose();
-              }}
-            />
+            {([false, true] as const).map((coexist) => (
+              <MetaSignupButton
+                key={String(coexist)}
+                label={label}
+                coexist={coexist}
+                onError={setError}
+                onDone={(r) => {
+                  if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}`);
+                  else if (r.syncErrors.length) toast.err(`Número conectado, mas a Meta recusou parte da sincronização (${r.syncErrors.join('; ')})`);
+                  else toast.ok(coexist ? 'Número conectado; contatos e histórico chegam nos próximos minutos' : 'Número conectado pela Meta');
+                  onDone({ id: r.id, provider: 'meta' });
+                  onClose();
+                }}
+              />
+            ))}
             <button type="button" onClick={() => setManual(true)} className="text-xs text-accent-ink hover:underline">Já tenho o token e os IDs: preencher manualmente</button>
           </>
         )}

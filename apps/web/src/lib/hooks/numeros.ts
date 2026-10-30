@@ -42,8 +42,8 @@ export const useMetaSignupConfig = (enabled = true) =>
 export const useMetaSignup = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { code: string; wabaId: string; phoneNumberId: string; label: string }) =>
-      api<NumberItem & { verifiedName: string | null; registerError: string | null }>('/numbers/meta-signup', { method: 'POST', body: JSON.stringify(body) }),
+    mutationFn: (body: { code: string; wabaId: string; phoneNumberId?: string; label: string; coexist?: boolean }) =>
+      api<NumberItem & { verifiedName: string | null; registerError: string | null; syncErrors?: string[] }>('/numbers/meta-signup', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };

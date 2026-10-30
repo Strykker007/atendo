@@ -64,6 +64,11 @@ export interface ParsedWebhook {
    * celular ou só o pushName repetido — quem decide é `InboundService.applyContactName`.
    */
   contactNames?: InboundContactName[];
+  /**
+   * Histórico antigo do celular (coexistência da Meta, `history`): entra como importado — sem
+   * fluxo, sem cobrança, sem mexer em não-lidas (docs/meta-cadastro-incorporado.md#coexistência).
+   */
+  history?: InboundMessage[];
   /** mudanças de conexão (QR lido, desconectou) */
   connection?: {
     externalNumberId: string;
