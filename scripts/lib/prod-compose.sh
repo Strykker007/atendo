@@ -12,7 +12,7 @@ PC_ENV=${PC_ENV:-.env.production}
 PC_SUDO=${PC_SUDO-sudo}
 
 # serviços que o deploy comum recria (sem estado próprio)
-APP_SERVICES="api worker web caddy backup"
+APP_SERVICES="api worker web site caddy backup"
 # nunca recriados pelo deploy comum
 PROTECTED_SERVICES="postgres redis evolution-db evolution"
 # serviços que precisam estar de pé antes de um deploy comum (com --no-deps ninguém os sobe)

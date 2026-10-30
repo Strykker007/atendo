@@ -56,5 +56,5 @@ Do WordPress ficaram para trás: a API de Conversões da Meta pelo servidor (plu
 
 ## Pendente
 
-- **Deploy:** ainda não há `Dockerfile` do site nem serviço/domínio no `infra/docker-compose.prod.yml` e no Caddy.
+- **Deploy:** serviço `site` no `infra/docker-compose.prod.yml` (`apps/site/Dockerfile`, standalone) atrás do Caddy em `SITE_DOMAIN` (padrão `vogochatplus.com.br`; `www.` redireciona para ele). Sobe com o deploy comum (`APP_SERVICES` em `scripts/lib/prod-compose.sh`). `NEXT_PUBLIC_APP_URL` = `https://APP_DOMAIN` e `NEXT_PUBLIC_SITE_URL` = `https://SITE_DOMAIN` entram no build. A política de privacidade (`/privacidade`, com `#exclusao-de-dados`) é a URL cadastrada no app da Meta ([31](31-migracao-meta-oficial.md)).
 - Os vídeos (~33 MB) são servidos pelo próprio app; se o tráfego crescer, vale mover para um CDN/armazenamento externo.
