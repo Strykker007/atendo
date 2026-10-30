@@ -12,6 +12,8 @@ import { AppLogger } from '../../common/observability/app-logger';
 import { QUEUE_CAMPAIGN, type CampaignJob } from './queues';
 import { SegmentationService, type Audience } from './segmentation.service';
 import { QR_WINDOW_MS } from './dispatch';
+import { UsageService } from '../billing/usage.service';
+import { PricingService } from '../billing/pricing.service';
 
 export type { Audience } from './segmentation.service';
 
@@ -31,6 +33,29 @@ export interface CreateCampaign {
   audience: Audience;
 }
 
+/**
+ * Previsão antes de disparar pela API oficial (docs/gasto-meta.md#transmissão): o que impede o
+ * início (`blockers`), o que merece atenção (`warnings`) e quanto a Meta vai cobrar.
+ */
+export interface CampaignEstimate {
+  provider: 'meta' | 'evolution';
+  recipients: number;
+  /** categoria do template (define o preço na Meta) */
+  category: string | null;
+  /** preço por mensagem na tabela, em BRL */
+  unitPrice: number;
+  /** recipients × unitPrice — estimativa; o valor real vem da Meta depois */
+  total: number;
+  /** templates do plano do Atendo (cota própria, à parte do que a Meta cobra) */
+  plan: { included: number | null; remaining: number | null; hardLimit: boolean; overageCount: number; overagePrice: number | null } | null;
+  /** gasto do mês com a Meta e orçamento do cliente */
+  month: { spent: number; budget: number | null; after: number } | null;
+  blockers: string[];
+  warnings: string[];
+}
+
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
 /** contagem de uma transmissão: alvos por situação + o que o WhatsApp confirmou */
 export interface CampaignStats { total: number; pending: number; sent: number; delivered: number; read: number; failed: number; skipped: number }
 
@@ -45,6 +70,8 @@ export class CampaignsService {
     private readonly numbers: NumbersService,
     private readonly segmentation: SegmentationService,
     private readonly gateway: ConversationsGateway,
+    private readonly usage: UsageService,
+    private readonly pricing: PricingService,
     @InjectQueue(QUEUE_CAMPAIGN) private readonly queue: Queue<CampaignJob>,
   ) {}
 
@@ -55,6 +82,79 @@ export class CampaignsService {
       a.groupIds?.length ? this.prisma.whatsAppGroup.count({ where: { tenantId, id: { in: a.groupIds }, authorized: true, ...(numbers && { numberId: numbers }) } }) : Promise.resolve(0),
     ]);
     return { ...contatos, groups: grupos };
+  }
+
+  /** Previsão de uma transmissão ainda não criada: o público e o template da tela. */
+  async estimateDraft(tenantId: string, dto: { numberId: string; audience: Audience; template?: { name: string; language: string } }, numbers?: { in: string[] }) {
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { tenantId, deletedAt: null, AND: [{ id: dto.numberId }, ...(numbers ? [{ id: numbers }] : [])] } });
+    if (!number) throw new NotFoundException('Número não encontrado');
+    const { total } = await this.segmentation.preview(tenantId, dto.audience, numbers);
+    return this.estimate(tenantId, number, total, dto.template ?? null);
+  }
+
+  /** Previsão de uma transmissão salva: só os alvos que ainda não receberam. */
+  async estimateSaved(tenantId: string, id: string, numbers?: { in: string[] }) {
+    const campaign = await this.prisma.campaign.findFirst({ where: { id, tenantId, ...(numbers && { numberId: numbers }) }, include: { number: true } });
+    if (!campaign) throw new NotFoundException('Campanha não encontrada');
+    const pendentes = await this.prisma.campaignTarget.count({ where: { campaignId: id, status: 'pending' } });
+    return this.estimate(tenantId, campaign.number, pendentes, campaign.template as unknown as CampaignTemplate | null);
+  }
+
+  /**
+   * O que a tela mostra antes de disparar pela API oficial: travas (número, template, plano),
+   * custo previsto na Meta (alvos × preço da categoria do template), cota de templates do plano
+   * e o gasto do mês contra o orçamento. QR Code não tem custo por mensagem.
+   */
+  async estimate(
+    tenantId: string,
+    number: { id: string; provider: string; status: string; label: string },
+    recipients: number,
+    tpl: { name: string; language: string } | null,
+  ): Promise<CampaignEstimate> {
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+    if (number.provider !== 'meta') return { provider: 'evolution', recipients, category: null, unitPrice: 0, total: 0, plan: null, month: null, blockers, warnings };
+
+    if (number.status !== 'connected') blockers.push(`O número "${number.label}" está desconectado.`);
+    let category: string | null = null;
+    if (!tpl) blockers.push('Escolha um template aprovado pela Meta.');
+    else {
+      const def = await this.numbers.template(number.id, tpl.name, tpl.language).catch(() => null);
+      if (!def) blockers.push(`O template "${tpl.name}" não está aprovado neste número.`);
+      else {
+        if (def.unsupported) blockers.push(def.unsupported);
+        category = def.category;
+      }
+    }
+    const pode = await this.usage.canSend(tenantId, 'templates', number.id);
+    if (!pode.ok) blockers.push(pode.reason ?? 'O plano não permite enviar templates agora.');
+
+    const unitPrice = category ? await this.pricing.unitCost('meta', category as 'marketing' | 'utility' | 'authentication') : 0;
+    const total = Math.round(unitPrice * recipients * 100) / 100;
+
+    // cota de templates do plano do Atendo (cobrança do Atendo, à parte da Meta)
+    const [plano, usado] = await Promise.all([this.usage.limits(tenantId), this.usage.current(tenantId)]);
+    const included = plano ? (plano.limits.includedTemplatesMonth ?? null) : null;
+    const remaining = included === null ? null : Math.max(0, included - usado.templates);
+    const hardLimit = !!plano?.limits.hardLimit;
+    const overagePrice = plano?.limits.overagePricePerTemplate ?? null;
+    const overageCount = remaining === null ? 0 : Math.max(0, recipients - remaining);
+    if (overageCount > 0) {
+      warnings.push(hardLimit || overagePrice == null
+        ? `O plano tem ${remaining!.toLocaleString('pt-BR')} template(s) sobrando no mês: a transmissão pausa quando acabar e ${overageCount.toLocaleString('pt-BR')} contato(s) ficam sem receber.`
+        : `${overageCount.toLocaleString('pt-BR')} template(s) passam do incluído no plano: ${brl(overageCount * overagePrice)} de excedente na próxima fatura do Atendo.`);
+    }
+
+    // mês com a Meta x orçamento
+    const [gasto, t] = await Promise.all([this.usage.metaSpend(tenantId), this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { metaBudgetMonth: true } })]);
+    const spent = Math.max(gasto.estimated, gasto.real.find((r) => r.currency === 'BRL')?.total ?? 0);
+    const budget = t?.metaBudgetMonth != null ? Number(t.metaBudgetMonth) : null;
+    const after = spent + total;
+    if (budget && after > budget) warnings.push(`Com esta transmissão o gasto do mês com a Meta fica em ${brl(after)}, acima do orçamento de ${brl(budget)}.`);
+    if (category === 'marketing') warnings.push('Template de marketing: a Meta limita quantas mensagens de marketing cada pessoa recebe de empresas. Parte pode não ser entregue (e não é cobrada).');
+    if (!unitPrice && category) warnings.push('Sem preço cadastrado para esta categoria: o custo previsto pode estar abaixo do real.');
+
+    return { provider: 'meta', recipients, category, unitPrice, total, plan: { included, remaining, hardLimit, overageCount, overagePrice }, month: { spent, budget, after }, blockers, warnings };
   }
 
   /** Grupos escolhidos: só os autorizados, do tenant e do número da transmissão (docs/grupos.md). */
@@ -127,6 +227,12 @@ export class CampaignsService {
     if (campaign.status === 'done' || campaign.status === 'canceled') throw new BadRequestException('Esta campanha já terminou.');
     if (campaign.number.status !== 'connected') throw new BadRequestException(`O número "${campaign.number.label}" está desconectado.`);
     const qr = campaign.number.provider !== 'meta';
+    if (!qr) {
+      // API oficial: mesmas travas da previsão que a tela mostrou (template, plano)
+      const pendentes = await this.prisma.campaignTarget.count({ where: { campaignId: id, status: 'pending' } });
+      const prev = await this.estimate(tenantId, campaign.number, pendentes, campaign.template as unknown as CampaignTemplate | null);
+      if (prev.blockers.length) throw new BadRequestException(prev.blockers[0]);
+    }
     if (qr && !acceptRisk && !campaign.riskAcceptedAt) {
       throw new BadRequestException({ code: 'qr_risk_not_accepted', message: 'Aceite o aviso de segurança do QR Code para iniciar a transmissão.' });
     }

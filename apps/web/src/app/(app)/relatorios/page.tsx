@@ -181,7 +181,7 @@ export default function RelatoriosPage() {
             <Kpi icon={<Inbox size={15} />} label="Na fila agora" value={String(overview.data.kpis.waitingNow)} sub={`${overview.data.kpis.inProgressNow} em atendimento`} tone={overview.data.kpis.waitingNow > 5 ? 'warn' : undefined} />
             <Kpi icon={<Clock size={15} />} label="1ª resposta (média)" value={overview.data.kpis.avgFirstResponseMin != null ? fmtMin(overview.data.kpis.avgFirstResponseMin) : '—'} sub="do contato escrever até a equipe responder" tone={overview.data.kpis.avgFirstResponseMin != null && overview.data.kpis.avgFirstResponseMin > 30 ? 'warn' : undefined} />
             {/* encerrados ÷ iniciados passava de 100%: quem foi aberto antes do período também encerra nele */}
-            <Kpi icon={<CheckCircle2 size={15} />} label="Encerrados no período" value={overview.data.kpis.closed.toLocaleString('pt-BR')} sub="inclui os iniciados antes do período" />} label="Encerradas" value={`${Math.round(overview.data.kpis.closeRate * 100)}%`} sub={`${overview.data.kpis.closed} de ${overview.data.kpis.conversations}`} />
+            <Kpi icon={<CheckCircle2 size={15} />} label="Encerrados no período" value={overview.data.kpis.closed.toLocaleString('pt-BR')} sub="inclui os iniciados antes do período" />
           </div>
 
           {empresa === 'all' && porEmpresa.data && porEmpresa.data.rows.length > 1 && <PorEmpresa rows={porEmpresa.data.rows} onAbrir={setEmpresa} vendas={vendas} />}

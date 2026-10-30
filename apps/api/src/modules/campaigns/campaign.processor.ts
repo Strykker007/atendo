@@ -11,6 +11,7 @@ import { CampaignsService, type CampaignTemplate } from './campaigns.service';
 import { afterBatch, decideDispatch, eligible, failureStreak, FAILURE_STREAK, qrDelay, type CampaignStatus } from './dispatch';
 import { QUEUE_CAMPAIGN, type CampaignJob } from './queues';
 import { GroupSender } from './group-sender';
+import { UsageService } from '../billing/usage.service';
 
 type MediaType = 'image' | 'document' | 'audio' | 'video';
 
@@ -36,6 +37,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     private readonly numbers: NumbersService,
     private readonly interpolation: InterpolationService,
     private readonly groups: GroupSender,
+    private readonly usage: UsageService,
   ) {
     super(QUEUE_CAMPAIGN);
   }
@@ -91,6 +93,13 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
     const definition = tpl ? await this.numbers.template(campaign.numberId, tpl.name, tpl.language).catch(() => null) : null;
     if (tpl && !definition) {
       return this.campaigns.autoPause(campaign.tenantId, campaign.id, campaign.name, `O template "${tpl.name}" não está mais aprovado neste número. Escolha outro e crie a transmissão de novo.`);
+    }
+
+    // API oficial: cota de templates do plano acabou no meio → pausa com o motivo, em vez de
+    // falhar contato a contato (docs/gasto-meta.md#transmissão)
+    if (tpl) {
+      const pode = await this.usage.canSend(campaign.tenantId, 'templates', campaign.numberId);
+      if (!pode.ok) return this.campaigns.autoPause(campaign.tenantId, campaign.id, campaign.name, pode.reason ?? 'O plano não permite enviar mais templates neste mês.');
     }
 
     const targets = await this.prisma.campaignTarget.findMany({

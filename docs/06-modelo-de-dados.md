@@ -227,4 +227,6 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 
 **Desativar cliente** — `tenants.deactivatedAt` (quando foi desativado) e `whatsapp_numbers.suspendedAt` (número desligado junto com o cliente; reativar devolve). Ver [Desativar cliente](desativar-cliente.md).
 
+**meta_cost_daily** — gasto real com a Meta por número, dia, categoria e tipo (lido do `pricing_analytics` da WABA, na moeda dela); `tenants.metaBudgetMonth` = orçamento mensal do cliente. Ver [Gasto com a Meta](gasto-meta.md).
+
 **tickets / ticket_participants / ticket_events / ticket_hold_reasons** — tickets internos entre setores: número por empresa, setor, prioridade, prazo, espera (motivo, observação, retomar em), responsável + participantes, linha do tempo e motivos de espera cadastráveis. Ver [Tickets internos](tickets.md).

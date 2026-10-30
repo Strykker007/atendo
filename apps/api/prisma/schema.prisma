@@ -20,6 +20,8 @@ model Tenant {
   ticketHoldReasons  TicketHoldReason[]
   /// quando foi desativado (docs/desativar-cliente.md); nulo = ativo
   deactivatedAt DateTime?
+  /// orçamento mensal com a Meta definido pelo cliente (docs/gasto-meta.md); nulo = sem teto, sem aviso
+  metaBudgetMonth Decimal? @db.Decimal(12, 2)
   /// id do Customer no Stripe (criado no primeiro checkout)
   stripeCustomerId String? @unique
   /// cliente no Asaas (cus_…) — criado no primeiro checkout quando o gateway é o Asaas
@@ -77,6 +79,7 @@ model Tenant {
   schedulingSettings SchedulingSettings?
   usage         MessageUsage[]
   usageCounters UsageCounter[]
+  metaCosts     MetaCostDaily[]
   invoices      Invoice[]
   activationCharges ActivationCharge[]
   financeEntries FinanceEntry[]
@@ -704,6 +707,7 @@ model WhatsAppNumber {
   conversations Conversation[]
   messages      Message[]
   usage         MessageUsage[]
+  metaCosts     MetaCostDaily[]
   users         UserNumber[]
   campaigns     Campaign[]
   phonebook     PhonebookEntry[]
@@ -2122,6 +2126,31 @@ model UsageCounter {
 
   @@unique([tenantId, period])
   @@map("usage_counters")
+}
+
+/// Gasto real com a Meta, por dia e categoria, lido do `pricing_analytics` da WABA (docs/gasto-meta.md).
+/// Reescrito a cada sincronização: a Meta fecha os números do dia com algumas horas de atraso.
+model MetaCostDaily {
+  id              String   @id @default(uuid())
+  tenantId        String
+  numberId        String
+  day             DateTime @db.Date
+  /// MARKETING | UTILITY | AUTHENTICATION | SERVICE | … (como a Meta devolve)
+  pricingCategory String
+  /// REGULAR | FREE_CUSTOMER_SERVICE | FREE_ENTRY_POINT
+  pricingType     String
+  volume          Int
+  cost            Decimal  @db.Decimal(12, 4)
+  /// moeda da WABA (BRL ou USD)
+  currency        String
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  number WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
+
+  @@unique([numberId, day, pricingCategory, pricingType])
+  @@index([tenantId, day])
+  @@map("meta_cost_daily")
 }
 
 model UsageAlert {

@@ -56,6 +56,8 @@ export interface EntryDto {
   /** pago/recebido em; ausente = em aberto */
   paidAt?: string | null;
   paymentMethod?: string | null; documentNumber?: string | null; notes?: string | null; supplierId?: string | null;
+  /** entrada recebida de um cliente do sistema (só `income`) */
+  tenantId?: string | null;
   /** parcelas (cada uma com o `amount`), mês a mês */
   installments?: number;
 }

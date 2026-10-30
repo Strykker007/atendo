@@ -208,6 +208,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/campaigns` | `campaigns.manage` + recurso `campaigns` | Transmissões (até 200, mais recentes) com `stats{total, pending, sent, delivered, read, failed, skipped}`, `number{label, provider}`, `pauseReason`, `riskAcceptedAt` ([Envio › Transmissão](envio.md#transmissão)) |
 | GET | `/campaigns/:id` | idem | Uma transmissão + `daily{sent, limit}` (teto do número em 24h; `null` na Meta) + `problemas[{contato, status, motivo}]` (até 50) |
 | POST | `/campaigns/preview` | idem | Público `{all?, tagIds?, closingTagIds?, closingFrom?, closingTo?, lastOutcome?: 'won'\|'lost', agentId?, contactIds?, phones?, groupIds?}` → `{total, novos, invalidos, optOut, excedeu, max, groups}`. Não cria nada. `groupIds` = grupos autorizados ([Grupos restritos](grupos.md)) |
+| POST | `/campaigns/estimate` · GET `/campaigns/:id/estimate` | idem | Previsão na API oficial: `{numberId, audience, template?}` (ou os alvos pendentes da salva) → custo na Meta (alvos × preço da categoria do template), cota de templates do plano, gasto do mês × orçamento, `blockers` e `warnings` — [Gasto com a Meta](gasto-meta.md#transmissão) |
 | POST | `/campaigns` | idem | `{name, numberId, text?, mediaKey?, mediaType?, mediaName?, template?: {name, language, header?, body?}, startAt?, businessHoursOnly?, audience}` → rascunho com o público materializado. Meta: `template` obrigatório (conferido); QR: texto e/ou anexo, horário de funcionamento forçado. Sem critério de público = 400; >20.000 = 400 |
 | GET | `/groups?numberId=` | `numbers.manage` ou `campaigns.manage` | Grupos do WhatsApp listados e se estão autorizados ([Grupos restritos](grupos.md)) |
 | POST | `/groups/sync` | `numbers.manage` | `{numberId}` → busca os grupos do número (só QR, conectado); grupo novo nasce desmarcado |
@@ -228,6 +229,8 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/webhooks/asaas` | — | Eventos Asaas (header `asaas-access-token` = `ASAAS_WEBHOOK_TOKEN`; 403 se não bater) |
 
 ### Tickets internos
+
+Rotas `/billing/meta-costs`, `/billing/meta-costs/refresh` e `/billing/meta-budget` em [Gasto com a Meta](gasto-meta.md#api).
 
 Rotas `/tickets/*` (recurso `tickets`; permissões `tickets.create/handle/view_all/manage`) em [Tickets internos](tickets.md#api-tickets-recurso-tickets).
 

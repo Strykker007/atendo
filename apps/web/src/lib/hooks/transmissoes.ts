@@ -74,6 +74,33 @@ export const useCampaign = (id: string | null) =>
 export const useAudiencePreview = (a: CampaignAudience, enabled: boolean) =>
   useQuery({ queryKey: ['campaign-preview', JSON.stringify(a)], enabled, placeholderData: keepPreviousData, queryFn: () => api<AudiencePreview>('/campaigns/preview', { method: 'POST', body: JSON.stringify(a) }) });
 
+/** Previsão antes de disparar pela API oficial (docs/gasto-meta.md#transmissão). */
+export interface CampaignEstimate {
+  provider: 'meta' | 'evolution';
+  recipients: number;
+  category: string | null;
+  unitPrice: number;
+  total: number;
+  plan: { included: number | null; remaining: number | null; hardLimit: boolean; overageCount: number; overagePrice: number | null } | null;
+  month: { spent: number; budget: number | null; after: number } | null;
+  blockers: string[];
+  warnings: string[];
+}
+
+/** transmissão ainda na tela: número + público + template (só faz sentido na API oficial) */
+export const useCampaignEstimate = (b: { numberId: string; audience: CampaignAudience; template?: { name: string; language: string } }, enabled: boolean) =>
+  useQuery({
+    queryKey: ['campaign-estimate', JSON.stringify(b)],
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: false,
+    queryFn: () => api<CampaignEstimate>('/campaigns/estimate', { method: 'POST', body: JSON.stringify(b) }),
+  });
+
+/** transmissão salva (rascunho): os alvos que ainda faltam */
+export const useSavedCampaignEstimate = (id: string | null) =>
+  useQuery({ queryKey: ['campaign-estimate', id], enabled: !!id, retry: false, queryFn: () => api<CampaignEstimate>(`/campaigns/${id}/estimate`) });
+
 export const useCreateCampaign = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (b: NewCampaign) => api<Campaign>('/campaigns', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['campaigns'] }) });

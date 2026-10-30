@@ -9,10 +9,11 @@ import { toast } from '@/components/ui/Toast';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { TemplateFields, useTemplateChoice } from '@/components/chat/TemplateFields';
 import {
-  uploadFile, mediaTypeOf, useAgents, useNumbers, useTags, useAudiencePreview, useCreateCampaign, useStartCampaign, useOutcomeLabels, useGroups,
+  uploadFile, mediaTypeOf, useAgents, useNumbers, useTags, useAudiencePreview, useCreateCampaign, useStartCampaign, useOutcomeLabels, useGroups, useCampaignEstimate,
   type CampaignAudience, type Upload,
 } from '@/lib/hooks';
 import { QrRiskModal } from './QrRiskModal';
+import { CampaignCostBox } from './CampaignCostBox';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const diasAtras = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
@@ -117,6 +118,11 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
   const dias = p && teto ? Math.ceil((p.total + totalGrupos) / Math.max(1, teto)) : null;
 
   const mensagemOk = oficial ? choice.valid : !!text.trim() || !!anexo;
+  // API oficial: custo previsto e travas antes de disparar (docs/gasto-meta.md#transmissão)
+  const tplEscolhido = choice.value ? { name: choice.value.name, language: choice.value.language } : undefined;
+  const estimativa = useCampaignEstimate({ numberId, audience: publicoAtual, template: tplEscolhido }, !!oficial && temPublico && !!tplEscolhido);
+  const custo = oficial && tplEscolhido && temPublico ? estimativa.data : undefined;
+  const travado = !!custo?.blockers.length;
   const podeCriar = !!name.trim() && !!number && mensagemOk && temPublico && !!p && p.total + totalGrupos > 0 && !p.excedeu && (quando === 'agora' || !!startAt);
 
   async function anexar(f: File) {
@@ -345,6 +351,8 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        {oficial && tplEscolhido && temPublico && <CampaignCostBox e={custo} loading={estimativa.isFetching} />}
+
         {/* ---------- quando ---------- */}
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className={rot}>Quando</span>
@@ -356,8 +364,9 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
         <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button variant="ghost" disabled={!podeCriar} loading={create.isPending && !start.isPending} onClick={() => void criar(false)}>Salvar rascunho</Button>
-          <Button disabled={!podeCriar} loading={create.isPending || start.isPending} loadingText="Criando…" onClick={() => (oficial ? void criar(true) : setRiscoAberto(true))}>
+          <Button disabled={!podeCriar || travado || (oficial && !custo)} loading={create.isPending || start.isPending} loadingText="Criando…" onClick={() => (oficial ? void criar(true) : setRiscoAberto(true))}>
             {quando === 'agendar' ? 'Agendar transmissão' : 'Iniciar transmissão'}
+            {oficial && custo && !travado && <span className="tnum opacity-80"> · {custo.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}
           </Button>
         </div>
       </div>

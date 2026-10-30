@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { TenantLifecycleModule } from './modules/tenants/tenant-lifecycle.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
+import { MetaCostsModule } from './modules/billing/meta-costs.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { TagsModule } from './modules/tags/tags.module';
@@ -52,6 +53,7 @@ import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.mod
     TenantsModule,
     TenantLifecycleModule,
     TicketsModule,
+    MetaCostsModule,
     WhatsAppModule,
     ConversationsModule,
     TagsModule,

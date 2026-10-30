@@ -14,6 +14,17 @@ export interface MetaNumberConfig {
   wabaId: string;
 }
 
+/** um ponto do `pricing_analytics` (granularidade diária) */
+export interface MetaPricingPoint {
+  start: number;
+  end: number;
+  phone_number?: string;
+  pricing_category?: string;
+  pricing_type?: string;
+  volume?: number;
+  cost?: number;
+}
+
 /**
  * WhatsApp Cloud API (oficial).
  * Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
@@ -47,6 +58,21 @@ export class MetaProvider implements WhatsAppProvider {
     await this.graph(cfg, `${cfg.phoneNumberId}?fields=display_phone_number`);
     if (cfg.wabaId) await this.graph(cfg, `${cfg.wabaId}/subscribed_apps`, { method: 'POST' });
     return { status: NumberStatus.CONNECTED };
+  }
+
+  /**
+   * Gasto real da WABA por dia, categoria, tipo e telefone (`pricing_analytics`, cobrança por
+   * mensagem desde 07/2025). A Meta fecha o dia com algumas horas de atraso. `start`/`end` em
+   * segundos (epoch). Docs: https://developers.facebook.com/docs/whatsapp/business-management-api/analytics
+   */
+  async pricingAnalytics(ctx: NumberContext, start: number, end: number) {
+    const cfg = this.cfg(ctx);
+    const field = `pricing_analytics.start(${start}).end(${end}).granularity(DAILY).dimensions(["PRICING_CATEGORY","PRICING_TYPE","PHONE"])`;
+    const r = await this.graph<{ currency?: string; pricing_analytics?: { data?: { data_points?: MetaPricingPoint[] }[] } }>(cfg, `${cfg.wabaId}?fields=currency,${encodeURIComponent(field)}`);
+    return {
+      currency: r.currency ?? 'USD',
+      points: (r.pricing_analytics?.data ?? []).flatMap((d) => d.data_points ?? []),
+    };
   }
 
   async disconnect() {
