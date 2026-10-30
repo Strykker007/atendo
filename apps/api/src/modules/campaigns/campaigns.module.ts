@@ -50,6 +50,12 @@ class CreateCampaignDto {
   @IsOptional() @IsBoolean() businessHoursOnly?: boolean;
   @ValidateNested() @Type(() => AudienceDto) audience: AudienceDto;
 }
+class EstimateDto {
+  @IsUUID() numberId: string;
+  @ValidateNested() @Type(() => AudienceDto) audience: AudienceDto;
+  @IsOptional() @ValidateNested() @Type(() => TemplateChoiceDto) template?: TemplateChoiceDto;
+}
+
 class StartDto {
   /** QR Code: aceite do aviso de risco de bloqueio (obrigatório na 1ª vez) */
   @IsOptional() @IsBoolean() acceptRisk?: boolean;
@@ -84,6 +90,17 @@ class CampaignsController {
   preview(@CurrentUser() u: AuthUser, @Body() body: AudienceDto) {
     // contagem para a tela: sem critério, zero (não "todos")
     return this.campaigns.preview(u.tenantId, body, isolatedNumbers(u));
+  }
+
+  /** Antes de criar: o que impede, o que avisar e quanto a Meta vai cobrar (docs/gasto-meta.md#transmissão). */
+  @Post('estimate')
+  estimate(@CurrentUser() u: AuthUser, @Body() dto: EstimateDto) {
+    return this.campaigns.estimateDraft(u.tenantId, dto, isolatedNumbers(u));
+  }
+
+  @Get(':id/estimate')
+  estimateSaved(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.campaigns.estimateSaved(u.tenantId, id, isolatedNumbers(u));
   }
 
   @Post()

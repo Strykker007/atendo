@@ -37,12 +37,14 @@ Para quem prefere mandar o orçamento escrito e só cobrar depois do "ok" do cli
    📅 Válido até 29/10 às 23:59
    📝 observação
 
-   ✅ Para aprovar, responda *APROVO 42*
+   ✅ Para aprovar o orçamento, me informe qual a forma de pagamento
    ```
    Chave Pix e link **nunca** vão nesta mensagem. Se o envio falhar, o orçamento é descartado na hora (não fica no atalho algo que o cliente não viu).
-2. Enquanto espera, o link **não cobra**: `/o/:hash` mostra itens e total com "Para aprovar, responda *APROVO 42*" (`awaitingApproval`), sem Pix, link de pagamento nem envio de comprovante (o upload responde 400), e o Pix automático **não** é gerado. A página confere a cada 15 s e vira pagamento quando o atendente libera.
-3. **Atalho acima do campo** (`OrcamentosAguardando`): cada orçamento esperando aprovação vira uma linha com número, total, itens, **Enviar link** e ✕ (descartar). Se a última mensagem do contato tem "aprov…" e o número (ou só "aprov…" com um único orçamento aberto), a linha fica verde **Cliente aprovou**. Com mais de um aberto, aviso para conferir o número.
-4. **Enviar link** pede confirmação repetindo número, total e itens, chama `POST …/budgets/:id/approve` e envia `budgetLinkText`: "✅ João, seu orçamento *Nº 42* foi aprovado. Total: R$ 20,00 — Para pagar, acesse: …". A página `/o/:hash` também mostra "Seu orçamento Nº 42".
+2. Enquanto espera, o link **não cobra**: `/o/:hash` mostra itens e total com "Para aprovar o orçamento, me informe qual a forma de pagamento no WhatsApp" (`awaitingApproval`), sem Pix, link de pagamento nem envio de comprovante (o upload responde 400), e o Pix automático **não** é gerado. A página confere a cada 15 s e vira pagamento quando o atendente libera.
+3. **Atalho acima do campo** (`OrcamentosAguardando`): cada orçamento esperando aprovação vira uma linha com número, total, itens, **Pix: enviar link**, **Cartão/dinheiro** e ✕ (descartar). O link só vai quando o cliente paga por Pix; se a resposta fala em cartão, crédito, débito ou dinheiro (e não em Pix), o botão em destaque é **Cartão/dinheiro**. Se a última mensagem do contato fala a forma de pagamento (Pix, cartão, crédito, débito, dinheiro) ou "aprov…", a linha fica verde **Cliente aprovou** — com mais de um orçamento aberto, só a do número que ele citar; sem número, aviso para conferir qual.
+4. **Pix: enviar link** pede confirmação repetindo número, total e itens, chama `POST …/budgets/:id/approve` e envia `budgetLinkText`: "✅ João, seu orçamento *Nº 42* foi aprovado. Total: R$ 20,00 — Para pagar, acesse: …". A página `/o/:hash` também mostra "Seu orçamento Nº 42".
+
+5. **Cartão/dinheiro** pede confirmação, chama `POST …/budgets/:id/approve` com `{link: false}` (aprova **sem** gerar o Pix automático — `autoPix` passa a `false`) e envia só a confirmação `budgetApprovedText`: "✅ João, seu orçamento *Nº 42* foi aprovado. Total: R$ 20,00", sem link. Quando receber, o atendente marca como pago em *Desta conversa*. Se o cliente mudar para Pix, o link continua disponível em *Inserir no campo*.
 
 **Por que não erra de orçamento:** a aprovação é sempre por **id** (a linha clicada), nunca "o último"; a mensagem do link repete número e total; e o Pix automático é gerado na aprovação com o `totalValue` daquele orçamento (`externalReference` = id). Aprovar de novo (clique duplo, outra aba) devolve o mesmo orçamento sem segunda cobrança.
 
@@ -67,7 +69,7 @@ Com a opção *Enviar itens, protegendo os sensíveis*:
 
   🔒 Veja os itens do orçamento: https://…/o/<hash>
 
-  ✅ Para aprovar, responda *APROVO 42*
+  ✅ Para aprovar o orçamento, me informe qual a forma de pagamento
   ```
   O link é o mesmo que depois recebe o pagamento — a aprovação e o "Enviar link" funcionam igual.
 

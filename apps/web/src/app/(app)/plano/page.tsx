@@ -5,6 +5,7 @@ import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
 import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature, useCan, useAsaasPending, useCompanies, type Plan, type AsaasPayment } from '@/lib/hooks';
 import { AsaasCheckoutModal } from '@/components/billing/AsaasCheckoutModal';
+import { MetaCostsSection } from '@/components/billing/MetaCostsSection';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
@@ -207,6 +208,9 @@ function PlanoInner() {
           <p>Seu plano permite <b>excedente</b>: acima do incluído, cada mensagem custa {L.overagePricePerMessage != null ? brl(L.overagePricePerMessage) : '—'} e cada template {L.overagePricePerTemplate != null ? brl(L.overagePricePerTemplate) : '—'}, cobrados na próxima fatura. Você recebe aviso em 80% e 100%.</p>
         )}
       </div>
+
+      {/* gasto com a Meta: só aparece com número oficial (docs/gasto-meta.md) */}
+      {isAdmin && <MetaCostsSection />}
 
       {/* Planos */}
       {isAdmin && (

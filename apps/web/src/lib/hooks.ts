@@ -40,3 +40,5 @@ export * from './hooks/chat-interno';
 export * from './hooks/escalas';
 export * from './hooks/acessos';
 export * from './hooks/donos';
+export * from './hooks/tickets';
+export * from './hooks/gasto-meta';

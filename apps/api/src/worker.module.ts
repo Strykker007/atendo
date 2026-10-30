@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { CoreModule } from './common/core.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { MetaCostsModule } from './modules/billing/meta-costs.module';
 import { FlowsModule } from './modules/flows/flows.module';
 import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -17,6 +18,7 @@ import { env } from './config/env';
     WhatsAppModule,
     ConversationsModule,
     BillingModule,
+    MetaCostsModule,
     FlowsModule,
     SchedulingModule,
     ScheduledMessagesModule,

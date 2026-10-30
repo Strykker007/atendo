@@ -59,6 +59,11 @@ class CreateBudgetDto {
   @IsOptional() @IsBoolean() quote?: boolean;
 }
 
+class ApproveBudgetDto {
+  /** false = cliente paga em cartão ou dinheiro: aprova sem gerar o Pix automático (o link não é enviado) */
+  @IsOptional() @IsBoolean() link?: boolean;
+}
+
 class UpdateBudgetDto {
   /** atendente confirma o pagamento (ou desfaz, voltando a pendente); EXPIRED descarta orçamento ainda sem aprovação */
   @IsIn(['PENDING', 'PAID', 'EXPIRED']) status: 'PENDING' | 'PAID' | 'EXPIRED';
@@ -260,8 +265,9 @@ export class BudgetsService {
    * Cliente aprovou o orçamento enviado por texto (docs/orcamentos.md#orçamento-com-aprovação):
    * o link passa a valer, a validade recomeça agora e o Pix automático é gerado com o valor do
    * orçamento aprovado — é sempre o deste id, nunca "o último". Repetir devolve o mesmo, sem nova cobrança.
+   * `link: false` (cartão ou dinheiro): aprova sem Pix automático; o pagamento é marcado à mão depois.
    */
-  async approve(user: AuthUser, conversationId: string, id: string) {
+  async approve(user: AuthUser, conversationId: string, id: string, link = true) {
     const b = await this.prisma.budget.findFirst({ where: { id, conversationId, tenantId: user.tenantId } });
     if (!b) throw new NotFoundException('Orçamento não encontrado');
     if (!b.quotedAt) throw new BadRequestException('Este orçamento já foi enviado como link.');
@@ -275,16 +281,17 @@ export class BudgetsService {
     if (status === 'EXPIRED') throw new BadRequestException(`O Orçamento Nº ${b.number} venceu antes da aprovação. Gere um novo com os valores de hoje.`);
     if (status !== 'PENDING') throw new BadRequestException(`O Orçamento Nº ${b.number} já está ${status === 'PAID' ? 'pago' : 'estornado'}.`);
 
-    const account = b.autoPix ? await this.payments.accountFor(user.tenantId) : null;
-    if (b.autoPix && !account) throw new BadRequestException('Pix automático indisponível: conecte a conta do Asaas em Configurações → Empresa (recurso do plano).');
+    const autoPix = b.autoPix && link;
+    const account = autoPix ? await this.payments.accountFor(user.tenantId) : null;
+    if (autoPix && !account) throw new BadRequestException('Pix automático indisponível: conecte a conta do Asaas em Configurações → Empresa (recurso do plano).');
     const contato = await this.prisma.contact.findUnique({ where: { id: b.contactId }, select: { name: true, document: true } });
     const doc = (contato?.document ?? '').replace(/\D/g, '');
-    if (b.autoPix && !isCpfCnpjLength(doc)) throw new BadRequestException('Informe o CPF/CNPJ do contato na ficha — o Asaas exige para gerar o Pix.');
+    if (autoPix && !isCpfCnpjLength(doc)) throw new BadRequestException('Informe o CPF/CNPJ do contato na ficha — o Asaas exige para gerar o Pix.');
 
     const validity = (BUDGET_VALIDITY as readonly string[]).includes(b.validity ?? '') ? (b.validity as BudgetValidity) : BUDGET_DEFAULT_VALIDITY;
     const expiresAt = await this.vencimento(user.tenantId, { validity });
     // só um clique ganha: o segundo cai no "já aprovado" acima
-    const ok = await this.prisma.budget.updateMany({ where: { id: b.id, approvedAt: null, status: 'PENDING' }, data: { approvedAt: new Date(), approvedById: user.id, expiresAt } });
+    const ok = await this.prisma.budget.updateMany({ where: { id: b.id, approvedAt: null, status: 'PENDING' }, data: { approvedAt: new Date(), approvedById: user.id, expiresAt, ...(!link && { autoPix: false }) } });
     if (!ok.count) {
       // outro clique aprovou (ou pagou) entre a leitura e aqui: devolve o que ficou, sem nova cobrança
       const atual = await this.prisma.budget.findUniqueOrThrow({ where: { id: b.id }, include: inclui });
@@ -300,7 +307,7 @@ export class BudgetsService {
         return this.present(comPix);
       } catch (e) {
         // volta a esperar aprovação: o atendente corrige (CPF, conta) e clica de novo
-        await this.prisma.budget.update({ where: { id: b.id }, data: { approvedAt: null, approvedById: null, expiresAt: b.expiresAt } });
+        await this.prisma.budget.update({ where: { id: b.id }, data: { approvedAt: null, approvedById: null, expiresAt: b.expiresAt, autoPix: b.autoPix } });
         throw e;
       }
     }
@@ -645,10 +652,10 @@ class BudgetsController {
     return this.budgets.update(u, id, budgetId, dto);
   }
 
-  /** Cliente aprovou o orçamento por texto: libera o link deste orçamento (e gera o Pix automático). */
+  /** Cliente aprovou o orçamento por texto: libera o link deste orçamento (e gera o Pix automático, se for Pix). */
   @Post(':budgetId/approve')
-  approve(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('budgetId') budgetId: string) {
-    return this.budgets.approve(u, id, budgetId);
+  approve(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('budgetId') budgetId: string, @Body() dto: ApproveBudgetDto) {
+    return this.budgets.approve(u, id, budgetId, dto.link ?? true);
   }
 
   /** Estorno é dinheiro voltando: gestão (`settings.manage`). */

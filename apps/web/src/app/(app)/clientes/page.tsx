@@ -15,7 +15,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useBrand } from '@/lib/brand-context';
 import { impersonation, setAccessToken } from '@/lib/api';
-import { useTenants, useTenantsLive, useCreateTenant, useUpdateTenant, useImpersonate, usePlans, useMe, useTenantTemplates, type Plan, type TenantRow, type TenantProfile, type TenantLive, type TenantLiveNumber } from '@/lib/hooks';
+import { useTenants, useTenantsLive, useCreateTenant, useUpdateTenant, useSetTenantActive, useImpersonate, usePlans, useMe, useTenantTemplates, type Plan, type TenantRow, type TenantProfile, type TenantLive, type TenantLiveNumber } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 /** Rótulo do plano nos seletores: gratuito aparece como tal (e com o prazo), não como "R$ 0,00". */
@@ -260,6 +260,7 @@ export default function ClientesPage() {
       router.push('/conversas');
     } catch (err) { toast.err(err); } finally { setBusy(null); }
   }
+  const acesso = useSetTenantActive();
   async function patch(t: TenantRow, body: { name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) {
     setBusy(t.id);
     try { await update.mutateAsync({ ...body, id: t.id }); toast.ok('Cliente atualizado'); } catch (err) { toast.err(err); } finally { setBusy(null); }
@@ -402,7 +403,7 @@ export default function ClientesPage() {
                       <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditando(t)} title="Editar dados do cliente">Editar</Button>
                       <Button size="sm" variant="ghost" className="ml-1" icon={<QrCode size={13} />} onClick={() => setAtivando(t.id)} title="Cobrança de ativação: instalação + 1ª mensalidade por Pix">Ativação</Button>
                       <Button size="sm" variant="ghost" className="ml-1" icon={<Store size={13} />} onClick={() => setEmpresasDe(t)} title="Empresas e unidades do cliente">Empresas</Button>
-                      <Button size="sm" variant="ghost" className="ml-1" icon={<Power size={13} />} onClick={() => patch(t, { isActive: !t.isActive })} loading={busy === t.id && update.isPending} title={t.isActive ? 'Desativar cliente' : 'Ativar cliente'}>{t.isActive ? 'Desativar' : 'Ativar'}</Button>
+                      <Button size="sm" variant="ghost" className="ml-1" icon={<Power size={13} />} onClick={() => { setBusy(t.id); void mudarAcesso(t, !t.isActive, acesso).finally(() => setBusy(null)); }} loading={busy === t.id && acesso.isPending} title={t.isActive ? 'Desativar cliente' : 'Ativar cliente'}>{t.isActive ? 'Desativar' : 'Ativar'}</Button>
                       <Button size="sm" className="ml-1" icon={<Eye size={13} />} onClick={() => enter(t)} loading={busy === t.id && impersonate.isPending} loadingText="Entrando…">Entrar como</Button>
                     </td>
                   </tr>
@@ -498,9 +499,29 @@ function CreateTenantModal({ open, onClose, onCriado }: { open: boolean; onClose
  * O identificador não entra: ele já foi usado em registro e suporte, e trocá-lo depois quebra
  * a referência de quem procura o cliente por ele.
  */
+/**
+ * Desativar/reativar com os efeitos explicados (docs/desativar-cliente.md). Na desativação, a
+ * cobrança só é cancelada se o dono confirmar. Devolve false se desistiu ou falhou.
+ */
+async function mudarAcesso(t: TenantRow, ativo: boolean, m: ReturnType<typeof useSetTenantActive>): Promise<boolean> {
+  if (ativo) {
+    if (!confirm(`Reativar ${t.name}?\n\nA equipe volta a entrar. Os números voltam desconectados: os de QR precisam ler o QR de novo em Números. Campanhas pausadas continuam pausadas. Se a assinatura foi cancelada, atribua o plano de novo.`)) return false;
+  } else if (!confirm(`Desativar ${t.name}?\n\n• A equipe é desconectada e não entra mais (donos do sistema continuam)\n• Os números QR são excluídos da Evolution (para voltar, ler o QR de novo)\n• Mensagens recebidas são ignoradas e nada é enviado\n• Fluxos em andamento param e campanhas ficam pausadas\n\nConversas, contatos e histórico ficam guardados.`)) return false;
+  const sub = t.subscription;
+  const cobra = !ativo && !!sub && !['canceled'].includes(sub.status) && !sub.plan.isFree;
+  const cancelBilling = cobra && confirm(`Cancelar também a assinatura de ${t.name}${sub!.gateway ? ` no ${sub!.gateway === 'asaas' ? 'Asaas' : 'Stripe'}` : ''}?\n\nOK = cancela a cobrança agora. Cancelar = mantém a cobrança como está.`);
+  try {
+    const r = await m.mutateAsync({ id: t.id, active: ativo, cancelBilling });
+    if (r.billing?.error) toast.warn(`Desativado, mas a assinatura não foi cancelada: ${r.billing.error}`);
+    else toast.ok(ativo ? 'Cliente reativado' : r.billing?.canceled ? 'Cliente desativado e assinatura cancelada' : 'Cliente desativado');
+    return true;
+  } catch (err) { toast.err(err); return false; }
+}
+
 function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () => void }) {
   const plans = usePlans();
   const update = useUpdateTenant();
+  const acesso = useSetTenantActive();
   const [f, setF] = useState({
     name: tenant.name,
     planId: tenant.subscription?.plan.id ?? '',
@@ -523,8 +544,13 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          update.mutateAsync({ id: tenant.id, ...f, planId: f.planId || undefined, billingType: f.billingType !== tenant.billingType ? f.billingType : undefined, profile: perfil, ...(vencimento && vencimento !== vencimentoInicial && { currentPeriodEnd: vencimento }) })
-            .then(() => { toast.ok('Cliente atualizado'); onClose(); })
+          // ativo/desativado vai pela rota própria, com os efeitos confirmados (mudarAcesso)
+          update.mutateAsync({ id: tenant.id, ...f, isActive: undefined, planId: f.planId || undefined, billingType: f.billingType !== tenant.billingType ? f.billingType : undefined, profile: perfil, ...(vencimento && vencimento !== vencimentoInicial && { currentPeriodEnd: vencimento }) })
+            .then(async () => {
+              if (f.isActive !== tenant.isActive && !(await mudarAcesso(tenant, f.isActive, acesso))) return;
+              toast.ok('Cliente atualizado');
+              onClose();
+            })
             .catch(toast.err);
         }}
         className="space-y-4"
@@ -593,7 +619,7 @@ function EditTenantModal({ tenant, onClose }: { tenant: TenantRow; onClose: () =
         </div>
         <Field label="Observações" hint="Só você vê."><textarea className={cn(inputCls, 'min-h-[4.5rem]')} {...campo('notes')} maxLength={2000} /></Field>
 
-        <Field label="Acesso" hint="Desativado, ninguém da empresa consegue entrar — as conversas e o histórico ficam guardados.">
+        <Field label="Acesso" hint="Desativado: a equipe não entra, os números QR são excluídos e nada é recebido nem enviado — conversas e histórico ficam guardados. Ao salvar, confirma os efeitos e a cobrança.">
           <div className="flex gap-2">
             {[[true, 'Ativo'], [false, 'Desativado']].map(([v, l]) => (
               <button key={String(v)} type="button" onClick={() => setF({ ...f, isActive: v as boolean })} className={cn('rounded-lg border px-3 py-1.5 text-[13px]', f.isActive === v ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>{l as string}</button>

@@ -16,7 +16,7 @@ import { PercentInput } from '@/components/ui/PercentInput';
 import { DateInput, MonthPicker } from '@/components/ui/DatePicker';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
-import { useClosingConfig, useClosingMonth, useClosingWrite, useMe, useOverdue, usePayables, useUpdateTenant, type ClosingConfig, type ClosingSummary, type FinanceEntryRow, type PayoutRow, type ReceivableRow } from '@/lib/hooks';
+import { useClosingConfig, useClosingMonth, useClosingWrite, useMe, useOverdue, usePayables, useTenants, useUpdateTenant, type ClosingConfig, type ClosingSummary, type FinanceEntryRow, type PayoutRow, type ReceivableRow } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
@@ -395,7 +395,7 @@ function LancamentoModal({ entry, tipo, periodo, onClose }: { entry: FinanceEntr
   const [kind, setKind] = useState<'income' | 'expense'>(entry?.kind ?? tipo);
   const [f, setF] = useState({
     category: entry?.category ?? '', description: entry?.description ?? '', amount: entry?.amount ?? 0, date: dataInicial,
-    period: entry?.period ?? periodo, supplierId: entry?.supplierId ?? '', paymentMethod: entry?.paymentMethod ?? '',
+    period: entry?.period ?? periodo, supplierId: entry?.supplierId ?? '', tenantId: entry?.tenantId ?? '', paymentMethod: entry?.paymentMethod ?? '',
     documentNumber: entry?.documentNumber ?? '', notes: entry?.notes ?? '', installments: 1,
   });
   // pago? entrada nasce recebida; saída com vencimento até hoje nasce paga
@@ -405,6 +405,8 @@ function LancamentoModal({ entry, tipo, periodo, onClose }: { entry: FinanceEntr
   const set = (p: Partial<typeof f>) => setF((v) => ({ ...v, ...p }));
   const fixoOuImposto = !!(entry?.recurringId || entry?.taxRuleId);
   const entrada = kind === 'income';
+  // entrada de cliente do sistema: liga o recebimento à conta dele (aparece nas mensalidades do mês)
+  const clientes = useTenants(entrada);
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
@@ -413,7 +415,8 @@ function LancamentoModal({ entry, tipo, periodo, onClose }: { entry: FinanceEntr
     const body = {
       category: f.category, description: f.description, amount: f.amount, date: f.date,
       period: competenciaManual ? f.period : f.date.slice(0, 7),
-      paidAt: pago ? pagoEm : null, paymentMethod: f.paymentMethod || null, supplierId: f.supplierId || null,
+      paidAt: pago ? pagoEm : null, paymentMethod: f.paymentMethod || null, supplierId: entrada ? null : f.supplierId || null,
+      tenantId: entrada ? f.tenantId || null : null,
       documentNumber: f.documentNumber || null, notes: f.notes || null,
       ...(!entry && f.installments > 1 && { installments: f.installments }),
     };
@@ -440,15 +443,23 @@ function LancamentoModal({ entry, tipo, periodo, onClose }: { entry: FinanceEntr
           {entry?.taxRuleId && (
             <p className="text-xs rounded-lg bg-field text-muted px-3 py-2">Imposto automático, calculado sobre o que entrou no mês. {entry.amountLocked ? 'O valor foi corrigido à mão (guia): não recalcula mais.' : 'Se a guia vier com outro valor, corrija aqui — a partir daí ele não recalcula mais.'}</p>
           )}
-          {entry?.tenantId && <p className="text-xs rounded-lg bg-field text-muted px-3 py-2">Recebimento da mensalidade de {entry.tenant}.</p>}
 
           <div className="grid sm:grid-cols-2 gap-3">
             <Field label="Categoria">
               <SelectCategoria cats={cfg.data.categories} value={f.category} onChange={(category) => set({ category })} kind={kind} />
             </Field>
-            <Field label={entrada ? 'De quem' : 'Fornecedor / favorecido'}>
-              <SelectFornecedor sups={cfg.data.suppliers} value={f.supplierId} onChange={(supplierId) => set({ supplierId })} />
-            </Field>
+            {entrada ? (
+              <Field label="Cliente">
+                <select className={inputCls} value={f.tenantId} onChange={(e) => set({ tenantId: e.target.value })}>
+                  <option value="">Não é cliente do sistema</option>
+                  {(clientes.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((t) => <option key={t.id} value={t.id}>{t.name}{!t.isActive ? ' (desativado)' : ''}</option>)}
+                </select>
+              </Field>
+            ) : (
+              <Field label="Fornecedor / favorecido">
+                <SelectFornecedor sups={cfg.data.suppliers} value={f.supplierId} onChange={(supplierId) => set({ supplierId })} />
+              </Field>
+            )}
           </div>
           <Field label="Descrição">
             <input className={inputCls} value={f.description} maxLength={160} onChange={(e) => set({ description: e.target.value })}
@@ -834,7 +845,10 @@ function Configuracao() {
             <ul className="divide-y divide-line">
               {cfg.partners.map((p) => (
                 <li key={p.id} className={cn('flex items-center gap-3 py-2 text-sm', !p.isActive && 'opacity-50')}>
-                  <span className="flex-1 font-medium text-ink">{p.name}{!p.isActive && <span className="text-xs text-muted font-normal"> (inativo)</span>}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="font-medium text-ink">{p.name}{!p.isActive && <span className="text-xs text-muted font-normal"> (inativo)</span>}</span>
+                    <span className="block text-[11px] text-muted truncate">{p.userId ? `Conta: ${p.email ?? 'no sistema'}` : 'Sem conta no sistema'}</span>
+                  </span>
                   {p.pixKey && <span className="text-xs text-muted hidden sm:inline">Pix: {p.pixKey}</span>}
                   <b className="tnum w-16 text-right">{p.sharePercent.toLocaleString('pt-BR')}%</b>
                   <button type="button" className="text-faint hover:text-ink p-1" title="Editar" onClick={() => setSocio(p)}><Pencil size={14} /></button>
@@ -908,7 +922,7 @@ function Configuracao() {
         </Secao>
       </div>
 
-      {socio && <SocioModal socio={socio === 'novo' ? null : socio} outros={ativos.filter((p) => socio === 'novo' || p.id !== socio.id)} onClose={() => setSocio(null)} />}
+      {socio && <SocioModal socio={socio === 'novo' ? null : socio} outros={ativos.filter((p) => socio === 'novo' || p.id !== socio.id)} cfg={cfg} onClose={() => setSocio(null)} />}
       {fixo && <FixoModal item={fixo.item} folha={fixo.folha} cfg={cfg} onClose={() => setFixo(null)} />}
       {imposto && <ImpostoModal item={imposto === 'novo' ? null : imposto} cfg={cfg} onClose={() => setImposto(null)} />}
       {categoria && <CategoriaModal item={categoria === 'novo' ? null : categoria} onClose={() => setCategoria(null)} />}
@@ -944,24 +958,39 @@ function ListaFixos({ titulo, desc, itens, cats, onNovo, onEditar }: { titulo: s
   );
 }
 
-function SocioModal({ socio, outros, onClose }: { socio: ClosingConfig['partners'][number] | null; outros: ClosingConfig['partners']; onClose: () => void }) {
+function SocioModal({ socio, outros, cfg, onClose }: { socio: ClosingConfig['partners'][number] | null; outros: ClosingConfig['partners']; cfg: ClosingConfig; onClose: () => void }) {
   const w = useClosingWrite();
   // quanto dos 100% os demais sócios ativos já ocupam: o que falta é a sugestão para este
   const ocupado = Math.round(outros.reduce((s, p) => s + p.sharePercent, 0) * 100) / 100;
   const falta = Math.max(0, Math.round((100 - ocupado) * 100) / 100);
-  const [f, setF] = useState({ name: socio?.name ?? '', sharePercent: socio?.sharePercent ?? (outros.length ? falta : 0), pixKey: socio?.pixKey ?? '', isActive: socio?.isActive ?? true });
+  // conta já usada por outro sócio não aparece: uma pessoa, um cadastro
+  const usadas = new Set(cfg.partners.filter((p) => p.userId && p.id !== socio?.id).map((p) => p.userId));
+  const contas = cfg.accounts.filter((a) => !usadas.has(a.id));
+  const [f, setF] = useState({ userId: socio ? socio.userId ?? '' : contas[0]?.id ?? '', name: socio?.name ?? '', sharePercent: socio?.sharePercent ?? (outros.length ? falta : 0), pixKey: socio?.pixKey ?? '', isActive: socio?.isActive ?? true });
   const total = Math.round((ocupado + (f.isActive ? f.sharePercent : 0)) * 100) / 100;
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await w.mutateAsync(socio ? { path: `partners/${socio.id}`, method: 'PUT', body: f } : { path: 'partners', body: f });
+      const body = { ...f, userId: f.userId || null, name: f.userId ? undefined : f.name };
+      await w.mutateAsync(socio ? { path: `partners/${socio.id}`, method: 'PUT', body } : { path: 'partners', body });
       onClose();
     } catch (err) { toast.err(err); }
   }
   return (
     <Modal open onClose={onClose} title={socio ? 'Editar sócio' : 'Novo sócio'} width="max-w-md">
       <form onSubmit={salvar} className="space-y-3">
-        <Field label="Nome"><input className={inputCls} value={f.name} maxLength={80} onChange={(e) => setF({ ...f, name: e.target.value })} required autoFocus /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Conta no sistema">
+            <select className={inputCls} value={f.userId} onChange={(e) => setF({ ...f, userId: e.target.value })} autoFocus>
+              {contas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <option value="">Sem conta (só o nome)</option>
+            </select>
+          </Field>
+          {f.userId
+            ? <Field label="Nome"><Fixo>{contas.find((a) => a.id === f.userId)?.name ?? socio?.name}</Fixo></Field>
+            : <Field label="Nome"><input className={inputCls} value={f.name} maxLength={80} onChange={(e) => setF({ ...f, name: e.target.value })} required /></Field>}
+        </div>
+        <p className="text-[11px] text-faint -mt-1">{f.userId ? `Nome e e-mail vêm da conta (${contas.find((a) => a.id === f.userId)?.email ?? '—'}) — mudou lá, muda aqui.` : 'A lista mostra os donos do sistema. Sem conta, o nome fica só aqui.'}</p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Participação no lucro"><PercentInput value={f.sharePercent} onChange={(v) => setF({ ...f, sharePercent: v })} aria-label="Participação no lucro" /></Field>
           <Field label="Chave Pix"><input className={inputCls} value={f.pixKey} maxLength={120} placeholder="Opcional" onChange={(e) => setF({ ...f, pixKey: e.target.value })} /></Field>

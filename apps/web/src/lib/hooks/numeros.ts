@@ -266,6 +266,16 @@ export function useRealtime() {
       if (m.authorId !== eu && !useUI.getState().soundMuted) playMessageSound();
     });
     socket.on('support_chat', () => { qc.invalidateQueries({ queryKey: ['support-chats'] }); });
+    // tickets internos (docs/tickets.md): lista/detalhe se atualizam; `ticket_alert` só para quem passou a atuar
+    socket.on('ticket', (e: { id: string }) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['tickets-summary'] });
+      qc.invalidateQueries({ queryKey: ['ticket', e.id] });
+    });
+    socket.on('ticket_alert', (e: { id: string; number: number; title: string; message: string }) => {
+      toast.ok(e.message);
+      if (!useUI.getState().soundMuted) playMessageSound();
+    });
     socket.on('kanban', () => { qc.invalidateQueries({ queryKey: ['kanban'] }); qc.invalidateQueries({ queryKey: ['tags'] }); });
     // transmissão: progresso atualiza a tela; `alert` = parou sozinha (3 falhas seguidas…) — aviso em qualquer tela
     socket.on('campaign', (e: { id: string; status: string; name?: string; alert?: string }) => {

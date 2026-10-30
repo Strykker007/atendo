@@ -228,7 +228,10 @@ export interface ClosingMonth {
   cash: { balance: number; since: string | null; received: number; spent: number; paidToPartners: number; toPay: number; toPayCount: number; overdue: number; overdueCount: number };
 }
 export interface ClosingConfig {
-  partners: { id: string; name: string; sharePercent: number; pixKey: string | null; isActive: boolean }[];
+  /** `userId`: conta do sócio no sistema (o nome vem dela) */
+  partners: { id: string; name: string; userId: string | null; email: string | null; sharePercent: number; pixKey: string | null; isActive: boolean }[];
+  /** donos do sistema que podem ser vinculados como sócio */
+  accounts: { id: string; name: string; email: string | null }[];
   recurring: {
     id: string; category: string; description: string; amount: number; dayOfMonth: number; isActive: boolean; startPeriod: string;
     endPeriod: string | null; frequency: FinanceFrequency; autoPaid: boolean; paymentMethod: string | null; supplierId: string | null; supplier: string | null; notes: string | null;

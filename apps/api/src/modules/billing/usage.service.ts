@@ -103,6 +103,60 @@ export class UsageService {
         .catch((err) => this.log.error(`Janela de conversa não registrada (tenant ${input.tenantId}): ${err instanceof Error ? err.message : err}`));
     }
     if (input.direction === 'out') await this.checkAlerts(input.tenantId, period);
+    if (input.provider === 'meta' && providerCost > 0) {
+      await this.checkMetaBudget(input.tenantId, period)
+        .catch((err) => this.log.error(`Orçamento da Meta não conferido (tenant ${input.tenantId}): ${err instanceof Error ? err.message : err}`));
+    }
+  }
+
+  /**
+   * Gasto do mês com a Meta (docs/gasto-meta.md): `estimated` = ledger (preço da tabela no envio,
+   * em BRL, na hora); `real` = `meta_cost_daily` (o que a Meta apurou, na moeda da WABA, com
+   * atraso de horas). Moedas diferentes não se somam: cada uma vem com a sua.
+   */
+  async metaSpend(tenantId: string, period = periodOf()) {
+    const [y, m] = period.split('-').map(Number);
+    const from = new Date(Date.UTC(y, m - 1, 1));
+    const to = new Date(Date.UTC(y, m, 1));
+    const [est, real] = await Promise.all([
+      this.prisma.messageUsage.aggregate({ where: { tenantId, provider: 'meta', occurredAt: { gte: from, lt: to } }, _sum: { providerCost: true } }),
+      this.prisma.metaCostDaily.groupBy({ by: ['currency'], where: { tenantId, day: { gte: from, lt: to } }, _sum: { cost: true }, _max: { updatedAt: true } }),
+    ]);
+    return {
+      estimated: Number(est._sum.providerCost ?? 0),
+      real: real.map((r) => ({ currency: r.currency, total: Number(r._sum.cost ?? 0), updatedAt: r._max.updatedAt })),
+    };
+  }
+
+  /** Aviso de 80% e 100% do orçamento com a Meta. Só avisa — a Meta cobra o cliente direto, não bloqueamos. */
+  async checkMetaBudget(tenantId: string, period = periodOf()) {
+    const t = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { metaBudgetMonth: true } });
+    const budget = Number(t?.metaBudgetMonth ?? 0);
+    if (!budget) return;
+    const spend = await this.metaSpend(tenantId, period);
+    // o maior dos dois em reais: a estimativa chega primeiro, o real corrige depois
+    const gasto = Math.max(spend.estimated, spend.real.find((r) => r.currency === 'BRL')?.total ?? 0);
+    for (const threshold of USAGE_ALERT_THRESHOLDS) {
+      if (gasto / budget < threshold) continue;
+      const created = await this.prisma.usageAlert.create({ data: { tenantId, period, metric: 'meta_cost', threshold } }).catch(() => null);
+      if (!created) continue;
+      this.log.warn(`[alerta] tenant ${tenantId} atingiu ${threshold * 100}% do orçamento da Meta`);
+      const to = await this.adminEmails(tenantId);
+      if (!to.length) continue;
+      const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      const pct = Math.round(threshold * 100);
+      this.mail.send({
+        to,
+        subject: threshold >= 1 ? 'Gasto com a Meta passou do orçamento do mês' : `Gasto com a Meta em ${pct}% do orçamento do mês`,
+        text: `O gasto com a API oficial do WhatsApp (Meta) neste mês está em ${brl(gasto)}, ${pct}% do orçamento de ${brl(budget)} que vocês definiram.
+
+O envio continua normal: a Meta cobra direto no cartão da conta do WhatsApp. Mensagens de modelo (marketing, utilidade, autenticação) são as que custam; responder dentro de 24 horas da mensagem do cliente é grátis.
+
+Veja o gasto por número e por tipo:
+
+${env.WEB_ORIGIN}/plano#gasto-meta`,
+      }).catch(() => undefined);
+    }
   }
 
   async current(tenantId: string, period = periodOf()) {
@@ -162,6 +216,9 @@ export class UsageService {
 
   /** Verifica se o tenant pode enviar mais uma mensagem/template. */
   async canSend(tenantId: string, kind: QuotaKind, numberId?: string): Promise<QuotaDecision> {
+    // cliente desativado não envia nada (docs/desativar-cliente.md)
+    const t = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { isActive: true } });
+    if (t && !t.isActive) return { ok: false, reason: 'Cliente desativado: o envio está bloqueado.' };
     // empresa com assinatura própria suspensa/cancelada: os números dela param de enviar, e só
     // eles — o resto do grupo segue normal (docs/empresas.md#cobrança)
     if (numberId) {

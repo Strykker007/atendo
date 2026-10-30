@@ -44,7 +44,8 @@ Mensalidade **sem gateway** (cobrada à mão) entra como a receber quando `activ
 |---|---|
 | Tipo | Saída (imposto, custo, despesa, folha) ou Entrada |
 | Categoria | Agrupada pelo grupo do fechamento; só as ativas |
-| Fornecedor / favorecido | Cadastro de fornecedores, com **＋ Cadastrar novo…** no próprio seletor |
+| Fornecedor / favorecido (saída) | Cadastro de fornecedores, com **＋ Cadastrar novo…** no próprio seletor |
+| Cliente (entrada) | Cliente do sistema que pagou (`tenantId`; lista de `/tenants`, desativados marcados) ou "Não é cliente do sistema". Com cliente, a entrada conta como recebido de clientes e aparece nas mensalidades do mês. Para o vencimento da mensalidade andar, use **Recebi** na linha dele |
 | Descrição, Valor | — |
 | Parcelas | À vista até 60x (saída nova). O valor é **de cada parcela**; cria uma por mês (vencimento e competência andam juntos), descrição "(1/3)", mesmo `installmentGroup`. Só a 1ª pode nascer paga |
 | Vencimento | Dia da conta (entrada: dia do recebimento) |
@@ -75,7 +76,7 @@ Tudo que venceu e não foi pago, de qualquer mês: faturas `open`/`failed` venci
 
 ## Aba Cadastros
 
-- **Sócios**: nome, % e chave Pix; inativo sai da divisão. Mostra a soma (precisa dar 100%).
+- **Sócios**: **conta no sistema** (lista os donos do sistema — `super_admin` ou `isSystemOwner`, login principal e ativos), % e chave Pix; inativo sai da divisão. Vinculado, o nome vem da conta (mudou lá, muda aqui) e cada conta só pode ser um sócio (`finance_partners.userId` único). **Sem conta (só o nome)** continua valendo para sócio que não usa o sistema. Mostra a soma (precisa dar 100%).
 - **Caixa**: reserva antes de dividir (%), saldo inicial e a data dele.
 - **Impostos automáticos** (`finance_tax_rules`): nome, categoria (grupo Impostos), alíquota (%), base (*tudo que entrou no mês* ou *só o recebido de clientes*), dia do vencimento no mês seguinte e mês de início. Todo mês aberto ganha o lançamento com `base × %`, competência no próprio mês e vencimento no seguinte; **recalcula** enquanto o mês está aberto, o lançamento não foi pago e o valor não foi corrigido à mão. Desligar/remover tira dos meses abertos o que ainda não foi pago. Serve para Simples Nacional (alíquota efetiva do DAS), ISS, PIS/COFINS, IRPJ/CSLL do presumido…
 - **Folha de pagamento e pró-labore** e **Custos e despesas fixos** (`finance_recurring`): categoria, fornecedor, descrição, valor, frequência (todo mês, a cada 3 ou 6 meses, anual — contada do mês de início), dia do vencimento (1–31; 31 em mês curto vira o último dia), mês de início, mês final opcional (parcelamento), forma de pagamento, **débito automático** (já nasce pago no dia) e observações. Novo vale a partir do mês de início; editar atualiza o lançamento do mês aberto (os fechados ficam como foram); remover tira do mês aberto e mantém o histórico. O total mostra o equivalente mensal.
@@ -94,12 +95,12 @@ Tudo que venceu e não foi pago, de qualquer mês: faturas `open`/`failed` venci
 | POST/PATCH/DELETE | `/billing/closing/entries[/:id]` | Lançamentos `{category, description, amount, date, period?, paidAt?, paymentMethod?, documentNumber?, notes?, supplierId?, installments?}`; PATCH também `skipped`; DELETE `?all=1` nas parcelas |
 | POST | `/billing/closing/entries/:id/pay` | Baixa `{date, amount?, paymentMethod?}`; `{date: null}` desfaz |
 | GET | `/billing/closing/payables` | Contas a pagar em aberto |
-| GET | `/billing/closing/config` | Sócios, fixos, categorias, fornecedores, impostos e configuração |
+| GET | `/billing/closing/config` | Sócios, fixos, categorias, fornecedores, impostos, configuração e `accounts` (donos do sistema que podem ser sócio) |
 | POST/PUT/DELETE | `/billing/closing/categories[/:id]` | Categoria `{name, section, isActive?}` |
 | POST/PUT/DELETE | `/billing/closing/suppliers[/:id]` | Fornecedor `{name, document?, pixKey?, notes?, isActive?}` |
 | POST/PUT/DELETE | `/billing/closing/tax-rules[/:id]` | Imposto automático `{name, categoryId, percent, base?, dueDay?, isActive?, startPeriod?}` |
 | PUT | `/billing/closing/settings` | `{reservePercent?, openingBalance?, openingDate?}` |
-| POST/PUT | `/billing/closing/partners[/:id]` | Sócio |
+| POST/PUT | `/billing/closing/partners[/:id]` | Sócio: `{userId?, name?, sharePercent, pixKey?, isActive?}` — com `userId` (dono do sistema) o nome vem da conta; sem, `name` é obrigatório |
 | POST/PUT/DELETE | `/billing/closing/recurring[/:id]` | Custo fixo / folha `{category, description, amount, dayOfMonth?, frequency?, startPeriod?, endPeriod?, autoPaid?, paymentMethod?, supplierId?, notes?, isActive?}` |
 
 ## Modelo

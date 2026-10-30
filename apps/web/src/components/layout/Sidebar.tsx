@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound } from 'lucide-react';
+import { MessageSquare, Ticket, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -37,6 +37,8 @@ const OWNER_ITEMS = [
 const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission[]; feature?: PlanFeature }[] = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare },
   { href: '/kanban', label: 'Kanban', icon: Columns3 },
+  // tickets internos entre setores (docs/tickets.md)
+  { href: '/tickets', label: 'Tickets', icon: Ticket, need: ['tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'], feature: 'tickets' },
   { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: ['agenda.manage'], feature: 'scheduling' },
   // disparar um fluxo numa conversa não depende deste item: aqui é criar/editar
   { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: ['flows.manage'], feature: 'flows' },

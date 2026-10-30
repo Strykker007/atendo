@@ -221,7 +221,6 @@ export class ReportsController {
       kpis: {
         conversations: total,
         closed,
-        closeRate: total ? closed / total : 0,
         waitingNow,
         inProgressNow,
         messagesIn: msgsIn,

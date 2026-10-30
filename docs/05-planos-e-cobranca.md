@@ -206,6 +206,8 @@ Cada linha guarda preço de tabela, valor concedido, % (negativo = acima da tabe
 
 Tabela `provider_pricing` — `(provider, country, category, unitPrice, validFrom)`. `PricingService.unitCost` pega a linha mais recente com `validFrom <= agora`. Quando a Meta reajustar, **insira** uma linha nova (não edite a antiga: o histórico do ledger continua correto).
 
+O custo do ledger é **estimativa**; o cliente vê ao lado o valor real apurado pela Meta em [Gasto com a Meta](gasto-meta.md).
+
 ## Ledger — fonte da verdade
 
 Cada mensagem (entrada e saída) grava uma linha em `message_usage`:

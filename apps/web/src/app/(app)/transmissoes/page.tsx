@@ -11,7 +11,8 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { NewCampaignModal } from '@/components/transmissoes/NewCampaignModal';
 import { QrRiskModal } from '@/components/transmissoes/QrRiskModal';
-import { useCampaigns, useCampaign, useCampaignStatus, useStartCampaign, useHasFeature, useCan, useOutcomeLabels, type Campaign, type CampaignStatus } from '@/lib/hooks';
+import { CampaignCostBox } from '@/components/transmissoes/CampaignCostBox';
+import { useCampaigns, useCampaign, useCampaignStatus, useStartCampaign, useSavedCampaignEstimate, useHasFeature, useCan, useOutcomeLabels, type Campaign, type CampaignStatus } from '@/lib/hooks';
 
 const STATUS: Record<CampaignStatus, { label: string; cls: string }> = {
   draft: { label: 'Rascunho', cls: 'bg-field text-muted' },
@@ -96,18 +97,35 @@ function Controles({ c }: { c: Campaign }) {
   const start = useStartCampaign();
   const [cancelando, setCancelando] = useState(false);
   const [risco, setRisco] = useState(false);
+  // API oficial: confirma vendo o custo previsto (docs/gasto-meta.md#transmissão)
+  const [custoAberto, setCustoAberto] = useState(false);
+  const estimativa = useSavedCampaignEstimate(custoAberto ? c.id : null);
   const qr = c.number.provider !== 'meta';
   const iniciar = (acceptRisk?: boolean) => start.mutateAsync({ id: c.id, acceptRisk }).then(() => toast.ok('Transmissão iniciada')).catch(toast.err);
   const mudar = (s: 'paused' | 'running' | 'canceled', ok: string) => status.mutateAsync({ id: c.id, status: s }).then(() => toast.ok(ok)).catch(toast.err);
   return (
     <div className="flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
-      {c.status === 'draft' && <Button size="sm" icon={<Play size={13} />} loading={start.isPending} onClick={() => (qr && !c.riskAcceptedAt ? setRisco(true) : void iniciar())}>Iniciar</Button>}
+      {c.status === 'draft' && <Button size="sm" icon={<Play size={13} />} loading={start.isPending} onClick={() => (qr ? (c.riskAcceptedAt ? void iniciar() : setRisco(true)) : setCustoAberto(true))}>Iniciar</Button>}
       {(c.status === 'running' || c.status === 'scheduled') && <Button size="sm" variant="ghost" icon={<Pause size={13} />} loading={status.isPending} onClick={() => void mudar('paused', 'Transmissão pausada')}>Pausar</Button>}
       {c.status === 'paused' && <Button size="sm" icon={<Play size={13} />} loading={status.isPending} onClick={() => void mudar('running', 'Transmissão retomada')}>Retomar</Button>}
       {!['done', 'canceled'].includes(c.status) && <Button size="sm" variant="ghost" className="text-danger" icon={<XCircle size={13} />} onClick={() => setCancelando(true)}>Cancelar</Button>}
       <ConfirmDialog open={cancelando} onClose={() => setCancelando(false)} title="Cancelar transmissão" danger confirmLabel="Cancelar transmissão"
         text={`Os ${c.stats.pending} contato(s) que ainda não receberam não vão receber. O que já saiu não volta. Não dá para desfazer.`}
         onConfirm={async () => { await mudar('canceled', 'Transmissão cancelada'); }} />
+      {custoAberto && (
+        <Modal open onClose={() => setCustoAberto(false)} title={`Iniciar "${c.name}"`}>
+          <div className="space-y-4">
+            <CampaignCostBox e={estimativa.data} loading={estimativa.isFetching} />
+            {estimativa.error && <p className="text-sm text-danger-ink">Não deu para calcular o custo agora. Tente de novo.</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setCustoAberto(false)}>Voltar</Button>
+              <Button disabled={!estimativa.data || !!estimativa.data.blockers.length} loading={start.isPending} onClick={() => void iniciar().then(() => setCustoAberto(false))}>
+                Iniciar{estimativa.data && !estimativa.data.blockers.length && <span className="tnum opacity-80"> · {estimativa.data.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {risco && <QrRiskModal onClose={() => setRisco(false)} onAccept={() => { setRisco(false); void iniciar(true); }} />}
     </div>
   );

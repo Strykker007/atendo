@@ -48,8 +48,8 @@ export const budgetTotal = (items: Pick<BudgetItem, 'quantity' | 'unitPrice'>[])
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-/** Frase que o cliente responde para aprovar — o número evita confundir orçamentos da mesma conversa. */
-export const budgetApprovalPhrase = (number: number | string) => `APROVO ${number}`;
+/** Pedido de aprovação: o cliente aprova respondendo a forma de pagamento (só Pix leva link). */
+export const BUDGET_APPROVAL_TEXT = 'Para aprovar o orçamento, me informe qual a forma de pagamento';
 
 /**
  * Orçamento com aprovação (docs/orcamentos.md#orçamento-com-aprovação): a mensagem com os itens
@@ -74,7 +74,7 @@ export function budgetQuoteText(b: { number: number | string; items: BudgetItem[
     `📅 Válido até ${fmt({ day: '2-digit', month: '2-digit' })} às ${fmt({ hour: '2-digit', minute: '2-digit' })}`,
     ...(b.note ? [`📝 ${b.note}`] : []),
     '',
-    `✅ Para aprovar, responda *${budgetApprovalPhrase(b.number)}*`,
+    `✅ ${BUDGET_APPROVAL_TEXT}`,
   ].join('\n');
 }
 
@@ -147,13 +147,17 @@ export function budgetQuoteLinkText(b: { number: number | string; items: BudgetI
     '',
     `🔒 Veja os itens do orçamento: ${link}`,
     '',
-    `✅ Para aprovar, responda *${budgetApprovalPhrase(b.number)}*`,
+    `✅ ${BUDGET_APPROVAL_TEXT}`,
   ].join('\n');
 }
 
 /** Mensagem do link depois da aprovação: número e total junto, para o cliente conferir antes de pagar. */
 export const budgetLinkText = (b: { number: number; totalValue: number }, link: string, firstName?: string) =>
   `✅ ${firstName ? `${firstName}, seu orçamento` : 'Orçamento'} *Nº ${b.number}* foi aprovado.\nTotal: *${brl(b.totalValue)}*\n\nPara pagar, acesse: ${link}`;
+
+/** Aprovado para cartão ou dinheiro: confirma número e total, sem link nem Pix. */
+export const budgetApprovedText = (b: { number: number; totalValue: number }, firstName?: string) =>
+  `✅ ${firstName ? `${firstName}, seu orçamento` : 'Orçamento'} *Nº ${b.number}* foi aprovado.\nTotal: *${brl(b.totalValue)}*`;
 
 /** O que a página pública recebe — nada do contato além do primeiro nome. */
 export interface PublicBudget {

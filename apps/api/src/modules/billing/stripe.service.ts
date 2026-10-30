@@ -281,6 +281,21 @@ Assim que o pagamento for confirmado, tudo volta ao normal automaticamente.`,
     }
   }
 
+  /**
+   * Cliente desativado (docs/desativar-cliente.md), quando o dono confirma: cancela a assinatura
+   * no gateway (Asaas ou Stripe) e marca cancelada aqui. Sem gateway, só marca. Se o gateway
+   * recusar, nada muda aqui (a desativação segue e o erro volta para a tela).
+   */
+  async cancelForDeactivation(tenantId: string) {
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    if (!sub || sub.status === 'canceled') return { canceled: false };
+    if (sub.externalId && sub.gateway === 'asaas') await this.asaas.cancelSubscription(sub.externalId);
+    else if (sub.externalId && this.enabled) await this.client.subscriptions.cancel(sub.externalId, { prorate: false });
+    await this.prisma.subscription.update({ where: { tenantId }, data: { status: 'canceled', canceledAt: new Date(), cancelAtPeriodEnd: false, graceUntil: null } });
+    this.log.log(`tenant ${tenantId}: assinatura cancelada na desativação${sub.externalId ? ` (${sub.gateway ?? 'stripe'} ${sub.externalId})` : ''}`);
+    return { canceled: true };
+  }
+
   // ---------- Atribuição manual (dono) e planos gratuitos ----------
 
   /**

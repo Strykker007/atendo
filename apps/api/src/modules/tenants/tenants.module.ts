@@ -176,7 +176,12 @@ class TenantsController {
   @Roles('super_admin')
   async updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
     const perfil = dto.profile ? cleanProfile(dto.profile) : {};
-    if (dto.name !== undefined || dto.isActive !== undefined || dto.profile) await this.prisma.tenant.update({ where: { id }, data: { name: dto.name, isActive: dto.isActive, ...perfil } });
+    // ativar/desativar tem efeitos (sessões, números, cobrança): só pelas rotas próprias
+    if (dto.isActive !== undefined) {
+      const atual = await this.prisma.tenant.findUnique({ where: { id }, select: { isActive: true } });
+      if (atual && atual.isActive !== dto.isActive) throw new BadRequestException(`Use POST /tenants/${id}/${dto.isActive ? 'reactivate' : 'deactivate'} (docs/desativar-cliente.md).`);
+    }
+    if (dto.name !== undefined || dto.profile) await this.prisma.tenant.update({ where: { id }, data: { name: dto.name, ...perfil } });
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId: id }, select: { planId: true, gateway: true } });
     // troca de plano (inclusive para um gratuito, que cancela a cobrança no Stripe) — ver assignPlan
     if (dto.planId && dto.planId !== sub?.planId) await this.stripe.assignPlan(id, dto.planId, dto.subscriptionStatus);

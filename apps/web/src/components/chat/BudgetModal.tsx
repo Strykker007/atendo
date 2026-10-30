@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Trash2, Copy, FileText, Check, Undo2, CornerDownLeft, Zap, Send, Link2, X, Receipt, Lock } from 'lucide-react';
-import { BUDGET_DEFAULT_VALIDITY, BUDGET_GRACE_MINUTES, BUDGET_MAX_ITEMS, BUDGET_STATUS_LABEL, BUDGET_VALIDITY, BUDGET_VALIDITY_LABEL, budgetApprovalPhrase, budgetLinkText, budgetQuoteLinkText, budgetQuoteShowsItems, budgetQuoteText, budgetRiskTerms, budgetTotal, type BudgetItem, type BudgetStatus, type BudgetValidity } from '@atendo/shared';
+import { Plus, Trash2, Copy, FileText, Check, Undo2, CornerDownLeft, Zap, Send, Link2, X, Receipt, Lock, CreditCard } from 'lucide-react';
+import { BUDGET_DEFAULT_VALIDITY, BUDGET_GRACE_MINUTES, BUDGET_MAX_ITEMS, BUDGET_STATUS_LABEL, BUDGET_VALIDITY, BUDGET_VALIDITY_LABEL, budgetApprovedText, budgetLinkText, budgetQuoteLinkText, budgetQuoteShowsItems, budgetQuoteText, budgetRiskTerms, budgetTotal, type BudgetItem, type BudgetStatus, type BudgetValidity } from '@atendo/shared';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Button } from '@/components/ui/Button';
@@ -55,7 +55,17 @@ function useEnviarLink(conversationId: string, onEnviar: (texto: string) => Prom
       return false;
     }
   };
-  return { enviar, enviando: aprovar.isPending ? aprovar.variables?.id : undefined };
+  /** cartão ou dinheiro: aprova sem Pix e manda só a confirmação (número e total, sem link) */
+  const semLink = async (b: Budget) => {
+    if (!confirm(`Aprovar o ORÇAMENTO Nº ${b.number} — ${brl(b.totalValue)} para pagamento em cartão ou dinheiro?\n\nO link não é enviado; marque como pago quando receber.`)) return false;
+    try { await aprovar.mutateAsync({ conversationId, id: b.id, link: false }); } catch (e) { toast.err(e); return false; }
+    try {
+      await onEnviar(budgetApprovedText({ number: b.number!, totalValue: b.totalValue }, primeiroNome || undefined));
+      toast.ok(`Orçamento Nº ${b.number} aprovado`);
+      return true;
+    } catch (e) { toast.err(e); return false; }
+  };
+  return { enviar, semLink, enviando: aprovar.isPending && aprovar.variables?.link !== false ? aprovar.variables?.id : undefined, aprovandoSemLink: aprovar.isPending && aprovar.variables?.link === false ? aprovar.variables?.id : undefined };
 }
 
 export function BudgetModal({ open, onClose, conversationId, onInserir, onEnviar }: { open: boolean; onClose: () => void; conversationId: string; onInserir: (texto: string) => void; onEnviar: (texto: string) => Promise<unknown> }) {
@@ -81,8 +91,8 @@ export function BudgetModal({ open, onClose, conversationId, onInserir, onEnviar
 
 /**
  * Atalho acima do campo: orçamentos enviados por texto esperando o cliente aprovar. Um clique
- * envia o link do orçamento daquela linha. Com mais de um, o número do "APROVO 42" que o cliente
- * respondeu fica destacado — é ele que decide qual link vai.
+ * aprova o orçamento daquela linha (Pix: com link; cartão/dinheiro: sem). Com mais de um, o número
+ * que o cliente citar fica destacado — é ele que decide qual orçamento vai.
  */
 export function OrcamentosAguardando({ conversationId, ultimaDoContato, onEnviar }: { conversationId: string; ultimaDoContato?: string | null; onEnviar: (texto: string) => Promise<unknown> }) {
   const lista = useBudgets(conversationId);
@@ -91,16 +101,19 @@ export function OrcamentosAguardando({ conversationId, ultimaDoContato, onEnviar
   const abertos = (lista.data ?? []).filter((b) => b.awaitingApproval && b.status === 'PENDING' && b.number);
   if (!abertos.length) return null;
   const resposta = ultimaDoContato ?? '';
-  const aprovou = /aprov/i.test(resposta);
-  // "APROVO 42": o número citado manda; com um só orçamento aberto, basta o "aprovo"
+  // o cliente aprova respondendo a forma de pagamento (ou "aprovo")
+  const aprovou = /aprov|\bpix\b|cart[aã]o|cr[eé]dito|d[eé]bito|dinheiro|esp[eé]cie/i.test(resposta);
+  // com mais de um aberto, o número citado manda; com um só, basta a resposta
   const citado = (b: Budget) => aprovou && (new RegExp(`(^|\\D)${b.number}(\\D|$)`).test(resposta) || abertos.length === 1);
+  // a forma de pagamento na resposta decide o botão em destaque: só Pix leva link
+  const pagaPorFora = /cart[aã]o|cr[eé]dito|d[eé]bito|dinheiro|esp[eé]cie/i.test(resposta) && !/\bpix\b/i.test(resposta);
   const descartar = (b: Budget) => {
     if (confirm(`Descartar o orçamento Nº ${b.number}? Ele sai daqui e o link dele não pode mais ser enviado.`)) status.mutateAsync({ conversationId, id: b.id, status: 'EXPIRED' }).catch(toast.err);
   };
 
   return (
     <div className="space-y-1">
-      {abertos.length > 1 && <p className="text-[11px] text-warn-ink px-1">{abertos.length} orçamentos esperando aprovação — envie o link do número que o cliente aprovou.</p>}
+      {abertos.length > 1 && <p className="text-[11px] text-warn-ink px-1">{abertos.length} orçamentos esperando aprovação — confira qual número o cliente aprovou.</p>}
       {abertos.map((b) => (
         <div key={b.id} className={cn('flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-sm', citado(b) ? 'border-ok bg-ok-soft' : 'border-line bg-field')}>
           <Receipt size={15} className={citado(b) ? 'text-ok shrink-0' : 'text-muted shrink-0'} />
@@ -112,8 +125,11 @@ export function OrcamentosAguardando({ conversationId, ultimaDoContato, onEnviar
             </div>
             <p className="text-xs text-muted truncate">{resumoItens(b)}</p>
           </div>
-          <Button size="sm" variant={citado(b) ? 'success' : 'ghost'} icon={<Link2 size={13} />} loading={link.enviando === b.id} onClick={() => link.enviar(b)}>
-            <span className="hidden sm:inline">Enviar link</span><span className="sm:hidden">Link</span>
+          <Button size="sm" variant={citado(b) && !pagaPorFora ? 'success' : 'ghost'} icon={<Link2 size={13} />} loading={link.enviando === b.id} onClick={() => link.enviar(b)} title="Pix: aprova e envia o link de pagamento">
+            <span className="hidden sm:inline">Pix: enviar link</span><span className="sm:hidden">Pix</span>
+          </Button>
+          <Button size="sm" variant={citado(b) && pagaPorFora ? 'success' : 'ghost'} icon={<CreditCard size={13} />} loading={link.aprovandoSemLink === b.id} onClick={() => link.semLink(b)} title="Cartão ou dinheiro: aprova sem enviar link">
+            <span className="hidden sm:inline">Cartão/dinheiro</span>
           </Button>
           <button type="button" onClick={() => descartar(b)} className="text-faint hover:text-danger p-1" title="Descartar orçamento" aria-label={`Descartar orçamento Nº ${b.number}`}>
             <X size={14} />
@@ -305,7 +321,7 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
       <div className="flex items-center justify-end gap-2 flex-wrap">
         <button type="button" className="text-xs text-muted hover:text-ink mr-auto" onClick={() => setVerPrevia((v) => !v)}>{verPrevia ? 'Esconder prévia' : 'Ver prévia da mensagem'}</button>
         <Button variant="ghost" icon={<Link2 size={14} />} onClick={() => gerar(false)} disabled={criar.isPending || enviando} title="Sem orçamento por texto: itens e valores só na página do link">Só o link</Button>
-        <Button icon={<Send size={14} />} onClick={() => gerar(true)} loading={criar.isPending || enviando} loadingText="Enviando…" title={`O cliente aprova respondendo ${budgetApprovalPhrase('Nº')}; o link sai pelo atalho acima do campo`}>Enviar orçamento</Button>
+        <Button icon={<Send size={14} />} onClick={() => gerar(true)} loading={criar.isPending || enviando} loadingText="Enviando…" title="O cliente aprova respondendo a forma de pagamento; no Pix, o link sai pelo atalho acima do campo">Enviar orçamento</Button>
       </div>
     </div>
   );
@@ -352,7 +368,10 @@ function ListaOrcamentos({ conversationId, budgets, carregando, onInserir, link 
           <p className="text-xs text-muted truncate">{resumoItens(b)}</p>
           <div className="flex items-center gap-1.5 flex-wrap">
             {b.awaitingApproval && b.status === 'PENDING' && (
-              <Button variant="success" size="sm" icon={<Link2 size={13} />} loading={link.enviando === b.id} onClick={() => link.enviar(b)}>Aprovado: enviar link</Button>
+              <>
+                <Button variant="success" size="sm" icon={<Link2 size={13} />} loading={link.enviando === b.id} onClick={() => link.enviar(b)}>Aprovado no Pix: enviar link</Button>
+                <Button variant="ghost" size="sm" icon={<CreditCard size={13} />} loading={link.aprovandoSemLink === b.id} onClick={() => link.semLink(b)}>Aprovado em cartão/dinheiro</Button>
+              </>
             )}
             {/* sem aprovação o link não vale: nada de copiar/inserir */}
             {!b.awaitingApproval && b.status === 'PENDING' && <Button variant="ghost" size="sm" icon={<CornerDownLeft size={13} />} onClick={() => onInserir(b)}>Inserir no campo</Button>}

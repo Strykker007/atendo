@@ -27,6 +27,8 @@ class EntryDto {
   @IsOptional() @ValidateIf(NULLABLE) @IsString() @MaxLength(80) documentNumber?: string | null;
   @IsOptional() @ValidateIf(NULLABLE) @IsString() @MaxLength(1000) notes?: string | null;
   @IsOptional() @ValidateIf(NULLABLE) @IsUUID() supplierId?: string | null;
+  /** entrada recebida de um cliente do sistema */
+  @IsOptional() @ValidateIf(NULLABLE) @IsUUID() tenantId?: string | null;
   @IsOptional() @IsInt() @Min(1) @Max(60) installments?: number;
 }
 class UpdateEntryDto {
@@ -40,6 +42,7 @@ class UpdateEntryDto {
   @IsOptional() @ValidateIf(NULLABLE) @IsString() @MaxLength(80) documentNumber?: string | null;
   @IsOptional() @ValidateIf(NULLABLE) @IsString() @MaxLength(1000) notes?: string | null;
   @IsOptional() @ValidateIf(NULLABLE) @IsUUID() supplierId?: string | null;
+  @IsOptional() @ValidateIf(NULLABLE) @IsUUID() tenantId?: string | null;
   /** fixo/imposto que não houve no mês */
   @IsOptional() @IsBoolean() skipped?: boolean;
 }
@@ -75,7 +78,10 @@ class ReceiveDto {
   @IsOptional() @Matches(DATE) date?: string;
 }
 class PartnerDto {
-  @IsString() @MinLength(1) @MaxLength(80) name: string;
+  /** sem conta vinculada; com `userId`, o nome vem da conta */
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
+  /** conta do sócio no sistema (dono do sistema) */
+  @IsOptional() @ValidateIf(NULLABLE) @IsUUID() userId?: string | null;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) sharePercent: number;
   @IsOptional() @IsString() @MaxLength(120) pixKey?: string | null;
   @IsOptional() @IsBoolean() isActive?: boolean;
