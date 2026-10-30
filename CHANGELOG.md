@@ -3,6 +3,12 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.12.0 — 2026-10-30
+
+- feat(agendadas): agendar mensagem para número novo pela Nova conversa
+- feat(meta): gasto com a API oficial e custo previsto na transmissão
+- feat: tickets internos, desativação real de cliente e ajustes de financeiro/orçamento
+
 ## 1.11.0 — 2026-10-29
 
 - feat(conversas): filtro de ticket com Todos, Gera ticket e Não gera ticket
