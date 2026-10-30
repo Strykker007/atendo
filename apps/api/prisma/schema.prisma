@@ -2467,6 +2467,8 @@ model Budget {
   totalValue     Decimal      @db.Decimal(12, 2)
   /// desconto em R$ sobre a soma dos itens; `totalValue` já vem com ele descontado
   discountValue  Decimal      @default(0) @db.Decimal(12, 2)
+  /// desconto dado em %: guardado para mostrar "Desconto (10%)"; o valor em R$ é `discountValue`
+  discountPercent Decimal?    @db.Decimal(5, 2)
   /// cópia da chave Pix no momento da geração — editar/apagar a chave depois não muda o orçamento
   pixKey         String?
   pixKeyType     String?

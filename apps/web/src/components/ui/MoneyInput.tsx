@@ -22,7 +22,7 @@ export function MoneyInput({ value, onChange, decimals = 2, nullable, className,
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-faint">R$</span>
       <input
         {...rest}
-        className={cn(inputCls, 'pl-9 text-right tnum')}
+        className={cn(inputCls, 'h-[38px] pl-9 text-right tnum')}
         inputMode="numeric"
         placeholder={placeholder ?? fmt(0)}
         value={value == null ? '' : fmt(value)}

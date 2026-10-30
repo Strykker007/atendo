@@ -59,6 +59,8 @@ class CreateBudgetDto {
   @IsOptional() @IsBoolean() quote?: boolean;
   /** desconto em R$ sobre a soma dos itens (o total já sai descontado) */
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000_000) discount?: number;
+  /** desconto em %: ganha de `discount` (o valor em R$ sai daqui sobre a soma dos itens) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(99.99) discountPercent?: number;
 }
 
 class ApproveBudgetDto {
@@ -200,7 +202,8 @@ export class BudgetsService {
       if (!s?.budgetQuoteEnabled) throw new BadRequestException('Orçamento por mensagem está desligado nesta empresa: envie pelo link (Configurações → Atendimento → Orçamento).');
     }
     const subtotal = budgetTotal(items);
-    const discount = Math.round((dto.discount ?? 0) * 100) / 100;
+    const percent = dto.discountPercent ?? null;
+    const discount = Math.round((percent != null ? subtotal * percent / 100 : (dto.discount ?? 0)) * 100) / 100;
     if (discount >= subtotal) throw new BadRequestException('O desconto precisa ser menor que a soma dos itens.');
 
     const validity = dto.validity ?? (dto.validHours ? null : BUDGET_DEFAULT_VALIDITY);
@@ -212,6 +215,7 @@ export class BudgetsService {
       items: items as unknown as Prisma.InputJsonValue,
       totalValue: Math.round((subtotal - discount) * 100) / 100,
       discountValue: discount,
+      discountPercent: percent,
       pixKey: pix?.key,
       pixKeyType: pix?.keyType,
       pixHolderName: pix?.holderName,
@@ -539,6 +543,7 @@ export class BudgetsService {
       items: b.items as unknown as BudgetItem[],
       totalValue: Number(b.totalValue),
       discountValue: Number(b.discountValue ?? 0),
+      discountPercent: b.discountPercent != null ? Number(b.discountPercent) : null,
       status,
       expiresAt: b.expiresAt.toISOString(),
       createdAt: b.createdAt.toISOString(),
@@ -624,6 +629,7 @@ export class BudgetsService {
       items: b.items as unknown as BudgetItem[],
       totalValue: Number(b.totalValue),
       discountValue: Number(b.discountValue ?? 0),
+      discountPercent: b.discountPercent != null ? Number(b.discountPercent) : null,
       status: effectiveStatus(b),
       expiresAt: b.expiresAt,
       createdAt: b.createdAt,
