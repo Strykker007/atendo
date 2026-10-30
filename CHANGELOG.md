@@ -3,6 +3,15 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.14.2 — 2026-10-30
+
+- fix(agendadas): modal de agendar sem <form> e fora do formulário da conversa
+- feat(orcamentos): desconto visível e orçamento por mensagem opcional (padrão: só link)
+- fix(agendadas): Agendar não envia mais a mensagem na hora
+- feat(meta): coexistência com o aplicativo WhatsApp Business do celular
+- feat(meta): cadastro incorporado (Conectar com a Meta) sem token nem IDs
+- feat(numeros): atualizar o token de um número Meta (botão Credenciais)
+
 ## 1.14.1 — 2026-10-30
 
 - feat(site): página /exclusao-de-dados (a Meta não aceita URL com #)
