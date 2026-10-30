@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.14.0 — 2026-10-30
+
+- feat(infra): publicar o site público (vogochatplus.com.br) com a política de privacidade
+
 ## 1.13.0 — 2026-10-30
 
 - fix(web): erros de lint que quebravam o build (hook condicional em Clientes, aspas em Horários)
