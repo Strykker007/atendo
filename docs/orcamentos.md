@@ -29,8 +29,9 @@ texto (`budgetQuoteItems`). A API recusa `quote: true` com a opção desligada.
 
 ## Desconto
 
-Campo **Desconto (R$)** no modal, abaixo do total (`budgets.discountValue`; `totalValue` já sai
-descontado). Precisa ser menor que a soma dos itens. Aparece para o cliente em todo lugar: no
+Campo **Desconto** no modal, abaixo do total, em **R$** ou **%** (`budgets.discountValue` em R$;
+em %, `discountPercent` guarda o percentual só para mostrar "Desconto (10%)" e o valor sai da soma
+dos itens na API; `totalValue` já sai descontado). Migration `20270128000000_budget_discount_percent`. Precisa ser menor que a soma dos itens. Aparece para o cliente em todo lugar: no
 texto do orçamento (*Subtotal / 🏷️ Desconto / TOTAL*), na mensagem do link aprovado e da aprovação
 em cartão/dinheiro ("já com desconto de R$ X") e na página pública (subtotal e desconto acima do
 total). O Pix automático cobra o total com desconto.

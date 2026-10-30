@@ -23,13 +23,15 @@ import { budgetLink, useApproveBudget, useBudgets, useCan, useConversation, useC
  */
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+/** mesma altura em todo campo do formulário: select e input nativos não batem sozinhos */
+const campo = cn(inputCls, 'h-[38px]');
 const vazio = (): BudgetItem => ({ name: '', dosage: '', quantity: 1, unitPrice: 0 });
 const primeiroNomeDe = (nome?: string | null) => nome?.trim().split(/\s+/)[0] ?? '';
 const resumoItens = (b: Budget) => b.items.map((i) => `${i.quantity}× ${i.name}`).join(', ');
 
 /** Texto com o link: aprovado por texto leva número e total (o cliente confere antes de pagar); só o link, o genérico. */
 function textoDoLink(b: Budget, primeiroNome: string) {
-  if (b.number && b.quotedAt) return budgetLinkText({ number: b.number, totalValue: b.totalValue, discountValue: b.discountValue }, budgetLink(b.hash), primeiroNome || undefined);
+  if (b.number && b.quotedAt) return budgetLinkText({ number: b.number, totalValue: b.totalValue, discountValue: b.discountValue, discountPercent: b.discountPercent }, budgetLink(b.hash), primeiroNome || undefined);
   // texto genérico: nada de item, valor ou chave na conversa
   return `Olá${primeiroNome ? ` ${primeiroNome}` : ''}, acesse o link para visualizar os detalhes do seu orçamento e opções de pagamento: ${budgetLink(b.hash)}`;
 }
@@ -60,7 +62,7 @@ function useEnviarLink(conversationId: string, onEnviar: (texto: string) => Prom
     if (!confirm(`Aprovar o ORÇAMENTO Nº ${b.number} — ${brl(b.totalValue)} para pagamento em cartão ou dinheiro?\n\nO link não é enviado; marque como pago quando receber.`)) return false;
     try { await aprovar.mutateAsync({ conversationId, id: b.id, link: false }); } catch (e) { toast.err(e); return false; }
     try {
-      await onEnviar(budgetApprovedText({ number: b.number!, totalValue: b.totalValue, discountValue: b.discountValue }, primeiroNome || undefined));
+      await onEnviar(budgetApprovedText({ number: b.number!, totalValue: b.totalValue, discountValue: b.discountValue, discountPercent: b.discountPercent }, primeiroNome || undefined));
       toast.ok(`Orçamento Nº ${b.number} aprovado`);
       return true;
     } catch (e) { toast.err(e); return false; }
@@ -197,8 +199,12 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
   const mudar = (i: number, p: Partial<BudgetItem>) => setItens((l) => l.map((it, j) => (j === i ? { ...it, ...p } : it)));
   const validos = itens.filter((i) => i.name.trim());
   const subtotal = budgetTotal(validos);
-  // desconto em R$: aparece no texto e na página, para o cliente ver que já ganhou (e não pedir de novo)
-  const [desconto, setDesconto] = useState(0);
+  // desconto em R$ ou %: aparece no texto e na página, para o cliente ver que já ganhou (e não pedir de novo)
+  const [tipoDesc, setTipoDesc] = useState<'valor' | 'pct'>('valor');
+  const [descValor, setDescValor] = useState(0);
+  const [descPct, setDescPct] = useState('');
+  const pctNum = Math.min(99.99, Math.max(0, Number(descPct.replace(',', '.')) || 0));
+  const desconto = tipoDesc === 'pct' ? Math.round(subtotal * pctNum) / 100 : descValor;
   const descontoOk = desconto >= 0 && (desconto === 0 || desconto < subtotal);
   const total = Math.round((subtotal - (descontoOk ? desconto : 0)) * 100) / 100;
   const sensiveis = budgetRiskTerms(validos, note);
@@ -224,7 +230,7 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
         note: note.trim() || undefined,
         validity,
         quote: quote || undefined,
-        discount: desconto > 0 ? desconto : undefined,
+        ...(tipoDesc === 'pct' ? (pctNum > 0 ? { discountPercent: pctNum } : {}) : (desconto > 0 ? { discount: desconto } : {})),
       });
       if (!quote) {
         toast.ok('Link gerado — revise a mensagem no campo e envie');
@@ -247,7 +253,7 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
     } catch (e) { toast.err(e); }
   }
 
-  const rascunho = { number: '…', items: validos, totalValue: total, discountValue: desconto > 0 ? desconto : 0, expiresAt: vencimentoPrevia(validity), note: note.trim() || null };
+  const rascunho = { number: '…', items: validos, totalValue: total, discountValue: desconto > 0 ? desconto : 0, discountPercent: tipoDesc === 'pct' && pctNum > 0 ? pctNum : null, expiresAt: vencimentoPrevia(validity), note: note.trim() || null };
   const optsPrevia = { firstName: primeiroNome || undefined, timeZone: tz };
   const previa = !itensNoTexto ? budgetQuoteLinkText(rascunho, budgetLink('…'), optsPrevia) : budgetQuoteText(rascunho, optsPrevia);
 
@@ -259,9 +265,9 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
         </div>
         {itens.map((it, i) => (
           <div key={i} className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_4.5rem_8rem_2rem] gap-2 items-center">
-            <input className={cn(inputCls, 'col-span-2 sm:col-span-1')} placeholder={rot.exNome} value={it.name} maxLength={120} onChange={(e) => mudar(i, { name: e.target.value })} />
-            <input className={cn(inputCls, 'col-span-2 sm:col-span-1')} placeholder={rot.exDetalhe} value={it.dosage ?? ''} maxLength={120} onChange={(e) => mudar(i, { dosage: e.target.value })} />
-            <input className={cn(inputCls, 'text-right tnum')} type="number" min={1} max={9999} value={it.quantity} onChange={(e) => mudar(i, { quantity: Math.max(1, Math.min(9999, Math.floor(Number(e.target.value) || 1))) })} aria-label="Quantidade" />
+            <input className={cn(campo, 'col-span-2 sm:col-span-1')} placeholder={rot.exNome} value={it.name} maxLength={120} onChange={(e) => mudar(i, { name: e.target.value })} />
+            <input className={cn(campo, 'col-span-2 sm:col-span-1')} placeholder={rot.exDetalhe} value={it.dosage ?? ''} maxLength={120} onChange={(e) => mudar(i, { dosage: e.target.value })} />
+            <input className={cn(campo, 'text-right tnum')} type="number" min={1} max={9999} value={it.quantity} onChange={(e) => mudar(i, { quantity: Math.max(1, Math.min(9999, Math.floor(Number(e.target.value) || 1))) })} aria-label="Quantidade" />
             <MoneyInput value={it.unitPrice} onChange={(v) => mudar(i, { unitPrice: v ?? 0 })} aria-label="Valor unitário" />
             <button type="button" onClick={() => setItens((l) => (l.length > 1 ? l.filter((_, j) => j !== i) : [vazio()]))} className="text-faint hover:text-danger justify-self-center" title="Remover item" aria-label="Remover item">
               <Trash2 size={15} />
@@ -273,9 +279,19 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
           <span className="text-sm text-muted">{desconto > 0 && descontoOk ? <>Subtotal <span className="tnum">{brl(subtotal)}</span> · </> : null}Total <b className="text-ink tnum text-base ml-1">{brl(total)}</b></span>
         </div>
         <div className="flex items-center justify-end gap-2">
-          <span className="text-sm text-muted">Desconto (R$)</span>
-          <div className="w-32"><MoneyInput value={desconto} onChange={(v) => setDesconto(v ?? 0)} aria-label="Desconto em reais" /></div>
+          <span className="text-sm text-muted">Desconto</span>
+          <div className="grid grid-cols-2 rounded-lg bg-field p-0.5 text-xs font-semibold h-[38px]" role="group" aria-label="Tipo de desconto">
+            {(['valor', 'pct'] as const).map((t) => (
+              <button key={t} type="button" onClick={() => setTipoDesc(t)} className={cn('rounded-md px-2.5', tipoDesc === t ? 'bg-panel text-ink shadow-sm' : 'text-muted hover:text-ink')}>{t === 'valor' ? 'R$' : '%'}</button>
+            ))}
+          </div>
+          <div className="w-32">
+            {tipoDesc === 'valor'
+              ? <MoneyInput value={descValor} onChange={(v) => setDescValor(v ?? 0)} aria-label="Desconto em reais" />
+              : <div className="relative"><input className={cn(campo, 'pr-7 text-right tnum')} inputMode="decimal" placeholder="0" value={descPct} maxLength={5} onChange={(e) => setDescPct(e.target.value.replace(/[^\d,.]/g, ''))} aria-label="Desconto em percentual" /><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-faint">%</span></div>}
+          </div>
         </div>
+        {tipoDesc === 'pct' && pctNum > 0 && descontoOk && <p className="text-xs text-muted text-right">{pctNum.toLocaleString('pt-BR')}% = {brl(desconto)}</p>}
         {!descontoOk && <p className="text-xs text-danger-ink text-right">O desconto precisa ser menor que a soma dos itens.</p>}
       </div>
 
@@ -290,27 +306,27 @@ function NovoOrcamento({ conversationId, onLink, onEnviar, onEnviado }: { conver
       )}
       {auto && (
         <Field label="CPF / CNPJ do contato" hint={docFicha ? 'Da ficha do contato. Alterado aqui, a ficha é atualizada.' : 'O Asaas exige para gerar o Pix. Fica salvo na ficha do contato.'}>
-          <input className={cn(inputCls, 'tnum')} inputMode="numeric" placeholder="000.000.000-00" value={documento} maxLength={18} onChange={(e) => setDoc(formatDoc(e.target.value))} />
+          <input className={cn(campo, 'tnum')} inputMode="numeric" placeholder="000.000.000-00" value={documento} maxLength={18} onChange={(e) => setDoc(formatDoc(e.target.value))} />
         </Field>
       )}
 
       <div className="grid sm:grid-cols-2 gap-3">
         {!auto && <Field label="Chave Pix" hint={chaves.length ? undefined : 'Nenhuma chave cadastrada (Configurações → Chaves Pix).'}>
-          <select className={inputCls} value={chave} onChange={(e) => setPixKeyId(e.target.value)}>
+          <select className={cn(campo, 'py-0')} value={chave} onChange={(e) => setPixKeyId(e.target.value)}>
             {chaves.map((k) => <option key={k.id} value={k.id}>{k.title}</option>)}
             <option value="none">Sem chave Pix</option>
           </select>
         </Field>}
         {!auto && <Field label="Link de pagamento (opcional)">
-          <input className={inputCls} placeholder="https://…" value={paymentUrl} maxLength={500} onChange={(e) => setPaymentUrl(e.target.value)} />
+          <input className={campo} placeholder="https://…" value={paymentUrl} maxLength={500} onChange={(e) => setPaymentUrl(e.target.value)} />
         </Field>}
-        <Field label="Validade" hint={`Do orçamento e, depois da aprovação, do link (recomeça ao aprovar). No vencimento o contato não vê mais o Pix${auto ? `; a cobrança é cancelada ${BUDGET_GRACE_MINUTES} min depois` : ''}.`}>
-          <select className={inputCls} value={validity} onChange={(e) => setValidity(e.target.value as BudgetValidity)}>
+        <Field label="Validade" hint={`Recomeça ao aprovar. Vencido, o contato não vê mais o Pix${auto ? ` (cobrança cancelada ${BUDGET_GRACE_MINUTES} min depois)` : ''}.`}>
+          <select className={cn(campo, 'py-0')} value={validity} onChange={(e) => setValidity(e.target.value as BudgetValidity)}>
             {BUDGET_VALIDITY.map((v) => <option key={v} value={v}>{BUDGET_VALIDITY_LABEL[v]}</option>)}
           </select>
         </Field>
         <Field label="Observação (opcional)" hint="Vai no orçamento e na página do contato.">
-          <input className={inputCls} placeholder="Ex.: entrega amanhã pela manhã" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+          <input className={campo} placeholder="Ex.: entrega amanhã pela manhã" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
         </Field>
       </div>
 
