@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.14.3 — 2026-10-30
+
+- feat(orcamentos): desconto em R$ ou %, e campos do orçamento alinhados
+
 ## 1.14.2 — 2026-10-30
 
 - fix(agendadas): modal de agendar sem <form> e fora do formulário da conversa
