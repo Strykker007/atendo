@@ -43,8 +43,11 @@ type Viewer = { id: string; role: string; permissions?: readonly Permission[]; n
 
 /** O que a lista e o cabeçalho do chat mostram do departamento (etiqueta com cor). */
 export const DEPARTMENT_SELECT = { id: true, name: true, color: true, isActive: true } as const;
-/** Vagas de contato frio por dia no número QR: o `coldPerDay` que o dono ajustou, senão o padrão. */
-const coldPerDay = (sendLimits: Prisma.JsonValue | null | undefined) => resolveSendLimits('evolution', sendLimits as Partial<SendLimits> | null).coldPerDay;
+/**
+ * Vagas de contato frio por dia no número QR: o `coldPerDay` que o dono ajustou, senão o padrão.
+ * `0` = trava desligada: vaga sem fim, mas a vaga continua sendo registrada (`hasColdSlot` do fluxo).
+ */
+const coldPerDay = (sendLimits: Prisma.JsonValue | null | undefined) => resolveSendLimits('evolution', sendLimits as Partial<SendLimits> | null).coldPerDay || Number.MAX_SAFE_INTEGER;
 const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permissions?.includes(p);
 /**
  * Conversa livre: aberta e sem dono, fora da fila — o grupo (docs/grupos.md) e as de contato isento

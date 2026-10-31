@@ -84,7 +84,58 @@ export function SendingCard({ number }: { number: NumberItem }) {
         </label>
       )}
 
+      {!oficial && <ColdLimit number={number} />}
+
       <QueueLimits number={number} />
+    </div>
+  );
+}
+
+/**
+ * Trava de contatos novos por dia (docs/envio.md#envio-frio): quantos contatos que não escreveram
+ * nas últimas 24 h o atendente pode chamar primeiro. Desmarcada = `coldPerDay: 0`, sem limite.
+ * Automático (fluxo, boas-vindas) para contato frio continua recusado de qualquer jeito.
+ */
+function ColdLimit({ number }: { number: NumberItem }) {
+  const update = useUpdateNumber();
+  const atual = number.sendLimits ?? {};
+  const padrao = SEND_LIMIT_DEFAULTS.evolution.coldPerDay;
+  const ligada = atual.coldPerDay !== 0;
+
+  function salvar(v: number | undefined, msg: string) {
+    const next: Partial<SendLimits> = { ...atual };
+    if (v === undefined) delete next.coldPerDay;
+    else next.coldPerDay = v;
+    update.mutateAsync({ id: number.id, sendLimits: Object.keys(next).length ? next : null }).then(() => toast.ok(msg)).catch(toast.err);
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" checked={ligada} onChange={(e) => salvar(e.target.checked ? undefined : 0, e.target.checked ? 'Trava de contatos novos ligada' : 'Trava de contatos novos desligada')} />
+        <span className="text-[11px] text-faint leading-tight flex-1">Travar contatos novos por dia (falar primeiro com quem não escreveu em 24h)</span>
+      </label>
+      {ligada ? (
+        <label className="flex items-center gap-2 pl-5">
+          <span className="text-[11px] text-faint leading-tight flex-1">Contatos novos por dia</span>
+          <input
+            key={atual.coldPerDay ?? 'padrao'}
+            type="number"
+            min={1}
+            max={SEND_LIMIT_RANGES.coldPerDay[1]}
+            placeholder={`${padrao} (padrão)`}
+            className={cn(inputCls, 'h-8 py-0 w-28 text-right')}
+            defaultValue={atual.coldPerDay ?? ''}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              const v = raw === '' ? undefined : Math.max(1, Math.min(SEND_LIMIT_RANGES.coldPerDay[1], Math.round(Number(raw))));
+              if (v !== atual.coldPerDay) salvar(v, 'Limite salvo');
+            }}
+          />
+        </label>
+      ) : (
+        <p className="pl-5 text-[11px] text-warn-ink">Sem limite: o atendente pode chamar quantos contatos quiser. O risco de bloqueio volta se muitos não responderem ou denunciarem.</p>
+      )}
     </div>
   );
 }
@@ -98,7 +149,7 @@ function QueueLimits({ number }: { number: NumberItem }) {
   const [aberto, setAberto] = useState(false);
   const padrao = SEND_LIMIT_DEFAULTS[number.provider];
   const atual = number.sendLimits ?? {};
-  const personalizados = Object.keys(atual).length;
+  const personalizados = Object.keys(atual).filter((k) => k !== 'coldPerDay').length;
 
   function salvar(k: keyof SendLimits, raw: string) {
     const v = raw.trim() === '' ? undefined : Number(raw);
@@ -117,8 +168,8 @@ function QueueLimits({ number }: { number: NumberItem }) {
       </button>
       {aberto && (
         <div className="grid grid-cols-2 gap-2 mt-1.5 items-end">
-          {/* contato frio no oficial é regra da Meta (template), não deste limite */}
-          {(Object.keys(SEND_LIMIT_RANGES) as (keyof SendLimits)[]).filter((k) => number.provider !== 'meta' || k !== 'coldPerDay').map((k) => (
+          {/* contatos novos têm a própria trava (ColdLimit); no oficial é regra da Meta (template) */}
+          {(Object.keys(SEND_LIMIT_RANGES) as (keyof SendLimits)[]).filter((k) => k !== 'coldPerDay').map((k) => (
             <label key={k} className="flex flex-col gap-1">
               <span className="text-[11px] text-faint leading-tight">{SEND_LIMIT_LABEL[k]}</span>
               <input
