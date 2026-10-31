@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.14.4 — 2026-10-31
+
+- feat(envio): trava de contatos novos por dia pode ser desligada por número
+
 ## 1.14.3 — 2026-10-30
 
 - feat(orcamentos): desconto em R$ ou %, e campos do orçamento alinhados
