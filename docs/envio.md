@@ -197,7 +197,7 @@ então (`conversations/cold-send.ts`, `ConversationsService.assertColdAllowed`):
 | **Evolution — automático** | sai normal | **recusa**: 409 `cold_send_unofficial`, com a explicação |
 | **Meta** | sai normal | só template (regra da Meta) **e** o recurso `proactive_messaging` no plano (403 `feature_proactive`) — só para envio do atendente |
 
-**Limite por número:** o dono do sistema ajusta em Números → cartão de envio → *Limites da fila de envio* → **Contatos novos por dia** (1–500; vazio = 10). Só em número QR. Serve para o número que fala com quem já conhece (ex.: a cobrança da própria empresa aos clientes); subir em número que prospecta é pedir banimento.
+**Limite por número:** o dono do sistema ajusta em Números → cartão *Proteção do número* → **Travar contatos novos por dia** (marcado por padrão) e o campo **Contatos novos por dia** (1–500; vazio = 10). Desmarcar grava `sendLimits.coldPerDay = 0` = **sem trava**: o atendente chama quantos contatos frios quiser (a vaga continua sendo registrada no Redis, então o fluxo disparado à mão segue liberando o automático daquela conversa, e `cold-quota` devolve `max` enorme — nenhum aviso aparece). O automático para contato frio continua recusado com ou sem trava. Só em número QR. Serve para o número que fala com quem já conhece e responde (ex.: a cobrança da própria empresa aos clientes); em número que prospecta, muita mensagem sem resposta ou denunciada leva a banimento.
 
 **Fluxo disparado à mão** conta como o atendente: `FlowEngineService.start` com `startedById` chama
 `ConversationsService.assertFlowCanStart` antes de criar o run. Contato frio no QR gasta uma vaga

@@ -24,7 +24,8 @@ export interface SendLimits {
   /**
    * QR Code: contatos frios (sem mensagem dele nas últimas 24 h) com quem o atendente pode falar
    * primeiro por dia, no número. É a principal proteção contra banimento — subir só em número que
-   * fala com quem já conhece (ex.: cobrança de clientes). docs/envio.md#envio-frio
+   * fala com quem já conhece (ex.: cobrança de clientes). `0` = sem trava (o dono desmarcou no
+   * cartão do número). docs/envio.md#envio-frio
    */
   coldPerDay: number;
 }
@@ -43,7 +44,7 @@ export const SEND_LIMIT_RANGES: Record<keyof SendLimits, [number, number]> = {
   convBurstWindowSec: [5, 600],
   maxQueueAgeMin: [1, 1440],
   autoPerHour: [1, 5000],
-  coldPerDay: [1, 500],
+  coldPerDay: [0, 500],
 };
 
 export const SEND_LIMIT_LABEL: Record<keyof SendLimits, string> = {
