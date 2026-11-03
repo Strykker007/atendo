@@ -93,7 +93,9 @@ export function CallAlerts() {
     <div className="fixed top-4 right-4 z-[71] space-y-2 w-[24rem] max-w-[calc(100vw-2rem)]" role="alert" aria-live="assertive">
       {items.map((c) => {
         const perdida = c.fase === 'perdida';
-        const quem = c.contactName || (c.phone ? fone(c.phone) : 'Número oculto');
+        // sem telefone = nunca trocou mensagem com este número (o @lid não resolveu): contato novo
+        const novo = !c.contactName && !c.phone;
+        const quem = c.contactName || (c.phone ? fone(c.phone) : 'Contato novo');
         const hora = new Date(c.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         return (
           <div key={c.callId} className={`flex items-start gap-3 rounded-2xl border-2 bg-panel px-4 py-3 shadow-2xl ${perdida ? 'border-danger' : 'border-ok ring-4 ring-ok/20 animate-pulse'}`}>
@@ -105,7 +107,7 @@ export function CallAlerts() {
                 {perdida ? `Ligação ${c.isVideo ? 'de vídeo ' : ''}perdida` : `${c.isVideo ? 'Chamada de vídeo' : 'Ligação'} no WhatsApp`}
                 <span className="ml-1.5 text-xs font-normal text-muted">{hora}</span>
               </div>
-              <div className="text-sm text-ink truncate"><b>{quem}</b>{c.contactName && c.phone ? <span className="text-muted"> · {fone(c.phone)}</span> : null}</div>
+              <div className="text-sm text-ink truncate"><b>{quem}</b>{c.contactName && c.phone ? <span className="text-muted"> · {fone(c.phone)}</span> : null}{novo ? <span className="text-muted"> · primeiro contato com este número</span> : null}</div>
               <div className="text-xs text-muted truncate">para <b className="text-ink">{c.numberLabel}</b> · {fone(c.numberPhone)}</div>
               {!perdida && <div className="text-xs text-muted mt-0.5">Atenda pelo celular deste número.</div>}
               <div className="mt-2 flex gap-2">

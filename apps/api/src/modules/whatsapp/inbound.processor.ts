@@ -188,7 +188,7 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     for (const c of parsed.calls ?? []) {
       const number = await this.numbers.findByExternal(job.data.provider, c.externalNumberId);
       if (!number || number.suspendedAt) continue;
-      // só veio o @lid: o telefone sai das mensagens guardadas na Evolution (sem ele, "Número oculto")
+      // só veio o @lid: o telefone sai das mensagens guardadas na Evolution (sem ele, "Contato novo")
       if (!c.from && c.jid.endsWith('@lid')) {
         const ctx = await this.numbers.context(number.id);
         const provider = this.registry.get(ctx.provider);

@@ -17,7 +17,8 @@ Um aviso fixo no canto superior direito, com alarme (respeita o som desligado):
 
 Botões: **Abrir conversa** quando o contato já tem conversa nesse número; senão **Copiar
 número**. Contato desconhecido aparece pelo telefone. Se o WhatsApp mandar só o `@lid` (sem
-telefone), aparece "Número oculto".
+telefone) e ele não resolve — o contato nunca trocou mensagem com o número —, aparece
+**"Contato novo · primeiro contato com este número"**.
 
 **Quem recebe:** só quem opera o número. A regra é a mesma da API (`number-scope.ts`): sem
 números vinculados = todos; com vínculo (ou empresa/unidade selecionada) = só esses. O filtro é
@@ -43,7 +44,7 @@ WhatsApp → Evolution (evento call) → POST /webhooks/evolution → fila inbou
   desse contato — a Evolution guarda `remoteJid` = @lid e `remoteJidAlt` = telefone. Usa o índice
   `Message_instanceId_remoteJidJson_idx` (barato com milhões de linhas); cache de 1 h por
   instância + @lid, falha não entra no cache. Quem nunca trocou mensagem com o número fica
-  "Número oculto". Ligação em grupo é ignorada. Cada evento
+  "Contato novo". Ligação em grupo é ignorada. Cada evento
   é registrado no log (`ligação <instância>: {...}`, 600 caracteres) até o formato estar
   confirmado em produção.
 - **Não é mensagem:** nada é gravado em `messages`, não passa pelo `UsageService` (não é
