@@ -161,6 +161,8 @@ services:
       WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
       WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
       WEBHOOK_EVENTS_PRESENCE_UPDATE: "true"
+      # ligação recebida: avisa o painel quem liga e para qual número (docs/ligacoes.md)
+      WEBHOOK_EVENTS_CALL: "true"
       LOG_LEVEL: ERROR,WARN
       # Como o aparelho aparece em "Dispositivos conectados" e no handshake com o WhatsApp
       # (Baileys: [cliente, navegador, versão]). O padrão da Evolution é "Evolution API" — marca
@@ -208,6 +210,8 @@ services:
       WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
       WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
       WEBHOOK_EVENTS_PRESENCE_UPDATE: "true"
+      # ligação recebida: avisa o painel quem liga e para qual número (docs/ligacoes.md)
+      WEBHOOK_EVENTS_CALL: "true"
       LOG_LEVEL: ERROR,WARN
       CONFIG_SESSION_PHONE_CLIENT: Windows
       CONFIG_SESSION_PHONE_NAME: Chrome

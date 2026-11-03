@@ -421,6 +421,15 @@ O resto (inclusive .mov do iPhone e HEIC) vai como **documento**, com o nome do 
 Antes de 03/11/2026 a API só aceitava imagem, áudio, MP4/3GPP, PDF e Office, e um `.txt` dava
 "Tipo não permitido: text/plain".
 
+**Abrir e baixar.** Documento: clicar no nome abre em aba nova; a seta baixa com o **nome
+original**. Vídeo ganha a mesma seta ao lado do "tela cheia". Os dois pedem um link novo no
+clique (`GET /conversations/:id/messages/:messageId/media`, helpers `openMediaInTab` /
+`downloadMedia` em `lib/hooks/core.ts`): o link que vem com a lista vence em ~1 h, e com a
+conversa aberta por mais tempo o clique dava "Link expirado ou inválido". O atributo `download`
+do `<a>` não servia — o navegador ignora entre domínios (app → api) — por isso o download é
+forçado pela API (`?dl=nome` → `Content-Disposition: attachment`). A aba de "abrir" nasce no
+próprio clique e só depois recebe o link, senão o navegador bloqueia como pop-up.
+
 
 ## Respostas rápidas com anexo
 

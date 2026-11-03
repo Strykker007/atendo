@@ -66,7 +66,7 @@ export class StorageService {
   // ---- URLs assinadas: o navegador não manda header em <img>, então a autorização vai na query ----
 
   /** URL válida por `ttlSeconds` (padrão 1h). A chave já começa com media/, servida por GET /media/*path?exp&sig */
-  signedUrl(key: string, ttlSeconds = 3600) {
+  signedUrl(key: string, ttlSeconds = 3600, downloadName?: string) {
     // vencimento arredondado para a próxima janela de 30 min: a mesma foto devolve a MESMA URL
     // por meia hora e o navegador usa o cache. Com o segundo exato, cada recarga da lista gerava
     // URL nova e baixava tudo de novo (~27 mil GET /media por hora em 17/10/2026). Vale entre
@@ -74,7 +74,9 @@ export class StorageService {
     const janela = 1800;
     const exp = (Math.floor(Date.now() / 1000 / janela) + 1) * janela + ttlSeconds;
     const sig = this.sign(key, exp);
-    return `${env.API_PUBLIC_URL}/${key}?exp=${exp}&sig=${sig}`;
+    // `dl` fora da assinatura de propósito: só muda o nome sugerido no download, não dá acesso a nada
+    const dl = downloadName !== undefined ? `&dl=${encodeURIComponent(downloadName || 'arquivo')}` : '';
+    return `${env.API_PUBLIC_URL}/${key}?exp=${exp}&sig=${sig}${dl}`;
   }
 
   verify(key: string, exp: string, sig: string) {

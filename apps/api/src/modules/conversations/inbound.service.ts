@@ -20,6 +20,8 @@ import { planRemoval } from '../whatsapp/number-removal';
 import { DEFINITIVE_CLOSE } from '../whatsapp/connection-events';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
 import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
+import { phoneVariants } from './phone-variants';
+import type { InboundCall } from '../whatsapp/providers/provider.interface';
 
 const isGroupJid = (jid: string) => jid.endsWith('@g.us');
 
@@ -795,6 +797,33 @@ export class InboundService {
       select: { id: true },
     });
     if (conversation) this.gateway.emitTyping(number.tenantId, { conversationId: conversation.id, state: p.state });
+  }
+
+  /**
+   * Ligação no número (docs/ligacoes.md). Não grava mensagem nem passa pelo ledger: ligação não
+   * é mensagem do WhatsApp e a Evolution não a atende. Só diz ao painel QUEM liga e PARA QUAL
+   * número, com a conversa do contato nesse número (se já existir) para abrir com um clique.
+   */
+  async applyCall(number: WhatsAppNumber, c: InboundCall) {
+    const contact = c.from
+      ? await this.prisma.contact.findFirst({ where: { tenantId: number.tenantId, phone: { in: phoneVariants(c.from) } }, select: { id: true, name: true, phone: true } })
+      : null;
+    const conversation = contact
+      ? await this.prisma.conversation.findFirst({ where: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' }, select: { id: true } })
+      : null;
+    this.gateway.emitCall(number.tenantId, {
+      callId: c.callId,
+      status: c.status,
+      isVideo: c.isVideo,
+      at: c.at.toISOString(),
+      numberId: number.id,
+      numberLabel: number.label,
+      numberPhone: number.phone,
+      contactName: contact?.name || null,
+      phone: contact?.phone ?? c.from ?? null,
+      conversationId: conversation?.id ?? null,
+    });
+    if (c.status === 'offer') this.log.log(`ligação ${c.isVideo ? 'de vídeo ' : ''}de ${c.from ?? c.jid} para ${number.label} (${number.phone})`);
   }
 
   async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean; statusReason?: number }) {

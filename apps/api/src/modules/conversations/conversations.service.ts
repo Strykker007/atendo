@@ -1364,6 +1364,18 @@ export class ConversationsService {
   }
 
   /** Conteúdo original de uma apagada. A rota exige `conversations.view_deleted`. */
+  /** Link assinado novo do arquivo (ver rota `GET :id/messages/:messageId/media`). Apagada não tem. */
+  async mediaLink(tenantId: string, conversationId: string, messageId: string, download: boolean): Promise<{ url: string }> {
+    const m = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId, deletedAt: null, conversation: { tenantId } },
+      select: { mediaUrl: true, mediaName: true, mediaMime: true, type: true },
+    });
+    if (!m?.mediaUrl) throw new NotFoundException('Arquivo não disponível');
+    if (m.mediaUrl.startsWith('http')) return { url: m.mediaUrl };
+    if (!m.mediaUrl.startsWith(`media/${tenantId}/`)) throw new NotFoundException('Arquivo não disponível');
+    return { url: this.storage.signedUrl(m.mediaUrl, 3600, download ? (m.mediaName || nomePadrao(m.type, m.mediaUrl)) : undefined) };
+  }
+
   async deletedOriginal(tenantId: string, conversationId: string, messageId: string): Promise<DeletedMessageOriginal> {
     const m = await this.prisma.message.findFirst({ where: { id: messageId, conversationId, deletedAt: { not: null }, conversation: { tenantId } } });
     if (!m?.deletedAt) throw new NotFoundException('Mensagem apagada não encontrada');
@@ -2038,6 +2050,13 @@ export class ConversationsService {
  * fechado e reaberto apareceria como dois encerramentos no relatório.
  */
 const BOT_RESUMED_ON_CLOSE = 'atendimento encerrado';
+
+/** Nome do arquivo baixado quando a mensagem não trouxe um: "video.mp4", "documento.txt". */
+export function nomePadrao(type: string, key: string): string {
+  const ext = /\.([a-z0-9]{1,8})$/i.exec(key)?.[1];
+  const base = ({ image: 'imagem', audio: 'audio', video: 'video', sticker: 'figurinha' } as Record<string, string>)[type] ?? 'documento';
+  return ext ? `${base}.${ext}` : base;
+}
 
 export function tipoDaTransicao(de: ConversationStatus | null | undefined, para: ConversationStatus): ConversationEventType {
   if (para === 'closed') return 'closed';

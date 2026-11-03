@@ -14,6 +14,7 @@ import { playMessageSound, unlockMessageSound } from '../message-sound';
 import { useUI } from '../store';
 import { toast } from '@/components/ui/Toast';
 import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
+import { receiveCall, type CallEvent } from '@/components/layout/CallAlert';
 import { upsertInternalMessage, type InternalMessage } from './chat-interno';
 import { create } from 'zustand';
 import { markShiftLocked, useShiftSession } from '../shift-session';
@@ -242,6 +243,8 @@ export function useRealtime() {
     // aviso global do dono do sistema: popup no topo + sino
     socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
     // atendimento transferido para MIM (sala só minha): alarme + aviso em destaque
+    // ligação no WhatsApp: quem liga e para qual número (só para quem opera o número)
+    socket.on('call', (e: CallEvent) => receiveCall(e, qc.getQueryData<{ role?: string; numberIds?: string[] }>(['me'])));
     socket.on('transfer_alert', (e: TransferAlertEvent) => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       receiveTransferAlert(e);

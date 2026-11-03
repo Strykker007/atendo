@@ -50,7 +50,25 @@ export interface InboundContactName {
   name: string;
 }
 
+/** Etapas de uma ligação de WhatsApp (evento `call` da Evolution/Baileys). */
+export type CallStatus = 'offer' | 'ringing' | 'accept' | 'reject' | 'timeout' | 'terminate';
+
+/** Ligação recebida no número (docs/ligacoes.md). Não é mensagem: só avisa o painel. */
+export interface InboundCall {
+  externalNumberId: string;
+  callId: string;
+  /** telefone do contato; ausente quando o WhatsApp só manda o @lid (sem telefone) */
+  from?: string;
+  /** jid como veio, para o log e para o aviso quando não há telefone */
+  jid: string;
+  isVideo: boolean;
+  status: CallStatus;
+  at: Date;
+}
+
 export interface ParsedWebhook {
+  /** ligações (só Evolution). `offer` = está chamando agora */
+  calls?: InboundCall[];
   messages: InboundMessage[];
   statuses: StatusUpdate[];
   /** reações a mensagens — não são mensagens, só marcam a reagida */

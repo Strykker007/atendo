@@ -36,6 +36,7 @@
 | [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão e contas temporárias que expiram sozinhas |
 | [Registro de acessos](registro-de-acessos.md) | Dev / Cliente | Auditoria de login: quem esteve logado em cada dia, calendário por pessoa, tentativas barradas pela escala |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
+| [Ligações](ligacoes.md) | Dev / Cliente | Aviso de ligação no WhatsApp (quem liga e para qual número), ligação perdida, por que não dá para atender no painel |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
 | [13 — Agendamento](13-agendamento.md) | Dev / Cliente | Profissionais, serviços, agenda, marcação pelo WhatsApp, lembretes ao cliente e ao profissional |

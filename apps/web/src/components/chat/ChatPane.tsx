@@ -12,7 +12,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -1414,15 +1414,36 @@ function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) =
             <Maximize2 size={14} />
           </button>
         )}
+        <BaixarArquivo m={m} className={`absolute top-1.5 ${onVerMidia ? 'right-10' : 'right-1.5'} p-1.5 rounded-md bg-black/55 text-white opacity-80 group-hover/video:opacity-100 hover:bg-black/75`} />
       </div>
     );
   }
+  // link novo a cada clique (o da lista vence em ~1 h); nome abre em aba nova, a seta baixa com o nome original
   return (
-    <a href={m.mediaUrl} target="_blank" rel="noreferrer" download={m.mediaName ?? undefined} className="flex items-center gap-2 rounded-md bg-black/5 px-2.5 py-2 mb-1 hover:bg-black/10">
-      <FileText size={20} className="text-muted shrink-0" />
-      <span className="truncate text-xs font-medium flex-1">{m.mediaName ?? labelOf(m.type)}</span>
-      <Download size={14} className="text-faint" />
-    </a>
+    <div className="flex items-center gap-2 rounded-md bg-black/5 px-2.5 py-2 mb-1">
+      <button type="button" onClick={() => openMediaInTab(m.conversationId, m.id).catch(toast.err)} className="flex items-center gap-2 flex-1 min-w-0 text-left hover:underline" title="Abrir">
+        <FileText size={20} className="text-muted shrink-0" />
+        <span className="truncate text-xs font-medium flex-1">{m.mediaName ?? labelOf(m.type)}</span>
+      </button>
+      <BaixarArquivo m={m} className="p-1 rounded text-muted hover:text-ink hover:bg-black/10" />
+    </div>
+  );
+}
+
+/** Botão de baixar com o nome original (documento e vídeo). */
+function BaixarArquivo({ m, className }: { m: Message; className: string }) {
+  const [baixando, setBaixando] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={baixando}
+      onClick={() => { setBaixando(true); downloadMedia(m.conversationId, m.id).catch(toast.err).finally(() => setBaixando(false)); }}
+      className={className}
+      title="Baixar"
+      aria-label="Baixar arquivo"
+    >
+      {baixando ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+    </button>
   );
 }
 const labelOf = (t: string) => ({ image: 'imagem', audio: 'áudio', video: 'vídeo', document: 'documento', sticker: 'figurinha', location: 'localização', contact: 'contato' } as Record<string, string>)[t] ?? t;

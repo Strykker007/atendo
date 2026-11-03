@@ -43,14 +43,17 @@ export class MediaController {
    */
   @Get('media/*path')
   @SkipThrottle()
-  async serve(@Param('path') path: string | string[], @Query('exp') exp = '', @Query('sig') sig = '', @Headers('range') range = '', @Res() res: Response) {
+  async serve(@Param('path') path: string | string[], @Query('exp') exp = '', @Query('sig') sig = '', @Query('dl') dl: string | undefined, @Headers('range') range = '', @Res() res: Response) {
     const key = 'media/' + (Array.isArray(path) ? path.join('/') : path);
     if (!this.storage.verify(key, exp, sig)) throw new UnauthorizedException('Link expirado ou inválido');
     const obj = await this.storage.get(key);
 
     res.setHeader('Content-Type', obj.mimeType);
     // arquivo RECEBIDO pode ser HTML/SVG (o cliente manda o que quiser): baixa em vez de abrir
-    if (ACTIVE_CONTENT.test(obj.mimeType.split(';')[0].trim().toLowerCase())) res.setHeader('Content-Disposition', 'attachment');
+    // `?dl=nome` (botão Baixar): o atributo `download` do <a> não vale entre domínios (app → api),
+    // então quem força o download com o nome original é este cabeçalho
+    if (typeof dl === 'string') res.setHeader('Content-Disposition', contentDisposition(dl));
+    else if (ACTIVE_CONTENT.test(obj.mimeType.split(';')[0].trim().toLowerCase())) res.setHeader('Content-Disposition', 'attachment');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     // anunciar o suporte importa: sem este cabeçalho o player nem tenta pedir pedaços
     res.setHeader('Accept-Ranges', 'bytes');
@@ -68,6 +71,18 @@ export class MediaController {
     res.setHeader('Content-Length', String(end - start + 1));
     return res.end(obj.data.subarray(start, end + 1));
   }
+}
+
+/**
+ * `attachment` com o nome do arquivo. `filename` em ASCII para navegador antigo e `filename*`
+ * (RFC 5987) com o nome real em UTF-8. Caractere de controle, aspas e barras saem: o nome vem
+ * da query, sem assinatura, e não pode quebrar o cabeçalho nem virar caminho.
+ */
+export function contentDisposition(name: string): string {
+  const limpo = name.replace(/[\u0000-\u001f\u007f"\\/]/g, '').trim().slice(0, 200) || 'arquivo';
+  const ascii = limpo.normalize('NFD').replace(/[^\x20-\x7e]/g, '') || 'arquivo';
+  const utf8 = encodeURIComponent(limpo).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`;
 }
 
 /**

@@ -185,6 +185,11 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
       if (number) await this.inbound.applyContactName(number, c);
     }
 
+    for (const c of parsed.calls ?? []) {
+      const number = await this.numbers.findByExternal(job.data.provider, c.externalNumberId);
+      if (number && !number.suspendedAt) await this.inbound.applyCall(number, c);
+    }
+
     for (const p of parsed.presences ?? []) {
       const number = await this.numbers.findByExternal(job.data.provider, p.externalNumberId);
       if (number) await this.inbound.applyPresence(number, p);

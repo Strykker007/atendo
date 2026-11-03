@@ -42,6 +42,26 @@ export interface TransferAlert {
   byName: string | null;
 }
 
+/**
+ * Ligação no WhatsApp (docs/ligacoes.md). Vai para a sala do tenant; o front mostra só a quem
+ * opera `numberId`. Vários eventos por ligação, todos com o mesmo `callId`.
+ */
+export interface CallAlert {
+  callId: string;
+  status: 'offer' | 'ringing' | 'accept' | 'reject' | 'timeout' | 'terminate';
+  isVideo: boolean;
+  at: string;
+  numberId: string;
+  numberLabel: string;
+  numberPhone: string;
+  /** nome do contato no painel; null = desconhecido */
+  contactName: string | null;
+  /** telefone de quem liga; null = o WhatsApp só mandou o @lid */
+  phone: string | null;
+  /** conversa do contato NESSE número, se já existir */
+  conversationId: string | null;
+}
+
 @Injectable()
 @WebSocketGateway({ cors: { origin: webOrigins, credentials: true } })
 export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
@@ -210,6 +230,9 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
     this.room(tenantId).emit('appointment', { id: appointmentId });
   }
   /** Contato digitando/gravando. Efêmero: o painel esconde sozinho se o "parou" não chegar. */
+  emitCall(tenantId: string, event: CallAlert) {
+    this.room(tenantId).emit('call', event);
+  }
   emitTyping(tenantId: string, event: TypingEvent) {
     this.room(tenantId).emit('typing', event);
   }

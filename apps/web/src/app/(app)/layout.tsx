@@ -16,6 +16,7 @@ import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
 import { VersionWatcher } from '@/components/layout/VersionWatcher';
 import { NoticePopups } from '@/components/layout/SystemNotices';
 import { TransferAlerts } from '@/components/layout/TransferAlert';
+import { CallAlerts } from '@/components/layout/CallAlert';
 import { InternalChatWidget } from '@/components/layout/InternalChatWidget';
 
 /** Shell autenticado: menu lateral + área do módulo. */
@@ -78,6 +79,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <ShiftEndScreen />
       <NoticePopups />
       <TransferAlerts />
+      <CallAlerts />
       {/* chat interno da equipe: fica no shell para sobreviver à troca de página */}
       <InternalChatWidget />
       <VersionWatcher />
