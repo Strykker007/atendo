@@ -137,6 +137,7 @@ export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {
   template: 'Modelo',
   interactive: 'Mensagem interativa',
   unknown: 'Conteúdo não suportado',
+  call: '📞 Ligação',
 };
 
 const MEDIA_ICON: Partial<Record<MessageType, string>> = { image: '📷', video: '🎥', audio: '🎤', document: '📄' };
