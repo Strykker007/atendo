@@ -188,6 +188,8 @@ export interface WhatsAppProvider {
    * Evolution implementa. Devolve `null` quando o contato não tem foto ou a esconde.
    */
   fetchProfilePicture?(ctx: NumberContext, phone: string): Promise<MediaPayload | null>;
+  /** Telefone de um `@lid` (ligação chega só com ele): da última mensagem guardada desse contato. Só Evolution. */
+  phoneFromLid?(ctx: NumberContext, lid: string): Promise<string | undefined>;
   /**
    * Histórico da conversa guardado no provider, anterior a `before`, da mais nova para a mais
    * antiga (docs/historico-de-mensagens.md). Opcional: só a Evolution guarda o que passou pelo

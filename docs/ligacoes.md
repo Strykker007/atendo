@@ -37,7 +37,13 @@ WhatsApp → Evolution (evento call) → POST /webhooks/evolution → fila inbou
   manda o evento. Mudar o compose exige recriar o container da Evolution.
 - **Payload** (`WACallEvent` do Baileys): `{ id, from, chatId, status, isVideo, isGroup, date }`,
   às vezes `callerPn`. O telefone sai do primeiro jid `@s.whatsapp.net` (o `:12` do aparelho é
-  descartado); `@lid` sem telefone fica sem `phone`. Ligação em grupo é ignorada. Cada evento
+  descartado). **Na prática vem só o `@lid`** (ex.: `{"from":"1201…@lid","chatId":"1201…@lid",
+  "status":"ringing"}`, 03/11/2026): aí o `InboundProcessor` chama `phoneFromLid`, que busca
+  na Evolution (`POST /chat/findMessages`, `where.key.remoteJid = @lid`, `limit 1`) uma mensagem
+  desse contato — a Evolution guarda `remoteJid` = @lid e `remoteJidAlt` = telefone. Usa o índice
+  `Message_instanceId_remoteJidJson_idx` (barato com milhões de linhas); cache de 1 h por
+  instância + @lid, falha não entra no cache. Quem nunca trocou mensagem com o número fica
+  "Número oculto". Ligação em grupo é ignorada. Cada evento
   é registrado no log (`ligação <instância>: {...}`, 600 caracteres) até o formato estar
   confirmado em produção.
 - **Não é mensagem:** nada é gravado em `messages`, não passa pelo `UsageService` (não é

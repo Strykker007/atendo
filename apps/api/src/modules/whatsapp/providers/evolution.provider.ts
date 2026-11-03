@@ -316,6 +316,36 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   /**
+   * `@lid` → telefone. A ligação chega só com o @lid (`{ from: "1201…@lid" }`), mas a Evolution
+   * guarda as mensagens com `remoteJid` = @lid e `remoteJidAlt` = telefone. Busca uma mensagem
+   * desse @lid na instância (índice `Message_instanceId_remoteJidJson_idx`, barato mesmo com
+   * milhões de linhas). Contato que nunca trocou mensagem: sem telefone. Cache de 1 h — uma
+   * ligação manda vários eventos.
+   */
+  async phoneFromLid(ctx: NumberContext, lid: string): Promise<string | undefined> {
+    const k = `${this.instance(ctx)}|${lid}`;
+    const hit = this.lidCache.get(k);
+    if (hit && hit.until > Date.now()) return hit.phone;
+    let phone: string | undefined;
+    try {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        body: JSON.stringify({ where: { key: { remoteJid: lid } }, limit: 1 }),
+      }, this.shard(ctx));
+      const rows: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      const alt = rows.map((r) => [r?.key?.remoteJidAlt, r?.key?.senderPn]).flat().find((j) => typeof j === 'string' && j.endsWith('@s.whatsapp.net'));
+      phone = alt ? alt.split('@')[0].split(':')[0].replace(/\D/g, '') || undefined : undefined;
+    } catch (err) {
+      this.logger.warn(`telefone do ${lid} não encontrado: ${err instanceof Error ? err.message : err}`);
+      return undefined; // falha não entra no cache: a próxima tentativa pergunta de novo
+    }
+    if (this.lidCache.size > 5000) this.lidCache.clear();
+    this.lidCache.set(k, { phone, until: Date.now() + 3_600_000 });
+    return phone;
+  }
+  private readonly lidCache = new Map<string, { phone?: string; until: number }>();
+
+  /**
    * Endereço da conversa como a Evolution GRAVOU a mensagem — é com ele que ela confere a edição
    * ("RemoteJid does not match") e manda o protocolo ao WhatsApp.
    *

@@ -46,7 +46,10 @@ export const useCallAlerts = create<State>((set) => ({
       return { items: [...resto, novo].slice(-4) };
     }
     // terminou sem atender. Se o aviso já tinha sido dispensado, não volta (só se nunca apareceu)
-    const perdida: Item = atual ? { ...atual, ...e, fase: 'perdida' } : { ...e, fase: 'perdida', desde: Date.now() };
+    // evento de fim sem telefone/nome não apaga o que o aviso já mostrava
+    const perdida: Item = atual
+      ? { ...atual, ...e, contactName: e.contactName ?? atual.contactName, phone: e.phone ?? atual.phone, conversationId: e.conversationId ?? atual.conversationId, fase: 'perdida' }
+      : { ...e, fase: 'perdida', desde: Date.now() };
     return { items: [...resto, perdida].slice(-4) };
   }),
   remove: (callId) => set((s) => ({ items: s.items.filter((i) => i.callId !== callId) })),
