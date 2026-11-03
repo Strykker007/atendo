@@ -15,8 +15,8 @@ Um aviso fixo no canto superior direito, com alarme (respeita o som desligado):
 | Recusada, sem resposta ou desligada sem atender (`reject`/`timeout`/`terminate`) | vira **Ligação perdida** (vermelho) e fica até dispensar |
 | 1 min tocando sem evento de fim | também vira **Ligação perdida** |
 
-Botões: **Abrir conversa** quando o contato já tem conversa nesse número; senão **Copiar
-número**. Contato desconhecido aparece pelo telefone. Se o WhatsApp mandar só o `@lid` (sem
+Botões: **Abrir conversa** (a ligação já cria a conversa quando o telefone é conhecido); sem
+telefone, nenhum botão. Contato desconhecido aparece pelo telefone. Se o WhatsApp mandar só o `@lid` (sem
 telefone) e ele não resolve — o contato nunca trocou mensagem com o número —, aparece
 **"Contato novo · primeiro contato com este número"**.
 
@@ -47,10 +47,40 @@ WhatsApp → Evolution (evento call) → POST /webhooks/evolution → fila inbou
   "Contato novo". Ligação em grupo é ignorada. Cada evento
   é registrado no log (`ligação <instância>: {...}`, 600 caracteres) até o formato estar
   confirmado em produção.
-- **Não é mensagem:** nada é gravado em `messages`, não passa pelo `UsageService` (não é
-  cobrança) e não dispara fluxo nem boas-vindas. Quem não estava com o painel aberto não vê o
-  aviso depois. Ligação perdida não fica registrada no histórico (possível evolução: um
-  `ConversationEvent` novo, que exige migration).
+- **Fora do ledger:** ligação não é mensagem do WhatsApp — não passa pelo `UsageService`
+  (não é cobrança), não dispara fluxo nem boas-vindas e não mexe em `lastInboundAt` (não abre
+  a janela de 24h da Meta).
+
+## Registro na conversa
+
+Como no WhatsApp, cada ligação vira uma **linha no meio do chat** (`LinhaDeLigacao` em
+`ChatPane.tsx`): "📞 Ligação de voz perdida · 14:32". É uma linha em `messages` com
+`type = 'call'` (migration `20270130000000_message_type_call`, só um valor novo no enum),
+`direction = 'in'`, `externalId = "call:<id da ligação>"` (prefixo para nunca colidir com id de
+mensagem) e `content = { kind: 'call', isVideo, outcome }`. Regras em
+`conversations/call-record.ts`; quem grava é `InboundService.registrarLigacao`.
+
+| `outcome` | Quando | Linha |
+|---|---|---|
+| `ringing` | primeiro evento (`offer`/`ringing`) | "Ligação chamando…" (até 2 min; depois "recebida") |
+| `answered` | `accept` | "Ligação de voz atendida no celular" |
+| `missed` | `timeout` ou `terminate` sem atender | "Ligação de voz perdida" (vermelho) |
+| `rejected` | `reject` | "Ligação de voz recusada" (vermelho) |
+
+Desfecho final não muda mais (o `terminate` depois do `accept` não vira perdida). Eventos da
+mesma ligação chegam em paralelo: o `@@unique([numberId, externalId])` garante uma linha só.
+
+- **Contato novo:** contato e conversa nascem (conversa em Aguardando), como na primeira
+  mensagem. Só com telefone: se o `@lid` não resolveu, fica só o aviso na tela.
+- **Sobe na lista:** `lastMessageAt` e a prévia passam a ser a ligação (sem voltar o relógio
+  se já houve mensagem depois).
+- **Perdida ou recusada = mensagem nova:** +1 em não lidas, `awaitingSince` (cliente
+  esperando) e conversa encerrada volta para a fila (`setStatusSystem → waiting`). Atendida
+  no celular não mexe em não lidas nem no status.
+- Sem "plim" de mensagem nova (o aviso já toca o alarme) e sem ações na linha (responder,
+  reagir, encaminhar). Entra nas métricas que contam mensagens recebidas.
+- **Compatibilidade:** a API anterior não conhece `call` no enum e falha ao ler essas
+  linhas — migration e API nova sobem juntas.
 - **Meta (oficial):** sem aviso hoje. A Cloud API manda ligação só pela Calling API, com outro
   webhook (`calls`), ainda não tratado.
 

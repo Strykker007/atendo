@@ -208,7 +208,8 @@ export function useRealtime() {
     document.addEventListener('visibilitychange', aoVoltar);
     const vigia = setInterval(conferir, 20_000);
     socket.on('message', (m: Message) => {
-      const nova = m.direction === 'in' && !tocadas.has(m.id);
+      // ligação tem alarme próprio (CallAlert): a linha na conversa não toca o "plim"
+      const nova = m.direction === 'in' && m.type !== 'call' && !tocadas.has(m.id);
       upsertMessageInCache(qc, m);
       if (nova) avisarChegada(m);
       // a mensagem chegou: quem estava digitando terminou (o "parou" pode vir depois ou nunca)

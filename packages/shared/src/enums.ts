@@ -35,6 +35,8 @@ export const MessageType = {
   INTERACTIVE: 'interactive',
   /** último recurso: nem o fallback de texto achou o que mostrar. A UI nunca exibe a palavra crua. */
   UNKNOWN: 'unknown',
+  /** ligação no WhatsApp: linha na conversa, não é mensagem (docs/ligacoes.md) */
+  CALL: 'call',
 } as const;
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];
 

@@ -1176,6 +1176,9 @@ enum MessageType {
   template
   interactive
   unknown
+  /// ligação no WhatsApp (docs/ligacoes.md): linha na conversa, não é mensagem — fora do ledger.
+  /// `externalId` = "call:<id>", `content` = { kind: 'call', isVideo, outcome }
+  call
 }
 
 enum MessageStatus {

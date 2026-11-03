@@ -156,7 +156,7 @@ atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`).
 | NumberStatus | connected, pending_qr, disconnected, error |
 | ConversationStatus | waiting, in_progress, closed |
 | MessageDirection | in, out |
-| MessageType | text, image, audio, video, document, sticker, location, contact, template, interactive (botões/lista/template recebidos), unknown (só quando nem o fallback achou texto) |
+| MessageType | text, image, audio, video, document, sticker, location, contact, template, interactive (botões/lista/template recebidos), unknown (só quando nem o fallback achou texto), call (ligação no WhatsApp: linha na conversa, `externalId = "call:<id>"`, fora do `UsageService` — [Ligações](ligacoes.md), migration `message_type_call`) |
 | MessageStatus | pending, sent, delivered, read, failed |
 | BillingCategory | service, utility, marketing, authentication, unofficial |
 | SubscriptionStatus | trialing, active, past_due, suspended, canceled |

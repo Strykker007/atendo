@@ -6,7 +6,7 @@ import { ExemptConfirm } from './ExemptConfirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2 } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2, Phone, PhoneMissed } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
@@ -1076,6 +1076,7 @@ export function resumoDaMensagem(m: Message): string {
 function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
+  if (m.type === 'call') return <LinhaDeLigacao m={m} />;
   const estruturado = structuredBody(m);
   if (m.deletedAt) return <MensagemApagada m={m} podeVer={podeVerApagada} />;
   if (m.internal) {
@@ -1192,6 +1193,28 @@ function MensagemApagada({ m, podeVer }: { m: Message; podeVer: boolean }) {
  * Fim de um atendimento no meio da conversa: quem encerrou, com que resultado e quando. Com
  * `seguinte`, avisa que as mensagens de baixo já são outro atendimento.
  */
+/**
+ * Ligação registrada na conversa (docs/ligacoes.md), no meio do chat como no WhatsApp. Sem ações:
+ * não é mensagem. "recebida" com mais de 2 min = o evento de fim não chegou; mostra neutro.
+ */
+function LinhaDeLigacao({ m }: { m: Message }) {
+  const c = (m.content ?? null) as unknown as { isVideo?: boolean; outcome?: 'ringing' | 'answered' | 'missed' | 'rejected' } | null;
+  const tocandoAinda = c?.outcome === 'ringing' && Date.now() - new Date(m.createdAt).getTime() < 120_000;
+  const perdida = c?.outcome === 'missed' || c?.outcome === 'rejected';
+  const texto = c?.outcome === 'ringing' && !tocandoAinda ? (c.isVideo ? 'Chamada de vídeo recebida' : 'Ligação de voz recebida') : (m.text ?? 'Ligação').replace(/^\S+\s/, '');
+  const hora = new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const Icone = perdida ? PhoneMissed : c?.isVideo ? Video : Phone;
+  return (
+    <div className="flex justify-center py-1.5 select-none">
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium shadow-sm bg-panel ${perdida ? 'text-danger' : 'text-muted'}`}>
+        <Icone size={13} className={tocandoAinda ? 'animate-pulse text-ok' : ''} />
+        {tocandoAinda ? `${c?.isVideo ? 'Chamada de vídeo' : 'Ligação'} chamando…` : texto}
+        <span className="text-faint">· {hora}</span>
+      </span>
+    </div>
+  );
+}
+
 function MarcoDeAtendimento({ e, seguinte }: { e: ConversationEvent; seguinte?: boolean }) {
   const labels = useOutcomeLabels();
   const resultado = e.outcome === 'won' || e.outcome === 'lost' ? labels[e.outcome] : null;
