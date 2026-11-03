@@ -35,18 +35,19 @@ const TOQUE_MAX_MS = 60_000;
 
 export const useCallAlerts = create<State>((set) => ({
   items: [],
-  apply: (e) => set((s) => {
+  apply: (e) => set((s): Partial<State> => {
     const atual = s.items.find((i) => i.callId === e.callId);
     const resto = s.items.filter((i) => i.callId !== e.callId);
     // atendida no celular: o aviso some (alguém já está falando com o cliente)
     if (e.status === 'accept') return { items: resto };
     if (e.status === 'offer' || e.status === 'ringing') {
       if (atual) return s; // "ringing" depois do "offer": mesma ligação, nada muda
-      return { items: [...resto, { ...e, fase: 'tocando', desde: Date.now() }].slice(-4) };
+      const novo: Item = { ...e, fase: 'tocando', desde: Date.now() };
+      return { items: [...resto, novo].slice(-4) };
     }
     // terminou sem atender. Se o aviso já tinha sido dispensado, não volta (só se nunca apareceu)
-    if (atual) return { items: [...resto, { ...atual, ...e, fase: 'perdida' }] };
-    return { items: [...resto, { ...e, fase: 'perdida', desde: Date.now() }].slice(-4) };
+    const perdida: Item = atual ? { ...atual, ...e, fase: 'perdida' } : { ...e, fase: 'perdida', desde: Date.now() };
+    return { items: [...resto, perdida].slice(-4) };
   }),
   remove: (callId) => set((s) => ({ items: s.items.filter((i) => i.callId !== callId) })),
 }));
