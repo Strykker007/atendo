@@ -7,7 +7,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { env } from '../../config/env';
 
-const ALLOWED = /^(image\/(jpeg|png|webp|gif)|audio\/(ogg|mpeg|mp4|aac|webm)|video\/(mp4|3gpp)|application\/pdf|application\/(msword|vnd\.openxmlformats-officedocument.*|vnd\.ms-excel))/;
+/**
+ * Qualquer arquivo entra (txt, exe, zip, mov…): o que o WhatsApp não mostra como mídia vai como
+ * documento (`mediaTypeOf` no front). Só fica de fora conteúdo que o navegador EXECUTA ao abrir —
+ * servido pelo domínio da API, um HTML/SVG/JS rodaria script ali.
+ */
+const ACTIVE_CONTENT = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|(text|application)\/(x-)?(javascript|ecmascript))$/;
 
 @Controller()
 export class MediaController {
@@ -21,8 +26,8 @@ export class MediaController {
     if (!file) throw new BadRequestException('Arquivo ausente (campo "file")');
     // o navegador manda o codec junto ("audio/webm;codecs=opus") ao gravar áudio;
     // guardamos o tipo base, senão a extensão do arquivo sai errada
-    const mimeType = file.mimetype.split(';')[0].trim().toLowerCase();
-    if (!ALLOWED.test(mimeType)) throw new BadRequestException(`Tipo não permitido: ${mimeType}`);
+    const mimeType = file.mimetype.split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+    if (ACTIVE_CONTENT.test(mimeType)) throw new BadRequestException(`Tipo não permitido: ${mimeType}`);
     const key = this.storage.makeKey(user.tenantId, mimeType, file.originalname);
     await this.storage.put(key, file.buffer, mimeType);
     return { key, url: this.storage.signedUrl(key), mimeType, fileName: file.originalname, size: file.size };
@@ -44,6 +49,8 @@ export class MediaController {
     const obj = await this.storage.get(key);
 
     res.setHeader('Content-Type', obj.mimeType);
+    // arquivo RECEBIDO pode ser HTML/SVG (o cliente manda o que quiser): baixa em vez de abrir
+    if (ACTIVE_CONTENT.test(obj.mimeType.split(';')[0].trim().toLowerCase())) res.setHeader('Content-Disposition', 'attachment');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     // anunciar o suporte importa: sem este cabeçalho o player nem tenta pedir pedaços
     res.setHeader('Accept-Ranges', 'bytes');

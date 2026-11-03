@@ -43,8 +43,8 @@ import { useMinuto } from './ConversationList';
 import { structuredBody, ForwardedLabel } from './messages/MessageContent';
 import { messagePreview } from '@atendo/shared';
 
-/** Tipos que a API aceita (ver ALLOWED em media.controller.ts). */
-const ACCEPT_ALL = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx';
+/** Sem filtro: a API aceita qualquer arquivo (exceto HTML/SVG/JS — ver ACTIVE_CONTENT em media.controller.ts). */
+const ACCEPT_ALL = '';
 
 /**
  * `conversationId` por prop = modo embutido (mini-chat do Kanban): não lê nem mexe na seleção

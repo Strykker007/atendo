@@ -410,9 +410,16 @@ mp4); a conversão final para o padrão do WhatsApp fica com o provider.
 O upload normaliza o tipo: o navegador envia `audio/webm;codecs=opus` ao gravar, e sem tirar
 o parâmetro a extensão do arquivo salvo saía errada.
 
-**Tipos aceitos** (`ALLOWED` em `media.controller.ts`): JPEG, PNG, WebP e GIF; MP4 e 3GPP;
-OGG, MP3, MP4, AAC e WebM de áudio; PDF, Word e Excel. **HEIC do iPhone não entra** — a
-recusa é explícita ("Tipo não permitido: image/heic"), mas o ideal seria converter.
+**Tipos aceitos**: qualquer arquivo (txt, exe, zip, csv, .mov, HEIC…). Só HTML, XHTML, SVG e
+JavaScript são recusados (`ACTIVE_CONTENT` em `media.controller.ts`, "Tipo não permitido: …"):
+servidos pelo domínio da API, rodariam script. Se um desses chegar **recebido** do cliente, o
+`GET /media` responde com `Content-Disposition: attachment` (baixa, não abre).
+
+O tipo da mensagem sai de `mediaTypeOf` (`lib/hooks/core.ts`): só JPEG/PNG/WebP/GIF viram
+imagem, OGG/MP3/MP4/AAC/WebM/AMR viram áudio e MP4/3GPP viram vídeo — o que o WhatsApp exibe.
+O resto (inclusive .mov do iPhone e HEIC) vai como **documento**, com o nome do arquivo.
+Antes de 03/11/2026 a API só aceitava imagem, áudio, MP4/3GPP, PDF e Office, e um `.txt` dava
+"Tipo não permitido: text/plain".
 
 
 ## Respostas rápidas com anexo

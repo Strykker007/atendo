@@ -563,8 +563,15 @@ export const uploadFile = (file: File) => {
   return api<Upload>('/uploads', { method: 'POST', body: form });
 };
 
+/**
+ * Só o que o WhatsApp exibe como mídia vira imagem/áudio/vídeo; o resto (txt, exe, .mov, HEIC,
+ * BMP…) vai como documento — mandado como vídeo/imagem o WhatsApp recusa ou não abre.
+ */
 export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'document' =>
-  mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'document';
+  /^image\/(jpeg|png|webp|gif)$/.test(mime) ? 'image'
+    : /^audio\/(ogg|mpeg|mp4|aac|webm|amr)$/.test(mime) ? 'audio'
+    : /^video\/(mp4|3gpp)$/.test(mime) ? 'video'
+    : 'document';
 
 export const useSetStatus = () => {
   const qc = useQueryClient();

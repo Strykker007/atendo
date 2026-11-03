@@ -295,7 +295,6 @@ export default function RespostasPage() {
                 <input
                   type="file"
                   hidden
-                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx"
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
                     e.target.value = '';
