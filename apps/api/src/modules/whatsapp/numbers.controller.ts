@@ -175,7 +175,16 @@ export class NumbersController {
       await this.prisma.userNumber.createMany({ data: [{ userId: user.id, numberId: n.id }], skipDuplicates: true });
       this.permissions.invalidate();
     }
-    return this.numbers.switchProvider(n.id, dto.provider, config as any);
+    try {
+      return await this.numbers.switchProvider(n.id, dto.provider, config as any);
+    } catch (err) {
+      // conexão recusada (token sem acesso, ID trocado…): o cadastro não pode ficar para trás.
+      // Ficava "desconectado" e a próxima tentativa, já com os dados certos, dava "Este número já
+      // está cadastrado". Volta a como estava: novo = arquivado; restaurado = arquivado de novo.
+      await this.prisma.whatsAppNumber.update({ where: { id: n.id }, data: { deletedAt: existing?.deletedAt ?? new Date(), isActive: false } })
+        .catch((e) => this.log.error(`cadastro de ${phone} falhou e não foi desfeito: ${e instanceof Error ? e.message : e}`));
+      throw err;
+    }
   }
 
   /** A troca Meta Cloud API <-> Conexão Web (QR Code). */
