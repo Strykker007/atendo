@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import {
   CLOSED_BAND_ID, DEPARTMENT_NONE, CONDITION_CONTACT_FIELD_LABEL, CONDITION_ELSE, CONDITION_OPERANDS, CONDITION_OPS, RETRIES_EXHAUSTED_HANDLE, bandKey, REPLY_TIMEOUT_HANDLE, WEBHOOK_ERROR_HANDLE, normalizeCondition, normalizeContent, randomizerTotal, VARIABLE_OP_LABEL,
   type RandomizerBranch,
-  type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
+  type ConditionBranch, type ConditionContactField, type ConditionNode, type ConditionRule, type ContentItem, type DelayUnit, type WaitUnit, type FlowNode, type FlowNodeType, type MessageNode, type VariableAssignment,
 } from '@atendo/shared';
 import { WaText } from './TextWithVars';
 import { useAgents, useDepartments, useOutcomeLabels, useSchedules, useTags } from '@/lib/hooks';
@@ -409,8 +409,9 @@ export function HttpNodeView({ data, selected }: P) {
   );
 }
 export function WaitNodeView({ data, selected }: P) {
-  const d = data as { mode?: 'duration' | 'next_open'; minutes?: number; unit?: DelayUnit; businessHours?: boolean };
-  const summary = d.mode === 'next_open' ? 'Até o próximo horário de atendimento' : d.minutes ? `${formatDelay(d.minutes, d.unit)}${d.businessHours ? '\nsó no horário de atendimento' : ''}` : '';
+  const d = data as { mode?: 'duration' | 'next_open'; minutes?: number; seconds?: number; unit?: WaitUnit; businessHours?: boolean };
+  const tempo = d.unit === 'seconds' && d.seconds ? `${d.seconds} segundos` : d.minutes ? formatDelay(d.minutes, d.unit === 'seconds' ? 'minutes' : d.unit) : '';
+  const summary = d.mode === 'next_open' ? 'Até o próximo horário de atendimento' : tempo ? `${tempo}${d.businessHours ? '\nsó no horário de atendimento' : ''}` : '';
   return (
     <Shell type="wait" data={data} selected={selected} summary={summary}>
       <In /><Out />

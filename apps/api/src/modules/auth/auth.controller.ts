@@ -5,7 +5,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard, ShiftLockOk } from './jwt-auth.guard';
 import { CurrentUser, type AuthUser } from './current-user.decorator';
-import { NoTenantOk } from './tenant.guard';
+import { NoTenantOk, PartnerOk } from './tenant.guard';
 import { env } from '../../config/env';
 
 class LoginDto {
@@ -99,9 +99,10 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(200)
   @NoTenantOk()
+  @PartnerOk()
   @UseGuards(JwtAuthGuard)
   async changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
-    if (user.impersonatorId) throw new ForbiddenException('Dono entrando como cliente não troca a senha do cliente.');
+    if (user.impersonatorId) throw new ForbiddenException(user.partnerId ? 'Parceiro dentro do cliente não troca a senha do cliente.' : 'Dono entrando como cliente não troca a senha do cliente.');
     await this.auth.changePassword(user.personId, dto.current, dto.password);
     return { ok: true };
   }
@@ -109,15 +110,17 @@ export class AuthController {
   /** Editar o próprio perfil (nome de exibição). Vale para qualquer papel. */
   @Patch('me')
   @NoTenantOk()
+  @PartnerOk()
   @UseGuards(JwtAuthGuard)
   updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateMeDto) {
-    if (user.impersonatorId) throw new ForbiddenException('Dono entrando como cliente não altera o perfil do cliente.');
+    if (user.impersonatorId) throw new ForbiddenException(user.partnerId ? 'Parceiro dentro do cliente não altera o perfil do cliente.' : 'Dono entrando como cliente não altera o perfil do cliente.');
     return this.auth.updateName(user.id, dto.name);
   }
 
   /** Empresas da pessoa logada — seletor "Minhas empresas" (docs/multiempresa.md). */
   @Get('memberships')
   @NoTenantOk()
+  @PartnerOk()
   @ShiftLockOk()
   @UseGuards(JwtAuthGuard)
   memberships(@CurrentUser() user: AuthUser) {
@@ -139,6 +142,7 @@ export class AuthController {
 
   @Get('me')
   @NoTenantOk()
+  @PartnerOk()
   @ShiftLockOk()
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthUser) {

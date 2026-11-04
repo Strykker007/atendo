@@ -93,6 +93,8 @@ const schema = z.object({
   ASAAS_BASE_URL: z.string().url().default('https://api.asaas.com/v3'),
   /** token cadastrado no webhook do Asaas; chega no header `asaas-access-token` */
   ASAAS_WEBHOOK_TOKEN: z.string().optional().default(''),
+  /** token do "mecanismo de validação de saque" do Asaas: só sai Pix que o sistema autorizou (docs/37-vogopartners.md#segurança) */
+  ASAAS_TRANSFER_VALIDATION_TOKEN: z.string().optional().default(''),
   /**
    * Migração automática para a cobrança recorrente por Pix: o job diário põe no Asaas quem paga
    * hoje sem gateway (cobrança manual) e já tem CPF/CNPJ. Desligado: só pelo botão do dono

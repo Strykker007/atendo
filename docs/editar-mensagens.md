@@ -54,7 +54,13 @@ devolve a mesma assinatura no texto novo — editar não "desassina".
 ## Auditoria
 
 - `Message.editedAt` marca a bolha como **editada** (também quando a edição vem do celular, pelo
-  webhook da Evolution — `InboundService.applyEdit`).
+  webhook da Evolution — `InboundService.applyEdit`). Vale para a mensagem **do contato** editada
+  no WhatsApp dele: o texto da bolha troca e aparece *editada*, como no aplicativo.
+- O WhatsApp passou a mandar a edição **cifrada** (`secretEncryptedMessage`) com o segredo da
+  mensagem original. Deciframos com o `messageSecret` guardado no `raw` da original
+  (`evolution-edit-crypto.ts`) e o `@lid` do contato, buscado na Evolution porque o webhook o troca
+  pelo telefone; sem a original no banco (ou sem o segredo), a edição não aparece.
+  Até 03/11/2026 essas edições eram descartadas — por isso o painel quase nunca mostrava edição do contato.
 - Cada edição feita no painel grava o evento `message_edited` com quem editou (`actor`) e, no
   `reason`, a origem da mensagem (*própria*, *de Fulano*, *enviada pelo celular*, *da automação*)
   e o texto anterior (até 300 caracteres). Aparece no **Histórico** do atendimento: "Fulano editou uma mensagem".

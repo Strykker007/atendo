@@ -18,6 +18,7 @@ import { planoDaRecuperacao } from './gap-recovery-plan';
 import { agendaParaRestaurar, escolherDaAgenda, normalizeContactName, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
 import { DEFINITIVE_CLOSE } from '../whatsapp/connection-events';
+import { decifrarEdicao, jidsDaOriginal, segredoDaOriginal } from '../whatsapp/providers/evolution-edit-crypto';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
 import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
 import { phoneVariants } from './phone-variants';
@@ -624,9 +625,22 @@ export class InboundService {
    */
   async applyEdit(number: WhatsAppNumber, e: InboundEdit) {
     // filtra pelo número: o mesmo externalId existe nos dois lados quando um número nosso fala com outro
-    const m = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId: e.targetExternalId }, select: { id: true } });
+    const m = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId: e.targetExternalId }, select: { id: true, raw: true, text: true, editedAt: true } });
     if (!m) return;
-    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text: e.text, editedAt: new Date() }, include: MESSAGE_INCLUDE });
+    let text = e.text;
+    if (!text && e.encrypted) {
+      // formato novo: cifrada com o `messageSecret` da original, que está no `raw` dela
+      const secret = segredoDaOriginal(m.raw);
+      text = (secret && decifrarEdicao(secret, e.targetExternalId, e.encrypted, [...jidsDaOriginal(m.raw), `${number.phone}@s.whatsapp.net`])) || undefined;
+      if (!text) {
+        this.log.debug(`edição cifrada não aplicada (${secret ? 'não decifrou' : 'original sem messageSecret'}): ${e.targetExternalId}`);
+        return;
+      }
+    }
+    if (!text) return;
+    // a mesma edição pode chegar nos dois formatos: não reemite
+    if (text === m.text && m.editedAt) return;
+    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text, editedAt: new Date() }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(number.tenantId, this.conversations.present(updated));
   }
 

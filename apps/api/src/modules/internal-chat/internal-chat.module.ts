@@ -201,6 +201,8 @@ class InternalChatController {
     const chat = await this.chatOf(u, id);
     // dono "entrando como" o cliente: responde no canal de suporte como Suporte, com o nome dele
     if (chat.isSupport && u.impersonatorId) {
+      // parceiro dentro do cliente (docs/37-vogopartners.md) não fala como Suporte
+      if (u.partnerId) throw new ForbiddenException('O canal de suporte é da equipe Vogo.');
       const dono = await this.prisma.user.findUniqueOrThrow({ where: { id: u.impersonatorId }, select: { id: true, name: true } });
       return sendSupport(this.prisma, this.gateway, chat, dono, dto, true);
     }

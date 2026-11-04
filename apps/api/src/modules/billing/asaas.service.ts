@@ -61,6 +61,20 @@ export interface AsaasPayment {
 interface AsaasList<T> { data: T[]; totalCount: number; hasMore: boolean }
 
 /** O que a tela de checkout recebe de uma cobrança. */
+/** Transferência (Pix de saída) no Asaas. */
+export interface AsaasTransfer {
+  id: string;
+  /** PENDING | BANK_PROCESSING | DONE | CANCELLED | FAILED */
+  status: string;
+  value: number;
+  netValue?: number;
+  externalReference?: string | null;
+  failReason?: string | null;
+  effectiveDate?: string | null;
+  transactionReceiptUrl?: string | null;
+  bankAccount?: { pixAddressKey?: string | null } | null;
+}
+
 export interface PaymentView {
   id: string;
   status: string;
@@ -147,6 +161,26 @@ export class AsaasService {
       throw new ServiceUnavailableException(msg);
     }
     return json as T;
+  }
+
+  // ---------- Transferências (pagamento a VogoPartners — docs/37-vogopartners.md) ----------
+
+  /**
+   * Quem trata os eventos `TRANSFER_*` do webhook. Registrado pelo módulo de parceiros (que depende
+   * do billing — o contrário faria ciclo).
+   */
+  private transferListener: ((t: AsaasTransfer, event: string) => Promise<void>) | null = null;
+  onTransfer(fn: (t: AsaasTransfer, event: string) => Promise<void>) {
+    this.transferListener = fn;
+  }
+
+  /** Pix de saída para uma chave. `externalReference` amarra a transferência ao pagamento do parceiro. */
+  createTransfer(dto: { value: number; pixAddressKey: string; pixAddressKeyType: string; description: string; externalReference: string }) {
+    return this.request<AsaasTransfer>('POST', '/transfers', { ...dto, operationType: 'PIX' });
+  }
+
+  getTransfer(id: string) {
+    return this.request<AsaasTransfer>('GET', `/transfers/${id}`);
   }
 
   // ---------- Customer ----------
@@ -364,8 +398,12 @@ export class AsaasService {
 
   // ---------- Webhook ----------
 
-  async handle(body: { event?: string; payment?: AsaasPayment; subscription?: AsaasSubscription }) {
-    const { event, payment, subscription } = body;
+  async handle(body: { event?: string; payment?: AsaasPayment; subscription?: AsaasSubscription; transfer?: AsaasTransfer }) {
+    const { event, payment, subscription, transfer } = body;
+    if (transfer && event?.startsWith('TRANSFER_')) {
+      if (this.transferListener) await this.transferListener(transfer, event);
+      return;
+    }
     if (payment) {
       const tenant = await this.prisma.tenant.findUnique({ where: { asaasCustomerId: payment.customer } });
       if (!tenant) return this.log.warn(`webhook ${event}: cobrança ${payment.id} sem tenant (customer ${payment.customer})`);

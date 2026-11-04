@@ -5,6 +5,13 @@ export const NO_TENANT_OK = 'no_tenant_ok';
 /** Marca rotas que o dono do sistema (sem tenant) pode chamar. Todo o resto é área de cliente. */
 export const NoTenantOk = () => SetMetadata(NO_TENANT_OK, true);
 
+export const PARTNER_OK = 'partner_ok';
+/**
+ * Rotas que o VogoPartner (sem cliente, docs/37-vogopartners.md) pode chamar. Lista explícita:
+ * `@NoTenantOk` sozinho não basta — rota de dono esquecida sem `@Roles` ficaria aberta ao parceiro.
+ */
+export const PartnerOk = () => SetMetadata(PARTNER_OK, true);
+
 /**
  * Global: usuário autenticado sem tenant (super_admin) só acessa rotas marcadas com @NoTenantOk.
  * Evita 500 por `tenantId: null` em consultas de cliente e deixa a regra explícita.
@@ -15,6 +22,10 @@ export class TenantGuard implements CanActivate {
   canActivate(ctx: ExecutionContext) {
     const user = ctx.switchToHttp().getRequest().user;
     if (!user || user.tenantId) return true;
+    if (user.role === 'partner') {
+      if (!this.reflector.getAllAndOverride<boolean>(PARTNER_OK, [ctx.getHandler(), ctx.getClass()])) throw new ForbiddenException('Esta área não faz parte do portal do parceiro.');
+      return true;
+    }
     const ok = this.reflector.getAllAndOverride<boolean>(NO_TENANT_OK, [ctx.getHandler(), ctx.getClass()]);
     if (!ok) throw new ForbiddenException('Esta área é de clientes. Como dono do sistema, use Financeiro (dono).');
     return true;

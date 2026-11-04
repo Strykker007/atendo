@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, START_MAX_DELAY_SEC, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, START_MAX_DELAY_SEC, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, waitDurationMs, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -492,8 +492,8 @@ export class FlowEngineService {
             const juntar = await this.warming(run.conversationId);
             let paused = false;
             for (let i = resumeAt ?? 0; i < items.length; i++) {
-              // intervalo antes da mensagem i (a primeira sai na hora; a retomada já esperou)
-              const gap = i > 0 ? contentDelaySec(items[i]) : 0;
+              // intervalo antes da mensagem i (vale também na primeira; a retomada já esperou)
+              const gap = contentDelaySec(items[i]);
               const delay = i !== resumeAt ? gap : 0;
               if (delay > 0) {
                 await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting', waitUntil: new Date(Date.now() + delay * 1000), vars: { ...vars, [CONTENT_VAR]: `${node.id}:${i}` } } });
@@ -1069,7 +1069,7 @@ export class FlowEngineService {
    */
   private async waitUntil(tenantId: string, numberId: string, node: Extract<FlowNode, { type: 'wait' }>): Promise<Date> {
     if (node.data.mode === 'next_open') return this.schedules.nextOpen(tenantId, numberId, new Date());
-    const due = new Date(Date.now() + Math.max(1, Number(node.data.minutes) || 1) * 60_000);
+    const due = new Date(Date.now() + waitDurationMs(node.data));
     return node.data.businessHours ? this.schedules.nextOpen(tenantId, numberId, due) : due;
   }
 

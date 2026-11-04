@@ -1,5 +1,4 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -11,7 +10,7 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { PermissionsService } from '../auth/permissions.service';
 import { ShiftAccessService } from '../auth/shift-access.service';
 import { ProfilesController } from './profiles.controller';
-import { NoTenantOk } from '../auth/tenant.guard';
+import { NoTenantOk, PartnerOk } from '../auth/tenant.guard';
 import { creatorCompanyIds, teamCompanyIds, teamWhere } from '../auth/team-scope';
 import { canUseNumber } from '../auth/number-scope';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -22,22 +21,18 @@ import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { StripeService } from '../billing/stripe.service';
 import { DuesService } from '../billing/dues.service';
-import { PromotionsService } from '../billing/promotions.service';
-import { DiscountLedgerService } from '../billing/discount-ledger.service';
 import { UsageService } from '../billing/usage.service';
-import { freePeriod } from '../billing/plan-rules';
-import { TYPING_SPEED_KEYS, countLimit, type Permission, type PlanLimits, type TypingSpeed } from '@atendo/shared';
+import { TYPING_SPEED_KEYS, type Permission, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
+import { TenantCreationService } from './tenant-creation.service';
 import { TenantTemplatesController } from './tenant-templates.controller';
 import { SystemOwnersController } from './system-owners.controller';
-import { provisionedTags, templateTagConflictPairs, type TemplateContent } from './tenant-template';
 import { TemplateRolloutService } from './template-rollout.service';
-import { conflictPair } from '../tags/conflicts';
 import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
 
 const VINCULO_SEM_CONVITE = 'Esta pessoa entra pelo login de outra empresa (vínculo): não tem convite.';
 
-class CreateTenantDto {
+export class CreateTenantDto {
   @IsString() @MaxLength(80) name: string;
   @Matches(/^[a-z0-9-]{3,40}$/) slug: string;
   @IsUUID() planId: string;
@@ -146,10 +141,9 @@ class TenantsController {
     private readonly stripe: StripeService,
     private readonly dues: DuesService,
     private readonly provisioning: TenantProvisioningService,
-    private readonly promotions: PromotionsService,
-    private readonly ledger: DiscountLedgerService,
     private readonly shift: ShiftAccessService,
     private readonly usage: UsageService,
+    private readonly creation: TenantCreationService,
   ) {}
 
   @Get()
@@ -161,6 +155,8 @@ class TenantsController {
       include: { subscription: { include: { plan: { select: { id: true, name: true, priceMonth: true, isFree: true, billingCycle: true, durationDays: true } } } },
         // personalização do plano (valor/limites negociados) — a coluna Plano mostra o selo
         planOverride: { select: { planId: true, priceMonth: true, expiresAt: true } },
+        // VogoPartner que cuida do cliente (docs/37-vogopartners.md)
+        partner: { select: { id: true, name: true } },
         users: { where: { role: 'tenant_admin' }, select: { ...LOGIN_EMAIL_SELECT, name: true }, take: 1 },
         // plano de cada empresa na própria listagem: com assinatura própria, o plano do cliente não diz tudo
         companies: { where: { deletedAt: null }, orderBy: { name: 'asc' }, select: { id: true, name: true, billingType: true, isActive: true, subscription: { select: { planId: true, status: true, currentPeriodEnd: true, priceMonth: true, plan: { select: { name: true } } } } } },
@@ -209,8 +205,15 @@ class TenantsController {
   /** "Entrar como": o dono recebe um token com o tenant escolhido (papel admin). */
   @Post(':id/impersonate')
   @NoTenantOk()
-  @Roles('super_admin')
-  impersonate(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+  @PartnerOk()
+  @Roles('super_admin', 'partner')
+  async impersonate(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    // VogoPartner (docs/37-vogopartners.md): só nos clientes dele, e sem os poderes de dono
+    if (u.role === 'partner') {
+      const ok = u.partnerId && (await this.prisma.tenant.count({ where: { id, partnerId: u.partnerId, partner: { status: 'active' } } }));
+      if (!ok) throw new ForbiddenException('Este cliente não está entre os seus.');
+      return this.auth.impersonateAsPartner(u, u.partnerId!, id);
+    }
     return this.auth.impersonate(u, id);
   }
 
@@ -223,74 +226,8 @@ class TenantsController {
   @Post()
   @NoTenantOk()
   @Roles('super_admin')
-  async create(@Body() dto: CreateTenantDto) {
-    const plan = await this.prisma.plan.findUniqueOrThrow({ where: { id: dto.planId } });
-    const template = dto.templateId
-      ? await this.prisma.tenantTemplate.findUnique({ where: { id: dto.templateId } })
-      : dto.templateId === undefined ? await this.prisma.tenantTemplate.findFirst({ where: { isDefault: true } }) : null;
-    if (dto.templateId && !template) throw new BadRequestException('Modelo de perfil não encontrado.');
-    const content = template ? (template.content as unknown as TemplateContent) : null;
-    // tudo ou nada também no limite do plano: cliente nascendo acima do limite já começa travado
-    const maxReplies = countLimit(plan.limits as unknown as PlanLimits, 'maxQuickReplies');
-    if (content && maxReplies !== null && content.quickReplies.length > maxReplies) {
-      throw new BadRequestException(`O modelo "${template!.name}" tem ${content.quickReplies.length} respostas rápidas e o plano ${plan.name} permite ${maxReplies}.`);
-    }
-    if (await this.prisma.user.count({ where: { email: dto.adminEmail } })) throw new BadRequestException('Este e-mail já está em uso.');
-    // gratuito nasce ativo, sem cartão, e com o fim da degustação (se houver) como fim do período;
-    // pago segue como antes: `trialing` até o primeiro checkout
-    const { start, end } = freePeriod(plan.isFree ? plan.durationDays : null);
-    // promoção de entrada aberta para o plano: o cliente já nasce com o desconto (docs/05#promoções)
-    const promo = await this.promotions.quote(plan, null);
-    // hash fora da transação: é lento de propósito, e a transação segura locks enquanto espera
-    const passwordHash = await this.auth.hashPassword(dto.adminPassword ?? randomBytes(24).toString('base64url'));
-    const { tenant, admin } = await this.prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({
-        data: {
-          name: dto.name,
-          slug: dto.slug,
-          templateId: template?.id ?? null,
-          subscription: { create: { planId: dto.planId, status: plan.isFree ? 'active' : 'trialing', currentPeriodStart: start, currentPeriodEnd: end, ...(plan.isFree && { priceMonth: 0 }), ...(promo && { priceMonth: promo.priceMonth }) } },
-          ...(promo && { planOverride: { create: this.promotions.overrideData(dto.planId, promo) } }),
-        },
-        include: { subscription: true },
-      });
-      // configurações de atendimento do modelo (encerramento sem venda, assinatura, nomes dos resultados)
-      await tx.tenantSettings.create({ data: { tenantId: tenant.id, ...content?.settings } });
-      // livro de descontos: nasceu com promoção (docs/05#livro-de-descontos)
-      if (promo) await this.ledger.open({ tenantId: tenant.id, plan, priceMonth: promo.priceMonth, kind: 'promotion', source: 'tenant_create', promotion: promo.promotion, endsAt: promo.expiresAt }, tx);
-      // tags do modelo, na ordem dele (é a das colunas do Kanban). As marcadas para o encerramento
-      // (Comprou / Não comprou) viram MOTIVOS de encerramento — a lista própria, separada das tags
-      // (docs/06-modelo-de-dados.md#encerramento); continuam tag só se também forem etapa do Kanban
-      const modelo = provisionedTags(content);
-      const deEncerramento = modelo.filter((t) => t.showOnWon || t.showOnLost);
-      await tx.tag.createMany({ data: modelo.filter((t) => t.isKanban || !(t.showOnWon || t.showOnLost)).map((t, position) => ({ tenantId: tenant.id, name: t.name, position, isKanban: !!t.isKanban, ...(t.color && { color: t.color }) })), skipDuplicates: true });
-      // "conflita com" do modelo: só entre as que ficaram tag (as que viraram motivo não são tag aqui)
-      const pares = templateTagConflictPairs(modelo);
-      if (pares.length) {
-        const idPorNome = new Map((await tx.tag.findMany({ where: { tenantId: tenant.id }, select: { id: true, name: true } })).map((t) => [t.name.toLowerCase(), t.id]));
-        const data = pares.map(([a, b]) => [idPorNome.get(a), idPorNome.get(b)] as const).filter((p): p is readonly [string, string] => !!p[0] && !!p[1]).map(([a, b]) => conflictPair(a, b));
-        if (data.length) await tx.tagConflict.createMany({ data, skipDuplicates: true });
-      }
-      await tx.closeReason.createMany({
-        data: deEncerramento.map((t, position) => ({ tenantId: tenant.id, name: t.name, position, outcome: t.showOnWon && t.showOnLost ? 'both' : t.showOnWon ? 'won' : 'lost', ...(t.color && { color: t.color }) })),
-        skipDuplicates: true,
-      });
-      await this.provisioning.provision(tx, tenant.id, content);
-      const adminProfile = await tx.accessProfile.findFirstOrThrow({ where: { tenantId: tenant.id, isSystem: true, systemRole: 'tenant_admin' }, select: { id: true } });
-      const admin = await tx.user.create({
-        data: {
-          tenantId: tenant.id, email: dto.adminEmail, name: dto.adminName, role: 'tenant_admin', passwordHash,
-          profileId: template ? adminProfile.id : null,
-          ...(dto.adminPassword ? { passwordSetAt: new Date() } : { invitedAt: new Date() }),
-        },
-      });
-      return { tenant, admin };
-    }, { timeout: 30_000 });
-    if (!dto.adminPassword) {
-      // o e-mail é melhor esforço: sem provedor configurado, o dono usa o link copiável da equipe
-      await this.auth.sendInvite(admin.id, 'Equipe Atendo', tenant.name).catch((err) => this.log.warn(`Convite por e-mail não enviado para ${dto.adminEmail}: ${err instanceof Error ? err.message : err}`));
-    }
-    return tenant;
+  create(@Body() dto: CreateTenantDto) {
+    return this.creation.create(dto);
   }
 
   /**
@@ -523,7 +460,7 @@ class TenantsController {
 @Module({
   imports: [AuthModule, BillingModule],
   controllers: [TenantsController, TenantSettingsController, ProfilesController, TenantTemplatesController, SystemOwnersController],
-  providers: [TenantSettingsService, SchedulesService, TenantProvisioningService, TemplateRolloutService],
-  exports: [TenantSettingsService, SchedulesService, TenantProvisioningService],
+  providers: [TenantSettingsService, SchedulesService, TenantProvisioningService, TemplateRolloutService, TenantCreationService],
+  exports: [TenantSettingsService, SchedulesService, TenantProvisioningService, TenantCreationService],
 })
 export class TenantsModule {}

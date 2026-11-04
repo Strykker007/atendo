@@ -19,3 +19,4 @@ export * from './tickets.js';
 export * from './secure-media.js';
 export * from './ranking.js';
 export * from './documents.js';
+export * from './partners.js';

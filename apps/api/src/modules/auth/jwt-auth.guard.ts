@@ -32,8 +32,9 @@ export class JwtAuthGuard implements CanActivate {
     if (!token) throw new UnauthorizedException();
     let payload: (AuthUser & { sub: string; pid?: string; iatMs?: number; locked?: boolean }) | undefined;
     try {
-      payload = await this.jwt.verifyAsync<AuthUser & { sub: string; pid?: string; impersonatorId?: string; shiftEndsAt?: number; locked?: boolean; lockedUntil?: number; iatMs?: number }>(token, { secret: env.JWT_ACCESS_SECRET });
-      req.user = { id: payload.sub, personId: payload.pid ?? payload.sub, tenantId: payload.tenantId, role: payload.role, email: payload.email, name: payload.name, impersonatorId: payload.impersonatorId };
+      payload = await this.jwt.verifyAsync<AuthUser & { sub: string; pid?: string; prt?: string; impersonatorId?: string; shiftEndsAt?: number; locked?: boolean; lockedUntil?: number; iatMs?: number }>(token, { secret: env.JWT_ACCESS_SECRET });
+      // `prt`: parceiro (docs/37-vogopartners.md) — no login dele e no "entrar como" num cliente dele
+      req.user = { id: payload.sub, personId: payload.pid ?? payload.sub, tenantId: payload.tenantId, role: payload.role, email: payload.email, name: payload.name, impersonatorId: payload.impersonatorId, ...((payload as { prt?: string }).prt && { partnerId: (payload as { prt?: string }).prt }) };
       // fim de turno: pela hora gravada no token — zero consulta ao banco por requisição
       const travado = !!payload.locked || (!!payload.shiftEndsAt && Date.now() >= payload.shiftEndsAt * 1000);
       if (travado) {

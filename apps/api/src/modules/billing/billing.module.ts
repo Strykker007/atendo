@@ -31,6 +31,6 @@ import { QUEUE_BILLING } from '../whatsapp/queues';
   imports: [BullModule.registerQueue({ name: QUEUE_BILLING }), AuthModule],
   controllers: [BillingController, StripeWebhookController, AsaasController, AsaasWebhookController, DuesController, PlanOverridesController, PromotionsController, MonthlyBillingController, PixQrController, ActivationController, FinanceClosingController],
   providers: [PricingService, UsageService, PlanLimitGuard, BillingProcessor, BillingScheduler, StripeService, AsaasService, FinanceService, FeatureGuard, DuesService, PlanOverridesService, PromotionsService, DiscountLedgerService, MonthlyBillingService, ActivationService, FinanceClosingService],
-  exports: [PricingService, UsageService, PlanLimitGuard, StripeService, AsaasService, FeatureGuard, DuesService, PlanOverridesService, PromotionsService, DiscountLedgerService],
+  exports: [PricingService, UsageService, PlanLimitGuard, StripeService, AsaasService, FeatureGuard, DuesService, PlanOverridesService, PromotionsService, DiscountLedgerService, ActivationService],
 })
 export class BillingModule {}

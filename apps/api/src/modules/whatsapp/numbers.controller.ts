@@ -11,7 +11,7 @@ import { NumbersService } from './numbers.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard, Roles } from '../auth/roles.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
-import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { CurrentUser, type AuthUser, isOwnerSession } from '../auth/current-user.decorator';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { SendPacer } from './send-pacer';
 import { PermissionsService } from '../auth/permissions.service';
@@ -214,7 +214,8 @@ export class NumbersController {
     // `impersonatorId` entra porque o dono edita isto **entrando como o cliente** — o token de
     // impersonação carrega papel de admin do cliente, então checar só o papel trancaria o
     // próprio dono para fora do único lugar onde os campos aparecem.
-    const ehDono = user.role === 'super_admin' || !!user.impersonatorId;
+    // parceiro dentro do cliente (docs/37-vogopartners.md) também tem `impersonatorId`, mas não é dono
+    const ehDono = isOwnerSession(user);
     if (ehDono && sendDelay !== undefined) {
       const n = await this.prisma.whatsAppNumber.findFirst({ where: { id, tenantId: user.tenantId }, select: { provider: true } });
       if (n && !sendDelayAllowed(sendDelay, n.provider)) throw new BadRequestException(sendDelay === 'fast' ? 'O intervalo Rápido (1–2s) não está mais disponível: o mínimo no QR Code é 3 segundos.' : 'Imediato só existe na API oficial (Meta).');

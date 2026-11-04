@@ -5,6 +5,7 @@ import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '
 import { env } from '../../../config/env';
 import { bytesEmBase64, contextoDaCitacao, lerCitacao } from './quoted';
 import { desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
+import { jidsDaChave, lerEdicaoCifrada } from './evolution-edit-crypto';
 import type { CallStatus, HistoryPage, HistoryQuery, InboundCall, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, RecentPage, RecentQuery, WhatsAppProvider } from './provider.interface';
 import { phoneVariants } from '../../conversations/phone-variants';
 import { isDefinitiveClose } from '../connection-events';
@@ -354,6 +355,19 @@ export class EvolutionProvider implements WhatsAppProvider {
    * a enviada pela API fica como `<telefone>@s.whatsapp.net`. Além disso, para celular BR a
    * Evolution tira ou põe o nono dígito ao montar o JID. Sem registro, cai no telefone.
    */
+  async storedKeyJids(ctx: NumberContext, externalId: string): Promise<string[]> {
+    try {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        body: JSON.stringify({ where: { key: { id: externalId } }, limit: 1 }),
+      }, this.shard(ctx));
+      const rows: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      return jidsDaChave(rows.find((r) => r?.key?.id === externalId)?.key);
+    } catch {
+      return [];
+    }
+  }
+
   private async storedRemoteJid(ctx: NumberContext, externalId: string, phone: string): Promise<string> {
     // grupo nas conversas: o "telefone" já é o jid do grupo
     const fallback = phone.endsWith('@g.us') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
@@ -612,6 +626,13 @@ export class EvolutionProvider implements WhatsAppProvider {
           if (desembrulhar(m.message)?.protocolMessage) {
             const edicao = lerEdicao(m.message);
             if (edicao) (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...edicao });
+            continue;
+          }
+          // edição no formato novo (cifrada com o segredo da original): decifrada no
+          // InboundService, que tem o `raw` da original. Outros eventos cifrados: descartados.
+          const cifrada = lerEdicaoCifrada(m.message, m.key);
+          if (cifrada) {
+            (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...cifrada });
             continue;
           }
           if (eventoCifrado(m.message)) continue;

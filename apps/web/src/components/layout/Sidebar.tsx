@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Ticket, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound } from 'lucide-react';
+import { MessageSquare, Ticket, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound, Handshake, LayoutDashboard, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -19,9 +19,16 @@ import type { Permission, PlanFeature } from '@atendo/shared';
 const OWNER_ITEMS = [
   { href: '/admin', label: 'Financeiro', icon: ShieldCheck },
   { href: '/clientes', label: 'Clientes', icon: Building2 },
+  { href: '/parceiros', label: 'Parceiros', icon: Handshake },
   { href: '/planos', label: 'Planos', icon: Package },
   { href: '/avisos', label: 'Avisos', icon: Megaphone },
   { href: '/donos', label: 'Donos do sistema', icon: KeyRound },
+];
+/** Portal do VogoPartner (docs/37-vogopartners.md): só os clientes e o dinheiro dele. */
+const PARTNER_ITEMS = [
+  { href: '/parceiro', label: 'Painel', icon: LayoutDashboard },
+  { href: '/parceiro/clientes', label: 'Meus clientes', icon: Building2 },
+  { href: '/parceiro/extrato', label: 'Extrato', icon: Receipt },
 ];
 /**
  * Regra do menu (docs/08-frontend.md#menu-lateral): item que a pessoa não pode usar não aparece.
@@ -100,7 +107,10 @@ export function Sidebar() {
     .filter((i) => (!i.need || i.need.some(permitido)) && (!i.feature || noPlano(i.feature)))
     .map((i) => (i.href === '/escalas' ? { ...i, href: primeiraAbaEscalas(minhas) ?? i.href } : i));
   const semCliente = !me.data?.tenantId;
-  const menu: { href: string; label: string; icon: typeof MessageSquare; secao?: string }[] = !me.data?.systemOwner
+  const parceiro = me.data?.role === 'partner';
+  const menu: { href: string; label: string; icon: typeof MessageSquare; secao?: string }[] = parceiro
+    ? PARTNER_ITEMS
+    : !me.data?.systemOwner
     ? doCliente
     : semCliente
       ? [...OWNER_ITEMS, items[items.length - 1]]
@@ -138,8 +148,8 @@ export function Sidebar() {
       )}
       {/* empresa/unidade ativa: some quando o cliente não usa empresas */}
       {/* minhas empresas + (dono) qualquer cliente — Ctrl+K (docs/multiempresa.md#seletor) */}
-      <WorkspaceSwitcher collapsed={collapsed} owner={!!me.data?.systemOwner} />
-      {me.data?.role !== 'super_admin' && <CompanySwitcher collapsed={collapsed} />}
+      {!parceiro && <WorkspaceSwitcher collapsed={collapsed} owner={!!me.data?.systemOwner} />}
+      {me.data?.role !== 'super_admin' && !parceiro && <CompanySwitcher collapsed={collapsed} />}
 
       {/* só o menu rola: em tela baixa (notebook, zoom) os itens de baixo ficavam inalcançáveis,
           e marca, seletores e rodapé (Sair, versão) continuam sempre à vista */}
@@ -147,7 +157,8 @@ export function Sidebar() {
         {menu.map(({ href, label, icon: Icon, secao }) => {
           // as abas de Escalas e plantões contam como o mesmo item
           const raiz = href.startsWith('/escalas/') ? '/escalas' : href;
-          const active = target ? target === href : path.startsWith(raiz);
+          // o Painel do parceiro é prefixo das outras telas dele: só ativo na própria rota
+          const active = target ? target === href : href === '/parceiro' ? path === href : path.startsWith(raiz);
           const badge = href === '/conversas' && waiting > 0 ? waiting : raiz === '/escalas' && pedidos > 0 ? pedidos : null;
           return (
             <div key={href}>
@@ -180,7 +191,7 @@ export function Sidebar() {
         {!collapsed && me.data && (
           <div className="px-3 py-1.5 text-xs">
             <div className="text-white font-medium truncate">{me.data.name}</div>
-            <div className="text-side-ink/70 truncate">{{ agent: 'Atendente', manager: 'Gerente', tenant_admin: me.data.impersonatorId ? 'Dono · dentro do cliente' : 'Administrador', super_admin: 'Dono do sistema' }[me.data.role]}{me.data.systemOwner && !me.data.impersonatorId && me.data.role !== 'super_admin' ? ' · dono do sistema' : ''}</div>
+            <div className="text-side-ink/70 truncate">{{ agent: 'Atendente', manager: 'Gerente', tenant_admin: me.data.impersonatorId ? (me.data.partnerId ? 'Parceiro · dentro do cliente' : 'Dono · dentro do cliente') : 'Administrador', super_admin: 'Dono do sistema', partner: 'VogoPartner' }[me.data.role]}{me.data.systemOwner && !me.data.impersonatorId && me.data.role !== 'super_admin' ? ' · dono do sistema' : ''}</div>
           </div>
         )}
         <button onClick={logout} disabled={leaving} title="Sair" className={cn('w-full flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-side-ink hover:bg-white/5 hover:text-white disabled:opacity-60', collapsed && 'justify-center px-0')}>

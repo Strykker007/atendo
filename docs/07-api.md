@@ -227,7 +227,12 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/webhooks/meta` | — | Eventos Meta (HMAC) |
 | POST | `/webhooks/evolution` | — | Eventos Evolution (token de instância) |
 | POST | `/webhooks/stripe` | — | Eventos Stripe (assinatura `stripe-signature`) |
-| POST | `/webhooks/asaas` | — | Eventos Asaas (header `asaas-access-token` = `ASAAS_WEBHOOK_TOKEN`; 403 se não bater) |
+| POST | `/webhooks/asaas` | — | Eventos Asaas (header `asaas-access-token` = `ASAAS_WEBHOOK_TOKEN`; 403 se não bater). `TRANSFER_*` = Pix a parceiro ([37](37-vogopartners.md)) |
+| POST | `/webhooks/asaas/transfer-validation` | — | Validação de saque do Asaas (header = `ASAAS_TRANSFER_VALIDATION_TOKEN`): aprova só Pix autorizado aqui |
+
+### VogoPartners
+
+Rotas `/partners/*`, `/partner-program/*`, `/partner-payouts/*` (dono) e `/partner/*` (portal do parceiro, `role = partner`) em [37 — VogoPartners](37-vogopartners.md#api). `POST /tenants/:id/impersonate` também aceita o parceiro, só nos clientes dele.
 
 ### Tickets internos
 

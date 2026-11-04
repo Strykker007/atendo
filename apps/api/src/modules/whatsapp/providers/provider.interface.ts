@@ -191,6 +191,11 @@ export interface WhatsAppProvider {
   /** Telefone de um `@lid` (ligação chega só com ele): da última mensagem guardada desse contato. Só Evolution. */
   phoneFromLid?(ctx: NumberContext, lid: string): Promise<string | undefined>;
   /**
+   * JIDs da chave de uma mensagem como o provider guardou (com o `@lid` que o webhook da
+   * Evolution troca pelo telefone). Usado para decifrar edição no formato novo.
+   */
+  storedKeyJids?(ctx: NumberContext, externalId: string): Promise<string[]>;
+  /**
    * Histórico da conversa guardado no provider, anterior a `before`, da mais nova para a mais
    * antiga (docs/historico-de-mensagens.md). Opcional: só a Evolution guarda o que passou pelo
    * aparelho; a Meta só entrega o que chega pelo webhook.

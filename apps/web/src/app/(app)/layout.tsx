@@ -42,6 +42,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       try {
         const me = await api<{ role: string }>('/auth/me');
         if (me.role === 'super_admin' && (location.pathname === '/conversas' || location.pathname === '/')) router.replace('/admin');
+        // VogoPartner (docs/37-vogopartners.md): o portal dele; fora dele só entrando num cliente
+        if (me.role === 'partner' && !location.pathname.startsWith('/parceiro')) router.replace('/parceiro');
       } catch { /* segue */ }
       setReady(true);
     })();

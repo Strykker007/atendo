@@ -78,7 +78,8 @@ export function InternalChatWidget() {
   const ehDono = me.data?.role === 'super_admin' && !me.data.impersonatorId;
   const ehEquipe = !!me.data?.tenantId && me.data.role !== 'super_admin' && !me.data.impersonatorId;
   /** dono "entrando como": usa as rotas do cliente, que devolvem só o canal de suporte */
-  const entrandoComo = !!me.data?.tenantId && !!me.data.impersonatorId;
+  // parceiro dentro do cliente (docs/37-vogopartners.md) não fala pelo canal de suporte
+  const entrandoComo = !!me.data?.tenantId && !!me.data.impersonatorId && !me.data.partnerId;
   const habilitado = ehDono || ehEquipe || entrandoComo;
   /** dono por marcação, na empresa dele: chat da equipe dele + Equipe do suporte (docs/donos-do-sistema.md) */
   const donoMarcado = ehEquipe && !!me.data?.systemOwner;

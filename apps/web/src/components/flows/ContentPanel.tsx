@@ -31,7 +31,8 @@ const DEFAULT_DELAY_SEC = 1;
  * Editor do bloco Conteúdo: mensagens em sequência, reordenáveis, com intervalo opcional.
  * O arquivo é checado contra os limites do WhatsApp antes de subir (a API checa de novo ao salvar).
  */
-export function ContentPanel({ items, onChange, vars }: { items: ContentItem[]; onChange: (items: ContentItem[]) => void; vars: FlowVar[] }) {
+/** `delayFirst`: mostra o intervalo também na 1ª mensagem (fluxos; nas mensagens automáticas ela sai na hora). */
+export function ContentPanel({ items, onChange, vars, delayFirst }: { items: ContentItem[]; onChange: (items: ContentItem[]) => void; vars: FlowVar[]; delayFirst?: boolean }) {
   const refs = useContext(FlowEditorRefs);
   const [uploading, setUploading] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -77,7 +78,7 @@ export function ContentPanel({ items, onChange, vars }: { items: ContentItem[]; 
         const warnings = contentWarnings(it, refs.providers);
         return (
           <div key={it.id} className="space-y-2">
-            {i > 0 && (
+            {(i > 0 || delayFirst) && (
               <label className="flex items-center gap-1.5 text-[11.5px] text-muted">
                 <Timer size={12} /> Esperar
                 <input type="number" min={0} max={CONTENT_MAX_DELAY_SEC} className={cn(inputCls, 'w-16 py-0.5')} value={it.delay ?? 0} onChange={(e) => upd(it.id, { delay: Math.min(CONTENT_MAX_DELAY_SEC, Math.max(0, Math.round(Number(e.target.value) || 0))) || undefined })} />

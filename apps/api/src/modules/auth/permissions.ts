@@ -11,7 +11,7 @@ import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, isPermission, type Permission } f
  */
 
 export interface Principal {
-  role: 'super_admin' | 'tenant_admin' | 'manager' | 'agent';
+  role: 'super_admin' | 'tenant_admin' | 'manager' | 'agent' | 'partner';
   /** permissões do perfil de acesso; `null`/ausente = usuário sem perfil */
   profilePermissions?: string[] | null;
 }
@@ -21,6 +21,8 @@ export function permissionsOf(user: Principal): Permission[] {
   // Devolver lista vazia obrigaria cada ponto de checagem a lembrar de tratar o papel à
   // parte, e o próximo endpoint escrito seria o que esquece.
   if (user.role === 'super_admin') return [...ALL_PERMISSIONS];
+  // parceiro (docs/37-vogopartners.md) não é membro de cliente: no portal dele não há permissão de cliente
+  if (user.role === 'partner') return [];
   if (user.profilePermissions) return sanitize(user.profilePermissions);
   return [...DEFAULT_PERMISSIONS[user.role]];
 }
