@@ -3,6 +3,20 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.15.0 — 2026-11-04
+
+- feat: VogoPartners e ajustes em andamento
+- fix(numeros): trocar para a Meta com número de outro card dá 409, não 500
+- fix(meta-signup): fechar a janela da Meta encerra o cadastro
+- fix(numeros): cadastro recusado pela Meta não fica como duplicata
+- fix(shared): rótulo do tipo de mensagem call
+- feat(ligacoes): ligação registrada na linha do tempo da conversa
+- fix(ligacoes): "Contato novo" no lugar de "Número oculto"
+- fix(ligacoes): telefone de quem liga a partir do @lid
+- fix(ligacoes): tipo literal de fase no aviso de ligação
+- feat(ligacoes): aviso de ligação no WhatsApp + abrir/baixar arquivo com link novo
+- fix(anexos): aceita qualquer arquivo (txt, exe, mov…) exceto HTML/SVG/JS
+
 ## 1.14.4 — 2026-10-31
 
 - feat(envio): trava de contatos novos por dia pode ser desligada por número
