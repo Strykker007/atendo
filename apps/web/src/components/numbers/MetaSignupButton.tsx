@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useMetaSignup, useMetaSignupConfig } from '@/lib/hooks';
@@ -71,6 +71,8 @@ export function MetaSignupButton({ label, coexist = false, onDone, onError }: { 
   const cfg = useMetaSignupConfig();
   const signup = useMetaSignup();
   const [abrindo, setAbrindo] = useState(false);
+  // "Cancelar" enquanto a janela está aberta: o navegador nem sempre avisa que ela foi fechada
+  const cancelarRef = useRef<(() => void) | null>(null);
   if (!cfg.data?.enabled) return null;
 
   async function conectar() {
@@ -78,23 +80,41 @@ export function MetaSignupButton({ label, coexist = false, onDone, onError }: { 
     if (!label.trim()) return onError('Dê um nome ao número antes (ex.: Vendas).');
     setAbrindo(true);
     const janela = esperarJanela(coexist);
+    // fechar/cancelar a janela (CANCEL/ERROR por postMessage), o "Cancelar" daqui ou 10 min parado
+    // encerram a espera. Antes só o código do login era esperado: com a janela fechada ele nunca
+    // chegava e o botão ficava em "Janela da Meta aberta…" para sempre.
+    let limite: ReturnType<typeof setTimeout> | undefined;
+    const interrompido = new Promise<never>((_, rej) => {
+      cancelarRef.current = () => rej(new Error('Cadastro cancelado.'));
+      limite = setTimeout(() => rej(new Error('A janela da Meta ficou aberta tempo demais. Tente de novo.')), 10 * 60_000);
+    });
+    const falhaDaJanela = janela.promise.then(() => new Promise<never>(() => {})); // FINISH: segue esperando o código
     try {
-      const FB = await carregarSdk(cfg.data.appId, cfg.data.graphVersion);
+      const FB = await Promise.race([carregarSdk(cfg.data.appId, cfg.data.graphVersion), interrompido]);
       // o código vale 30 s: pede o login e, assim que a janela fecha, manda tudo ao servidor
-      const code = await new Promise<string>((resolve, reject) => {
-        FB.login((r) => (r.authResponse?.code ? resolve(r.authResponse.code) : reject(new Error('Cadastro cancelado na janela da Meta.'))), {
-          config_id: cfg.data!.configId,
-          response_type: 'code',
-          override_default_response_type: true,
-          extras: coexist ? { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' } : { setup: {} },
-        });
-      });
+      const code = await Promise.race([
+        new Promise<string>((resolve, reject) => {
+          FB.login((r) => (r.authResponse?.code ? resolve(r.authResponse.code) : reject(new Error('Cadastro cancelado na janela da Meta.'))), {
+            config_id: cfg.data!.configId,
+            response_type: 'code',
+            override_default_response_type: true,
+            extras: coexist ? { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' } : { setup: {} },
+          });
+        }),
+        falhaDaJanela,
+        interrompido,
+      ]);
+      cancelarRef.current = null; // daqui em diante é o servidor cadastrando: não dá mais para cancelar
       const ids = await Promise.race([janela.promise, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('A Meta não devolveu o número escolhido. Tente de novo.')), 15_000))]);
       const n = await signup.mutateAsync({ code, ...ids, label: label.trim(), ...(coexist && { coexist: true }) });
       onDone({ id: n.id, registerError: n.registerError, syncErrors: n.syncErrors ?? [] });
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Erro no cadastro pela Meta');
     } finally {
+      clearTimeout(limite);
+      cancelarRef.current = null;
+      interrompido.catch(() => undefined);
+      falhaDaJanela.catch(() => undefined);
       janela.parar();
       setAbrindo(false);
     }
@@ -105,6 +125,11 @@ export function MetaSignupButton({ label, coexist = false, onDone, onError }: { 
       <Button type="button" icon={<ShieldCheck size={15} />} onClick={() => void conectar()} loading={abrindo || signup.isPending} loadingText={signup.isPending ? 'Cadastrando…' : 'Janela da Meta aberta…'}>
         {coexist ? 'Conectar mantendo o WhatsApp Business do celular' : 'Conectar com a Meta'}
       </Button>
+      {abrindo && !signup.isPending && (
+        <button type="button" onClick={() => cancelarRef.current?.()} className="ml-2 text-xs font-medium text-meta-ink underline hover:opacity-80">
+          Cancelar
+        </button>
+      )}
       {coexist ? (
         <p className="text-xs text-meta-ink">
           Para quem já atende pelo aplicativo WhatsApp Business (versão 2.24.17 ou mais nova): o número continua no celular e passa a funcionar

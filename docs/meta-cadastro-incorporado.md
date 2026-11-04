@@ -15,6 +15,9 @@ do sócio ([31](31-migracao-meta-oficial.md)).
 2. A janela manda por `postMessage` (origem `*.facebook.com`) `{ type: 'WA_EMBEDDED_SIGNUP',
    event: 'FINISH', data: { waba_id, phone_number_id } }`; `CANCEL`/`ERROR` viram mensagem na tela.
    Outros `FINISH_*` (só WABA, app do celular) são recusados: sem número para a Cloud API.
+   Fechar a janela (`CANCEL`), erro (`ERROR`), o link **Cancelar** ao lado do botão ou 10 min sem
+   resposta encerram a espera na hora. Antes de 04/11/2026 a espera era só pelo código do login, que
+   não chega com a janela fechada: o botão ficava em "Janela da Meta aberta…" até recarregar a página.
 3. O callback do login traz o **código** — vale **30 s** — e o front manda tudo para
    `POST /numbers/meta-signup` `{code, wabaId, phoneNumberId, label}` (`numbers.manage`, limite
    `maxNumbers` do plano).
