@@ -563,8 +563,44 @@ export const uploadFile = (file: File) => {
   return api<Upload>('/uploads', { method: 'POST', body: form });
 };
 
+/**
+ * Link novo do arquivo da mensagem, pedido no clique: o que veio com a lista vence em ~1 h.
+ * `download` = a API manda `Content-Disposition: attachment` com o nome original.
+ */
+export const mediaLink = (conversationId: string, messageId: string, download = false) =>
+  api<{ url: string }>(`/conversations/${conversationId}/messages/${messageId}/media${download ? '?download=1' : ''}`).then((r) => r.url);
+
+/** Abre o arquivo em aba nova. A aba nasce no clique (senão o navegador bloqueia o pop-up) e recebe o link quando chegar. */
+export async function openMediaInTab(conversationId: string, messageId: string) {
+  const tab = window.open('about:blank', '_blank');
+  try {
+    const url = await mediaLink(conversationId, messageId);
+    if (tab) tab.location.href = url; else window.open(url, '_blank', 'noopener');
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
+}
+
+/** Baixa com o nome original. Resposta `attachment` não troca de página: o navegador só salva. */
+export async function downloadMedia(conversationId: string, messageId: string) {
+  const a = document.createElement('a');
+  a.href = await mediaLink(conversationId, messageId, true);
+  a.rel = 'noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/**
+ * Só o que o WhatsApp exibe como mídia vira imagem/áudio/vídeo; o resto (txt, exe, .mov, HEIC,
+ * BMP…) vai como documento — mandado como vídeo/imagem o WhatsApp recusa ou não abre.
+ */
 export const mediaTypeOf = (mime: string): 'image' | 'audio' | 'video' | 'document' =>
-  mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'document';
+  /^image\/(jpeg|png|webp|gif)$/.test(mime) ? 'image'
+    : /^audio\/(ogg|mpeg|mp4|aac|webm|amr)$/.test(mime) ? 'audio'
+    : /^video\/(mp4|3gpp)$/.test(mime) ? 'video'
+    : 'document';
 
 export const useSetStatus = () => {
   const qc = useQueryClient();

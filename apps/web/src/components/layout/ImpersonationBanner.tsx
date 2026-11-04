@@ -19,15 +19,17 @@ export function ImpersonationBanner() {
     // refresh devolve o token do dono (sem impersonação, pois o flag já foi limpo)
     try { const r = await api<{ accessToken: string }>('/auth/refresh', { method: 'POST' }, false); setAccessToken(r.accessToken); } catch { /* login pedirá de novo */ }
     qc.clear();
-    // dono com empresa própria volta às conversas dela; sem empresa, à lista de clientes
-    const eu = await api<{ tenantId: string | null }>('/auth/me').catch(() => null);
-    router.replace(eu?.tenantId ? '/conversas' : '/clientes');
+    // dono com empresa própria volta às conversas dela; sem empresa, à lista de clientes; parceiro, aos clientes dele
+    const eu = await api<{ tenantId: string | null; role: string }>('/auth/me').catch(() => null);
+    router.replace(eu?.role === 'partner' ? '/parceiro/clientes' : eu?.tenantId ? '/conversas' : '/clientes');
   }
 
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-c4 text-white">
       <Eye size={15} />
-      <span className="flex-1">Você está vendo <b>{imp.name}</b> como dono do sistema — tudo que fizer aqui vale como se fosse o admin deste cliente.</span>
+      <span className="flex-1">{me.data.partnerId
+        ? <>Você está configurando <b>{imp.name}</b> como parceiro — tudo que fizer aqui vale como se fosse o admin deste cliente.</>
+        : <>Você está vendo <b>{imp.name}</b> como dono do sistema — tudo que fizer aqui vale como se fosse o admin deste cliente.</>}</span>
       <button onClick={leave} className="inline-flex items-center gap-1 rounded-md bg-white/15 hover:bg-white/25 px-2 py-0.5 font-medium"><LogOut size={13} /> Sair do cliente</button>
     </div>
   );

@@ -6,13 +6,13 @@ import { ExemptConfirm } from './ExemptConfirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2 } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2, Phone, PhoneMissed } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -43,8 +43,8 @@ import { useMinuto } from './ConversationList';
 import { structuredBody, ForwardedLabel } from './messages/MessageContent';
 import { messagePreview } from '@atendo/shared';
 
-/** Tipos que a API aceita (ver ALLOWED em media.controller.ts). */
-const ACCEPT_ALL = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/webm,application/pdf,.doc,.docx,.xls,.xlsx';
+/** Sem filtro: a API aceita qualquer arquivo (exceto HTML/SVG/JS — ver ACTIVE_CONTENT em media.controller.ts). */
+const ACCEPT_ALL = '';
 
 /**
  * `conversationId` por prop = modo embutido (mini-chat do Kanban): não lê nem mexe na seleção
@@ -1076,6 +1076,7 @@ export function resumoDaMensagem(m: Message): string {
 function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
+  if (m.type === 'call') return <LinhaDeLigacao m={m} />;
   const estruturado = structuredBody(m);
   if (m.deletedAt) return <MensagemApagada m={m} podeVer={podeVerApagada} />;
   if (m.internal) {
@@ -1192,6 +1193,28 @@ function MensagemApagada({ m, podeVer }: { m: Message; podeVer: boolean }) {
  * Fim de um atendimento no meio da conversa: quem encerrou, com que resultado e quando. Com
  * `seguinte`, avisa que as mensagens de baixo já são outro atendimento.
  */
+/**
+ * Ligação registrada na conversa (docs/ligacoes.md), no meio do chat como no WhatsApp. Sem ações:
+ * não é mensagem. "recebida" com mais de 2 min = o evento de fim não chegou; mostra neutro.
+ */
+function LinhaDeLigacao({ m }: { m: Message }) {
+  const c = (m.content ?? null) as unknown as { isVideo?: boolean; outcome?: 'ringing' | 'answered' | 'missed' | 'rejected' } | null;
+  const tocandoAinda = c?.outcome === 'ringing' && Date.now() - new Date(m.createdAt).getTime() < 120_000;
+  const perdida = c?.outcome === 'missed' || c?.outcome === 'rejected';
+  const texto = c?.outcome === 'ringing' && !tocandoAinda ? (c.isVideo ? 'Chamada de vídeo recebida' : 'Ligação de voz recebida') : (m.text ?? 'Ligação').replace(/^\S+\s/, '');
+  const hora = new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const Icone = perdida ? PhoneMissed : c?.isVideo ? Video : Phone;
+  return (
+    <div className="flex justify-center py-1.5 select-none">
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium shadow-sm bg-panel ${perdida ? 'text-danger' : 'text-muted'}`}>
+        <Icone size={13} className={tocandoAinda ? 'animate-pulse text-ok' : ''} />
+        {tocandoAinda ? `${c?.isVideo ? 'Chamada de vídeo' : 'Ligação'} chamando…` : texto}
+        <span className="text-faint">· {hora}</span>
+      </span>
+    </div>
+  );
+}
+
 function MarcoDeAtendimento({ e, seguinte }: { e: ConversationEvent; seguinte?: boolean }) {
   const labels = useOutcomeLabels();
   const resultado = e.outcome === 'won' || e.outcome === 'lost' ? labels[e.outcome] : null;
@@ -1414,15 +1437,36 @@ function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) =
             <Maximize2 size={14} />
           </button>
         )}
+        <BaixarArquivo m={m} className={`absolute top-1.5 ${onVerMidia ? 'right-10' : 'right-1.5'} p-1.5 rounded-md bg-black/55 text-white opacity-80 group-hover/video:opacity-100 hover:bg-black/75`} />
       </div>
     );
   }
+  // link novo a cada clique (o da lista vence em ~1 h); nome abre em aba nova, a seta baixa com o nome original
   return (
-    <a href={m.mediaUrl} target="_blank" rel="noreferrer" download={m.mediaName ?? undefined} className="flex items-center gap-2 rounded-md bg-black/5 px-2.5 py-2 mb-1 hover:bg-black/10">
-      <FileText size={20} className="text-muted shrink-0" />
-      <span className="truncate text-xs font-medium flex-1">{m.mediaName ?? labelOf(m.type)}</span>
-      <Download size={14} className="text-faint" />
-    </a>
+    <div className="flex items-center gap-2 rounded-md bg-black/5 px-2.5 py-2 mb-1">
+      <button type="button" onClick={() => openMediaInTab(m.conversationId, m.id).catch(toast.err)} className="flex items-center gap-2 flex-1 min-w-0 text-left hover:underline" title="Abrir">
+        <FileText size={20} className="text-muted shrink-0" />
+        <span className="truncate text-xs font-medium flex-1">{m.mediaName ?? labelOf(m.type)}</span>
+      </button>
+      <BaixarArquivo m={m} className="p-1 rounded text-muted hover:text-ink hover:bg-black/10" />
+    </div>
+  );
+}
+
+/** Botão de baixar com o nome original (documento e vídeo). */
+function BaixarArquivo({ m, className }: { m: Message; className: string }) {
+  const [baixando, setBaixando] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={baixando}
+      onClick={() => { setBaixando(true); downloadMedia(m.conversationId, m.id).catch(toast.err).finally(() => setBaixando(false)); }}
+      className={className}
+      title="Baixar"
+      aria-label="Baixar arquivo"
+    >
+      {baixando ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+    </button>
   );
 }
 const labelOf = (t: string) => ({ image: 'imagem', audio: 'áudio', video: 'vídeo', document: 'documento', sticker: 'figurinha', location: 'localização', contact: 'contato' } as Record<string, string>)[t] ?? t;

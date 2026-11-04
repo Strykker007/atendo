@@ -10,7 +10,7 @@ import { OpOptions, TransformPreview } from './TransformPreview';
 import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useSurveys, reasonsFor } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
-import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, START_DELAY_OPTIONS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
+import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, START_DELAY_OPTIONS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type WaitUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
 import { ContentPanel } from './ContentPanel';
 import { HttpPanel } from './HttpPanel';
@@ -108,6 +108,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
           <ContentPanel
             items={normalizeContent(node.data)}
             vars={vars}
+            delayFirst
             // primeira edição de um bloco antigo grava no formato novo (`items`) e apaga os campos soltos
             onChange={(items) => set({ items, text: undefined, mediaKey: undefined, mediaType: undefined, mediaName: undefined })}
           />
@@ -399,8 +400,19 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         )}
 
         {node.type === 'wait' && (() => {
-          const unit = node.data.unit ?? 'minutes';
-          const f = DELAY_UNIT[unit].factor;
+          const unit: WaitUnit = node.data.unit ?? 'minutes';
+          const inSec = unit === 'seconds';
+          const f = inSec ? 1 : DELAY_UNIT[unit].factor;
+          // em segundos o total fica em `seconds`; `minutes` (arredondado para cima) segue preenchido para compatibilidade
+          const shown = inSec ? (node.data.seconds ?? node.data.minutes * 60) : +(node.data.minutes / f).toFixed(2);
+          const setValue = (v: number) => {
+            if (inSec) { const s = Math.max(1, Math.round(v)); set({ seconds: s, minutes: Math.max(1, Math.ceil(s / 60)) }); }
+            else set({ minutes: Math.max(1, Math.round(v * f)), seconds: undefined });
+          };
+          const setUnit = (u: WaitUnit) => {
+            if (u === 'seconds') set({ unit: u, seconds: Math.max(1, Math.round(node.data.minutes * 60)) });
+            else set({ unit: u, minutes: inSec ? Math.max(1, Math.ceil((node.data.seconds ?? 60) / 60)) : node.data.minutes, seconds: undefined });
+          };
           const mode = node.data.mode ?? 'duration';
           return (
             <>
@@ -413,9 +425,11 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               {mode === 'duration' ? (
                 <>
                   <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2">
-                    <Field label="Esperar"><input type="number" min={1} className={`${inputCls} min-w-0 max-w-full`} value={+(node.data.minutes / f).toFixed(2)} onChange={(e) => set({ minutes: Math.max(1, Math.round(Number(e.target.value) * f)) })} /></Field>
+                    {/* block: input e select inline-block desalinham pela linha de base */}
+                    <Field label="Esperar"><input type="number" min={1} className={`${inputCls} block min-w-0 max-w-full`} value={shown} onChange={(e) => setValue(Number(e.target.value))} /></Field>
                     <Field label="Unidade">
-                      <select className={`${inputCls} min-w-0 max-w-full`} value={unit} onChange={(e) => set({ unit: e.target.value })}>
+                      <select className={`${inputCls} block min-w-0 max-w-full`} value={unit} onChange={(e) => setUnit(e.target.value as WaitUnit)}>
+                        <option value="seconds">segundos</option>
                         {(Object.keys(DELAY_UNIT) as (keyof typeof DELAY_UNIT)[]).map((k) => <option key={k} value={k}>{DELAY_UNIT[k].label}</option>)}
                       </select>
                     </Field>

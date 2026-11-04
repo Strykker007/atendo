@@ -27,7 +27,8 @@ export function SendingCard({ number }: { number: NumberItem }) {
   // Tudo aqui é do dono do sistema (inclusive "entrando como" o cliente): ritmo de envio e
   // custo da linha. O cliente acelerando o intervalo queimava o próprio número. A API também
   // descarta esses campos para quem não é o dono.
-  if (!(me.data?.role === 'super_admin' || me.data?.impersonatorId)) return null;
+  // parceiro dentro do cliente também tem `impersonatorId`, mas o ritmo de envio é só do dono
+  if (!(me.data?.role === 'super_admin' || (me.data?.impersonatorId && !me.data.partnerId))) return null;
 
   return (
     <div className="rounded-lg bg-field/60 p-2.5 space-y-2 text-[12px]">

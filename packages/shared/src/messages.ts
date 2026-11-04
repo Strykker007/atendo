@@ -89,7 +89,13 @@ export interface InboundEdit {
   externalNumberId: string;
   /** id no provider da mensagem editada */
   targetExternalId: string;
-  text: string;
+  /** texto novo; ausente quando a edição veio cifrada (ver `encrypted`) */
+  text?: string;
+  /**
+   * Edição no formato novo do WhatsApp, cifrada com o segredo da original. Opaco fora do
+   * adapter da Evolution: quem aplica decifra com o `raw` da original (evolution-edit-crypto.ts).
+   */
+  encrypted?: { payload: string; iv: string; jids: string[]; /** id do próprio evento de edição no provider */ eventId?: string };
 }
 
 /** Botão de mensagem interativa/template. `kind` diz o que ele faz no celular do contato. */
@@ -137,6 +143,7 @@ export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {
   template: 'Modelo',
   interactive: 'Mensagem interativa',
   unknown: 'Conteúdo não suportado',
+  call: '📞 Ligação',
 };
 
 const MEDIA_ICON: Partial<Record<MessageType, string>> = { image: '📷', video: '🎥', audio: '🎤', document: '📄' };

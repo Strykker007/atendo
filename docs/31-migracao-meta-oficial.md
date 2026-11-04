@@ -62,6 +62,13 @@ recebe resposta dobrada. Para cada cliente:
 4. Tirar o número do sistema antigo (desinscrever o app antigo da WABA, se ela for compartilhada).
 5. Revisar **Configurações → Atendimento → Orçamento por mensagem**: farmácia/remédio em número oficial → manter o padrão *Não enviar os itens na mensagem* (a Meta lê o conteúdo; ver [Orçamentos — itens sensíveis](orcamentos.md#itens-sensíveis)).
 
+**Cadastro recusado não fica para trás.** Se a conexão falha (token sem acesso à conta, WABA ID e
+Phone Number ID trocados — a Meta responde *"Object with ID … does not exist, cannot be loaded due
+to missing permissions"*), o número volta a arquivado e dá para tentar de novo com os dados
+certos. Antes de 04/11/2026 ele ficava "desconectado" e a nova tentativa dava *"Este número já
+está cadastrado"* (o jeito era excluir o card). Onde conferir os dois IDs juntos: app →
+**WhatsApp → Configuração da API → "De"** (só lista contas que o token enxerga).
+
 ## Cliente novo, com conta própria
 
 Quem não está no portfólio do sócio conecta o número sozinho pela janela da Meta — ver

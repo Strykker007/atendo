@@ -5,7 +5,8 @@ import type { InboundMessage, OutboundMessage, SendResult, StatusUpdate } from '
 import { env } from '../../../config/env';
 import { bytesEmBase64, contextoDaCitacao, lerCitacao } from './quoted';
 import { desembrulhar, eventoCifrado, lerConteudo, lerEdicao } from './evolution-content';
-import type { HistoryPage, HistoryQuery, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, RecentPage, RecentQuery, WhatsAppProvider } from './provider.interface';
+import { jidsDaChave, lerEdicaoCifrada } from './evolution-edit-crypto';
+import type { CallStatus, HistoryPage, HistoryQuery, InboundCall, MediaPayload, NumberContext, OutboundEdit, OutboundReaction, OutboundRevoke, ParsedWebhook, RecentPage, RecentQuery, WhatsAppProvider } from './provider.interface';
 import { phoneVariants } from '../../conversations/phone-variants';
 import { isDefinitiveClose } from '../connection-events';
 import { describeProviderError, ProviderSendError, ProviderTimeoutError } from './provider-error';
@@ -316,6 +317,36 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   /**
+   * `@lid` → telefone. A ligação chega só com o @lid (`{ from: "1201…@lid" }`), mas a Evolution
+   * guarda as mensagens com `remoteJid` = @lid e `remoteJidAlt` = telefone. Busca uma mensagem
+   * desse @lid na instância (índice `Message_instanceId_remoteJidJson_idx`, barato mesmo com
+   * milhões de linhas). Contato que nunca trocou mensagem: sem telefone. Cache de 1 h — uma
+   * ligação manda vários eventos.
+   */
+  async phoneFromLid(ctx: NumberContext, lid: string): Promise<string | undefined> {
+    const k = `${this.instance(ctx)}|${lid}`;
+    const hit = this.lidCache.get(k);
+    if (hit && hit.until > Date.now()) return hit.phone;
+    let phone: string | undefined;
+    try {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        body: JSON.stringify({ where: { key: { remoteJid: lid } }, limit: 1 }),
+      }, this.shard(ctx));
+      const rows: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      const alt = rows.map((r) => [r?.key?.remoteJidAlt, r?.key?.senderPn]).flat().find((j) => typeof j === 'string' && j.endsWith('@s.whatsapp.net'));
+      phone = alt ? alt.split('@')[0].split(':')[0].replace(/\D/g, '') || undefined : undefined;
+    } catch (err) {
+      this.logger.warn(`telefone do ${lid} não encontrado: ${err instanceof Error ? err.message : err}`);
+      return undefined; // falha não entra no cache: a próxima tentativa pergunta de novo
+    }
+    if (this.lidCache.size > 5000) this.lidCache.clear();
+    this.lidCache.set(k, { phone, until: Date.now() + 3_600_000 });
+    return phone;
+  }
+  private readonly lidCache = new Map<string, { phone?: string; until: number }>();
+
+  /**
    * Endereço da conversa como a Evolution GRAVOU a mensagem — é com ele que ela confere a edição
    * ("RemoteJid does not match") e manda o protocolo ao WhatsApp.
    *
@@ -324,6 +355,19 @@ export class EvolutionProvider implements WhatsAppProvider {
    * a enviada pela API fica como `<telefone>@s.whatsapp.net`. Além disso, para celular BR a
    * Evolution tira ou põe o nono dígito ao montar o JID. Sem registro, cai no telefone.
    */
+  async storedKeyJids(ctx: NumberContext, externalId: string): Promise<string[]> {
+    try {
+      const res = await this.api<any>(`/chat/findMessages/${this.instance(ctx)}`, {
+        method: 'POST',
+        body: JSON.stringify({ where: { key: { id: externalId } }, limit: 1 }),
+      }, this.shard(ctx));
+      const rows: any[] = Array.isArray(res) ? res : res?.messages?.records ?? [];
+      return jidsDaChave(rows.find((r) => r?.key?.id === externalId)?.key);
+    } catch {
+      return [];
+    }
+  }
+
   private async storedRemoteJid(ctx: NumberContext, externalId: string, phone: string): Promise<string> {
     // grupo nas conversas: o "telefone" já é o jid do grupo
     const fallback = phone.endsWith('@g.us') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`;
@@ -584,6 +628,13 @@ export class EvolutionProvider implements WhatsAppProvider {
             if (edicao) (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...edicao });
             continue;
           }
+          // edição no formato novo (cifrada com o segredo da original): decifrada no
+          // InboundService, que tem o `raw` da original. Outros eventos cifrados: descartados.
+          const cifrada = lerEdicaoCifrada(m.message, m.key);
+          if (cifrada) {
+            (out.edits ??= []).push({ provider: 'evolution', externalNumberId, ...cifrada });
+            continue;
+          }
           if (eventoCifrado(m.message)) continue;
           // `fromMe` cobre DOIS casos: o que o painel acabou de enviar (descartado adiante
           // pelo externalId, que já está no banco) e o que a pessoa digitou no celular, que
@@ -658,6 +709,18 @@ export class EvolutionProvider implements WhatsAppProvider {
       case 'qrcode.updated':
         out.connection = { externalNumberId, status: NumberStatus.PENDING_QR, qrCode: data?.qrcode?.base64 };
         break;
+      // Ligação (WEBHOOK_EVENTS_CALL). Uma ligação manda vários eventos: offer (chamando),
+      // accept/reject/timeout/terminate. A Evolution não atende — só avisamos o painel.
+      case 'call': {
+        const items = Array.isArray(data) ? data : [data];
+        for (const c of items) {
+          const call = parseCall(c, externalNumberId);
+          // formato confirmado só depois do primeiro deploy: o log mostra o payload real
+          this.logger.log(`ligação ${externalNumberId}: ${JSON.stringify(c).slice(0, 600)}`);
+          if (call) (out.calls ??= []).push(call);
+        }
+        break;
+      }
     }
     return out;
   }
@@ -820,6 +883,32 @@ export function remetenteDoGrupo(m: any): { senderPhone?: string; senderName?: s
   const pn = jids.find((j) => j.endsWith('@s.whatsapp.net'));
   const nome = typeof m?.pushName === 'string' ? m.pushName.trim() : '';
   return { senderPhone: pn ? pn.replace(/@.*$/, '').split(':')[0] : undefined, senderName: nome || undefined };
+}
+
+const CALL_STATUSES = new Set<CallStatus>(['offer', 'ringing', 'accept', 'reject', 'timeout', 'terminate']);
+
+/**
+ * Evento `call` da Evolution (o `WACallEvent` do Baileys): `{ id, from, chatId, status, isVideo,
+ * isGroup, date, callerPn? }`. O `from` pode vir como @lid (sem telefone): aí procura o telefone
+ * em `callerPn`/`chatId`. Ligação em grupo é ignorada — grupo não abre atendimento.
+ */
+export function parseCall(c: any, externalNumberId: string): InboundCall | null {
+  const status = String(c?.status ?? '') as CallStatus;
+  if (!c?.id || c.isGroup || !CALL_STATUSES.has(status)) return null;
+  const jids = [c.callerPn, c.from, c.chatId].filter((j): j is string => typeof j === 'string' && !!j);
+  const jid = jids.find((j) => !j.includes('@')) ?? jids.find((j) => j.endsWith('@s.whatsapp.net')) ?? jids[0] ?? '';
+  // "5511999990000:12@s.whatsapp.net" → 5511999990000 (o :12 é o aparelho)
+  const phone = jid && !jid.endsWith('@lid') && !jid.endsWith('@g.us') ? jid.split('@')[0].split(':')[0].replace(/\D/g, '') : '';
+  const date = c.date ? new Date(c.date) : new Date();
+  return {
+    externalNumberId,
+    callId: String(c.id),
+    from: phone || undefined,
+    jid,
+    isVideo: !!c.isVideo,
+    status,
+    at: Number.isNaN(date.getTime()) ? new Date() : date,
+  };
 }
 
 export function parseGroupList(rows: unknown): { jid: string; name: string; size: number }[] {

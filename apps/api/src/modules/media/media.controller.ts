@@ -7,7 +7,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { env } from '../../config/env';
 
-const ALLOWED = /^(image\/(jpeg|png|webp|gif)|audio\/(ogg|mpeg|mp4|aac|webm)|video\/(mp4|3gpp)|application\/pdf|application\/(msword|vnd\.openxmlformats-officedocument.*|vnd\.ms-excel))/;
+/**
+ * Qualquer arquivo entra (txt, exe, zip, mov…): o que o WhatsApp não mostra como mídia vai como
+ * documento (`mediaTypeOf` no front). Só fica de fora conteúdo que o navegador EXECUTA ao abrir —
+ * servido pelo domínio da API, um HTML/SVG/JS rodaria script ali.
+ */
+const ACTIVE_CONTENT = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|(text|application)\/(x-)?(javascript|ecmascript))$/;
 
 @Controller()
 export class MediaController {
@@ -21,8 +26,8 @@ export class MediaController {
     if (!file) throw new BadRequestException('Arquivo ausente (campo "file")');
     // o navegador manda o codec junto ("audio/webm;codecs=opus") ao gravar áudio;
     // guardamos o tipo base, senão a extensão do arquivo sai errada
-    const mimeType = file.mimetype.split(';')[0].trim().toLowerCase();
-    if (!ALLOWED.test(mimeType)) throw new BadRequestException(`Tipo não permitido: ${mimeType}`);
+    const mimeType = file.mimetype.split(';')[0].trim().toLowerCase() || 'application/octet-stream';
+    if (ACTIVE_CONTENT.test(mimeType)) throw new BadRequestException(`Tipo não permitido: ${mimeType}`);
     const key = this.storage.makeKey(user.tenantId, mimeType, file.originalname);
     await this.storage.put(key, file.buffer, mimeType);
     return { key, url: this.storage.signedUrl(key), mimeType, fileName: file.originalname, size: file.size };
@@ -38,12 +43,17 @@ export class MediaController {
    */
   @Get('media/*path')
   @SkipThrottle()
-  async serve(@Param('path') path: string | string[], @Query('exp') exp = '', @Query('sig') sig = '', @Headers('range') range = '', @Res() res: Response) {
+  async serve(@Param('path') path: string | string[], @Query('exp') exp = '', @Query('sig') sig = '', @Query('dl') dl: string | undefined, @Headers('range') range = '', @Res() res: Response) {
     const key = 'media/' + (Array.isArray(path) ? path.join('/') : path);
     if (!this.storage.verify(key, exp, sig)) throw new UnauthorizedException('Link expirado ou inválido');
     const obj = await this.storage.get(key);
 
     res.setHeader('Content-Type', obj.mimeType);
+    // arquivo RECEBIDO pode ser HTML/SVG (o cliente manda o que quiser): baixa em vez de abrir
+    // `?dl=nome` (botão Baixar): o atributo `download` do <a> não vale entre domínios (app → api),
+    // então quem força o download com o nome original é este cabeçalho
+    if (typeof dl === 'string') res.setHeader('Content-Disposition', contentDisposition(dl));
+    else if (ACTIVE_CONTENT.test(obj.mimeType.split(';')[0].trim().toLowerCase())) res.setHeader('Content-Disposition', 'attachment');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     // anunciar o suporte importa: sem este cabeçalho o player nem tenta pedir pedaços
     res.setHeader('Accept-Ranges', 'bytes');
@@ -61,6 +71,18 @@ export class MediaController {
     res.setHeader('Content-Length', String(end - start + 1));
     return res.end(obj.data.subarray(start, end + 1));
   }
+}
+
+/**
+ * `attachment` com o nome do arquivo. `filename` em ASCII para navegador antigo e `filename*`
+ * (RFC 5987) com o nome real em UTF-8. Caractere de controle, aspas e barras saem: o nome vem
+ * da query, sem assinatura, e não pode quebrar o cabeçalho nem virar caminho.
+ */
+export function contentDisposition(name: string): string {
+  const limpo = name.replace(/[\u0000-\u001f\u007f"\\/]/g, '').trim().slice(0, 200) || 'arquivo';
+  const ascii = limpo.normalize('NFD').replace(/[^\x20-\x7e]/g, '') || 'arquivo';
+  const utf8 = encodeURIComponent(limpo).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`;
 }
 
 /**

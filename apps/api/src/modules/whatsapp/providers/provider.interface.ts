@@ -50,7 +50,25 @@ export interface InboundContactName {
   name: string;
 }
 
+/** Etapas de uma ligação de WhatsApp (evento `call` da Evolution/Baileys). */
+export type CallStatus = 'offer' | 'ringing' | 'accept' | 'reject' | 'timeout' | 'terminate';
+
+/** Ligação recebida no número (docs/ligacoes.md). Não é mensagem: só avisa o painel. */
+export interface InboundCall {
+  externalNumberId: string;
+  callId: string;
+  /** telefone do contato; ausente quando o WhatsApp só manda o @lid (sem telefone) */
+  from?: string;
+  /** jid como veio, para o log e para o aviso quando não há telefone */
+  jid: string;
+  isVideo: boolean;
+  status: CallStatus;
+  at: Date;
+}
+
 export interface ParsedWebhook {
+  /** ligações (só Evolution). `offer` = está chamando agora */
+  calls?: InboundCall[];
   messages: InboundMessage[];
   statuses: StatusUpdate[];
   /** reações a mensagens — não são mensagens, só marcam a reagida */
@@ -170,6 +188,13 @@ export interface WhatsAppProvider {
    * Evolution implementa. Devolve `null` quando o contato não tem foto ou a esconde.
    */
   fetchProfilePicture?(ctx: NumberContext, phone: string): Promise<MediaPayload | null>;
+  /** Telefone de um `@lid` (ligação chega só com ele): da última mensagem guardada desse contato. Só Evolution. */
+  phoneFromLid?(ctx: NumberContext, lid: string): Promise<string | undefined>;
+  /**
+   * JIDs da chave de uma mensagem como o provider guardou (com o `@lid` que o webhook da
+   * Evolution troca pelo telefone). Usado para decifrar edição no formato novo.
+   */
+  storedKeyJids?(ctx: NumberContext, externalId: string): Promise<string[]>;
   /**
    * Histórico da conversa guardado no provider, anterior a `before`, da mais nova para a mais
    * antiga (docs/historico-de-mensagens.md). Opcional: só a Evolution guarda o que passou pelo

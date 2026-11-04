@@ -146,7 +146,13 @@ Seu login será: ${user.email}`,
   }
 
   /** Cliente desativado (docs/desativar-cliente.md): a equipe não entra; dono do sistema continua. */
-  private async assertTenantActive(user: { tenantId: string | null; role: string; isSystemOwner: boolean }) {
+  private async assertTenantActive(user: { tenantId: string | null; role: string; isSystemOwner: boolean; partnerId?: string | null }) {
+    // VogoPartner suspenso ou encerrado não entra (docs/37-vogopartners.md)
+    if (user.role === 'partner') {
+      const p = user.partnerId ? await this.prisma.partner.findUnique({ where: { id: user.partnerId }, select: { status: true } }) : null;
+      if (p?.status !== 'active') throw new ForbiddenException('Seu acesso de parceiro está suspenso. Fale com a equipe.');
+      return;
+    }
     if (!user.tenantId || user.role === 'super_admin' || user.isSystemOwner) return;
     const t = await this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { isActive: true } });
     if (t && !t.isActive) throw new ForbiddenException('Esta empresa está desativada. Fale com o suporte.');
@@ -272,7 +278,7 @@ Seu login será: ${user.email}`,
     return this.issue(target, meta, janela, await this.accessLog.start(target, meta));
   }
 
-  private async issue(user: { id: string; tenantId: string | null; role: string; name: string }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow, sessionId?: string | null) {
+  private async issue(user: { id: string; tenantId: string | null; role: string; name: string; partnerId?: string | null }, meta: { userAgent?: string; ip?: string }, janela?: SessionWindow, sessionId?: string | null) {
     // Fim de turno viaja no token: o JwtAuthGuard trava as ações sem consultar o banco a cada
     // requisição. `shiftEndsAt` = a partir de quando trava; `locked` = já nasce travado (passagem)
     const sec = (d: Date) => Math.floor(d.getTime() / 1000);
@@ -286,7 +292,7 @@ Seu login será: ${user.email}`,
       // `iatMs`: o corte de sessão (cutSessions) compara em milissegundos — `iat` do JWT é em segundos
       // `owner`: só para o socket (salas do suporte); nas rotas a marcação vem do banco (PermissionsService)
       // `pid`: login principal, quando a sessão é de um vínculo (docs/multiempresa.md)
-      { sub: user.id, tenantId: user.tenantId, role: user.role, email: who.email, name: user.name, iatMs: Date.now(), ...(who.owner && { owner: true }), ...(who.personId !== user.id && { pid: who.personId }), ...shift },
+      { sub: user.id, tenantId: user.tenantId, role: user.role, email: who.email, name: user.name, iatMs: Date.now(), ...(who.owner && { owner: true }), ...(who.personId !== user.id && { pid: who.personId }), ...(user.role === 'partner' && user.partnerId && { prt: user.partnerId }), ...shift },
       { secret: env.JWT_ACCESS_SECRET, expiresIn: ttl },
     );
     const refreshToken = randomBytes(48).toString('base64url');
@@ -313,6 +319,28 @@ Seu login será: ${user.email}`,
       { secret: env.JWT_ACCESS_SECRET, expiresIn: '1h' as any },
     );
     return { accessToken, tenant: { id: tenant.id, name: tenant.name } };
+  }
+
+  /**
+   * VogoPartner "entra" num cliente dele para configurar (docs/37-vogopartners.md): admin do cliente,
+   * mas com `prt` — os poderes de dono (`isOwnerSession`) não valem. Quem chama confere a posse.
+   */
+  async impersonateAsPartner(caller: { id: string; impersonatorId?: string }, partnerId: string, tenantId: string) {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const userId = caller.impersonatorId ?? caller.id;
+    const me = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, name: true, email: true } });
+    const accessToken = await this.jwt.signAsync(
+      { sub: me.id, tenantId: tenant.id, role: 'tenant_admin', email: me.email ?? '', name: `${me.name} (parceiro)`, impersonatorId: me.id, prt: partnerId },
+      { secret: env.JWT_ACCESS_SECRET, expiresIn: '1h' as any },
+    );
+    return { accessToken, tenant: { id: tenant.id, name: tenant.name } };
+  }
+
+  /** Confere a senha da pessoa (ações sensíveis: ativar o autenticador). */
+  async verifyPassword(userId: string, password: string) {
+    const { personId } = await this.person(userId);
+    const u = await this.prisma.user.findUniqueOrThrow({ where: { id: personId }, select: { passwordHash: true } });
+    return argon2.verify(u.passwordHash, password);
   }
 
   hashPassword(p: string) {

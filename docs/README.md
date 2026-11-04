@@ -36,6 +36,7 @@
 | [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão e contas temporárias que expiram sozinhas |
 | [Registro de acessos](registro-de-acessos.md) | Dev / Cliente | Auditoria de login: quem esteve logado em cada dia, calendário por pessoa, tentativas barradas pela escala |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
+| [Ligações](ligacoes.md) | Dev / Cliente | Aviso de ligação no WhatsApp (quem liga e para qual número), ligação perdida, por que não dá para atender no painel |
 | [11 — Infra de produção e escala](11-infra-producao.md) | Dev / Ops | Docker, compose de produção, dimensionamento para 500 clientes, migração gradual |
 | [12 — Contas e e-mail](12-contas-e-email.md) | Dev / Operação | Convites, esqueci/trocar senha, e-mails transacionais (Resend) |
 | [13 — Agendamento](13-agendamento.md) | Dev / Cliente | Profissionais, serviços, agenda, marcação pelo WhatsApp, lembretes ao cliente e ao profissional |
@@ -62,6 +63,7 @@
 | [34 — Condomínios e operações sem venda](34-condominios.md) | Produto / Dev | Análise do produto para operação sem venda (condomínio) e plano por fases: unidades, chamados com protocolo, comunicados, relatórios do síndico |
 | [35 — Retomada do deploy v1.10.0](35-retomada-deploy-v1.10.md) | Ops | Onde paramos em 29/10 e o passo a passo para terminar o deploy, o webhook do Asaas e a migração da mensalidade por Pix |
 | [36 — Fechamento financeiro](36-fechamento-financeiro.md) | Produto / Dono | A receber × recebido do mês, clientes em atraso (filtros e ações), custos fixos, folha, pró-labore, caixa e a parte de cada sócio no fechamento |
+| [37 — VogoPartners](37-vogopartners.md) | Negócio / Dono | Programa de parceiros (um nível): faixas de comissão por cliente ativo, instalação semanal, portal do parceiro, pagamento por Pix com autenticador e validação de saque no Asaas |
 | [Desativar cliente](desativar-cliente.md) | Produto / Dev | O que para quando o dono desativa um cliente (sessões, números QR, envio, robô, cobrança) e como reativar |
 | [Cadastro incorporado da Meta](meta-cadastro-incorporado.md) | Produto / Dev | Cliente conecta o número oficial pela janela da Meta, sem token nem IDs; o que configurar na Meta (Tech Provider, configuração do login) |
 | [Gasto com a Meta](gasto-meta.md) | Produto / Dev | Painel do cliente com o gasto do mês na API oficial: estimativa na hora, valor real da Meta, projeção e orçamento com aviso |

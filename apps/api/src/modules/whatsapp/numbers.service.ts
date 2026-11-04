@@ -1,5 +1,5 @@
 import { RedisService } from '../../common/redis/redis.service';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -238,13 +238,19 @@ export class NumbersService {
    */
   async switchProvider(numberId: string, provider: ProviderKind, config: MetaNumberConfig | EvolutionNumberConfig) {
     const current = await this.context(numberId);
-    if (current.provider !== provider) {
-      await this.registry.get(current.provider).disconnect(current).catch(() => undefined);
-    }
-
     const externalId =
       provider === 'meta' ? (config as MetaNumberConfig).phoneNumberId : (config as EvolutionNumberConfig).instanceName;
     if (!externalId) throw new BadRequestException('Configuração do provider incompleta');
+    // antes de desligar o atual: o mesmo número em outro card estouraria o índice único (provider, externalId) num 500
+    const outro = await this.prisma.whatsAppNumber.findFirst({
+      where: { provider, externalId, id: { not: numberId } },
+      select: { label: true },
+    });
+    if (outro) throw new ConflictException(`Este número já está cadastrado no card "${outro.label}". Exclua aquele card ou use outro número.`);
+
+    if (current.provider !== provider) {
+      await this.registry.get(current.provider).disconnect(current).catch(() => undefined);
+    }
 
     const updated = await this.prisma.whatsAppNumber.update({
       where: { id: numberId },

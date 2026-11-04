@@ -40,7 +40,7 @@ export interface ContentItem {
   size?: number;
   /** audio: true (padrão) = áudio gravado (PTT); false = arquivo de áudio */
   voice?: boolean;
-  /** segundos de espera antes desta mensagem (ignorado na primeira) */
+  /** segundos de espera antes desta mensagem (na primeira: só nos fluxos; nas mensagens automáticas é ignorado) */
   delay?: number;
 }
 
@@ -282,8 +282,17 @@ export const WEBHOOK_MAX_TIMEOUT_SEC = 30;
  * expediente, espera até a próxima abertura. `mode: 'next_open'`: espera até o próximo horário
  * de atendimento (segue na hora se já estiver aberto) — hoje o expediente de Configurações →
  * Horário; o módulo de horários vai plugar aqui a origem do horário.
+ * `unit: 'seconds'`: o total é `seconds`; `minutes` continua preenchido (arredondado para cima)
+ * para quem ainda lê só ele.
  */
-export type WaitNode = FlowNodeBase<'wait', { mode?: 'duration' | 'next_open'; minutes: number; unit?: DelayUnit; businessHours?: boolean }>;
+export type WaitUnit = DelayUnit | 'seconds';
+export type WaitNode = FlowNodeBase<'wait', { mode?: 'duration' | 'next_open'; minutes: number; seconds?: number; unit?: WaitUnit; businessHours?: boolean }>;
+/** Espera do Atraso inteligente (modo tempo), em ms. */
+export function waitDurationMs(data: WaitNode['data']): number {
+  const sec = Number(data.seconds) || 0;
+  if (data.unit === 'seconds' && sec > 0) return Math.round(sec) * 1000;
+  return Math.max(1, Number(data.minutes) || 1) * 60_000;
+}
 /**
  * Manipulador (tipo interno 'variable', exibido como "Manipulador"): operações sobre as
  * variáveis do fluxo, executadas em ordem. `op` ausente = 'set' (fluxos antigos).

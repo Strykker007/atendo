@@ -18,8 +18,12 @@ import { planoDaRecuperacao } from './gap-recovery-plan';
 import { agendaParaRestaurar, escolherDaAgenda, normalizeContactName, nomeDaAgendaTroca, pushNameTrocaNome, trocaNaAgenda } from './contact-name';
 import { planRemoval } from '../whatsapp/number-removal';
 import { DEFINITIVE_CLOSE } from '../whatsapp/connection-events';
+import { decifrarEdicao, jidsDaOriginal, segredoDaOriginal } from '../whatsapp/providers/evolution-edit-crypto';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
 import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
+import { phoneVariants } from './phone-variants';
+import type { InboundCall } from '../whatsapp/providers/provider.interface';
+import { callExternalId, desfechoDaLigacao, ficouSemResposta, textoDaLigacao, type CallContent } from './call-record';
 
 const isGroupJid = (jid: string) => jid.endsWith('@g.us');
 
@@ -621,9 +625,22 @@ export class InboundService {
    */
   async applyEdit(number: WhatsAppNumber, e: InboundEdit) {
     // filtra pelo número: o mesmo externalId existe nos dois lados quando um número nosso fala com outro
-    const m = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId: e.targetExternalId }, select: { id: true } });
+    const m = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId: e.targetExternalId }, select: { id: true, raw: true, text: true, editedAt: true } });
     if (!m) return;
-    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text: e.text, editedAt: new Date() }, include: MESSAGE_INCLUDE });
+    let text = e.text;
+    if (!text && e.encrypted) {
+      // formato novo: cifrada com o `messageSecret` da original, que está no `raw` dela
+      const secret = segredoDaOriginal(m.raw);
+      text = (secret && decifrarEdicao(secret, e.targetExternalId, e.encrypted, [...jidsDaOriginal(m.raw), `${number.phone}@s.whatsapp.net`])) || undefined;
+      if (!text) {
+        this.log.debug(`edição cifrada não aplicada (${secret ? 'não decifrou' : 'original sem messageSecret'}): ${e.targetExternalId}`);
+        return;
+      }
+    }
+    if (!text) return;
+    // a mesma edição pode chegar nos dois formatos: não reemite
+    if (text === m.text && m.editedAt) return;
+    const updated = await this.prisma.message.update({ where: { id: m.id }, data: { text, editedAt: new Date() }, include: MESSAGE_INCLUDE });
     this.gateway.emitMessage(number.tenantId, this.conversations.present(updated));
   }
 
@@ -795,6 +812,96 @@ export class InboundService {
       select: { id: true },
     });
     if (conversation) this.gateway.emitTyping(number.tenantId, { conversationId: conversation.id, state: p.state });
+  }
+
+  /**
+   * Ligação no número (docs/ligacoes.md). Diz ao painel QUEM liga e PARA QUAL número (aviso na
+   * tela) e registra a ligação na conversa, como o WhatsApp: uma linha `type: 'call'` que vai de
+   * "recebida" para "atendida no celular" / "perdida" / "recusada". A Evolution não atende.
+   *
+   * **Fora do ledger** (`UsageService`) de propósito: ligação não é mensagem do WhatsApp, não se
+   * cobra. Também não aciona fluxo, boas-vindas nem `lastInboundAt` (não abre a janela de 24h).
+   * Sem telefone (o @lid não resolveu) não há contato onde gravar: fica só o aviso.
+   */
+  async applyCall(number: WhatsAppNumber, c: InboundCall) {
+    let contact: { id: string; name: string | null; phone: string } | null = null;
+    let conversationId: string | null = null;
+    if (c.from) {
+      try {
+        ({ contact, conversationId } = await this.registrarLigacao(number, c, c.from));
+      } catch (err) {
+        // o registro é extra: o aviso na tela sai mesmo assim
+        this.log.warn(`ligação ${c.callId} não registrada na conversa: ${err instanceof Error ? err.message : err}`);
+        contact = await this.prisma.contact.findFirst({ where: { tenantId: number.tenantId, phone: { in: phoneVariants(c.from) } }, select: { id: true, name: true, phone: true } });
+      }
+    }
+    this.gateway.emitCall(number.tenantId, {
+      callId: c.callId,
+      status: c.status,
+      isVideo: c.isVideo,
+      at: c.at.toISOString(),
+      numberId: number.id,
+      numberLabel: number.label,
+      numberPhone: number.phone,
+      contactName: contact?.name || null,
+      phone: contact?.phone ?? c.from ?? null,
+      conversationId,
+    });
+    if (c.status === 'offer') this.log.log(`ligação ${c.isVideo ? 'de vídeo ' : ''}de ${c.from ?? c.jid} para ${number.label} (${number.phone})`);
+  }
+
+  /**
+   * Linha da ligação na conversa. Contato e conversa nascem se não existirem (quem liga pela
+   * primeira vez entra na fila, como quem manda a primeira mensagem). Perdida/recusada conta
+   * como mensagem nova: não lida, espera e encerrada volta para a fila. Os eventos da mesma
+   * ligação chegam em paralelo (fila com concorrência): o `@@unique([numberId, externalId])`
+   * segura a linha única e quem perde a corrida tenta de novo.
+   */
+  private async registrarLigacao(number: WhatsAppNumber, c: InboundCall, phone: string, tentativa = 0): Promise<{ contact: Contact; conversationId: string }> {
+    const contact = (await this.prisma.contact.findFirst({ where: { tenantId: number.tenantId, phone: { in: phoneVariants(phone) } } }))
+      ?? (await this.createContact(number, phone));
+    const isento = await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    let conversation = (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
+      ?? (await this.prisma.conversation.create({ data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', ticketExempt: isento } }));
+
+    const externalId = callExternalId(c.callId);
+    const existente = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId }, select: { id: true, content: true } });
+    const antes = (existente?.content as unknown as CallContent | null)?.outcome;
+    const outcome = desfechoDaLigacao(antes, c.status);
+    if (existente && outcome === antes) return { contact, conversationId: conversation.id };
+
+    const content: CallContent = { kind: 'call', isVideo: c.isVideo, outcome };
+    const text = textoDaLigacao(c.isVideo, outcome);
+    const gravada = await (existente
+      ? this.prisma.message.update({ where: { id: existente.id }, data: { content: content as unknown as Prisma.InputJsonValue, text }, include: MESSAGE_INCLUDE })
+      : this.prisma.message.create({
+          data: { conversationId: conversation.id, numberId: number.id, direction: 'in', type: 'call', status: 'delivered', text, content: content as unknown as Prisma.InputJsonValue, externalId, createdAt: c.at },
+          include: MESSAGE_INCLUDE,
+        })
+    ).catch((err) => {
+      // outro evento da mesma ligação criou a linha agora: refaz com ela já existindo
+      if (!existente && tentativa < 2 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return null;
+      throw err;
+    });
+    if (!gravada) return this.registrarLigacao(number, c, phone, tentativa + 1);
+    const message = gravada;
+
+    const semResposta = ficouSemResposta(outcome) && !ficouSemResposta(antes ?? 'ringing');
+    if (semResposta && conversation.status === 'closed' && !contact.isGroup) conversation = await this.conversations.setStatusSystem(conversation.id, 'waiting');
+    // a conversa sobe na lista como no WhatsApp; nunca volta o relógio se já houve mensagem depois
+    const quando = conversation.lastMessageAt && conversation.lastMessageAt > message.createdAt ? conversation.lastMessageAt : message.createdAt;
+    conversation = await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        lastMessageAt: quando,
+        ...(quando === message.createdAt && { lastMessagePreview: text }),
+        ...(semResposta && { unreadCount: { increment: 1 }, awaitingSince: inicioDaEspera(conversation.awaitingSince, message.createdAt), deviceReplyAt: null }),
+      },
+    });
+
+    this.gateway.emitMessage(number.tenantId, this.conversations.present(message));
+    this.gateway.emitConversation(number.tenantId, conversation);
+    return { contact, conversationId: conversation.id };
   }
 
   async numberConnectionChanged(number: WhatsAppNumber, c: { status: NumberStatus; qrCode?: string; phone?: string; transient?: boolean; loggedOut?: boolean; statusReason?: number }) {

@@ -17,6 +17,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { shouldRefreshAvatar } from './avatar-refresh';
 import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
 import { ConnectionEventsService } from './connection-events';
+import { precisaDoLid } from './providers/evolution-edit-crypto';
 
 @Processor(QUEUE_INBOUND, { concurrency: 10 })
 export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
@@ -165,7 +166,19 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
 
     for (const e of parsed.edits ?? []) {
       const number = await this.numbers.findByExternal(job.data.provider, e.externalNumberId);
-      if (number) await this.inbound.applyEdit(number, e);
+      if (!number) continue;
+      // edição cifrada sem o @lid (a Evolution troca pelo telefone no webhook): busca a chave
+      // guardada — do próprio evento ou, se ainda não estiver lá, da original
+      if (e.encrypted && precisaDoLid(e.encrypted)) {
+        const ctx = await this.numbers.context(number.id);
+        const provider = this.registry.get(ctx.provider);
+        if (provider.storedKeyJids) {
+          let extra = e.encrypted.eventId ? await provider.storedKeyJids(ctx, e.encrypted.eventId) : [];
+          if (!extra.some((j) => j.endsWith('@lid'))) extra = [...extra, ...(await provider.storedKeyJids(ctx, e.targetExternalId))];
+          e.encrypted.jids = [...new Set([...e.encrypted.jids, ...extra])];
+        }
+      }
+      await this.inbound.applyEdit(number, e);
     }
 
     // coexistência: histórico do celular (docs/meta-cadastro-incorporado.md#coexistência)
@@ -183,6 +196,18 @@ export class InboundProcessor extends TrackedWorkerHost<InboundJob> {
     for (const c of parsed.contactNames ?? []) {
       const number = await this.numbers.findByExternal(job.data.provider, c.externalNumberId);
       if (number) await this.inbound.applyContactName(number, c);
+    }
+
+    for (const c of parsed.calls ?? []) {
+      const number = await this.numbers.findByExternal(job.data.provider, c.externalNumberId);
+      if (!number || number.suspendedAt) continue;
+      // só veio o @lid: o telefone sai das mensagens guardadas na Evolution (sem ele, "Contato novo")
+      if (!c.from && c.jid.endsWith('@lid')) {
+        const ctx = await this.numbers.context(number.id);
+        const provider = this.registry.get(ctx.provider);
+        if (provider.phoneFromLid) c.from = await provider.phoneFromLid(ctx, c.jid);
+      }
+      await this.inbound.applyCall(number, c);
     }
 
     for (const p of parsed.presences ?? []) {

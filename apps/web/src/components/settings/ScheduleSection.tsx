@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Copy, FlaskConical, Plus, Power, PowerOff, Star, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Copy, FlaskConical, Plus, Power, PowerOff, Star, Trash2, X } from 'lucide-react';
 import {
   BAND_BEHAVIOR_LABEL,
   CLOSED_BAND_ID,
@@ -271,6 +271,7 @@ function BandsEditor({ cfg, setCfg, issues }: { cfg: ScheduleConfig; setCfg: (p:
             <input type="color" className="w-7 h-7 rounded border border-line bg-panel" value={b.color ?? '#16a34a'} onChange={(e) => upd(b.id, { color: e.target.value })} title="Cor" />
             <input className={`${inputCls} flex-1 min-w-32 py-1`} placeholder='Nome da faixa (ex.: "Aberto", "Entrega encerrada")' value={b.name} onChange={(e) => upd(b.id, { name: e.target.value })} />
             <span className="text-[11px] text-muted">{BAND_BEHAVIOR_LABEL[b.behavior]}</span>
+            {blocksFlows(b) && <span className="inline-flex items-center gap-1 rounded bg-warn-soft px-1.5 py-0.5 text-[11px] text-warn-ink" title="Nesta faixa nenhum fluxo recebe as mensagens do contato. Abra Configurar para ver."><AlertTriangle size={12} /> Fluxos não recebem respostas</span>}
             <Button size="sm" variant="ghost" onClick={() => setOpen(open === b.id ? null : b.id)}>{open === b.id ? 'Fechar' : 'Configurar'}</Button>
             <button
               className="text-faint hover:text-danger p-1 disabled:opacity-40"
@@ -285,7 +286,7 @@ function BandsEditor({ cfg, setCfg, issues }: { cfg: ScheduleConfig; setCfg: (p:
                 <input type="checkbox" className="mt-0.5" checked={b.open} onChange={(e) => upd(b.id, { open: e.target.checked })} />
                 <span>Conta como horário de atendimento <span className="block text-[11px] text-muted">Condição “dentro do horário de atendimento”, Atraso “até o próximo horário” e tempo limite “só no horário”. Desmarque em faixas como “Almoço”.</span></span>
               </label>
-              <ReplyEditor value={b} onChange={(p) => upd(b.id, p)} />
+              <ReplyEditor value={b} onChange={(p) => upd(b.id, p)} openBand={b.open} />
             </div>
           )}
         </div>
@@ -309,8 +310,15 @@ function BandsEditor({ cfg, setCfg, issues }: { cfg: ScheduleConfig; setCfg: (p:
   );
 }
 
+/**
+ * Faixa de atendimento com "Enviar a resposta e parar": toda mensagem do contato para ali, então
+ * fluxo nenhum inicia nem recebe resposta (o Salvar/Menu cai sempre em "Não respondeu"). Quase
+ * sempre é erro de configuração — o editor avisa.
+ */
+const blocksFlows = (b: Pick<ScheduleBand, 'open' | 'behavior'>) => b.open && b.behavior === 'notify_stop';
+
 /** Comportamento + resposta (mensagens no formato do Conteúdo ou um fluxo). */
-function ReplyEditor({ value, onChange }: { value: Pick<ScheduleBand, 'behavior' | 'reply' | 'items' | 'flowId'>; onChange: (p: Partial<ScheduleBand>) => void }) {
+function ReplyEditor({ value, onChange, openBand }: { value: Pick<ScheduleBand, 'behavior' | 'reply' | 'items' | 'flowId'>; onChange: (p: Partial<ScheduleBand>) => void; openBand?: boolean }) {
   const flows = useFlows();
   return (
     <div className="space-y-2">
@@ -326,6 +334,12 @@ function ReplyEditor({ value, onChange }: { value: Pick<ScheduleBand, 'behavior'
           {value.behavior === 'notify_fallback' && 'O atendimento segue normal; a resposta só sai se nenhum fluxo (gatilho ou fluxo padrão) responder. Era o antigo "aviso de fora do expediente".'}
         </span>
       </label>
+      {openBand && value.behavior === 'notify_stop' && (
+        <div className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[12px] text-warn-ink space-y-1.5">
+          <p className="flex items-start gap-1.5"><AlertTriangle size={14} className="mt-0.5 shrink-0" /><span><b>Atenção: esta faixa conta como horário de atendimento.</b> Com “{BAND_BEHAVIOR_LABEL.notify_stop}”, toda mensagem do contato para aqui: nenhum fluxo inicia, e um fluxo que esteja esperando resposta (Salvar, Menu, Agendamento, IA) <b>não recebe o que o contato escreveu</b> — cai sempre em “Não respondeu”. Para enviar a resposta e deixar os fluxos funcionarem, use “{BAND_BEHAVIOR_LABEL.notify_continue}”.</span></p>
+          <Button size="sm" variant="ghost" onClick={() => onChange({ behavior: 'notify_continue' })}>Trocar para “{BAND_BEHAVIOR_LABEL.notify_continue}”</Button>
+        </div>
+      )}
       {value.behavior !== 'normal' && (
         <>
           <div className="flex gap-3 text-[12px]">

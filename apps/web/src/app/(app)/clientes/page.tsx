@@ -344,7 +344,7 @@ export default function ClientesPage() {
                 const st = STATUS[t.subscription?.status ?? ''] ?? ['—', 'bg-field text-muted'];
                 return (
                   <tr key={t.id} className={cn(!t.isActive && 'opacity-50')}>
-                    <td className="px-4 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}</div>{(t.legalName || t.document) && <div className="text-[11px] text-muted truncate max-w-[16rem]">{[t.legalName, fmtDoc(t.document)].filter(Boolean).join(' · ')}</div>}</td>
+                    <td className="px-4 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}{t.partner && <span className="ml-1 text-accent-ink" title="VogoPartner que cuida deste cliente">· parceiro {t.partner.name}</span>}</div>{(t.legalName || t.document) && <div className="text-[11px] text-muted truncate max-w-[16rem]">{[t.legalName, fmtDoc(t.document)].filter(Boolean).join(' · ')}</div>}</td>
                     <td className="px-3 py-2.5"><Presenca live={liveDe.get(t.id)} /></td>
                     <td className="px-3 py-2.5 text-muted">{t.users[0]?.email ?? '—'}</td>
                     <td className="px-3 py-2.5">

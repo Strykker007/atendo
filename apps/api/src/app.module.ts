@@ -6,6 +6,7 @@ import { CoreModule } from './common/core.module';
 import { ObservabilityModule } from './common/observability/observability.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
+import { PartnersModule } from './modules/partners/partners.module';
 import { TenantLifecycleModule } from './modules/tenants/tenant-lifecycle.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { MetaCostsModule } from './modules/billing/meta-costs.module';
@@ -51,6 +52,7 @@ import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.mod
     BullModule.forRoot({ connection: { url: env.REDIS_URL } }),
     AuthModule,
     TenantsModule,
+    PartnersModule,
     TenantLifecycleModule,
     TicketsModule,
     MetaCostsModule,

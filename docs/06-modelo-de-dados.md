@@ -130,6 +130,24 @@ entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` qua
 
 **invoices** — espelho da fatura do Stripe (`in_…`) ou da cobrança do Asaas (`pay_…`; excedente vira cobrança avulsa com `baseAmount = 0`): base + excedente, `externalId`, `hostedUrl` (link de pagamento). Única por tenant/período.
 
+### VogoPartners
+
+Ver [37 — VogoPartners](37-vogopartners.md). Migração `20270129000000_vogopartners` (aditiva).
+
+**partners** — parceiro: `name`, `document`, contato, `pixKey` + `pixKeyType` (CPF | CNPJ | EMAIL | PHONE | EVP, formato do Asaas), `pixKeyChangedAt` (início da carência), `setupRate` (% da instalação próprio; null = padrão), `status` (`active | suspended | ended`). Logins em `users` com `role = partner` e `partnerId`.
+
+**partner_tiers** — faixas da comissão sobre a mensalidade: `minClients` → `rate` %. `partnerId` null = faixas padrão do programa; parceiro com faixas próprias usa só as dele.
+
+**partner_settings** — linha única `default`: `setupRate` (30), `setupFee` (taxa de instalação que o parceiro lança), `minPayout`, `pixKeyCooldownHours` (24), `secondApprovalAbove`, `dailyLimit`.
+
+**partner_commissions** — livro de comissões: uma linha por (pagamento do cliente × tipo). `kind` `recurring | setup`; `sourceType` `invoice | finance_entry | activation | reversal`; `period` `AAAA-MM` ou `AAAA-Wss`; `baseAmount` (valor pago; negativo no estorno); `rate`/`amount` (instalação na geração, mensalidade na apuração); `status` `pending | reversed`; `payoutId`. `@@unique([sourceType, sourceId, kind])`.
+
+**partner_payouts** — pagamento por parceiro × tipo × ciclo (`@@unique([partnerId, kind, period])`): `activeClients`/`rate` (faixa aplicada), `baseTotal`, `amount`, `status` (`draft | awaiting_second | approved | processing | paid | failed`), `approvals` jsonb, `pixKey` congelada na autorização, `transferId` (Asaas), `paidAt`, `paidVia`.
+
+**partner_events** — auditoria do programa (ação, quem, IP, dados).
+
+Colunas novas: `tenants.partnerId` + `partnerAttributedAt` (o vínculo e desde quando conta), `users.partnerId`, `users.totpConfirmedAt` (autenticador confirmado; segredo em `totpSecret`, criptografado), `finance_entries.partnerPayoutId` (saída gerada pelo pagamento, única).
+
 ### Relatórios
 
 **sales** — uma linha por atendimento encerrado como **Comprou**: `conversationId`, `contactId`,
@@ -151,12 +169,12 @@ atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`).
 
 | Enum | Valores |
 |---|---|
-| Role | super_admin, tenant_admin, agent |
+| Role | super_admin, tenant_admin, manager, agent, partner ([37](37-vogopartners.md)) |
 | WhatsAppProvider | meta, evolution |
 | NumberStatus | connected, pending_qr, disconnected, error |
 | ConversationStatus | waiting, in_progress, closed |
 | MessageDirection | in, out |
-| MessageType | text, image, audio, video, document, sticker, location, contact, template, interactive (botões/lista/template recebidos), unknown (só quando nem o fallback achou texto) |
+| MessageType | text, image, audio, video, document, sticker, location, contact, template, interactive (botões/lista/template recebidos), unknown (só quando nem o fallback achou texto), call (ligação no WhatsApp: linha na conversa, `externalId = "call:<id>"`, fora do `UsageService` — [Ligações](ligacoes.md), migration `message_type_call`) |
 | MessageStatus | pending, sent, delivered, read, failed |
 | BillingCategory | service, utility, marketing, authentication, unofficial |
 | SubscriptionStatus | trialing, active, past_due, suspended, canceled |

@@ -28,7 +28,7 @@ O conteúdo do quadro é `config: ScheduleConfig` (JSON, `packages/shared/src/sc
 |---|---|---|
 | `normal` | Seguir o atendimento normal | Nada é enviado pela faixa |
 | `notify_continue` | Enviar a resposta e seguir | Resposta da faixa e depois o atendimento normal (run ativo, gatilhos, fluxos padrão) |
-| `notify_stop` | Enviar a resposta e parar | Só a resposta: nenhum fluxo inicia nem recebe a mensagem (run que estava esperando continua esperando) |
+| `notify_stop` | Enviar a resposta e parar | Só a resposta: nenhum fluxo inicia nem recebe a mensagem (run que estava esperando continua esperando e, com tempo limite, sai por "Não respondeu") |
 | `notify_fallback` | Enviar a resposta só se nenhum fluxo responder | Atendimento normal; a resposta só sai se nenhum fluxo recebeu/assumiu. **É o antigo aviso de fora do expediente** (usado na migração) |
 
 **Resposta** (`reply`): `message` → `items` no formato do bloco Conteúdo (texto com formatação, imagem, vídeo, documento, áudio, intervalo entre mensagens; variáveis `{{contact.*}}`, `{{faixa}}`, `{{proxima_abertura}}` — ex.: "amanhã às 08:00"); `flow` → inicia o fluxo `flowId` (do mesmo cliente, ativo). Resposta `message` sem itens = nada é enviado.
@@ -40,6 +40,8 @@ O conteúdo do quadro é `config: ScheduleConfig` (JSON, `packages/shared/src/sc
 1. Resolve a faixa atual do quadro do número (`SchedulesService.now`).
 2. **Boas-vindas** (atendimento novo e faixa ≠ "parar") → **resposta da faixa** (`notify_continue`/`notify_stop`) → **atendimento normal** (se não for "parar") → resposta da faixa se ninguém respondeu (`notify_fallback`).
 3. `notify_continue` com resposta **fluxo**: o fluxo da faixa assume a mensagem (não passa pelos gatilhos). Se a conversa já está no meio de outro fluxo, o fluxo da faixa **não interrompe** (com "parar", interrompe: substitui o run).
+
+> **Armadilha comum:** `notify_stop` numa faixa com `open: true` (horário de atendimento) bloqueia todos os fluxos durante o expediente — o Salvar/Menu nunca recebe a resposta. O editor de horários mostra um selo "Fluxos não recebem respostas" na faixa e um aviso com botão para trocar para `notify_continue`. Caso real: Vogo Chatbot, 31/10/2026.
 
 **Envio único por período**: a resposta da faixa sai **uma vez por conversa a cada período daquela faixa**. Período = trecho contínuo da mesma faixa (`periodStartOf`: 08–12 e 12–14 "Aberto" são um só; Fechado de sexta 22h a segunda 08h também, inclusive atravessando feriado). A conversa guarda `scheduleNoticeKey = "<faixa>@<início do período>"`; o motor reivindica com `updateMany` condicional (duas mensagens juntas → um envio só). "Atendimento desativado" é um período próprio por desligamento (`TenantSettings.attendanceChangedAt`). Editar o quadro pode mudar o início do período e fazer a resposta sair de novo.
 

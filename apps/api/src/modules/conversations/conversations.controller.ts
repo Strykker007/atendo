@@ -429,6 +429,16 @@ export class ConversationsController {
     return this.conversations.deletedOriginal(u.tenantId, id, messageId);
   }
 
+  /**
+   * Link novo do arquivo da mensagem, pedido no clique. O link que veio com a lista vence em ~1 h;
+   * com a conversa aberta por mais tempo, abrir/baixar dava "Link expirado ou inválido".
+   * `download=1` = força o download com o nome original (`Content-Disposition`).
+   */
+  @Get(':id/messages/:messageId/media')
+  mediaLink(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string, @Query('download') download?: string) {
+    return this.conversations.mediaLink(u.tenantId, id, messageId, download === '1' || download === 'true');
+  }
+
   /** Excluir a conversa inteira (só no painel; o contato fica e uma nova nasce se ele escrever). */
   @Delete(':id')
   @RequirePermission('conversations.delete_conversation')

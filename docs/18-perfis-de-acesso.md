@@ -51,6 +51,10 @@ fica sem, para não "limpar" do relatório o atendimento demorado ou perdido —
 `internal_chat.audit` (ler qualquer conversa do chat interno) entrou só no perfil padrão
 Administrador não editado (migration `ignored_contacts_internal_chat`) — ver [Chat interno](chat-interno.md).
 
+### Papel `partner` (VogoPartner)
+
+Login de parceiro ([37](37-vogopartners.md)): sem cliente próprio e **sem permissão de cliente** (`permissionsOf` devolve lista vazia). Só entra nas rotas marcadas com `@PartnerOk()` — lista explícita no `TenantGuard`, porque `@NoTenantOk` sozinho abriria ao parceiro qualquer rota de dono que tivesse esquecido o `@Roles`. Ao "entrar" num cliente dele vira admin daquele cliente (token com `impersonatorId` **e** `prt`); os poderes de dono "entrando como" (ritmo de envio, custo da linha, falar como Suporte) usam `isOwnerSession()`, que exclui o parceiro.
+
 ## Como é aplicado
 
 **`JwtAuthGuard`** resolve a lista a cada requisição e deixa em `user.permissions`.

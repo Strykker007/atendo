@@ -22,6 +22,11 @@ export interface AuthUser {
   personId: string;
   /** presente quando o dono do sistema está "entrando como" este tenant */
   impersonatorId?: string;
+  /**
+   * VogoPartner (docs/37-vogopartners.md): o login do parceiro (`role = partner`) e o "entrar como"
+   * dele num cliente seu. Com `impersonatorId`, NÃO é dono: use `isOwnerSession` para os poderes de dono.
+   */
+  partnerId?: string;
   /** preenchido pelo JwtAuthGuard em toda rota */
   permissions?: Permission[];
   /** números que o usuário opera; vazio = todos (ver number-scope.ts) */
@@ -49,3 +54,10 @@ export interface AuthUser {
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthUser => {
   return ctx.switchToHttp().getRequest().user;
 });
+
+/**
+ * Sessão com poderes de dono do sistema: o próprio `super_admin` ou o dono "entrando como".
+ * O parceiro também entra no cliente (com `impersonatorId`), mas não ganha o que é do dono.
+ */
+export const isOwnerSession = (u: { role: string; impersonatorId?: string; partnerId?: string }) =>
+  u.role === 'super_admin' || (!!u.impersonatorId && !u.partnerId);
