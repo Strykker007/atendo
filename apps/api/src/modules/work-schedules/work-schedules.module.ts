@@ -22,6 +22,8 @@ import { TenantProvisioningService } from '../tenants/tenant-provisioning.servic
 import { ConversationsModule } from '../conversations/conversations.module';
 import { AccessRequestsController, PublicAccessRequestsController } from './access-requests.controller';
 import { ShiftController } from './shift.controller';
+import { ScheduleCalendarController } from './calendar.controller';
+import { isWithinPlannedShift, type DayException } from '../auth/shift-calendar';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 
 const QUEUE_WORK_SCHEDULES = 'work-schedules';
@@ -163,9 +165,19 @@ class WorkSchedulesController {
         scheduleOverrides: { where: { revokedAt: null, validFrom: { lte: now }, validUntil: { gt: now } }, orderBy: { validUntil: 'desc' }, take: 1, select: { id: true, validUntil: true, reason: true } },
       },
     });
+    // folga / turno extra de hoje mudam quem está no turno (docs/escalas.md#calendário)
+    const desde = new Date(Date.parse(`${local.ymd}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    const ate = new Date(Date.parse(`${local.ymd}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const excecoes = await this.prisma.shiftException.findMany({
+      where: { tenantId: u.tenantId, userId: { in: users.map((x) => x.id) }, date: { gte: desde, lte: ate } },
+      select: { userId: true, date: true, kind: true, startTime: true, endTime: true },
+    });
+    const regra = new Map(schedules.map((s) => [s.id, s as ShiftRule]));
     return users.map(({ scheduleOverrides, ...p }) => {
       const exempt = p.role === 'tenant_admin' || !p.scheduleId;
-      return { ...p, exempt, onShift: exempt || (onShift.get(p.scheduleId!) ?? true), override: scheduleOverrides[0] ?? null };
+      const exc = excecoes.filter((e) => e.userId === p.id) as DayException[];
+      const noTurno = exc.length && p.scheduleId && regra.has(p.scheduleId) ? isWithinPlannedShift(regra.get(p.scheduleId)!, exc, local) : (onShift.get(p.scheduleId!) ?? true);
+      return { ...p, exempt, onShift: exempt || noTurno, override: scheduleOverrides[0] ?? null };
     });
   }
 
@@ -338,7 +350,7 @@ class WorkSchedulesProcessor extends TrackedWorkerHost {
     TenantsModule,
     ConversationsModule,
   ],
-  controllers: [WorkSchedulesController, UsersScheduleController, AccessRequestsController, PublicAccessRequestsController, ShiftController],
+  controllers: [ScheduleCalendarController, WorkSchedulesController, UsersScheduleController, AccessRequestsController, PublicAccessRequestsController, ShiftController],
   providers: [WorkSchedulesScheduler, WorkSchedulesProcessor],
 })
 export class WorkSchedulesModule {}

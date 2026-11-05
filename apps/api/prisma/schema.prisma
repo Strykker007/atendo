@@ -68,6 +68,7 @@ model Tenant {
   workSchedules     WorkSchedule[]
   supportTickets    SupportTicket[]
   scheduleOverrides ScheduleOverride[]
+  shiftExceptions   ShiftException[]
   scheduleAccessRequests ScheduleAccessRequest[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
@@ -229,6 +230,7 @@ model User {
   expiredAt       DateTime?
   scheduleOverrides ScheduleOverride[] @relation("overrideUser")
   approvedOverrides ScheduleOverride[] @relation("overrideApprover")
+  shiftExceptions   ShiftException[]   @relation("shiftExceptionUser")
   accessRequests    ScheduleAccessRequest[] @relation("accessRequestUser")
   accessRequestsToMe ScheduleAccessRequest[] @relation("accessRequestApprover")
   createdTemporaryUsers User[]         @relation("temporaryCreator")
@@ -303,6 +305,37 @@ model ScheduleOverride {
   @@index([tenantId, validUntil])
   @@index([userId, validUntil])
   @@map("schedule_overrides")
+}
+
+enum ShiftExceptionKind {
+  /// folga: tira o turno que a escala daria neste dia
+  off
+  /// turno extra: põe um turno com horário próprio neste dia
+  extra
+}
+
+/// Exceção de um dia na escala (docs/escalas.md#calendário). Troca entre colegas = folga de um + extra do outro.
+model ShiftException {
+  id          String             @id @default(uuid())
+  tenantId    String
+  userId      String
+  /// "AAAA-MM-DD" (hora local): dia em que o turno COMEÇA
+  date        String
+  kind        ShiftExceptionKind
+  /// "HH:MM", só no `extra`
+  startTime   String?
+  endTime     String?
+  reason      String?
+  /// quem lançou (sem relação: o gestor pode sair da equipe e a exceção fica)
+  createdById String?
+  createdAt   DateTime           @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation("shiftExceptionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, kind])
+  @@index([tenantId, date])
+  @@map("shift_exceptions")
 }
 
 enum AccessRequestStatus {

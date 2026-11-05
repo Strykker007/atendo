@@ -137,3 +137,49 @@ export const useDecideAccessRequest = () => {
     onSuccess: () => invalidar(qc),
   });
 };
+
+// ---- calendário da escala: turnos dia a dia, folgas e turnos extras (docs/escalas.md#calendário) ----
+export interface CalendarShift {
+  date: string;
+  userId: string;
+  start: string;
+  end: string;
+  minutes: number;
+  /** `rule` = vem da escala; `extra` = lançado no calendário */
+  source: 'rule' | 'extra';
+  exceptionId?: string;
+  reason?: string | null;
+}
+export interface ScheduleCalendar {
+  from: string;
+  to: string;
+  timezone: string;
+  today: string;
+  users: { id: string; name: string; role: 'manager' | 'agent'; isTemporary: boolean; scheduleId: string | null; scheduleName: string | null; editable: boolean }[];
+  schedules: { id: string; name: string; startTime: string; endTime: string }[];
+  shifts: CalendarShift[];
+  offs: { id: string; date: string; userId: string; reason: string | null }[];
+  overrides: { id: string; userId: string; validFrom: string; validUntil: string; reason: string | null }[];
+}
+export const useScheduleCalendar = (from: string, to: string) =>
+  useQuery({ queryKey: ['work-schedules', 'calendar', from, to], queryFn: () => api<ScheduleCalendar>(`/work-schedules/calendar?from=${from}&to=${to}`), placeholderData: (prev) => prev });
+
+export const useCreateShiftException = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { userId: string; date: string; kind: 'off' | 'extra'; startTime?: string; endTime?: string; reason?: string }) => api('/work-schedules/exceptions', { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: () => invalidar(qc),
+  });
+};
+export const useRemoveShiftException = () => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api(`/work-schedules/exceptions/${id}`, { method: 'DELETE' }), onSuccess: () => invalidar(qc) });
+};
+/** Arrastar no quadro: o turno de uma pessoa num dia vai para outra pessoa e/ou outro dia. */
+export const useMoveShift = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { userId: string; date: string; toUserId: string; toDate: string; reason?: string }) => api('/work-schedules/exceptions/move', { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: () => invalidar(qc),
+  });
+};
