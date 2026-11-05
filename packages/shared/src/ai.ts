@@ -15,6 +15,8 @@ export const AiTask = {
   REWRITE: 'rewrite',
   /** copiloto: resumir a conversa para quem vai assumir */
   SUMMARY: 'summary',
+  /** agente de IA com etapas (bloco IA modo Agente e o simulador) — docs/agente-ia.md */
+  FLOW_AGENT: 'flow_agent',
 } as const;
 export type AiTask = (typeof AiTask)[keyof typeof AiTask];
 
@@ -24,6 +26,7 @@ export const AI_TASK_LABEL: Record<AiTask, string> = {
   suggest: 'Sugestão de resposta',
   rewrite: 'Reescrita',
   summary: 'Resumo da conversa',
+  flow_agent: 'Agente de IA',
 };
 
 export const REWRITE_TONES = {

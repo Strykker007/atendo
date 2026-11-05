@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Ticket, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound, Handshake, LayoutDashboard, Receipt } from 'lucide-react';
+import { MessageSquare, Ticket, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound, Handshake, LayoutDashboard, Receipt, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -49,6 +49,8 @@ const items: { href: string; label: string; icon: typeof MessageSquare; need?: P
   { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: ['agenda.manage'], feature: 'scheduling' },
   // disparar um fluxo numa conversa não depende deste item: aqui é criar/editar
   { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: ['flows.manage'], feature: 'flows' },
+  // agente com etapas: entra no atendimento pelo bloco IA dos fluxos (docs/agente-ia.md)
+  { href: '/agentes-ia', label: 'Agentes de IA', icon: Bot, need: ['flows.manage'], feature: 'ai_flows' },
   { href: '/respostas', label: 'Respostas', icon: Zap },
   // quem agenda (permissão vendida à parte) ou quem supervisiona a equipe (gerente padrão vê as
   // de todos sem poder agendar). Sem nenhuma das duas, a lista seria só das próprias — que não existem

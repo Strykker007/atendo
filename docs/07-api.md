@@ -332,6 +332,7 @@ Exigem login e a feature `ai_copilot`. Ver [15](15-ia.md).
 | GET | `/ai/status` | `{ available }` — se há fornecedor de IA configurado no ambiente |
 | GET | `/ai/usage` | consumo do mês: interações, custo em BRL e quebra por tipo |
 | POST | `/ai/suggest` | `{ conversationId }` → `{ text }` — sugestão de resposta (não envia nada) |
+| — | `/ai/agents…` | Agentes de IA com etapas: CRUD, `catalog` e `:id/simulate` — ver [Agente de IA](agente-ia.md#api) |
 | POST | `/ai/rewrite` | `{ text, tone, conversationId? }` → `{ text }` — tons: `formal`, `friendly`, `short`, `clear` |
 | POST | `/ai/summary` | `{ conversationId, force? }` → `{ text, updatedAt, cached }` resumo em tópicos. Fica em cache na conversa amarrado à última mensagem: sem mensagem nova devolve o salvo (`cached: true`, sem chamar nem cobrar a IA); `force: true` gera de novo |
 

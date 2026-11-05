@@ -55,7 +55,10 @@ export function validateDefinition(def: FlowDefinition, { strict = false }: { st
     if (n.type === 'menu' && (!n.data.text || !n.data.options?.length)) errors.push(`"Menu" (${n.id}) precisa de texto e ao menos uma opção.`);
     if (n.type === 'start' && !def.edges.some((e) => e.source === n.id)) errors.push('O nó "Início" não está conectado a nada.');
     if (n.type === 'ai') {
-      if (!n.data.instructions?.trim()) errors.push(`"IA" (${n.id}) precisa das instruções do negócio.`);
+      // modo agente: as instruções moram no agente (tela Agentes de IA)
+      if (n.data.mode === 'agent') {
+        if (!n.data.aiAgentId) errors.push(`"IA" (${n.id}) em modo agente precisa de um agente escolhido.`);
+      } else if (!n.data.instructions?.trim()) errors.push(`"IA" (${n.id}) precisa das instruções do negócio.`);
       if (n.data.mode === 'classify' && !n.data.labels?.length) errors.push(`"IA" (${n.id}) em modo classificar precisa de pelo menos um rótulo.`);
       // sem saída de fallback, uma indisponibilidade da IA deixaria o contato sem resposta
       if (!def.edges.some((e) => e.source === n.id && e.sourceHandle === 'fallback')) {

@@ -409,7 +409,10 @@ export type ScheduleNode = FlowNodeBase<'schedule', { intro?: string; serviceId?
  * estiver na base. Por isso todo nó de IA deve ter a saída 'fallback' ligada a um humano.
  */
 export type AiNode = FlowNodeBase<'ai', {
-  mode: 'answer' | 'classify';
+  /** `agent`: conversa seguindo um Agente de IA com etapas (docs/agente-ia.md). Saídas 'done' e 'fallback' */
+  mode: 'answer' | 'classify' | 'agent';
+  /** agent: qual agente (tela Agentes de IA) */
+  aiAgentId?: string;
   /** quem é o negócio e o que a IA pode ou não fazer */
   instructions: string;
   /** answer: única fonte de fatos (FAQ, preços, endereço) */

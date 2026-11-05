@@ -7,7 +7,7 @@ import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META, TRANSFORM_META, isTransform, DELAY_UNIT, FlowEditorRefs, fmtAtraso } from './nodes';
 import { OpOptions, TransformPreview } from './TransformPreview';
-import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useSurveys, reasonsFor } from '@/lib/hooks';
+import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useSurveys, reasonsFor, useAiAgents } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
 import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, START_DELAY_OPTIONS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type WaitUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
@@ -352,8 +352,10 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               <select className={`${inputCls} min-w-0 max-w-full`} value={node.data.mode} onChange={(e) => set({ mode: e.target.value, labels: e.target.value === 'classify' && !node.data.labels?.length ? [{ id: crypto.randomUUID().slice(0, 8), label: 'Quer agendar' }, { id: crypto.randomUUID().slice(0, 8), label: 'Perguntou preço' }] : node.data.labels })}>
                 <option value="answer">Responder o contato</option>
                 <option value="classify">Classificar a mensagem (escolher o caminho)</option>
+                <option value="agent">Atender como agente (roteiro em etapas)</option>
               </select>
             </Field>
+            {node.data.mode === 'agent' ? <AgentePicker value={node.data.aiAgentId} onChange={(v) => set({ aiAgentId: v })} /> : (<>
             <Field label="Instruções do negócio" hint="Quem é você, o que pode e o que não pode responder">
               <TextWithVars value={node.data.instructions} onChange={(v) => set({ instructions: v })} vars={vars} placeholder="Você atende a Barbearia do Carlos. Só fale de cortes, barba e horários. Nunca prometa desconto." />
             </Field>
@@ -391,6 +393,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                 </div>
               </Field>
             )}
+            </>)}
             <Field label="Mensagem quando a IA não conseguir" hint="Enviada antes de seguir pela saída 'Não conseguiu'">
               <TextWithVars multiline={false} value={node.data.fallbackText ?? ''} onChange={(v) => set({ fallbackText: v })} vars={vars} placeholder="Vou verificar isso com um atendente, um momento." />
             </Field>
@@ -587,5 +590,28 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Bloco IA no modo Agente: escolhe um agente da tela Agentes de IA (docs/agente-ia.md). O roteiro,
+ * as regras e o que a IA pode fazer moram no agente; aqui só a ligação com o fluxo.
+ */
+function AgentePicker({ value, onChange }: { value?: string; onChange: (v: string | undefined) => void }) {
+  const agentes = useAiAgents();
+  const escolhido = agentes.data?.find((a) => a.id === value);
+  return (
+    <>
+      <Field label="Agente" hint="O agente conversa até concluir (saída Respondeu), transferir ou encerrar. Falha, limite de respostas ou agente desligado: saída Não conseguiu.">
+        <select className={`${inputCls} min-w-0 max-w-full`} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)}>
+          <option value="">Escolha um agente…</option>
+          {(agentes.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (desligado)'}</option>)}
+        </select>
+      </Field>
+      {escolhido && <p className="text-[11.5px] text-muted">{escolhido.stages.length} etapa{escolhido.stages.length === 1 ? '' : 's'}: {escolhido.stages.map((s) => s.name).join(' → ')}</p>}
+      <a href={value ? `/agentes-ia/${value}` : '/agentes-ia'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12.5px] text-accent hover:underline">
+        <ExternalLink size={12} /> {value ? 'Editar este agente' : 'Criar um agente'}
+      </a>
+    </>
   );
 }

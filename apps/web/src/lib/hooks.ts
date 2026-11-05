@@ -43,3 +43,4 @@ export * from './hooks/donos';
 export * from './hooks/tickets';
 export * from './hooks/gasto-meta';
 export * from './hooks/parceiros';
+export * from './hooks/ia-agentes';

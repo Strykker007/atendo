@@ -120,6 +120,8 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 **message_usage** — ledger, uma linha por mensagem. Ver [05](05-planos-e-cobranca.md).
 
+**ai_agents** — agentes de IA com etapas (`persona`, `tone`, `rules`, `knowledge`, `stages` jsonb `AgentStage[]`, `targets` jsonb, `maxReplies`, `isActive`); `AiTaskKind` ganhou `flow_agent` — migração `20270201000000_ai_agents`. Ver [Agente de IA](agente-ia.md).
+
 **ai_usage** — ledger de IA, uma linha por chamada ao modelo (`kind`, modelo, tokens de
 entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` quando falhou).
 É o que permite saber a margem da IA e aplicar o teto de gasto. Ver [15](15-ia.md).

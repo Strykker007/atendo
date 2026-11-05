@@ -69,6 +69,7 @@ model Tenant {
   supportTickets    SupportTicket[]
   scheduleOverrides ScheduleOverride[]
   shiftExceptions   ShiftException[]
+  aiAgents          AiAgent[]
   scheduleAccessRequests ScheduleAccessRequest[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
@@ -2078,6 +2079,34 @@ enum AiTaskKind {
   suggest
   rewrite
   summary
+  /// agente de IA com etapas (docs/agente-ia.md)
+  flow_agent
+}
+
+/// Agente de IA com etapas (docs/agente-ia.md): persona, regras, base e o roteiro em blocos.
+/// Entra no atendimento pelo bloco IA (modo Agente) dos fluxos; a etapa de cada conversa fica no FlowRun.
+model AiAgent {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  persona    String   @default("")
+  /// friendly | formal | casual
+  tone       String   @default("friendly")
+  rules      String   @default("")
+  knowledge  String   @default("")
+  /// AgentStage[] (packages/shared/src/ai-agent.ts)
+  stages     Json     @default("[]")
+  /// AgentToolTargets: alvos liberados de cada ferramenta
+  targets    Json     @default("{}")
+  maxReplies Int      @default(20)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("ai_agents")
 }
 
 /// Ledger append-only de IA: uma linha por chamada ao modelo. Fonte da verdade da margem
