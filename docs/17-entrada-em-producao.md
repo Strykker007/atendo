@@ -261,7 +261,7 @@ O serviço `backup` do compose de produção roda **todo dia às 03:30** (horár
 | `atendo.dump` | conversas, mensagens, contatos, agendamentos, fluxos, cobrança |
 | `evolution.dump` | estado das instâncias |
 | `evolution-instances.tar.gz` | **credenciais de pareamento** — sem isto, todo número precisa ler o QR de novo |
-| mídia | só quando `STORAGE_DRIVER=local` (com S3/R2 a durabilidade é do provedor). Com `BACKUP_REMOTE`, vai **incremental** para `<remoto>/storage` (só arquivos novos, nada é apagado lá) e não fica na pasta datada. No dia a dia sobe só o que mudou nas **últimas 48 h** (`--max-age 48h --no-traverse`, sem listar o R2); uma vez por semana (`BACKUP_MEDIA_FULL_DOW`, padrão 7 = domingo) faz a **conferência completa** por tamanho, com teto de 6 h. Antes comparava os ~365 mil arquivos todo dia — um HEAD por objeto, horas de execução, arriscando invadir o backup seguinte. Falha na mídia vira `AVISO` no log e não impede a retenção nem o `concluído`; sem remoto, `storage.tar.gz` na pasta |
+| mídia | só quando `STORAGE_DRIVER=local` (com S3/R2 a durabilidade é do provedor). Com `BACKUP_REMOTE`, vai **incremental** para `<remoto>/storage` (só arquivos novos, nada é apagado lá) e não fica na pasta datada. Três ritmos: **dia a dia** sobe só o que mudou nas últimas 48 h (`--max-age 48h --no-traverse`, sem listar o R2); **domingo** (`BACKUP_MEDIA_FULL_DOW`, padrão 7) confere por tamanho os **últimos 62 dias** (teto 6 h); **1º domingo do mês** confere **tudo** (teto `BACKUP_MEDIA_FULL_HOURS`, padrão 10 h). Sem `--fast-list`: ele monta a lista do bucket inteiro na memória antes de começar; pasta a pasta, a memória fica pequena e o progresso não se perde se cortar. Em 01/11/2026 a conferência de tudo (658 mil arquivos) parou nas 6 h; a contagem por amostra em 06/11 mostrou o R2 igual ao servidor. Falha na mídia não impede a retenção nem o `concluído`, mas vira **alerta** (abaixo); sem remoto, `storage.tar.gz` na pasta |
 
 Até 24/10/2026 a mídia ia num `storage.tar.gz` inteiro por dia (~17 GB). Com a cópia de ontem
 ainda no servidor, o backup das 03:30 encheu o disco (96 GB): Redis e bancos pararam de gravar
@@ -303,6 +303,30 @@ baixar do R2: as anteriores saem ao fim de cada backup) e `BACKUP_REMOTE_KEEP_DA
 A retenção remota vale para as pastas datadas; `<remoto>/storage` é uma cópia só, fora dela.
 É seguro: se o envio ao R2 falhar, o script para (`set -e`) antes de apagar as cópias locais.
 
+### Conferências e alerta
+
+Cada backup, antes de dizer `concluído`:
+
+1. **Dump íntegro:** `pg_restore --list` em `atendo.dump` e `evolution.dump`. Arquivo truncado ou corrompido falha na hora, e não no dia de restaurar.
+2. **Remoto confere:** depois do envio, `rclone check --size-only --one-way` compara a pasta do dia com o R2 (os dumps passam de 1 GB e sobem em partes, então o R2 não guarda MD5 deles; o tamanho é o que dá para garantir). Não confere = erro **antes** da retenção: nada antigo é apagado se o de hoje não está lá.
+3. **Resultado:** `infra/volumes/backup/ULTIMO_STATUS` no servidor (`ok`, `aviso` ou `falhou`, com data e hora).
+
+**Alerta (`BACKUP_PING_URL`).** Sem ela, falha só aparece no `docker logs`, e ninguém lê. Com ela, o `agenda.sh` avisa um serviço de "dead man's switch":
+
+| Resultado | Ping |
+|---|---|
+| tudo certo | `GET/POST <URL>` |
+| falhou ou com aviso (mídia não terminou, Evolution inacessível…) | `POST <URL>/fail`, com o fim do log |
+| **não rodou** (container parado, servidor fora do ar) | nenhum, e o serviço avisa sozinho por falta de ping |
+
+Como configurar ([healthchecks.io](https://healthchecks.io), grátis até 20 checagens):
+
+1. Crie uma checagem "Backup Atendo" com **período 1 dia** e **tolerância 6 horas** (o backup começa 03:30 e termina perto de 04:30; no 1º domingo do mês pode ir até ~13:30).
+2. Ligue o aviso por e-mail ou WhatsApp/Telegram em *Integrations*.
+3. Copie a URL de ping para o `.env.production`: `BACKUP_PING_URL=https://hc-ping.com/<uuid>` e suba o `backup` de novo (o deploy já sobe).
+
+**Proteção contra apagar o R2.** A chave do R2 fica no servidor e pode apagar objetos (a retenção precisa). Se o servidor for invadido, o backup vai junto. No Cloudflare, em R2 → bucket → *Settings* → **Bucket lock rules**, crie uma regra de **7 dias** para o prefixo das pastas datadas (`2`) e uma **sem prazo** para `storage/`. Assim nada é apagado antes do prazo, nem pela chave.
+
 ### Restaurar
 
 ```bash
@@ -324,6 +348,8 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env.production \
 ```
 
 ### Testado
+
+Teste de restauração completo: faça **uma vez por trimestre** num banco limpo (como em 29/09) e anote aqui. O `pg_restore --list` diário pega arquivo corrompido, mas não substitui restaurar de verdade.
 
 Em 2026-09-29 o backup foi gerado e restaurado num banco limpo: 21 conversas, 229 mensagens,
 18 contatos, 5 agendamentos e 7 fluxos conferem com o original, e os desfechos de venda e a
