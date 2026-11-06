@@ -56,6 +56,40 @@ Mensalidade **sem gateway** (cobrada à mão) entra como a receber quando `activ
 
 **Pagar** (`POST /entries/:id/pay {date, amount?, paymentMethod?}`): data, valor pago (juros, guia diferente) e forma. Vale **até em mês fechado** — muda o caixa, não o fechamento; mudar o valor de mês fechado é recusado (reabra). `{date: null}` desfaz a baixa. Corrigir o valor de um imposto automático trava o recálculo dele (`amountLocked`).
 
+## Baixar o relatório do mês
+
+Na aba **Mês**, **Baixar relatório do mês** gera uma planilha (CSV com `;` e vírgula decimal, abre no
+Excel) com quatro blocos: resumo do fechamento (as linhas da conta, previsto, falta receber, caixa),
+parte dos sócios, mensalidades e cobranças do mês e os lançamentos (saídas com sinal negativo, sem os
+riscados). Mês em aberto sai marcado "números podem mudar". Código: `components/billing/closing-csv.ts`.
+
+## Custo por cliente
+
+**Financeiro → Custo por cliente** (`GET /billing/client-costs?period=AAAA-MM`, `super_admin`). Quanto
+cada cliente pagou no mês, quanto custou e a margem — **sem digitar nada por cliente**: os custos
+compartilhados saem do que foi lançado aqui no Fechamento e são divididos sozinhos.
+
+| Coluna | De onde vem |
+|---|---|
+| Recebido | Faturas pagas no mês + recebimentos por fora com o cliente (mesmo regime de caixa do Fechamento). Sem pagamento no mês, mostra o contratado embaixo |
+| Infra | Lançado no mês na categoria **Servidores e infraestrutura** (`infra`) ÷ números de WhatsApp. Número com custo manual (`infraCostMonth`, no cartão do número) fica com o valor dele e sai da divisão (✎ na tabela) |
+| IA | Custo real do mês no ledger `ai_usage` (fora a chave própria do cliente, que ele paga) |
+| Comissão | Comissões VogoPartner sobre os pagamentos do mês; mensalidade ainda não apurada = estimada pela faixa atual do parceiro (* na tabela) |
+| Impostos | Impostos lançados no mês × (recebido do cliente ÷ tudo que entrou) — a parte das outras entradas não vai para cliente |
+| Taxas | Lançado em **Taxas de cobrança** × (recebido do cliente ÷ recebido de clientes) |
+| Plano | Custo fixo cadastrado no plano (`plans.costMonth`), para quem está com o plano em uso |
+| Meta | **Só informativo**: cada cliente paga a Meta direto (custo real da `meta_cost_daily`, USD convertido por `USD_BRL_RATE`) |
+
+Entra quem teve plano em uso, dinheiro ou custo no mês; ordenado do pior para o melhor. Filtros: no
+prejuízo, margem abaixo de 30%, com parceiro, e busca. **Baixar planilha** traz a tabela inteira e um
+bloco de totais: o que foi dividido (infra por número, impostos, taxas), as **despesas gerais não
+rateadas** (folha, pró-labore, ferramentas…) e o resultado aproximado. Regras puras em
+`apps/api/src/modules/billing/client-costs.ts` (testes em `test/client-costs.test.ts`); serviço em
+`modules/finance-reports/client-costs.module.ts`; tela `components/billing/ClientCostsTab.tsx`.
+
+**Para a infra aparecer**, lance o servidor (Oracle, etc.) no mês em *Servidores e infraestrutura* — o
+melhor é como custo fixo em Cadastros, que entra sozinho todo mês.
+
 ## Aba Contas a pagar
 
 Toda saída em aberto (`paidAt` nulo, não riscada), de qualquer mês, por vencimento (`GET /billing/closing/payables`). Cartões: vencidas, vencem em 7 dias, total em aberto (inclui parcelas futuras). Filtros: todas / vencidas / próximos 7 / próximos 30 dias, grupo e busca (descrição, fornecedor, categoria). Cada linha diz há quantos dias venceu ou em quantos vence, e tem **Pagar**.

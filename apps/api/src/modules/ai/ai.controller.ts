@@ -33,8 +33,8 @@ export class AiController {
 
   /** Se a IA está configurada neste ambiente — o front esconde os botões quando não está. */
   @Get('status')
-  status() {
-    return { available: this.ai.available };
+  async status(@CurrentUser() u: AuthUser) {
+    return { available: await this.ai.available(u.tenantId) };
   }
 
   @Get('usage')

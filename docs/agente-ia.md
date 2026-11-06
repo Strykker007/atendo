@@ -7,7 +7,7 @@ encerrar). É a fase 1 do plano em [22 — Agente de IA](22-agente-ia.md). O que
 
 ## Onde fica
 
-- **Tela Agentes de IA** (`/agentes-ia`, menu lateral; permissão `flows.manage`, feature do plano
+- **Tela Agentes de IA** (`/agentes-ia`, aba de **Fluxos** no menu lateral; permissão `flows.manage`, feature do plano
   `ai_flows`): lista, "Começar com um exemplo" (3 etapas) e o editor `/agentes-ia/:id`.
 - **No atendimento**: bloco **IA** dos fluxos, modo **Atender como agente** (`mode: 'agent'`,
   `aiAgentId`). Para o agente atender um número sozinho, monte um fluxo com Início → IA (agente) e
@@ -79,7 +79,8 @@ executado. Conta como interação de IA (`kind: flow_agent`).
 
 Igual ao resto da IA: cada resposta do agente (e cada teste no simulador) = 1 interação, com
 quota, teto de custo do cliente e orçamento da plataforma (`AiService.run`). `AiTaskKind`
-ganhou `flow_agent`.
+ganhou `flow_agent`. Com a [chave própria do cliente](15-ia.md#chave-própria-do-cliente), as
+respostas saem da conta dele e não contam na cota.
 
 ## API
 
@@ -98,6 +99,5 @@ ganhou `flow_agent`.
 ## Ainda não (próximas fases, ver doc 22)
 
 - consultar agenda/marcar horário, orçamento com link, lembrete ("me chama amanhã");
-- chave de IA do próprio cliente (feature de plano, uso fora da cota — decidido, não feito);
 - exportar/importar fluxo com bloco de agente leva o `aiAgentId` do cliente de origem: no destino,
   escolha o agente de novo.

@@ -19,7 +19,7 @@ export interface PartnerDetail {
   setupRate: number | null; effectiveSetupRate: number;
   tiers: { id: string; minClients: number; rate: number }[];
   current: { tiers: PartnerTierRule[]; custom: boolean; activeClients: number; rate: number; nextTier: (PartnerTierRule & { missing: number }) | null };
-  users: { id: string; name: string; email: string | null; isActive: boolean; invitedAt: string | null; passwordSetAt: string | null; lastLoginAt: string | null }[];
+  users: { id: string; name: string; email: string | null; isActive: boolean; invitedAt: string | null; passwordSetAt: string | null; lastLoginAt: string | null; /** entra pelo login que já tem no Atendo (vínculo) */ linked?: boolean; linkedTenant?: string | null }[];
   tenants: { id: string; name: string; isActive: boolean; createdAt: string; partnerAttributedAt: string | null; subscription: { status: string; awaitingActivation: boolean; priceMonth: number | null; plan: { name: string; isFree: boolean } } | null }[];
   events: PartnerEvent[];
 }
@@ -56,7 +56,7 @@ export const useCreatePartner = () => useM((b: Record<string, unknown>) => api<P
 export const useUpdatePartner = () => useM(({ id, ...b }: { id: string } & Record<string, unknown>) => api<PartnerDetail>(`/partners/${id}`, json('PATCH', b)));
 export const useSetPartnerPix = () => useM(({ id, ...b }: { id: string; pixKey: string; pixKeyType: PayoutPixKeyType; code: string }) => api<PartnerDetail>(`/partners/${id}/pix-key`, json('PUT', b)));
 export const useSetPartnerTiers = () => useM(({ id, tiers }: { id: string; tiers: PartnerTierRule[] }) => api<PartnerDetail>(`/partners/${id}/tiers`, json('PUT', { tiers })));
-export const useAddPartnerLogin = () => useM(({ id, ...b }: { id: string; name: string; email: string }) => api<{ userId: string; inviteLink: string; emailSent: boolean }>(`/partners/${id}/logins`, json('POST', b)));
+export const useAddPartnerLogin = () => useM(({ id, ...b }: { id: string; name: string; email: string }) => api<{ userId: string; linked: boolean; inviteLink: string | null; emailSent: boolean }>(`/partners/${id}/logins`, json('POST', b)));
 export const usePartnerLoginLink = () => useM(({ id, userId }: { id: string; userId: string }) => api<{ link: string }>(`/partners/${id}/logins/${userId}/invite-link`, json('POST')));
 export const useSetPartnerLoginActive = () => useM(({ id, userId, isActive }: { id: string; userId: string; isActive: boolean }) => api<PartnerDetail>(`/partners/${id}/logins/${userId}`, json('PATCH', { isActive })));
 

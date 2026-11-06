@@ -14,5 +14,7 @@ import { AsaasTransferValidationController, PartnerPayoutsController, PartnerPor
   imports: [AuthModule, BillingModule, TenantsModule],
   controllers: [PartnersAdminController, PartnerProgramController, PartnerPayoutsController, PartnerPortalController, AsaasTransferValidationController],
   providers: [PartnerCommissionsService, PartnerPayoutsService, PartnerPortalService, PartnersService, PayoutSecurityService],
+  // custo por cliente estima a comissão do mês ainda não apurada (finance-reports/client-costs)
+  exports: [PartnerCommissionsService],
 })
 export class PartnersModule {}

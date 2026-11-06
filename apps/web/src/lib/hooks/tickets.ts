@@ -1,6 +1,6 @@
 'use client';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { TicketEventType, TicketPriority, TicketStatus } from '@atendo/shared';
+import type { TicketContextMessage, TicketEventType, TicketPriority, TicketStatus } from '@atendo/shared';
 import { api } from '../api';
 
 /** Tickets internos (docs/tickets.md). */
@@ -17,7 +17,17 @@ export interface TicketRow {
   canAct: boolean;
 }
 export interface TicketEvent { id: string; type: TicketEventType; body: string | null; data: Record<string, unknown> | null; actor: Pessoa | null; createdAt: string }
-export interface TicketDetail extends TicketRow { conversation: { id: string; contact: { name: string | null; phone: string } } | null; events: TicketEvent[] }
+export interface TicketDetail extends TicketRow {
+  /** mensagem de onde nasceu (o "momento" na conversa) */
+  messageId: string | null;
+  /** retrato das mensagens até a abertura — fica mesmo se a conversa sumir */
+  context: TicketContextMessage[] | null;
+  /** `canOpen` = a pessoa pode abrir a conversa (número e setor) */
+  conversation: { id: string; canOpen: boolean; contact: { name: string | null; phone: string } } | null;
+  events: TicketEvent[];
+}
+/** Selo no topo da conversa: os tickets que nasceram dela. */
+export interface ConversationTicket { id: string; number: number; title: string; status: TicketStatus; messageId: string | null; createdAt: string }
 export interface TicketOptions {
   users: (Pessoa & { departmentIds: string[] })[];
   departments: { id: string; name: string; color: string }[];
@@ -34,7 +44,9 @@ const qs = (q: TicketQuery) => {
 export const useTickets = (q: TicketQuery) => useQuery({ queryKey: ['tickets', q], queryFn: () => api<{ items: TicketRow[]; total: number; page: number; pageSize: number }>(`/tickets?${qs(q)}`), placeholderData: keepPreviousData });
 export const useTicketsSummary = (enabled = true) => useQuery({ queryKey: ['tickets-summary'], enabled, queryFn: () => api<{ mine: number; department: number; onHold: number; holdExpired: number; overdue: number }>('/tickets/summary'), refetchInterval: 120_000 });
 export const useTicket = (id: string | null) => useQuery({ queryKey: ['ticket', id], enabled: !!id, queryFn: () => api<TicketDetail>(`/tickets/${id}`) });
-export const useTicketOptions = () => useQuery({ queryKey: ['ticket-options'], queryFn: () => api<TicketOptions>('/tickets/options'), staleTime: 60_000 });
+export const useConversationTickets = (conversationId: string | null, enabled = true) =>
+  useQuery({ queryKey: ['tickets', 'conversation', conversationId], enabled: enabled && !!conversationId, queryFn: () => api<ConversationTicket[]>(`/tickets/conversation/${conversationId}`) });
+export const useTicketOptions = (enabled = true) => useQuery({ queryKey: ['ticket-options'], enabled, queryFn: () => api<TicketOptions>('/tickets/options'), staleTime: 60_000 });
 
 /** Toda escrita devolve o ticket atualizado: grava no cache do detalhe e recarrega a lista. */
 export const useTicketWrite = () => {

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useAiAgents, useCan, useHasFeature, useSaveAiAgent } from '@/lib/hooks';
+import { SectionTabs } from '@/components/layout/SectionTabs';
 
 /** Roteiro de exemplo: dá ao cliente o formato das etapas para ele adaptar. */
 const EXEMPLO: AgentStage[] = [
@@ -57,6 +58,7 @@ export default function AgentesIaPage() {
         subtitle="A IA atende como uma pessoa da equipe, seguindo um roteiro em etapas. Cada etapa tem o seu prompt e as ações que ela pode fazer no sistema."
         action={<Button onClick={() => criar(false)} loading={save.isPending}><Plus size={14} /> Novo agente</Button>}
       />
+      <SectionTabs section="fluxos" label="Fluxos e agentes de IA" />
 
       {agentes.isLoading ? <SkeletonRows /> : !agentes.data?.length ? (
         <div className="rounded-2xl border border-line bg-panel p-6 text-center space-y-3">

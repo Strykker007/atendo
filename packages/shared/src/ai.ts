@@ -54,6 +54,34 @@ export const AI_MODEL_PRICE: Record<string, AiModelPrice> = {
   'gpt-4o-mini': { inputPer1k: 0.00015, outputPer1k: 0.0006 },
   'gpt-4o': { inputPer1k: 0.0025, outputPer1k: 0.01 },
 };
+/**
+ * Fornecedores aceitos na **chave própria do cliente** (feature `ai_own_key`). Sempre o endpoint
+ * oficial — endereço livre seria porta para a API chamar qualquer servidor (SSRF).
+ */
+export const AI_KEY_PROVIDERS = {
+  openai: { label: 'OpenAI (ChatGPT)', defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o'], keyHint: 'sk-…', consoleUrl: 'https://platform.openai.com/api-keys' },
+  anthropic: { label: 'Anthropic (Claude)', defaultModel: 'claude-haiku-4-5-20251001', models: ['claude-haiku-4-5-20251001', 'claude-sonnet-5'], keyHint: 'sk-ant-…', consoleUrl: 'https://console.anthropic.com/settings/keys' },
+} as const;
+export type AiKeyProvider = keyof typeof AI_KEY_PROVIDERS;
+export const AI_KEY_PROVIDER_IDS = Object.keys(AI_KEY_PROVIDERS) as AiKeyProvider[];
+
+/** `GET /ai/own-key` */
+export interface AiOwnKeyStatus {
+  /** plano inclui `ai_own_key` */
+  feature: boolean;
+  connected: boolean;
+  /** conectada E o plano inclui: é ela que está sendo usada */
+  inUse: boolean;
+  provider?: AiKeyProvider;
+  model?: string;
+  /** últimos 4 caracteres, para conferir qual chave está gravada */
+  keyLast4?: string;
+  /** último erro do fornecedor (chave revogada, sem crédito); some no próximo sucesso */
+  lastError?: string | null;
+  lastErrorAt?: string | null;
+  updatedAt?: string;
+}
+
 /** Preço de um modelo desconhecido: assume o mais caro da tabela, para nunca subestimar custo. */
 export function priceOf(model: string): AiModelPrice {
   return (

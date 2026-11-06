@@ -13,6 +13,7 @@ import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState, Suspense } from 'react';
 import { ExternalLink, Check, Receipt, CalendarClock } from 'lucide-react';
 import Link from 'next/link';
+import { SectionTabs } from '@/components/layout/SectionTabs';
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   trialing: { label: 'Período de teste', cls: 'bg-meta-soft text-meta-ink' },
@@ -106,6 +107,7 @@ function PlanoInner() {
   return (
     <PageShell width="max-w-4xl">
       <PageHeader title="Plano e uso" subtitle={`Consumo de ${periodLabel}. Os contadores zeram no início de cada mês.`} />
+      <SectionTabs section="configuracoes" label="Configurações e plano" />
 
       {/* Cartão do plano */}
       <div className="rounded-2xl bg-panel border border-line p-4 flex flex-wrap items-center gap-5">
@@ -312,7 +314,7 @@ function AiMeter({ limits }: { limits: { includedAiInteractionsMonth?: number; o
       max={included}
       hard={limits.overagePricePerAiInteraction == null}
       overage={limits.overagePricePerAiInteraction}
-      hint={`Sugestão, reescrita, resumo e resposta da IA nos fluxos${cap ? ` · teto de gasto ${brl(cap)}/mês (${brl(custo)} usados)` : ''}`}
+      hint={`Sugestão, reescrita, resumo e resposta da IA nos fluxos${cap ? ` · teto de gasto ${brl(cap)}/mês (${brl(custo)} usados)` : ''}${ai.data?.ownKeyInteractions ? ` · ${ai.data.ownKeyInteractions} pela sua chave própria (fora do limite)` : ''}`}
     />
   );
 }

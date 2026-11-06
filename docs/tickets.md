@@ -11,9 +11,25 @@ Pedidos **entre setores da mesma empresa** (portaria → administração, concie
 | Setor | departamento de destino (opcional) |
 | Prioridade | baixa, normal, alta, urgente |
 | Prazo | dia (vale até 23:59 de Brasília); vencido aparece em vermelho |
-| Atendimento | opcional: ligado à conversa aberta no momento (link na tela) |
+| Atendimento | opcional: a conversa de onde nasceu, a mensagem de origem e o retrato do contexto (ver [Aberto de uma conversa](#aberto-de-uma-conversa)) |
 
 **Situação** (`TICKET_STATUSES`): Aberto (ninguém responsável) → Em andamento (tem responsável) → **Em espera** (congelado) → Resolvido / Cancelado. Reabrir volta para em andamento (com responsável) ou aberto.
+
+## Aberto de uma conversa
+
+O atendente abre o ticket **sem sair da conversa**, e o vínculo fica dos dois lados:
+
+| Onde | O que |
+|---|---|
+| Topo da conversa | botão **Ticket**: abre o formulário já ligado à conversa (o momento = a última mensagem) |
+| Cada mensagem (ao passar o mouse) | ícone de ticket, **Abrir ticket a partir desta mensagem**: ela vira o momento |
+| Na conversa, depois | **marco** "Conversa virou ticket" no ponto em que foi aberto (nota interna, só a equipe vê), com *Ver ticket #N* e *Ver mensagem de origem*; selo **#N · situação** na mensagem de origem; selos dos tickets ativos no topo da conversa |
+| Quando o ticket muda | resolvido, cancelado ou reaberto viram outro marco na conversa, com quem fez e a observação |
+| No ticket | **Contexto da conversa**: as últimas 12 mensagens até o momento (`TICKET_CONTEXT_SIZE`), com a de origem destacada, e **Ver na conversa**, que abre a conversa já rolada até a mensagem (carrega o histórico antigo se precisar) |
+
+O contexto é um **retrato gravado na abertura** (`tickets.context`): continua no ticket se a conversa for apagada ou o histórico limpo, e quem atende o ticket em outro setor lê o trecho mesmo sem acesso à conversa. O link *Ver na conversa* só aparece para quem pode abrir a conversa (número e setor). Para abrir de uma conversa, a pessoa precisa poder vê-la; a API recusa conversa de número ou setor que ela não atende.
+
+Os marcos são notas internas com `content.kind = 'ticket'` (`MessageContent` do shared): nunca vão ao WhatsApp nem contam no uso. Falhar ao gravar o marco não derruba o ticket.
 
 ## Várias pessoas no mesmo ticket
 
@@ -57,8 +73,9 @@ Abas: **Comigo** (sou responsável ou participante), **Do meu setor** (`tickets.
 | GET | `/tickets?scope=mine\|department\|created\|all&status=active\|<status>&priority=&departmentId=\|none&search=&page=` | lista (50 por página) |
 | GET | `/tickets/summary` | `{mine, department, onHold, holdExpired, overdue}` |
 | GET | `/tickets/options` | equipe ativa (com setores), setores e motivos de espera |
-| GET | `/tickets/:id` | detalhe com linha do tempo |
-| POST | `/tickets` | `{title, description?, priority?, departmentId?, responsibleId?, participantIds?, conversationId?, dueAt?}` — `tickets.create` |
+| GET | `/tickets/:id` | detalhe com linha do tempo, `messageId`, `context` e `conversation.canOpen` |
+| GET | `/tickets/conversation/:conversationId` | tickets que nasceram da conversa e que a pessoa enxerga (`{id, number, title, status, messageId, createdAt}`) |
+| POST | `/tickets` | `{title, description?, priority?, departmentId?, responsibleId?, participantIds?, conversationId?, messageId?, dueAt?}`: com `conversationId`, grava o retrato e o marco na conversa; `messageId` (da mesma conversa) marca o momento — `tickets.create` |
 | PATCH | `/tickets/:id` | `{title?, description?, priority?, dueAt?}` |
 | POST | `/tickets/:id/comments` | `{body}` |
 | POST | `/tickets/:id/status` | `{status: open\|in_progress\|resolved\|canceled, note?}` |
@@ -69,4 +86,4 @@ Abas: **Comigo** (sou responsável ou participante), **Do meu setor** (`tickets.
 
 ## Limites desta versão
 
-Sem anexos nos comentários e sem retomada automática na data. O ticket se liga a um atendimento quando aberto com a conversa aberta no painel (caixa no formulário).
+Sem anexos nos comentários e sem retomada automática na data. O ticket se liga a uma conversa quando aberto de dentro dela (botão ou mensagem) ou, pela tela de Tickets, com a conversa aberta no painel (caixa no formulário). Não dá para ligar um ticket já aberto a uma conversa depois. O selo do topo mostra até 2 tickets (os ativos primeiro).

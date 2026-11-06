@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Ticket, Zap, Tags, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, CreditCard, Loader2, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, ThumbsUp, AlarmClock, BookUser, CalendarClock, KeyRound, Handshake, LayoutDashboard, Receipt, Bot } from 'lucide-react';
+import { MessageSquare, Ticket, Zap, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, Loader2, ChevronDown, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, AlarmClock, BookUser, CalendarClock, KeyRound, Handshake, LayoutDashboard, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -10,6 +10,7 @@ import { useNav } from './NavigationProgress';
 import { CompanySwitcher } from './CompanySwitcher';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ESCALAS_ABAS, primeiraAbaEscalas } from '@/components/escalas/EscalasTabs';
+import { SECTION_TABS, useTabFilter, type SectionKey, type SectionTab } from './SectionTabs';
 import { NoticeBell } from './SystemNotices';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
 import { useTheme, applyTheme } from '@/lib/theme';
@@ -37,35 +38,51 @@ const PARTNER_ITEMS = [
  * - `need`: permissão do perfil de acesso — basta UMA da lista. A API já recusava, mas o menu
  *   continuava oferecendo: a pessoa clicava e batia num 403, ou numa tela vazia que parecia defeito.
  * - `feature`: recurso do plano (`@RequireFeature` na API). Sem ele o item some, mesmo para o admin.
+ * - `tabs`: telas parecidas que dividem o item (`SECTION_TABS`, com abas no topo de cada uma). O
+ *   item aparece se alguma aba for permitida e leva à primeira delas.
  *
  * Itens sem `need` são de todo mundo: conversas, Kanban (ver; mexer nas colunas é `tags.manage`),
  * respostas (consultar) e configurações (onde fica a troca da própria senha).
  */
-const items: { href: string; label: string; icon: typeof MessageSquare; need?: Permission[]; feature?: PlanFeature }[] = [
-  { href: '/conversas', label: 'Conversas', icon: MessageSquare },
-  { href: '/kanban', label: 'Kanban', icon: Columns3 },
-  // tickets internos entre setores (docs/tickets.md)
-  { href: '/tickets', label: 'Tickets', icon: Ticket, need: ['tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'], feature: 'tickets' },
-  { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: ['agenda.manage'], feature: 'scheduling' },
-  // disparar um fluxo numa conversa não depende deste item: aqui é criar/editar
-  { href: '/fluxos', label: 'Fluxos', icon: Workflow, need: ['flows.manage'], feature: 'flows' },
-  // agente com etapas: entra no atendimento pelo bloco IA dos fluxos (docs/agente-ia.md)
-  { href: '/agentes-ia', label: 'Agentes de IA', icon: Bot, need: ['flows.manage'], feature: 'ai_flows' },
-  { href: '/respostas', label: 'Respostas', icon: Zap },
-  // quem agenda (permissão vendida à parte) ou quem supervisiona a equipe (gerente padrão vê as
-  // de todos sem poder agendar). Sem nenhuma das duas, a lista seria só das próprias — que não existem
-  { href: '/agendadas', label: 'Mensagens agendadas', icon: AlarmClock, need: ['conversations.schedule_message', 'conversations.view_all'] },
-  { href: '/tags', label: 'Tags', icon: Tags, need: ['tags.manage'] },
-  { href: '/contatos', label: 'Contatos', icon: BookUser },
-  { href: '/transmissoes', label: 'Transmissões', icon: Send, need: ['campaigns.manage'], feature: 'campaigns' },
-  { href: '/pesquisas', label: 'Pesquisas', icon: ThumbsUp, need: ['settings.manage'], feature: 'satisfaction_surveys' },
-  { href: '/relatorios', label: 'Relatórios', icon: BarChart3, need: ['reports.view'] },
-  { href: '/equipe', label: 'Equipe', icon: Users, need: ['team.manage'] },
-  // tudo que é horário (plantões, escalas, horário de atendimento): o destino é a 1ª aba permitida
-  { href: '/escalas', label: 'Escalas e plantões', icon: CalendarClock, need: ESCALAS_ABAS.map((a) => a.need) },
-  { href: '/plano', label: 'Plano e uso', icon: CreditCard, need: ['billing.manage'] },
-  { href: '/configuracoes', label: 'Configurações', icon: Settings },
+type NavItem = { href: string; label: string; icon: typeof MessageSquare; need?: Permission[]; feature?: PlanFeature; tabs?: SectionKey };
+/** Grupos que abrem e fecham; `id` null = sem título (portal do parceiro, dono fora de cliente). */
+const GROUPS: { id: string | null; label: string; items: NavItem[] }[] = [
+  {
+    id: 'atendimento', label: 'Atendimento', items: [
+      { href: '/conversas', label: 'Conversas', icon: MessageSquare },
+      { href: '/kanban', label: 'Kanban', icon: Columns3 },
+      // tickets internos entre setores (docs/tickets.md)
+      { href: '/tickets', label: 'Tickets', icon: Ticket, need: ['tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'], feature: 'tickets' },
+      { href: '/agenda', label: 'Agenda', icon: CalendarDays, need: ['agenda.manage'], feature: 'scheduling' },
+      // quem agenda (permissão vendida à parte) ou quem supervisiona a equipe (gerente padrão vê as
+      // de todos sem poder agendar). Sem nenhuma das duas, a lista seria só das próprias — que não existem
+      { href: '/agendadas', label: 'Mensagens agendadas', icon: AlarmClock, need: ['conversations.schedule_message', 'conversations.view_all'] },
+      { href: '/contatos', label: 'Contatos', icon: BookUser, tabs: 'contatos' },
+    ],
+  },
+  {
+    id: 'automacao', label: 'Automação', items: [
+      // disparar um fluxo numa conversa não depende deste item: aqui é criar/editar (aba Agentes de IA)
+      { href: '/fluxos', label: 'Fluxos', icon: Workflow, tabs: 'fluxos' },
+      { href: '/respostas', label: 'Respostas', icon: Zap },
+      { href: '/transmissoes', label: 'Transmissões', icon: Send, need: ['campaigns.manage'], feature: 'campaigns' },
+    ],
+  },
+  {
+    id: 'gestao', label: 'Gestão', items: [
+      { href: '/relatorios', label: 'Relatórios', icon: BarChart3, tabs: 'relatorios' },
+      { href: '/equipe', label: 'Equipe', icon: Users, need: ['team.manage'] },
+      // tudo que é horário (plantões, escalas, horário de atendimento): o destino é a 1ª aba permitida
+      { href: '/escalas', label: 'Escalas e plantões', icon: CalendarClock, need: ESCALAS_ABAS.map((a) => a.need) },
+    ],
+  },
+  // Plano e uso virou aba de Configurações; Conta fica sempre por último (depois até do grupo de dono)
+  { id: 'conta', label: 'Conta', items: [{ href: '/configuracoes', label: 'Configurações', icon: Settings, tabs: 'configuracoes' }] },
 ];
+const CONFIG_ITEM = GROUPS[GROUPS.length - 1].items[0];
+/** Rotas que acendem o item: a dele, as abas dele e as subpáginas. */
+const rotasDo = (i: NavItem) => (i.tabs ? (SECTION_TABS[i.tabs] as SectionTab[]).map((t) => t.href) : [i.href.startsWith('/escalas') ? '/escalas' : i.href]);
+const naRota = (path: string, r: string) => path === r || path.startsWith(`${r}/`);
 
 
 /** Menu lateral: expansível ou recolhido só com ícones. Fundo escuro nos dois temas. */
@@ -105,21 +122,36 @@ export function Sidebar() {
    * dono do sistema (docs/donos-do-sistema.md). Dono sem empresa e fora de cliente: só a seção
    * de dono e Configurações, como antes.
    */
-  const doCliente = items
-    .filter((i) => (!i.need || i.need.some(permitido)) && (!i.feature || noPlano(i.feature)))
-    .map((i) => (i.href === '/escalas' ? { ...i, href: primeiraAbaEscalas(minhas) ?? i.href } : i));
+  const abaPermitida = useTabFilter();
+  const pode = (i: NavItem) => (!i.need || i.need.some(permitido)) && (!i.feature || noPlano(i.feature));
+  /** item visível com o destino já resolvido (1ª aba permitida); null = some */
+  const resolver = (i: NavItem): NavItem | null => {
+    if (i.tabs) {
+      const abas = (SECTION_TABS[i.tabs] as SectionTab[]).filter(abaPermitida);
+      return abas.length ? { ...i, href: abas[0].href } : null;
+    }
+    if (!pode(i)) return null;
+    return i.href === '/escalas' ? { ...i, href: primeiraAbaEscalas(minhas) ?? i.href } : i;
+  };
+  const doCliente = GROUPS.map((g) => ({ ...g, items: g.items.map(resolver).filter((i): i is NavItem => !!i) })).filter((g) => g.items.length);
   const semCliente = !me.data?.tenantId;
   const parceiro = me.data?.role === 'partner';
-  const menu: { href: string; label: string; icon: typeof MessageSquare; secao?: string }[] = parceiro
-    ? PARTNER_ITEMS
+  const dono = { id: 'dono', label: 'Dono do sistema', items: OWNER_ITEMS as NavItem[] };
+  const grupos: { id: string | null; label: string; items: NavItem[] }[] = parceiro
+    ? [{ id: null, label: '', items: PARTNER_ITEMS as NavItem[] }]
     : !me.data?.systemOwner
     ? doCliente
     : semCliente
-      ? [...OWNER_ITEMS, items[items.length - 1]]
-      : [...doCliente, ...OWNER_ITEMS.map((i, n) => (n === 0 ? { ...i, secao: 'Dono do sistema' } : i))];
+      ? [{ ...dono, id: null, label: '' }, { id: 'conta', label: 'Conta', items: [{ ...CONFIG_ITEM, tabs: undefined }] }]
+      : [...doCliente.filter((g) => g.id !== 'conta'), dono, ...doCliente.filter((g) => g.id === 'conta')];
+  const closed = useUI((s) => s.closedNavGroups);
+  const toggleGroup = useUI((s) => s.toggleNavGroup);
   const waiting = counts.data?.waiting ?? 0;
   // pedidos de autorização de plantão esperando resposta (docs/escalas.md#pedido-de-autorização)
   const pedidos = useAccessRequests(me.data?.role !== 'super_admin' && permitido('team.manage')).data?.length ?? 0;
+  // o Painel do parceiro é prefixo das outras telas dele: só ativo na própria rota
+  const estaAtivo = (i: NavItem) => (target ? target === i.href : i.href === '/parceiro' ? path === i.href : rotasDo(i).some((r) => naRota(path, r)));
+  const badgeDe = (i: NavItem) => (i.href === '/conversas' && waiting > 0 ? waiting : i.href.startsWith('/escalas') && pedidos > 0 ? pedidos : null);
 
   return (
     <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-14' : 'w-52')}>
@@ -150,40 +182,59 @@ export function Sidebar() {
       )}
       {/* empresa/unidade ativa: some quando o cliente não usa empresas */}
       {/* minhas empresas + (dono) qualquer cliente — Ctrl+K (docs/multiempresa.md#seletor) */}
-      {!parceiro && <WorkspaceSwitcher collapsed={collapsed} owner={!!me.data?.systemOwner} />}
+      {/* parceiro também: quem é dono de farmácia E VogoPartner troca entre os dois (docs/37-vogopartners.md) */}
+      <WorkspaceSwitcher collapsed={collapsed} owner={!parceiro && !!me.data?.systemOwner} />
       {me.data?.role !== 'super_admin' && !parceiro && <CompanySwitcher collapsed={collapsed} />}
 
       {/* só o menu rola: em tela baixa (notebook, zoom) os itens de baixo ficavam inalcançáveis,
           e marca, seletores e rodapé (Sair, versão) continuam sempre à vista */}
       <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin [scrollbar-width:thin] py-2">
-        {menu.map(({ href, label, icon: Icon, secao }) => {
-          // as abas de Escalas e plantões contam como o mesmo item
-          const raiz = href.startsWith('/escalas/') ? '/escalas' : href;
-          // o Painel do parceiro é prefixo das outras telas dele: só ativo na própria rota
-          const active = target ? target === href : href === '/parceiro' ? path === href : path.startsWith(raiz);
-          const badge = href === '/conversas' && waiting > 0 ? waiting : raiz === '/escalas' && pedidos > 0 ? pedidos : null;
+        {grupos.map((g, gi) => {
+          const ativoAqui = g.items.some((i) => estaAtivo(i));
+          const aberto = collapsed || !g.id || !closed.includes(g.id);
+          const badgeGrupo = g.items.reduce((n, i) => n + (badgeDe(i) ?? 0), 0);
           return (
-            <div key={href}>
-            {secao && (collapsed
-              ? <div className="mx-3 my-1.5 border-t border-side-line" />
-              : <div className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-side-ink/50">{secao}</div>)}
-            <Link
-              href={href}
-              title={badge ? `${label} · ${badge} aguardando` : label}
-              onClick={() => { if (!path.startsWith(raiz)) setTarget(href); }}
-              className={cn(
-                'relative flex items-center gap-2.5 mx-2 my-px rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
-                active ? 'bg-side-on text-side-on-ink font-semibold' : 'text-side-ink hover:bg-white/5 hover:text-white',
-                target === href && pending && 'animate-pulse',
-                collapsed && 'justify-center px-0',
-              )}
-            >
-              <Icon size={17} className="shrink-0" />
-              {!collapsed && <span className="truncate">{label}</span>}
-              {badge !== null && (
-                <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-wait text-white', collapsed ? 'absolute -top-0.5 right-1' : 'ml-auto')}>{badge}</span>
-              )}
-            </Link>
+            <div key={g.id ?? `g${gi}`}>
+              {g.id && (collapsed
+                ? gi > 0 && <div className="mx-3 my-1.5 border-t border-side-line" />
+                : (
+                  <button type="button" onClick={() => toggleGroup(g.id!)} aria-expanded={aberto} title={aberto ? `Fechar ${g.label}` : `Abrir ${g.label}`}
+                    className={cn('group/sec w-[calc(100%-1rem)] mx-2 mt-2 mb-0.5 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors hover:bg-white/5 hover:text-white', !aberto && ativoAqui ? 'text-white' : 'text-side-ink/85')}>
+                    {/* seta à esquerda, como em árvore de pastas: deixa claro que abre e fecha */}
+                    <ChevronDown size={14} className={cn('shrink-0 text-side-ink/70 group-hover/sec:text-white transition-transform', !aberto && '-rotate-90')} />
+                    <span className="flex-1 text-left">{g.label}</span>
+                    {!aberto && badgeGrupo > 0 && <span className="tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-wait text-white normal-case tracking-normal">{badgeGrupo}</span>}
+                    {!aberto && <span className="text-[10px] font-medium normal-case tracking-normal text-side-ink/60">{g.items.length}</span>}
+                  </button>
+                ))}
+              {!g.id && gi > 0 && <div className={cn('border-t border-side-line', collapsed ? 'mx-3 my-1.5' : 'mx-4 mt-2 mb-1')} />}
+              {aberto && g.items.map((item) => {
+                const { href, label, icon: Icon } = item;
+                const active = estaAtivo(item);
+                const badge = badgeDe(item);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    title={badge ? `${label} · ${badge} aguardando` : label}
+                    onClick={() => { if (!rotasDo(item).some((r) => naRota(path, r))) setTarget(href); }}
+                    className={cn(
+                      'relative flex items-center gap-2.5 my-px rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
+                      // dentro de um grupo com título: recuo, para ler como item do grupo
+                      g.id && !collapsed ? 'ml-5 mr-2' : 'mx-2',
+                      active ? 'bg-side-on text-side-on-ink font-semibold' : 'text-side-ink hover:bg-white/5 hover:text-white',
+                      target === href && pending && 'animate-pulse',
+                      collapsed && 'justify-center px-0',
+                    )}
+                  >
+                    <Icon size={17} className="shrink-0" />
+                    {!collapsed && <span className="truncate">{label}</span>}
+                    {badge !== null && (
+                      <span className={cn('tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-wait text-white', collapsed ? 'absolute -top-0.5 right-1' : 'ml-auto')}>{badge}</span>
+                    )}
+                  </Link>
+                );
+              })}
             </div>
           );
         })}

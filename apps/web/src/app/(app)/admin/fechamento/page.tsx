@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { ArrowLeft, Wallet, TrendingUp, AlertTriangle, Receipt, Landmark, Plus, Pencil, Trash2, Check, Lock, Unlock, MessageCircle, ExternalLink, Copy, Search, Undo2, Ban, Users, CalendarClock, Percent, Repeat } from 'lucide-react';
+import { ArrowLeft, Download, Wallet, TrendingUp, AlertTriangle, Receipt, Landmark, Plus, Pencil, Trash2, Check, Lock, Unlock, MessageCircle, ExternalLink, Copy, Search, Undo2, Ban, Users, CalendarClock, Percent, Repeat } from 'lucide-react';
 import {
   FINANCE_FREQUENCIES, FINANCE_FREQUENCY_LABEL, FINANCE_PAYMENT_METHODS, FINANCE_PAYMENT_METHOD_LABEL, FINANCE_SECTION_HINT, FINANCE_SECTION_LABEL, FINANCE_SECTIONS,
   FINANCE_TAX_BASE_LABEL, FINANCE_TAX_BASES, isValidCpfCnpj, type FinanceFrequency, type FinancePaymentMethod, type FinanceSection, type FinanceTaxBase,
@@ -17,6 +17,7 @@ import { DateInput, MonthPicker } from '@/components/ui/DatePicker';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { useClosingConfig, useClosingMonth, useClosingWrite, useMe, useOverdue, usePayables, useTenants, useUpdateTenant, type ClosingConfig, type ClosingSummary, type FinanceEntryRow, type PayoutRow, type ReceivableRow } from '@/lib/hooks';
+import { baixarRelatorioMes } from '@/components/billing/closing-csv';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
@@ -121,6 +122,8 @@ function Mes({ periodo, setPeriodo }: { periodo: string; setPeriodo: (p: string)
         <MonthPicker value={periodo} max={mesAtual()} onChange={setPeriodo} />
         {travado && <span className="inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 bg-ok-soft text-ok"><Lock size={11} /> Fechado em {new Date(d!.closed!.closedAt).toLocaleDateString('pt-BR')}</span>}
         {d?.current && <span className="text-[11px] rounded-full px-2 py-0.5 bg-field text-muted">Mês em andamento — fecha a partir de {fechaEm(periodo)}</span>}
+        {/* resumo, sócios, cobranças e lançamentos numa planilha (contador / arquivo) */}
+        {d && <Button size="sm" variant="ghost" className="ml-auto" icon={<Download size={14} />} onClick={() => baixarRelatorioMes(d, nomeMes(periodo))}>Baixar relatório do mês</Button>}
       </div>
 
       {/* no começo do mês, o que se fecha é o mês passado: o aviso leva até ele */}

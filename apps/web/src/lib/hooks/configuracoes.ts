@@ -42,11 +42,13 @@ export interface TenantSettings {
   transferDefaults: { agent: string; department: string };
   /** aviso ao cliente quando o atendente encerra; texto null = o padrão (`closeDefault`) */
   closeMessageEnabled: boolean; closeMessageText: string | null;
+  /** redistribuição automática (docs/redistribuicao-automatica.md) */
+  autoReassignWaiting: boolean; autoReassignAssigned: boolean; autoReassignBaseMinutes: number; autoReassignMaxMinutes: number; autoReassignMaxTimes: number;
   closeDefault: string;
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'companyIsolation' | 'requireSignature' | 'budgetQuoteItems' | 'budgetQuoteEnabled' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText' | 'closeMessageEnabled' | 'closeMessageText'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'companyIsolation' | 'requireSignature' | 'budgetQuoteItems' | 'budgetQuoteEnabled' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText' | 'closeMessageEnabled' | 'closeMessageText' | 'autoReassignWaiting' | 'autoReassignAssigned' | 'autoReassignBaseMinutes' | 'autoReassignMaxMinutes' | 'autoReassignMaxTimes'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

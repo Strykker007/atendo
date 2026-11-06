@@ -66,7 +66,7 @@ export interface PlanLimits {
   aiMonthlyCostCap?: number;
 }
 
-export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot', CAMPAIGNS: 'campaigns', PROACTIVE_MESSAGING: 'proactive_messaging', CONSULTANT_RANKING: 'consultant_ranking', SATISFACTION_SURVEYS: 'satisfaction_surveys', PIX_PAYMENTS: 'pix_payments', GROUPS_INBOX: 'groups_inbox', DAILY_REPORT: 'daily_report', TICKETS: 'tickets' } as const;
+export const PlanFeature = { FLOWS: 'flows', SCHEDULING: 'scheduling', AI_FLOWS: 'ai_flows', AI_COPILOT: 'ai_copilot', CAMPAIGNS: 'campaigns', PROACTIVE_MESSAGING: 'proactive_messaging', CONSULTANT_RANKING: 'consultant_ranking', SATISFACTION_SURVEYS: 'satisfaction_surveys', PIX_PAYMENTS: 'pix_payments', GROUPS_INBOX: 'groups_inbox', DAILY_REPORT: 'daily_report', TICKETS: 'tickets', AI_OWN_KEY: 'ai_own_key' } as const;
 export type PlanFeature = (typeof PlanFeature)[keyof typeof PlanFeature];
 /** Lista fechada, para validar o que vem do formulário de planos. */
 export const PLAN_FEATURES = Object.values(PlanFeature);
@@ -91,6 +91,8 @@ export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
   daily_report: 'Relatório diário por e-mail',
   /** tickets internos entre setores, com espera por motivo externo (docs/tickets.md) */
   tickets: 'Tickets internos',
+  /** a empresa usa a própria chave da OpenAI/Anthropic: uso fora da cota e do teto, pago direto ao fornecedor (docs/15-ia.md#chave-própria-do-cliente) */
+  ai_own_key: 'Chave de IA própria',
 };
 
 /** Limites de quantidade checados na criação/ativação (ver `PlanLimitGuard` na API). */

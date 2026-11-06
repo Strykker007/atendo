@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 import {
-  DEFAULT_TICKET_HOLD_REASONS, TICKET_ACTIVE_STATUSES, TICKET_MAX_PARTICIPANTS, TICKET_PRIORITIES, TICKET_STATUS_LABEL, TICKET_STATUSES, TICKET_TEXT_MAX, TICKET_TITLE_MAX,
+  DEFAULT_TICKET_HOLD_REASONS, TICKET_ACTIVE_STATUSES, TICKET_CONTEXT_SIZE, messagePreview, type MessageContent, type TicketContextMessage, TICKET_MAX_PARTICIPANTS, TICKET_PRIORITIES, TICKET_STATUS_LABEL, TICKET_STATUSES, TICKET_TEXT_MAX, TICKET_TITLE_MAX,
   type Permission, type TicketEventType, type TicketPriority, type TicketStatus,
 } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -17,6 +17,9 @@ import { BillingModule } from '../billing/billing.module';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
+import { ConversationsService } from '../conversations/conversations.service';
+import { canUseNumber } from '../auth/number-scope';
+import { canSeeDepartment } from '../auth/department-scope';
 
 const NULLABLE = (_: unknown, v: unknown) => v !== null;
 
@@ -28,6 +31,8 @@ class CreateTicketDto {
   @IsOptional() @IsUUID() responsibleId?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(TICKET_MAX_PARTICIPANTS) @IsUUID('4', { each: true }) participantIds?: string[];
   @IsOptional() @IsUUID() conversationId?: string;
+  /** mensagem da conversa de onde o ticket nasce (o "momento"); sem ela, a última */
+  @IsOptional() @IsUUID() messageId?: string;
   @IsOptional() @IsDateString() dueAt?: string;
 }
 class UpdateTicketDto {
@@ -99,7 +104,11 @@ type TicketRow = Prisma.TicketGetPayload<{ include: typeof LIST_INCLUDE }>;
  */
 @Injectable()
 export class TicketsService {
-  constructor(private readonly prisma: PrismaService, private readonly gateway: ConversationsGateway) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: ConversationsGateway,
+    private readonly conversations: ConversationsService,
+  ) {}
 
   /** Setores que a pessoa atende; null = todos (sem setor na equipe). */
   private setores(u: AuthUser): string[] | null {
@@ -220,9 +229,66 @@ export class TicketsService {
     const t = await this.load(u, id);
     const events = await this.prisma.ticketEvent.findMany({ where: { ticketId: id }, orderBy: { createdAt: 'asc' }, include: { actor: pessoa } });
     const conversa = t.conversationId
-      ? await this.prisma.conversation.findUnique({ where: { id: t.conversationId }, select: { id: true, contact: { select: { name: true, phone: true } } } })
+      ? await this.prisma.conversation.findUnique({ where: { id: t.conversationId }, select: { id: true, numberId: true, departmentId: true, contact: { select: { name: true, phone: true } } } })
       : null;
-    return { ...this.present(u, t), conversation: conversa, events: events.map((e) => ({ id: e.id, type: e.type, body: e.body, data: e.data, actor: e.actor, createdAt: e.createdAt })) };
+    return {
+      ...this.present(u, t),
+      messageId: t.messageId,
+      context: (t.context as TicketContextMessage[] | null) ?? null,
+      // o link "Ver na conversa" só para quem pode abrir a conversa; o retrato vale para todos do ticket
+      conversation: conversa && { id: conversa.id, contact: conversa.contact, canOpen: canUseNumber(u, conversa.numberId) && canSeeDepartment(u, conversa.departmentId) },
+      events: events.map((e) => ({ id: e.id, type: e.type, body: e.body, data: e.data, actor: e.actor, createdAt: e.createdAt })),
+    };
+  }
+
+  /** Tickets ligados a uma conversa (selo no topo da conversa) — só os que a pessoa enxerga. */
+  async byConversation(u: AuthUser, conversationId: string) {
+    await this.assertConversation(u, conversationId);
+    const rows = await this.prisma.ticket.findMany({
+      where: { conversationId, AND: [this.visible(u)] },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: { id: true, number: true, title: true, status: true, messageId: true, createdAt: true },
+    });
+    return rows.map((r) => ({ ...r, status: r.status as TicketStatus }));
+  }
+
+  /** A conversa existe no cliente e a pessoa pode abri-la (mesmo critério do painel: número e setor). */
+  private async assertConversation(u: AuthUser, conversationId: string) {
+    const c = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId: u.tenantId }, select: { id: true, numberId: true, departmentId: true } });
+    if (!c || !canUseNumber(u, c.numberId) || !canSeeDepartment(u, c.departmentId)) throw new BadRequestException('Atendimento não encontrado');
+    return c;
+  }
+
+  /**
+   * Retrato das últimas mensagens até `messageId` (ou até agora). Guardado no ticket para o
+   * contexto não depender da conversa continuar existindo nem de quem atende o ticket vê-la.
+   */
+  private async snapshot(conversationId: string, messageId?: string): Promise<{ anchorId: string | null; context: TicketContextMessage[] }> {
+    const anchor = messageId ? await this.prisma.message.findFirst({ where: { id: messageId, conversationId }, select: { id: true, createdAt: true } }) : null;
+    if (messageId && !anchor) throw new BadRequestException('Mensagem não encontrada nesta conversa');
+    const rows = await this.prisma.message.findMany({
+      where: { conversationId, deletedAt: null, type: { not: 'call' }, ...(anchor && { createdAt: { lte: anchor.createdAt } }) },
+      orderBy: { createdAt: 'desc' },
+      take: TICKET_CONTEXT_SIZE,
+      select: { id: true, createdAt: true, direction: true, internal: true, type: true, text: true, content: true, mediaName: true, authorName: true, senderName: true, author: { select: { name: true } } },
+    });
+    const anchorId = anchor?.id ?? rows[0]?.id ?? null;
+    const context = rows.reverse().map((m) => ({
+      id: m.id,
+      at: m.createdAt.toISOString(),
+      from: m.internal ? ('note' as const) : m.direction === 'in' ? ('in' as const) : ('out' as const),
+      author: m.direction === 'in' ? m.senderName : (m.author?.name ?? m.authorName ?? null),
+      text: messagePreview({ type: m.type, text: m.text, content: m.content as MessageContent | null, mediaName: m.mediaName }).slice(0, 1000),
+      ...(m.id === anchorId && { anchor: true }),
+    }));
+    return { anchorId, context };
+  }
+
+  /** Marco na conversa (nota interna): nunca derruba a ação do ticket. */
+  private markConversation(t: { id: string; number: number; conversationId: string | null }, text: string, content: Extract<MessageContent, { kind: 'ticket' }>) {
+    if (!t.conversationId) return;
+    void this.conversations.systemNote(t.conversationId, text, content).catch(() => undefined);
   }
 
   /** O que o formulário precisa: equipe ativa, setores (com quem está em cada) e motivos de espera. */
@@ -246,9 +312,9 @@ export class TicketsService {
     await this.assertDepartment(u.tenantId, dto.departmentId);
     const participantes = [...new Set((dto.participantIds ?? []).filter((id) => id !== dto.responsibleId))];
     await this.assertUsers(u.tenantId, [...(dto.responsibleId ? [dto.responsibleId] : []), ...participantes]);
-    if (dto.conversationId && !(await this.prisma.conversation.findFirst({ where: { id: dto.conversationId, tenantId: u.tenantId }, select: { id: true } }))) {
-      throw new BadRequestException('Atendimento não encontrado');
-    }
+    if (dto.messageId && !dto.conversationId) throw new BadRequestException('Informe a conversa da mensagem');
+    if (dto.conversationId) await this.assertConversation(u, dto.conversationId);
+    const snap = dto.conversationId ? await this.snapshot(dto.conversationId, dto.messageId) : null;
     for (let tentativa = 0; ; tentativa++) {
       try {
         const t = await this.prisma.$transaction(async (tx) => {
@@ -257,6 +323,7 @@ export class TicketsService {
             data: {
               tenantId: u.tenantId, number: (ultimo._max.number ?? 0) + 1, title: dto.title.trim(), description: dto.description?.trim() || null,
               priority: dto.priority ?? 'normal', departmentId: dto.departmentId ?? null, conversationId: dto.conversationId ?? null, createdById: u.id,
+              messageId: snap?.anchorId ?? null, ...(snap && snap.context.length ? { context: snap.context as unknown as Prisma.InputJsonValue } : {}),
               dueAt: dto.dueAt ? new Date(dto.dueAt) : null, status: dto.responsibleId ? 'in_progress' : 'open',
               participants: { create: [...(dto.responsibleId ? [{ userId: dto.responsibleId, role: 'responsible' }] : []), ...participantes.map((userId) => ({ userId, role: 'participant' }))] },
             },
@@ -265,6 +332,7 @@ export class TicketsService {
           return novo;
         });
         this.notify(u.tenantId, t, [dto.responsibleId, ...participantes].filter((x): x is string => !!x && x !== u.id), `Ticket #${t.number} para você: ${t.title}`);
+        this.markConversation(t, `🎫 Ticket #${t.number} aberto por ${u.name}: ${t.title}`, { kind: 'ticket', ticketId: t.id, number: t.number, event: 'opened', fromMessageId: snap?.anchorId ?? null });
         return this.get(u, t.id);
       } catch (e) {
         // dois tickets ao mesmo tempo pegaram o mesmo número: tenta de novo
@@ -324,6 +392,9 @@ export class TicketsService {
     });
     const avisar = [...t.participants.map((p) => p.userId), ...(t.createdBy ? [t.createdBy.id] : [])].filter((x) => x !== u.id);
     this.notify(u.tenantId, t, [...new Set(avisar)], `Ticket #${t.number}: ${TICKET_STATUS_LABEL[dto.status]}`);
+    // a conversa de origem fica sabendo do desfecho: resolvido, cancelado ou reaberto
+    const nota = dto.note?.trim() ? `\n${dto.note.trim()}` : '';
+    this.markConversation(t, `🎫 Ticket #${t.number} ${TICKET_STATUS_LABEL[dto.status].toLowerCase()} por ${u.name}: ${t.title}${nota}`, { kind: 'ticket', ticketId: t.id, number: t.number, event: 'status', status: dto.status });
     return this.get(u, id);
   }
 
@@ -471,6 +542,9 @@ class TicketsController {
 
   @Delete('hold-reasons/:id') @RequirePermission('tickets.manage')
   deleteReason(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.tickets.deleteHoldReason(u, id); }
+
+  @Get('conversation/:conversationId')
+  byConversation(@CurrentUser() u: AuthUser, @Param('conversationId', ParseUUIDPipe) conversationId: string) { return this.tickets.byConversation(u, conversationId); }
 
   @Get(':id')
   get(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.tickets.get(u, id); }

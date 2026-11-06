@@ -6,6 +6,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { AiController } from './ai.controller';
 import { AiAgentsController, AiAgentsService } from './ai-agents';
+import { AiOwnKeyController, AiOwnKeyService } from './ai-own-key';
 import { AiService } from './ai.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
@@ -36,8 +37,8 @@ class AiProcessor extends TrackedWorkerHost {
 /** IA: copiloto do atendente, agentes com etapas (docs/agente-ia.md) e motor de fluxos (AiService exportado). */
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_AI, defaultJobOptions: { removeOnComplete: 20, removeOnFail: 50 } }), AuthModule, BillingModule],
-  controllers: [AiController, AiAgentsController],
-  providers: [AiService, AiAgentsService, AiUsageService, AiProviderRegistry, AnthropicProvider, OpenAiProvider, AiReconcileScheduler, AiProcessor],
+  controllers: [AiController, AiAgentsController, AiOwnKeyController],
+  providers: [AiService, AiAgentsService, AiOwnKeyService, AiUsageService, AiProviderRegistry, AnthropicProvider, OpenAiProvider, AiReconcileScheduler, AiProcessor],
   exports: [AiService, AiUsageService, AiAgentsService],
 })
 export class AiModule {}

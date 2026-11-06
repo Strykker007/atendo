@@ -17,6 +17,7 @@ import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, Slid
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { SalesDetails } from '@/components/reports/SalesDetails';
 import { Attendances, type AttendanceFocus } from '@/components/reports/Attendances';
+import { SectionTabs } from '@/components/layout/SectionTabs';
 
 // datas no fuso do navegador: `toISOString` dava o dia UTC, e depois das 21h "hoje" já era amanhã
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -133,6 +134,7 @@ export default function RelatoriosPage() {
           </div>
         }
       />
+      <SectionTabs section="relatorios" label="Relatórios e pesquisas" />
 
       {/* ---------- Filtros da tela inteira ---------- */}
       <section className="rounded-2xl bg-panel border border-line p-3 space-y-3">

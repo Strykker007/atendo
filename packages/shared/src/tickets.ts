@@ -41,3 +41,22 @@ export const DEFAULT_TICKET_HOLD_REASONS = [
 export const TICKET_TITLE_MAX = 140;
 export const TICKET_TEXT_MAX = 4000;
 export const TICKET_MAX_PARTICIPANTS = 20;
+
+/**
+ * Retrato da conversa guardado no ticket na abertura (docs/tickets.md#aberto-de-uma-conversa):
+ * as últimas mensagens até o momento escolhido. O contexto fica no ticket mesmo que a conversa
+ * seja apagada, limpa, ou de um setor que quem atende o ticket não vê.
+ */
+export interface TicketContextMessage {
+  id: string;
+  at: string;
+  /** in = contato; out = equipe/robô; note = nota interna */
+  from: 'in' | 'out' | 'note';
+  /** atendente que escreveu (saída/nota); nulo = robô/sistema ou contato */
+  author: string | null;
+  text: string;
+  /** a mensagem de onde o ticket foi aberto */
+  anchor?: boolean;
+}
+/** quantas mensagens o retrato guarda */
+export const TICKET_CONTEXT_SIZE = 12;

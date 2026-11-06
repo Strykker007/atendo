@@ -342,6 +342,39 @@ export class ConversationsService {
     return users.filter((_, i) => ok[i]).map(({ id, name }) => ({ id, name }));
   }
 
+  /** Dos usuários informados, os que conseguiriam abrir a conversa (mesma régua da transferência). */
+  async receiversOf(tenantId: string, conv: { numberId: string; departmentId: string | null }, users: { id: string; role: Principal['role'] }[]) {
+    const ok = await Promise.all(users.map((u) => this.canReceive(tenantId, u, conv)));
+    return users.filter((_, i) => ok[i]).map((u) => u.id);
+  }
+
+  /**
+   * Redistribuição automática (docs/redistribuicao-automatica.md). Só troca se a conversa continua
+   * como foi lida — mesmo dono, mesmo status, contato ainda esperando desde o mesmo momento. Se
+   * alguém respondeu, assumiu ou transferiu no meio, não mexe (devolve false).
+   * Sem mensagem ao contato: para ele nada mudou além de alguém responder.
+   */
+  async reassignSystem(
+    tenantId: string,
+    conv: { id: string; contactId: string; assigneeId: string | null; status: ConversationStatus; awaitingSince: Date },
+    target: { id: string; name: string },
+    reason: string,
+    note: string,
+  ) {
+    const r = await this.prisma.conversation.updateMany({
+      where: { id: conv.id, tenantId, assigneeId: conv.assigneeId, status: conv.status, awaitingSince: conv.awaitingSince },
+      data: { assigneeId: target.id, status: 'in_progress' },
+    });
+    if (!r.count) return false;
+    const updated = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    await this.registrar({ tenantId, conversationId: conv.id, type: 'transferred', actorId: null, targetId: target.id, fromStatus: conv.status, toStatus: 'in_progress', reason });
+    this.gateway.emitConversation(tenantId, updated);
+    const contact = await this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { name: true, phone: true } });
+    this.gateway.emitTransferAlert(tenantId, target.id, { conversationId: conv.id, contactName: contact?.name || contact?.phone || 'Cliente', byName: 'Redistribuição automática' });
+    await this.systemNote(conv.id, note).catch((err) => this.log.warn(`nota da redistribuição não gravada (${conv.id}): ${err instanceof Error ? err.message : err}`));
+    return true;
+  }
+
   private async canReceive(tenantId: string, user: { id: string; role: Principal['role'] }, conv: { numberId: string; departmentId: string | null }) {
     const [scope, companyNumbers] = await Promise.all([this.permissions.scope(user), this.permissions.companyNumbers(tenantId)]);
     return canReceiveTransfer({ role: user.role, ...scope }, conv, companyNumbers);
@@ -1471,10 +1504,10 @@ export class ConversationsService {
   }
 
   /** Nota interna do sistema (sem autor): o robô avisando a equipe. Nunca vai ao WhatsApp. */
-  async systemNote(conversationId: string, text: string) {
+  async systemNote(conversationId: string, text: string, content?: Prisma.InputJsonValue) {
     const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId }, select: { id: true, tenantId: true } });
     const message = await this.prisma.message.create({
-      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text, internal: true },
+      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text, internal: true, ...(content !== undefined && { content }) },
       include: { author: { select: { name: true } } },
     });
     this.gateway.emitMessage(conv.tenantId, this.present(message));

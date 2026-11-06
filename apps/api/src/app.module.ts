@@ -38,6 +38,8 @@ import { KanbanModule } from './modules/kanban/kanban.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
+import { AutoReassignModule } from './modules/auto-reassign/auto-reassign.module';
+import { ClientCostsModule } from './modules/finance-reports/client-costs.module';
 import { NoticesModule } from './modules/notices/notices.module';
 import { MonitorModule } from './modules/monitor/monitor.module';
 import { IgnoredContactsModule } from './modules/ignored-contacts/ignored-contacts.module';
@@ -81,6 +83,8 @@ import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.mod
     FlowsModule,
     SchedulingModule,
     ScheduledMessagesModule,
+    AutoReassignModule,
+    ClientCostsModule,
     AiModule,
     NoticesModule,
     MonitorModule,

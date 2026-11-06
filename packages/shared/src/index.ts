@@ -5,6 +5,7 @@ export * from './plans.js';
 export * from './flows.js';
 export * from './ai.js';
 export * from './ai-agent.js';
+export * from './auto-reassign.js';
 export * from './kanban.js';
 export * from './portable.js';
 export * from './schedule.js';

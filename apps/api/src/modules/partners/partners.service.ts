@@ -71,7 +71,7 @@ export class PartnersService {
       where: { id },
       include: {
         tiers: { orderBy: { minClients: 'asc' } },
-        users: { select: { id: true, name: true, email: true, isActive: true, invitedAt: true, passwordSetAt: true, lastLoginAt: true }, orderBy: { createdAt: 'asc' } },
+        users: { select: { id: true, name: true, email: true, isActive: true, invitedAt: true, passwordSetAt: true, lastLoginAt: true, primaryUserId: true, primaryUser: { select: { email: true, lastLoginAt: true, tenant: { select: { name: true } } } } }, orderBy: { createdAt: 'asc' } },
         tenants: {
           orderBy: { createdAt: 'desc' },
           select: { id: true, name: true, isActive: true, createdAt: true, partnerAttributedAt: true, subscription: { select: { status: true, awaitingActivation: true, priceMonth: true, plan: { select: { name: true, isFree: true } } } } },
@@ -85,7 +85,16 @@ export class PartnersService {
       this.prisma.partnerEvent.findMany({ where: { partnerId: id }, orderBy: { createdAt: 'desc' }, take: 50 }),
     ]);
     return {
-      ...p, setupRate: p.setupRate === null ? null : num(p.setupRate), effectiveSetupRate: setupRate,
+      ...p,
+      // vínculo (docs/37-vogopartners.md#parceiro-que-ja-usa-o-atendo): entra pelo login que já tem
+      users: p.users.map(({ primaryUser, primaryUserId, ...u }) => ({
+        ...u,
+        email: u.email ?? primaryUser?.email ?? null,
+        linked: !!primaryUserId,
+        linkedTenant: primaryUser?.tenant?.name ?? null,
+        lastLoginAt: u.lastLoginAt ?? primaryUser?.lastLoginAt ?? null,
+      })),
+      setupRate: p.setupRate === null ? null : num(p.setupRate), effectiveSetupRate: setupRate,
       tiers: p.tiers.map((t) => ({ id: t.id, minClients: t.minClients, rate: num(t.rate) })),
       current: { ...rate, nextTier: nextTier(rate.tiers, rate.activeClients) },
       tenants: p.tenants.map((t) => ({ ...t, subscription: t.subscription && { ...t.subscription, priceMonth: t.subscription.priceMonth === null ? null : num(t.subscription.priceMonth) } })),
@@ -114,6 +123,8 @@ export class PartnersService {
 
   async create(dto: PartnerInput & { name: string; login?: { name: string; email: string } }, actor: Actor) {
     const data = this.clean(dto) as Prisma.PartnerUncheckedCreateInput;
+    // confere o login ANTES de criar: e-mail recusado não pode deixar um parceiro sem login para trás
+    if (dto.login) await this.loginTarget(dto.login.email.trim().toLowerCase());
     const p = await this.prisma.partner.create({ data: { ...data, name: dto.name.trim() } });
     await this.security.event('partner.created', actor, { partnerId: p.id, data: { name: p.name } });
     if (dto.login) await this.addLogin(p.id, dto.login, actor);
@@ -176,23 +187,49 @@ export class PartnersService {
 
   // ---------- logins do parceiro ----------
 
+  /**
+   * Quem é o dono do e-mail. Livre → null (login novo, com convite). Já usa o Atendo (ex.: dono ou
+   * gerente de uma farmácia) → a pessoa, para o parceiro virar um **vínculo** dela
+   * (docs/multiempresa.md): entra com o mesmo e-mail e senha e troca no seletor. Uma pessoa é
+   * parceira de um parceiro só.
+   */
+  private async loginTarget(email: string) {
+    const existing = await this.prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true, name: true, isActive: true, primaryUserId: true } });
+    if (!existing) return null;
+    const personId = existing.primaryUserId ?? existing.id;
+    const ja = await this.prisma.user.findFirst({ where: { role: 'partner', OR: [{ id: personId }, { primaryUserId: personId }] }, select: { partner: { select: { name: true } } } });
+    if (ja) throw new BadRequestException(`Este e-mail já é login do parceiro ${ja.partner?.name ?? '(removido)'}.`);
+    if (!existing.isActive) throw new BadRequestException('Este e-mail é de um usuário desativado. Reative-o antes de usá-lo como parceiro.');
+    return { personId, name: existing.name };
+  }
+
   async addLogin(partnerId: string, dto: { name: string; email: string }, actor: Actor) {
     const email = dto.email.trim().toLowerCase();
-    if (await this.prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } })) throw new BadRequestException('Já existe um usuário com este e-mail.');
     const p = await this.prisma.partner.findUnique({ where: { id: partnerId }, select: { name: true } });
     if (!p) throw new NotFoundException('Parceiro não encontrado');
+    const pessoa = await this.loginTarget(email);
+    if (pessoa) {
+      // já tem login no Atendo: sem convite nem senha nova — o portal aparece no seletor dela
+      const link = await this.prisma.user.create({
+        data: { tenantId: null, partnerId, primaryUserId: pessoa.personId, email: null, name: pessoa.name, role: 'partner', passwordHash: await this.auth.hashPassword(randomBytes(24).toString('base64url')) },
+        select: { id: true },
+      });
+      await this.security.event('partner.login_created', actor, { partnerId, data: { email, linked: true } });
+      return { userId: link.id, linked: true, inviteLink: null, emailSent: false };
+    }
     const user = await this.prisma.user.create({
       data: { tenantId: null, partnerId, email, name: dto.name.trim(), role: 'partner', passwordHash: await this.auth.hashPassword(randomBytes(24).toString('base64url')), invitedAt: new Date() },
       select: { id: true },
     });
     const sent = await this.auth.sendInvite(user.id, actor.name, `${p.name} (VogoPartner)`).catch(() => null);
     await this.security.event('partner.login_created', actor, { partnerId, data: { email } });
-    return { userId: user.id, inviteLink: sent ?? (await this.auth.inviteLink(user.id)).link, emailSent: !!sent };
+    return { userId: user.id, linked: false, inviteLink: sent ?? (await this.auth.inviteLink(user.id)).link, emailSent: !!sent };
   }
 
   async loginInviteLink(partnerId: string, userId: string) {
-    const u = await this.prisma.user.findFirst({ where: { id: userId, partnerId, role: 'partner' }, select: { passwordSetAt: true } });
+    const u = await this.prisma.user.findFirst({ where: { id: userId, partnerId, role: 'partner' }, select: { passwordSetAt: true, primaryUserId: true } });
     if (!u) throw new NotFoundException('Login não encontrado');
+    if (u.primaryUserId) throw new BadRequestException('Este parceiro entra com o e-mail e a senha que já usa no Atendo; não há convite.');
     if (u.passwordSetAt) throw new BadRequestException('Este login já definiu a senha.');
     return this.auth.inviteLink(userId);
   }

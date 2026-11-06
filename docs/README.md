@@ -48,6 +48,7 @@
 | [20 — Modelos de perfil](20-modelos-de-perfil.md) | Dev / Produto | Verticais (Farmácia, Clínica…): perfis, respostas e fluxos com que o cliente nasce; import/export em JSON |
 | [19 — Marcas e vertentes](19-marcas-e-vertentes.md) | Dev / Negócio | White-label: como subir uma nova vertente (ex.: clínicas) com outra logo, cores e domínio, e o que ainda é compartilhado |
 | [21 — Site (landing page)](21-site.md) | Dev / Marketing | App `apps/site`: landing pública da VogoChat em domínio próprio, seções, onde editar textos, deploy |
+| [Redistribuição automática](redistribuicao-automatica.md) | Dev / Cliente | Conversa sem resposta há X min vai para o atendente online menos ocupado; tempo cresce da base ao teto conforme a carga |
 | [Agente de IA com etapas](agente-ia.md) | Dev / Cliente | Tela Agentes de IA: persona, roteiro em etapas, ferramentas do sistema (transferir, etiquetar, ficha, encerrar), simulador e o bloco IA modo Agente |
 | [22 — Agente de IA](22-agente-ia.md) | Dev / Produto | Plano: agente que atende e negocia com ferramentas e limites, e onde mais a IA entra no produto |
 | [23 — Evolution: desempenho](23-evolution-desempenho.md) | Ops | Incidente de CPU de 16/10/2026: índices no banco da Evolution, teto do histórico, manutenção de `shared_buffers` e limite de CPU |

@@ -93,6 +93,7 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 - `invoices.remindedSoonAt` / `remindedDueAt` (migração `20270117000000_invoice_reminders`): lembretes da mensalidade já enviados naquela cobrança — ver [Lembretes da mensalidade](05-planos-e-cobranca.md#lembretes-da-mensalidade).
 - `tenant_settings.companyIsolation` (default `false`, migração `20270116000000_company_isolation`): separa também equipe, planilha de contatos e transmissões por empresa para quem é vinculado a empresas. Só o admin da conta muda. Ver [Empresas › Separar por empresa](empresas.md#separar-por-empresa).
   - **Relatórios** (`/relatorios`): sem venda, a seção "Vendas" vira "Resultados" (quantidade de cada resultado e taxa do positivo, com os nomes da empresa) e somem faturamento, ticket médio, faturamento por dia/atendente/origem, o detalhe de vendas, as colunas de faturamento do quadro "Por empresa", a métrica "Faturamento" do relatório personalizado e o atalho "Pagamentos". Os motivos do resultado negativo continuam.
+- `tenant_settings.autoReassign*` (migração `20270203000000_auto_reassign`): redistribuição automática de conversas órfãs — duas regras (`autoReassignWaiting`, `autoReassignAssigned`), tempo base/teto em minutos e limite de vezes por espera. Ver [Redistribuição automática](redistribuicao-automatica.md).
 - `tenant_settings.requireSignature` (default `false`): assinatura do atendente obrigatória. O botão de assinar do chat fica travado ligado e `ConversationsService.send` acrescenta `*Nome:*` na 1ª linha do texto que chegar sem (`signText`); template, encaminhada e Pix saem intactos.
 - `tenant_settings.requireSaleValue` (default `true`): "Comprou" exige valor; desligado, encerra sem valor (conta na conversão, sem linha em `sales`). Orçamento pago no atendimento já conta como valor.
 - `tenant_settings.requireReasonOnWon` / `requireReasonOnLost` (default `true`, migração `20261205000000_budget_sale_refund`): motivo obrigatório em cada resultado, separados — desligado, o motivo fica opcional naquele resultado (`CloseReasonsService.resolve`).
@@ -124,7 +125,13 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 **ai_usage** — ledger de IA, uma linha por chamada ao modelo (`kind`, modelo, tokens de
 entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` quando falhou).
-É o que permite saber a margem da IA e aplicar o teto de gasto. Ver [15](15-ia.md).
+É o que permite saber a margem da IA e aplicar o teto de gasto. `ownKey` = feita com a chave do
+próprio cliente (fora da cota e do teto). Ver [15](15-ia.md).
+
+**ai_credentials** — chave de IA do próprio cliente (feature `ai_own_key`), uma por tenant:
+`provider` (openai | anthropic), `credentials` criptografado `{ apiKey }`, `model` opcional,
+`keyLast4`, `lastError`/`lastErrorAt` — migração `20270202000000_ai_own_key` (também adiciona
+`ai_usage.ownKey`). Ver [15](15-ia.md#chave-própria-do-cliente).
 
 **usage_counters** — agregado mensal reconciliado (`tenantId + period` únicos).
 
@@ -251,4 +258,4 @@ seus; não há cadastro de campos da empresa. Ver [Campos personalizados](campos
 
 **meta_cost_daily** — gasto real com a Meta por número, dia, categoria e tipo (lido do `pricing_analytics` da WABA, na moeda dela); `tenants.metaBudgetMonth` = orçamento mensal do cliente. Ver [Gasto com a Meta](gasto-meta.md).
 
-**tickets / ticket_participants / ticket_events / ticket_hold_reasons** — tickets internos entre setores: número por empresa, setor, prioridade, prazo, espera (motivo, observação, retomar em), responsável + participantes, linha do tempo e motivos de espera cadastráveis. Ver [Tickets internos](tickets.md).
+**tickets / ticket_participants / ticket_events / ticket_hold_reasons** — tickets internos entre setores: número por empresa, setor, prioridade, prazo, espera (motivo, observação, retomar em), responsável + participantes, linha do tempo e motivos de espera cadastráveis. Aberto de uma conversa: `tickets.conversationId`, `messageId` (a mensagem de origem, sem FK) e `context` (JSON com o retrato das últimas mensagens; migration `20270204000000_ticket_from_conversation`). Ver [Tickets internos](tickets.md#aberto-de-uma-conversa).

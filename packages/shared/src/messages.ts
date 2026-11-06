@@ -128,7 +128,9 @@ export type MessageContent =
   | { kind: 'buttons'; header?: string; footer?: string; buttons: ContentButton[] }
   | { kind: 'list'; header?: string; footer?: string; buttonText?: string; sections: { title?: string; rows: ContentListRow[] }[] }
   | { kind: 'location'; lat: number; lng: number; name?: string; address?: string; live?: boolean }
-  | { kind: 'contacts'; contacts: ContentContact[] };
+  | { kind: 'contacts'; contacts: ContentContact[] }
+  /** marco na conversa (nota interna): um ticket nasceu daqui ou mudou de situação (docs/tickets.md) */
+  | { kind: 'ticket'; ticketId: string; number: number; event: 'opened' | 'status'; status?: string; fromMessageId?: string | null };
 
 /** Rótulo em português de cada tipo, para prévia/citação de mensagem sem texto. Nunca "unknown". */
 export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {

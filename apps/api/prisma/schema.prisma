@@ -70,6 +70,7 @@ model Tenant {
   scheduleOverrides ScheduleOverride[]
   shiftExceptions   ShiftException[]
   aiAgents          AiAgent[]
+  aiCredential      AiCredential?
   scheduleAccessRequests ScheduleAccessRequest[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
@@ -642,6 +643,17 @@ model TenantSettings {
   closeMessageEnabled Boolean @default(false)
   /// texto do aviso de encerramento, com {{atendente}}; null = o padrão
   closeMessageText String?
+  // ---- redistribuição automática de conversas órfãs (docs/redistribuicao-automatica.md) ----
+  /// na fila (Aguardando) sem dono e o contato sem resposta há X min → vai para alguém online
+  autoReassignWaiting  Boolean @default(false)
+  /// com atendente, mas o contato sem resposta há X min → passa para outra pessoa online
+  autoReassignAssigned Boolean @default(false)
+  /// tempo com demanda normal (até 1 contato esperando por atendente online)
+  autoReassignBaseMinutes Int @default(15)
+  /// teto: na alta demanda o tempo cresce até aqui, nunca além
+  autoReassignMaxMinutes  Int @default(30)
+  /// quantas vezes a MESMA espera pode ser redistribuída (evita a conversa rodar a equipe inteira)
+  autoReassignMaxTimes    Int @default(2)
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2111,6 +2123,29 @@ model AiAgent {
 
 /// Ledger append-only de IA: uma linha por chamada ao modelo. Fonte da verdade da margem
 /// e do teto de gasto — sem isto não dá para saber se a IA está dando lucro ou prejuízo.
+/// Chave de IA do próprio cliente (feature `ai_own_key`, docs/15-ia.md#chave-própria-do-cliente).
+/// Com ela gravada e o plano incluindo, toda chamada de IA do tenant usa esta chave.
+model AiCredential {
+  id          String    @id @default(uuid())
+  tenantId    String    @unique
+  /// openai | anthropic (sempre o endpoint oficial)
+  provider    String
+  /// `{ apiKey }` via CryptoService.encryptJson — nunca em claro
+  credentials String
+  /// vazio = o modelo padrão do fornecedor (AI_KEY_PROVIDERS)
+  model       String?
+  keyLast4    String
+  lastError   String?
+  lastErrorAt DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("ai_credentials")
+}
+
 model AiUsage {
   id             String     @id @default(uuid())
   tenantId       String
@@ -2128,6 +2163,9 @@ model AiUsage {
   latencyMs      Int?
   /// preenchido quando a chamada falhou (a linha fica, para diagnóstico)
   error          String?
+  /// feita com a chave do próprio cliente (`ai_credentials`): fora da cota, do teto e do
+  /// orçamento da plataforma; o custo fica só como referência (quem paga é o cliente)
+  ownKey         Boolean    @default(false)
   occurredAt     DateTime   @default(now())
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -3046,6 +3084,12 @@ model Ticket {
   departmentId   String?
   /// aberto a partir de um atendimento
   conversationId String?
+  /// mensagem da conversa de onde o ticket nasceu (o "momento"). Sem FK: limpar o histórico
+  /// apaga a mensagem, e o ticket continua com o retrato em `context`
+  messageId      String?
+  /// Retrato das últimas mensagens até o momento da abertura (TicketContextMessage[] do shared):
+  /// o contexto não se perde se a conversa for apagada, limpa ou for de um setor que o outro não vê
+  context        Json?
   createdById    String?
   dueAt          DateTime?
   /// em espera: motivo, observação e quando retomar

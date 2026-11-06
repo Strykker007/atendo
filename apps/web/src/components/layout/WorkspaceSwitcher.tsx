@@ -8,7 +8,9 @@ import { api, impersonation, setAccessToken } from '@/lib/api';
 import { toast } from '@/components/ui/Toast';
 import { useImpersonate, useMemberships, useTenants, type Membership } from '@/lib/hooks';
 
-const PAPEL: Record<Membership['role'], string> = { super_admin: 'Dono do sistema', tenant_admin: 'Administrador', manager: 'Gerente', agent: 'Atendente' };
+const PAPEL: Record<Membership['role'], string> = { super_admin: 'Dono do sistema', tenant_admin: 'Administrador', manager: 'Gerente', agent: 'Atendente', partner: 'VogoPartner' };
+/** nome no seletor: a empresa, o parceiro (portal) ou o dono do sistema */
+const nomeDe = (m: Membership) => m.tenantName ?? m.partnerName ?? 'Dono do sistema';
 const RECENT_KEY = 'atendo-recent-tenants';
 const MAX_RECENT = 5;
 const MAX_TODOS = 60;
@@ -59,8 +61,8 @@ export function WorkspaceSwitcher({ collapsed, owner }: { collapsed: boolean; ow
     const t = normal(q.trim());
     const bate = (s: string) => !t || normal(s).includes(t);
     const meus = minhas
-      .filter((m) => bate(m.tenantName ?? 'Dono do sistema'))
-      .map<Item>((m) => ({ kind: 'membro', key: `m:${m.userId}`, label: m.tenantName ?? 'Dono do sistema', hint: m.systemOwner && m.tenantId ? `${PAPEL[m.role]} · dono` : PAPEL[m.role], m }));
+      .filter((m) => bate(nomeDe(m)))
+      .map<Item>((m) => ({ kind: 'membro', key: `m:${m.userId}`, label: nomeDe(m), hint: m.systemOwner && m.tenantId ? `${PAPEL[m.role]} · dono` : PAPEL[m.role], m }));
     if (!owner) return [{ titulo: 'Minhas empresas', itens: meus }];
     const minhasIds = new Set(minhas.map((m) => m.tenantId));
     const todos = (tenants.data ?? []).filter((x) => !minhasIds.has(x.id));
@@ -91,7 +93,7 @@ export function WorkspaceSwitcher({ collapsed, owner }: { collapsed: boolean; ow
         setAccessToken(r.accessToken);
         qc.clear();
         setOpen(false);
-        router.replace(it.m.tenantId ? '/conversas' : '/admin');
+        router.replace(it.m.tenantId ? '/conversas' : it.m.role === 'partner' ? '/parceiro' : '/admin');
         return;
       }
       if (vendo?.tenantId === it.tenantId) { setOpen(false); return; }
@@ -112,7 +114,7 @@ export function WorkspaceSwitcher({ collapsed, owner }: { collapsed: boolean; ow
     else if (e.key === 'Escape') setOpen(false);
   }
 
-  const rotulo = vendo ? vendo.name : atual?.tenantName ?? 'Dono do sistema';
+  const rotulo = vendo ? vendo.name : atual ? nomeDe(atual) : 'Dono do sistema';
   const icone = vendo ? <Eye size={14} /> : atual?.tenantId ? <Building2 size={14} /> : <KeyRound size={14} />;
   let i = -1;
 

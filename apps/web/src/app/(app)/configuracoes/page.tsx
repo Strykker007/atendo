@@ -18,10 +18,12 @@ import { ClosingSection } from '@/components/settings/ClosingSection';
 import { SignatureSection } from '@/components/settings/SignatureSection';
 import { BudgetQuoteSection } from '@/components/settings/BudgetQuoteSection';
 import { TransferSection } from '@/components/settings/TransferSection';
+import { AutoReassignSection } from '@/components/settings/AutoReassignSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
+import { AiOwnKeySection } from '@/components/settings/AiOwnKeySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
 import Link from 'next/link';
-import { BellOff, CalendarClock, MessagesSquare, Smartphone, Mail } from 'lucide-react';
+import { BellOff, CalendarClock, MessagesSquare, Smartphone, Mail, CreditCard } from 'lucide-react';
 import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe, useHasFeature, useDailyEmail, useSetDailyEmail, usePreviewDailyEmail } from '@/lib/hooks';
 
 type Aba = 'conta' | 'empresa' | 'atendimento';
@@ -51,8 +53,11 @@ export default function ConfiguracoesPage() {
   const podeVariaveis = useCan('variables.manage');
   // ler as conversas do chat interno da equipe (docs/chat-interno.md)
   const podeAuditar = useCan('internal_chat.audit');
+  // chave de IA própria: é conta e pagamento com o fornecedor (docs/15-ia.md#chave-própria-do-cliente)
+  const podeCobranca = useCan('billing.manage');
 
-  const temEmpresa = !isOwner && (podeNumeros || podeConfigurar || podeEquipe || podeVariaveis || podeAuditar);
+  const verPlano = !isOwner && podeCobranca;
+  const temEmpresa = !isOwner && (podeNumeros || podeConfigurar || podeEquipe || podeVariaveis || podeAuditar || podeCobranca);
   const temAtendimento = !isOwner && podeConfigurar;
   const visiveis = ABAS.filter((a) => a.id === 'conta' || (a.id === 'empresa' && temEmpresa) || (a.id === 'atendimento' && temAtendimento));
 
@@ -69,14 +74,20 @@ export default function ConfiguracoesPage() {
     <PageShell width="max-w-4xl">
       <PageHeader title="Configurações" subtitle={ABAS.find((a) => a.id === atual)?.desc} />
 
-      {visiveis.length > 1 && (
-        <div role="tablist" aria-label="Seções das configurações" className="sticky top-0 z-10 -mt-1 mb-4 flex gap-1 rounded-xl border border-line bg-panel p-1">
+      {(visiveis.length > 1 || verPlano) && (
+        <div role="tablist" aria-label="Seções das configurações" className="sticky top-0 z-10 -mt-1 mb-4 flex gap-1 rounded-xl border border-line bg-panel p-1 overflow-x-auto">
           {visiveis.map((a) => (
             <button key={a.id} role="tab" aria-selected={atual === a.id} onClick={() => escolher(a.id)}
-              className={cn('flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors', atual === a.id ? 'bg-accent-soft text-accent-ink' : 'text-muted hover:text-ink hover:bg-field')}>
+              className={cn('flex-1 shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors', atual === a.id ? 'bg-accent-soft text-accent-ink' : 'text-muted hover:text-ink hover:bg-field')}>
               {a.icon}{a.label}
             </button>
           ))}
+          {/* Plano e uso saiu do menu lateral e mora aqui (docs/08-frontend.md#menu-lateral) */}
+          {verPlano && (
+            <Link href="/plano" className="flex-1 shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium text-muted hover:text-ink hover:bg-field">
+              <CreditCard size={15} />Plano e uso
+            </Link>
+          )}
         </div>
       )}
 
@@ -100,6 +111,7 @@ export default function ConfiguracoesPage() {
             )}
             {podeVariaveis && <GlobalVariablesSection />}
             {podeConfigurar && <PixGatewaySection />}
+            {podeCobranca && <AiOwnKeySection />}
             {podeConfigurar && <PublicPagesSection />}
             {podeAuditar && (
               <LinkSection href="/configuracoes/chat-interno" icon={<MessagesSquare size={20} />} title="Auditoria do chat interno" text="Leia qualquer conversa do chat interno da equipe. O histórico é permanente: ninguém apaga nem edita mensagens." action="Abrir auditoria" />
@@ -115,6 +127,7 @@ export default function ConfiguracoesPage() {
             <SignatureSection />
             <BudgetQuoteSection />
             <TransferSection />
+            <AutoReassignSection />
             <ClosingSection />
             <LinkSection href="/configuracoes/contatos-isentos" icon={<BellOff size={20} />} title="Contatos isentos de ticket" text="Números que nunca abrem atendimento (diretoria, fornecedores): ficam na aba Livres e fora dos relatórios." action="Gerenciar lista" />
             <DefaultFlowsSection />

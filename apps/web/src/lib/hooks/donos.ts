@@ -32,6 +32,6 @@ export const useUnlinkOwner = () =>
   useOwnersMutation(({ id, userId }: { id: string; userId: string }) => api<SystemOwner>(`/super-admin/owners/${id}/link/${userId}`, { method: 'DELETE' }));
 
 // ---- Minhas empresas (docs/multiempresa.md) ----
-export interface Membership { userId: string; tenantId: string | null; tenantName: string | null; role: OwnerRole; systemOwner: boolean; current: boolean }
+export interface Membership { userId: string; tenantId: string | null; tenantName: string | null; /** linha de VogoPartner: o portal do parceiro */ partnerName?: string | null; role: OwnerRole | 'partner'; systemOwner: boolean; current: boolean }
 export const useMemberships = () => useQuery({ queryKey: ['memberships'], queryFn: () => api<Membership[]>('/auth/memberships'), staleTime: 60_000 });
 export const useRemoveOwner = () => useOwnersMutation((id: string) => api<{ ok: true }>(`/super-admin/owners/${id}`, { method: 'DELETE' }));
