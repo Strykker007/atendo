@@ -35,6 +35,11 @@ export interface SettingsUpdate {
   departmentTransferMessageText?: string | null;
   closeMessageEnabled?: boolean;
   closeMessageText?: string | null;
+  autoReassignWaiting?: boolean;
+  autoReassignAssigned?: boolean;
+  autoReassignBaseMinutes?: number;
+  autoReassignMaxMinutes?: number;
+  autoReassignMaxTimes?: number;
 }
 
 export const OUTCOME_LABELS_DEFAULT = { won: 'Comprou', lost: 'Não comprou' } as const;
@@ -64,6 +69,13 @@ export class TenantSettingsService {
       ...(departmentTransferMessageText !== undefined && { departmentTransferMessageText: departmentTransferMessageText?.trim() || null }),
       ...(closeMessageText !== undefined && { closeMessageText: closeMessageText?.trim() || null }),
     };
+    // teto abaixo da base não faz sentido (encurtaria o tempo na alta demanda): sobe para a base
+    if (dto.autoReassignBaseMinutes !== undefined || dto.autoReassignMaxMinutes !== undefined) {
+      const cur = await this.get(tenantId);
+      const base = dto.autoReassignBaseMinutes ?? cur.autoReassignBaseMinutes;
+      const max = dto.autoReassignMaxMinutes ?? cur.autoReassignMaxMinutes;
+      if (max < base) data.autoReassignMaxMinutes = base;
+    }
     if (dto.attendanceActive !== undefined) {
       // cada vez que liga/desliga é um período novo da faixa Fechado (a resposta sai de novo)
       const cur = await this.get(tenantId);

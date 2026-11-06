@@ -1,5 +1,6 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { env } from '../../config/env';
+import type { AiKeyProvider } from '@atendo/shared';
 import type { AiProvider } from './ai.types';
 import { isLocalEndpoint } from './providers/base-url';
 import { AnthropicProvider } from './providers/anthropic.provider';
@@ -24,5 +25,10 @@ export class AiProviderRegistry {
   get(): AiProvider {
     if (!this.configured) throw new ServiceUnavailableException('IA não configurada neste ambiente (AI_PROVIDER/AI_API_KEY).');
     return env.AI_PROVIDER === 'openai' ? this.openai : this.anthropic;
+  }
+
+  /** Adapter de um fornecedor específico — chave própria do cliente, independente de `AI_PROVIDER`. */
+  of(kind: AiKeyProvider): AiProvider {
+    return kind === 'openai' ? this.openai : this.anthropic;
   }
 }

@@ -1,6 +1,6 @@
 # 22 — Agente de IA (plano)
 
-> Status: **plano**, nada disto está implementado. O que já existe está em [15 — IA](15-ia.md).
+> Status: **fase 1 implementada** em [Agente de IA com etapas](agente-ia.md) — agente com persona, roteiro em etapas e as ferramentas transferir, chamar atendente, etiquetar, salvar dado do contato e encerrar, no bloco IA (modo Agente). Agenda, orçamento, lembrete e política comercial abaixo continuam como plano. O que já existia está em [15 — IA](15-ia.md).
 
 Hoje a IA no fluxo **responde** (com base de conhecimento) ou **classifica**. Ela não *faz*
 nada: não consulta agenda, não gera orçamento, não transfere. O agente é o passo seguinte. O

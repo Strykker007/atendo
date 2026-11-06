@@ -83,23 +83,32 @@ src/
 Regra: **item que a pessoa não pode usar não aparece** (`components/layout/Sidebar.tsx`). Cada item espelha o que a API exige na tela dele:
 
 - `need`: permissões do perfil de acesso — basta uma da lista;
-- `feature`: recurso do plano (`@RequireFeature`) — sem ele o item some até para o admin.
+- `feature`: recurso do plano (`@RequireFeature`) — sem ele o item some até para o admin;
+- `tabs`: telas parecidas que **dividem um item** (`SECTION_TABS` em `components/layout/SectionTabs.tsx`).
+  Cada tela mostra a barra de abas no topo (`<SectionTabs section="…" />`); cada aba tem o próprio
+  `need`/`feature`. O item aparece se alguma aba for permitida e leva à primeira; com uma aba só, a
+  barra some.
 
-| Item | Permissão | Recurso do plano |
-|---|---|---|
-| Conversas, Kanban, Respostas, Configurações | — | — |
-| Agenda | `agenda.manage` | `scheduling` |
-| Fluxos | `flows.manage` (disparar um fluxo na conversa não depende do item) | `flows` |
-| Mensagens agendadas | `conversations.schedule_message` **ou** `conversations.view_all` | — |
-| Tags | `tags.manage` | — |
-| Contatos | `contacts.import_export` | — |
-| Transmissões | `campaigns.manage` | `campaigns` |
-| Pesquisas | `settings.manage` | `satisfaction_surveys` |
-| Relatórios | `reports.view` | — |
-| Equipe | `team.manage` | — |
-| Escalas e plantões | `team.manage` **ou** `settings.manage` — abre na 1ª aba permitida | — |
-| Plano e uso | `billing.manage` | — |
+Os itens ficam em **grupos que abrem e fecham**, com recuo sob o título. A escolha fica salva no navegador (`useUI.closedNavGroups`, no `persist` do zustand): recarregar a página mantém. Por padrão todos começam abertos.
+Todo grupo fecha, inclusive o da tela aberta (o título dele fica destacado enquanto fechado). Grupo fechado mostra a soma dos contadores (ex.: conversas
+aguardando) no título. Menu recolhido (só ícones): todos os itens, com uma linha entre os grupos.
 
+| Grupo | Item | Abas | Permissão | Recurso do plano |
+|---|---|---|---|---|
+| Atendimento | Conversas, Kanban | — | — | — |
+| | Tickets | — | `tickets.*` (qualquer uma) | `tickets` |
+| | Agenda | — | `agenda.manage` | `scheduling` |
+| | Mensagens agendadas | — | `conversations.schedule_message` **ou** `conversations.view_all` | — |
+| | Contatos | Contatos · Tags | Tags: `tags.manage` | — |
+| Automação | Fluxos | Fluxos · Agentes de IA | `flows.manage` nas duas (disparar fluxo na conversa não depende do item) | `flows` · `ai_flows` |
+| | Respostas | — | — | — |
+| | Transmissões | — | `campaigns.manage` | `campaigns` |
+| Gestão | Relatórios | Relatórios · Pesquisas de satisfação | `reports.view` · `settings.manage` | — · `satisfaction_surveys` |
+| | Equipe | — | `team.manage` | — |
+| | Escalas e plantões | abas próprias (`EscalasTabs`) | `team.manage` **ou** `settings.manage` — abre na 1ª aba permitida | — |
+| Conta | Configurações | Plano e uso entra como aba na barra de Configurações (link para `/plano`) | Plano: `billing.manage` | — |
+
+Dono do sistema ganha o grupo "Dono do sistema" antes de Conta (Conta é sempre o último); parceiro (VogoPartner) vê só o portal dele.
 Enquanto o plano carrega, os itens com `feature` aparecem (sumir e voltar pisca o menu). Item novo no menu entra nesta tabela.
 
 ## Feedback de carregamento

@@ -82,7 +82,18 @@ Perdeu o celular: outro dono não consegue desativar o seu autenticador; use a c
 
 ## Portal do parceiro
 
-Login com `role = partner` (convite por e-mail criado na ficha do parceiro). Menu: **Painel** (clientes ativos, faixa e quanto falta para a próxima, previsão do mês, instalações da semana, a receber, recebido), **Meus clientes** (novo cliente, *Configurar* = entrar no cliente, *Ativação*) e **Extrato**. Parceiro suspenso/encerrado não entra (login e refresh recusam) e o "entrar" no cliente é recusado.
+Login com `role = partner` (convite por e-mail criado na ficha do parceiro).
+
+### Parceiro que já usa o Atendo
+
+O parceiro pode ser, por exemplo, dono ou gerente de uma farmácia cliente. Se o e-mail de login já é de alguém do Atendo, o sistema não recusa: cria o login de parceiro como **vínculo** dessa pessoa (`users.primaryUserId`, sem e-mail nem senha, ver [Uma pessoa em várias empresas](multiempresa.md)).
+
+- Ela entra com o e-mail e a senha que já usa e troca para o portal no **seletor** (Ctrl+K), que também aparece no portal para voltar à farmácia. Não há convite.
+- Na ficha do parceiro, o login aparece como "entra pelo login que já usa (Farmácia X)".
+- Uma pessoa é login de **um** parceiro só; e-mail de usuário desativado é recusado.
+- O e-mail é conferido **antes** de criar o parceiro: e-mail recusado não deixa parceiro sem login para trás.
+
+ Menu: **Painel** (clientes ativos, faixa e quanto falta para a próxima, previsão do mês, instalações da semana, a receber, recebido), **Meus clientes** (novo cliente, *Configurar* = entrar no cliente, *Ativação*) e **Extrato**. Parceiro suspenso/encerrado não entra (login e refresh recusam) e o "entrar" no cliente é recusado.
 
 ## API
 

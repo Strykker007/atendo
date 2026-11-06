@@ -6,9 +6,10 @@ import { AppLogger } from '../../common/observability/app-logger';
 import { UsageService } from '../billing/usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
 import { AiUsageService } from './ai-usage.service';
+import { AiOwnKeyService } from './ai-own-key';
 import { decideCanUseAi, platformBudgetStatus } from './ai-quota';
 import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, suggestSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from './prompts';
-import type { AiMessage } from './ai.types';
+import type { AiMessage, AiProvider } from './ai.types';
 import { env } from '../../config/env';
 
 @Injectable()
@@ -20,10 +21,12 @@ export class AiService {
     private readonly registry: AiProviderRegistry,
     private readonly aiUsage: AiUsageService,
     private readonly usage: UsageService,
+    private readonly ownKeys: AiOwnKeyService,
   ) {}
 
-  get available() {
-    return this.registry.configured;
+  /** IA utilizável por este tenant: a da plataforma ou a chave própria dele. */
+  async available(tenantId: string) {
+    return this.registry.configured || !!(await this.ownKeys.resolve(tenantId));
   }
 
   /** Feature do plano — o guard cobre os endpoints; o motor de fluxos chama isto na mão. */
@@ -49,18 +52,32 @@ export class AiService {
     userId?: string;
   }): Promise<string> {
     if (!input.messages.length) throw new BadRequestException('Não há mensagens suficientes para a IA trabalhar.');
-    const provider = this.registry.get();
 
-    const [plan, used, platformSpent] = await Promise.all([this.usage.limits(input.tenantId), this.aiUsage.current(input.tenantId), this.aiUsage.platformCost()]);
-    // orçamento da plataforma antes da quota do tenant: protege o crédito da conta do fornecedor
-    if (platformBudgetStatus(platformSpent, env.AI_PLATFORM_BUDGET_BRL).blocked) {
-      throw new ServiceUnavailableException('IA temporariamente indisponível. Tente novamente mais tarde.');
+    const plan = await this.usage.limits(input.tenantId);
+    // chave do próprio cliente (ai_own_key): roda na conta dele — fora da cota, do teto e do
+    // orçamento da plataforma; só a assinatura precisa estar ativa
+    const own = await this.ownKeys.resolve(input.tenantId, plan?.limits.features ?? []);
+    let provider: AiProvider;
+    let model: string;
+    if (own) {
+      if (!plan) throw new ForbiddenException('Sem assinatura ativa');
+      if (plan.status === 'suspended' || plan.status === 'canceled') throw new ForbiddenException('Assinatura suspensa');
+      provider = this.registry.of(own.provider);
+      model = own.model;
+    } else {
+      provider = this.registry.get();
+      const [used, platformSpent] = await Promise.all([this.aiUsage.current(input.tenantId), this.aiUsage.platformCost()]);
+      // orçamento da plataforma antes da quota do tenant: protege o crédito da conta do fornecedor
+      if (platformBudgetStatus(platformSpent, env.AI_PLATFORM_BUDGET_BRL).blocked) {
+        throw new ServiceUnavailableException('IA temporariamente indisponível. Tente novamente mais tarde.');
+      }
+      const decision = decideCanUseAi(plan, used);
+      if (!decision.ok) throw new ForbiddenException(decision.reason);
+      model = env.AI_MODEL || provider.defaultModel;
     }
-    const decision = decideCanUseAi(plan, used);
-    if (!decision.ok) throw new ForbiddenException(decision.reason);
 
     const started = Date.now();
-    const model = env.AI_MODEL || provider.defaultModel;
+    const base = { tenantId: input.tenantId, kind: input.kind, provider: provider.kind, conversationId: input.conversationId, userId: input.userId, ownKey: !!own };
     try {
       const out = await provider.complete({
         system: input.system,
@@ -68,27 +85,19 @@ export class AiService {
         maxTokens: input.maxTokens ?? env.AI_MAX_TOKENS,
         temperature: input.temperature,
         timeoutMs: env.AI_TIMEOUT_MS,
+        ...(own && { apiKey: own.apiKey, model }),
       });
-      await this.aiUsage.record({
-        tenantId: input.tenantId,
-        kind: input.kind,
-        provider: provider.kind,
-        model: out.model,
-        tokensIn: out.tokensIn,
-        tokensOut: out.tokensOut,
-        conversationId: input.conversationId,
-        userId: input.userId,
-        latencyMs: Date.now() - started,
-      });
+      await this.aiUsage.record({ ...base, model: out.model, tokensIn: out.tokensIn, tokensOut: out.tokensOut, latencyMs: Date.now() - started });
+      if (own?.hadError) await this.ownKeys.markError(input.tenantId, null);
       if (!out.text) throw new BadRequestException('A IA não devolveu resposta.');
       return out.text;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       // registra a falha (sem custo) para aparecer no diagnóstico em vez de sumir
-      await this.aiUsage
-        .record({ tenantId: input.tenantId, kind: input.kind, provider: provider.kind, model, tokensIn: 0, tokensOut: 0, conversationId: input.conversationId, userId: input.userId, latencyMs: Date.now() - started, error: reason.slice(0, 300) })
-        .catch(() => undefined);
-      this.log.warn(`IA (${input.kind}) falhou: ${reason}`, { kind: input.kind });
+      await this.aiUsage.record({ ...base, model, tokensIn: 0, tokensOut: 0, latencyMs: Date.now() - started, error: reason.slice(0, 300) }).catch(() => undefined);
+      // chave revogada / sem crédito na conta do cliente: a tela de configuração mostra o motivo
+      if (own) await this.ownKeys.markError(input.tenantId, reason);
+      this.log.warn(`IA (${input.kind}${own ? ', chave própria' : ''}) falhou: ${reason}`, { kind: input.kind });
       throw err;
     }
   }

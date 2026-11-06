@@ -71,6 +71,12 @@ class SettingsDto {
   /** aviso ao cliente quando o atendente encerra; texto vazio/null = o padrão (close-message.ts) */
   @IsOptional() @IsBoolean() closeMessageEnabled?: boolean;
   @IsOptional() @IsString() @MaxLength(500) closeMessageText?: string | null;
+  /** redistribuição automática (docs/redistribuicao-automatica.md) */
+  @IsOptional() @IsBoolean() autoReassignWaiting?: boolean;
+  @IsOptional() @IsBoolean() autoReassignAssigned?: boolean;
+  @IsOptional() @IsInt() @Min(1) @Max(240) autoReassignBaseMinutes?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(480) autoReassignMaxMinutes?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(10) autoReassignMaxTimes?: number;
 }
 class ScheduleDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(60) name?: string;

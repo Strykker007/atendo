@@ -33,7 +33,7 @@
 | [Relatório diário por e-mail](relatorio-diario.md) | Produto / Dev | Resumo do dia anterior + ranking da equipe às 7h para quem marcar; funcionalidade de plano `daily_report` |
 | [Relatórios sem pico](relatorios-desempenho.md) | Dev / Ops | Limite de consultas simultâneas, cache curto, teto de período e regras para relatório novo |
 | [Pesquisa de satisfação](pesquisa-de-satisfacao.md) | Dev / Cliente | CSAT/NPS no encerramento: escalas, recusa sem insistência, interceptação da resposta, relatório por consultor |
-| [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão e contas temporárias que expiram sozinhas |
+| [Escalas e acessos temporários](escalas.md) | Dev / Cliente | Escalas 12x36/44h/custom, login bloqueado fora do turno, liberação de plantão, contas temporárias que expiram sozinhas e calendário mensal/semanal com folga, turno extra e troca |
 | [Registro de acessos](registro-de-acessos.md) | Dev / Cliente | Auditoria de login: quem esteve logado em cada dia, calendário por pessoa, tentativas barradas pela escala |
 | [Horários e boas-vindas](horarios.md) | Dev / Cliente | Quadro de horários, faixas, estabelecimento fechado, boas-vindas e integração com fluxos |
 | [Ligações](ligacoes.md) | Dev / Cliente | Aviso de ligação no WhatsApp (quem liga e para qual número), ligação perdida, por que não dá para atender no painel |
@@ -48,6 +48,8 @@
 | [20 — Modelos de perfil](20-modelos-de-perfil.md) | Dev / Produto | Verticais (Farmácia, Clínica…): perfis, respostas e fluxos com que o cliente nasce; import/export em JSON |
 | [19 — Marcas e vertentes](19-marcas-e-vertentes.md) | Dev / Negócio | White-label: como subir uma nova vertente (ex.: clínicas) com outra logo, cores e domínio, e o que ainda é compartilhado |
 | [21 — Site (landing page)](21-site.md) | Dev / Marketing | App `apps/site`: landing pública da VogoChat em domínio próprio, seções, onde editar textos, deploy |
+| [Redistribuição automática](redistribuicao-automatica.md) | Dev / Cliente | Conversa sem resposta há X min vai para o atendente online menos ocupado; tempo cresce da base ao teto conforme a carga |
+| [Agente de IA com etapas](agente-ia.md) | Dev / Cliente | Tela Agentes de IA: persona, roteiro em etapas, ferramentas do sistema (transferir, etiquetar, ficha, encerrar), simulador e o bloco IA modo Agente |
 | [22 — Agente de IA](22-agente-ia.md) | Dev / Produto | Plano: agente que atende e negocia com ferramentas e limites, e onde mais a IA entra no produto |
 | [23 — Evolution: desempenho](23-evolution-desempenho.md) | Ops | Incidente de CPU de 16/10/2026: índices no banco da Evolution, teto do histórico, manutenção de `shared_buffers` e limite de CPU |
 | [24 — Auditoria da Evolution](24-auditoria-evolution.md) | Dev / Ops / Negócio | Banimentos, desconexões e webhooks travando: causas confirmadas no código da Evolution 2.3.7, correções priorizadas e alternativas (base segue no QR; Cloud API só por cliente) |

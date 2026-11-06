@@ -302,7 +302,7 @@ function BillingModal({ company, billing, groupPlan, onClose }: { company: Billi
                 </select>
               </Field>
               <Field label="Valor mensal contratado" hint="Vazio = o preço do plano.">
-                <MoneyInput className={inputCls} value={f.priceMonth} onChange={(v) => setF({ ...f, priceMonth: v })} nullable placeholder="do plano" />
+                <MoneyInput value={f.priceMonth} onChange={(v) => setF({ ...f, priceMonth: v })} nullable placeholder="do plano" />
               </Field>
             </div>
             <div className="grid sm:grid-cols-2 gap-3">

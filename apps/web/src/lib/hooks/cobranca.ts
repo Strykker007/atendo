@@ -255,3 +255,19 @@ export const useClosingWrite = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: ({ path, method = 'POST', body }: { path: string; method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown }) => api<unknown>(`/billing/closing/${path}`, { method, ...(body !== undefined && { body: JSON.stringify(body) }) }), onSuccess: fechamentoMudou(qc) });
 };
+
+// ---- custo e margem por cliente (docs/36-fechamento-financeiro.md#custo-por-cliente) ----
+export interface ClientCostRow {
+  tenantId: string; name: string; isActive: boolean; plan: string | null; status: string | null; partner: string | null;
+  numbers: number; messagesSent: number; contracted: number; received: number;
+  infra: number; ai: number; commission: number; taxes: number; fees: number; planCost: number;
+  cost: number; margin: number; marginPct: number | null; metaInfo: number;
+  commissionEstimated: boolean; infraManual: boolean;
+}
+export interface ClientCostsReport {
+  period: string;
+  rows: ClientCostRow[];
+  totals: Record<'received' | 'infra' | 'ai' | 'commission' | 'taxes' | 'fees' | 'planCost' | 'cost' | 'margin' | 'metaInfo', number>;
+  pools: { infra: number; infraPerNumber: number; taxes: number; fees: number; otherIncome: number; generalExpenses: number };
+}
+export const useClientCosts = (period: string) => useQuery({ queryKey: ['client-costs', period], queryFn: () => api<ClientCostsReport>(`/billing/client-costs?period=${period}`) });

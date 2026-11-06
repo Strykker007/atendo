@@ -84,4 +84,12 @@ describe('custo por endpoint', () => {
     restore = m.restore;
     expect(m.costOf('llama-3.3-70b', 10_000, 10_000)).toBe(0);
   });
+
+  it('chave própria do cliente usa o preço de tabela, ignorando endpoint local e preço do ambiente', async () => {
+    const m = await withEnv({ AI_BASE_URL: 'http://localhost:11434/v1', AI_PRICE_IN_PER_1K: '0', AI_PRICE_OUT_PER_1K: '0' });
+    restore = m.restore;
+    const { aiCostUsd } = await import('@atendo/shared');
+    expect(m.costOf('gpt-4o-mini', 1000, 1000, true)).toBe(aiCostUsd('gpt-4o-mini', 1000, 1000));
+    expect(m.costOf('gpt-4o-mini', 1000, 1000, true)).toBeGreaterThan(0);
+  });
 });

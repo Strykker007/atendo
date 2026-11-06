@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { useCan, useDebounced, useContactsList, useImportContacts, downloadContactsCsv, type ContactImportBody, type ContactImportReport, type ContactRow } from '@/lib/hooks';
 import { readXlsx } from '@/lib/xlsx-read';
+import { SectionTabs } from '@/components/layout/SectionTabs';
 
 /** mesmo teto da API (IMPORT_MAX_ROWS) — avisa antes de mandar */
 const MAX_ROWS = 5_000;
@@ -30,6 +31,7 @@ export default function ContatosPage() {
   return (
     <PageShell width="max-w-4xl">
       <PageHeader title="Contatos" subtitle="Encontre alguém e fale com ele: abra a conversa, inicie uma nova ou atualize a ficha." />
+      <SectionTabs section="contatos" label="Contatos e tags" />
       <ListaDeContatos />
       {podePlanilha && (
         <section className="space-y-3">

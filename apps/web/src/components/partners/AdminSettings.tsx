@@ -48,15 +48,15 @@ export function AdminSettings() {
       <section className={cn(cardCls, 'p-5 space-y-4')}>
         <h3 className="font-semibold">Instalação e pagamento</h3>
         <div className="grid sm:grid-cols-3 gap-3">
-          <Field label="% padrão da instalação"><input type="number" min={0} max={100} step={0.5} className={inputCls} value={f.setupRate} onChange={(e) => setF({ ...f, setupRate: Number(e.target.value) || 0 })} /></Field>
-          <Field label="Taxa de instalação" hint="É o valor que o parceiro cobra na ativação — ele não muda."><MoneyInput className={inputCls} value={f.setupFee} onChange={(v) => setF({ ...f, setupFee: v ?? 0 })} /></Field>
-          <Field label="Pagamento mínimo" hint="Abaixo disso, acumula para o próximo ciclo."><MoneyInput className={inputCls} value={f.minPayout} onChange={(v) => setF({ ...f, minPayout: v ?? 0 })} /></Field>
+          <Field label="% padrão da instalação"><input type="number" min={0} max={100} step={0.5} className={cn(inputCls, 'h-[38px] tnum')} value={f.setupRate} onChange={(e) => setF({ ...f, setupRate: Number(e.target.value) || 0 })} /></Field>
+          <Field label="Taxa de instalação" hint="É o valor que o parceiro cobra na ativação — ele não muda."><MoneyInput value={f.setupFee} onChange={(v) => setF({ ...f, setupFee: v ?? 0 })} /></Field>
+          <Field label="Pagamento mínimo" hint="Abaixo disso, acumula para o próximo ciclo."><MoneyInput value={f.minPayout} onChange={(v) => setF({ ...f, minPayout: v ?? 0 })} /></Field>
         </div>
         <h4 className="text-sm font-semibold pt-2">Travas de segurança</h4>
         <div className="grid sm:grid-cols-3 gap-3">
-          <Field label="Carência após trocar chave Pix (horas)"><input type="number" min={0} max={720} className={inputCls} value={f.pixKeyCooldownHours} onChange={(e) => setF({ ...f, pixKeyCooldownHours: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} /></Field>
-          <Field label="2º dono acima de" hint="Vazio = um dono basta."><MoneyInput nullable className={inputCls} value={f.secondApprovalAbove} onChange={(v) => setF({ ...f, secondApprovalAbove: v })} /></Field>
-          <Field label="Teto por dia" hint="Vazio = sem teto."><MoneyInput nullable className={inputCls} value={f.dailyLimit} onChange={(v) => setF({ ...f, dailyLimit: v })} /></Field>
+          <Field label="Carência da chave Pix (h)" hint="Horas sem pagar após trocar a chave."><input type="number" min={0} max={720} className={cn(inputCls, 'h-[38px] tnum')} value={f.pixKeyCooldownHours} onChange={(e) => setF({ ...f, pixKeyCooldownHours: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} /></Field>
+          <Field label="2º dono acima de" hint="Vazio = um dono basta."><MoneyInput nullable value={f.secondApprovalAbove} onChange={(v) => setF({ ...f, secondApprovalAbove: v })} /></Field>
+          <Field label="Teto por dia" hint="Vazio = sem teto."><MoneyInput nullable value={f.dailyLimit} onChange={(v) => setF({ ...f, dailyLimit: v })} /></Field>
         </div>
         <div className="flex justify-end"><Button loading={save.isPending && !pedindo} onClick={() => (travasMudaram ? setPedindo(true) : void salvar())}>Salvar</Button></div>
         {travasMudaram && <p className="text-[11.5px] text-warn-ink text-right">Mudar as travas pede o código do autenticador.</p>}

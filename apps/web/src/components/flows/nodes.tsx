@@ -441,14 +441,14 @@ export function ScheduleNodeView({ data, selected }: P) {
 }
 
 export function AiNodeView({ data, selected }: P) {
-  const d = data as { mode?: 'answer' | 'classify'; instructions?: string; labels?: { id: string; label: string }[]; keepTalking?: boolean; maxTurns?: number };
+  const d = data as { mode?: 'answer' | 'classify' | 'agent'; instructions?: string; labels?: { id: string; label: string }[]; keepTalking?: boolean; maxTurns?: number };
   return (
-    <Shell type="ai" data={data} selected={selected} summary={d.instructions || ''}>
+    <Shell type="ai" data={data} selected={selected} summary={d.mode === 'agent' ? 'Atende como agente de IA (roteiro em etapas)' : d.instructions || ''}>
       <In />
       <Rows>
         {d.mode === 'classify'
           ? (d.labels ?? []).map((l) => <OutRow key={l.id} id={l.id}><span className="truncate">{l.label || '(rótulo)'}</span></OutRow>)
-          : <OutRow id="done" tone="ok">{d.keepTalking ? `Após ${d.maxTurns ?? 10} respostas` : 'Respondeu'}</OutRow>}
+          : <OutRow id="done" tone="ok">{d.mode === 'agent' ? 'Concluiu' : d.keepTalking ? `Após ${d.maxTurns ?? 10} respostas` : 'Respondeu'}</OutRow>}
         <OutRow id="fallback" tone={d.mode === 'classify' ? 'dashed' : 'danger'}>Não conseguiu</OutRow>
       </Rows>
     </Shell>

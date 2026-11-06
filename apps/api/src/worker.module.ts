@@ -9,6 +9,7 @@ import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
+import { AutoReassignModule } from './modules/auto-reassign/auto-reassign.module';
 import { env } from './config/env';
 
 @Module({
@@ -22,6 +23,7 @@ import { env } from './config/env';
     FlowsModule,
     SchedulingModule,
     ScheduledMessagesModule,
+    AutoReassignModule,
     AiModule,
   ],
 })

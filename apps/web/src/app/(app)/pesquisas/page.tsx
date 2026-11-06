@@ -12,6 +12,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { FeatureLocked } from '@/components/billing/FeatureLocked';
 import { TextWithVars, type FlowVar } from '@/components/flows/TextWithVars';
 import { useCan, useHasFeature, useCreateSurvey, useSurveys, useUpdateSurvey, type SatisfactionSurvey, type SurveyInput } from '@/lib/hooks';
+import { SectionTabs } from '@/components/layout/SectionTabs';
 
 /** Além das do sistema e dos campos da ficha (que o TextWithVars já traz): quem atendeu. */
 const SURVEY_VARS: FlowVar[] = [
@@ -58,6 +59,7 @@ export default function SurveysPage() {
           </div>
         }
       />
+      <SectionTabs section="relatorios" label="Relatórios e pesquisas" />
 
       {surveys.isLoading && <SkeletonRows rows={3} />}
       {surveys.data?.length === 0 && <Empty icon={<ThumbsUp size={28} />} title="Nenhuma pesquisa ainda" text="Crie uma pesquisa e ela passa a sair no encerramento dos atendimentos." />}

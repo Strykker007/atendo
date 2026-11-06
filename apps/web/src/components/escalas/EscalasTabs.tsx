@@ -12,6 +12,7 @@ import { usePermissions } from '@/lib/hooks';
  */
 export const ESCALAS_ABAS: { href: string; label: string; need: Permission }[] = [
   { href: '/escalas/aprovacoes', label: 'Plantões e liberações', need: 'team.manage' },
+  { href: '/escalas/calendario', label: 'Calendário', need: 'team.manage' },
   { href: '/escalas/turnos', label: 'Escalas de trabalho', need: 'team.manage' },
   { href: '/escalas/horario-atendimento', label: 'Horário de atendimento', need: 'settings.manage' },
   { href: '/escalas/acessos', label: 'Registro de acessos', need: 'team.manage' },

@@ -72,7 +72,7 @@ function NovoParceiro({ open, onClose, onCreated }: { open: boolean; onClose: ()
     try {
       const login = f.loginEmail.trim() ? { name: f.loginName.trim() || f.name.trim(), email: f.loginEmail.trim() } : undefined;
       const p = await create.mutateAsync({ name: f.name, document: f.document || null, email: f.email || null, phone: f.phone || null, ...(login && { login }) });
-      toast.ok(login ? 'Parceiro cadastrado e convite enviado' : 'Parceiro cadastrado');
+      toast.ok(!login ? 'Parceiro cadastrado' : p.users?.some((u) => u.linked) ? 'Parceiro cadastrado: a pessoa já usa o Atendo — entra com o mesmo e-mail e troca para o VogoPartner no seletor' : 'Parceiro cadastrado e convite enviado');
       setF({ name: '', document: '', email: '', phone: '', loginName: '', loginEmail: '' });
       onCreated(p.id);
     } catch (err) { toast.err(err); }
@@ -234,8 +234,8 @@ function Logins({ p }: { p: PartnerDetail }) {
         <ul className="divide-y divide-line rounded-xl border border-line text-sm">
           {p.users.map((u) => (
             <li key={u.id} className={cn('flex flex-wrap items-center gap-2 px-3 py-2', !u.isActive && 'opacity-60')}>
-              <div className="flex-1 min-w-[10rem]"><p className="font-medium">{u.name}</p><p className="text-[11.5px] text-faint">{u.email} · {u.passwordSetAt ? `último acesso ${dataBR(u.lastLoginAt)}` : 'convite pendente'}</p></div>
-              {!u.passwordSetAt && u.isActive && <Button size="sm" variant="ghost" icon={<LinkIcon size={12} />} onClick={() => link.mutateAsync({ id: p.id, userId: u.id }).then((r) => setUrl(r.link)).catch(toast.err)}>Link</Button>}
+              <div className="flex-1 min-w-[10rem]"><p className="font-medium">{u.name}</p><p className="text-[11.5px] text-faint">{u.email} · {u.linked ? `entra pelo login que já usa${u.linkedTenant ? ` (${u.linkedTenant})` : ''} e troca no seletor` : u.passwordSetAt ? `último acesso ${dataBR(u.lastLoginAt)}` : 'convite pendente'}</p></div>
+              {!u.passwordSetAt && !u.linked && u.isActive && <Button size="sm" variant="ghost" icon={<LinkIcon size={12} />} onClick={() => link.mutateAsync({ id: p.id, userId: u.id }).then((r) => setUrl(r.link)).catch(toast.err)}>Link</Button>}
               <Button size="sm" variant="ghost" onClick={() => toggle.mutateAsync({ id: p.id, userId: u.id, isActive: !u.isActive }).catch(toast.err)}>{u.isActive ? 'Desativar' : 'Reativar'}</Button>
             </li>
           ))}
@@ -250,7 +250,7 @@ function Logins({ p }: { p: PartnerDetail }) {
       )}
       <form className="flex flex-wrap gap-2" onSubmit={async (e) => {
         e.preventDefault();
-        try { const r = await add.mutateAsync({ id: p.id, ...f }); setF({ name: '', email: '' }); if (!r.emailSent) setUrl(r.inviteLink); toast.ok(r.emailSent ? 'Convite enviado por e-mail' : 'Login criado: copie o link do convite'); } catch (err) { toast.err(err); }
+        try { const r = await add.mutateAsync({ id: p.id, ...f }); setF({ name: '', email: '' }); if (!r.emailSent && r.inviteLink) setUrl(r.inviteLink); toast.ok(r.linked ? 'Pronto: a pessoa já usa o Atendo — entra com o mesmo e-mail e troca para o VogoPartner no seletor' : r.emailSent ? 'Convite enviado por e-mail' : 'Login criado: copie o link do convite'); } catch (err) { toast.err(err); }
       }}>
         <input required className={cn(inputCls, 'flex-1 min-w-[9rem]')} placeholder="Nome" value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} />
         <input required type="email" className={cn(inputCls, 'flex-1 min-w-[12rem]')} placeholder="E-mail de login" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} />

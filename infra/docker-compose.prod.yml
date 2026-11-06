@@ -241,6 +241,10 @@ services:
       BACKUP_AT: ${BACKUP_AT:-03:30}
       # dia da semana (1=seg … 7=dom) da conferência completa da mídia; nos outros, só as últimas 48 h
       BACKUP_MEDIA_FULL_DOW: ${BACKUP_MEDIA_FULL_DOW:-7}
+      # 1º domingo do mês: conferência de TODA a mídia, com este teto em horas (os outros domingos: 62 dias)
+      BACKUP_MEDIA_FULL_HOURS: ${BACKUP_MEDIA_FULL_HOURS:-10}
+      # alerta do resultado (ex.: URL do healthchecks.io): sem ping no dia = backup não rodou; /fail = falhou
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
       # O rclone aceita a configuração por ambiente, o que evita montar um arquivo único:
       # quando o arquivo não existe no host, o Docker cria um DIRETÓRIO no lugar e o envio
       # falha em silêncio. Assim o segredo fica só no .env.production.

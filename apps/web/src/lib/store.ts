@@ -24,6 +24,8 @@ interface UIState {
   /** admin: ver conversas de um atendente específico ('me' = as minhas); null = todas */
   assigneeId: string | null;
   conversationId: string | null;
+  /** abrir a conversa já rolada até esta mensagem (ex.: "Ver na conversa" do ticket). Não persiste */
+  jumpTo: { conversationId: string; messageId: string } | null;
   /** filtro "último encerramento" das conversas (todas as abas): resultado e/ou motivo */
   closeFilter: { outcome: 'won' | 'lost' | null; reasonId: string | null };
   /** filtro "Gera ticket": só contatos que abrem atendimento. "Não gera" é o modo `status: 'free'` */
@@ -32,6 +34,9 @@ interface UIState {
   /** som de mensagem nova desligado neste navegador (preferência de quem atende) */
   soundMuted: boolean;
   toggleSidebar: () => void;
+  /** grupos do menu lateral fechados pela pessoa (o do item aberto fica sempre aberto) */
+  closedNavGroups: string[];
+  toggleNavGroup: (id: string) => void;
   toggleRightPanel: () => void;
   /** troca de unidade: o número e a conversa abertos eram da outra, então saem junto */
   setCompany: (id: string | null) => void;
@@ -44,6 +49,9 @@ interface UIState {
   setOrigin: (o: ConversationOrigin | null) => void;
   setAssignee: (id: string | null) => void;
   setConversation: (id: string | null) => void;
+  /** abre a conversa e marca a mensagem para o painel rolar até ela */
+  openAtMessage: (conversationId: string, messageId: string | null) => void;
+  clearJump: () => void;
   setSoundMuted: (muted: boolean) => void;
   /** foto protegida marcada no anexo (docs/foto-protegida.md): lembra a última escolha do atendente */
   securePhotos: boolean;
@@ -66,11 +74,14 @@ export const useUI = create<UIState>()(
       origin: null,
       assigneeId: null,
       conversationId: null,
+      jumpTo: null,
       soundMuted: false,
       securePhotos: false,
       closeFilter: { outcome: null, reasonId: null },
       onlyTickets: false,
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      closedNavGroups: [],
+      toggleNavGroup: (id) => set((s) => ({ closedNavGroups: s.closedNavGroups.includes(id) ? s.closedNavGroups.filter((g) => g !== id) : [...s.closedNavGroups, id] })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
       setCompany: (companyId) => set({ companyId, numberId: null, conversationId: null }),
       toggleGroupByAssignee: () => set((s) => ({ groupByAssignee: !s.groupByAssignee })),
@@ -81,6 +92,8 @@ export const useUI = create<UIState>()(
       setOrigin: (origin) => set({ origin }),
       setAssignee: (assigneeId) => set({ assigneeId }),
       setConversation: (conversationId) => set({ conversationId }),
+      openAtMessage: (conversationId, messageId) => set({ conversationId, jumpTo: messageId ? { conversationId, messageId } : null }),
+      clearJump: () => set({ jumpTo: null }),
       setSoundMuted: (soundMuted) => set({ soundMuted }),
       setSecurePhotos: (securePhotos) => set({ securePhotos }),
       setCloseFilter: (closeFilter) => set({ closeFilter }),
@@ -93,6 +106,6 @@ export const useUI = create<UIState>()(
       // nunca mexeu) ganha o novo uma vez; daqui para a frente vale a escolha da pessoa
       version: 1,
       migrate: (persisted, version) => (version < 1 ? { ...(persisted as object), groupByAssignee: true } : persisted) as UIState,
-      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, soundMuted: s.soundMuted, securePhotos: s.securePhotos }) },
+      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, closedNavGroups: s.closedNavGroups, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, soundMuted: s.soundMuted, securePhotos: s.securePhotos }) },
   ),
 );

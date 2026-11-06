@@ -2,14 +2,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Building2, Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download, Hourglass, Landmark } from 'lucide-react';
+import { Wallet, TrendingUp, AlertTriangle, Users, Receipt, Download, Hourglass, Landmark } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { SkeletonCards, SkeletonRows } from '@/components/ui/Skeleton';
-import { useFinance, useMargin, useMe, type DiscountGrant, type DiscountSource } from '@/lib/hooks';
+import { useFinance, useMe, type DiscountGrant, type DiscountSource } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { useBrand } from '@/lib/brand-context';
 import { PixMigration } from '@/components/billing/PixMigration';
+import { ClientCostsTab } from '@/components/billing/ClientCostsTab';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const brlK = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
@@ -68,6 +69,9 @@ function Exportar({ texto, onClick, disabled }: { texto: string; onClick: () => 
 }
 
 /** Financeiro do dono do Atendo. Só super_admin (a API também bloqueia). */
+/** de qual gateway é o link da fatura, pelo endereço */
+const gatewayDe = (url: string) => (/asaas\./i.test(url) ? 'Asaas' : /stripe\./i.test(url) ? 'Stripe' : 'gateway');
+
 export default function AdminPage() {
   const { brandName } = useBrand();
   const me = useMe();
@@ -75,7 +79,6 @@ export default function AdminPage() {
   const [months, setMonths] = useState(12);
   const [period, setPeriod] = useState(periodOf(new Date()));
   const fin = useFinance(months);
-  const margin = useMargin(period);
   if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
   const d = fin.data;
@@ -83,12 +86,12 @@ export default function AdminPage() {
 
   return (
     <PageShell width="max-w-6xl">
-      <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, faturas do Stripe e do ledger de uso.`} action={
+      <PageHeader title="Financeiro" subtitle={`Receita, custos e margem do ${brandName} como um todo. Dados vêm das assinaturas, das faturas (Asaas e Stripe) e do ledger de uso.`} action={
         <div className="flex items-center gap-2 flex-wrap">
         {/* fechamento do mês: a receber, atrasados, custos, folha e parte de cada sócio (docs/36) */}
         <Link href="/admin/fechamento" className="inline-flex items-center gap-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white px-3 py-2 text-sm font-medium"><Landmark size={15} /> Fechamento</Link>
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
-          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Margem por cliente'], ['pix', 'Cobrança por Pix']] as [Tab, string][]).map(([t, l]) => (
+          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Custo por cliente'], ['pix', 'Cobrança por Pix']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>
           ))}
         </div>
@@ -182,10 +185,11 @@ export default function AdminPage() {
           <Exportar texto="Faturas dos últimos meses (até 100), mais recente primeiro." disabled={!d.invoices.length} onClick={() => baixarCsv('faturas', ['Cliente', 'Período', 'Total', 'Excedente', 'Status', 'Vencimento', 'Pago em'], d.invoices.map((i) => [
             i.tenant, i.period, num(i.total), num(i.overage), STATUS_PT[i.status] ?? i.status, dia(i.dueAt), dia(i.paidAt),
           ]))} />
-          <Table head={['Cliente', 'Período', 'Total', 'Excedente', 'Status', 'Vencimento', '']} rows={d.invoices.map((i) => [
+          <Table head={['Cliente', 'Período', 'Total', 'Excedente', 'Status', 'Vencimento', 'Fatura']} rows={d.invoices.map((i) => [
           <Cliente key="c" nome={i.tenant} />, i.period, brl(i.total), brl(i.overage), <Pill key="s" status={i.status} />, i.dueAt ? new Date(i.dueAt).toLocaleDateString('pt-BR') : '—',
-          i.hostedUrl ? <a key="l" href={i.hostedUrl} target="_blank" rel="noreferrer" className="text-accent-ink underline text-xs">Stripe</a> : '',
-        ])} empty="Nenhuma fatura ainda — aparecem quando o Stripe gerar a primeira cobrança." />
+          // página da fatura no gateway (boleto/Pix/comprovante), a mesma que o cliente recebe
+          i.hostedUrl ? <a key="l" href={i.hostedUrl} target="_blank" rel="noreferrer" title={`Abrir a fatura no ${gatewayDe(i.hostedUrl)} (boleto, Pix e comprovante)`} className="text-accent-ink underline text-xs whitespace-nowrap">Ver no {gatewayDe(i.hostedUrl)}</a> : '',
+        ])} empty="Nenhuma fatura ainda — aparecem quando o Asaas (ou o Stripe) gerar a primeira cobrança." />
         </>
       )}
 
@@ -215,19 +219,7 @@ export default function AdminPage() {
       {tab === 'margem' && (
         <>
           <div className="flex justify-end"><select value={period} onChange={(e) => setPeriod(e.target.value)} className="rounded-lg border border-line bg-panel text-ink px-3 py-1.5 text-sm">{Array.from({ length: 6 }, (_, i) => { const x = new Date(); x.setMonth(x.getMonth() - i); return periodOf(x); }).map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
-          {margin.isLoading && <SkeletonRows rows={4} />}
-          {margin.data && (
-            <>
-            <Exportar texto={`Receita, custo e margem de cada cliente em ${mm(period)}.`} disabled={!margin.data.length} onClick={() => baixarCsv(`margem-${period}`, ['Cliente', 'Plano', 'Mensagens', 'Templates', 'Receita', 'Excedente', 'Custo Meta', 'Infra', 'Margem', 'Margem %'], margin.data!.map((r) => [
-              r.name, r.plan ?? '', String(r.messagesSent), String(r.templatesSent), num(r.revenue), num(r.overage), num(r.providerCost), num(r.infraCost), num(r.margin), num(r.marginPct),
-            ]))} />
-            <Table head={['Cliente', 'Plano', 'Msgs', 'Templates', 'Receita', 'Custo Meta', 'Infra', 'Margem', '%']} rows={margin.data.map((r) => [
-              <span key="n" className="inline-flex items-center gap-2"><Building2 size={14} className="text-faint" /><Cliente nome={r.name} /></span>, r.plan ?? '—', r.messagesSent.toLocaleString('pt-BR'), r.templatesSent.toLocaleString('pt-BR'),
-              <span key="r">{brl(r.revenue)}{r.overage > 0 && <span className="text-[10px] text-warn ml-1">+{brl(r.overage)}</span>}</span>, brl(r.providerCost), brl(r.infraCost),
-              <b key="m" className={r.margin >= 0 ? 'text-ok' : 'text-danger'}>{brl(r.margin)}</b>, <span key="p" className={r.marginPct < 30 ? 'text-warn' : 'text-muted'}>{r.marginPct.toFixed(0)}%</span>,
-            ])} />
-            </>
-          )}
+          <ClientCostsTab period={period} />
         </>
       )}
     </PageShell>

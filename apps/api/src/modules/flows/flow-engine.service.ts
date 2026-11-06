@@ -19,6 +19,8 @@ import { applyAssignments } from './variables';
 import { afterAiAnswer } from './ai-turns';
 import { onScheduleMiss } from './schedule-misses';
 import { AiService } from '../ai/ai.service';
+import { AiAgentsService } from '../ai/ai-agents';
+import { describeAction } from '../ai/agent-prompt';
 import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { isOpenAt } from '../tenants/business-hours';
@@ -92,6 +94,7 @@ export class FlowEngineService {
     private readonly gateway: ConversationsGateway,
     @Inject(forwardRef(() => SchedulingService)) private readonly scheduling: SchedulingService,
     private readonly ai: AiService,
+    private readonly aiAgents: AiAgentsService,
     private readonly tenantSettings: TenantSettingsService,
     private readonly schedules: SchedulesService,
     private readonly interpolation: InterpolationService,
@@ -581,7 +584,9 @@ export class FlowEngineService {
             if (node.data.closeConversation) await this.conversations.setStatusSystem(run.conversationId, 'closed');
             return this.finish(runId, 'done');
           case 'ai': {
-            const out = await this.aiStep(run, node, ctx);
+            const out = node.data.mode === 'agent' ? await this.agentStep(runId, node) : await this.aiStep(run, node, ctx);
+            // o agente transferiu ou encerrou: o run já terminou
+            if (out === 'ended') return;
             if (out === 'wait') {
               // modo conversa: fica no mesmo nó esperando a próxima mensagem do contato
               await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'waiting' } });
@@ -669,6 +674,15 @@ export class FlowEngineService {
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars, status: 'running' } });
       return this.next(run.id, chosen.id);
     }
+    if (node.type === 'ai' && node.data.mode === 'agent') {
+      // uma rodada por vez: duas mensagens seguidas não geram duas respostas (a segunda entra no histórico)
+      const claimed = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'waiting', currentNodeId: node.id }, data: { status: 'running' } });
+      if (!claimed.count) return;
+      const out = await this.agentStep(run.id, node);
+      if (out === 'ended') return;
+      if (out === 'wait') { await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'waiting' } }); return; }
+      return this.next(run.id, out);
+    }
     if (node.type === 'ai') {
       const vars = run.vars as Record<string, string>;
       const out = await this.aiStep(run as never, node, { contact: { name: null, phone: '' }, vars });
@@ -749,6 +763,75 @@ export class FlowEngineService {
       return outcome;
     } catch (err) {
       this.log.warn(`IA no fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
+      if (node.data.fallbackText) await this.send(run.conversationId, node.data.fallbackText).catch(() => undefined);
+      return 'fallback';
+    }
+  }
+
+  /**
+   * Bloco IA em modo Agente (docs/agente-ia.md): uma rodada do agente com etapas. Responde, executa
+   * as ações que o código conferiu (etiqueta, dado do contato, transferir, chamar atendente,
+   * encerrar) com nota interna de cada uma, e guarda a etapa em `vars._agentStage`.
+   * Devolve 'wait' (continua conversando), 'done' (a IA concluiu), 'fallback' (falhou, limite de
+   * respostas, agente desligado) ou 'ended' (transferiu/encerrou: o run acabou aqui).
+   * **Nunca lança**: qualquer erro vira 'fallback', que o fluxo liga a um humano.
+   */
+  private async agentStep(runId: string, node: Extract<FlowNode, { type: 'ai' }>): Promise<'wait' | 'done' | 'fallback' | 'ended'> {
+    const run = await this.prisma.flowRun.findUniqueOrThrow({ where: { id: runId }, include: { flow: true, conversation: { include: { contact: true } } } });
+    const nota = (t: string) => this.conversations.systemNote(run.conversationId, t).catch(() => undefined);
+    try {
+      await this.ai.assertFeature(run.tenantId, 'ai_flows');
+      if (!node.data.aiAgentId) return 'fallback';
+      const agent = await this.aiAgents.config(run.tenantId, node.data.aiAgentId);
+      if (!agent.isActive) { await nota(`🤖 Agente "${agent.name}" está desligado: conversa entregue para a equipe.`); return 'fallback'; }
+      const vars = run.vars as Record<string, string>;
+      const turns = Number(vars._aiTurns ?? 0);
+      // freio de custo: passou do limite, entrega para humano
+      if (turns >= agent.maxReplies) { await nota(`🤖 Agente "${agent.name}" chegou ao limite de ${agent.maxReplies} respostas nesta conversa.`); return 'fallback'; }
+
+      const history = await this.prisma.message.findMany({
+        where: { conversationId: run.conversationId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: { direction: true, text: true, internal: true },
+      });
+      const turn = await this.aiAgents.turn({
+        tenantId: run.tenantId, agent, stageId: vars._agentStage, history: [...history].reverse(),
+        contactName: run.conversation.contact.name, conversationId: run.conversationId,
+      });
+      if (turn.rejected.length) this.log.warn(`agente ${node.data.aiAgentId} (run ${runId}) pediu e foi recusado: ${turn.rejected.join('; ')}`);
+      if (turn.reply) await this.send(run.conversationId, turn.reply);
+      await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, _aiTurns: String(turns + 1), _agentStage: turn.stageId } } });
+      if (turn.stageId !== (vars._agentStage ?? agent.stages[0]?.id)) {
+        await nota(`🤖 Agente "${agent.name}": etapa "${agent.stages.find((x) => x.id === turn.stageId)?.name ?? turn.stageId}".`);
+      }
+
+      for (const a of turn.actions) {
+        await nota(`🤖 Agente "${agent.name}" ${describeAction(a, turn.catalog)}.`);
+        const acao = (data: Extract<FlowNode, { type: 'action' }>['data']) => this.act({ id: node.id, type: 'action', position: { x: 0, y: 0 }, data } as Extract<FlowNode, { type: 'action' }>, run);
+        switch (a.tool) {
+          case 'add_tag':
+            await acao({ kind: 'add_tag', tagId: a.tagId, scope: 'conversation' });
+            break;
+          case 'set_contact_field':
+            await saveFlowContactField(this.prisma, run.tenantId, run.conversationId, a.field, a.value);
+            break;
+          case 'transfer_department':
+            await acao({ kind: 'set_department', departmentId: a.departmentId });
+            await this.handoff(runId, `agente de IA transferiu${a.reason ? `: ${a.reason}` : ''}`);
+            return 'ended';
+          case 'handoff':
+            await this.handoff(runId, `agente de IA chamou um atendente${a.reason ? `: ${a.reason}` : ''}`);
+            return 'ended';
+          case 'close':
+            await acao({ kind: 'set_status', status: 'closed', outcome: a.outcome, closeReasonId: a.closeReasonId });
+            await this.finish(runId, 'done', 'agente de IA encerrou');
+            return 'ended';
+        }
+      }
+      return turn.done ? 'done' : 'wait';
+    } catch (err) {
+      this.log.warn(`agente de IA no fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
       if (node.data.fallbackText) await this.send(run.conversationId, node.data.fallbackText).catch(() => undefined);
       return 'fallback';
     }

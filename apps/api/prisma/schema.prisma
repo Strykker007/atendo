@@ -68,6 +68,9 @@ model Tenant {
   workSchedules     WorkSchedule[]
   supportTickets    SupportTicket[]
   scheduleOverrides ScheduleOverride[]
+  shiftExceptions   ShiftException[]
+  aiAgents          AiAgent[]
+  aiCredential      AiCredential?
   scheduleAccessRequests ScheduleAccessRequest[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
@@ -229,6 +232,7 @@ model User {
   expiredAt       DateTime?
   scheduleOverrides ScheduleOverride[] @relation("overrideUser")
   approvedOverrides ScheduleOverride[] @relation("overrideApprover")
+  shiftExceptions   ShiftException[]   @relation("shiftExceptionUser")
   accessRequests    ScheduleAccessRequest[] @relation("accessRequestUser")
   accessRequestsToMe ScheduleAccessRequest[] @relation("accessRequestApprover")
   createdTemporaryUsers User[]         @relation("temporaryCreator")
@@ -303,6 +307,37 @@ model ScheduleOverride {
   @@index([tenantId, validUntil])
   @@index([userId, validUntil])
   @@map("schedule_overrides")
+}
+
+enum ShiftExceptionKind {
+  /// folga: tira o turno que a escala daria neste dia
+  off
+  /// turno extra: põe um turno com horário próprio neste dia
+  extra
+}
+
+/// Exceção de um dia na escala (docs/escalas.md#calendário). Troca entre colegas = folga de um + extra do outro.
+model ShiftException {
+  id          String             @id @default(uuid())
+  tenantId    String
+  userId      String
+  /// "AAAA-MM-DD" (hora local): dia em que o turno COMEÇA
+  date        String
+  kind        ShiftExceptionKind
+  /// "HH:MM", só no `extra`
+  startTime   String?
+  endTime     String?
+  reason      String?
+  /// quem lançou (sem relação: o gestor pode sair da equipe e a exceção fica)
+  createdById String?
+  createdAt   DateTime           @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation("shiftExceptionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, kind])
+  @@index([tenantId, date])
+  @@map("shift_exceptions")
 }
 
 enum AccessRequestStatus {
@@ -608,6 +643,17 @@ model TenantSettings {
   closeMessageEnabled Boolean @default(false)
   /// texto do aviso de encerramento, com {{atendente}}; null = o padrão
   closeMessageText String?
+  // ---- redistribuição automática de conversas órfãs (docs/redistribuicao-automatica.md) ----
+  /// na fila (Aguardando) sem dono e o contato sem resposta há X min → vai para alguém online
+  autoReassignWaiting  Boolean @default(false)
+  /// com atendente, mas o contato sem resposta há X min → passa para outra pessoa online
+  autoReassignAssigned Boolean @default(false)
+  /// tempo com demanda normal (até 1 contato esperando por atendente online)
+  autoReassignBaseMinutes Int @default(15)
+  /// teto: na alta demanda o tempo cresce até aqui, nunca além
+  autoReassignMaxMinutes  Int @default(30)
+  /// quantas vezes a MESMA espera pode ser redistribuída (evita a conversa rodar a equipe inteira)
+  autoReassignMaxTimes    Int @default(2)
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2045,10 +2091,61 @@ enum AiTaskKind {
   suggest
   rewrite
   summary
+  /// agente de IA com etapas (docs/agente-ia.md)
+  flow_agent
+}
+
+/// Agente de IA com etapas (docs/agente-ia.md): persona, regras, base e o roteiro em blocos.
+/// Entra no atendimento pelo bloco IA (modo Agente) dos fluxos; a etapa de cada conversa fica no FlowRun.
+model AiAgent {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  persona    String   @default("")
+  /// friendly | formal | casual
+  tone       String   @default("friendly")
+  rules      String   @default("")
+  knowledge  String   @default("")
+  /// AgentStage[] (packages/shared/src/ai-agent.ts)
+  stages     Json     @default("[]")
+  /// AgentToolTargets: alvos liberados de cada ferramenta
+  targets    Json     @default("{}")
+  maxReplies Int      @default(20)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("ai_agents")
 }
 
 /// Ledger append-only de IA: uma linha por chamada ao modelo. Fonte da verdade da margem
 /// e do teto de gasto — sem isto não dá para saber se a IA está dando lucro ou prejuízo.
+/// Chave de IA do próprio cliente (feature `ai_own_key`, docs/15-ia.md#chave-própria-do-cliente).
+/// Com ela gravada e o plano incluindo, toda chamada de IA do tenant usa esta chave.
+model AiCredential {
+  id          String    @id @default(uuid())
+  tenantId    String    @unique
+  /// openai | anthropic (sempre o endpoint oficial)
+  provider    String
+  /// `{ apiKey }` via CryptoService.encryptJson — nunca em claro
+  credentials String
+  /// vazio = o modelo padrão do fornecedor (AI_KEY_PROVIDERS)
+  model       String?
+  keyLast4    String
+  lastError   String?
+  lastErrorAt DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("ai_credentials")
+}
+
 model AiUsage {
   id             String     @id @default(uuid())
   tenantId       String
@@ -2066,6 +2163,9 @@ model AiUsage {
   latencyMs      Int?
   /// preenchido quando a chamada falhou (a linha fica, para diagnóstico)
   error          String?
+  /// feita com a chave do próprio cliente (`ai_credentials`): fora da cota, do teto e do
+  /// orçamento da plataforma; o custo fica só como referência (quem paga é o cliente)
+  ownKey         Boolean    @default(false)
   occurredAt     DateTime   @default(now())
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2984,6 +3084,12 @@ model Ticket {
   departmentId   String?
   /// aberto a partir de um atendimento
   conversationId String?
+  /// mensagem da conversa de onde o ticket nasceu (o "momento"). Sem FK: limpar o histórico
+  /// apaga a mensagem, e o ticket continua com o retrato em `context`
+  messageId      String?
+  /// Retrato das últimas mensagens até o momento da abertura (TicketContextMessage[] do shared):
+  /// o contexto não se perde se a conversa for apagada, limpa ou for de um setor que o outro não vê
+  context        Json?
   createdById    String?
   dueAt          DateTime?
   /// em espera: motivo, observação e quando retomar

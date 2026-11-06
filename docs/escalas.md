@@ -130,6 +130,31 @@ Expirar = `isActive = false`, `expiredAt = agora` e todos os refresh tokens revo
 serve para outro dia. Conta inativa deixa de contar em `maxAgents`. Status na listagem:
 `ACTIVE`, `EXPIRED` (venceu ou foi encerrada) ou `INACTIVE` (desativada pela equipe).
 
+## Calendário: folga, turno extra e troca (`shift_exceptions`)
+
+A escala continua sendo uma **regra**; o calendário mostra os turnos que ela dá em cada dia e
+deixa o gestor lançar **exceções de um dia**, sem mexer na regra:
+
+| `kind` | O que faz |
+|---|---|
+| `off` (folga) | tira o turno que a escala daria naquele dia |
+| `extra` (turno extra) | põe um turno com `startTime`/`endTime` próprios naquele dia |
+
+- `date` = dia local em que o turno **começa** (o plantão das 19h às 07h pertence ao dia das 19h).
+  Uma por pessoa × dia × tipo (`@@unique([userId, date, kind])`).
+- **Arrastar no quadro** (`POST /work-schedules/exceptions/move`) = folga na origem (ou o extra
+  some) + extra no destino com o mesmo horário. Mesma pessoa em outro dia = remanejar; outra pessoa
+  = cobrir/trocar. Se o destino tinha folga daquele mesmo horário da escala, a folga só é desfeita.
+  Destino que já tem turno no dia → `400`. Tudo numa transação.
+- **A trava de login respeita as exceções**: `ShiftAccessService` carrega as da pessoa de 9 dias
+  atrás até amanhã e, se houver alguma, usa `currentPlannedShift`/`lastPlannedShift`
+  (`apps/api/src/modules/auth/shift-calendar.ts`, testes em `test/shift-calendar.test.ts`); sem
+  exceção, a regra pura de sempre. O extra usa as tolerâncias da escala da pessoa. "Quem está no
+  turno agora" (`/work-schedules/team`) também.
+- Quem **não tem escala** continua sem trava: o extra dele aparece no calendário só para organizar.
+- Toda mudança faz o [corte imediato](#corte-imediato) das pessoas envolvidas.
+- Gerente só mexe em atendentes (como na equipe); admin não aparece (nunca tem escala).
+
 ## API
 
 Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — menos as três `/auth/access-requests`, que usam o `requestToken` (tenant e usuário vêm dele, nunca do corpo).
@@ -141,6 +166,10 @@ Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — meno
 | PATCH | `/work-schedules/:id` | Mesmos campos, parciais (revalida a escala inteira) |
 | DELETE | `/work-schedules/:id` | Apaga; colaboradores ficam sem escala |
 | GET | `/work-schedules/team` | Equipe ativa agora: escala, `onShift`, `exempt` (admin/sem escala) e liberação ativa |
+| GET | `/work-schedules/calendar?from&to` | Turnos dia a dia (`AAAA-MM-DD`, até 45 dias): `users`, `schedules`, `shifts` (`date`, `userId`, `start`, `end`, `minutes`, `source` `rule`\|`extra`, `exceptionId`), `offs`, `overrides`, `today` no fuso da empresa |
+| POST | `/work-schedules/exceptions` | `{userId, date, kind: off\|extra, startTime?, endTime?, reason?}` — folga (num extra: apaga o extra) ou turno extra (sem horário = o da escala; dia com turno → 400) |
+| DELETE | `/work-schedules/exceptions/:id` | Desfaz a exceção |
+| POST | `/work-schedules/exceptions/move` | `{userId, date, toUserId, toDate, reason?}` — arrastar no quadro |
 | GET | `/work-schedules/overrides` | Liberações ativas ou futuras |
 | POST | `/work-schedules/overrides` | `{userId, hours (1–72), reason?}` — "Autorizar plantão excepcional" |
 | DELETE | `/work-schedules/overrides/:id` | Encerra a liberação |
@@ -163,6 +192,11 @@ Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — meno
 Cada aba exige a permissão da API dela e some sem ela; o item do menu aparece com qualquer uma e abre
 na primeira permitida. Configurações mantém atalhos nos lugares antigos.
 
+- **Calendário** (`/escalas/calendario`, `team.manage`): **Semana** em quadro (uma coluna por dia,
+  um cartão por turno, cor por pessoa; arrastar para outro dia abre o "Remanejar turno", onde também
+  se escolhe outra pessoa) e **Mês** em grade (arrastar entre dias igual). Clicar no turno: dar
+  folga, remover o extra ou passar para outro dia/pessoa. **+** no dia lança turno extra. Folgas
+  aparecem riscadas com "desfazer"; plantões liberados, com 🔓.
 - **Escalas de trabalho** (`/escalas/turnos`, `team.manage`; `/configuracoes/escalas` e `/settings/schedules`
   redirecionam): criar/editar escalas (12x36, 44h, personalizada) e associar cada atendente/gerente.
 - **Horário de atendimento** (`/escalas/horario-atendimento`, `settings.manage`): quadros, faixas e

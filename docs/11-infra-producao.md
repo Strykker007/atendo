@@ -109,8 +109,9 @@ join entra só quando a métrica ou o agrupamento precisa. Também foi criado o 
 
 ## O que ainda falta para "dormir tranquilo"
 
-- **Backups automatizados e testados** (Postgres + volume da Evolution). É o maior buraco
-  antes de um cliente pagante — ver [17](17-entrada-em-producao.md).
+- **Alerta do backup ligado**: o backup diário confere os dumps e o envio ao R2, mas só avisa
+  alguém com `BACKUP_PING_URL` configurada — ver [17 › Conferências e alerta](17-entrada-em-producao.md#conferências-e-alerta).
+  Também: *Bucket lock* no R2 e o teste de restauração trimestral.
 - Alerta ativo de número caído e de fila acumulada (o health job corrige o status, mas
   ninguém é avisado) e métricas das filas.
 - Balanceamento automático de shards da Evolution.

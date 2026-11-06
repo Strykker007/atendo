@@ -157,7 +157,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/quick-replies/export` | `quick_replies.manage` | `{ ids }` → `{ bundle, warnings }` — `{ atendo: 'quick-reply-bundle', version, items }`, cada item igual ao individual |
 | POST | `/quick-replies/import` | `quick_replies.manage` | `{ portable }` (individual ou lote) → `{ replies, warnings }`. Pasta achada pelo nome ou criada; título repetido na pasta ganha " (cópia)"; tudo ou nada (transação) |
 | **Configurações** | | | |
-| GET / PATCH | `/settings` | todos / `settings.manage` | Fuso, `attendanceActive`, fluxos padrão, boas-vindas (`welcomeEnabled`, `welcomeMessages`, `welcomeMode`), `requireSaleValue` (padrão `true`: "Comprou" exige valor > 0 no `PATCH /conversations/:id/status` — orçamento pago no atendimento conta; `false` = pode encerrar sem valor — conta na conversão, não cria venda), `salesEnabled` (padrão `true`; `false` = encerramento sem venda: valor/itens/produtos/observação ignorados e "Comprou" liberado no encerramento em massa — ver [06](06-modelo-de-dados.md#encerramento-sem-venda)), `requireSignature` (padrão `false`; `true` = a API assina com `*Nome:*` toda mensagem do atendente que chegar sem), `requireReasonOnWon` / `requireReasonOnLost` (padrão `true`: motivo obrigatório em cada resultado, quando há motivo cadastrado para ele), `wonLabel`/`lostLabel` (nome dos resultados, até 30 caracteres; vazio = padrão — as mensagens de erro do encerramento usam esses nomes). GET traz `isOpenNow`, `currentBand`, `nextOpenLabel` |
+| GET / PATCH | `/settings` | todos / `settings.manage` | Fuso, `attendanceActive`, fluxos padrão, boas-vindas (`welcomeEnabled`, `welcomeMessages`, `welcomeMode`), `requireSaleValue` (padrão `true`: "Comprou" exige valor > 0 no `PATCH /conversations/:id/status` — orçamento pago no atendimento conta; `false` = pode encerrar sem valor — conta na conversão, não cria venda), `salesEnabled` (padrão `true`; `false` = encerramento sem venda: valor/itens/produtos/observação ignorados e "Comprou" liberado no encerramento em massa — ver [06](06-modelo-de-dados.md#encerramento-sem-venda)), `requireSignature` (padrão `false`; `true` = a API assina com `*Nome:*` toda mensagem do atendente que chegar sem), `requireReasonOnWon` / `requireReasonOnLost` (padrão `true`: motivo obrigatório em cada resultado, quando há motivo cadastrado para ele), `wonLabel`/`lostLabel` (nome dos resultados, até 30 caracteres; vazio = padrão — as mensagens de erro do encerramento usam esses nomes), `autoReassignWaiting`/`autoReassignAssigned`/`autoReassignBaseMinutes`/`autoReassignMaxMinutes`/`autoReassignMaxTimes` ([redistribuição automática](redistribuicao-automatica.md)). GET traz `isOpenNow`, `currentBand`, `nextOpenLabel` |
 | GET / POST | `/settings/schedules` | todos / `settings.manage` | Quadros de horários. POST `{ name, timezone?, config?, copyFromId? }` |
 | PUT / DELETE | `/settings/schedules/:id` | `settings.manage` | `{ name?, timezone?, config? }` validado (`validateSchedule`); devolve `renamedConditions` (faixa renomeada atualiza as condições dos fluxos); o padrão não pode ser excluído |
 | POST | `/settings/schedules/:id/default` | `settings.manage` | Torna o quadro padrão |
@@ -184,6 +184,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | POST | `/billing/checkout` | tenant_admin | `{planId}` → `{url}` do Checkout (ou troca com proration se já assina). Plano gratuito/personalizado = 400 (só o dono atribui) |
 | POST | `/billing/portal` | tenant_admin | `{url}` do Customer Portal |
 | GET | `/billing/margin?period=` | super_admin | Margem por cliente |
+| GET | `/billing/client-costs?period=AAAA-MM` | `super_admin`: custo e margem por cliente no mês (recebido, infra rateada por número, IA, comissão, impostos e taxas rateados, custo do plano; Meta só informativo) — ver [36](36-fechamento-financeiro.md#custo-por-cliente) |
 | GET | `/billing/finance?months=` | super_admin | Financeiro completo: `now.discountMonth`/`discountedTenants` (desconto vigente), `series[].discounts`, `discounts[]` (livro de descontos inteiro), MRR/ARR, ativos/teste/pendentes/suspensos, em atraso, série mensal (faturado, recebido, atrasado, excedente, custo, novos, cancelados), por plano, assinaturas, faturas |
 | POST | `/billing/sync-plans` | super_admin | Cria Products/Prices no Stripe |
 | GET | `/billing/usage` | todos | Uso do mês (mensagens, templates, números, atendentes, fluxos ativos, respostas rápidas), limites, status, mensalidade, excedente, fim do período, `freePlan: {durationDays} \| null`, `billingCycle`, `gateway` (`asaas\|stripe\|null`, dos checkouts novos) `subscriptionGateway` (onde a assinatura atual nasceu) `quota` (`{unit, ratio, metric, blocked, reason, templatesBlocked, overage} \| null`, mesma regra do envio — o front não recalcula) e `customPlan` (`{expiresAt} \| null`: personalização do dono vigente; `limits` já vêm com ela aplicada) |
@@ -249,7 +250,7 @@ Rotas em [Contatos isentos](contatos-isentos.md#api) (`/ignored-contacts`, `sett
 
 ### Escalas, plantões e acessos temporários (`team.manage`)
 
-Rotas em [Escalas](escalas.md#api): `/work-schedules`, `/work-schedules/team`, `/work-schedules/overrides`, `PATCH /users/:id/schedule` e `/users/temporary`. Login e refresh devolvem `403` com `code` `FOR_OUT_OF_SCHEDULE` (fora da escala, sem liberação — com `requestToken` para o pedido de autorização) ou `ACCOUNT_EXPIRED` (conta temporária vencida).
+Rotas em [Escalas](escalas.md#api): `/work-schedules`, `/work-schedules/team`, `/work-schedules/calendar`, `/work-schedules/exceptions` (folga, turno extra, `move`), `/work-schedules/overrides`, `PATCH /users/:id/schedule` e `/users/temporary`. Login e refresh devolvem `403` com `code` `FOR_OUT_OF_SCHEDULE` (fora da escala, sem liberação — com `requestToken` para o pedido de autorização) ou `ACCOUNT_EXPIRED` (conta temporária vencida).
 
 ### Contatos: importar e exportar (`contacts.import_export`)
 
@@ -329,9 +330,11 @@ Exigem login e a feature `ai_copilot`. Ver [15](15-ia.md).
 
 | Método | Rota | O que faz |
 |---|---|---|
-| GET | `/ai/status` | `{ available }` — se há fornecedor de IA configurado no ambiente |
+| GET | `/ai/status` | `{ available }` — se há IA utilizável para o tenant (do ambiente ou chave própria) |
+| GET/PUT/DELETE | `/ai/own-key` | Chave de IA própria do cliente (`billing.manage`; gravar exige `ai_own_key`) — ver [15](15-ia.md#chave-própria-do-cliente) |
 | GET | `/ai/usage` | consumo do mês: interações, custo em BRL e quebra por tipo |
 | POST | `/ai/suggest` | `{ conversationId }` → `{ text }` — sugestão de resposta (não envia nada) |
+| — | `/ai/agents…` | Agentes de IA com etapas: CRUD, `catalog` e `:id/simulate` — ver [Agente de IA](agente-ia.md#api) |
 | POST | `/ai/rewrite` | `{ text, tone, conversationId? }` → `{ text }` — tons: `formal`, `friendly`, `short`, `clear` |
 | POST | `/ai/summary` | `{ conversationId, force? }` → `{ text, updatedAt, cached }` resumo em tópicos. Fica em cache na conversa amarrado à última mensagem: sem mensagem nova devolve o salvo (`cached: true`, sem chamar nem cobrar a IA); `force: true` gera de novo |
 

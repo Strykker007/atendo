@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { hasWebhookBody, type FlowDefinition } from '@atendo/shared';
 import { useFlows, useDeleteFlow, useDeleteFlows, useDuplicateFlows, useExportFlow, useExportFlows, useImportFlow, useUpdateFlow, useSetFlowsActive, useReorderFlows, useHasFeature, useMe, useCan, fetchFlowReferences, type FlowSummary } from '@/lib/hooks';
+import { SectionTabs } from '@/components/layout/SectionTabs';
 
 const TRIGGER_LABEL = { manual: 'Manual (pelo chat)', new_conversation: 'Toda conversa nova', keyword: 'Palavra-chave' };
 
@@ -142,6 +143,7 @@ export default function FluxosPage() {
           <Link href="/fluxos/novo"><Button icon={<Plus size={16} />}>Novo fluxo</Button></Link>
         </div>
       )} />
+      <SectionTabs section="fluxos" label="Fluxos e agentes de IA" />
       {flows.isLoading && <SkeletonRows rows={3} />}
       {flows.data?.length === 0 && <Empty icon={<Workflow size={36} />} title="Nenhum fluxo" text="Crie o primeiro: por exemplo, uma triagem com menu 'Vendas / Suporte'." />}
       {!!flows.data?.length && (

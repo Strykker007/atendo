@@ -8,10 +8,11 @@ import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
+import type { AiKeyProvider, AiOwnKeyStatus } from '@atendo/shared';
 
 // ---- IA ----
 export type RewriteTone = 'formal' | 'friendly' | 'short' | 'clear';
-export interface AiUsageSummary { period: string; interactions: number; costBrl: number; failed: number; byKind: { kind: string; count: number; costBrl: number; tokensIn: number; tokensOut: number }[] }
+export interface AiUsageSummary { period: string; interactions: number; costBrl: number; failed: number; ownKeyInteractions?: number; byKind: { kind: string; count: number; costBrl: number; tokensIn: number; tokensOut: number }[] }
 
 /** IA configurada neste ambiente? Sem chave, o front esconde os botões em vez de dar erro. */
 export const useAiStatus = () => {
@@ -26,3 +27,10 @@ export const useAiRewrite = () => { const qc = useQueryClient(); return useMutat
 export interface AiSummary { text: string; updatedAt: string; cached: boolean }
 /** Resumo vem do cache enquanto não há mensagem nova; `force` gera de novo (e cobra). */
 export const useAiSummary = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { conversationId: string; force?: boolean }) => api<AiSummary>('/ai/summary', { method: 'POST', body: JSON.stringify(b) }), onSuccess: (r) => { if (!r.cached) invAi(qc)(); } }); };
+
+// ---- chave de IA própria (feature ai_own_key) ----
+const OWN_KEY = ['ai-own-key'];
+export const useAiOwnKey = (enabled = true) => useQuery({ queryKey: OWN_KEY, enabled, queryFn: () => api<AiOwnKeyStatus>('/ai/own-key'), staleTime: 60_000 });
+const invOwnKey = (qc: ReturnType<typeof useQueryClient>) => (d: AiOwnKeyStatus) => { qc.setQueryData(OWN_KEY, d); qc.invalidateQueries({ queryKey: ['ai-status'] }); };
+export const useSaveAiOwnKey = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { provider: AiKeyProvider; apiKey: string; model?: string }) => api<AiOwnKeyStatus>('/ai/own-key', { method: 'PUT', body: JSON.stringify(b) }), onSuccess: invOwnKey(qc) }); };
+export const useRemoveAiOwnKey = () => { const qc = useQueryClient(); return useMutation({ mutationFn: () => api<AiOwnKeyStatus>('/ai/own-key', { method: 'DELETE' }), onSuccess: invOwnKey(qc) }); };

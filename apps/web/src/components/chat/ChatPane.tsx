@@ -6,6 +6,10 @@ import { ExemptConfirm } from './ExemptConfirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
+import { Ticket as TicketIcon } from 'lucide-react';
+import { TICKET_STATUS_LABEL, type MessageContent } from '@atendo/shared';
+import { NewTicketModal, type TicketOrigin } from '@/components/tickets/NewTicketModal';
+import { useConversationTickets, useTicketOptions, type ConversationTicket } from '@/lib/hooks';
 import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2, Phone, PhoneMissed } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
@@ -148,6 +152,45 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const tags = useTags();
   const messages = useMessages(conversationId);
   const mensagens = useMemo(() => mensagensEmOrdem(messages.data), [messages.data]);
+  // tickets que nasceram desta conversa (docs/tickets.md#aberto-de-uma-conversa)
+  const temTickets = useHasFeature('tickets').has;
+  const podeAbrirTicket = useCan('tickets.create') && temTickets;
+  const ticketsDaConversa = useConversationTickets(conversationId, temTickets);
+  const [ticketDe, setTicketDe] = useState<TicketOrigin | null>(null);
+  const ticketOpts = useTicketOptions(!!ticketDe);
+  /** mensagem → tickets abertos a partir dela (selo na bolha) */
+  const ticketsPorMensagem = useMemo(() => {
+    const m = new Map<string, ConversationTicket[]>();
+    for (const t of ticketsDaConversa.data ?? []) if (t.messageId) m.set(t.messageId, [...(m.get(t.messageId) ?? []), t]);
+    return m;
+  }, [ticketsDaConversa.data]);
+  const abrirTicket = (msg?: Message) => conv && setTicketDe({
+    conversationId: conv.id,
+    contato: conv.contact.name ?? `+${conv.contact.phone}`,
+    ...(msg && { messageId: msg.id, trecho: messagePreview(msg) }),
+  });
+  // "Ver na conversa" do ticket: carrega páginas antigas até achar a mensagem e rola até ela
+  const jumpTo = useUI((s) => s.jumpTo);
+  const clearJump = useUI((s) => s.clearJump);
+  const paginasDoPulo = useRef(0);
+  useEffect(() => {
+    if (!jumpTo || !conversationId || jumpTo.conversationId !== conversationId || messages.isLoading) return;
+    if (mensagens.some((m) => m.id === jumpTo.messageId)) {
+      paginasDoPulo.current = 0;
+      clearJump();
+      // depois do "rola para o fim" da primeira carga
+      setTimeout(() => irParaMensagem(jumpTo.messageId, 'origem'), 350);
+      return;
+    }
+    if (messages.hasNextPage && paginasDoPulo.current < 30) {
+      if (!messages.isFetchingNextPage) { paginasDoPulo.current++; void messages.fetchNextPage(); }
+      return;
+    }
+    paginasDoPulo.current = 0;
+    clearJump();
+    toast.ok('A mensagem de origem não está mais na conversa — o retrato dela fica no ticket.');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reage à página carregada, não à identidade do hook
+  }, [jumpTo, conversationId, mensagens, messages.isLoading, messages.hasNextPage, messages.isFetchingNextPage]);
   // cada encerramento fecha um atendimento: vira divisória entre as mensagens, para saber onde um
   // termina e o próximo começa (a mesma janela que a auditoria de Relatórios usa)
   const eventos = useConversationEvents(conversationId ?? null);
@@ -657,6 +700,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         {sched.has && (
           <Button size="sm" variant="ghost" icon={<CalendarPlus size={14} />} onClick={() => setScheduling(true)} title="Agendar horário para este contato"><span className="hidden sm:inline">Agendar</span></Button>
         )}
+        {podeAbrirTicket && (
+          <Button size="sm" variant="ghost" icon={<TicketIcon size={14} />} onClick={() => abrirTicket()} title="Abrir ticket para outro setor a partir desta conversa (para partir de uma mensagem, use o ícone de ticket nela)">
+            <span className="hidden lg:inline">Ticket</span>
+          </Button>
+        )}
+        <TicketsDaConversa tickets={ticketsDaConversa.data ?? []} />
         {conv.status === 'waiting' && (
           <Button size="sm" icon={<Hand size={14} />} loading={claim.isPending} loadingText="Assumindo…" onClick={() => claim.mutateAsync(conv.id).then(() => { toast.ok('Você assumiu este atendimento'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Assumir atendimento">
             <span className="hidden sm:inline">Assumir</span>
@@ -778,7 +827,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{encerradosAntes(mensagens[i - 1], m).map((e) => <MarcoDeAtendimento key={e.id} e={e} seguinte />)}{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{encerradosAntes(mensagens[i - 1], m).map((e) => <MarcoDeAtendimento key={e.id} e={e} seguinte />)}{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} onTicket={podeAbrirTicket ? abrirTicket : undefined} ticketsDaqui={ticketsPorMensagem.get(m.id)} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
         {ultima && encerramentos.filter((e) => e.createdAt > ultima.createdAt).map((e) => <MarcoDeAtendimento key={e.id} e={e} />)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
@@ -839,6 +888,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
       {/* prévia do que vai ser enviado, sobre o chat — nada sobe antes de confirmar */}
       {/* o link entra no campo da MENSAGEM (sai da nota, se estava nela) — o atendente revisa e envia */}
+      {ticketDe && ticketOpts.data && (
+        <NewTicketModal opts={ticketOpts.data} origem={ticketDe} onClose={() => setTicketDe(null)} onCriado={() => setTicketDe(null)} />
+      )}
       <BudgetModal open={orcando} onClose={() => setOrcando(false)} conversationId={conv.id} onInserir={(t) => { setModoNota(false); inserirNoTexto(t); }} onEnviar={enviarTexto} />
       {previa && (
         <MediaPreview
@@ -1073,12 +1125,14 @@ export function resumoDaMensagem(m: Message): string {
   return messagePreview(m);
 }
 
-function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; podeVerApagada: boolean; citada?: Message; contato: string }) {
+function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, onTicket, ticketsDaqui, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; onTicket?: (m: Message) => void; ticketsDaqui?: ConversationTicket[]; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
   if (m.type === 'call') return <LinhaDeLigacao m={m} />;
   const estruturado = structuredBody(m);
   if (m.deletedAt) return <MensagemApagada m={m} podeVer={podeVerApagada} />;
+  const marco = (m.content as MessageContent | null)?.kind === 'ticket' ? (m.content as Extract<MessageContent, { kind: 'ticket' }>) : null;
+  if (m.internal && marco && !m.deletedAt) return <MarcoDeTicket m={m} c={marco} />;
   if (m.internal) {
     // `author` some se o usuário for removido; `authorName` é o nome gravado na nota.
     // Sem nenhum dos dois = aviso do sistema (fluxo, agenda).
@@ -1100,7 +1154,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
   }
   return (
     <div id={`msg-${m.id}`} className={cn('group flex items-center gap-1 rounded-lg transition-colors duration-700', out ? 'justify-end' : 'justify-start')}>
-      {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onEditar={onEditar} podeReagir={canResend} />}
+      {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onEditar={onEditar} onTicket={onTicket} podeReagir={canResend} />}
       <div className={cn('relative max-w-[72%] px-2.5 py-1.5 text-[13px]', m.reactions?.length && 'mb-3', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
         {!out && m.senderName && <span className="block text-[11.5px] font-semibold text-accent truncate" title={m.senderPhone ?? undefined}>{m.senderName}</span>}
         {m.forwarded && <ForwardedLabel score={m.forwardingScore} />}
@@ -1117,6 +1171,16 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
           {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           {out && <StatusIcon status={m.status} error={m.error} />}
         </div>
+        {/* o "momento" em que a conversa virou ticket: selo na própria mensagem */}
+        {!!ticketsDaqui?.length && (
+          <div className="flex flex-wrap justify-end gap-1 mt-1">
+            {ticketsDaqui.map((t) => (
+              <Link key={t.id} href={`/tickets?ver=${t.id}`} title={`${t.title} — ${TICKET_STATUS_LABEL[t.status]}`} className="inline-flex items-center gap-1 rounded-full bg-panel/80 text-ink border border-line px-1.5 py-px text-[10.5px] font-semibold hover:bg-panel">
+                <TicketIcon size={10} /> #{t.number} · {TICKET_STATUS_LABEL[t.status]}
+              </Link>
+            ))}
+          </div>
+        )}
         {(m.status === 'failed' || (m.error && !m.mediaUrl)) && (
           <p className={cn('text-[10px] mt-0.5 flex items-center gap-2', out ? 'text-danger-ink bg-danger-soft rounded px-1.5 py-0.5' : 'text-danger')}>
             <span className="flex-1">{m.error ?? 'Falha ao enviar'}</span>
@@ -1134,7 +1198,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
           </div>
         )}
       </div>
-      {!out && <AcoesDaBolha m={m} out={false} onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onNaoLida={onNaoLida} podeReagir={canResend} />}
+      {!out && <AcoesDaBolha m={m} out={false} onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onNaoLida={onNaoLida} onTicket={onTicket} podeReagir={canResend} />}
     </div>
   );
 }
@@ -1263,18 +1327,20 @@ function mudouODia(anterior: Message | undefined, atual: Message) {
  * Só para mensagem que chegou ao WhatsApp — sem `externalId` não há o que citar nem reagir.
  * Apagar é a exceção: pendente (cancela o envio) e com falha também saem do histórico.
  */
-function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; podeReagir: boolean }) {
+function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, onTicket, podeReagir }: { m: Message; out: boolean; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; onTicket?: (m: Message) => void; podeReagir: boolean }) {
   const apagar = onApagar && <BotaoAcao titulo="Apagar" onClick={() => onApagar(m)}><Trash2 size={14} /></BotaoAcao>;
   // editar vale também na fila (sem `externalId`): o texto novo é o que sai
   const editar = onEditar && <BotaoAcao titulo="Editar" onClick={() => onEditar(m)}><Pencil size={14} /></BotaoAcao>;
-  if (!m.externalId) return apagar || editar ? <div className="flex items-center shrink-0">{apagar}{editar}</div> : null;
+  // ticket a partir desta mensagem: ela vira o "momento" guardado no ticket (docs/tickets.md)
+  const ticket = onTicket && <BotaoAcao titulo="Abrir ticket a partir desta mensagem" onClick={() => onTicket(m)}><TicketIcon size={14} /></BotaoAcao>;
+  if (!m.externalId) return apagar || editar || ticket ? <div className="flex items-center shrink-0">{apagar}{editar}{ticket}</div> : null;
   const reagir = podeReagir && m.status !== 'pending' && m.status !== 'failed' && <BotaoReagir m={m} out={out} />;
   const responder = onResponder && <BotaoResponder m={m} onResponder={onResponder} />;
   // figurinha não sai pelos providers; o resto vira envio normal (mídia, texto ou link)
   const encaminhar = onEncaminhar && m.type !== 'sticker' && <BotaoAcao titulo="Encaminhar" onClick={() => onEncaminhar(m)}><Forward size={14} /></BotaoAcao>;
   // só nas recebidas: é o que o contato mandou que fica pendente de leitura
   const naoLida = onNaoLida && !out && <BotaoAcao titulo="Marcar como não lida a partir daqui" onClick={() => onNaoLida(m)}><Mail size={14} /></BotaoAcao>;
-  return <div className="flex items-center shrink-0">{out ? <>{apagar}{editar}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{naoLida}{apagar}</>}</div>;
+  return <div className="flex items-center shrink-0">{out ? <>{apagar}{editar}{ticket}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{ticket}{naoLida}{apagar}</>}</div>;
 }
 
 function BotaoAcao({ titulo, onClick, children }: { titulo: string; onClick: () => void; children: React.ReactNode }) {
@@ -1402,12 +1468,56 @@ function Citacao({ m, citada, contato, onVerMidia }: { m: Message; citada?: Mess
 const DESTAQUE_CITADA = ['bg-accent/15'];
 
 /** Rola até a mensagem citada e pisca. Fora da página carregada, avisa em vez de falhar calado. */
-function irParaMensagem(id: string) {
+function irParaMensagem(id: string, motivo: 'citada' | 'origem' = 'citada') {
   const el = document.getElementById(`msg-${id}`);
-  if (!el) { toast.ok('A mensagem citada está mais acima no histórico — role para carregar.'); return; }
+  if (!el) { toast.ok(motivo === 'origem' ? 'A mensagem de origem está mais acima no histórico — role para carregar.' : 'A mensagem citada está mais acima no histórico — role para carregar.'); return; }
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.add(...DESTAQUE_CITADA);
-  setTimeout(() => el.classList.remove(...DESTAQUE_CITADA), 1200);
+  // vindo do ticket, o destaque dura mais: a pessoa precisa achar o ponto na tela
+  setTimeout(() => el.classList.remove(...DESTAQUE_CITADA), motivo === 'origem' ? 3000 : 1200);
+}
+
+/** Selos no topo da conversa: os tickets que nasceram dela, com a situação de agora. */
+function TicketsDaConversa({ tickets }: { tickets: ConversationTicket[] }) {
+  if (!tickets.length) return null;
+  const ativos = tickets.filter((t) => t.status !== 'resolved' && t.status !== 'canceled');
+  const mostrar = (ativos.length ? ativos : tickets).slice(0, 2);
+  const resto = tickets.length - mostrar.length;
+  return (
+    <div className="hidden sm:flex items-center gap-1 shrink-0">
+      {mostrar.map((t) => (
+        <Link key={t.id} href={`/tickets?ver=${t.id}`} title={`${t.title} — ${TICKET_STATUS_LABEL[t.status]}`} className="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-accent-soft text-accent-ink hover:ring-1 hover:ring-accent/40">
+          <TicketIcon size={11} /> #{t.number} <span className="font-normal">{TICKET_STATUS_LABEL[t.status]}</span>
+        </Link>
+      ))}
+      {resto > 0 && <Link href={`/tickets?ver=${tickets[0].id}`} className="text-[11px] text-muted hover:text-ink" title={tickets.map((t) => `#${t.number} ${t.title} (${TICKET_STATUS_LABEL[t.status]})`).join('\n')}>+{resto}</Link>}
+    </div>
+  );
+}
+
+/**
+ * Marco na conversa: o ticket nasceu aqui (ou mudou de situação). Só a equipe vê; leva ao ticket
+ * e, se veio de uma mensagem, mostra de qual.
+ */
+function MarcoDeTicket({ m, c }: { m: Message; c: Extract<MessageContent, { kind: 'ticket' }> }) {
+  const aberto = c.event === 'opened';
+  return (
+    <div id={`msg-${m.id}`} className="flex justify-center my-1.5">
+      <div className={cn('max-w-[80%] min-w-[220px] rounded-lg border px-3 py-2 text-[13px] shadow-sm', aberto ? 'border-accent/50 bg-accent-soft' : 'border-line bg-field')}>
+        <div className="flex items-center gap-1.5 text-[11px] text-accent-ink mb-1">
+          <TicketIcon size={12} className="shrink-0" />
+          <b className="flex-1">{aberto ? 'Conversa virou ticket' : `Ticket #${c.number} atualizado`}</b>
+          <span className="tnum font-mono text-[10px] text-muted">{new Date(m.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+        </div>
+        <p className="whitespace-pre-wrap break-words text-ink">{(m.text ?? '').replace(/^🎫\s*/, '')}</p>
+        <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11.5px]">
+          <Link href={`/tickets?ver=${c.ticketId}`} className="text-accent-ink font-semibold hover:underline">Ver ticket #{c.number}</Link>
+          {aberto && c.fromMessageId && <button type="button" onClick={() => irParaMensagem(c.fromMessageId!, 'origem')} className="text-muted hover:text-ink hover:underline">Ver mensagem de origem</button>}
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted"><Lock size={10} /> Só a equipe vê</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Corpo de mídia da bolha. Sem mediaUrl ainda (download em andamento) mostra placeholder. */

@@ -248,13 +248,15 @@ Seu login será: ${user.email}`,
     const { personId } = await this.person(caller.impersonatorId ?? caller.id);
     const rows = await this.prisma.user.findMany({
       where: { isActive: true, OR: [{ id: personId }, { primaryUserId: personId }] },
-      select: { id: true, role: true, isSystemOwner: true, tenant: { select: { id: true, name: true } } },
+      select: { id: true, role: true, isSystemOwner: true, tenant: { select: { id: true, name: true } }, partner: { select: { name: true } } },
       orderBy: { createdAt: 'asc' },
     });
     return rows.map((r) => ({
       userId: r.id,
       tenantId: r.tenant?.id ?? null,
       tenantName: r.tenant?.name ?? null,
+      /** linha de VogoPartner (sem empresa): o portal do parceiro */
+      partnerName: r.role === 'partner' ? (r.partner?.name ?? 'VogoPartner') : null,
       role: r.role,
       systemOwner: r.isSystemOwner || r.role === 'super_admin',
       current: r.id === caller.id && !caller.impersonatorId,

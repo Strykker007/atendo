@@ -13,7 +13,9 @@ import { platformBudgetStatus, type AiUsageSnapshot } from './ai-quota';
  * Custo de uma chamada em USD. Ordem: endpoint local = 0 → preço do ambiente (endpoint
  * alternativo) → tabela por modelo (que assume o mais caro quando não conhece).
  */
-export function costOf(model: string, tokensIn: number, tokensOut: number) {
+export function costOf(model: string, tokensIn: number, tokensOut: number, ownKey = false) {
+  // chave do cliente vai sempre ao endpoint oficial: preço de tabela, sem as variáveis da plataforma
+  if (ownKey) return aiCostUsd(model, tokensIn, tokensOut);
   if (isLocalEndpoint()) return 0;
   const { AI_PRICE_IN_PER_1K: i, AI_PRICE_OUT_PER_1K: o } = env;
   if (i !== undefined || o !== undefined) return (tokensIn / 1000) * (i ?? 0) + (tokensOut / 1000) * (o ?? 0);
@@ -52,11 +54,13 @@ export class AiUsageService {
     userId?: string;
     latencyMs?: number;
     error?: string;
+    /** chave do próprio cliente: grava a linha, mas não soma na cota, no teto nem no orçamento */
+    ownKey?: boolean;
   }) {
-    const costUsd = input.error ? 0 : costOf(input.model, input.tokensIn, input.tokensOut);
+    const costUsd = input.error ? 0 : costOf(input.model, input.tokensIn, input.tokensOut, input.ownKey);
     const costBrl = costUsd * env.USD_BRL_RATE;
-    await this.prisma.aiUsage.create({ data: { ...input, costUsd, costBrl } });
-    if (input.error) return { costUsd, costBrl };
+    await this.prisma.aiUsage.create({ data: { ...input, ownKey: !!input.ownKey, costUsd, costBrl } });
+    if (input.error || input.ownKey) return { costUsd, costBrl };
 
     const period = aiPeriodOf();
     const multi = this.redis.multi();
@@ -106,7 +110,7 @@ export class AiUsageService {
     const [y, m] = period.split('-').map(Number);
     const rows = await this.prisma.aiUsage.groupBy({
       by: ['tenantId'],
-      where: { occurredAt: { gte: new Date(Date.UTC(y, m - 1, 1)), lt: new Date(Date.UTC(y, m, 1)) }, error: null },
+      where: { occurredAt: { gte: new Date(Date.UTC(y, m - 1, 1)), lt: new Date(Date.UTC(y, m, 1)) }, error: null, ownKey: false },
       _count: { _all: true },
       _sum: { costBrl: true },
     });
@@ -126,17 +130,20 @@ export class AiUsageService {
     const [y, m] = period.split('-').map(Number);
     const where = { tenantId, occurredAt: { gte: new Date(Date.UTC(y, m - 1, 1)), lt: new Date(Date.UTC(y, m, 1)) } };
     // só chamadas bem-sucedidas contam como interação; as que falharam entram em `failed`
-    const ok = { ...where, error: null };
-    const [byKind, total, failed] = await Promise.all([
+    // chave própria do cliente fica fora da cota: contada à parte (`ownKeyInteractions`)
+    const ok = { ...where, error: null, ownKey: false };
+    const [byKind, total, failed, own] = await Promise.all([
       this.prisma.aiUsage.groupBy({ by: ['kind'], where: ok, _count: { _all: true }, _sum: { costBrl: true, tokensIn: true, tokensOut: true } }),
       this.prisma.aiUsage.aggregate({ where: ok, _count: { _all: true }, _sum: { costBrl: true } }),
       this.prisma.aiUsage.count({ where: { ...where, NOT: { error: null } } }),
+      this.prisma.aiUsage.count({ where: { ...where, error: null, ownKey: true } }),
     ]);
     return {
       period,
       interactions: total._count._all,
       costBrl: Number(total._sum.costBrl ?? 0),
       failed,
+      ownKeyInteractions: own,
       byKind: byKind.map((k) => ({ kind: k.kind, count: k._count._all, costBrl: Number(k._sum.costBrl ?? 0), tokensIn: k._sum.tokensIn ?? 0, tokensOut: k._sum.tokensOut ?? 0 })),
     };
   }

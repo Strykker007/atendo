@@ -6,6 +6,7 @@ import { env } from '../../config/env';
 import { localToUtc, TZ_DEFAULT } from '../../common/time';
 import { localOf } from '../tenants/schedule-clock';
 import { currentShift, isWithinShift, lastShift, splitLocal, type ShiftRule } from './shift-window';
+import { currentPlannedShift, isWithinPlannedShift, lastPlannedShift, type DayException } from './shift-calendar';
 
 export const OUT_OF_SCHEDULE = 'FOR_OUT_OF_SCHEDULE';
 export const ACCOUNT_EXPIRED = 'ACCOUNT_EXPIRED';
@@ -111,7 +112,9 @@ export class ShiftAccessService {
     const local = localOf(now, tz);
     const instante = (abs: number) => { const p = splitLocal(abs); return localToUtc(p.ymd, p.hm, tz); };
     const rule = schedule as ShiftRule;
-    const turno = currentShift(rule, local);
+    // folga / turno extra lançados no calendário (docs/escalas.md#calendário); sem nenhum, a regra pura
+    const excecoes = await this.exceptionsAround(user.id, local.ymd);
+    const turno = excecoes.length ? currentPlannedShift(rule, excecoes, local) : currentShift(rule, local);
     const liberacao = await this.activeOverride(user.id, now);
     if (turno || liberacao) {
       // vale o que durar mais (turno ou liberação), mas nunca além do vencimento da conta temporária
@@ -124,7 +127,7 @@ export class ShiftAccessService {
     }
     if (mode === 'refresh') {
       // acabou há pouco (turno ou liberação): sessão travada na tela de passagem
-      const ultimo = lastShift(rule, local);
+      const ultimo = excecoes.length ? lastPlannedShift(rule, excecoes, local) : lastShift(rule, local);
       // liberação que venceu ou foi encerrada pelo gestor nos últimos minutos também abre a passagem
       const desde = new Date(now.getTime() - HANDOFF_MS);
       const liberacoes = await this.prisma.scheduleOverride.findMany({
@@ -166,14 +169,28 @@ export class ShiftAccessService {
     }
   }
 
-  async onShift(tenantId: string, scheduleId: string, now = new Date()) {
+  async onShift(tenantId: string, scheduleId: string, now = new Date(), userId?: string) {
     const [schedule, settings] = await Promise.all([
       this.prisma.workSchedule.findFirst({ where: { id: scheduleId, tenantId } }),
       this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { timezone: true } }),
     ]);
     // escala apagada no meio do caminho: sem escala, sem trava
     if (!schedule) return true;
-    return isWithinShift(schedule as ShiftRule, localOf(now, settings?.timezone ?? TZ_DEFAULT));
+    const local = localOf(now, settings?.timezone ?? TZ_DEFAULT);
+    const excecoes = userId ? await this.exceptionsAround(userId, local.ymd) : [];
+    return excecoes.length ? isWithinPlannedShift(schedule as ShiftRule, excecoes, local) : isWithinShift(schedule as ShiftRule, local);
+  }
+
+  /**
+   * Exceções que podem mexer no turno de agora: de 9 dias atrás (último turno, passagem) até amanhã
+   * (tolerância de entrada puxa o turno seguinte). Datas "AAAA-MM-DD" comparam como texto.
+   */
+  async exceptionsAround(userId: string, ymd: string): Promise<DayException[]> {
+    const shift = (n: number) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+    return this.prisma.shiftException.findMany({
+      where: { userId, date: { gte: shift(-9), lte: shift(1) } },
+      select: { id: true, date: true, kind: true, startTime: true, endTime: true },
+    });
   }
 
   activeOverride(userId: string, now = new Date()) {
