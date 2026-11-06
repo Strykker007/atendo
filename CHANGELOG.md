@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.16.0 — 2026-11-06
+
+- feat: chave própria de IA, redistribuição automática, ticket da conversa, custo por cliente e VogoPartner com login existente
+- fix(backup): conferir dumps e envio ao R2, alerta e conferência de mídia que termina
+- feat(ia): agente de IA com etapas e ferramentas do sistema
+- feat(escalas): calendário mensal e semanal com folga, turno extra e troca
+
 ## 1.15.0 — 2026-11-04
 
 - feat: VogoPartners e ajustes em andamento
