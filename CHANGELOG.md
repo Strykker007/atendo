@@ -3,6 +3,98 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.16.0 — 2026-11-06
+
+- feat: chave própria de IA, redistribuição automática, ticket da conversa, custo por cliente e VogoPartner com login existente
+- fix(backup): conferir dumps e envio ao R2, alerta e conferência de mídia que termina
+- feat(ia): agente de IA com etapas e ferramentas do sistema
+- feat(escalas): calendário mensal e semanal com folga, turno extra e troca
+
+## 1.15.0 — 2026-11-04
+
+- feat: VogoPartners e ajustes em andamento
+- fix(numeros): trocar para a Meta com número de outro card dá 409, não 500
+- fix(meta-signup): fechar a janela da Meta encerra o cadastro
+- fix(numeros): cadastro recusado pela Meta não fica como duplicata
+- fix(shared): rótulo do tipo de mensagem call
+- feat(ligacoes): ligação registrada na linha do tempo da conversa
+- fix(ligacoes): "Contato novo" no lugar de "Número oculto"
+- fix(ligacoes): telefone de quem liga a partir do @lid
+- fix(ligacoes): tipo literal de fase no aviso de ligação
+- feat(ligacoes): aviso de ligação no WhatsApp + abrir/baixar arquivo com link novo
+- fix(anexos): aceita qualquer arquivo (txt, exe, mov…) exceto HTML/SVG/JS
+
+## 1.14.4 — 2026-10-31
+
+- feat(envio): trava de contatos novos por dia pode ser desligada por número
+
+## 1.14.3 — 2026-10-30
+
+- feat(orcamentos): desconto em R$ ou %, e campos do orçamento alinhados
+
+## 1.14.2 — 2026-10-30
+
+- fix(agendadas): modal de agendar sem <form> e fora do formulário da conversa
+- feat(orcamentos): desconto visível e orçamento por mensagem opcional (padrão: só link)
+- fix(agendadas): Agendar não envia mais a mensagem na hora
+- feat(meta): coexistência com o aplicativo WhatsApp Business do celular
+- feat(meta): cadastro incorporado (Conectar com a Meta) sem token nem IDs
+- feat(numeros): atualizar o token de um número Meta (botão Credenciais)
+
+## 1.14.1 — 2026-10-30
+
+- feat(site): página /exclusao-de-dados (a Meta não aceita URL com #)
+
+## 1.14.0 — 2026-10-30
+
+- feat(infra): publicar o site público (vogochatplus.com.br) com a política de privacidade
+
+## 1.13.0 — 2026-10-30
+
+- fix(web): erros de lint que quebravam o build (hook condicional em Clientes, aspas em Horários)
+
+## 1.12.0 — 2026-10-30
+
+- feat(agendadas): agendar mensagem para número novo pela Nova conversa
+- feat(meta): gasto com a API oficial e custo previsto na transmissão
+- feat: tickets internos, desativação real de cliente e ajustes de financeiro/orçamento
+
+## 1.11.0 — 2026-10-29
+
+- feat(conversas): filtro de ticket com Todos, Gera ticket e Não gera ticket
+- feat(financeiro): fechamento do mês com contas a pagar, impostos e parte dos sócios
+- fix(web): máscara em CPF/CNPJ, telefone, CEP e cartão nos formulários
+- feat(cobranca): cobrança de ativação (instalação + 1ª mensalidade) por Pix
+- feat(orcamentos): orçamento numerado com aprovação antes do link de pagamento
+- feat(envio): contatos novos por dia ajustável por número (QR), pelo dono do sistema
+
+## 1.10.2 — 2026-10-29
+
+- feat(cobranca): "Migrar só este" na prévia da cobrança por Pix (um cliente por vez)
+- docs(retomada): webhook do Asaas configurado e testado
+- docs(retomada): v1.10.1 no ar com a cobrança por Pix escondida dos clientes
+
+## 1.10.1 — 2026-10-29
+
+- feat(cobranca): botão do dono para liberar/esconder dos clientes a cobrança por Pix (Asaas)
+- docs(retomada): chave do Asaas comentada até o webhook; como reativar no passo 4
+- docs(retomada): v1.10.0 no ar; próximo passo é o webhook do Asaas
+- docs: roteiro para retomar o deploy v1.10.0 e a mensalidade por Pix (Asaas)
+
+## 1.10.0 — 2026-10-29
+
+- chore(site): tsconfig.tsbuildinfo regenerado no build
+- feat(cobranca): mensalidade por Pix no Asaas — migração automática da cobrança manual, lembretes por e-mail (Brevo) com QR e copia e cola, aviso no painel
+- fix(relatorios): aspas tipográficas no aviso da auditoria (lint react/no-unescaped-entities quebrava o next build)
+- feat(condominios): separação por empresa opcional (equipe, contatos, transmissões); contatos com lista e ações; abrir conversa sem mensagem; atraso da 1ª mensagem no fluxo; relatórios sem venda; política de privacidade
+- feat(equipe): registro de acessos (quem esteve logado por dia e calendário por pessoa); tabela da Equipe responsiva; perfis de acesso em cartões e editor por área
+- fix(envio): ordem estrita na conversa; atendente libera a automática segurada à frente; textos seguidos juntos no aquecimento; despedida atrasada de conversa encerrada é descartada
+- feat(escalas): tolerância para sair configurável por escala, com contador na tela até travar
+- feat(ops): leitura de produção só com papel atendo_ro e escrita manual só pelo write.sh (simulação, contagem esperada, registro)
+- feat(conversas): conversas livres aparecem em Atendendo com o selo Livre (fora dos contadores e relatórios)
+- feat(envio): varredura a cada minuto de mensagem pendente sem job na fila (volta para a fila ou vira não enviada)
+- fix(infra): deploy recria o caddy quando o Caddyfile muda; Redis com maxmemory 2gb
+
 ## 1.9.1 — 2026-10-26
 
 - fix(seguranca): next 15.5.28, zod 4 e overrides das dependências vulneráveis; headers de segurança no painel
