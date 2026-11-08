@@ -237,7 +237,7 @@ function legacyRule(d: LegacyConditionData): ConditionRule | undefined {
  * `WEBHOOK_ERROR_HANDLE` se estiver ligada; senão segue pela saída normal.
  */
 export type ActionNode = FlowNodeBase<'action', {
-  kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook' | 'set_department';
+  kind: 'add_tag' | 'remove_tag' | 'assign' | 'set_status' | 'handoff' | 'set_var' | 'webhook' | 'set_department' | 'create_ticket';
   tagId?: string; scope?: 'conversation' | 'contact'; agentId?: string; status?: 'waiting' | 'in_progress' | 'closed';
   /**
    * set_status + closed: resultado do encerramento. Ausente = sem resultado (como antes, fora de
@@ -254,6 +254,13 @@ export type ActionNode = FlowNodeBase<'action', {
   /** set_var */ varName?: string; value?: string;
   /** webhook */ url?: string; method?: WebhookMethod; headers?: WebhookHeader[]; body?: string; timeoutSec?: number;
   /** webhook: guarda o corpo da resposta nesta variável */ responseVar?: string;
+  /**
+   * create_ticket (docs/tickets.md#pelo-fluxo): abre ticket ligado à conversa. Título, detalhes e
+   * campos aceitam {{variáveis}}; setor/prioridade/prazo vazios = os do tipo. O número vai para a
+   * variável `ticketVar` (padrão `ticket`). Usa também `departmentId` (setor) e `agentId` (responsável).
+   */
+  ticketTypeId?: string; ticketTitle?: string; ticketDescription?: string; ticketPriority?: 'low' | 'normal' | 'high' | 'urgent';
+  ticketDueDays?: number; ticketFields?: Record<string, string>; ticketVar?: string;
 }>;
 /**
  * Valor em reais vindo de texto livre (variável do fluxo): "R$ 1.234,56", "1234,5", "1234.56",

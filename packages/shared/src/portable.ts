@@ -101,6 +101,15 @@ export type PortableFlowBundle = PortableBundle<'flow', PortableFlow>;
 export interface SourceNames {
   tagNameById?: Record<string, string>;
   flowNameById?: Record<string, string>;
+  /** agente de IA do bloco IA (modo Agente) e tipo do "Abrir ticket": viajam pelo nome */
+  aiAgentNameById?: Record<string, string>;
+  ticketTypeNameById?: Record<string, string>;
+}
+
+/** No destino: nome → id do agente de IA e do tipo de ticket (resolvidos/criados por quem chama). */
+export interface TargetRefs {
+  aiAgentIdByName?: Record<string, string>;
+  ticketTypeIdByName?: Record<string, string>;
 }
 
 type AnyNode = { id: string; type: string; data: Record<string, unknown> };
@@ -203,6 +212,27 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
       }
     }
 
+    // agente de IA e tipo de ticket são do cliente de origem: viajam pelo NOME (o modelo de perfil
+    // leva os dois junto; na importação avulsa, casa com o de mesmo nome no destino)
+    if (typeof d.aiAgentId === 'string') {
+      const name = names.aiAgentNameById?.[d.aiAgentId];
+      delete d.aiAgentId;
+      if (name) d.aiAgentName = name;
+      else {
+        warnings.push('O agente de IA de um bloco IA não existe mais — escolha o agente no destino.');
+        flagReconfig(d, 'agente de IA');
+      }
+    }
+    if (typeof d.ticketTypeId === 'string') {
+      const name = names.ticketTypeNameById?.[d.ticketTypeId];
+      delete d.ticketTypeId;
+      if (name) d.ticketTypeName = name;
+      else {
+        warnings.push('O tipo de um "Abrir ticket" não existe mais — escolha o tipo no destino.');
+        flagReconfig(d, 'tipo de ticket');
+      }
+    }
+
     // o id do fluxo de destino não existe em outro cliente; o nome fica só como referência no card
     if (node.type === 'connect_flow' && typeof d.flowId === 'string') {
       const name = flowNameById[d.flowId];
@@ -246,6 +276,13 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
   return { definition, warnings: dedupe(warnings) };
 }
 
+/** Agentes de IA e tipos de ticket citados (pelo nome) no desenho portável. */
+export function flowRefNames(def: FlowDefinition): { aiAgents: string[]; ticketTypes: string[] } {
+  const nodes = def.nodes as unknown as AnyNode[];
+  const of = (k: string) => [...new Set(nodes.map((n) => n.data[k]).filter((v): v is string => typeof v === 'string' && v.trim() !== ''))];
+  return { aiAgents: of('aiAgentName'), ticketTypes: of('ticketTypeName') };
+}
+
 /** Nomes de etiqueta citados no desenho portável — o destino precisa garantir que existam antes. */
 export function flowTagNames(def: FlowDefinition): string[] {
   const names = (def.nodes as unknown as AnyNode[])
@@ -260,10 +297,33 @@ export function flowTagNames(def: FlowDefinition): string[] {
  * aviso e marca `_reconfig`. Todo webhook é marcado "revisar configuração": URL, headers e
  * corpo vieram de outro lugar.
  */
-export function restoreFlowDefinition(def: FlowDefinition, tagIdByName: Record<string, string>): { definition: FlowDefinition; warnings: string[] } {
+export function restoreFlowDefinition(def: FlowDefinition, tagIdByName: Record<string, string>, refs: TargetRefs = {}): { definition: FlowDefinition; warnings: string[] } {
   const warnings: string[] = [];
   const definition = clone(def);
+  // casa ignorando maiúsculas: "Atendente Virtual" e "atendente virtual" são o mesmo
+  const pick = (map: Record<string, string> | undefined, name: string) => map?.[name] ?? Object.entries(map ?? {}).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1];
   for (const node of definition.nodes as unknown as AnyNode[]) {
+    const d = node.data;
+    if (typeof d.aiAgentName === 'string') {
+      const name = d.aiAgentName;
+      const id = pick(refs.aiAgentIdByName, name);
+      delete d.aiAgentName;
+      if (id) d.aiAgentId = id;
+      else {
+        warnings.push(`O agente de IA "${name}" não existe aqui — escolha o agente no bloco IA.`);
+        flagReconfig(d, 'agente de IA');
+      }
+    }
+    if (typeof d.ticketTypeName === 'string') {
+      const name = d.ticketTypeName;
+      const id = pick(refs.ticketTypeIdByName, name);
+      delete d.ticketTypeName;
+      if (id) d.ticketTypeId = id;
+      else {
+        warnings.push(`O tipo de ticket "${name}" não existe aqui — escolha o tipo no "Abrir ticket".`);
+        flagReconfig(d, 'tipo de ticket');
+      }
+    }
     if ((node.type === 'action' && node.data.kind === 'webhook') || node.type === 'http') flagReconfig(node.data, WEBHOOK_REVIEW_FLAG);
     for (const holder of tagHolders(node)) {
       if (typeof holder.tagName !== 'string') continue;
@@ -310,8 +370,9 @@ export function flowFromPortable(
   portable: PortableFlow,
   tagIdByName: Record<string, string>,
   newId: (type: FlowNodeType) => string,
+  refs: TargetRefs = {},
 ): { name: string; description?: string; showOnClosing: boolean; trigger: FlowTrigger; definition: FlowDefinition; warnings: string[] } {
-  const { definition, warnings } = restoreFlowDefinition(portable.definition, tagIdByName);
+  const { definition, warnings } = restoreFlowDefinition(portable.definition, tagIdByName, refs);
   return { name: portable.name, description: portable.description, showOnClosing: portable.showOnClosing === true, trigger: clone(portable.trigger), definition: renewFlowIds(definition, newId), warnings };
 }
 

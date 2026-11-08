@@ -123,6 +123,12 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 **ai_agents** — agentes de IA com etapas (`persona`, `tone`, `rules`, `knowledge`, `stages` jsonb `AgentStage[]`, `targets` jsonb, `maxReplies`, `isActive`); `AiTaskKind` ganhou `flow_agent` — migração `20270201000000_ai_agents`. Ver [Agente de IA](agente-ia.md).
 
+**ticket_types** — tipos de ticket por empresa (cor, setor/prioridade/prazo padrão, `fields` jsonb `TicketField[]`); `tickets` ganhou `typeId`, `fields` (valores) e `source` (panel/conversation/flow/agent) — migração `20270207000000_ticket_types`. Ver [Tickets › Tipos](tickets.md#tipos-de-ticket).
+
+**agent_pauses** — pausa do atendente (motivo, `startedAt`, `until` opcional, `endedAt`, `endedById`); aberta = não recebe atendimento. `tenant_settings` ganhou `autoDistribute`, `autoDistributeMax`, `autoDistributeLockClaim` — migração `20270206000000_attendance_queue`. Ver [Fila de atendimento](fila-de-atendimento.md).
+
+**ai_knowledge_docs** / **ai_knowledge_chunks** — documentos do agente (o arquivo não fica guardado: só o texto em trechos com `heading`, `search` sem acento, `tsv` GIN e `embedding` BYTEA opcional); `AiTaskKind` ganhou `knowledge` (custo de embeddings, não conta como interação) — migração `20270205000000_ai_knowledge_docs`. Ver [Documentos do agente](agente-ia.md#documentos).
+
 **ai_usage** — ledger de IA, uma linha por chamada ao modelo (`kind`, modelo, tokens de
 entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` quando falhou).
 É o que permite saber a margem da IA e aplicar o teto de gasto. `ownKey` = feita com a chave do

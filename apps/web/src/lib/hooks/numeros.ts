@@ -99,7 +99,7 @@ export const useNumberQr = (id: string | null) => useQuery({ queryKey: ['number-
  * estava fora não chega nunca — recarrega tudo de uma vez (é o que antes só acontecia trocando de
  * tela, ex.: abrir o Kanban).
  */
-const REALTIME_KEYS = ['conversations', 'conversation-counts', 'conversation', 'messages', 'kanban', 'numbers', 'internal-chats', 'internal-messages', 'support-chats', 'scheduled-messages-all', 'budgets-all'];
+const REALTIME_KEYS = ['conversations', 'conversation-counts', 'conversation', 'messages', 'kanban', 'numbers', 'internal-chats', 'internal-messages', 'support-chats', 'scheduled-messages-all', 'budgets-all', 'queue-status'];
 
 /** Tempo real: aplica eventos do socket direto no cache do react-query. */
 export function useRealtime() {
@@ -240,7 +240,12 @@ export function useRealtime() {
       // pausa/retomada do robô entra no histórico
       qc.invalidateQueries({ queryKey: ['conversation-events', c.id] });
       recarregarListas();
+      // entrou na fila ou alguém encerrou: o contador da fila muda
+      if (c.status === 'waiting' || c.status === 'closed') qc.invalidateQueries({ queryKey: ['queue-status'] });
     });
+    // fila de atendimento: alguém entrou/saiu de pausa (docs/fila-de-atendimento.md)
+    socket.on('queue', () => qc.invalidateQueries({ queryKey: ['queue-status'] }));
+    socket.on('agent_pause', () => qc.invalidateQueries({ queryKey: ['queue-status'] }));
     // aviso global do dono do sistema: popup no topo + sino
     socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
     // atendimento transferido para MIM (sala só minha): alarme + aviso em destaque
@@ -248,6 +253,7 @@ export function useRealtime() {
     socket.on('call', (e: CallEvent) => receiveCall(e, qc.getQueryData<{ role?: string; numberIds?: string[] }>(['me'])));
     socket.on('transfer_alert', (e: TransferAlertEvent) => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['queue-status'] });
       receiveTransferAlert(e);
     });
     // chat interno da equipe (sala só dos membros): entra na conversa e toca para quem não escreveu

@@ -12,6 +12,8 @@ import { AiUsageService } from './ai-usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
 import { AnthropicProvider } from './providers/anthropic.provider';
 import { OpenAiProvider } from './providers/openai.provider';
+import { KnowledgeService } from './knowledge.service';
+import { embedModel, embeddingsOn } from './providers/embeddings';
 
 export const QUEUE_AI = 'ai';
 
@@ -21,16 +23,23 @@ class AiReconcileScheduler implements OnModuleInit {
   constructor(@InjectQueue(QUEUE_AI) private readonly queue: Queue) {}
   async onModuleInit() {
     await this.queue.upsertJobScheduler('daily-ai-reconcile', { pattern: '10 3 * * *' }, { name: 'reconcile' });
+    // chave de embedding recém-configurada (ou modelo trocado): gera o que faltar dos documentos já enviados
+    if (embeddingsOn()) await this.queue.add('knowledge-embed', {}, { jobId: `knowledge-backfill-${embedModel().replace(/[^a-z0-9-]/gi, '_')}`, attempts: 3, backoff: { type: 'exponential', delay: 60_000 } });
   }
 }
 
 @Processor(QUEUE_AI)
 class AiProcessor extends TrackedWorkerHost {
-  constructor(private readonly usage: AiUsageService) {
+  constructor(
+    private readonly usage: AiUsageService,
+    private readonly knowledge: KnowledgeService,
+  ) {
     super(QUEUE_AI);
   }
   protected async handle(job: Job) {
     if (job.name === 'reconcile') await this.usage.reconcile();
+    // embeddings dos documentos do agente: de um documento ou tudo que falta (docs/agente-ia.md#documentos)
+    if (job.name === 'knowledge-embed') await this.knowledge.embedPending((job.data as { docId?: string })?.docId);
   }
 }
 
@@ -38,7 +47,7 @@ class AiProcessor extends TrackedWorkerHost {
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_AI, defaultJobOptions: { removeOnComplete: 20, removeOnFail: 50 } }), AuthModule, BillingModule],
   controllers: [AiController, AiAgentsController, AiOwnKeyController],
-  providers: [AiService, AiAgentsService, AiOwnKeyService, AiUsageService, AiProviderRegistry, AnthropicProvider, OpenAiProvider, AiReconcileScheduler, AiProcessor],
+  providers: [AiService, AiAgentsService, KnowledgeService, AiOwnKeyService, AiUsageService, AiProviderRegistry, AnthropicProvider, OpenAiProvider, AiReconcileScheduler, AiProcessor],
   exports: [AiService, AiUsageService, AiAgentsService],
 })
 export class AiModule {}

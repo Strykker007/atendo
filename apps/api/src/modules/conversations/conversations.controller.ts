@@ -269,7 +269,9 @@ export class ConversationsController {
   }
 
   @Post(':id/claim')
-  claim(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+  async claim(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    // fila travada: atendente não puxa (docs/fila-de-atendimento.md#quem-pode-puxar)
+    await this.conversations.assertQueueAllows(u.tenantId, u);
     return this.conversations.claim(u.tenantId, id, u);
   }
 

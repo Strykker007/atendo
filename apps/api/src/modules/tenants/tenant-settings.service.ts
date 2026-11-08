@@ -40,6 +40,9 @@ export interface SettingsUpdate {
   autoReassignBaseMinutes?: number;
   autoReassignMaxMinutes?: number;
   autoReassignMaxTimes?: number;
+  autoDistribute?: boolean;
+  autoDistributeMax?: number;
+  autoDistributeLockClaim?: boolean;
 }
 
 export const OUTCOME_LABELS_DEFAULT = { won: 'Comprou', lost: 'Não comprou' } as const;

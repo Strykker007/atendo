@@ -44,11 +44,12 @@ export interface TenantSettings {
   closeMessageEnabled: boolean; closeMessageText: string | null;
   /** redistribuição automática (docs/redistribuicao-automatica.md) */
   autoReassignWaiting: boolean; autoReassignAssigned: boolean; autoReassignBaseMinutes: number; autoReassignMaxMinutes: number; autoReassignMaxTimes: number;
+  autoDistribute: boolean; autoDistributeMax: number; autoDistributeLockClaim: boolean;
   closeDefault: string;
   /** quadro padrão, agora */
   isOpenNow: boolean; currentBand: string; nextOpenLabel: string;
 }
-export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'companyIsolation' | 'requireSignature' | 'budgetQuoteItems' | 'budgetQuoteEnabled' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText' | 'closeMessageEnabled' | 'closeMessageText' | 'autoReassignWaiting' | 'autoReassignAssigned' | 'autoReassignBaseMinutes' | 'autoReassignMaxMinutes' | 'autoReassignMaxTimes'>>;
+export type SettingsPatch = Partial<Pick<TenantSettings, 'timezone' | 'attendanceActive' | 'welcomeFlowId' | 'closedFlowId' | 'onCloseFlowId' | 'wonFlowId' | 'lostFlowId' | 'requireSaleValue' | 'salesEnabled' | 'companyIsolation' | 'requireSignature' | 'budgetQuoteItems' | 'budgetQuoteEnabled' | 'requireReasonOnWon' | 'requireReasonOnLost' | 'rankingWeights' | 'wonLabel' | 'lostLabel' | 'defaultFlowId' | 'defaultFlowInactivityHours' | 'welcomeMessages' | 'welcomeMode' | 'welcomeEnabled' | 'secureMediaText' | 'publicLogoKey' | 'transferMessageEnabled' | 'transferMessageText' | 'departmentTransferMessageText' | 'closeMessageEnabled' | 'closeMessageText' | 'autoReassignWaiting' | 'autoReassignAssigned' | 'autoReassignBaseMinutes' | 'autoReassignMaxMinutes' | 'autoReassignMaxTimes' | 'autoDistribute' | 'autoDistributeMax' | 'autoDistributeLockClaim'>>;
 export const useTenantSettings = () => useQuery({ queryKey: ['tenant-settings'], queryFn: () => api<TenantSettings>('/settings') });
 /**
  * Nome dos dois resultados do encerramento na empresa ("Comprou"/"Não comprou" por padrão;

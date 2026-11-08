@@ -21,10 +21,31 @@ conversas isentas marcadas antes da mudança que ainda estão abertas sem dono (
 | Isento: a conversa nasce/fica `ticketExempt = true` e segue a regra comum de status — nasce em **Aguardando**, reabre ao voltar a falar depois de encerrada, marca espera (`awaitingSince`), tem dono ao assumir/responder | `inbound.service.ts` |
 | Sem automação: a entrada volta como `quiet`, então o processor não dispara fluxo, boas-vindas, horário ou agenda; pesquisa de satisfação não é reivindicada | `inbound.service.ts` / `inbound.processor.ts` |
 | Continua passando pelo ledger (`UsageService.record`) — é tráfego real e é cobrado como qualquer mensagem | `inbound.service.ts` |
-| Responder pelo painel **assume** como qualquer atendimento (só a conversa livre — grupo — não assume) | `ConversationsService.send` (`ehLivre`) |
+| Responder pelo painel **assume** como qualquer atendimento (só a conversa livre — grupo — não assume). **O dono não trava** (ver abaixo) | `ConversationsService.send` (`ehLivre`) |
 | Encerrar: **sem resultado** (`outcome = none`), sem venda, sem pesquisa e sem o fluxo padrão de encerramento (só o escolhido explicitamente); o evento `closed` sai com `ignoreInReports = true`. Não exige `conversations.close_internal` — a marca já foi decidida por quem tem `settings.manage`. O aviso de encerramento (Configurações → Encerramento), se ligado, sai normalmente. Em massa: entra com o resultado escolhido, mas o evento também vai com `ignoreInReports` | `conversations.controller.ts` (`status`) / `ConversationsService.setStatus` / `closeMany` |
 | Abas e contadores: isento aparece e conta em Aguardando/Atendendo/Encerrado como qualquer conversa (regra de posse inclusa). **Atendendo** mostra também as conversas livres (grupo; isentas antigas sem dono), com o selo **Livre**; a visão **Conversas livres** (`GET /conversations?free=1`) lista todos os isentos e livres, em qualquer status | `ConversationsService.list` (`LIVRE`, `comLivres`) / `counts` |
 | Relatórios: conversa `ticketExempt` sai de **todas** as métricas — volume, TMA/TMR (1ª resposta), encerramentos, perdidos, ranking, auditoria de atendimentos, mensagens enviadas/recebidas, comparativo por empresa. Vendas registradas (`sales`) continuam contando: é dinheiro que entrou | `reports.module.ts` (`not c."ticketExempt"`, `semIsento`) |
+
+### Dono não trava
+
+Desde 08/11/2026: em **todo** contato isento (cadastrado na lista ou número da própria conta), quem
+está atendendo **não bloqueia** os outros. Caso real: alguém
+escreveu para o número de um colega (isento por ser da equipe), não encerrou, e mais ninguém
+conseguia falar com ele — "fulano está atendendo".
+
+- **Responder** (`send`) numa conversa isenta com outro dono: a conversa passa para quem respondeu
+  (`in_progress`), sem erro, e fica no histórico um evento `transferred` (ator = alvo = quem
+  respondeu, motivo "Respondeu contato isento que estava com outra pessoa"). Não passa pela regra da
+  fila automática (como já era no isento).
+- **Nova conversa** (`POST /conversations/start`) com o contato isento em atendimento com outra
+  pessoa: não devolve `409 already_assigned`; segue para o `send`, que troca o dono.
+- **Tela**: o composer não mostra o cadeado "fulano está atendendo" no isento (`ownedByOther` ignora
+  `ticketExempt`). Departamento e número continuam valendo (quem não vê o departamento/número segue
+  sem acesso).
+- Atendimento comum (gera ticket) não muda: dono continua travando.
+- A conversa já **nasce** isenta quando criada pelo painel ou pelo sistema (`start`, `sendToContact`,
+  `sendToPhone`): antes ela nascia sem a marca e só ficava isenta quando o contato respondia —
+  nesse meio-tempo o dono travava e o atendimento podia entrar em relatório.
 
 ### Entrar e sair da lista
 

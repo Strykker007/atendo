@@ -29,7 +29,7 @@ Entidade nova `AiAgent` (por tenant; mais de um por empresa, ex.: "Vendas" e "Su
 | Nome e tom | como se apresenta ("Ana, da Farmácia X"), formal/informal |
 | Objetivo | texto livre: "tirar dúvidas e fechar pedido; agendar aplicação de vacina" |
 | Instruções | o "prompt" do cliente, com `{{variáveis}}` ([Variáveis](variaveis.md)) |
-| Base de conhecimento | texto hoje; arquivos + busca vetorial (`pgvector`) depois |
+| Base de conhecimento | texto + documentos (PDF/Word/texto) com busca por palavra e por significado — feito, sem pgvector (ver agente-ia.md#documentos) |
 | Ferramentas liberadas | checkboxes: agenda, orçamento, etiquetas, transferir… |
 | Política comercial | desconto máximo %, valor mínimo do pedido, parcelamento, quem aprova acima |
 | Quando atua | só fora do expediente / sempre / só conversa nova; números e departamentos |
@@ -144,4 +144,4 @@ Em ordem de retorno para o cliente (e de facilidade, dado o que já existe):
 4. Modo "Agente" no bloco IA e gatilho padrão do número.
 5. `create_budget` + política comercial + aprovação.
 6. Transcrição de áudio (entra antes se o primeiro cliente usar muito áudio).
-7. Base por arquivo com `pgvector` (`search_knowledge`).
+7. ~~Base por arquivo~~ — feito como busca antes da rodada (não ferramenta), embeddings comparados na API, sem `pgvector` (agente-ia.md#documentos).

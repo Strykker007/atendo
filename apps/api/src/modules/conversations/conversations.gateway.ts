@@ -23,6 +23,11 @@ const OWNERS_ROOM = 'owners';
 const PRESENCE_BEAT_MS = 30_000;
 const PRESENCE_TTL_MS = 90_000;
 const availableKey = (tenantId: string) => `presence:available:${tenantId}`;
+/**
+ * Em pausa (docs/fila-de-atendimento.md#pausa): HASH por cliente, campo userId, valor = até quando
+ * (ms; 0 = até voltar). Espelho do `agent_pauses` aberto — quem grava é o `AgentPauseService`.
+ */
+export const pausedKey = (tenantId: string) => `presence:paused:${tenantId}`;
 
 /** Dono do sistema, logado como ele mesmo ou "entrando como" um cliente. */
 export const isOwner = (u: { role: string; impersonatorId?: string }) => u.role === 'super_admin' || !!u.impersonatorId;
@@ -152,12 +157,32 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
    * worker (lê do Redis). Usado pelo Distribuidor com `onlyOnline`.
    */
   async availableUserIds(tenantId: string): Promise<Set<string>> {
+    const [online, paused] = await Promise.all([this.onlineUserIds(tenantId), this.pausedUserIds(tenantId)]);
+    for (const id of paused) online.delete(id);
+    return online;
+  }
+
+  /** Painel aberto e no turno, sem olhar pausa (a tela da fila mostra "em pausa" à parte). */
+  async onlineUserIds(tenantId: string): Promise<Set<string>> {
     const key = availableKey(tenantId);
     const now = Date.now();
     await this.redisCmd.zremrangebyscore(key, '-inf', now);
     const members = await this.redisCmd.zrangebyscore(key, now, '+inf');
     return new Set(members.map((m) => m.split('|')[0]));
   }
+
+  /** Em pausa agora. Pausa com prazo vencido não conta (o job da fila fecha a linha no banco). */
+  async pausedUserIds(tenantId: string): Promise<Set<string>> {
+    const all = await this.redisCmd.hgetall(pausedKey(tenantId)).catch(() => ({}) as Record<string, string>);
+    const now = Date.now();
+    return new Set(Object.entries(all).filter(([, until]) => !Number(until) || Number(until) > now).map(([id]) => id));
+  }
+
+  /**
+   * Quem quer saber de toda mudança de conversa (fila de atendimento: entrou alguém em Aguardando,
+   * alguém encerrou e abriu vaga). Registrado no `onModuleInit` de quem escuta — sem import circular.
+   */
+  conversationListeners: ((tenantId: string, conversation: Conversation) => void)[] = [];
 
   /** Alguém do cliente abriu/fechou o painel: o monitor do dono recarrega a presença. */
   private presenceChanged(client: Socket) {
@@ -220,6 +245,14 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
   }
   emitConversation(tenantId: string, conversation: Conversation) {
     this.room(tenantId).emit('conversation', conversation);
+    for (const fn of this.conversationListeners) {
+      try { fn(tenantId, conversation); } catch { /* quem escuta não derruba o envio do evento */ }
+    }
+  }
+  /** Pausa/volta da pessoa: todas as abas dela atualizam; o painel da fila do cliente recarrega. */
+  emitAgentStatus(tenantId: string, userId: string) {
+    this.to(`user:${tenantId}:${userId}`).emit('agent_pause', {});
+    this.room(tenantId).emit('queue', {});
   }
   emitNumber(tenantId: string, number: Pick<WhatsAppNumber, 'id' | 'status'> & { qrCode?: string }) {
     this.room(tenantId).emit('number', number);

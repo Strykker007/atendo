@@ -4,6 +4,7 @@ import { SYSTEM_PROFILES } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { PermissionsService } from '../auth/permissions.service';
 import { provisionedTags, type TemplateContent, type TemplateSettings } from './tenant-template';
+import { createAgentsFromPortable, createTicketTypesFromPortable } from './portable-db';
 
 /** O que replicar do modelo. Cada parte é opcional — o dono escolhe só o que quer mexer. */
 export interface RolloutParts {
@@ -17,6 +18,10 @@ export interface RolloutParts {
   tags?: boolean;
   /** configurações de atendimento do modelo (encerramento com/sem venda, assinatura, nomes dos resultados) */
   settings?: boolean;
+  /** cria os agentes de IA do modelo que o cliente não tem (pelo nome; não altera os dele) */
+  aiAgents?: boolean;
+  /** cria os tipos de ticket do modelo que o cliente não tem (pelo nome; não altera os dele) */
+  ticketTypes?: boolean;
 }
 
 export interface RolloutTenantResult {
@@ -27,6 +32,8 @@ export interface RolloutTenantResult {
   tags: { created: string[] };
   /** configurações que mudaram, em texto para a prévia ("Encerramento com venda: desligado") */
   settings: { changed: string[] };
+  aiAgents: { created: string[] };
+  ticketTypes: { created: string[] };
 }
 
 const lower = (s: string) => s.trim().toLowerCase();
@@ -64,7 +71,9 @@ export class TemplateRolloutService {
       if (!p) throw new BadRequestException(`O perfil "${name}" não está no modelo.`);
       return p;
     });
-    if (!profiles.length && !parts.closeReasons && !parts.tags && !parts.settings) throw new BadRequestException('Escolha o que aplicar.');
+    if (!profiles.length && !parts.closeReasons && !parts.tags && !parts.settings && !parts.aiAgents && !parts.ticketTypes) throw new BadRequestException('Escolha o que aplicar.');
+    if (parts.aiAgents && !content.aiAgents?.length) throw new BadRequestException('O modelo não tem agentes de IA.');
+    if (parts.ticketTypes && !content.ticketTypes?.length) throw new BadRequestException('O modelo não tem tipos de ticket.');
     if (parts.settings && !content.settings) throw new BadRequestException('O modelo não tem configurações de atendimento — nada para aplicar.');
 
     const modelo = provisionedTags(content);
@@ -90,6 +99,8 @@ export class TemplateRolloutService {
         closeReasons: { created: [], updated: [], reactivated: [], deactivated: [] },
         tags: { created: [] },
         settings: { changed: [] },
+        aiAgents: { created: [] },
+        ticketTypes: { created: [] },
       };
       // um cliente por transação: falha num não deixa o outro pela metade
       await this.prisma.$transaction(async (tx) => {
@@ -97,6 +108,9 @@ export class TemplateRolloutService {
         if (parts.closeReasons) await this.applyCloseReasons(tx, t.id, motivos, !!parts.replaceCloseReasons, r, dryRun);
         if (parts.tags) await this.applyTags(tx, t.id, tags, r, dryRun);
         if (parts.settings && content.settings) await this.applySettings(tx, t.id, content.settings, r, dryRun);
+        // tipos antes dos agentes (mesma ordem da criação do cliente); só cria o que falta, pelo nome
+        if (parts.ticketTypes && content.ticketTypes) await this.applyMissing(tx, t.id, 'ticketType', content.ticketTypes.map((x) => x.name), r.ticketTypes, dryRun, () => createTicketTypesFromPortable(tx, t.id, content.ticketTypes!));
+        if (parts.aiAgents && content.aiAgents) await this.applyMissing(tx, t.id, 'aiAgent', content.aiAgents.map((x) => x.name), r.aiAgents, dryRun, () => createAgentsFromPortable(tx, t.id, content.aiAgents!, 'skip'));
       });
       out.push(r);
     }
@@ -187,6 +201,18 @@ export class TemplateRolloutService {
       });
     }
     r.tags.created.push(...novas.map((t) => t.name));
+  }
+
+  /** Cria o que o cliente ainda não tem (pelo nome, ignorando maiúsculas). Na prévia só calcula. */
+  private async applyMissing(tx: Prisma.TransactionClient, tenantId: string, model: 'aiAgent' | 'ticketType', names: string[], out: { created: string[] }, dryRun: boolean, create: () => Promise<unknown>) {
+    const rows = model === 'aiAgent'
+      ? await tx.aiAgent.findMany({ where: { tenantId }, select: { name: true } })
+      : await tx.ticketType.findMany({ where: { tenantId }, select: { name: true } });
+    const tem = new Set(rows.map((r) => lower(r.name)));
+    const faltam = names.filter((n) => !tem.has(lower(n)));
+    if (!faltam.length) return;
+    if (!dryRun) await create();
+    out.created.push(...faltam);
   }
 
   /** Só o que o modelo define; o resto do `tenant_settings` do cliente fica como está. */

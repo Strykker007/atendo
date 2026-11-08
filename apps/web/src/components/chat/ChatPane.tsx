@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -74,6 +74,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const setDepartment = useSetConversationDepartment();
   // permissão, não papel (ver ConversationList)
   const podeTransferir = useCan('conversations.transfer_any');
+  // fila com distribuição automática e "atendente não puxa": quem não transfere não assume da fila (docs/fila-de-atendimento.md)
+  const fila = useQueueStatus();
+  const filaTravada = !!fila.data?.enabled && fila.data.lockClaim && !podeTransferir;
   const podeNota = useCan('conversations.internal_note');
   // Apagar (docs/apagar-mensagens.md): a própria mensagem recente qualquer um apaga; o resto é
   // `delete_message`. A API corta de novo — aqui é só para não oferecer o que vai dar 403.
@@ -102,7 +105,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     // na fila ainda dá em qualquer provider (o texto novo é o que sai); enviada, só Evolution e no prazo
     && (m.status === 'pending' || (conv?.number.provider !== 'meta' && Date.now() - new Date(m.createdAt).getTime() < MESSAGE_EDIT_WINDOW_MS));
   const mine = !!conv && conv.assignee?.id === me.data?.id;
-  const ownedByOther = !!conv && !!conv.assignee && !mine;
+  // contato isento (equipe/diretoria): o dono não trava — quem responde assume (docs/contatos-isentos.md#dono-não-trava)
+  const ownedByOther = !!conv && !!conv.assignee && !mine && !conv.ticketExempt;
   // Modo nota interna: o composer vira âmbar e o que sai é NOTA (só a equipe vê, nunca vai ao
   // WhatsApp). Vale em qualquer conversa; na de outra pessoa é o único jeito de escrever (cadeado).
   // Texto separado do da resposta: desligar o modo nunca manda a nota para o cliente por engano.
@@ -706,7 +710,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           </Button>
         )}
         <TicketsDaConversa tickets={ticketsDaConversa.data ?? []} />
-        {conv.status === 'waiting' && (
+        {conv.status === 'waiting' && filaTravada && !conv.assignee && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-wait-soft text-wait px-2.5 py-1 text-[11.5px] font-semibold" title="A fila entrega os contatos sozinha, por ordem de chegada e até o limite de cada atendente">
+            Na fila · distribuição automática
+          </span>
+        )}
+        {conv.status === 'waiting' && !(filaTravada && !conv.assignee) && (
           <Button size="sm" icon={<Hand size={14} />} loading={claim.isPending} loadingText="Assumindo…" onClick={() => claim.mutateAsync(conv.id).then(() => { toast.ok('Você assumiu este atendimento'); setFilterStatus('in_progress', true); }).catch(toast.err)} title="Assumir atendimento">
             <span className="hidden sm:inline">Assumir</span>
           </Button>

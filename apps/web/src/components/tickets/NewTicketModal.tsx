@@ -9,6 +9,7 @@ import { DateInput } from '@/components/ui/DatePicker';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useTicketWrite, type TicketOptions } from '@/lib/hooks';
+import { CamposDoTipo } from './TicketTypes';
 
 export const hojeYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 /** "AAAA-MM-DD" → fim do dia em Brasília (prazo e retomada valem o dia inteiro) */
@@ -70,7 +71,15 @@ function SeletorPessoas({ opts, responsavel, participantes, onResponsavel, onPar
 export function NewTicketModal({ opts, onClose, onCriado, origem }: { opts: TicketOptions; onClose: () => void; onCriado: (id: string, number: number) => void; origem?: TicketOrigin }) {
   const w = useTicketWrite();
   const conversa = useUI((s) => s.conversationId);
-  const [f, setF] = useState({ title: '', description: '', priority: 'normal' as TicketPriority, departmentId: '', responsibleId: '', participantIds: [] as string[], dueAt: '', vincular: false });
+  const [f, setF] = useState({ title: '', description: '', priority: 'normal' as TicketPriority, departmentId: '', responsibleId: '', participantIds: [] as string[], dueAt: '', vincular: false, typeId: '', fields: {} as Record<string, string> });
+  const tipos = opts.types.filter((t) => t.isActive);
+  const tipo = tipos.find((t) => t.id === f.typeId) ?? null;
+  /** escolher o tipo traz setor, prioridade e prazo padrão dele (dá para mudar depois) */
+  const escolherTipo = (id: string) => {
+    const t = tipos.find((x) => x.id === id);
+    const prazo = t?.dueDays ? new Date(Date.now() + t.dueDays * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) : '';
+    setF((x) => ({ ...x, typeId: id, fields: {}, ...(t && { priority: t.priority, departmentId: t.departmentId ?? x.departmentId, dueAt: prazo || x.dueAt, title: x.title || t.name }) }));
+  };
   const ligacao = origem
     ? { conversationId: origem.conversationId, ...(origem.messageId && { messageId: origem.messageId }) }
     : f.vincular && conversa ? { conversationId: conversa } : {};
@@ -82,6 +91,7 @@ export function NewTicketModal({ opts, onClose, onCriado, origem }: { opts: Tick
           title: f.title, description: f.description || undefined, priority: f.priority, departmentId: f.departmentId || undefined,
           responsibleId: f.responsibleId || undefined, participantIds: f.participantIds, dueAt: f.dueAt ? fimDoDia(f.dueAt) : undefined,
           ...ligacao,
+          ...(tipo && { typeId: tipo.id, fields: f.fields }),
         },
       });
       if ('id' in r && 'number' in r) { toast.ok(`Ticket #${r.number} aberto`); onCriado(r.id, r.number); }
@@ -97,8 +107,17 @@ export function NewTicketModal({ opts, onClose, onCriado, origem }: { opts: Tick
             <p>O ticket guarda as últimas mensagens até aqui e a conversa ganha um marco com o número dele.</p>
           </div>
         )}
+        {tipos.length > 0 && (
+          <Field label="Tipo">
+            <select className={inputCls} value={f.typeId} onChange={(e) => escolherTipo(e.target.value)}>
+              <option value="">Sem tipo (livre)</option>
+              {tipos.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="O que precisa"><input className={inputCls} value={f.title} maxLength={TICKET_TITLE_MAX} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Ex.: Trocar lâmpada do hall do bloco B" required minLength={3} autoFocus /></Field>
         <Field label="Detalhes"><textarea className={cn(inputCls, 'min-h-[5rem]')} value={f.description} maxLength={TICKET_TEXT_MAX} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Onde, quem pediu, o que já foi feito…" /></Field>
+        {tipo && <CamposDoTipo fields={tipo.fields} values={f.fields} onChange={(fields) => setF((x) => ({ ...x, fields }))} />}
         <div className="grid sm:grid-cols-3 gap-3">
           <Field label="Setor">
             <select className={inputCls} value={f.departmentId} onChange={(e) => setF({ ...f, departmentId: e.target.value })}>

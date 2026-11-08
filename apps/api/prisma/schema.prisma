@@ -654,6 +654,13 @@ model TenantSettings {
   autoReassignMaxMinutes  Int @default(30)
   /// quantas vezes a MESMA espera pode ser redistribuída (evita a conversa rodar a equipe inteira)
   autoReassignMaxTimes    Int @default(2)
+  // ---- fila de atendimento com distribuição automática (docs/fila-de-atendimento.md) ----
+  /// a fila entrega sozinha os contatos em Aguardando para quem está disponível, até o limite
+  autoDistribute          Boolean @default(false)
+  /// atendimentos abertos por pessoa: quem chegou no limite só recebe depois de encerrar
+  autoDistributeMax       Int     @default(4)
+  /// com a fila ligada, atendente não puxa contato da fila (só a distribuição e quem pode transferir)
+  autoDistributeLockClaim Boolean @default(true)
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2093,6 +2100,8 @@ enum AiTaskKind {
   summary
   /// agente de IA com etapas (docs/agente-ia.md)
   flow_agent
+  /// embeddings dos documentos do agente (não conta como interação)
+  knowledge
 }
 
 /// Agente de IA com etapas (docs/agente-ia.md): persona, regras, base e o roteiro em blocos.
@@ -2116,9 +2125,79 @@ model AiAgent {
   updatedAt  DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  docs   AiKnowledgeDoc[]
 
   @@index([tenantId])
   @@map("ai_agents")
+}
+
+/// Pausa do atendente (docs/fila-de-atendimento.md#pausa): enquanto aberta, não recebe atendimento
+/// da fila, do Distribuidor nem da redistribuição. Fica o histórico (quem, motivo, quanto tempo).
+model AgentPause {
+  id        String    @id @default(uuid())
+  tenantId  String
+  userId    String
+  /// lunch | break | meeting | other (AGENT_PAUSE_REASONS)
+  reason    String
+  startedAt DateTime  @default(now())
+  /// fim combinado; null = até a pessoa voltar
+  until     DateTime?
+  /// quando voltou (ou o prazo venceu); null = em pausa agora
+  endedAt   DateTime?
+  /// quem encerrou: a própria pessoa, um gerente, ou null = venceu o prazo
+  endedById String?
+
+  @@index([tenantId, endedAt])
+  @@index([userId, startedAt])
+  @@map("agent_pauses")
+}
+
+/// Documento da base de um agente (docs/agente-ia.md#documentos). O arquivo não fica guardado:
+/// só o texto extraído, cortado em trechos (AiKnowledgeChunk) para a busca.
+model AiKnowledgeDoc {
+  id           String   @id @default(uuid())
+  tenantId     String
+  agentId      String
+  name         String
+  mime         String
+  sizeBytes    Int
+  chars        Int      @default(0)
+  /// ready | failed
+  status       String   @default("ready")
+  error        String?
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  agent  AiAgent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  chunks AiKnowledgeChunk[]
+
+  @@index([tenantId, agentId])
+  @@map("ai_knowledge_docs")
+}
+
+/// Trecho de um documento: busca por palavra (tsv, dicionário português) e, com AI_EMBED_API_KEY,
+/// por significado (embedding Float32 normalizado, comparado na API — sem pgvector).
+model AiKnowledgeChunk {
+  id         String                   @id @default(uuid())
+  tenantId   String
+  agentId    String
+  docId      String
+  position   Int
+  /// capítulo/seção/artigo em que o trecho está
+  heading    String?
+  text       String
+  /// título + texto, minúsculo e sem acento — o que vira o tsv
+  search     String
+  tsv        Unsupported("tsvector")?
+  embedding  Bytes?
+  embedModel String?
+
+  doc AiKnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, position])
+  @@index([agentId])
+  @@index([tsv], type: Gin)
+  @@map("ai_knowledge_chunks")
 }
 
 /// Ledger append-only de IA: uma linha por chamada ao modelo. Fonte da verdade da margem
@@ -3098,6 +3177,12 @@ model Ticket {
   holdUntil      DateTime?
   holdSince      DateTime?
   resolvedAt     DateTime?
+  /// tipo (docs/tickets.md#tipos-de-ticket); nulo = ticket livre
+  typeId         String?
+  /// valores dos campos do tipo, por chave ({ unidade: "302" }) — ficam mesmo se o tipo mudar
+  fields         Json?
+  /// TICKET_SOURCES: panel | conversation | flow | agent
+  source         String    @default("panel")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -3106,6 +3191,7 @@ model Ticket {
   conversation Conversation?       @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   createdBy    User?               @relation("ticketCreator", fields: [createdById], references: [id], onDelete: SetNull)
   holdReason   TicketHoldReason?   @relation(fields: [holdReasonId], references: [id], onDelete: SetNull)
+  type         TicketType?         @relation(fields: [typeId], references: [id], onDelete: SetNull)
   participants TicketParticipant[]
   events       TicketEvent[]
 
@@ -3113,6 +3199,7 @@ model Ticket {
   @@index([tenantId, status])
   @@index([departmentId])
   @@index([conversationId])
+  @@index([tenantId, typeId])
   @@map("tickets")
 }
 
@@ -3149,6 +3236,29 @@ model TicketEvent {
 
   @@index([ticketId, createdAt])
   @@map("ticket_events")
+}
+
+/// Tipo de ticket da empresa (docs/tickets.md#tipos-de-ticket): Manutenção, Encomenda, Retorno…
+/// com setor/prioridade/prazo padrão e campos próprios — o que deixa o ticket servir a qualquer nicho.
+model TicketType {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  color        String   @default("#6366f1")
+  departmentId String?
+  priority     String   @default("normal")
+  dueDays      Int?
+  /// TicketField[] (packages/shared/src/tickets.ts)
+  fields       Json     @default("[]")
+  isActive     Boolean  @default(true)
+  position     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tickets Ticket[]
+
+  @@unique([tenantId, name])
+  @@map("ticket_types")
 }
 
 /// Motivo de "Em espera" (prestador, peça, aprovação…), cadastrável por empresa.

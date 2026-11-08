@@ -31,6 +31,7 @@ import { buildTransferMessage, DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFE
 import { buildCloseMessage, DEFAULT_CLOSE_TEXT } from './close-message';
 import { canReceiveTransfer } from './transfer-scope';
 import { PermissionsService } from '../auth/permissions.service';
+import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
 import type { Principal } from '../auth/permissions';
 
 /**
@@ -308,6 +309,38 @@ export class ConversationsService {
     await this.registrar({ tenantId, conversationId: id, type: 'claimed', actorId: user.id, toStatus: 'in_progress' });
     this.gateway.emitConversation(tenantId, conv);
     return conv;
+  }
+
+  /**
+   * Fila de atendimento travada (docs/fila-de-atendimento.md#quem-pode-puxar): com a distribuição
+   * automática e "atendente não puxa" ligados, só quem pode transferir qualquer conversa
+   * (gerente/admin) tira contato da fila na mão. O atendente recebe pela distribuição.
+   */
+  async assertQueueAllows(tenantId: string, viewer: Viewer) {
+    if (may(viewer, 'conversations.transfer_any')) return;
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { autoDistribute: true, autoDistributeLockClaim: true } });
+    if (s?.autoDistribute && s.autoDistributeLockClaim) {
+      throw new ForbiddenException('A distribuição é automática: os contatos da fila chegam para você sozinhos, por ordem de chegada e até o limite de atendimentos.');
+    }
+  }
+
+  /**
+   * Fila de atendimento: entrega um contato da fila para a pessoa escolhida. Só se continua na fila
+   * (Aguardando, sem dono) — se alguém assumiu no meio, não mexe (devolve false).
+   */
+  async distributeSystem(tenantId: string, conv: { id: string; contactId: string }, target: { id: string; name: string }, reason: string, note: string) {
+    const r = await this.prisma.conversation.updateMany({
+      where: { id: conv.id, tenantId, assigneeId: null, status: 'waiting' },
+      data: { assigneeId: target.id, status: 'in_progress' },
+    });
+    if (!r.count) return false;
+    const updated = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } });
+    await this.registrar({ tenantId, conversationId: conv.id, type: 'transferred', actorId: null, targetId: target.id, fromStatus: 'waiting', toStatus: 'in_progress', reason });
+    this.gateway.emitConversation(tenantId, updated);
+    const contact = await this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { name: true, phone: true } });
+    this.gateway.emitTransferAlert(tenantId, target.id, { conversationId: conv.id, contactName: contact?.name || contact?.phone || 'Cliente', byName: 'Fila de atendimento' });
+    await this.systemNote(conv.id, note).catch((err) => this.log.warn(`nota da fila não gravada (${conv.id}): ${err instanceof Error ? err.message : err}`));
+    return true;
   }
 
   /** Transferir para outro atendente (admin, ou o próprio dono). */
@@ -654,7 +687,7 @@ export class ConversationsService {
     if (!conv) {
       const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
       conv = (opts?.allowClosed && (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId: number.id }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } })))
-        || (await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() }, include: { number: { select: { provider: true } } } }));
+        || (await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) }, include: { number: { select: { provider: true } } } }));
     }
     await this.assertHasWhatsApp(contact.id, conv.numberId, contact.phone, opts?.checkPhone);
     const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed, allowCold: opts?.allowCold };
@@ -688,7 +721,7 @@ export class ConversationsService {
     const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
     await this.assertHasWhatsApp(contact.id, number.id, clean, opts?.checkPhone);
     let conv = await this.prisma.conversation.findFirst({ where: { contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } });
-    if (!conv) conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date() } });
+    if (!conv) conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) } });
     // conversa fechada: sendAsSystem exige aberta → abre, envia, fecha de novo (não polui a fila)
     if (conv.status === 'closed') await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'in_progress' } });
     const m = await this.sendAsSystem(conv.id, text, undefined, undefined, { idempotencyKey: opts?.idempotencyKey, allowCold: opts?.allowCold });
@@ -862,9 +895,17 @@ export class ConversationsService {
     // Conversa de OUTRA pessoa: ninguém (nem admin) responde ao cliente por ela — admin/gerente usa
     // nota interna (cadeado). Para atender, transfere para si.
     // Conversa livre (grupo, docs/grupos.md) não tem dono: responder não assume. Contato isento
-    // assume como qualquer atendimento (docs/contatos-isentos.md).
+    // assume como qualquer atendimento, mas o dono NÃO trava: quem responde passa a ser o dono
+    // (equipe/diretoria esquecida "em atendimento" com alguém não pode ficar sem resposta —
+    // docs/contatos-isentos.md#dono-não-trava).
     if (conv.assigneeId !== authorId && !ehLivre(conv)) {
-      const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, OR: [{ assigneeId: null }, { assigneeId: authorId }] }, data: { assigneeId: authorId, status: 'in_progress' } });
+      // fila com distribuição automática: atendente não pega da fila respondendo
+      if (!conv.assigneeId && !conv.ticketExempt) await this.assertQueueAllows(tenantId, author);
+      const anterior = conv.assigneeId;
+      const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, ...(!conv.ticketExempt && { OR: [{ assigneeId: null }, { assigneeId: authorId }] }) }, data: { assigneeId: authorId, status: 'in_progress' } });
+      if (r.count > 0 && conv.ticketExempt && anterior) {
+        await this.registrar({ tenantId, conversationId: conv.id, type: 'transferred', actorId: authorId, targetId: authorId, fromStatus: conv.status, toStatus: 'in_progress', reason: 'Respondeu contato isento que estava com outra pessoa' });
+      }
       if (r.count === 0) {
         const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
         throw new ConflictException(`${owner?.assignee?.name ?? 'Outro atendente'} está atendendo. Use uma nota interna ou transfira para você.`);
@@ -1073,7 +1114,8 @@ export class ConversationsService {
     if (conv && !canSeeDepartment(author, conv.departmentId)) {
       throw new ConflictException({ code: 'other_department', message: 'Este contato já é atendido por um departamento que você não acessa neste número.' });
     }
-    if (conv && conv.status !== 'closed' && conv.assigneeId && conv.assigneeId !== author.id) {
+    // isento: o dono não trava (o `send` passa a conversa para quem escreveu)
+    if (conv && conv.status !== 'closed' && conv.assigneeId && conv.assigneeId !== author.id && !conv.ticketExempt) {
       const owner = await this.prisma.user.findUnique({ where: { id: conv.assigneeId }, select: { name: true } });
       throw new ConflictException({ code: 'already_assigned', conversationId: conv.id, message: `${owner?.name ?? 'Outro atendente'} já está atendendo este contato neste número.` });
     }
@@ -1081,7 +1123,7 @@ export class ConversationsService {
       // conversa nova nasce com quem abriu (assumida), fora da fila: vazia na fila, outro pegaria.
       // Existente fica como está — encerrada continua encerrada até alguém reabrir ou escrever.
       if (!conv) {
-        conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date() } });
+        conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) } });
         await this.claim(tenantId, conv.id, author);
         return { conversationId: conv.id, status: 'in_progress' as const, message: null };
       }
@@ -1106,7 +1148,7 @@ export class ConversationsService {
 
     if (!conv) {
       // nasce na fila sem dono: o `send` faz "responder = assumir" e põe em atendimento
-      conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date() } });
+      conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) } });
     } else if (conv.status === 'closed') {
       conv = await this.setStatus(tenantId, conv.id, 'in_progress', author.id);
     }

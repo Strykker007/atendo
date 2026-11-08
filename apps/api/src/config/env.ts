@@ -135,6 +135,18 @@ const schema = z.object({
   AI_PLATFORM_BUDGET_BRL: z.coerce.number().min(0).default(0),
   /** quem recebe os alertas do orçamento de IA (vírgula separa vários) */
   AI_ALERT_EMAIL: z.string().optional().default(''),
+  /**
+   * Busca por significado nos documentos do agente (docs/agente-ia.md#documentos): endpoint
+   * `/embeddings` no formato da OpenAI (OpenAI, Gemini no modo compatível, Ollama). Sem chave
+   * (e sem endpoint local), os documentos funcionam só com a busca por palavra.
+   */
+  AI_EMBED_API_KEY: z.string().optional().default(''),
+  AI_EMBED_BASE_URL: z.string().optional().default('https://api.openai.com/v1'),
+  AI_EMBED_MODEL: z.string().optional().default('text-embedding-3-small'),
+  /** USD por 1 milhão de tokens (text-embedding-3-small = 0,02) */
+  AI_EMBED_PRICE_PER_1M: z.coerce.number().min(0).default(0.02),
+  /** tamanho do vetor pedido ao fornecedor (512 = 2 KB por trecho, quase a mesma qualidade). 0 = o padrão do modelo */
+  AI_EMBED_DIMENSIONS: z.coerce.number().int().min(0).max(4096).default(512),
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
   /** > 0: amostra memória/event loop a cada N ms no Redis (testes de carga locais; docs/30). 0 = desligado */
   DIAG_STATS_MS: z.coerce.number().int().min(0).default(0),

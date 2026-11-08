@@ -32,6 +32,8 @@ class RolloutDto {
   @IsOptional() @IsBoolean() tags?: boolean;
   /** configurações de atendimento do modelo (encerramento com/sem venda, assinatura, nomes) */
   @IsOptional() @IsBoolean() settings?: boolean;
+  @IsOptional() @IsBoolean() aiAgents?: boolean;
+  @IsOptional() @IsBoolean() ticketTypes?: boolean;
   /** só calcula (prévia), sem gravar */
   @IsOptional() @IsBoolean() dryRun?: boolean;
 }
@@ -146,7 +148,7 @@ export class TenantTemplatesController {
       } catch (e) {
         throw new BadRequestException(e instanceof Error ? e.message : 'Conteúdo inválido.');
       }
-      this.provisioning.assertFlows(content.flows);
+      this.provisioning.assertFlows(content.flows, content);
     }
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -184,7 +186,7 @@ export class TenantTemplatesController {
     } catch (e) {
       throw new BadRequestException(e instanceof Error ? e.message : 'Arquivo inválido.');
     }
-    this.provisioning.assertFlows(file.flows);
+    this.provisioning.assertFlows(file.flows, file);
     return file;
   }
 }

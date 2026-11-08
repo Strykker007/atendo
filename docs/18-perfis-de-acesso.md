@@ -175,6 +175,7 @@ lugar só, testada.
 | Lista de conversas e contadores | filtradas pelos números da pessoa |
 | Filtro por número na tela | interseccionado com o escopo; pedir um número que não opera devolve lista vazia, nunca ignora o pedido |
 | Qualquer rota `/conversations/:id/…` | `ConversationScopeGuard` |
+| Lista de números (`GET /numbers`) | só os números da pessoa: o seletor "Todos os números" das conversas e os demais seletores (agendadas, Kanban, transmissões, nova conversa) nem mostram os outros |
 
 O guard responde **404, não 403**: um 403 confirmaria que a conversa existe, e para quem não
 pode vê-la ela não deveria ser distinguível de uma inexistente. Ele fica no controller, em um

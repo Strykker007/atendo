@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, Get, Injectable, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Injectable, NotFoundException, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { randomUUID } from 'node:crypto';
-import { AGENT_DEFAULT_MAX_REPLIES, AGENT_MAX_STAGES, AGENT_TONES, AGENT_TOOL_KEYS, type AgentStage, type AgentToolTargets, type AgentTurn, type AiAgentConfig, type AgentTone } from '@atendo/shared';
+import { AGENT_DEFAULT_MAX_REPLIES, AGENT_MAX_STAGES, KNOWLEDGE_MAX_FILE_MB, parsePortableAiAgentFile, toBundle, AGENT_TONES, AGENT_TOOL_KEYS, type AgentStage, type AgentToolTargets, type AgentTurn, type AiAgentConfig, type AgentTone } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantGuard } from '../auth/tenant.guard';
@@ -12,6 +13,8 @@ import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { AiService } from './ai.service';
 import { agentSystemPrompt, parseAgentReply, stageOf, type AgentCatalog } from './agent-prompt';
 import { toMessages, type HistoryItem } from './prompts';
+import { KnowledgeService } from './knowledge.service';
+import { queryFromHistory } from './knowledge-text';
 
 class AgentDto {
   @IsOptional() @IsString() @MaxLength(80) name?: string;
@@ -27,6 +30,9 @@ class AgentDto {
 class SimMessage {
   @IsIn(['contact', 'agent']) from: 'contact' | 'agent';
   @IsString() @MaxLength(2000) text: string;
+}
+class KnowledgeSearchDto {
+  @IsString() @MaxLength(1000) q: string;
 }
 class SimulateDto {
   @IsArray() @ArrayMaxSize(40) @ValidateNested({ each: true }) @Type(() => SimMessage) messages: SimMessage[];
@@ -72,6 +78,7 @@ export class AiAgentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
+    private readonly knowledge: KnowledgeService,
   ) {}
 
   list(tenantId: string) {
@@ -143,7 +150,7 @@ export class AiAgentsService {
   }
 
   /** Config do agente lida do banco, no formato do shared. */
-  async config(tenantId: string, id: string): Promise<AiAgentConfig> {
+  async config(tenantId: string, id: string): Promise<AiAgentConfig & { id: string }> {
     const a = await this.get(tenantId, id);
     return { ...a, tone: (a.tone in AGENT_TONES ? a.tone : 'friendly') as AgentTone, stages: a.stages as unknown as AgentStage[], targets: (a.targets ?? {}) as AgentToolTargets };
   }
@@ -153,28 +160,39 @@ export class AiAgentsService {
    * e confere a resposta. Lança se a IA falhar ou devolver algo ilegível — quem chama entrega
    * para humano.
    */
-  async turn(input: { tenantId: string; agent: AiAgentConfig; stageId?: string | null; history: HistoryItem[]; contactName?: string | null; conversationId?: string; userId?: string }): Promise<AgentTurn & { catalog: AgentCatalog }> {
+  async turn(input: { tenantId: string; agent: AiAgentConfig & { id?: string }; stageId?: string | null; history: HistoryItem[]; contactName?: string | null; conversationId?: string; userId?: string }): Promise<AgentTurn & { catalog: AgentCatalog }> {
     const stage = stageOf(input.agent, input.stageId);
     if (!stage) throw new BadRequestException('O agente não tem etapas.');
-    const [tenant, catalog] = await Promise.all([
-      this.prisma.tenant.findUniqueOrThrow({ where: { id: input.tenantId }, select: { name: true } }),
-      this.catalog(input.tenantId),
-    ]);
     const messages = toMessages(input.history);
     if (!messages.length) throw new BadRequestException('Ainda não há mensagem do contato para responder.');
+    const [tenant, catalog, sources] = await Promise.all([
+      this.prisma.tenant.findUniqueOrThrow({ where: { id: input.tenantId }, select: { name: true } }),
+      this.catalog(input.tenantId),
+      this.sourcesFor(input.tenantId, input.agent.id, input.history),
+    ]);
     const raw = await this.ai.run({
       tenantId: input.tenantId,
       kind: 'flow_agent',
       conversationId: input.conversationId,
       userId: input.userId,
-      system: agentSystemPrompt({ agent: input.agent, stage, businessName: tenant.name, catalog, contactName: input.contactName }),
+      system: agentSystemPrompt({ agent: input.agent, stage, businessName: tenant.name, catalog, contactName: input.contactName, sources }),
       messages,
       maxTokens: 600,
       temperature: 0.3,
     });
     const parsed = parseAgentReply(raw, { agent: input.agent, stage, catalog });
     if (!parsed) throw new BadRequestException('A IA devolveu uma resposta que não deu para entender.');
-    return { ...parsed, catalog };
+    return { ...parsed, ...(sources && { sources }), catalog };
+  }
+
+  /**
+   * Trechos dos documentos para as últimas mensagens do contato. `null` = agente sem documento.
+   * Busca que falha não derruba a rodada: segue como "nada encontrado" (a IA não inventa).
+   */
+  private async sourcesFor(tenantId: string, agentId: string | undefined, history: HistoryItem[]) {
+    if (!agentId || !(await this.knowledge.hasDocs(tenantId, agentId))) return null;
+    const q = queryFromHistory(history);
+    return this.knowledge.search(tenantId, agentId, q).catch(() => []);
   }
 }
 
@@ -187,7 +205,11 @@ export class AiAgentsService {
 @RequirePermission('flows.manage')
 @RequireFeature('ai_flows')
 export class AiAgentsController {
-  constructor(private readonly agents: AiAgentsService) {}
+  constructor(
+    private readonly agents: AiAgentsService,
+    private readonly knowledge: KnowledgeService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get()
   list(@CurrentUser() u: AuthUser) {
@@ -197,6 +219,26 @@ export class AiAgentsController {
   @Get('catalog')
   catalog(@CurrentUser() u: AuthUser) {
     return this.agents.catalog(u.tenantId);
+  }
+
+  /** Exportar (docs/20-modelos-de-perfil.md): todos ou `?ids=a,b`. Documentos e departamentos não vão. */
+  @Get('export')
+  async exportAgents(@CurrentUser() u: AuthUser, @Query('ids') ids?: string) {
+    const { agentsToPortable } = await import('../tenants/portable-db');
+    const { items, warnings } = await agentsToPortable(this.prisma, u.tenantId, ids ? ids.split(',').filter(Boolean) : undefined);
+    return { bundle: toBundle('ai-agent', items), warnings };
+  }
+
+  /** Importar: arquivo individual ou lote; nome repetido vira "(cópia)"; etiquetas e motivos pelo nome. */
+  @Post('import')
+  async importAgents(@CurrentUser() u: AuthUser, @Body() body: unknown) {
+    const { createAgentsFromPortable } = await import('../tenants/portable-db');
+    try {
+      const items = parsePortableAiAgentFile((body as { portable?: unknown })?.portable ?? body);
+      return await createAgentsFromPortable(this.prisma, u.tenantId, items, 'copy');
+    } catch (e) {
+      throw new BadRequestException(e instanceof Error ? e.message : 'Arquivo inválido.');
+    }
   }
 
   @Get(':id')
@@ -217,6 +259,31 @@ export class AiAgentsController {
   @Delete(':id')
   remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.agents.remove(u.tenantId, id);
+  }
+
+  // ---- documentos do agente (docs/agente-ia.md#documentos) ----
+
+  @Get(':id/knowledge')
+  docs(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.knowledge.list(u.tenantId, id);
+  }
+
+  @Post(':id/knowledge')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: KNOWLEDGE_MAX_FILE_MB * 1024 * 1024, files: 1 } }))
+  uploadDoc(@CurrentUser() u: AuthUser, @Param('id') id: string, @UploadedFile() file?: Express.Multer.File) {
+    return this.knowledge.upload(u.tenantId, id, u.id, file);
+  }
+
+  @Delete(':id/knowledge/:docId')
+  removeDoc(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('docId') docId: string) {
+    return this.knowledge.remove(u.tenantId, id, docId);
+  }
+
+  /** Testar a busca: o que o agente leria para esta pergunta. Não chama o modelo de chat. */
+  @Post(':id/knowledge/search')
+  async searchDocs(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: KnowledgeSearchDto) {
+    await this.agents.get(u.tenantId, id);
+    return this.knowledge.search(u.tenantId, id, dto.q);
   }
 
   /**

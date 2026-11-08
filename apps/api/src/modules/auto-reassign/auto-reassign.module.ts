@@ -77,6 +77,9 @@ export class AutoReassignService {
     ]);
     const lastHandoff = new Map(handoffs.map((h) => [h.conversationId, h._max.createdAt]));
     const openCount: Record<string, number> = Object.fromEntries(open.map((o) => [o.assigneeId!, o._count._all]));
+    // fila de atendimento ligada: quem chegou no limite também não recebe por aqui (docs/fila-de-atendimento.md)
+    const fila = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { autoDistribute: true, autoDistributeMax: true } });
+    const limite = fila?.autoDistribute ? fila.autoDistributeMax : Infinity;
     const onlineIds = new Set(agents.map((a) => a.id));
     const nome = new Map(agents.map((a) => [a.id, a.name]));
 
@@ -87,7 +90,7 @@ export class AutoReassignService {
       const nestaEspera = autos.filter((a) => a.conversationId === c.id && a.createdAt >= since);
       if (nestaEspera.length >= cfg.autoReassignMaxTimes) continue;
       const exclude = new Set([...(c.assigneeId ? [c.assigneeId] : []), ...nestaEspera.map((a) => a.targetId).filter((x): x is string => !!x)]);
-      const eligible = await this.conversations.receiversOf(tenantId, c, agents.filter((a) => !exclude.has(a.id)));
+      const eligible = (await this.conversations.receiversOf(tenantId, c, agents.filter((a) => !exclude.has(a.id)))).filter((id) => (openCount[id] ?? 0) < limite);
       const chosen = pickReassignTarget({ eligible, online: onlineIds, exclude, openCount });
       if (!chosen) continue;
 
