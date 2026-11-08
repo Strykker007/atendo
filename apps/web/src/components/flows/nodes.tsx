@@ -377,7 +377,7 @@ export function ConditionNodeView({ data, selected }: P) {
 }
 const STATUS_LABEL: Record<string, string> = { waiting: 'Aguardando', in_progress: 'Em atendimento', closed: 'Encerrado' };
 export function ActionNodeView({ data, selected }: P) {
-  const d = data as { kind?: string; scope?: string; tagId?: string; agentId?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string; outcome?: 'won' | 'lost'; saleValue?: string; surveyId?: string };
+  const d = data as { ticketTitle?: string; kind?: string; scope?: string; tagId?: string; agentId?: string; varName?: string; value?: string; url?: string; method?: string; status?: string; departmentId?: string; outcome?: 'won' | 'lost'; saleValue?: string; surveyId?: string };
   const departments = useDepartments();
   const outcomeLabels = useOutcomeLabels();
   const tagName = useTagName();
@@ -386,7 +386,7 @@ export function ActionNodeView({ data, selected }: P) {
   const agent = d.kind === 'assign' && d.agentId ? agents.data?.find((a) => a.id === d.agentId)?.name ?? (agents.data ? 'atendente removido' : undefined) : undefined;
   const dept = d.departmentId === DEPARTMENT_NONE ? 'Sem departamento' : departments.data?.find((x) => x.id === d.departmentId)?.name ?? (d.departmentId && departments.data ? 'departamento excluído' : '?');
   const label = d.kind === 'set_status' && d.status === 'closed' ? `Encerrar conversa${d.outcome ? ` · ${outcomeLabels[d.outcome]}${d.outcome === 'won' && d.saleValue ? ` ${d.saleValue}` : ''}` : ''}${d.surveyId ? ' · ⭐ pesquisa' : ''}`
-    : ({ add_tag: `Aplicar etiqueta${tag ? ` "${tag}"` : ''}`, remove_tag: `Remover etiqueta${tag ? ` "${tag}"` : ''}`, assign: agent ? `Atribuir a ${agent}` : 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook', set_department: `Departamento → ${dept}` } as Record<string, string>)[d.kind ?? ''] ?? '';
+    : ({ add_tag: `Aplicar etiqueta${tag ? ` "${tag}"` : ''}`, remove_tag: `Remover etiqueta${tag ? ` "${tag}"` : ''}`, assign: agent ? `Atribuir a ${agent}` : 'Atribuir a atendente', set_status: `Mudar status${d.status ? ` → ${STATUS_LABEL[d.status] ?? d.status}` : ''}`, handoff: 'Entregar para humano', webhook: 'Chamar webhook', set_department: `Departamento → ${dept}`, create_ticket: `🎫 Abrir ticket${d.ticketTitle ? `: ${d.ticketTitle}` : ''}` } as Record<string, string>)[d.kind ?? ''] ?? '';
   const txt = d.kind === 'set_var' ? `{{${d.varName || '?'}}} = ${d.value ?? ''}` : d.kind === 'webhook' ? `${label}${d.url ? `\n${d.method ?? 'POST'} ${d.url}` : ''}` : label + (d.scope === 'contact' && (d.kind === 'add_tag' || d.kind === 'remove_tag') ? ' 📌 no contato' : '');
   return (
     <Shell type="action" data={data} selected={selected} summary={txt}>

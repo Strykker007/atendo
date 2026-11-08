@@ -17,6 +17,8 @@ export const AiTask = {
   SUMMARY: 'summary',
   /** agente de IA com etapas (bloco IA modo Agente e o simulador) — docs/agente-ia.md */
   FLOW_AGENT: 'flow_agent',
+  /** documentos do agente: gerar a busca por significado (embeddings) na hora do upload — não conta como interação */
+  KNOWLEDGE: 'knowledge',
 } as const;
 export type AiTask = (typeof AiTask)[keyof typeof AiTask];
 
@@ -27,6 +29,7 @@ export const AI_TASK_LABEL: Record<AiTask, string> = {
   rewrite: 'Reescrita',
   summary: 'Resumo da conversa',
   flow_agent: 'Agente de IA',
+  knowledge: 'Leitura de documentos do agente',
 };
 
 export const REWRITE_TONES = {

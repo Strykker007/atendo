@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Ticket, Plus, Search, X, PauseCircle, PlayCircle, ArrowRightLeft, CheckCircle2, RotateCcw, Ban, UserPlus, UserMinus, Send, MessageSquare, Settings2, Trash2, Hand, Clock } from 'lucide-react';
-import { TICKET_PRIORITIES, TICKET_PRIORITY_LABEL, TICKET_STATUS_LABEL, TICKET_TEXT_MAX, type TicketPriority, type TicketStatus } from '@atendo/shared';
+import { Ticket, Plus, Search, X, Bot, Workflow, Shapes, PauseCircle, PlayCircle, ArrowRightLeft, CheckCircle2, RotateCcw, Ban, UserPlus, UserMinus, Send, MessageSquare, Settings2, Trash2, Hand, Clock } from 'lucide-react';
+import { TICKET_PRIORITIES, TICKET_PRIORITY_LABEL, TICKET_SOURCE_LABEL, TICKET_STATUS_LABEL, TICKET_TEXT_MAX, type TicketPriority, type TicketSource, type TicketStatus } from '@atendo/shared';
+import { TipoChip, TiposModal, ValoresDoTicket } from '@/components/tickets/TicketTypes';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -26,6 +27,13 @@ const PRIO_CLS: Record<TicketPriority, string> = { low: 'text-faint', normal: 't
 const selCls = cn(inputCls, 'h-9 py-0 w-auto');
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const dia = (iso: string) => new Date(iso).toLocaleDateString('pt-BR');
+
+/** Selo de origem para o que não foi aberto por uma pessoa no painel. */
+function Origem({ source }: { source: TicketSource }) {
+  if (source !== 'flow' && source !== 'agent') return null;
+  const Icon = source === 'flow' ? Workflow : Bot;
+  return <span className="inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 bg-field text-muted whitespace-nowrap" title={`Aberto pelo ${TICKET_SOURCE_LABEL[source].toLowerCase()}`}><Icon size={11} /> {source === 'flow' ? 'fluxo' : 'IA'}</span>;
+}
 
 function Chip({ status }: { status: TicketStatus }) {
   return <span className={cn('text-[11px] rounded-full px-2 py-0.5 whitespace-nowrap', STATUS_CLS[status])}>{TICKET_STATUS_LABEL[status]}</span>;
@@ -53,6 +61,7 @@ export default function TicketsPage() {
   }, []);
   const [novo, setNovo] = useState(false);
   const [motivos, setMotivos] = useState(false);
+  const [tipos, setTipos] = useState(false);
   const r = resumo.data;
 
   const abas: [NonNullable<TicketQuery['scope']>, string, number | undefined][] = [
@@ -68,13 +77,15 @@ export default function TicketsPage() {
         title="Tickets"
         subtitle="Pedidos entre setores: quem abre, quem atua junto, o que está esperando algo de fora."
         action={<div className="flex gap-2">
+          {gestao && <Button variant="ghost" icon={<Shapes size={15} />} onClick={() => setTipos(true)}>Tipos</Button>}
           {gestao && <Button variant="ghost" icon={<Settings2 size={15} />} onClick={() => setMotivos(true)}>Motivos de espera</Button>}
           {podeAbrir && <Button icon={<Plus size={15} />} onClick={() => setNovo(true)}>Novo ticket</Button>}
         </div>}
       />
 
-      {r && (r.holdExpired > 0 || r.overdue > 0) && (
+      {r && (r.holdExpired > 0 || r.overdue > 0 || r.toPick > 0) && (
         <div className="mb-3 flex flex-wrap gap-2 text-xs">
+          {r.toPick > 0 && <button type="button" onClick={() => set({ scope: atende ? 'department' : 'all', status: 'open' })} className="rounded-lg bg-accent-soft text-accent-ink px-3 py-1.5 font-semibold"><Hand size={12} className="inline mr-1" />{r.toPick} sem responsável esperando alguém pegar</button>}
           {r.overdue > 0 && <button type="button" onClick={() => set({ scope: verTodos || gestao ? 'all' : 'mine', status: 'active' })} className="rounded-lg bg-danger-soft text-danger-ink px-3 py-1.5"><Clock size={12} className="inline mr-1" />{r.overdue} com prazo vencido</button>}
           {r.holdExpired > 0 && <button type="button" onClick={() => set({ status: 'on_hold' })} className="rounded-lg bg-warn-soft text-warn-ink px-3 py-1.5"><PauseCircle size={12} className="inline mr-1" />{r.holdExpired} em espera passaram da data de retomar</button>}
         </div>
@@ -104,6 +115,16 @@ export default function TicketsPage() {
             <option value="none">Sem setor</option>
           </select>
         )}
+        {!!opts.data?.types.length && (
+          <select className={selCls} value={q.typeId ?? ''} onChange={(e) => set({ typeId: e.target.value })} aria-label="Tipo">
+            <option value="">Todo tipo</option>
+            {opts.data.types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.isActive ? '' : ' (desativado)'}</option>)}
+          </select>
+        )}
+        <select className={selCls} value={q.source ?? ''} onChange={(e) => set({ source: e.target.value as TicketSource | '' })} aria-label="Origem">
+          <option value="">Toda origem</option>
+          {(Object.keys(TICKET_SOURCE_LABEL) as TicketSource[]).map((k) => <option key={k} value={k}>{TICKET_SOURCE_LABEL[k]}</option>)}
+        </select>
         <label className="flex items-center gap-1.5 rounded-lg bg-field px-2.5 h-9 flex-1 min-w-[12rem]">
           <Search size={14} className="text-faint shrink-0" />
           <input value={q.search ?? ''} onChange={(e) => set({ search: e.target.value })} placeholder="Título, descrição ou #número" className="bg-transparent text-[13px] w-full focus:outline-none" />
@@ -129,6 +150,7 @@ export default function TicketsPage() {
       {novo && opts.data && <NewTicketModal opts={opts.data} onClose={() => setNovo(false)} onCriado={(id) => { setNovo(false); setAberto(id); }} />}
       {aberto && opts.data && <Detalhe id={aberto} opts={opts.data} onClose={() => setAberto(null)} />}
       {motivos && opts.data && <MotivosModal opts={opts.data} onClose={() => setMotivos(false)} />}
+      {tipos && opts.data && <TiposModal opts={opts.data} onClose={() => setTipos(false)} />}
     </PageShell>
   );
 }
@@ -143,7 +165,9 @@ function Linha({ t, onAbrir }: { t: TicketRow; onAbrir: () => void }) {
         <span className="min-w-0 flex-1 space-y-1">
           <span className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-ink truncate">{t.title}</span>
+            <TipoChip type={t.type} />
             <Chip status={t.status} />
+            <Origem source={t.source} />
             {t.priority !== 'normal' && <span className={cn('text-[11px]', PRIO_CLS[t.priority])}>{TICKET_PRIORITY_LABEL[t.priority]}</span>}
             {atrasado && <span className="text-[11px] rounded-full px-2 py-0.5 bg-danger-soft text-danger-ink">prazo vencido</span>}
           </span>
@@ -196,11 +220,13 @@ function Detalhe({ id, opts, onClose }: { id: string; opts: TicketOptions; onClo
     <Modal open onClose={onClose} title={`#${t.number} · ${t.title}`} width="max-w-3xl">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          <TipoChip type={t.type} />
           <Chip status={t.status} />
+          <Origem source={t.source} />
           <span className={PRIO_CLS[t.priority]}>Prioridade {TICKET_PRIORITY_LABEL[t.priority].toLowerCase()}</span>
           <span className="text-muted">· {t.department?.name ?? 'Sem setor'}</span>
           {t.dueAt && <span className="text-muted">· prazo {dia(t.dueAt)}</span>}
-          <span className="text-faint">· aberto por {t.createdBy?.name ?? '—'} em {quando(t.createdAt)}</span>
+          <span className="text-faint">· aberto {t.createdBy ? `por ${t.createdBy.name}` : `pelo ${TICKET_SOURCE_LABEL[t.source].toLowerCase()}`} em {quando(t.createdAt)}</span>
           {t.conversation && (t.conversation.canOpen ? (
             <Link href="/conversas" onClick={() => openAtMessage(t.conversation!.id, t.messageId)} className="text-accent-ink hover:underline inline-flex items-center gap-1" title={t.messageId ? 'Abrir a conversa no momento em que o ticket foi aberto' : 'Abrir a conversa'}>
               <MessageSquare size={12} /> {t.conversation.contact.name ?? t.conversation.contact.phone}
@@ -220,6 +246,7 @@ function Detalhe({ id, opts, onClose }: { id: string; opts: TicketOptions; onClo
           </div>
         )}
 
+        <ValoresDoTicket fields={t.typeFields} values={t.fields} />
         {t.description && <p className="text-sm text-ink whitespace-pre-wrap rounded-lg bg-field px-3 py-2">{t.description}</p>}
 
         {!!t.context?.length && <ContextoDaConversa t={t} onVer={t.conversation?.canOpen ? () => { openAtMessage(t.conversation!.id, t.messageId); router.push('/conversas'); } : undefined} />}
@@ -352,7 +379,9 @@ function TransferirForm({ opts, t, onCancel, onSalvar, loading }: { opts: Ticket
 
 function Evento({ e, nome, opts }: { e: TicketEvent; nome: (uid: unknown) => string; opts: TicketOptions }) {
   const d = (e.data ?? {}) as Record<string, unknown>;
-  const quem = e.actor?.name ?? 'Sistema';
+  const d0 = (e.data ?? {}) as Record<string, unknown>;
+  // aberto pela automação: "Fluxo “Portaria”" no lugar da pessoa
+  const quem = e.actor?.name ?? (d0.source === 'flow' ? `Fluxo “${d0.origin}”` : d0.source === 'agent' ? `Agente “${d0.origin}”` : 'Sistema');
   const setor = (sid: unknown) => (sid ? opts.departments.find((x) => x.id === sid)?.name ?? 'outro setor' : 'sem setor');
   const texto = (() => {
     switch (e.type) {

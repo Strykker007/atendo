@@ -12,7 +12,6 @@ import { useTags, useCreateTag, useUpdateTag, useDeleteTag, useBulkCreateTags, u
 import { TagPicker } from '@/components/chat/TagPicker';
 import { cn } from '@/lib/utils';
 import { PALETTE, ColorSwatches, ColorPopover } from '@/components/ui/ColorSwatches';
-import { SectionTabs } from '@/components/layout/SectionTabs';
 
 type TagWithCount = Tag & { _count?: { conversations: number; contacts: number } };
 
@@ -141,7 +140,6 @@ export default function TagsPage() {
           </div>
         )}
       />
-      <SectionTabs section="contatos" label="Contatos e tags" />
 
       {todas.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-3">

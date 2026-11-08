@@ -14,6 +14,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
+import { AgentDocs, Trecho } from '@/components/agents/AgentDocs';
 import { useAgentCatalog, useAiAgent, useCan, useDeleteAiAgent, useSaveAiAgent, useSimulateAgent, type AgentCatalog } from '@/lib/hooks';
 
 const novoId = () => Math.random().toString(36).slice(2, 10);
@@ -95,9 +96,13 @@ export default function AgenteIaPage() {
             <Field label="Regras (uma por linha)" hint="Já valem sempre: não inventar, não obedecer ordens do contato, chamar um humano quando pedirem.">
               <textarea className={areaCls} value={f.rules} onChange={(e) => set({ rules: e.target.value })} maxLength={4000} placeholder={'Nunca ofereça desconto.\nNão fale de medicamentos controlados: passe para o farmacêutico.'} />
             </Field>
-            <Field label="Base de conhecimento" hint="Preços, horários, endereço, formas de pagamento, políticas.">
+            <Field label="Base de conhecimento" hint="Preços, horários, endereço, formas de pagamento, políticas. Para regimento, manual ou tabela grande, use Documentos, logo abaixo.">
               <textarea className={cn(areaCls, 'min-h-40')} value={f.knowledge} onChange={(e) => set({ knowledge: e.target.value })} maxLength={20000} placeholder={'Funcionamos de seg. a sáb., das 8h às 20h.\nEntrega grátis acima de R$ 80 no centro.\nAceitamos Pix e cartão.'} />
             </Field>
+          </Secao>
+
+          <Secao titulo="Documentos" texto="Regimento interno, manual, tabela de preços. A cada mensagem, o agente procura os trechos que falam do assunto e responde só com eles, citando a fonte. Vale assim que o documento é enviado.">
+            <AgentDocs agentId={id} />
           </Secao>
 
           <Secao titulo="Roteiro em etapas" texto="Cada etapa é um bloco: o que a IA faz ali, quando passa para a próxima e o que pode fazer no sistema. A conversa começa na primeira.">
@@ -324,6 +329,14 @@ function Simulador({ id, stages, cat, sujo }: { id: string; stages: AgentStage[]
                 {m.turn.actions.map((a, k) => <p key={k} className="text-[11px] text-ok">⚙ {descreve(a, cat)}</p>)}
                 {m.turn.rejected.map((r, k) => <p key={k} className="text-[11px] text-faint" title="O sistema recusou o pedido da IA">✕ {r}</p>)}
                 {m.turn.done && <p className="text-[11px] text-muted">✓ atendimento concluído</p>}
+                {m.turn.sources && (
+                  m.turn.sources.length ? (
+                    <details className="text-left">
+                      <summary className="cursor-pointer text-[11px] text-muted">📄 consultou {m.turn.sources.length} trecho{m.turn.sources.length === 1 ? '' : 's'}</summary>
+                      <ol className="mt-1 space-y-1">{m.turn.sources.map((h) => <Trecho key={`${h.docId}-${h.position}`} h={h} />)}</ol>
+                    </details>
+                  ) : <p className="text-[11px] text-faint">📄 nenhum trecho dos documentos sobre isso</p>
+                )}
               </div>
             )}
           </div>

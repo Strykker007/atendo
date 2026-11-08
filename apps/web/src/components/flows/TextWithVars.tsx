@@ -168,6 +168,9 @@ export function collectFlowVars(nodes: { id: string; type: string; data: Record<
         if (a.varName) out.push({ key: a.varName, label: `Manipulador (${how})`, source: 'action' });
       }
     }
+    if (n.type === 'action' && n.data.kind === 'create_ticket') {
+      out.push({ key: typeof n.data.ticketVar === 'string' && n.data.ticketVar ? n.data.ticketVar : 'ticket', label: 'Número do ticket aberto', source: 'action' });
+    }
     if (n.type === 'action' && n.data.kind === 'webhook' && typeof n.data.responseVar === 'string' && n.data.responseVar) {
       out.push({ key: n.data.responseVar, label: 'Resposta do webhook', source: 'action' });
     }

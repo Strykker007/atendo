@@ -18,10 +18,6 @@ export const SECTION_TABS = {
     // agente com etapas: entra no atendimento pelo bloco IA dos fluxos (docs/agente-ia.md)
     { href: '/agentes-ia', label: 'Agentes de IA', need: ['flows.manage'], feature: 'ai_flows' },
   ],
-  contatos: [
-    { href: '/contatos', label: 'Contatos' },
-    { href: '/tags', label: 'Tags', need: ['tags.manage'] },
-  ],
   relatorios: [
     { href: '/relatorios', label: 'Relatórios', need: ['reports.view'] },
     { href: '/pesquisas', label: 'Pesquisas de satisfação', need: ['settings.manage'], feature: 'satisfaction_surveys' },

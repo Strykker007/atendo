@@ -1,13 +1,15 @@
 'use client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Bot, Plus } from 'lucide-react';
+import { useRef } from 'react';
+import { Bot, Download, Plus, Upload } from 'lucide-react';
+import { downloadJson } from '@/lib/utils';
 import type { AgentStage } from '@atendo/shared';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
-import { useAiAgents, useCan, useHasFeature, useSaveAiAgent } from '@/lib/hooks';
+import { useAiAgents, useCan, useExportAiAgents, useHasFeature, useImportAiAgents, useSaveAiAgent } from '@/lib/hooks';
 import { SectionTabs } from '@/components/layout/SectionTabs';
 
 /** Roteiro de exemplo: dá ao cliente o formato das etapas para ele adaptar. */
@@ -39,6 +41,21 @@ export default function AgentesIaPage() {
   const agentes = useAiAgents(pode && feature.has);
   const save = useSaveAiAgent();
   const router = useRouter();
+  const exportar = useExportAiAgents();
+  const importar = useImportAiAgents();
+  const arquivo = useRef<HTMLInputElement>(null);
+  /** Exportar todos: o mesmo arquivo serve para outro cliente e para o modelo de perfil (docs/20). */
+  const baixar = () => exportar.mutate(undefined, {
+    onSuccess: ({ bundle, warnings }) => { downloadJson(bundle, `agentes-ia-${new Date().toISOString().slice(0, 10)}.json`); warnings.forEach((w) => toast.ok(w)); },
+    onError: toast.err,
+  });
+  async function subir(f: File) {
+    try {
+      const r = await importar.mutateAsync(JSON.parse(await f.text()));
+      toast.ok(`${r.created.length} agente(s) importado(s)`);
+      r.warnings.forEach((w) => toast.ok(w));
+    } catch (err) { toast.err(err instanceof SyntaxError ? 'Arquivo não é um JSON válido.' : err); }
+  }
 
   if (!pode) return <PageShell width="max-w-3xl"><Empty icon={<Bot size={28} />} title="Sem permissão" text="Seu perfil de acesso não inclui montar fluxos e agentes." /></PageShell>;
   if (!feature.loading && !feature.has) return <PageShell width="max-w-3xl"><Empty icon={<Bot size={28} />} title="Fora do plano" text="Agentes de IA fazem parte de “IA nos fluxos”. Fale com o suporte para incluir no seu plano." /></PageShell>;
@@ -56,7 +73,12 @@ export default function AgentesIaPage() {
       <PageHeader
         title="Agentes de IA"
         subtitle="A IA atende como uma pessoa da equipe, seguindo um roteiro em etapas. Cada etapa tem o seu prompt e as ações que ela pode fazer no sistema."
-        action={<Button onClick={() => criar(false)} loading={save.isPending}><Plus size={14} /> Novo agente</Button>}
+        action={<div className="flex flex-wrap gap-2">
+          <input ref={arquivo} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void subir(f); }} />
+          <Button variant="ghost" icon={<Upload size={14} />} loading={importar.isPending} onClick={() => arquivo.current?.click()}>Importar</Button>
+          {!!agentes.data?.length && <Button variant="ghost" icon={<Download size={14} />} loading={exportar.isPending} onClick={baixar}>Exportar</Button>}
+          <Button onClick={() => criar(false)} loading={save.isPending}><Plus size={14} /> Novo agente</Button>
+        </div>}
       />
       <SectionTabs section="fluxos" label="Fluxos e agentes de IA" />
 

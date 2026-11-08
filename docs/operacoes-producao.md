@@ -33,3 +33,13 @@ WHERE lower(p.email) = 'tatasousafarias@gmail.com'
   AND NOT EXISTS (SELECT 1 FROM partner_commissions c WHERE c."partnerId" = p.id)
   AND NOT EXISTS (SELECT 1 FROM partner_payouts y WHERE y."partnerId" = p.id);
 ```
+
+## 2026-11-07 12:54 — Marttins: fim do aquecimento reaberto pela queda de 07/11
+
+- quem: Tiago Lima · linhas: 1 · arquivo: `scripts/prod/ops/2026-11-07-marttins-fim-aquecimento.sql`
+
+```sql
+-- Drogaria Marttins (Cel 0192): encerra o aquecimento reaberto pela queda de 07/11 08:22.
+-- sessionStartedAt 8 dias atrás => warmupPhase() devolve null (passa das 168 h).
+UPDATE whatsapp_numbers SET "sessionStartedAt" = now() - interval '8 days' WHERE id = '5d37b8ad-11f7-4654-9598-a8ad5fb0fe8f';
+```

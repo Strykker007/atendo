@@ -1,4 +1,4 @@
-import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, LOSS_REASONS_MAX, SYSTEM_PROFILES, parsePortableFlowFile, type Permission, type PortableFlow } from '@atendo/shared';
+import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, LOSS_REASONS_MAX, SYSTEM_PROFILES, parsePortableAiAgentFile, parsePortableFlowFile, parsePortableTicketTypeFile, type Permission, type PortableAiAgent, type PortableFlow, type PortableTicketType } from '@atendo/shared';
 import { sanitize } from '../auth/permissions';
 import { parsePortableReplyFile, type PortableQuickReply } from '../quick-replies/portable';
 import { MAX_CONFLICTS_PER_TAG } from '../tags/conflicts';
@@ -98,6 +98,13 @@ export interface TemplateContent {
   lossReasonColors?: Record<string, string>;
   /** configurações de atendimento (encerramento com/sem venda, assinatura, nomes dos resultados) */
   settings?: TemplateSettings;
+  /**
+   * Agentes de IA (persona, regras, base em texto, etapas). Os fluxos citam o agente pelo nome.
+   * Documentos e departamentos liberados não viajam.
+   */
+  aiAgents?: PortableAiAgent[];
+  /** Tipos de ticket (campos, prioridade, prazo). O "Abrir ticket" dos fluxos cita o tipo pelo nome. */
+  ticketTypes?: PortableTicketType[];
 }
 
 /** O arquivo `.json` de importar/exportar. */
@@ -187,9 +194,15 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
   }
 
   const settings = parseTemplateSettings(o.settings);
+  if (o.aiAgents !== undefined && !Array.isArray(o.aiAgents)) throw new Error('"aiAgents" deve ser uma lista.');
+  if (o.ticketTypes !== undefined && !Array.isArray(o.ticketTypes)) throw new Error('"ticketTypes" deve ser uma lista.');
+  const aiAgents = o.aiAgents?.length ? parsePortableAiAgentFile({ atendo: 'ai-agent-bundle', version: 1, items: o.aiAgents }) : undefined;
+  const ticketTypes = o.ticketTypes?.length ? parsePortableTicketTypeFile({ atendo: 'ticket-type-bundle', version: 1, items: o.ticketTypes }) : undefined;
+  if (aiAgents && new Set(aiAgents.map((a) => a.name.toLowerCase())).size !== aiAgents.length) throw new Error('Há dois agentes de IA com o mesmo nome no modelo.');
+  const extras = { ...(settings && { settings }), ...(aiAgents && { aiAgents }), ...(ticketTypes && { ticketTypes }) };
   // com `tags`, o formato antigo sai: uma fonte só do que o cliente recebe
-  if (tags) return { profiles, quickReplies, flows, tags, ...(settings && { settings }) };
-  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }), ...(settings && { settings }) };
+  if (tags) return { profiles, quickReplies, flows, tags, ...extras };
+  return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }), ...extras };
 }
 
 /**
@@ -229,7 +242,7 @@ export function templateTagConflictPairs(tags: TemplateTag[]): [string, string][
   return out;
 }
 
-export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }), ...(f.settings && { settings: f.settings }) });
+export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }), ...(f.settings && { settings: f.settings }), ...(f.aiAgents && { aiAgents: f.aiAgents }), ...(f.ticketTypes && { ticketTypes: f.ticketTypes }) });
 
 /**
  * Tags com que o cliente nasce, na ordem: as do modelo; em modelo antigo, a lista de motivos
@@ -270,4 +283,4 @@ export function provisionedProfiles(content: TemplateContent | null): { name: st
 }
 
 /** Resumo para a listagem do Super Admin. */
-export const templateSummary = (c: TemplateContent) => ({ profiles: c.profiles.length, quickReplies: c.quickReplies.length, flows: c.flows.length, tags: provisionedTags(c).length });
+export const templateSummary = (c: TemplateContent) => ({ profiles: c.profiles.length, quickReplies: c.quickReplies.length, flows: c.flows.length, tags: provisionedTags(c).length, aiAgents: c.aiAgents?.length ?? 0, ticketTypes: c.ticketTypes?.length ?? 0 });

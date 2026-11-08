@@ -7,7 +7,7 @@
  * JSON em vez de tool use nativo de propósito: uma chamada por resposta (custo), funciona igual
  * na Anthropic e na OpenAI, e a regra fica toda deste lado.
  */
-import { AGENT_TONES, AGENT_TOOLS, CONTACT_FIELD_LABEL, type AgentAction, type AgentStage, type AgentToolKey, type AgentTurn, type AiAgentConfig, type ContactField } from '@atendo/shared';
+import { AGENT_TONES, AGENT_TOOLS, CONTACT_FIELD_LABEL, type KnowledgeHit, type AgentAction, type AgentStage, type AgentToolKey, type AgentTurn, type AiAgentConfig, type ContactField } from '@atendo/shared';
 
 /** Nomes dos alvos, para a IA escolher por nome e o código conferir por id. */
 export interface AgentCatalog {
@@ -61,8 +61,8 @@ function toolLines(stage: AgentStage, agent: AiAgentConfig, catalog: AgentCatalo
 }
 
 /** Instruções de sistema da rodada: quem a IA é, regras, base, a etapa atual e o formato da resposta. */
-export function agentSystemPrompt(input: { agent: AiAgentConfig; stage: AgentStage; businessName: string; catalog: AgentCatalog; contactName?: string | null }): string {
-  const { agent, stage, catalog } = input;
+export function agentSystemPrompt(input: { agent: AiAgentConfig; stage: AgentStage; businessName: string; catalog: AgentCatalog; contactName?: string | null; sources?: KnowledgeHit[] | null }): string {
+  const { agent, stage, catalog, sources } = input;
   const nomes = new Map(agent.stages.map((s) => [s.id, s.name]));
   const transicoes = stage.transitions.filter((t) => nomes.has(t.to));
   return [
@@ -78,8 +78,9 @@ export function agentSystemPrompt(input: { agent: AiAgentConfig; stage: AgentSta
     agent.rules.trim() ? `- ${agent.rules.trim().split('\n').filter(Boolean).join('\n- ')}` : '',
     '',
     'BASE DE CONHECIMENTO:',
-    agent.knowledge.trim() || '(vazia — não afirme nenhum fato sobre a empresa)',
+    agent.knowledge.trim() || (sources ? '(veja os trechos dos documentos abaixo)' : '(vazia — não afirme nenhum fato sobre a empresa)'),
     '',
+    ...documentLines(sources),
     `ETAPA ATUAL: ${stage.name} (id ${stage.id})`,
     `O que fazer nesta etapa: ${stage.goal.trim()}`,
     transicoes.length
@@ -93,6 +94,24 @@ export function agentSystemPrompt(input: { agent: AiAgentConfig; stage: AgentSta
     '{"reply": "mensagem para o contato (pode ser vazia se só for transferir)", "next_stage": "id da etapa seguinte ou vazio para continuar nesta", "actions": [{"tool": "nome", ...campos}], "done": false}',
     '"done": true só quando o atendimento terminou e não há mais nada a fazer.',
   ].filter((l, i, a) => !(l === '' && a[i - 1] === '')).join('\n');
+}
+
+/**
+ * Trechos dos documentos achados para a última mensagem. `null` = o agente não tem documentos
+ * (a seção nem aparece); lista vazia = tem, mas nada bateu — a IA não pode supor o conteúdo.
+ */
+export function documentLines(sources?: KnowledgeHit[] | null): string[] {
+  if (!sources) return [];
+  if (!sources.length) {
+    return ['TRECHOS DOS DOCUMENTOS: nenhum trecho dos documentos fala do que o contato perguntou. Não suponha o que os documentos dizem; se a resposta depender deles, diga que vai verificar e use handoff.', ''];
+  }
+  return [
+    'TRECHOS DOS DOCUMENTOS (buscados para a última mensagem do contato; também são BASE DE CONHECIMENTO):',
+    ...sources.map((h) => `--- ${h.docName}${h.heading ? ` · ${h.heading}` : ''} ---\n${h.text}`),
+    '--- fim dos trechos ---',
+    'Responda com base nesses trechos. Quando ajudar, cite a fonte de forma curta ("pelo regimento, Art. 12"). Se os trechos não respondem exatamente, não complete com suposição.',
+    '',
+  ];
 }
 
 /** O primeiro objeto JSON da resposta (o modelo às vezes embrulha em ```json). */

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { ArrowLeft, DoorClosed, Send, GripVertical, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
+import { ArrowLeft, Bot, DoorClosed, Send, GripVertical, Shapes, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
 import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -27,7 +27,7 @@ function itemsOf<T>(raw: unknown, kind: string): T[] {
   const o = ((raw as { portable?: unknown })?.portable ?? raw) as { atendo?: string; items?: unknown[] } | null;
   if (o?.atendo === `${kind}-bundle` && Array.isArray(o.items)) return o.items as T[];
   if (o?.atendo === kind) return [o as T];
-  throw new Error(kind === 'flow' ? 'Este arquivo não é uma exportação de fluxos.' : 'Este arquivo não é uma exportação de respostas rápidas.');
+  throw new Error(({ flow: 'Este arquivo não é uma exportação de fluxos.', 'ai-agent': 'Este arquivo não é uma exportação de agentes de IA.', 'ticket-type': 'Este arquivo não é uma exportação de tipos de ticket.' } as Record<string, string>)[kind] ?? 'Este arquivo não é uma exportação de respostas rápidas.');
 }
 
 /**
@@ -75,7 +75,7 @@ export default function TemplateEditorPage() {
   return (
     <PageShell width="max-w-6xl">
       {modal}
-      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} settings={tpl.data.content.settings} />
+      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} settings={tpl.data.content.settings} aiAgents={(tpl.data.content.aiAgents ?? []).map((a) => a.name)} ticketTypes={(tpl.data.content.ticketTypes ?? []).map((t) => t.name)} />
       <PageHeader
         title={tpl.data.name}
         subtitle={<>Tudo com que um cliente novo nasce ao ser criado com este modelo. Clientes que já existem só mudam pelo “Aplicar aos clientes”.</>}
@@ -105,6 +105,14 @@ export default function TemplateEditorPage() {
         <ProfilesSection profiles={content.profiles} onChange={(profiles) => edit({ profiles })} />
         <QuickRepliesSection items={content.quickReplies} onChange={(quickReplies) => edit({ quickReplies })} />
         <FlowsSection items={content.flows} onChange={(flows) => edit({ flows })} />
+        <PortableSection kind="ai-agent" icon={<Bot size={15} className="text-faint shrink-0" />} titulo="Agentes de IA" items={content.aiAgents ?? []}
+          texto={<>Persona, regras, base de conhecimento e etapas (prompts) com que o cliente nasce. Os fluxos do modelo citam o agente <b>pelo nome</b>. Monte num cliente, exporte em <b>Agentes de IA → Exportar</b> e importe aqui (mesmo nome substitui). Documentos e departamentos liberados não vão — o cliente envia/escolhe os dele.</>}
+          detalhe={(a) => `${a.stages.length} etapa(s)${a.knowledge ? ' · com base de conhecimento' : ''}${a.isActive ? '' : ' · desligado'}`}
+          onChange={(aiAgents) => edit({ aiAgents: aiAgents.length ? aiAgents : undefined })} />
+        <PortableSection kind="ticket-type" icon={<Shapes size={15} className="text-faint shrink-0" />} titulo="Tipos de ticket" items={content.ticketTypes ?? []}
+          texto={<>Tipos com campos próprios (unidade, produto, paciente…). O “Abrir ticket” dos fluxos cita o tipo <b>pelo nome</b>. Exporte em <b>Tickets → Tipos → Exportar</b> e importe aqui. O setor padrão não vai (o cliente escolhe o dele).</>}
+          detalhe={(t) => t.fields.map((f) => f.label).join(', ') || 'sem campos'}
+          onChange={(ticketTypes) => edit({ ticketTypes: ticketTypes.length ? ticketTypes : undefined })} />
         {/* editar grava `tags` e aposenta o formato antigo (lossReasons); "Voltar ao catálogo" tira as duas */}
         <TagsSection value={content.tags} fallback={content.lossReasons || content.lossReasonColors ? tpl.data.effectiveTags : CATALOGO_TAGS} labels={templateOutcomeLabels(content.settings)} onChange={(tags) => edit({ tags, lossReasons: undefined, lossReasonColors: undefined })} />
       </div>
@@ -384,6 +392,51 @@ function FlowsSection({ items, onChange }: { items: TemplateFlow[]; onChange: (i
               >
                 <DoorClosed size={14} /> Encerramento
               </button>
+              <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => onChange(items.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Agentes de IA e tipos de ticket do modelo: como os fluxos, não são editados aqui — vêm da
+ * exportação de um cliente (mesmo nome substitui) e podem ser removidos.
+ */
+function PortableSection<T extends { name: string }>({ kind, icon, titulo, texto, items, detalhe, onChange }: {
+  kind: 'ai-agent' | 'ticket-type'; icon: React.ReactNode; titulo: string; texto: React.ReactNode; items: T[]; detalhe: (x: T) => string; onChange: (i: T[]) => void;
+}) {
+  const file = useRef<HTMLInputElement>(null);
+  async function onImport(f: File) {
+    try {
+      const add = itemsOf<T>(JSON.parse(await f.text()), kind);
+      const names = new Set(add.map((x) => x.name.toLowerCase()));
+      onChange([...items.filter((x) => !names.has(x.name.toLowerCase())), ...add]);
+      toast.ok(`${add.length} item(ns) adicionado(s) — salve para gravar`);
+    } catch (err) { toast.err(err instanceof SyntaxError ? 'Arquivo não é um JSON válido.' : err); }
+  }
+  return (
+    <div className={section}>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="font-display font-semibold text-ink">{titulo} <span className="text-muted font-normal text-sm">· {items.length}</span></h2>
+          <p className="text-[12px] text-muted">{texto}</p>
+        </div>
+        <input ref={file} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onImport(f); }} />
+        <Button variant="ghost" size="sm" icon={<Upload size={14} />} onClick={() => file.current?.click()}>Importar JSON</Button>
+      </div>
+      {!items.length && <p className="text-sm text-muted">Nenhum.</p>}
+      {!!items.length && (
+        <div className="rounded-xl border border-line divide-y divide-line">
+          {items.map((x, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2">
+              {icon}
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-ink">{x.name}</div>
+                <div className="text-[12px] text-muted truncate">{detalhe(x)}</div>
+              </div>
               <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => onChange(items.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
             </div>
           ))}

@@ -43,7 +43,8 @@ ocupado: tirar a conversa de alguém cedo só troca de fila, não atende mais r�
 
 ## Para quem vai
 
-- **online** = painel aberto e no turno (a mesma presença do bloco Distribuidor);
+- **online** = painel aberto, no turno e fora de [pausa](fila-de-atendimento.md#pausa) (a mesma presença do bloco Distribuidor);
+- com a [fila de atendimento](fila-de-atendimento.md) ligada, quem está no limite de atendimentos não recebe;
 - com acesso à conversa (número e departamento — mesma régua da transferência manual);
 - fora quem está com ela e quem **já a recebeu nesta espera** (sem pingue-pongue);
 - entre os que sobram, o com **menos conversas abertas** (empate: ordem fixa).
@@ -76,4 +77,4 @@ se alguém respondeu ou assumiu no meio do minuto, nada muda.
 ## Ainda não
 
 - tempo por departamento (hoje a carga e os tempos são da empresa inteira);
-- teto de conversas por atendente (quem já tem N abertas não recebe).
+- teto de conversas por atendente sem a fila ligada (com ela, vale o limite da fila).

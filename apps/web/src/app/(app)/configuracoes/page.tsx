@@ -19,6 +19,7 @@ import { SignatureSection } from '@/components/settings/SignatureSection';
 import { BudgetQuoteSection } from '@/components/settings/BudgetQuoteSection';
 import { TransferSection } from '@/components/settings/TransferSection';
 import { AutoReassignSection } from '@/components/settings/AutoReassignSection';
+import { QueueSection } from '@/components/settings/QueueSection';
 import { PixGatewaySection } from '@/components/settings/PixGatewaySection';
 import { AiOwnKeySection } from '@/components/settings/AiOwnKeySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
@@ -127,6 +128,7 @@ export default function ConfiguracoesPage() {
             <SignatureSection />
             <BudgetQuoteSection />
             <TransferSection />
+            <QueueSection />
             <AutoReassignSection />
             <ClosingSection />
             <LinkSection href="/configuracoes/contatos-isentos" icon={<BellOff size={20} />} title="Contatos isentos de ticket" text="Números que nunca abrem atendimento (diretoria, fornecedores): ficam na aba Livres e fora dos relatórios." action="Gerenciar lista" />

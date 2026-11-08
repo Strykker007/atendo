@@ -5,7 +5,9 @@ import { SYSTEM_PROFILES, copyName, flowFromPortable, flowTagNames, flowToPortab
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { assertOwnFlowMedia, validateDefinition } from '../flows/flow-validation';
 import { toPortableReply } from '../quick-replies/portable';
+import { cleanStages } from '../ai/ai-agents';
 import { TEMPLATE_TAGS_MAX, provisionedProfiles, type TemplateContent } from './tenant-template';
+import { agentsToPortable, createAgentsFromPortable, createTicketTypesFromPortable, refMaps, ticketTypesToPortable } from './portable-db';
 
 const newId = (type: FlowNodeType) => `${type}-${randomUUID().slice(0, 6)}`;
 
@@ -21,11 +23,20 @@ export class TenantProvisioningService {
    * Fluxos do modelo passam pela mesma validação do editor. Roda na importação do modelo, para
    * o erro aparecer para quem subiu o arquivo — e não na hora de criar o cliente.
    */
-  assertFlows(flows: PortableFlow[]) {
+  assertFlows(flows: PortableFlow[], content?: Pick<TemplateContent, 'aiAgents' | 'ticketTypes'>) {
     const fakeTags = Object.fromEntries(flows.flatMap((p) => flowTagNames(p.definition)).map((n) => [n, n]));
+    // agente/tipo que vem no próprio modelo resolve; o que não vem fica marcado para escolher no cliente
+    const fakeRefs = {
+      aiAgentIdByName: Object.fromEntries((content?.aiAgents ?? []).map((a) => [a.name, a.name])),
+      ticketTypeIdByName: Object.fromEntries((content?.ticketTypes ?? []).map((t) => [t.name, t.name])),
+    };
+    // etapas do agente com a mesma régua do editor: o erro aparece para quem subiu o modelo, não na criação do cliente
+    for (const a of content?.aiAgents ?? []) {
+      try { cleanStages(a.stages); } catch (e) { throw new BadRequestException(`Agente "${a.name}": ${e instanceof Error ? e.message : 'etapas inválidas'}`); }
+    }
     for (const p of flows) {
       try {
-        validateDefinition(flowFromPortable(p, fakeTags, newId).definition);
+        validateDefinition(flowFromPortable(p, fakeTags, newId, fakeRefs).definition);
       } catch (e) {
         throw new BadRequestException(`Fluxo "${p.name}": ${e instanceof Error ? e.message : 'inválido'}`);
       }
@@ -59,14 +70,19 @@ export class TenantProvisioningService {
       await tx.quickReply.create({ data: { folderId: f.id, title, body: it.body, position: f.next++ } });
     }
 
+    // tipos de ticket e agentes antes dos fluxos: o fluxo os cita pelo nome
+    if (content.ticketTypes?.length) await createTicketTypesFromPortable(tx, tenantId, content.ticketTypes);
+    if (content.aiAgents?.length) await createAgentsFromPortable(tx, tenantId, content.aiAgents, 'skip');
+
     if (!content.flows.length) return;
     const tagNames = [...new Set(content.flows.flatMap((p) => flowTagNames(p.definition)))];
     if (tagNames.length) await tx.tag.createMany({ data: tagNames.map((name) => ({ tenantId, name })), skipDuplicates: true });
     const tags = await tx.tag.findMany({ where: { tenantId }, select: { id: true, name: true } });
     const tagIdByName = Object.fromEntries(tags.map((t) => [t.name, t.id]));
+    const { refs } = await refMaps(tx, tenantId);
     const taken: string[] = [];
     for (const p of content.flows) {
-      const b = flowFromPortable(p, tagIdByName, newId);
+      const b = flowFromPortable(p, tagIdByName, newId, refs);
       validateDefinition(b.definition);
       assertOwnFlowMedia(tenantId, b.definition);
       const name = uniqueName(b.name, taken);
@@ -90,12 +106,14 @@ export class TenantProvisioningService {
       this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true, requireSignature: true, wonLabel: true, lostLabel: true } }),
     ]);
     const warnings = new Set<string>();
+    const [{ names: refNames }, agentes, tiposTicket] = await Promise.all([refMaps(this.prisma, tenantId), agentsToPortable(this.prisma, tenantId), ticketTypesToPortable(this.prisma, tenantId)]);
+    [...agentes.warnings, ...tiposTicket.warnings].forEach((w) => warnings.add(w));
     const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
     const flowNameById = Object.fromEntries(flows.map((f) => [f.id, f.name]));
     const qr = replies.map((r) => toPortableReply(r, r.folder.name));
     qr.forEach((o) => o.warnings.forEach((w) => warnings.add(w)));
     const portableFlows = flows.map((f) => {
-      const out = flowToPortable({ name: f.name, description: f.description, showOnClosing: f.showOnClosing, trigger: f.trigger as unknown as FlowTrigger, definition: f.definition as unknown as FlowDefinition }, { tagNameById, flowNameById });
+      const out = flowToPortable({ name: f.name, description: f.description, showOnClosing: f.showOnClosing, trigger: f.trigger as unknown as FlowTrigger, definition: f.definition as unknown as FlowDefinition }, { tagNameById, flowNameById, ...refNames });
       out.warnings.forEach((w) => warnings.add(`${f.name}: ${w}`));
       return out.portable;
     });
@@ -115,6 +133,9 @@ export class TenantProvisioningService {
         ].slice(0, TEMPLATE_TAGS_MAX),
         // configurações de atendimento como estão no cliente
         ...(ajustes && { settings: { salesEnabled: ajustes.salesEnabled, requireSignature: ajustes.requireSignature, wonLabel: ajustes.wonLabel, lostLabel: ajustes.lostLabel } }),
+        // agentes de IA (sem documentos) e tipos de ticket: os fluxos acima os citam pelo nome
+        ...(agentes.items.length && { aiAgents: agentes.items }),
+        ...(tiposTicket.items.length && { ticketTypes: tiposTicket.items }),
       },
       warnings: [...warnings],
     };

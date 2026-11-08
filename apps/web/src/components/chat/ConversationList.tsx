@@ -5,6 +5,7 @@ import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Sq
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
+import { QueueBar } from '@/components/queue/Queue';
 import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { ExemptConfirm, useExemptShortcut } from './ExemptConfirm';
@@ -188,6 +189,9 @@ export function ConversationList() {
           </div>
         )}
       </div>
+
+      {/* fila de atendimento (só com a distribuição automática ligada) */}
+      <QueueBar />
 
       {/* Filtro principal com contadores, na largura toda: dividindo a linha com os ícones, as
           abas ficavam espremidas na coluna de 320px (navegador menor) */}

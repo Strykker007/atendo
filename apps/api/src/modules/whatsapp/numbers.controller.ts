@@ -15,7 +15,7 @@ import { CurrentUser, type AuthUser, isOwnerSession } from '../auth/current-user
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { SendPacer } from './send-pacer';
 import { PermissionsService } from '../auth/permissions.service';
-import { canManageNumber, canUseNumber, unrestricted } from '../auth/number-scope';
+import { canManageNumber, canUseNumber, numberFilter, unrestricted } from '../auth/number-scope';
 import { ContactsSyncScheduler } from './contacts-sync';
 import { textSearch } from '../../common/text-search';
 import { phoneVariants } from '../conversations/phone-variants';
@@ -90,7 +90,8 @@ export class NumbersController {
   @Get()
   async list(@CurrentUser() user: AuthUser) {
     const rows = await this.prisma.whatsAppNumber.findMany({
-      where: { tenantId: user.tenantId, deletedAt: null },
+      // quem só atende alguns números (ex.: portaria) nem vê os outros — nem no filtro "Todos os números"
+      where: { tenantId: user.tenantId, deletedAt: null, ...(numberFilter(user) && { id: numberFilter(user) }) },
       select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, syncStartedAt: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
       orderBy: { createdAt: 'asc' },
     });

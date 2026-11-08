@@ -99,7 +99,8 @@ aguardando) no título. Menu recolhido (só ícones): todos os itens, com uma li
 | | Tickets | — | `tickets.*` (qualquer uma) | `tickets` |
 | | Agenda | — | `agenda.manage` | `scheduling` |
 | | Mensagens agendadas | — | `conversations.schedule_message` **ou** `conversations.view_all` | — |
-| | Contatos | Contatos · Tags | Tags: `tags.manage` | — |
+| | Contatos | — | — | — |
+| | Tags | — | `tags.manage` | — |
 | Automação | Fluxos | Fluxos · Agentes de IA | `flows.manage` nas duas (disparar fluxo na conversa não depende do item) | `flows` · `ai_flows` |
 | | Respostas | — | — | — |
 | | Transmissões | — | `campaigns.manage` | `campaigns` |

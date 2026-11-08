@@ -14,6 +14,7 @@ import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, START_DELAY_OPTIONS, WEBHOOK_DEFAUL
 import { ConditionPanel } from './ConditionPanel';
 import { ContentPanel } from './ContentPanel';
 import { HttpPanel } from './HttpPanel';
+import { TicketActionPanel } from './TicketActionPanel';
 
 const varName = (v: string) => v.replace(/[^\w]/g, '_').toLowerCase();
 const shortId = () => crypto.randomUUID().slice(0, 8);
@@ -197,7 +198,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
               <select className={`${inputCls} min-w-0 max-w-full`} value={node.data.kind === 'set_status' && node.data.status === 'closed' ? 'close' : node.data.kind} onChange={(e) => set(e.target.value === 'close' ? { kind: 'set_status', status: 'closed' } : e.target.value === 'set_status' ? { kind: 'set_status', status: 'waiting' } : { kind: e.target.value })}>
                 {/* "Definir variável" virou o bloco Manipulador; continua aqui só para fluxos antigos */}
                 {node.data.kind === 'set_var' && <option value="set_var">Definir variável (antigo — prefira o bloco Manipulador)</option>}
-                <option value="add_tag">Aplicar etiqueta</option><option value="remove_tag">Remover etiqueta</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="close">Encerrar conversa</option><option value="webhook">Chamar webhook</option><option value="set_department">Definir departamento</option><option value="handoff">Transferir para atendente humano (fim do fluxo)</option>
+                <option value="add_tag">Aplicar etiqueta</option><option value="remove_tag">Remover etiqueta</option><option value="assign">Atribuir a atendente</option><option value="set_status">Mudar status</option><option value="close">Encerrar conversa</option><option value="webhook">Chamar webhook</option><option value="set_department">Definir departamento</option><option value="create_ticket">Abrir ticket</option><option value="handoff">Transferir para atendente humano (fim do fluxo)</option>
               </select>
             </Field>
             {node.data.kind === 'webhook' && (() => {
@@ -262,6 +263,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                 <select className={`${inputCls} min-w-0 max-w-full`} value={node.data.agentId ?? ''} onChange={(e) => set({ agentId: e.target.value || undefined })}><option value="">{node.data.kind === 'handoff' ? 'Fila (qualquer atendente)' : 'Escolha…'}</option>{agents.data?.filter((a) => a.isActive).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
               </Field>
             )}
+            {node.data.kind === 'create_ticket' && <TicketActionPanel d={node.data} set={set} vars={vars} />}
             {node.data.kind === 'set_department' && (
               <>
                 <Field label="Departamento">

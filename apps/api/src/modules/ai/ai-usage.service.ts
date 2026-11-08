@@ -22,6 +22,9 @@ export function costOf(model: string, tokensIn: number, tokensOut: number, ownKe
   return aiCostUsd(model, tokensIn, tokensOut);
 }
 
+/** gastam (custo e teto), mas não contam como interação do plano */
+const NOT_INTERACTION: AiTaskKind[] = ['knowledge'];
+
 export const aiPeriodOf = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 const key = (tenantId: string, period: string, metric: 'count' | 'cost') => `ai:${tenantId}:${period}:${metric}`;
 /** gasto somado de todos os tenants — o que de fato sai do crédito da conta do fornecedor */
@@ -56,15 +59,19 @@ export class AiUsageService {
     error?: string;
     /** chave do próprio cliente: grava a linha, mas não soma na cota, no teto nem no orçamento */
     ownKey?: boolean;
+    /** custo já calculado (embeddings: preço por token próprio, fora da tabela de modelos de chat) */
+    costUsd?: number;
   }) {
-    const costUsd = input.error ? 0 : costOf(input.model, input.tokensIn, input.tokensOut, input.ownKey);
+    const { costUsd: fixed, ...row } = input;
+    const costUsd = input.error ? 0 : (fixed ?? costOf(input.model, input.tokensIn, input.tokensOut, input.ownKey));
     const costBrl = costUsd * env.USD_BRL_RATE;
-    await this.prisma.aiUsage.create({ data: { ...input, ownKey: !!input.ownKey, costUsd, costBrl } });
+    await this.prisma.aiUsage.create({ data: { ...row, ownKey: !!input.ownKey, costUsd, costBrl } });
     if (input.error || input.ownKey) return { costUsd, costBrl };
 
     const period = aiPeriodOf();
     const multi = this.redis.multi();
-    multi.incr(key(input.tenantId, period, 'count'));
+    // embeddings de documento custam (entra no teto), mas não são uma interação com o contato
+    if (!NOT_INTERACTION.includes(input.kind)) multi.incr(key(input.tenantId, period, 'count'));
     // custo em centavos de centavo (inteiro) — INCRBYFLOAT perde precisão entre réplicas
     multi.incrby(key(input.tenantId, period, 'cost'), Math.round(costBrl * 10_000));
     multi.incrby(platformKey(period), Math.round(costBrl * 10_000));
@@ -108,17 +115,17 @@ export class AiUsageService {
   /** Reconstrói os contadores a partir do ledger (job diário e conserto manual). */
   async reconcile(period = aiPeriodOf()) {
     const [y, m] = period.split('-').map(Number);
-    const rows = await this.prisma.aiUsage.groupBy({
-      by: ['tenantId'],
-      where: { occurredAt: { gte: new Date(Date.UTC(y, m - 1, 1)), lt: new Date(Date.UTC(y, m, 1)) }, error: null, ownKey: false },
-      _count: { _all: true },
-      _sum: { costBrl: true },
-    });
+    const where = { occurredAt: { gte: new Date(Date.UTC(y, m - 1, 1)), lt: new Date(Date.UTC(y, m, 1)) }, error: null, ownKey: false };
+    const [rows, counted] = await Promise.all([
+      this.prisma.aiUsage.groupBy({ by: ['tenantId'], where, _sum: { costBrl: true } }),
+      this.prisma.aiUsage.groupBy({ by: ['tenantId'], where: { ...where, kind: { notIn: NOT_INTERACTION } }, _count: { _all: true } }),
+    ]);
+    const countOf = new Map(counted.map((c) => [c.tenantId, c._count._all]));
     const total = rows.reduce((sum, r) => sum + Number(r._sum.costBrl ?? 0), 0);
     await this.redis.set(platformKey(period), Math.round(total * 10_000));
     for (const r of rows) {
       await this.redis.mset(
-        key(r.tenantId, period, 'count'), r._count._all,
+        key(r.tenantId, period, 'count'), countOf.get(r.tenantId) ?? 0,
         key(r.tenantId, period, 'cost'), Math.round(Number(r._sum.costBrl ?? 0) * 10_000),
       );
     }
@@ -134,13 +141,13 @@ export class AiUsageService {
     const ok = { ...where, error: null, ownKey: false };
     const [byKind, total, failed, own] = await Promise.all([
       this.prisma.aiUsage.groupBy({ by: ['kind'], where: ok, _count: { _all: true }, _sum: { costBrl: true, tokensIn: true, tokensOut: true } }),
-      this.prisma.aiUsage.aggregate({ where: ok, _count: { _all: true }, _sum: { costBrl: true } }),
+      this.prisma.aiUsage.aggregate({ where: ok, _sum: { costBrl: true } }),
       this.prisma.aiUsage.count({ where: { ...where, NOT: { error: null } } }),
       this.prisma.aiUsage.count({ where: { ...where, error: null, ownKey: true } }),
     ]);
     return {
       period,
-      interactions: total._count._all,
+      interactions: byKind.filter((k) => !NOT_INTERACTION.includes(k.kind)).reduce((s, k) => s + k._count._all, 0),
       costBrl: Number(total._sum.costBrl ?? 0),
       failed,
       ownKeyInteractions: own,

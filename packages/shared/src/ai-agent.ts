@@ -88,4 +88,45 @@ export interface AgentTurn {
   rejected: string[];
   /** a IA disse que o assunto terminou */
   done: boolean;
+  /** trechos dos documentos do agente consultados nesta rodada (o simulador mostra; o fluxo não) */
+  sources?: KnowledgeHit[];
+}
+
+// ---------- documentos do agente (RAG) — docs/agente-ia.md#documentos ----------
+
+export const KNOWLEDGE_MAX_FILE_MB = 10;
+export const KNOWLEDGE_MAX_DOCS = 20;
+/** ~300 páginas de texto corrido por documento */
+export const KNOWLEDGE_MAX_CHARS = 600_000;
+export const KNOWLEDGE_ACCEPT = '.pdf,.docx,.txt,.md';
+
+/**
+ * `ready` = busca por palavra pronta. `embedded` diz se a busca por significado também está
+ * (depende de `AI_EMBED_API_KEY`; sem ela, só a busca por palavra).
+ */
+export type KnowledgeDocStatus = 'ready' | 'failed';
+
+export interface AgentKnowledgeDoc {
+  id: string;
+  name: string;
+  mime: string;
+  sizeBytes: number;
+  chars: number;
+  chunks: number;
+  status: KnowledgeDocStatus;
+  error: string | null;
+  /** trechos já com embedding (busca por significado) */
+  embedded: number;
+  createdAt: string;
+}
+
+/** Trecho encontrado para uma pergunta. */
+export interface KnowledgeHit {
+  docId: string;
+  docName: string;
+  position: number;
+  heading: string | null;
+  text: string;
+  /** por onde achou: palavra, significado ou os dois */
+  via: ('keyword' | 'semantic')[];
 }

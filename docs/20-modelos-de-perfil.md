@@ -1,7 +1,7 @@
 # 20 — Modelos de perfil (verticais)
 
 Um **modelo de perfil** (Farmácia, Clínica…) é o pacote com que um cliente novo já nasce:
-permissões padrão dos perfis, respostas rápidas, fluxos, tags (cor, Kanban, encerramento) e as **configurações de atendimento** (encerramento com ou sem venda, assinatura obrigatória, nome dos resultados). Só o dono do
+permissões padrão dos perfis, respostas rápidas, fluxos, tags (cor, Kanban, encerramento), **agentes de IA** (persona, regras, base, etapas/prompts), **tipos de ticket** (campos, prioridade, prazo) e as **configurações de atendimento** (encerramento com ou sem venda, assinatura obrigatória, nome dos resultados). Só o dono do
 sistema mexe (tela **Clientes → Modelos de perfil → Editar**, rota `/clientes/modelos/:id`).
 
 Um modelo pode ser marcado como **padrão** (`isDefault`, no máximo um): ele já vem escolhido no
@@ -25,9 +25,12 @@ Na API: `templateId` ausente = modelo padrão (se houver); `null` = nenhum.
      desfaria a matriz;
    - perfis extras do modelo (qualquer outro nome) entram como perfis comuns;
 3. pastas e respostas rápidas do modelo;
-4. etiquetas citadas pelos fluxos + fluxos — **desligados** (os números ainda não existem; o admin
+4. tipos de ticket e agentes de IA do modelo (antes dos fluxos: o fluxo cita os dois **pelo nome**;
+   alvos do agente — etiquetas e motivos — também pelo nome; agente com etapa inválida recusa o
+   modelo ao salvar/importar, não na criação);
+5. etiquetas citadas pelos fluxos + fluxos — **desligados** (os números ainda não existem; o admin
    revisa e liga). Desligado não conta em `maxFlows`;
-5. o admin (com senha, ou convidado — o e-mail do convite sai só depois do commit).
+6. o admin (com senha, ou convidado — o e-mail do convite sai só depois do commit).
 
 Qualquer falha desfaz tudo — inclusive e-mail de admin repetido, que antes deixava cliente órfão.
 Modelo com mais respostas do que o `maxQuickReplies` do plano é recusado (400) antes de criar.
@@ -48,6 +51,10 @@ Modelo com mais respostas do que o `maxQuickReplies` do plano é recusado (400) 
 - **Fluxos** — não são editados no modelo (o editor de fluxos depende de etiquetas, números e
   departamentos reais): monte num cliente (pode ser um de testes), exporte em Fluxos e importe
   aqui; mesmo nome substitui. Remover também é por aqui.
+- **Agentes de IA** e **Tipos de ticket** — como os fluxos, não são editados no modelo: monte num
+  cliente, exporte (**Agentes de IA → Exportar**, **Tickets → Tipos → Exportar**) e importe aqui
+  (mesmo nome substitui); remover também por aqui. Documentos do agente e departamento/setor
+  padrão não viajam (são do cliente) — a exportação avisa.
 - **Tags** — as mesmas opções da tela de Tags do cliente: cor (bolinha → paleta ou cor livre),
   interruptores **Kanban**, **Comprou** e **Não comprou** por linha, **Conflita com** (botão ⇄ N: escolhe as tags que saem quando esta é marcada — simétrico, até 20; tag que vira motivo de encerramento não tem conflito no cliente novo), arrastar pela alça para ordenar (ordem das colunas),
   remover; selecionar todas com Encerramento (Mostrar/Tirar em Comprou e em Não comprou), Pôr/Tirar do Kanban, Cor e
@@ -88,6 +95,9 @@ então grava. Partes, todas opcionais:
 - **Tags que faltam**: cria as tags do modelo (as que continuam tag na criação do cliente) que o
   cliente não tem, no fim da lista. Não altera nem remove as dele; conflitos não são replicados.
 
+- **Tipos de ticket que faltam** e **Agentes de IA que faltam**: cria os do modelo que o cliente não
+  tem (pelo nome, ignorando maiúsculas); os que ele já tem não mudam.
+
 Para quem: todos os clientes ativos ou uma seleção. Cada cliente roda numa transação própria.
 Respostas rápidas e fluxos não entram (ainda).
 
@@ -117,7 +127,9 @@ Salvar → Aplicar aos clientes → Motivos de encerramento + Deixar idêntico �
     { "name": "Achou caro", "color": "#f59e0b", "showOnLost": true },
     { "name": "Receita vencida", "color": "#dc2626", "showOnLost": true }
   ],
-  "settings": { "salesEnabled": true, "requireSignature": false, "wonLabel": "Comprou", "lostLabel": "Não comprou" }
+  "settings": { "salesEnabled": true, "requireSignature": false, "wonLabel": "Comprou", "lostLabel": "Não comprou" },
+  "aiAgents": [ { "atendo": "ai-agent", "version": 1, "name": "Atendente virtual", "persona": "…", "tone": "friendly", "rules": "…", "knowledge": "…", "stages": [], "maxReplies": 20, "isActive": true, "targets": { "tagNames": ["Cliente"], "closeReasonNames": ["Achou caro"], "contactFields": ["name"] } } ],
+  "ticketTypes": [ { "atendo": "ticket-type", "version": 1, "name": "Encomenda de produto", "color": "#10b981", "priority": "normal", "dueDays": 2, "fields": [ { "key": "produto", "label": "Produto", "type": "text", "required": true } ], "isActive": true } ]
 }
 ```
 
@@ -135,6 +147,12 @@ Salvar → Aplicar aos clientes → Motivos de encerramento + Deixar idêntico �
   encerramentos (Comprou e Não comprou), como era antes da separação.
   Com `tags` presente, as duas são ignoradas, e salvar pelo editor grava só `tags`.
 - `settings` (opcional): `salesEnabled` e `requireSignature` booleanos (outro tipo recusa o arquivo), `wonLabel`/`lostLabel` até 30 caracteres. Chave ausente = padrão do sistema.
+- `aiAgents` e `ticketTypes` são os itens das exportações de Agentes de IA e de Tipos de ticket
+  (`packages/shared/src/portable-extras.ts`); gravação no cliente em `tenants/portable-db.ts`.
+- Nos fluxos, o bloco IA (modo Agente) e o "Abrir ticket" levam `aiAgentName` / `ticketTypeName`
+  no lugar do id (`scrubFlowDefinition` / `restoreFlowDefinition`). No destino casa com o de mesmo
+  nome; sem ele, o bloco fica marcado "Reconfigurar" (o agente sai por Não conseguiu até escolher).
+  Antes, o id do agente viajava cru e apontava para o cliente de origem.
 - `quickReplies` e `flows` são exatamente os itens das exportações de Respostas e Fluxos
   (formato portável — `quick-replies/portable.ts` e `packages/shared/src/portable.ts`): sem ids,
   etiquetas por nome, sem anexos.
@@ -146,8 +164,8 @@ Salvar → Aplicar aos clientes → Motivos de encerramento + Deixar idêntico �
 ## Montando um modelo
 
 O jeito prático é **Gerar de um cliente**: escolhe um cliente já redondo e o sistema tira dele
-os perfis que ele ajustou (perfil padrão nunca editado fica de fora), as respostas, os fluxos e
-**todas as tags** na ordem do Kanban, com cor, Kanban, Comprou e Não comprou (até 200).
+os perfis que ele ajustou (perfil padrão nunca editado fica de fora), as respostas, os fluxos, os
+**agentes de IA** (sem documentos), os **tipos de ticket** e **todas as tags** na ordem do Kanban, com cor, Kanban, Comprou e Não comprou (até 200).
 Depois **Exportar** baixa o `.json`, **Carregar JSON** substitui o conteúdo de um modelo
 existente e **Importar JSON** cria um modelo novo.
 

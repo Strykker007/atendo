@@ -22,6 +22,7 @@ import { AiService } from '../ai/ai.service';
 import { AiAgentsService } from '../ai/ai-agents';
 import { describeAction } from '../ai/agent-prompt';
 import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
+import { TicketsService } from '../tickets/tickets.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
 import { isOpenAt } from '../tenants/business-hours';
 import { SchedulesService } from '../tenants/schedules.service';
@@ -100,6 +101,7 @@ export class FlowEngineService {
     private readonly interpolation: InterpolationService,
     @InjectQueue(QUEUE_FLOWS) private readonly queue: Queue<FlowJob>,
     @Inject(forwardRef(() => SurveyRunnerService)) private readonly surveys: SurveyRunnerService,
+    @Inject(forwardRef(() => TicketsService)) private readonly tickets: TicketsService,
   ) {}
 
   /**
@@ -1036,6 +1038,9 @@ export class FlowEngineService {
       }
       case 'webhook':
         return this.webhook(d, run);
+      case 'create_ticket':
+        await this.createTicket(d, run);
+        return undefined;
       case 'set_var': {
         if (!d.varName) break;
         const vars = { ...(run.vars as Record<string, string>) };
@@ -1046,6 +1051,39 @@ export class FlowEngineService {
     }
     this.gateway.emitConversation(run.tenantId, await this.prisma.conversation.findUniqueOrThrow({ where: { id: run.conversationId } }));
     return undefined;
+  }
+
+  /**
+   * Ação "Abrir ticket" (docs/tickets.md#pelo-fluxo). Título, detalhes e campos com as variáveis do
+   * fluxo; o número vai para `{{ticket}}` (ou a variável escolhida) para o fluxo responder o protocolo.
+   * Nunca para o fluxo: falha (fora do plano, erro) ou campo faltando vira aviso à equipe.
+   */
+  private async createTicket(d: Extract<FlowNode, { type: 'action' }>['data'], run: FlowRun & { flow: { name: string }; conversation: { contact: InterpolateCtx['contact'] & { id: string } } }) {
+    const vars = { ...(run.vars as Record<string, string>) };
+    const ctx = await this.interpolation.context(run.tenantId, run.conversation.contact, vars);
+    const fields = Object.fromEntries(Object.entries(d.ticketFields ?? {}).map(([k, v]) => [k, interpolate(v ?? '', ctx).trim()]));
+    try {
+      const t = await this.tickets.createSystem(run.tenantId, {
+        title: interpolate(d.ticketTitle ?? '', ctx),
+        description: d.ticketDescription ? interpolate(d.ticketDescription, ctx) : undefined,
+        priority: d.ticketPriority,
+        departmentId: d.departmentId || null,
+        responsibleId: d.agentId || null,
+        conversationId: run.conversationId,
+        typeId: d.ticketTypeId || null,
+        fields,
+        dueDays: d.ticketDueDays ?? null,
+        source: 'flow',
+        originName: run.flow.name,
+      });
+      vars[d.ticketVar || 'ticket'] = String(t.number);
+      await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
+      for (const w of t.warnings) await this.warnTeam(run, `Abrir ticket #${t.number}: ${w}.`);
+    } catch (err) {
+      vars[d.ticketVar || 'ticket'] = '';
+      await this.prisma.flowRun.update({ where: { id: run.id }, data: { vars } });
+      await this.warnTeam(run, `Abrir ticket: não abriu (${err instanceof Error ? err.message : err}). O fluxo seguiu.`);
+    }
   }
 
   /**
@@ -1173,7 +1211,10 @@ export class FlowEngineService {
         return false;
       }
     }
-    if (node.data.mode === 'queue') {
+    // fila de atendimento ligada (docs/fila-de-atendimento.md): quem decide é ela — por ordem de
+    // chegada e respeitando o limite por atendente. O bloco só põe na fila (com o departamento acima).
+    const fila = await this.prisma.tenantSettings.findUnique({ where: { tenantId: run.tenantId }, select: { autoDistribute: true } });
+    if (node.data.mode === 'queue' || fila?.autoDistribute) {
       await this.conversations.setStatusSystem(conv.id, 'waiting');
       return true;
     }

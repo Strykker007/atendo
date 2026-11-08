@@ -47,6 +47,7 @@ export function validateDefinition(def: FlowDefinition, { strict = false }: { st
     if (n.type === 'action' && n.data.kind === 'webhook') errors.push(...webhookErrors(n));
     if (n.type === 'http') errors.push(...httpErrors(n));
     // departamento que saiu na importação: o card já mostra "Reconfigurar"; não trava o salvar
+    if (n.type === 'action' && n.data.kind === 'create_ticket' && !n.data.ticketTypeId && !n.data.ticketTitle?.trim() && !(n.data as { _reconfig?: unknown })._reconfig) errors.push(`"Ação" (${n.id}): o ticket precisa de um tipo ou de um título.`);
     if (n.type === 'action' && n.data.kind === 'set_department' && !n.data.departmentId && !(n.data as { _reconfig?: unknown })._reconfig) errors.push(`"Ação" (${n.id}): escolha o departamento.`);
     if ((n.type === 'question' || n.type === 'menu') && n.data.timeoutMinutes !== undefined) {
       const t = Number(n.data.timeoutMinutes);
@@ -57,7 +58,8 @@ export function validateDefinition(def: FlowDefinition, { strict = false }: { st
     if (n.type === 'ai') {
       // modo agente: as instruções moram no agente (tela Agentes de IA)
       if (n.data.mode === 'agent') {
-        if (!n.data.aiAgentId) errors.push(`"IA" (${n.id}) em modo agente precisa de um agente escolhido.`);
+        // importado sem o agente no destino: o card pede para escolher (`_reconfig`); até lá sai por Não conseguiu
+        if (!n.data.aiAgentId && !(n.data as { _reconfig?: unknown })._reconfig) errors.push(`"IA" (${n.id}) em modo agente precisa de um agente escolhido.`);
       } else if (!n.data.instructions?.trim()) errors.push(`"IA" (${n.id}) precisa das instruções do negócio.`);
       if (n.data.mode === 'classify' && !n.data.labels?.length) errors.push(`"IA" (${n.id}) em modo classificar precisa de pelo menos um rótulo.`);
       // sem saída de fallback, uma indisponibilidade da IA deixaria o contato sem resposta

@@ -14,7 +14,7 @@ import { useRolloutTenantTemplate, useTenants, type TemplateRolloutResult, type 
  * Comprou / Não comprou, tags que faltam) para quem já existe. Sempre passa pela prévia: o dono
  * vê cliente por cliente o que muda antes de gravar.
  */
-export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags, settings }: {
+export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags, settings, aiAgents = [], ticketTypes = [] }: {
   open: boolean;
   onClose: () => void;
   templateId: string;
@@ -24,6 +24,9 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
   tags: TemplateTag[];
   /** configurações de atendimento do modelo salvo */
   settings?: TemplateSettings;
+  /** nomes dos agentes de IA e dos tipos de ticket do modelo salvo */
+  aiAgents?: string[];
+  ticketTypes?: string[];
 }) {
   const tenants = useTenants();
   const rollout = useRolloutTenantTemplate();
@@ -34,6 +37,8 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
   const [substituir, setSubstituir] = useState(false);
   const [comTags, setComTags] = useState(false);
   const [comAjustes, setComAjustes] = useState(false);
+  const [comAgentes, setComAgentes] = useState(false);
+  const [comTipos, setComTipos] = useState(false);
   const resumoAjustes = settings ? resumoSettings(settings) : '';
   const labels = templateOutcomeLabels(settings);
   const [todos, setTodos] = useState(true);
@@ -54,6 +59,8 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
     ...(motivos && { closeReasons: true, replaceCloseReasons: substituir }),
     ...(comTags && { tags: true }),
     ...(comAjustes && { settings: true }),
+    ...(comAgentes && { aiAgents: true }),
+    ...(comTipos && { ticketTypes: true }),
   });
   const algo = perfis.length > 0 || motivos || comTags || comAjustes;
   const alvo = todos ? ativos.length : escolhidos.length;
@@ -115,6 +122,16 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
               Configurações de atendimento <span className="text-muted">— {resumoAjustes || 'o modelo não define (o cliente fica como está)'}</span>
             </Check>
           </div>
+          <div className="rounded-xl border border-line p-3">
+            <Check checked={comTipos} disabled={!ticketTypes.length} onChange={mexer(setComTipos)}>
+              Tipos de ticket que faltam <span className="text-muted">— {ticketTypes.length ? `cria os do modelo que o cliente não tem (${ticketTypes.join(', ')}); os dele não mudam` : 'o modelo não tem'}</span>
+            </Check>
+          </div>
+          <div className="rounded-xl border border-line p-3">
+            <Check checked={comAgentes} disabled={!aiAgents.length} onChange={mexer(setComAgentes)}>
+              Agentes de IA que faltam <span className="text-muted">— {aiAgents.length ? `cria os do modelo que o cliente não tem (${aiAgents.join(', ')}); os dele não mudam` : 'o modelo não tem'}</span>
+            </Check>
+          </div>
         </section>
 
         <section className="space-y-2">
@@ -156,6 +173,8 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
                   <Linha rotulo="Motivos desativados" itens={r.closeReasons.deactivated} perigo />
                   <Linha rotulo="Tags criadas" itens={r.tags.created} />
                   <Linha rotulo="Configurações" itens={r.settings?.changed ?? []} />
+                  <Linha rotulo="Tipos de ticket criados" itens={r.ticketTypes?.created ?? []} />
+                  <Linha rotulo="Agentes de IA criados" itens={r.aiAgents?.created ?? []} />
                 </li>
               ))}
             </ul>
@@ -174,7 +193,7 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
 }
 
 const temMudanca = (r: TemplateRolloutResult) =>
-  [r.profiles.created, r.profiles.updated, r.closeReasons.created, r.closeReasons.updated, r.closeReasons.reactivated, r.closeReasons.deactivated, r.tags.created, r.settings?.changed ?? []].some((l) => l.length > 0);
+  [r.profiles.created, r.profiles.updated, r.closeReasons.created, r.closeReasons.updated, r.closeReasons.reactivated, r.closeReasons.deactivated, r.tags.created, r.settings?.changed ?? [], r.ticketTypes?.created ?? [], r.aiAgents?.created ?? []].some((l) => l.length > 0);
 
 /** "sem venda · assinatura obrigatória · Resolvido / Não resolvido" — o que o modelo define */
 export function resumoSettings(s: TemplateSettings) {

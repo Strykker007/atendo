@@ -9,6 +9,7 @@ import { WaRemovedBanner } from '@/components/numbers/WaRemovedNotice';
 import { ReceiveStalledBanner } from '@/components/numbers/ReceiveStalledNotice';
 import { NumberSyncBanner } from '@/components/numbers/NumberSyncNotice';
 import { RealtimeBanner } from '@/components/layout/RealtimeBanner';
+import { PauseBanner } from '@/components/queue/Queue';
 import { ShiftEndScreen } from '@/components/layout/ShiftEndScreen';
 import { Toaster } from '@/components/ui/Toast';
 import { NavigationProgress } from '@/components/layout/NavigationProgress';
@@ -74,6 +75,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <ReceiveStalledBanner />
         <NumberSyncBanner />
         <RealtimeBanner />
+        <PauseBanner />
         <div key={pathname} className="flex-1 min-h-0 flex animate-fade-in">{children}</div>
       </div>
       <Toaster />

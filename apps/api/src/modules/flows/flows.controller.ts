@@ -2,6 +2,7 @@ import { BadRequestException, Body, ConflictException, Controller, Delete, Get, 
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, IsInt, MaxLength, Min } from 'class-validator';
 import { randomUUID } from 'node:crypto';
 import { copyName, flowFromPortable, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type VariableAssignment, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
+import { refMaps } from '../tenants/portable-db';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -322,10 +323,12 @@ export class FlowsController {
     const tags = await this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true } });
     const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
     const flowNameById = Object.fromEntries((await this.prisma.flow.findMany({ where: { tenantId }, select: { id: true, name: true } })).map((f) => [f.id, f.name]));
+    // agente de IA e tipo de ticket viajam pelo nome
+    const { names: refNames } = await refMaps(this.prisma, tenantId);
     const items: PortableFlow[] = [];
     const warnings = new Set<string>();
     for (const flow of flows) {
-      const out = flowToPortable({ name: flow.name, description: flow.description, showOnClosing: flow.showOnClosing, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, { tagNameById, flowNameById });
+      const out = flowToPortable({ name: flow.name, description: flow.description, showOnClosing: flow.showOnClosing, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, { tagNameById, flowNameById, ...refNames });
       items.push(out.portable);
       // num lote, o aviso diz de qual fluxo é
       out.warnings.forEach((w) => warnings.add(flows.length > 1 ? `${flow.name}: ${w}` : w));
@@ -357,7 +360,9 @@ export class FlowsController {
     const tagIdByName = Object.fromEntries(tags.map((t) => [t.name, t.id]));
 
     const newId = (type: FlowNodeType) => `${type}-${randomUUID().slice(0, 6)}`;
-    const built = items.map((p) => flowFromPortable(p, tagIdByName, newId));
+    // agente de IA e tipo de ticket: o de mesmo nome neste cliente (sem ele, o bloco pede para escolher)
+    const { refs } = await refMaps(this.prisma, u.tenantId);
+    const built = items.map((p) => flowFromPortable(p, tagIdByName, newId, refs));
     for (const b of built) {
       validateDefinition(b.definition);
       // arquivo editado à mão pode apontar para anexo de outro cliente
