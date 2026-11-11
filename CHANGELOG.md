@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.18.0 — 2026-11-11
+
+- (sem commits novos)
+
 ## 1.17.0 — 2026-11-08
 
 - feat: fila de atendimento, tipos de ticket, documentos do agente de IA e isento sem trava de dono
