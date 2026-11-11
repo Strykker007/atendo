@@ -3,6 +3,17 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.19.0 — 2026-11-11
+
+- chore(infra): liga o Ollama (bge-m3) em produção para os documentos do agente
+- chore(infra): teto de memória da aplicação e pg_stat_statements no Postgres
+- perf(db): índices de conversas por atendente e por contato; revisão de escalabilidade
+- fix(ia): agente responde valores e todas as partes da pergunta; JSON tolerante e busca sem palavras de conversa
+- feat(ia): Gemini 3.5 na chave própria e Ollama de dev para embeddings
+- feat(ia): embeddings locais com Ollama (bge-m3) prontos para ligar
+- feat(escalas): ajustes no calendário de escalas
+- feat: hierarquia de departamentos, acesso padrão do perfil, Gemini com saldo de IA e melhorias de atendimento
+
 ## 1.18.0 — 2026-11-11
 
 - (sem commits novos)
