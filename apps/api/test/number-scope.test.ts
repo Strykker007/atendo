@@ -69,3 +69,24 @@ describe('gestão da conexão do número', () => {
     expect(canManageNumber(u([]), 'n9')).toBe(true);
   });
 });
+
+describe('narrowTo com vários números (filtro com mais de um marcado)', () => {
+  it('"a,b" filtra pelos dois', () => {
+    expect(narrowTo(u([]), 'n1,n2')).toEqual({ in: ['n1', 'n2'] });
+    expect(narrowTo(u([]), ['n1', 'n2'])).toEqual({ in: ['n1', 'n2'] });
+  });
+
+  it('tira os que a pessoa não opera e mantém o resto', () => {
+    expect(narrowTo(u(['n1', 'n2']), 'n2,n9')).toBe('n2');
+    expect(narrowTo(u(['n1', 'n2', 'n3']), 'n1,n3,n9')).toEqual({ in: ['n1', 'n3'] });
+  });
+
+  it('nenhum dos pedidos permitido = lista vazia, nunca "sem filtro"', () => {
+    expect(narrowTo(u(['n1']), 'n8,n9')).toBeNull();
+  });
+
+  it('repetidos e vazios não contam', () => {
+    expect(narrowTo(u([]), 'n1,,n1')).toBe('n1');
+    expect(narrowTo(u(['n1']), ',')).toEqual({ in: ['n1'] });
+  });
+});

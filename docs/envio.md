@@ -391,6 +391,19 @@ Abordagem **híbrida**: QR Code com travas, API oficial com template.
 Filtros combinados com E; seleção manual (`contactIds`) e telefones colados (`phones`, DDI 55 quando
 falta; viram contato ao criar) **somam**. Sem critério, só com "Todos os contatos" (`all`).
 Descadastrados e números sem WhatsApp nunca entram. Máximo 20.000 por transmissão.
+
+Na tela (`NewCampaignModal`), os jeitos de montar o público:
+- **Telefones**: digitar com Enter, colar a coluna inteira de uma planilha (quebra de linha, vírgula,
+  `;` ou tab separam) ou **Importar planilha (.csv/.txt)** — o arquivo é lido no navegador e só o que
+  parece telefone entra, de qualquer coluna (nomes/e-mails são ignorados). Planilha .xlsx: exportar
+  como CSV antes.
+- **Escolher contatos** (`ContactPicker` → `contactIds`): busca por nome/telefone na base que a pessoa
+  enxerga (`GET /conversations/contacts`), marcar um a um ou "Marcar todos os listados" (50 por
+  página, "Carregar mais"). Grupos, descadastrados e sem WhatsApp não aparecem.
+- **Por tag ou todos**: tags atuais, filtros avançados de encerramento/atendente, ou "Todos os contatos".
+
+Depois do envio, a conversa de cada contato fica **encerrada** (aba Encerradas): transmissão não
+abre conversa na fila. Quando o contato responde, ela reabre e entra na fila normalmente.
 **Grupos autorizados** (`groupIds`, só QR) também somam — ver [Grupos restritos](grupos.md): vão
 em `campaign_group_targets`, saem pelo `GroupSender` com as mesmas travas e contam no mesmo teto.
 

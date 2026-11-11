@@ -30,7 +30,7 @@ Migração `20270206000000_attendance_queue` (colunas com default + tabela `agen
 - **Na fila** = Aguardando, sem dono, sem robô rodando (`activeFlowRunId`), fora grupos e contatos
   isentos. Ordem de chegada: quem espera resposta há mais tempo (`awaitingSince`) primeiro.
 - **Disponível** = painel aberto, dentro do turno (a mesma presença do Distribuidor) e **fora de
-  pausa**, com acesso ao número e ao departamento da conversa (`receiversOf`, régua da transferência).
+  pausa**, com acesso ao número e ao departamento da conversa e, se o número tiver lista, marcado em [quem recebe automaticamente](distribuicao-por-numero.md) (`autoReceiversOf`).
 - **Limite** conta tudo que está com a pessoa e não foi encerrado (inclusive esperando o cliente),
   fora grupos e isentos.
 - **Para quem vai**: entre os disponíveis abaixo do limite, o com **menos** atendimentos abertos;

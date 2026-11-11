@@ -75,6 +75,8 @@ describe('chunkText', () => {
 describe('keywordQuery', () => {
   it('tira acento, junta com OU e ignora palavras curtas', () => {
     expect(keywordQuery('Posso fazer OBRA no domingo?')).toBe('posso | fazer | obra | domingo');
+    // palavras de conversa não puxam trecho sem relação; número de artigo continua
+    expect(keywordQuery('quero saber o valor, vou ficar 3 dias, qual o art. 20?')).toBe('valor | 3 | dias | art | 20');
     expect(fold('salão')).toBe('salao');
   });
   it('mantém número de artigo', () => {

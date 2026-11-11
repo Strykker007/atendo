@@ -13,9 +13,16 @@ describe('quem é restringido por departamento', () => {
     expect(departmentWhere(u(ids))).toBeUndefined();
   });
 
-  it('quem vê a equipe toda e o dono do sistema não são restringidos', () => {
-    expect(departmentRestricted(u(['d1'], { viewAll: true }))).toBe(false);
+  it('admin da conta e dono do sistema não são restringidos', () => {
+    expect(departmentRestricted(u(['d1'], { role: 'tenant_admin' }))).toBe(false);
     expect(departmentRestricted(u(['d1'], { role: 'super_admin' }))).toBe(false);
+  });
+
+  it('gestor (vê a equipe toda) num departamento fica no alcance dele — hierarquia', () => {
+    const g = u(['portaria'], { role: 'manager', viewAll: true });
+    expect(departmentRestricted(g)).toBe(true);
+    expect(canSeeDepartment(g, 'portaria')).toBe(true);
+    expect(canSeeDepartment(g, 'administracao')).toBe(false);
   });
 
   it('atendente de um departamento vê o dele e as sem departamento', () => {

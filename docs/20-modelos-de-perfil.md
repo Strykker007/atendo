@@ -1,7 +1,11 @@
 # 20 — Modelos de perfil (verticais)
 
 Um **modelo de perfil** (Farmácia, Clínica…) é o pacote com que um cliente novo já nasce:
-permissões padrão dos perfis, respostas rápidas, fluxos, tags (cor, Kanban, encerramento), **agentes de IA** (persona, regras, base, etapas/prompts), **tipos de ticket** (campos, prioridade, prazo) e as **configurações de atendimento** (encerramento com ou sem venda, assinatura obrigatória, nome dos resultados). Só o dono do
+permissões padrão dos perfis, respostas rápidas, fluxos, tags (cor, Kanban, encerramento), **agentes de IA** (persona, regras, base, etapas/prompts), **tipos de ticket** (campos, prioridade, prazo), **departamentos com hierarquia**, o **acesso padrão** de cada perfil (em quais departamentos a pessoa nasce) e as **configurações de atendimento** (encerramento com ou sem venda, assinatura obrigatória, nome dos resultados, redistribuição automática e saiu do plantão).
+
+**Regra do projeto (11/11/2026)**: toda configuração escalável nova — por pessoa ou do cliente — precisa
+entrar no modelo (formato, criação, "Gerar de um cliente" e "Aplicar aos clientes"). O que é do cliente
+(números, telefones) não viaja; o modelo cita por nome. Só o dono do
 sistema mexe (tela **Clientes → Modelos de perfil → Editar**, rota `/clientes/modelos/:id`).
 
 Um modelo pode ser marcado como **padrão** (`isDefault`, no máximo um): ele já vem escolhido no
@@ -17,7 +21,11 @@ Na API: `templateId` ausente = modelo padrão (se houver); `null` = nenhum.
    ordem dele (é a das colunas do Kanban), cada uma com cor, `isKanban`, `showOnWon` e `showOnLost`. Modelo
    sem `tags` (formato antigo): `lossReasons` — ou, sem ela, `DEFAULT_LOSS_REASONS` do catálogo —
    como tags de encerramento **fora do Kanban** com a cor de `lossReasonColors`;
-2. perfis de acesso (`access_profiles`, ver [18](18-perfis-de-acesso.md)):
+2. departamentos do modelo, com o pai pelo nome (`createTemplateDepartments`), e depois os perfis de
+   acesso (`access_profiles`, ver [18](18-perfis-de-acesso.md)) — perfil com `access` nasce com
+   [acesso padrão](18-perfis-de-acesso.md#acesso-padrão-do-perfil): todos os números, recebe de todos e os
+   departamentos do modelo. O recorte por número vem do departamento de cada número, que o cliente
+   escolhe depois de conectar ([hierarquia](departamentos.md#hierarquia)):
    - **Administrador** — sempre todas as permissões (o modelo não restringe o admin: sem
      `profiles.manage` o cliente ficaria sem saída);
    - **Gerente** e **Atendente** — a matriz do modelo, se ele trouxer; senão o padrão do catálogo.
@@ -46,6 +54,14 @@ Modelo com mais respostas do que o `maxQuickReplies` do plano é recusado (400) 
   líder"…), podendo começar com as permissões de outro perfil. Gerente/Atendente nunca editados
   aparecem como "padrão do sistema" (acompanham permissões novas do catálogo); depois de editados
   ficam congelados na escolha, e "↺" volta ao padrão.
+- **Atendimento** também tem **Redistribuir quem está aguardando**, **Redistribuir quem está com
+  atendente** (minutos iniciais, máximos e vezes) e **Saiu do plantão** (minutos), com as mesmas faixas
+  de Configurações → Atendimento.
+- **Departamentos** — nome, cor, descrição e **Fica abaixo de** (árvore). Renomear acompanha o pai dos
+  filhos e o acesso padrão dos perfis; remover sobe os filhos para o pai dele. Até 50; pai inexistente
+  ou ciclo vai para o topo.
+- **Perfis → Acesso padrão** — caixa no modal do perfil: os departamentos em que quem for cadastrado
+  nesse perfil já nasce. Números não entram (são do cliente).
 - **Respostas rápidas** — criar, editar, remover (pasta, título, texto); importar a exportação da
   tela Respostas de um cliente. Sem anexos.
 - **Fluxos** — não são editados no modelo (o editor de fluxos depende de etiquetas, números e
@@ -95,8 +111,19 @@ então grava. Partes, todas opcionais:
 - **Tags que faltam**: cria as tags do modelo (as que continuam tag na criação do cliente) que o
   cliente não tem, no fim da lista. Não altera nem remove as dele; conflitos não são replicados.
 
+- **Departamentos que faltam**: cria os do modelo que o cliente não tem (pelo nome, ignorando
+  maiúsculas), já com o pai; os que ele já tem (e a árvore dele) não mudam. Marque junto com os perfis
+  para o acesso padrão achar os departamentos.
+- **Perfis** também levam o acesso padrão do modelo: troca os **departamentos** do acesso padrão do
+  perfil no cliente (os que ele não tem ficam de fora); os números que o cliente já marcou no perfil
+  ficam. Não mexe em quem já está no perfil — no cliente, o **Reaplicar** do perfil faz isso.
+- **Configurações de atendimento** inclui redistribuição e saiu do plantão quando o modelo define.
 - **Tipos de ticket que faltam** e **Agentes de IA que faltam**: cria os do modelo que o cliente não
   tem (pelo nome, ignorando maiúsculas); os que ele já tem não mudam.
+
+**Gerar de um cliente** traz também os departamentos ativos (com a árvore), o acesso padrão dos perfis
+(só os departamentos — avisa se o perfil tinha números marcados) e as configurações de redistribuição
+e saiu do plantão.
 
 Para quem: todos os clientes ativos ou uma seleção. Cada cliente roda numa transação própria.
 Respostas rápidas e fluxos não entram (ainda).

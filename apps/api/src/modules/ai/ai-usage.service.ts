@@ -7,7 +7,7 @@ import { RedisService } from '../../common/redis/redis.service';
 import { env } from '../../config/env';
 import { AppLogger } from '../../common/observability/app-logger';
 import { MailService } from '../../common/mail/mail.service';
-import { platformBudgetStatus, type AiUsageSnapshot } from './ai-quota';
+import { creditCharge, platformBudgetStatus, type AiUsageSnapshot } from './ai-quota';
 
 /**
  * Custo de uma chamada em USD. Ordem: endpoint local = 0 → preço do ambiente (endpoint
@@ -61,11 +61,16 @@ export class AiUsageService {
     ownKey?: boolean;
     /** custo já calculado (embeddings: preço por token próprio, fora da tabela de modelos de chat) */
     costUsd?: number;
+    /** pago com o saldo de IA: desconta custo × (1 + margem%) da carteira (docs/15-ia.md#saldo-de-ia) */
+    creditMarkupPct?: number;
   }) {
-    const { costUsd: fixed, ...row } = input;
+    const { costUsd: fixed, creditMarkupPct, ...row } = input;
     const costUsd = input.error ? 0 : (fixed ?? costOf(input.model, input.tokensIn, input.tokensOut, input.ownKey));
     const costBrl = costUsd * env.USD_BRL_RATE;
-    await this.prisma.aiUsage.create({ data: { ...row, ownKey: !!input.ownKey, costUsd, costBrl } });
+    const creditBrl = creditMarkupPct !== undefined && !input.error ? creditCharge(costBrl, creditMarkupPct) : 0;
+    await this.prisma.aiUsage.create({ data: { ...row, ownKey: !!input.ownKey, costUsd, costBrl, creditBrl } });
+    // atômico: duas respostas ao mesmo tempo não leem o mesmo saldo (pode ficar levemente negativo na última)
+    if (creditBrl > 0) await this.prisma.aiCreditWallet.updateMany({ where: { tenantId: input.tenantId }, data: { balanceBrl: { decrement: creditBrl } } });
     if (input.error || input.ownKey) return { costUsd, costBrl };
 
     const period = aiPeriodOf();

@@ -20,10 +20,11 @@ import { planRemoval } from '../whatsapp/number-removal';
 import { DEFINITIVE_CLOSE } from '../whatsapp/connection-events';
 import { decifrarEdicao, jidsDaOriginal, segredoDaOriginal } from '../whatsapp/providers/evolution-edit-crypto';
 import { warmupStartOnPair } from '../whatsapp/number-warmup';
-import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
+import { exemptMode } from '../ignored-contacts/ignored-contacts';
 import { phoneVariants } from './phone-variants';
 import type { InboundCall } from '../whatsapp/providers/provider.interface';
 import { callExternalId, desfechoDaLigacao, ficouSemResposta, textoDaLigacao, type CallContent } from './call-record';
+import { clip } from '../../common/clip';
 
 const isGroupJid = (jid: string) => jid.endsWith('@g.us');
 
@@ -136,8 +137,10 @@ export class InboundService {
     // não entra na fila, não marca espera. Contato isento (docs/contatos-isentos.md) segue a fila
     // como qualquer atendimento — Aguardando, Atendendo, Encerrado — e só fica fora dos relatórios
     // (`ticketExempt`); dos dois, nenhum aciona automação nem pesquisa
-    const livre = contact.isGroup;
-    const isento = livre || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    // conversa livre: grupo, ou contato isento marcado "Conversa livre" (docs/contatos-isentos.md#conversa-livre)
+    const modo = contact.isGroup ? 'free' : await exemptMode(this.prisma, number.tenantId, contact.phone);
+    const livre = modo === 'free';
+    const isento = modo !== 'none';
     const pesquisa = !isento && decisao.acao === 'reabrir' ? await this.surveys.claim(conversation!.id, { type: msg.type, text: msg.text, interactiveReplyId: msg.interactiveReplyId }, msg.timestamp) : null;
     const quieta = livre || !!pesquisa || (decisao.acao === 'reabrir' && naCarencia(conversation!.closedAt, msg.timestamp) && ehConfirmacao({ type: msg.type, text: msg.text })
       && !(await this.prisma.flowRun.findFirst({ where: { conversationId: conversation!.id, status: { in: ['running', 'waiting'] } }, select: { id: true } })));
@@ -151,7 +154,7 @@ export class InboundService {
     if (conversation && !livre && conversation.status === 'in_progress' && !conversation.assigneeId) {
       conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'waiting' } });
     }
-    if (conversation && livre && conversation.status !== 'in_progress') {
+    if (conversation && livre && (conversation.status !== 'in_progress' || conversation.assigneeId)) {
       // conversa livre fica sempre "aberta" e sem dono: qualquer um da equipe responde
       conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
     }
@@ -165,6 +168,7 @@ export class InboundService {
       conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { origin, originData: msg.referral as unknown as Prisma.InputJsonValue } });
       if (origin === 'ad') await this.autoTagAd(conversation.id, number.tenantId, msg.referral?.headline);
     }
+    conversation = await this.departamentoDoNumero(conversation, number);
 
     const message = await this.prisma.message.create({
       data: {
@@ -197,7 +201,7 @@ export class InboundService {
         lastMessageAt: msg.timestamp,
         // encerrada (confirmação na carência): ninguém está esperando resposta
         ...(!quieta && { awaitingSince: inicioDaEspera(conversation.awaitingSince, msg.timestamp) }),
-        lastMessagePreview: msg.group?.senderName ? `${msg.group.senderName}: ${this.previa(msg)}`.slice(0, 120) : this.previa(msg),
+        lastMessagePreview: msg.group?.senderName ? clip(`${msg.group.senderName}: ${this.previa(msg)}`, 120) : this.previa(msg),
         unreadCount: { increment: 1 },
         // o contato voltou a falar: agora é ele quem espera, o selo "respondida pelo celular" sai
         deviceReplyAt: null,
@@ -268,15 +272,18 @@ export class InboundService {
     // pelo celular logo depois de encerrar ("eu que agradeço", "atendimento finalizado ✅") entra
     // no histórico sem reabrir (carência, reopen.ts).
     // grupo: chat livre, sem reabrir atendimento; contato isento segue a regra comum (docs/contatos-isentos.md)
-    const livre = contact.isGroup;
-    const isento = livre || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    // conversa livre: grupo, ou contato isento marcado "Conversa livre" (docs/contatos-isentos.md#conversa-livre)
+    const modo = contact.isGroup ? 'free' : await exemptMode(this.prisma, number.tenantId, contact.phone);
+    const livre = modo === 'free';
+    const isento = modo !== 'none';
     if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento, livre);
-    if (livre && conversation && conversation.status !== 'in_progress') conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
+    if (livre && conversation && (conversation.status !== 'in_progress' || conversation.assigneeId)) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
     else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, conversation.assigneeId ? 'in_progress' : 'waiting');
     else if (!livre && conversation?.status === 'in_progress' && !conversation.assigneeId) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'waiting' } });
     conversation ??= await this.prisma.conversation.create({
       data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: livre ? 'in_progress' : 'waiting', ticketExempt: isento },
     });
+    conversation = await this.departamentoDoNumero(conversation, number);
     const semDono = !livre && conversation.status === 'waiting';
 
     const message = await this.prisma.message.create({
@@ -428,8 +435,10 @@ export class InboundService {
     }
     if (!msgs.length) return null;
 
-    const livre = contact.isGroup;
-    const isento = livre || await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    // conversa livre: grupo, ou contato isento marcado "Conversa livre" (docs/contatos-isentos.md#conversa-livre)
+    const modo = contact.isGroup ? 'free' : await exemptMode(this.prisma, number.tenantId, contact.phone);
+    const livre = modo === 'free';
+    const isento = modo !== 'none';
     const plano = planoDaRecuperacao(conversation, livre, msgs);
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
@@ -441,6 +450,7 @@ export class InboundService {
         ? await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } })
         : await this.conversations.setStatusSystem(conversation.id, plano.status);
     }
+    conversation = await this.departamentoDoNumero(conversation, number);
 
     const { ids, data } = await this.linhasDoHistorico({ id: conversation.id, numberId: number.id }, msgs, false);
     await this.prisma.message.createMany({ data, skipDuplicates: true });
@@ -534,7 +544,7 @@ export class InboundService {
   }
 
   private previa(msg: InboundMessage) {
-    return messagePreview({ type: msg.type, text: msg.text, content: msg.content, mediaName: msg.media?.fileName }).slice(0, 120);
+    return clip(messagePreview({ type: msg.type, text: msg.text, content: msg.content, mediaName: msg.media?.fileName }), 120);
   }
 
   /**
@@ -650,6 +660,18 @@ export class InboundService {
    * dono e espera continuam (docs/contatos-isentos.md). Grupo (chat livre) sai da fila e de quem
    * atendia; deixando de ser livre, a conversa aberta sem dono volta para a fila.
    */
+  /**
+   * Departamento do número (docs/departamentos.md#departamento-do-número): conversa sem departamento
+   * que entra por um número com departamento padrão ganha esse departamento. Quem já tem um (foi
+   * transferida para outro setor) fica como está. Departamento desativado não entra.
+   */
+  private async departamentoDoNumero(conv: Conversation, number: Pick<WhatsAppNumber, 'defaultDepartmentId'>) {
+    if (conv.departmentId || !number.defaultDepartmentId) return conv;
+    const ativo = await this.prisma.department.count({ where: { id: number.defaultDepartmentId, tenantId: conv.tenantId, isActive: true } });
+    if (!ativo) return conv;
+    return this.prisma.conversation.update({ where: { id: conv.id }, data: { departmentId: number.defaultDepartmentId } });
+  }
+
   private aplicarIsencao(conv: Conversation, isento: boolean, livre: boolean) {
     return this.prisma.conversation.update({
       where: { id: conv.id },
@@ -860,9 +882,11 @@ export class InboundService {
   private async registrarLigacao(number: WhatsAppNumber, c: InboundCall, phone: string, tentativa = 0): Promise<{ contact: Contact; conversationId: string }> {
     const contact = (await this.prisma.contact.findFirst({ where: { tenantId: number.tenantId, phone: { in: phoneVariants(phone) } } }))
       ?? (await this.createContact(number, phone));
-    const isento = await isTicketExempt(this.prisma, number.tenantId, contact.phone);
+    const modo = contact.isGroup ? 'free' : await exemptMode(this.prisma, number.tenantId, contact.phone);
+    const isento = modo !== 'none';
     let conversation = (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
       ?? (await this.prisma.conversation.create({ data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', ticketExempt: isento } }));
+    conversation = await this.departamentoDoNumero(conversation, number);
 
     const externalId = callExternalId(c.callId);
     const existente = await this.prisma.message.findFirst({ where: { numberId: number.id, externalId }, select: { id: true, content: true } });
@@ -887,7 +911,8 @@ export class InboundService {
     const message = gravada;
 
     const semResposta = ficouSemResposta(outcome) && !ficouSemResposta(antes ?? 'ringing');
-    if (semResposta && conversation.status === 'closed' && !contact.isGroup) conversation = await this.conversations.setStatusSystem(conversation.id, 'waiting');
+    // conversa livre (grupo ou "Conversa livre" do isento) não reabre atendimento
+    if (semResposta && conversation.status === 'closed' && modo !== 'free') conversation = await this.conversations.setStatusSystem(conversation.id, 'waiting');
     // a conversa sobe na lista como no WhatsApp; nunca volta o relógio se já houve mensagem depois
     const quando = conversation.lastMessageAt && conversation.lastMessageAt > message.createdAt ? conversation.lastMessageAt : message.createdAt;
     conversation = await this.prisma.conversation.update({

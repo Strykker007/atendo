@@ -1,6 +1,6 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpException, HttpStatus, Logger, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpException, HttpStatus, Logger, NotFoundException, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ProviderRegistry } from './providers/provider.registry';
-import { IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsUUID, IsBoolean, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { Prisma, SendDelayProfile, WhatsAppProvider as ProviderKind } from '@prisma/client';
 import { SEND_LIMIT_LABEL, SEND_LIMIT_RANGES, type SendLimits } from '@atendo/shared';
 import { defaultSendDelay, sendDelayAllowed } from './sending-policy';
@@ -15,7 +15,8 @@ import { CurrentUser, type AuthUser, isOwnerSession } from '../auth/current-user
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { SendPacer } from './send-pacer';
 import { PermissionsService } from '../auth/permissions.service';
-import { canManageNumber, canUseNumber, numberFilter, unrestricted } from '../auth/number-scope';
+import { canManageNumber, canUseNumber, numberFilter } from '../auth/number-scope';
+import { canReceiveTransfer } from '../conversations/transfer-scope';
 import { ContactsSyncScheduler } from './contacts-sync';
 import { textSearch } from '../../common/text-search';
 import { phoneVariants } from '../conversations/phone-variants';
@@ -46,10 +47,18 @@ class SwitchProviderDto {
   @IsEnum(ProviderKind) provider: ProviderKind;
   @IsObject() config: Record<string, unknown>;
 }
+class NumberReceiversDto {
+  @IsArray() @ArrayMaxSize(500) @IsUUID('4', { each: true }) userIds!: string[];
+}
+
 class UpdateNumberDto {
   @IsOptional() @IsString() @MaxLength(60) label?: string;
   @IsOptional() @Matches(/^#[0-9a-fA-F]{6}$/) color?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** reservado: só quem tem o número marcado em Equipe enxerga (docs/18-perfis-de-acesso.md#número-reservado). Só o admin da conta */
+  @IsOptional() @IsBoolean() reserved?: boolean;
+  /** departamento em que as conversas do número nascem (docs/departamentos.md#departamento-do-número); null tira. Só o admin da conta */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsUUID() defaultDepartmentId?: string | null;
   /** proteção contra bloqueio: ritmo de envio e teto diário */
   @IsOptional() @IsEnum(SendDelayProfile) sendDelay?: SendDelayProfile;
   @IsOptional() @IsInt() @Min(0) @Max(100_000) sendDailyLimit?: number;
@@ -92,13 +101,13 @@ export class NumbersController {
     const rows = await this.prisma.whatsAppNumber.findMany({
       // quem só atende alguns números (ex.: portaria) nem vê os outros — nem no filtro "Todos os números"
       where: { tenantId: user.tenantId, deletedAt: null, ...(numberFilter(user) && { id: numberFilter(user) }) },
-      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, syncStartedAt: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true },
+      select: { id: true, phone: true, label: true, color: true, provider: true, status: true, isActive: true, createdAt: true, waRemovedAt: true, waRemovedCount: true, reconnectBlockedUntil: true, sessionStartedAt: true, receiveStalledAt: true, syncStartedAt: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, warmupStartedAt: true, infraCostMonth: true, scheduleId: true, companyId: true, reserved: true, defaultDepartmentId: true, receivers: { select: { userId: true } } },
       orderBy: { createdAt: 'asc' },
     });
     // fase do aquecimento calculada aqui: a regra fica num lugar só (number-warmup.ts).
     // `manageable`: a tela mostra QR/reconectar/excluir só onde a API vai aceitar
     const podeGerenciar = !!user.permissions?.includes('numbers.manage') || user.role === 'super_admin';
-    return rows.map((n) => ({ ...n, warmup: warmupPhase(n), manageable: podeGerenciar && canManageNumber(user, n.id) }));
+    return rows.map(({ receivers, ...n }) => ({ ...n, receiverIds: receivers.map((r) => r.userId), warmup: warmupPhase(n), manageable: podeGerenciar && canManageNumber(user, n.id) }));
   }
 
   /** Número da conta que esta pessoa pode gerenciar (ver `canManageNumber`); senão 403. */
@@ -172,10 +181,12 @@ export class NumbersController {
       : await this.prisma.whatsAppNumber.create({ data: { tenantId: user.tenantId, phone, ...data } });
     // quem só opera alguns números e cadastra um novo passa a operá-lo — senão perderia o
     // acesso ao QR do número que acabou de criar
-    if (!unrestricted(user) && user.role !== 'tenant_admin') {
+    // (pelo que está marcado: quem "opera todos" já vê o número novo, que nasce não reservado)
+    if (user.linkedNumberIds?.length && user.role !== 'tenant_admin') {
       await this.prisma.userNumber.createMany({ data: [{ userId: user.id, numberId: n.id }], skipDuplicates: true });
-      this.permissions.invalidate();
     }
+    // número novo entra na lista dos "abertos" de quem não tem marcação (número reservado)
+    this.permissions.invalidate();
     try {
       return await this.numbers.switchProvider(n.id, dto.provider, config as any);
     } catch (err) {
@@ -208,6 +219,13 @@ export class NumbersController {
   async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateNumberDto) {
     await this.manageable(user, id);
     const { infraCostMonth, sendLimits, endWarmup, sendDelay, sendDailyLimit, campaignDailyLimit, ...resto } = dto;
+    // reservar decide quem enxerga o número: é do admin da conta, não de quem só configura conexão
+    if (dto.reserved !== undefined && user.role !== 'tenant_admin' && !user.impersonatorId) throw new ForbiddenException('Só o administrador da conta reserva números.');
+    if (dto.defaultDepartmentId !== undefined) {
+      if (user.role !== 'tenant_admin' && !user.impersonatorId) throw new ForbiddenException('Só o administrador da conta define o departamento do número.');
+      // departamento de outro cliente não entra: o id vem do corpo da requisição
+      if (dto.defaultDepartmentId && !(await this.prisma.department.count({ where: { id: dto.defaultDepartmentId, tenantId: user.tenantId } }))) throw new NotFoundException('Departamento não encontrado');
+    }
     // Custo da linha e ritmo de envio (intervalo, limites da fila, teto diário, aquecimento) são
     // do dono do sistema. Chegam no corpo mas são descartados para o cliente: devolver 403
     // vazaria que o campo existe. O ritmo é o que protege o número de bloqueio — o cliente
@@ -231,11 +249,45 @@ export class NumbersController {
           ...(endWarmup && { warmupStartedAt: null }),
         }
       : {};
-    return this.prisma.whatsAppNumber.update({
+    const saved = await this.prisma.whatsAppNumber.update({
       where: { id, tenantId: user.tenantId, deletedAt: null },
       data: { ...resto, ...doDono },
-      select: { id: true, label: true, color: true, isActive: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
+      select: { id: true, label: true, color: true, isActive: true, reserved: true, defaultDepartmentId: true, sendDelay: true, sendDailyLimit: true, campaignDailyLimit: true, sendLimits: true, infraCostMonth: true, warmupStartedAt: true },
     });
+    // quem enxerga o número mudou: vale na próxima requisição, não daqui a 15 s
+    // reservado e departamento do número mudam quem enxerga o número (docs/departamentos.md#hierarquia)
+    if (dto.reserved !== undefined || dto.defaultDepartmentId !== undefined) this.permissions.invalidate();
+    // as conversas que já existem SEM departamento passam a ser do departamento do número (as que
+    // foram transferidas para outro setor ficam onde estão) — senão o filtro por departamento vinha vazio
+    if (dto.defaultDepartmentId) {
+      await this.prisma.conversation.updateMany({ where: { tenantId: user.tenantId, numberId: id, departmentId: null }, data: { departmentId: dto.defaultDepartmentId } });
+    }
+    return saved;
+  }
+
+  /**
+   * Quem recebe atendimento automático deste número (docs/distribuicao-por-numero.md). Lista vazia =
+   * todos que enxergam o número (como antes). Só o admin da conta: é a hierarquia da operação.
+   * Só entra quem enxerga o número — senão a pessoa estaria na lista e nunca receberia.
+   */
+  @Put(':id/receivers')
+  async setReceivers(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: NumberReceiversDto) {
+    if (user.role !== 'tenant_admin' && !user.impersonatorId) throw new ForbiddenException('Só o administrador da conta define quem recebe os atendimentos.');
+    const n = await this.prisma.whatsAppNumber.findFirst({ where: { id, tenantId: user.tenantId, deletedAt: null }, select: { id: true } });
+    if (!n) throw new NotFoundException('Número não encontrado');
+    const pessoas = await this.prisma.user.findMany({ where: { id: { in: [...new Set(dto.userIds)] }, tenantId: user.tenantId, role: { not: 'super_admin' } }, select: { id: true, name: true, role: true } });
+    const companyNumbers = await this.permissions.companyNumbers(user.tenantId);
+    const fora: string[] = [];
+    for (const p of pessoas) {
+      const sc = await this.permissions.scope({ id: p.id, role: p.role });
+      if (!canReceiveTransfer({ role: p.role, ...sc }, { numberId: n.id, departmentId: null }, companyNumbers)) fora.push(p.name);
+    }
+    if (fora.length) throw new BadRequestException(`${fora.join(', ')} não ${fora.length > 1 ? 'enxergam' : 'enxerga'} este número. Marque o número na Equipe antes.`);
+    await this.prisma.$transaction([
+      this.prisma.numberReceiver.deleteMany({ where: { numberId: n.id } }),
+      this.prisma.numberReceiver.createMany({ data: pessoas.map((p) => ({ numberId: n.id, userId: p.id })), skipDuplicates: true }),
+    ]);
+    return { receiverIds: pessoas.map((p) => p.id) };
   }
 
   /** Quanto este número já enviou hoje e qual o teto (considerando o aquecimento). */
@@ -315,6 +367,7 @@ export class NumbersController {
   async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     await this.manageable(user, id);
     await this.numbers.remove(id);
+    this.permissions.invalidate();
     return { ok: true };
   }
 

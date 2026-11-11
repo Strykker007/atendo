@@ -20,7 +20,24 @@ export interface TemplateProfile {
   systemRole?: 'manager' | 'agent';
   description?: string;
   permissions: Permission[];
+  /**
+   * Acesso padrão do perfil no cliente (docs/18-perfis-de-acesso.md#acesso-padrão-do-perfil), pelo
+   * NOME dos departamentos do modelo. Números não viajam (são do cliente): o padrão é "todos os números
+   * e recebe de todos" — o recorte de números vem do departamento de cada número (hierarquia).
+   */
+  access?: { departments: string[] };
 }
+
+/** Departamento com que o cliente nasce (docs/departamentos.md). `parent` = nome do departamento acima. */
+export interface TemplateDepartment {
+  name: string;
+  color?: string;
+  description?: string;
+  parent?: string;
+}
+
+/** teto de departamentos num modelo */
+export const TEMPLATE_DEPARTMENTS_MAX = 50;
 
 /** Tag com que o cliente nasce: as mesmas opções da tela de Tags. */
 export interface TemplateTag {
@@ -53,7 +70,24 @@ export interface TemplateSettings {
   /** nome dos resultados do encerramento ("Resolvido" / "Não resolvido"…) */
   wonLabel?: string;
   lostLabel?: string;
+  /** redistribuição automática (docs/redistribuicao-automatica.md) */
+  autoReassignWaiting?: boolean;
+  autoReassignAssigned?: boolean;
+  autoReassignBaseMinutes?: number;
+  autoReassignMaxMinutes?: number;
+  autoReassignMaxTimes?: number;
+  /** saiu do plantão (docs/redistribuicao-automatica.md#saiu-do-plantão) */
+  releaseAwayEnabled?: boolean;
+  releaseAwayMinutes?: number;
 }
+
+/** Faixas válidas dos números das configurações — as mesmas de Configurações → Atendimento. */
+const SETTINGS_RANGES = {
+  autoReassignBaseMinutes: [1, 240],
+  autoReassignMaxMinutes: [1, 480],
+  autoReassignMaxTimes: [1, 10],
+  releaseAwayMinutes: [5, 240],
+} as const;
 
 /** Só o que veio no modelo, já validado — vira `tenant_settings` na criação e no Aplicar aos clientes. */
 export function parseTemplateSettings(raw: unknown): TemplateSettings | undefined {
@@ -61,7 +95,7 @@ export function parseTemplateSettings(raw: unknown): TemplateSettings | undefine
   if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('"settings" deve ser um objeto.');
   const o = raw as Record<string, unknown>;
   const out: TemplateSettings = {};
-  for (const k of ['salesEnabled', 'requireSignature'] as const) {
+  for (const k of ['salesEnabled', 'requireSignature', 'autoReassignWaiting', 'autoReassignAssigned', 'releaseAwayEnabled'] as const) {
     if (o[k] === undefined) continue;
     if (typeof o[k] !== 'boolean') throw new Error(`"settings.${k}" deve ser verdadeiro ou falso.`);
     out[k] = o[k] as boolean;
@@ -70,7 +104,44 @@ export function parseTemplateSettings(raw: unknown): TemplateSettings | undefine
     const v = str(o[k], 30);
     if (v) out[k] = v;
   }
+  for (const [k, [min, max]] of Object.entries(SETTINGS_RANGES) as [keyof typeof SETTINGS_RANGES, readonly [number, number]][]) {
+    if (o[k] === undefined) continue;
+    const v = o[k];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw new Error(`"settings.${k}" deve ser um número inteiro de ${min} a ${max}.`);
+    out[k] = v;
+  }
   return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * Departamentos do modelo: sem nome vazio ou repetido (ignorando maiúsculas), cor `#rrggbb`, pai que
+ * existe na lista. Pai que formaria ciclo é descartado (o departamento vai para o topo).
+ */
+export function parseTemplateDepartments(raw: unknown): TemplateDepartment[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) throw new Error('"departments" deve ser uma lista.');
+  const out: TemplateDepartment[] = [];
+  for (const d of raw as Partial<TemplateDepartment>[]) {
+    const name = str(d?.name, 40);
+    if (!name || out.some((x) => x.name.toLowerCase() === name.toLowerCase())) continue;
+    if (d.color !== undefined && (typeof d.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(d.color))) throw new Error(`Cor do departamento "${name}" inválida (use #rrggbb).`);
+    out.push({ name, ...(d.color && { color: d.color.toLowerCase() }), ...(str(d.description, 200) && { description: str(d.description, 200) }), ...(str(d.parent, 40) && { parent: str(d.parent, 40) }) });
+  }
+  if (out.length > TEMPLATE_DEPARTMENTS_MAX) throw new Error(`No máximo ${TEMPLATE_DEPARTMENTS_MAX} departamentos no modelo.`);
+  const canon = new Map(out.map((d) => [d.name.toLowerCase(), d.name]));
+  for (const d of out) {
+    const pai = d.parent ? canon.get(d.parent.toLowerCase()) : undefined;
+    if (!pai || pai === d.name) delete d.parent;
+    else d.parent = pai;
+  }
+  // ciclo: sobe pelos pais; se voltar a si mesmo, o departamento vai para o topo
+  const paiDe = (n: string) => out.find((x) => x.name === n)?.parent;
+  for (const d of out) {
+    for (let at = d.parent, passos = 0; at && passos <= out.length; at = paiDe(at), passos++) {
+      if (at === d.name) { delete d.parent; break; }
+    }
+  }
+  return out.length ? out : undefined;
 }
 
 /** teto de tags num modelo */
@@ -105,6 +176,8 @@ export interface TemplateContent {
   aiAgents?: PortableAiAgent[];
   /** Tipos de ticket (campos, prioridade, prazo). O "Abrir ticket" dos fluxos cita o tipo pelo nome. */
   ticketTypes?: PortableTicketType[];
+  /** Departamentos com hierarquia (Administração › Portaria…). Os perfis citam pelo nome. */
+  departments?: TemplateDepartment[];
 }
 
 /** O arquivo `.json` de importar/exportar. */
@@ -149,7 +222,8 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
     const systemRole = p.systemRole === 'manager' || p.systemRole === 'agent' ? p.systemRole : undefined;
     if (p.systemRole !== undefined && !systemRole) throw new Error('"systemRole" do perfil deve ser manager ou agent.');
     if (systemRole && profiles.some((x) => x.systemRole === systemRole)) throw new Error(`Há mais de um perfil padrão para ${systemRole}.`);
-    profiles.push({ name: pname, ...(systemRole && { systemRole }), ...(str(p.description, 200) && { description: str(p.description, 200) }), permissions: sanitize(p.permissions) });
+    const deps = Array.isArray(p.access?.departments) ? [...new Set(p.access.departments.map((x) => str(x, 40)).filter(Boolean))] : undefined;
+    profiles.push({ name: pname, ...(systemRole && { systemRole }), ...(str(p.description, 200) && { description: str(p.description, 200) }), permissions: sanitize(p.permissions), ...(deps && { access: { departments: deps } }) });
   }
 
   if (o.quickReplies !== undefined && !Array.isArray(o.quickReplies)) throw new Error('"quickReplies" deve ser uma lista.');
@@ -194,12 +268,19 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
   }
 
   const settings = parseTemplateSettings(o.settings);
+  const departments = parseTemplateDepartments(o.departments);
+  // acesso padrão dos perfis: só departamentos que existem no modelo (nome canônico)
+  const deptCanon = new Map((departments ?? []).map((d) => [d.name.toLowerCase(), d.name]));
+  for (const p of profiles) {
+    if (!p.access) continue;
+    p.access.departments = [...new Set(p.access.departments.map((n) => deptCanon.get(n.toLowerCase())).filter((n): n is string => !!n))];
+  }
   if (o.aiAgents !== undefined && !Array.isArray(o.aiAgents)) throw new Error('"aiAgents" deve ser uma lista.');
   if (o.ticketTypes !== undefined && !Array.isArray(o.ticketTypes)) throw new Error('"ticketTypes" deve ser uma lista.');
   const aiAgents = o.aiAgents?.length ? parsePortableAiAgentFile({ atendo: 'ai-agent-bundle', version: 1, items: o.aiAgents }) : undefined;
   const ticketTypes = o.ticketTypes?.length ? parsePortableTicketTypeFile({ atendo: 'ticket-type-bundle', version: 1, items: o.ticketTypes }) : undefined;
   if (aiAgents && new Set(aiAgents.map((a) => a.name.toLowerCase())).size !== aiAgents.length) throw new Error('Há dois agentes de IA com o mesmo nome no modelo.');
-  const extras = { ...(settings && { settings }), ...(aiAgents && { aiAgents }), ...(ticketTypes && { ticketTypes }) };
+  const extras = { ...(settings && { settings }), ...(aiAgents && { aiAgents }), ...(ticketTypes && { ticketTypes }), ...(departments && { departments }) };
   // com `tags`, o formato antigo sai: uma fonte só do que o cliente recebe
   if (tags) return { profiles, quickReplies, flows, tags, ...extras };
   return { profiles, quickReplies, flows, ...(lossReasons && { lossReasons }), ...(lossReasonColors && Object.keys(lossReasonColors).length && { lossReasonColors }), ...extras };
@@ -242,7 +323,7 @@ export function templateTagConflictPairs(tags: TemplateTag[]): [string, string][
   return out;
 }
 
-export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }), ...(f.settings && { settings: f.settings }), ...(f.aiAgents && { aiAgents: f.aiAgents }), ...(f.ticketTypes && { ticketTypes: f.ticketTypes }) });
+export const templateContent = (f: TemplateFile): TemplateContent => ({ profiles: f.profiles, quickReplies: f.quickReplies, flows: f.flows, ...(f.tags ? { tags: f.tags } : { ...(f.lossReasons && { lossReasons: f.lossReasons }), ...(f.lossReasonColors && { lossReasonColors: f.lossReasonColors }) }), ...(f.settings && { settings: f.settings }), ...(f.aiAgents && { aiAgents: f.aiAgents }), ...(f.ticketTypes && { ticketTypes: f.ticketTypes }), ...(f.departments && { departments: f.departments }) });
 
 /**
  * Tags com que o cliente nasce, na ordem: as do modelo; em modelo antigo, a lista de motivos
@@ -270,17 +351,23 @@ export const provisionedLossReasonColors = (c: TemplateContent | null) => {
  * Padrão que veio do modelo nasce `customized`: senão o alinhamento ao catálogo
  * (`ensureSystemProfiles`) desfaria a matriz no primeiro acesso à tela de perfis.
  */
-export function provisionedProfiles(content: TemplateContent | null): { name: string; description: string; permissions: Permission[]; isSystem: boolean; customized: boolean; role?: 'tenant_admin' | 'manager' | 'agent' }[] {
+export function provisionedProfiles(content: TemplateContent | null): { name: string; description: string; permissions: Permission[]; isSystem: boolean; customized: boolean; role?: 'tenant_admin' | 'manager' | 'agent'; access?: { departments: string[] } }[] {
   const fromTemplate = new Map((content?.profiles ?? []).map((p) => [p.name, p]));
   const system = SYSTEM_PROFILES.map(({ name, role }) => {
     const t = role === 'tenant_admin' ? undefined : (content?.profiles ?? []).find((p) => p.systemRole === role) ?? fromTemplate.get(name);
-    return { name: t?.name ?? name, role, description: t?.description ?? `Perfil padrão de ${(t?.name ?? name).toLowerCase()}`, permissions: t ? t.permissions : [...DEFAULT_PERMISSIONS[role]], isSystem: true, customized: !!t };
+    return { name: t?.name ?? name, role, description: t?.description ?? `Perfil padrão de ${(t?.name ?? name).toLowerCase()}`, permissions: t ? t.permissions : [...DEFAULT_PERMISSIONS[role]], isSystem: true, customized: !!t, ...(t?.access && { access: t.access }) };
   });
   const extra = (content?.profiles ?? [])
     .filter((p) => !p.systemRole && !SYSTEM_PROFILES.some((s) => s.name === p.name))
-    .map((p) => ({ name: p.name, description: p.description ?? '', permissions: p.permissions, isSystem: false, customized: false }));
+    .map((p) => ({ name: p.name, description: p.description ?? '', permissions: p.permissions, isSystem: false, customized: false, ...(p.access && { access: p.access }) }));
   return [...system, ...extra];
 }
 
 /** Resumo para a listagem do Super Admin. */
-export const templateSummary = (c: TemplateContent) => ({ profiles: c.profiles.length, quickReplies: c.quickReplies.length, flows: c.flows.length, tags: provisionedTags(c).length, aiAgents: c.aiAgents?.length ?? 0, ticketTypes: c.ticketTypes?.length ?? 0 });
+export const templateSummary = (c: TemplateContent) => ({ profiles: c.profiles.length, quickReplies: c.quickReplies.length, flows: c.flows.length, tags: provisionedTags(c).length, aiAgents: c.aiAgents?.length ?? 0, ticketTypes: c.ticketTypes?.length ?? 0, departments: c.departments?.length ?? 0 });
+
+/** Acesso padrão do perfil no cliente a partir do modelo: todos os números, recebe de todos, departamentos pelo id. */
+export function templateAccess(access: { departments: string[] } | undefined, deptIdByName: ReadonlyMap<string, string>) {
+  if (!access) return undefined;
+  return { allNumbers: true, numberIds: [], defaultNumberIds: [], departmentIds: access.departments.map((n) => deptIdByName.get(n.toLowerCase())).filter((id): id is string => !!id), receiveAll: true, receiveNumberIds: [] };
+}

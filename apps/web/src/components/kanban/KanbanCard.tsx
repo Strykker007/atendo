@@ -4,6 +4,7 @@ import type { KanbanCard as Card, KanbanColumn } from '@atendo/shared';
 import { Avatar } from '@/components/chat/Avatar';
 import { SeloEspera, formatTime } from '@/components/chat/ConversationList';
 import { cn, formatPreview } from '@/lib/utils';
+import { formatPhone } from '@/components/ui/PhoneInput';
 
 /**
  * Card do atendimento. Duplo clique (ou o botão, no celular) abre o mini-chat; clicar numa
@@ -17,7 +18,7 @@ export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote }
   onOpen: () => void;
   onPromote: (tagId: string) => void;
 }) {
-  const nome = card.contact.name ?? `+${card.contact.phone}`;
+  const nome = card.contact.name ?? formatPhone(card.contact.phone);
   return (
     <div
       onDoubleClick={onOpen}

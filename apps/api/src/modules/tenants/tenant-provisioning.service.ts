@@ -6,7 +6,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { assertOwnFlowMedia, validateDefinition } from '../flows/flow-validation';
 import { toPortableReply } from '../quick-replies/portable';
 import { cleanStages } from '../ai/ai-agents';
-import { TEMPLATE_TAGS_MAX, provisionedProfiles, type TemplateContent } from './tenant-template';
+import { TEMPLATE_DEPARTMENTS_MAX, TEMPLATE_TAGS_MAX, provisionedProfiles, templateAccess, type TemplateContent, type TemplateDepartment } from './tenant-template';
+import { parseAccessTemplate } from './access-template';
 import { agentsToPortable, createAgentsFromPortable, createTicketTypesFromPortable, refMaps, ticketTypesToPortable } from './portable-db';
 
 const newId = (type: FlowNodeType) => `${type}-${randomUUID().slice(0, 6)}`;
@@ -52,8 +53,13 @@ export class TenantProvisioningService {
    * também não conta em `maxFlows`.
    */
   async provision(tx: Prisma.TransactionClient, tenantId: string, content: TemplateContent | null) {
+    // departamentos antes dos perfis: o acesso padrão do perfil cita o departamento
+    const deptIdByName = await createTemplateDepartments(tx, tenantId, content?.departments ?? []);
     await tx.accessProfile.createMany({
-      data: provisionedProfiles(content).map((p) => ({ tenantId, name: p.name, description: p.description || null, permissions: p.permissions, isSystem: p.isSystem, systemRole: p.role, customized: p.customized })),
+      data: provisionedProfiles(content).map((p) => {
+        const accessTemplate = templateAccess(p.access, deptIdByName);
+        return { tenantId, name: p.name, description: p.description || null, permissions: p.permissions, isSystem: p.isSystem, systemRole: p.role, customized: p.customized, ...(accessTemplate && { accessTemplate }) };
+      }),
     });
     if (!content) return;
 
@@ -97,14 +103,23 @@ export class TenantProvisioningService {
    * modelo congelaria a matriz de hoje.
    */
   async capture(tenantId: string): Promise<{ content: TemplateContent; warnings: string[] }> {
-    const [profiles, replies, flows, tags, motivos, ajustes] = await Promise.all([
+    const [profiles, replies, flows, tags, motivos, ajustes, deptos] = await Promise.all([
       this.prisma.accessProfile.findMany({ where: { tenantId }, orderBy: [{ isSystem: 'desc' }, { name: 'asc' }] }),
       this.prisma.quickReply.findMany({ where: { folder: { tenantId } }, include: { folder: { select: { name: true } } }, orderBy: [{ folder: { position: 'asc' } }, { position: 'asc' }] }),
       this.prisma.flow.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
       this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnWon: true, showOnLost: true, conflictsA: { select: { otherId: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
       this.prisma.closeReason.findMany({ where: { tenantId, isActive: true }, select: { name: true, color: true, outcome: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
-      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true, requireSignature: true, wonLabel: true, lostLabel: true } }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true, requireSignature: true, wonLabel: true, lostLabel: true, autoReassignWaiting: true, autoReassignAssigned: true, autoReassignBaseMinutes: true, autoReassignMaxMinutes: true, autoReassignMaxTimes: true, releaseAwayEnabled: true, releaseAwayMinutes: true } }),
+      this.prisma.department.findMany({ where: { tenantId, isActive: true }, select: { id: true, name: true, color: true, description: true, parentId: true }, orderBy: { name: 'asc' } }),
     ]);
+    const deptNameById = new Map(deptos.map((d) => [d.id, d.name]));
+    // números não viajam: o modelo leva só os departamentos do acesso padrão do perfil
+    const acessoDe = (raw: unknown) => {
+      const t = parseAccessTemplate(raw);
+      if (!t) return undefined;
+      if (!t.allNumbers || !t.receiveAll) warnings.add('Acesso padrão dos perfis: os números marcados não vão para o modelo (são do cliente). Vai só o departamento.');
+      return { access: { departments: t.departmentIds.map((id) => deptNameById.get(id)).filter((n): n is string => !!n) } };
+    };
     const warnings = new Set<string>();
     const [{ names: refNames }, agentes, tiposTicket] = await Promise.all([refMaps(this.prisma, tenantId), agentsToPortable(this.prisma, tenantId), ticketTypesToPortable(this.prisma, tenantId)]);
     [...agentes.warnings, ...tiposTicket.warnings].forEach((w) => warnings.add(w));
@@ -121,7 +136,7 @@ export class TenantProvisioningService {
       content: {
         profiles: profiles
           .filter((p) => p.systemRole !== 'tenant_admin' && (!p.isSystem || p.customized || p.name !== SYSTEM_PROFILES.find((s) => s.role === p.systemRole)?.name))
-          .map((p) => ({ name: p.name, ...(p.systemRole === 'manager' || p.systemRole === 'agent' ? { systemRole: p.systemRole } : {}), ...(p.description && { description: p.description }), permissions: p.permissions as TemplateContent['profiles'][number]['permissions'] })),
+          .map((p) => ({ name: p.name, ...(p.systemRole === 'manager' || p.systemRole === 'agent' ? { systemRole: p.systemRole } : {}), ...(p.description && { description: p.description }), permissions: p.permissions as TemplateContent['profiles'][number]['permissions'], ...acessoDe(p.accessTemplate) })),
         quickReplies: qr.map((o) => o.portable),
         flows: portableFlows,
         // todas as tags, com cor, Kanban e encerramento (Comprou / Não comprou), na ordem das colunas
@@ -132,7 +147,9 @@ export class TenantProvisioningService {
           ...motivos.filter((m) => !tags.some((t) => t.name.toLowerCase() === m.name.toLowerCase())).map((m) => ({ name: m.name, ...(/^#[0-9a-f]{6}$/i.test(m.color) && { color: m.color.toLowerCase() }), isKanban: false, showOnWon: m.outcome !== 'lost', showOnLost: m.outcome !== 'won' })),
         ].slice(0, TEMPLATE_TAGS_MAX),
         // configurações de atendimento como estão no cliente
-        ...(ajustes && { settings: { salesEnabled: ajustes.salesEnabled, requireSignature: ajustes.requireSignature, wonLabel: ajustes.wonLabel, lostLabel: ajustes.lostLabel } }),
+        ...(ajustes && { settings: { ...ajustes } }),
+        // departamentos ativos com a hierarquia (pai pelo nome)
+        ...(deptos.length && { departments: deptos.slice(0, TEMPLATE_DEPARTMENTS_MAX).map((d) => ({ name: d.name, ...(/^#[0-9a-f]{6}$/i.test(d.color) && { color: d.color.toLowerCase() }), ...(d.description && { description: d.description }), ...(d.parentId && deptNameById.get(d.parentId) && { parent: deptNameById.get(d.parentId) }) })) }),
         // agentes de IA (sem documentos) e tipos de ticket: os fluxos acima os citam pelo nome
         ...(agentes.items.length && { aiAgents: agentes.items }),
         ...(tiposTicket.items.length && { ticketTypes: tiposTicket.items }),
@@ -152,4 +169,32 @@ export class TenantProvisioningService {
     const profile = await this.prisma.accessProfile.findFirst({ where: { tenantId, systemRole: role, isSystem: true }, select: { id: true } });
     if (profile) await this.prisma.user.update({ where: { id: userId }, data: { profileId: profile.id } });
   }
+}
+
+/**
+ * Cria os departamentos do modelo (os que o cliente ainda não tem, pelo nome) e liga os pais. Devolve
+ * nome (minúsculo) → id de TODOS os departamentos do cliente — o acesso padrão dos perfis usa.
+ * `onlyMissingParent`: no Aplicar aos clientes, não mexe no pai de quem o cliente já organizou.
+ */
+export async function createTemplateDepartments(tx: Prisma.TransactionClient, tenantId: string, deps: TemplateDepartment[], created: string[] = [], dryRun = false): Promise<Map<string, string>> {
+  const existentes = await tx.department.findMany({ where: { tenantId }, select: { id: true, name: true, parentId: true } });
+  const idPorNome = new Map(existentes.map((d) => [d.name.toLowerCase(), d.id]));
+  const novos = new Set<string>();
+  for (const d of deps) {
+    if (idPorNome.has(d.name.toLowerCase())) continue;
+    created.push(d.name);
+    if (dryRun) { idPorNome.set(d.name.toLowerCase(), `novo:${d.name}`); continue; }
+    const row = await tx.department.create({ data: { tenantId, name: d.name, ...(d.color && { color: d.color }), description: d.description ?? null }, select: { id: true } });
+    idPorNome.set(d.name.toLowerCase(), row.id);
+    novos.add(row.id);
+  }
+  if (!dryRun) {
+    // pai só nos que acabaram de nascer: a árvore que o cliente já montou é dele
+    for (const d of deps) {
+      const id = idPorNome.get(d.name.toLowerCase());
+      const pai = d.parent ? idPorNome.get(d.parent.toLowerCase()) : undefined;
+      if (id && pai && novos.has(id)) await tx.department.update({ where: { id }, data: { parentId: pai } });
+    }
+  }
+  return idPorNome;
 }

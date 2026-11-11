@@ -5,8 +5,11 @@ import type { Prisma } from '@prisma/client';
  * **dados**, e **lista vazia = sem restrição** (quem nunca foi colocado num departamento
  * continua vendo a fila inteira — ligar a funcionalidade não tranca ninguém para fora).
  *
- * Quem tem `conversations.view_all` (gerente, atendente líder) também vê todos: é quem
- * coordena a equipe, e precisa enxergar as filas que coordena.
+ * Hierarquia (docs/departamentos.md#hierarquia): `departmentIds` já chega como **alcance**
+ * (`PermissionsService.scope`). Quem tem `conversations.view_all` (gestor) recebe o departamento
+ * dele e todos os que ficam abaixo; os demais, só os de que participam. Ver toda a equipe NÃO
+ * libera os outros departamentos: o gestor da Portaria não vê a Administração. Só o admin da
+ * conta (e quem não está em departamento nenhum) vê todos.
  *
  * Restrito, o usuário vê as conversas dos departamentos dele **e as sem departamento** — a
  * conversa que ainda não passou por nenhuma triagem não pode ficar invisível para todo mundo.
@@ -14,12 +17,12 @@ import type { Prisma } from '@prisma/client';
 export interface DeptScoped {
   role: string;
   permissions?: readonly string[];
-  /** ids dos departamentos do usuário; vazio = sem restrição */
+  /** alcance de departamentos do usuário (os dele + os abaixo, se gestor); vazio = sem restrição */
   departmentIds?: readonly string[];
 }
 
 export function departmentRestricted(user: DeptScoped): boolean {
-  return user.role !== 'super_admin' && !user.permissions?.includes('conversations.view_all') && !!user.departmentIds?.length;
+  return user.role !== 'super_admin' && user.role !== 'tenant_admin' && !!user.departmentIds?.length;
 }
 
 export function canSeeDepartment(user: DeptScoped, departmentId: string | null | undefined): boolean {

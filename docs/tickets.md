@@ -75,9 +75,29 @@ para `{{ticket}}` (ou a variável escolhida) para o fluxo responder o protocolo 
 
 - **Aviso na hora**: com responsável, ele (e participantes); sem responsável, **todos do setor**;
   da automação sem setor nem responsável, administradores e gerentes. Toast + som (`ticket_alert`).
-- **Contador no menu** (item Tickets): abertos **sem responsável** nos setores que a pessoa atende
-  (`summary.toPick`; gestão vê todos) — "alguém precisa pegar".
+- **Contador no menu** (item Tickets): **não lidos**, como nas conversas — ver [Não lidos](#não-lidos).
+  O "alguém precisa pegar" (`summary.toPick`, abertos sem responsável nos setores da pessoa) ficou na
+  faixa do topo da tela de Tickets.
 - Faixa no topo da tela de Tickets: "N sem responsável esperando alguém pegar" (abre o filtro).
+
+## Não lidos
+
+Ticket novo ou com novidade acende o menu como mensagem nova (pedido de 11/11/2026). Antes o número só
+contava os abertos sem responsável: ticket atribuído direto a mim, comentário ou transferência não
+sinalizava nada.
+
+- **Me diz respeito** (`paraMim`): sou responsável ou participante, ou está aberto sem responsável num
+  setor que eu atendo (gestão com `tickets.manage`: qualquer setor). Ticket que só vejo por `view_all`
+  não conta.
+- **Não lido**: ativo (aberto, em andamento, em espera), me diz respeito e `updatedAt` é depois da minha
+  última abertura (`ticket_reads.seenAt`) — ou nunca abri. Comentário, transferência, mudança de
+  situação etc. mexem no `updatedAt`.
+- **Lido**: abrir o detalhe (`GET /tickets/:id`) grava agora. Toda escrita devolve o ticket por esse
+  mesmo caminho, então quem fez a mudança não fica com ela "não lida".
+- `GET /tickets/summary` devolve `unread` (até 500 candidatos); `GET /tickets` marca `unread` em cada
+  linha (ponto + título em negrito na lista). O menu atualiza ao vivo pelo socket `ticket`.
+- Migration `20270211000000_ticket_reads`: quem já participava dos tickets existentes começa com tudo
+  lido, para o deploy não acender o menu de todo mundo com o passado.
 
 ## Várias pessoas no mesmo ticket
 

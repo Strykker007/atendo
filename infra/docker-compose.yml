@@ -22,6 +22,20 @@ services:
     ports: ["6379:6379"]
     volumes: ["./volumes/redis:/data"]
 
+  # Embeddings locais dos documentos do agente (docs/agente-ia.md#embeddings-locais). Só sobe pedindo:
+  #   docker compose -f infra/docker-compose.yml --profile ia up -d ollama
+  #   docker compose -f infra/docker-compose.yml exec ollama ollama pull bge-m3
+  # e no .env: AI_EMBED_BASE_URL=http://localhost:11434/v1  AI_EMBED_MODEL=bge-m3
+  ollama:
+    image: ollama/ollama:0.6.8
+    profiles: ["ia"]
+    restart: unless-stopped
+    mem_limit: 2.5g
+    cpus: 2
+    environment: { OLLAMA_NUM_PARALLEL: "1", OLLAMA_MAX_LOADED_MODELS: "1", OLLAMA_KEEP_ALIVE: "24h" }
+    ports: ["127.0.0.1:11434:11434"]
+    volumes: ["./volumes/ollama:/root/.ollama"]
+
   # Provider QR code. A Evolution usa seu próprio Postgres/Redis.
   evolution:
     # versão FIXA (docs/04-providers-whatsapp.md#versão-da-evolution): `:latest` atualizava sozinha

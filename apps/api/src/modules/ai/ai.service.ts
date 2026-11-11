@@ -6,11 +6,24 @@ import { AppLogger } from '../../common/observability/app-logger';
 import { UsageService } from '../billing/usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
 import { AiUsageService } from './ai-usage.service';
-import { AiOwnKeyService } from './ai-own-key';
-import { decideCanUseAi, platformBudgetStatus } from './ai-quota';
+import { AiOwnKeyService, type OwnKey } from './ai-own-key';
+import { AiCreditsService } from './ai-credits';
+import { AiBusyError } from './ai-busy';
+import { decideCanUseAi, decideWithCredit, platformBudgetStatus } from './ai-quota';
 import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, suggestSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from './prompts';
 import type { AiMessage, AiProvider } from './ai.types';
 import { env } from '../../config/env';
+
+interface RunInput {
+  tenantId: string;
+  kind: AiTaskKind;
+  system: string;
+  messages: AiMessage[];
+  maxTokens?: number;
+  temperature?: number;
+  conversationId?: string;
+  userId?: string;
+}
 
 @Injectable()
 export class AiService {
@@ -22,6 +35,7 @@ export class AiService {
     private readonly aiUsage: AiUsageService,
     private readonly usage: UsageService,
     private readonly ownKeys: AiOwnKeyService,
+    private readonly credits: AiCreditsService,
   ) {}
 
   /** IA utilizável por este tenant: a da plataforma ou a chave própria dele. */
@@ -41,41 +55,51 @@ export class AiService {
    * Chamada ao modelo com quota, teto de gasto e ledger. **Todo** uso de IA passa por aqui —
    * é o equivalente ao `UsageService.record` das mensagens.
    */
-  async run(input: {
-    tenantId: string;
-    kind: AiTaskKind;
-    system: string;
-    messages: AiMessage[];
-    maxTokens?: number;
-    temperature?: number;
-    conversationId?: string;
-    userId?: string;
-  }): Promise<string> {
+  async run(input: RunInput): Promise<string> {
     if (!input.messages.length) throw new BadRequestException('Não há mensagens suficientes para a IA trabalhar.');
 
     const plan = await this.usage.limits(input.tenantId);
     // chave do próprio cliente (ai_own_key): roda na conta dele — fora da cota, do teto e do
     // orçamento da plataforma; só a assinatura precisa estar ativa
     const own = await this.ownKeys.resolve(input.tenantId, plan?.limits.features ?? []);
-    let provider: AiProvider;
-    let model: string;
     if (own) {
       if (!plan) throw new ForbiddenException('Sem assinatura ativa');
       if (plan.status === 'suspended' || plan.status === 'canceled') throw new ForbiddenException('Assinatura suspensa');
-      provider = this.registry.of(own.provider);
-      model = own.model;
-    } else {
-      provider = this.registry.get();
-      const [used, platformSpent] = await Promise.all([this.aiUsage.current(input.tenantId), this.aiUsage.platformCost()]);
-      // orçamento da plataforma antes da quota do tenant: protege o crédito da conta do fornecedor
-      if (platformBudgetStatus(platformSpent, env.AI_PLATFORM_BUDGET_BRL).blocked) {
-        throw new ServiceUnavailableException('IA temporariamente indisponível. Tente novamente mais tarde.');
+      try {
+        return await this.call(input, this.registry.of(own.provider), own.model, { own });
+      } catch (err) {
+        // o grátis da chave própria (Gemini) acabou no dia: segue pela IA da plataforma pagando
+        // com o saldo de IA, se o cliente deixou ligado (docs/15-ia.md#saldo-de-ia)
+        if (!(err instanceof AiBusyError && err.daily) || !this.registry.configured) throw err;
+        const w = await this.credits.wallet(input.tenantId);
+        if (!w.autoUseOnFreeLimit || w.balanceBrl <= 0) throw err;
+        this.log.log(`tenant ${input.tenantId}: chave própria no limite do dia, usando o saldo de IA (${input.kind})`);
+        return this.platform(input, plan);
       }
-      const decision = decideCanUseAi(plan, used);
-      if (!decision.ok) throw new ForbiddenException(decision.reason);
-      model = env.AI_MODEL || provider.defaultModel;
     }
+    return this.platform(input, plan);
+  }
 
+  /** IA da plataforma: incluído no plano → saldo de IA → excedente → bloqueia. */
+  private async platform(input: RunInput, plan: Awaited<ReturnType<UsageService['limits']>>) {
+    const provider = this.registry.get();
+    const [used, platformSpent] = await Promise.all([this.aiUsage.current(input.tenantId), this.aiUsage.platformCost()]);
+    // orçamento da plataforma antes da quota do tenant: protege o crédito da conta do fornecedor
+    if (platformBudgetStatus(platformSpent, env.AI_PLATFORM_BUDGET_BRL).blocked) {
+      throw new ServiceUnavailableException('IA temporariamente indisponível. Tente novamente mais tarde.');
+    }
+    const base = decideCanUseAi(plan, used);
+    // só lê a carteira quando o incluído do plano não cobre
+    const balance = base.ok && !base.overage ? 0 : (await this.credits.wallet(input.tenantId)).balanceBrl;
+    const decision = decideWithCredit(plan, used, balance);
+    if (!decision.ok) throw new ForbiddenException(decision.reason);
+    const creditMarkupPct = decision.credit ? await this.credits.markupPct() : undefined;
+    return this.call(input, provider, env.AI_MODEL || provider.defaultModel, { creditMarkupPct });
+  }
+
+  /** Chamada + ledger (sucesso e falha). */
+  private async call(input: RunInput, provider: AiProvider, model: string, opts: { own?: OwnKey; creditMarkupPct?: number }) {
+    const { own } = opts;
     const started = Date.now();
     const base = { tenantId: input.tenantId, kind: input.kind, provider: provider.kind, conversationId: input.conversationId, userId: input.userId, ownKey: !!own };
     try {
@@ -87,7 +111,7 @@ export class AiService {
         timeoutMs: env.AI_TIMEOUT_MS,
         ...(own && { apiKey: own.apiKey, model }),
       });
-      await this.aiUsage.record({ ...base, model: out.model, tokensIn: out.tokensIn, tokensOut: out.tokensOut, latencyMs: Date.now() - started });
+      await this.aiUsage.record({ ...base, model: out.model, tokensIn: out.tokensIn, tokensOut: out.tokensOut, latencyMs: Date.now() - started, creditMarkupPct: opts.creditMarkupPct });
       if (own?.hadError) await this.ownKeys.markError(input.tenantId, null);
       if (!out.text) throw new BadRequestException('A IA não devolveu resposta.');
       return out.text;
@@ -95,8 +119,9 @@ export class AiService {
       const reason = err instanceof Error ? err.message : String(err);
       // registra a falha (sem custo) para aparecer no diagnóstico em vez de sumir
       await this.aiUsage.record({ ...base, model, tokensIn: 0, tokensOut: 0, latencyMs: Date.now() - started, error: reason.slice(0, 300) }).catch(() => undefined);
-      // chave revogada / sem crédito na conta do cliente: a tela de configuração mostra o motivo
-      if (own) await this.ownKeys.markError(input.tenantId, reason);
+      // chave revogada / sem crédito na conta do cliente: a tela de configuração mostra o motivo.
+      // Limite por minuto do plano grátis não é defeito da chave: não acende o aviso.
+      if (own && !(err instanceof AiBusyError && !err.daily)) await this.ownKeys.markError(input.tenantId, reason);
       this.log.warn(`IA (${input.kind}${own ? ', chave própria' : ''}) falhou: ${reason}`, { kind: input.kind });
       throw err;
     }

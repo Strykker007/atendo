@@ -13,12 +13,14 @@ class DepartmentDto {
   @IsOptional() @IsString() @MaxLength(200) description?: string | null;
   @IsOptional() @IsHexColor() color?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** departamento acima (docs/departamentos.md#hierarquia); null = topo */
+  @IsOptional() @IsUUID('4') parentId?: string | null;
   /** participantes; ausente = não mexe. Substitui a lista inteira */
   @IsOptional() @IsArray() @ArrayMaxSize(500) @IsUUID('4', { each: true }) userIds?: string[];
 }
 
 const SELECT = {
-  id: true, name: true, description: true, color: true, isActive: true, createdAt: true,
+  id: true, name: true, description: true, color: true, isActive: true, parentId: true, createdAt: true,
   users: { select: { user: { select: { id: true, name: true, isActive: true } } } },
   _count: { select: { conversations: { where: { status: { not: 'closed' } } } } },
 } satisfies Prisma.DepartmentSelect;
@@ -42,6 +44,7 @@ class DepartmentsController {
   @RequirePermission('team.manage')
   async create(@CurrentUser() u: AuthUser, @Body() dto: DepartmentDto) {
     const { userIds, ...data } = dto;
+    if (data.parentId) await this.assertParent(u.tenantId, null, data.parentId);
     const dept = await this.prisma.department
       .create({ data: { tenantId: u.tenantId, ...data, name: data.name.trim(), description: data.description?.trim() || null } })
       .catch(duplicate);
@@ -53,7 +56,8 @@ class DepartmentsController {
   @RequirePermission('team.manage')
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<DepartmentDto>) {
     const { userIds, ...data } = dto;
-    await this.prisma.department.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { id: true } });
+    const atual = await this.prisma.department.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { id: true, parentId: true } });
+    if (data.parentId) await this.assertParent(u.tenantId, id, data.parentId);
     await this.prisma.department
       .update({
         where: { id, tenantId: u.tenantId },
@@ -61,10 +65,22 @@ class DepartmentsController {
       })
       .catch(duplicate);
     if (userIds) await this.setUsers(u.tenantId, id, userIds);
+    // o alcance dos gestores muda com a árvore
+    else if (data.parentId !== undefined && (data.parentId ?? null) !== atual.parentId) this.permissions.invalidate();
     return this.prisma.department.findUniqueOrThrow({ where: { id }, select: SELECT });
   }
 
-  /** As conversas do departamento ficam sem departamento (passam a aparecer para toda a equipe). */
+  /** Pai do mesmo cliente e sem ciclo: não pode ficar abaixo de si mesmo nem de um departamento que está abaixo dele. */
+  private async assertParent(tenantId: string, id: string | null, parentId: string) {
+    const todos = await this.prisma.department.findMany({ where: { tenantId }, select: { id: true, parentId: true } });
+    const pai = new Map(todos.map((d) => [d.id, d.parentId]));
+    if (!pai.has(parentId)) throw new BadRequestException('Departamento acima não encontrado.');
+    for (let at: string | null | undefined = parentId, passos = 0; at && passos <= todos.length; at = pai.get(at), passos++) {
+      if (at === id) throw new BadRequestException('Um departamento não pode ficar abaixo dele mesmo nem de um que está abaixo dele.');
+    }
+  }
+
+  /** As conversas do departamento ficam sem departamento (passam a aparecer para toda a equipe); os departamentos abaixo dele vão para o topo. */
   @Delete(':id')
   @RequirePermission('team.manage')
   async remove(@CurrentUser() u: AuthUser, @Param('id') id: string) {

@@ -2,6 +2,7 @@
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
 import { useAddIgnoredContact, useCan, useRemoveIgnoredByContact, type Conversation } from '@/lib/hooks';
+import { formatPhone } from '@/components/ui/PhoneInput';
 
 /**
  * Atalho para isentar (ou deixar de isentar) o número da conversa — docs/contatos-isentos.md.
@@ -17,7 +18,7 @@ export function ExemptConfirm({ conv, open, onClose }: { conv: Pick<Conversation
   const add = useAddIgnoredContact();
   const remove = useRemoveIgnoredByContact();
   const isento = !!conv.ticketExempt;
-  const nome = conv.contact.name ?? `+${conv.contact.phone}`;
+  const nome = conv.contact.name ?? formatPhone(conv.contact.phone);
   return (
     <ConfirmDialog
       open={open}

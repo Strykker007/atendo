@@ -8,6 +8,8 @@ export interface IgnoredContact {
   /** só dígitos, com DDI */
   phone: string;
   label: string | null;
+  /** conversa livre: sempre aberta, sem dono, ninguém encerra (docs/contatos-isentos.md#conversa-livre) */
+  freeChat: boolean;
   createdAt: string;
   /** contato do painel com este telefone, se já existir */
   contact: { id: string; name: string | null; phone: string } | null;
@@ -26,6 +28,15 @@ export const useAddIgnoredContact = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { phone?: string; contactId?: string; label?: string }) => api<IgnoredContact>('/ignored-contacts', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => invalidar(qc),
+  });
+};
+
+/** Liga/desliga "Conversa livre" (muda as conversas existentes na hora). */
+export const useSetIgnoredFreeChat = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, freeChat }: { id: string; freeChat: boolean }) => api<IgnoredContact>(`/ignored-contacts/${id}`, { method: 'PATCH', body: JSON.stringify({ freeChat }) }),
     onSuccess: () => invalidar(qc),
   });
 };

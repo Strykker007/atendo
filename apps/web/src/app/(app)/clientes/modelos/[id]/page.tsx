@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { ArrowLeft, Bot, DoorClosed, Send, GripVertical, Shapes, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
+import { ArrowLeft, Bot, Building2, DoorClosed, Send, GripVertical, Shapes, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
 import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
@@ -11,7 +11,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useUnsavedGuard } from '@/lib/unsaved-guard';
-import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateFlow, type TemplateProfile, type TemplateQuickReply, type TemplateSettings, type TemplateTag } from '@/lib/hooks';
+import { useMe, useTenantTemplate, useUpdateTenantTemplate, type TemplateContent, type TemplateDepartment, type TemplateFlow, type TemplateProfile, type TemplateQuickReply, type TemplateSettings, type TemplateTag } from '@/lib/hooks';
 import { PALETTE, ColorPopover } from '@/components/ui/ColorSwatches';
 import { ApplyToTenantsModal } from './ApplyToTenants';
 
@@ -75,7 +75,7 @@ export default function TemplateEditorPage() {
   return (
     <PageShell width="max-w-6xl">
       {modal}
-      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} settings={tpl.data.content.settings} aiAgents={(tpl.data.content.aiAgents ?? []).map((a) => a.name)} ticketTypes={(tpl.data.content.ticketTypes ?? []).map((t) => t.name)} />
+      <ApplyToTenantsModal open={aplicando} onClose={() => setAplicando(false)} templateId={id} profiles={tpl.data.content.profiles.map((p) => p.name)} tags={tpl.data.effectiveTags} settings={tpl.data.content.settings} aiAgents={(tpl.data.content.aiAgents ?? []).map((a) => a.name)} ticketTypes={(tpl.data.content.ticketTypes ?? []).map((t) => t.name)} departments={(tpl.data.content.departments ?? []).map((d) => d.name)} />
       <PageHeader
         title={tpl.data.name}
         subtitle={<>Tudo com que um cliente novo nasce ao ser criado com este modelo. Clientes que já existem só mudam pelo “Aplicar aos clientes”.</>}
@@ -102,7 +102,12 @@ export default function TemplateEditorPage() {
         </div>
 
         <SettingsSection value={content.settings} onChange={(settings) => edit({ settings })} />
-        <ProfilesSection profiles={content.profiles} onChange={(profiles) => edit({ profiles })} />
+        <DepartmentsSection value={content.departments ?? []} onChange={(departments, renomes) => edit({
+          departments: departments.length ? departments : undefined,
+          // renomear/remover departamento acompanha no acesso padrão dos perfis
+          profiles: content.profiles.map((p) => (p.access ? { ...p, access: { departments: p.access.departments.map((n) => renomes[n] ?? n).filter((n) => departments.some((d) => d.name === n)) } } : p)),
+        })} />
+        <ProfilesSection profiles={content.profiles} departments={content.departments ?? []} onChange={(profiles) => edit({ profiles })} />
         <QuickRepliesSection items={content.quickReplies} onChange={(quickReplies) => edit({ quickReplies })} />
         <FlowsSection items={content.flows} onChange={(flows) => edit({ flows })} />
         <PortableSection kind="ai-agent" icon={<Bot size={15} className="text-faint shrink-0" />} titulo="Agentes de IA" items={content.aiAgents ?? []}
@@ -168,6 +173,104 @@ function SettingsSection({ value, onChange }: { value?: TemplateSettings; onChan
         <Field label="Resultado positivo"><input className={inputCls} value={s.wonLabel ?? ''} maxLength={30} placeholder={vendas ? 'Comprou' : 'Resolvido'} onChange={(e) => set({ wonLabel: e.target.value })} /></Field>
         <Field label="Resultado negativo"><input className={inputCls} value={s.lostLabel ?? ''} maxLength={30} placeholder={vendas ? 'Não comprou' : 'Não resolvido'} onChange={(e) => set({ lostLabel: e.target.value })} /></Field>
       </div>
+      {/* redistribuição e saiu do plantão (docs/redistribuicao-automatica.md) — mesmas faixas de Configurações */}
+      <Switch on={!!s.autoReassignWaiting} onToggle={() => set({ autoReassignWaiting: !s.autoReassignWaiting })} titulo="Redistribuir quem está aguardando"
+        desc="Conversa parada na fila passa para outra pessoa disponível." />
+      <Switch on={!!s.autoReassignAssigned} onToggle={() => set({ autoReassignAssigned: !s.autoReassignAssigned })} titulo="Redistribuir quem está com atendente sem resposta"
+        desc="Atendimento sem resposta do atendente volta para a fila e vai para outra pessoa." />
+      {(s.autoReassignWaiting || s.autoReassignAssigned) && (
+        <div className="grid sm:grid-cols-3 gap-3">
+          <Field label="Minutos iniciais"><input type="number" min={1} max={240} className={inputCls} value={s.autoReassignBaseMinutes ?? ''} placeholder="15" onChange={(e) => set({ autoReassignBaseMinutes: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+          <Field label="Minutos máximos"><input type="number" min={1} max={480} className={inputCls} value={s.autoReassignMaxMinutes ?? ''} placeholder="30" onChange={(e) => set({ autoReassignMaxMinutes: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+          <Field label="Vezes no máximo"><input type="number" min={1} max={10} className={inputCls} value={s.autoReassignMaxTimes ?? ''} placeholder="2" onChange={(e) => set({ autoReassignMaxTimes: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+        </div>
+      )}
+      <Switch on={!!s.releaseAwayEnabled} onToggle={() => set({ releaseAwayEnabled: !s.releaseAwayEnabled })} titulo="Saiu do plantão"
+        desc="Quem sai do painel (fora da pausa) tem os atendimentos devolvidos para a fila depois do tempo abaixo." />
+      {s.releaseAwayEnabled && (
+        <Field label="Minutos fora do painel"><input type="number" min={5} max={240} className={inputCls} value={s.releaseAwayMinutes ?? ''} placeholder="30" onChange={(e) => set({ releaseAwayMinutes: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Departamentos com que o cliente nasce, com a hierarquia (docs/departamentos.md#hierarquia). Os perfis
+ * citam pelo nome — renomear avisa o pai e o acesso padrão (`renomes`: antigo → novo).
+ */
+function DepartmentsSection({ value, onChange }: { value: TemplateDepartment[]; onChange: (d: TemplateDepartment[], renomes: Record<string, string>) => void }) {
+  const [editing, setEditing] = useState<{ original: string | null; name: string; color: string; description: string; parent: string } | null>(null);
+  // árvore: pai e depois os filhos recuados
+  const arvore: { d: TemplateDepartment; nivel: number }[] = [];
+  const descer = (pai: string | undefined, nivel: number) => value.filter((d) => d.parent === pai).forEach((d) => { if (arvore.some((x) => x.d.name === d.name)) return; arvore.push({ d, nivel }); descer(d.name, nivel + 1); });
+  descer(undefined, 0);
+  value.filter((d) => !arvore.some((x) => x.d.name === d.name)).forEach((d) => arvore.push({ d, nivel: 0 }));
+  const abaixo = (nome: string) => { const out = new Set([nome]); for (let mudou = true; mudou; ) { mudou = false; for (const d of value) if (d.parent && out.has(d.parent) && !out.has(d.name)) { out.add(d.name); mudou = true; } } return out; };
+
+  function submit() {
+    if (!editing) return;
+    const name = editing.name.trim();
+    if (!name) return toast.err('Informe o nome do departamento.');
+    if (value.some((d) => d.name.toLowerCase() === name.toLowerCase() && d.name !== editing.original)) return toast.err('Já existe um departamento com esse nome.');
+    const d: TemplateDepartment = { name, color: editing.color, ...(editing.description.trim() && { description: editing.description.trim() }), ...(editing.parent && { parent: editing.parent }) };
+    const renomes = editing.original && editing.original !== name ? { [editing.original]: name } : {};
+    const lista = editing.original ? value.map((x) => (x.name === editing.original ? d : x.parent === editing.original ? { ...x, parent: name } : x)) : [...value, d];
+    onChange(lista, renomes);
+    setEditing(null);
+  }
+  function remover(nome: string) {
+    const pai = value.find((x) => x.name === nome)?.parent;
+    // os de baixo sobem para o pai dele (ou para o topo)
+    onChange(value.filter((x) => x.name !== nome).map((x) => (x.parent === nome ? { ...x, parent: pai } : x)), {});
+  }
+
+  return (
+    <div className={section}>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="font-display font-semibold text-ink">Departamentos <span className="text-muted font-normal text-sm">· {value.length}</span></h2>
+          <p className="text-[12px] text-muted">Setores com que o cliente nasce (Administração › Portaria…). O gestor de cima vê os de baixo; o de baixo não vê os de cima. Os perfis abaixo podem já nascer em um departamento. O cliente escolhe o departamento de cada número depois de conectar.</p>
+        </div>
+        <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={() => setEditing({ original: null, name: '', color: PALETTE[value.length % PALETTE.length], description: '', parent: '' })}>Novo departamento</Button>
+      </div>
+      {value.length === 0 ? (
+        <p className="text-sm text-muted rounded-lg bg-field px-3 py-2">Nenhum departamento: o cliente nasce sem separar a fila por setor.</p>
+      ) : (
+        <div className="rounded-xl border border-line divide-y divide-line">
+          {arvore.map(({ d, nivel }) => (
+            <div key={d.name} className="flex items-center gap-2 px-3 py-2" style={{ paddingLeft: 12 + Math.min(nivel, 4) * 20 }}>
+              {nivel > 0 && <span className="text-faint" aria-hidden>└</span>}
+              <span className="w-6 h-6 rounded-md grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${d.color ?? '#6366f1'} 16%, transparent)`, color: d.color ?? '#6366f1' }}><Building2 size={13} /></span>
+              <span className="min-w-0 flex-1 text-sm text-ink truncate">{d.name}{d.description && <span className="text-muted text-xs"> · {d.description}</span>}</span>
+              <button title="Editar" className="text-faint hover:text-accent-ink p-1" onClick={() => setEditing({ original: d.name, name: d.name, color: d.color ?? '#6366f1', description: d.description ?? '', parent: d.parent ?? '' })}><Pencil size={14} /></button>
+              <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => remover(d.name)}><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.original ? `Editar departamento — ${editing.original}` : 'Novo departamento'}>
+        {editing && (
+          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+            <Field label="Nome"><input className={inputCls} value={editing.name} maxLength={40} required autoFocus onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Portaria" /></Field>
+            <Field label="Descrição (opcional)"><input className={inputCls} value={editing.description} maxLength={200} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></Field>
+            <Field label="Fica abaixo de">
+              <select className={inputCls} value={editing.parent} onChange={(e) => setEditing({ ...editing, parent: e.target.value })}>
+                <option value="">Nenhum (topo)</option>
+                {value.filter((d) => !editing.original || !abaixo(editing.original).has(d.name)).map((d) => <option key={d.name} value={d.name}>{d.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Cor">
+              <div className="flex flex-wrap gap-2 pt-1">
+                {PALETTE.map((c) => <button type="button" key={c} onClick={() => setEditing({ ...editing, color: c })} className="w-7 h-7 rounded-full" style={{ background: c, boxShadow: editing.color === c ? `0 0 0 2px var(--color-panel, white), 0 0 0 4px ${c}` : undefined }} aria-label={c} />)}
+              </div>
+            </Field>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancelar</Button>
+              <Button type="submit">OK</Button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -177,15 +280,15 @@ function SettingsSection({ value, onChange }: { value?: TemplateSettings; onChan
  * Atendente, mais quantos extras o segmento pedir ("Farmacêutico", "Atendente líder"…).
  * Administrador é sempre tudo; os dois perfis operacionais seguem o catálogo até serem editados.
  */
-function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; onChange: (p: TemplateProfile[]) => void }) {
-  const [editing, setEditing] = useState<{ original: string | null; systemRole?: 'manager' | 'agent'; name: string; description: string; permissions: Permission[]; system: boolean } | null>(null);
+function ProfilesSection({ profiles, departments, onChange }: { profiles: TemplateProfile[]; departments: TemplateDepartment[]; onChange: (p: TemplateProfile[]) => void }) {
+  const [editing, setEditing] = useState<{ original: string | null; systemRole?: 'manager' | 'agent'; name: string; description: string; permissions: Permission[]; system: boolean; deptos: string[] | null } | null>(null);
   const byName = new Map(profiles.map((p) => [p.name, p]));
   const cards = [
     ...FIXED.map((f) => {
       const t = profiles.find((p) => p.systemRole === f.role) ?? byName.get(f.name);
-      return { name: t?.name ?? f.name, systemRole: f.role as 'manager' | 'agent', description: t?.description ?? '', permissions: t?.permissions ?? DEFAULT_PERMISSIONS[f.role], system: true, catalog: !t };
+      return { name: t?.name ?? f.name, systemRole: f.role as 'manager' | 'agent', description: t?.description ?? '', permissions: t?.permissions ?? DEFAULT_PERMISSIONS[f.role], system: true, catalog: !t, access: t?.access };
     }),
-    ...profiles.filter((p) => !p.systemRole && !FIXED.some((f) => f.name === p.name)).map((p) => ({ name: p.name, systemRole: undefined, description: p.description ?? '', permissions: p.permissions, system: false, catalog: false })),
+    ...profiles.filter((p) => !p.systemRole && !FIXED.some((f) => f.name === p.name)).map((p) => ({ name: p.name, systemRole: undefined, description: p.description ?? '', permissions: p.permissions, system: false, catalog: false, access: p.access })),
   ];
 
   function submit() {
@@ -193,7 +296,7 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
     const name = editing.name.trim();
     if (!name) return toast.err('Informe o nome do perfil.');
     if (name !== editing.original && (name === ADMIN || cards.some((c) => c.name === name))) return toast.err('Já existe um perfil com esse nome.');
-    const p: TemplateProfile = { name, ...(editing.systemRole && { systemRole: editing.systemRole }), ...(editing.description.trim() && { description: editing.description.trim() }), permissions: editing.permissions };
+    const p: TemplateProfile = { name, ...(editing.systemRole && { systemRole: editing.systemRole }), ...(editing.description.trim() && { description: editing.description.trim() }), permissions: editing.permissions, ...(editing.deptos && { access: { departments: editing.deptos } }) };
     // perfil padrão que ainda seguia o catálogo entra no conteúdo a partir desta edição
     const sameProfile = (x: TemplateProfile) => editing.systemRole ? x.systemRole === editing.systemRole || (!x.systemRole && x.name === editing.original) : x.name === editing.original;
     onChange(editing.original && profiles.some(sameProfile) ? profiles.map((x) => (sameProfile(x) ? p : x)) : [...profiles, p]);
@@ -208,7 +311,7 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
           <h2 className="font-display font-semibold text-ink">Perfis e permissões <span className="text-muted font-normal text-sm">· {cards.length + 1}</span></h2>
           <p className="text-[12px] text-muted">Os perfis que o cliente novo já recebe, cada um com o que pode fazer. Renomeie os dois perfis operacionais para usar o vocabulário do segmento (por exemplo, Porteiro e Supervisor).</p>
         </div>
-        <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={() => setEditing({ original: null, name: '', description: '', permissions: [], system: false })}>Novo perfil</Button>
+        <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={() => setEditing({ original: null, name: '', description: '', permissions: [], system: false, deptos: null })}>Novo perfil</Button>
       </div>
 
       <div className="rounded-xl border border-line divide-y divide-line">
@@ -229,13 +332,14 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
                 <span className="text-xs text-muted font-normal">· {c.permissions.length} permiss{c.permissions.length === 1 ? 'ão' : 'ões'}</span>
               </div>
               {c.description && <div className="text-[12px] text-muted">{c.description}</div>}
+              {c.access && <div className="text-[12px] text-muted inline-flex items-center gap-1"><Building2 size={11} /> Nasce em: {c.access.departments.length ? c.access.departments.join(', ') : 'nenhum departamento (vê todos)'}</div>}
               <div className="mt-1 flex flex-wrap gap-1">
                 {c.permissions.length === 0 && <span className="text-xs text-muted">Nenhuma permissão — só atende as próprias conversas.</span>}
                 {c.permissions.map((perm) => <span key={perm} className="text-[11px] rounded bg-field text-muted px-1.5 py-0.5">{PERMISSIONS[perm]}</span>)}
               </div>
             </div>
             {c.system && !c.catalog && <button title="Voltar ao padrão do sistema" className="text-faint hover:text-accent-ink p-1" onClick={() => onChange(profiles.filter((p) => p.systemRole !== c.systemRole && p.name !== c.name))}><RotateCcw size={14} /></button>}
-            <button title="Editar" className="text-faint hover:text-accent-ink p-1" onClick={() => setEditing({ original: c.name, systemRole: c.systemRole, name: c.name, description: c.description, permissions: [...c.permissions], system: c.system })}><Pencil size={14} /></button>
+            <button title="Editar" className="text-faint hover:text-accent-ink p-1" onClick={() => setEditing({ original: c.name, systemRole: c.systemRole, name: c.name, description: c.description, permissions: [...c.permissions], system: c.system, deptos: c.access ? [...c.access.departments] : null })}><Pencil size={14} /></button>
             {!c.system && <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => onChange(profiles.filter((p) => p.name !== c.name))}><Trash2 size={14} /></button>}
           </div>
         ))}
@@ -256,6 +360,26 @@ function ProfilesSection({ profiles, onChange }: { profiles: TemplateProfile[]; 
                 {cards.map((c) => <button key={c.name} type="button" className="rounded border border-line px-1.5 py-0.5 hover:bg-field text-ink" onClick={() => setEditing({ ...editing, permissions: [...c.permissions] })}>{c.name}</button>)}
               </div>
             )}
+            {/* acesso padrão no cliente (docs/18-perfis-de-acesso.md#acesso-padrão-do-perfil): números são do cliente, departamentos vêm daqui */}
+            <div className="rounded-lg border border-line p-3 space-y-2">
+              <label className="flex items-start gap-2 text-sm text-ink cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={editing.deptos !== null} onChange={(e) => setEditing({ ...editing, deptos: e.target.checked ? [] : null })} />
+                <span><b>Acesso padrão</b> <span className="text-muted">— quem o cliente cadastrar neste perfil já nasce nestes departamentos, vendo todos os números do alcance deles e recebendo deles.</span></span>
+              </label>
+              {editing.deptos !== null && (departments.length === 0
+                ? <p className="text-[12px] text-muted">Cadastre os departamentos na seção acima.</p>
+                : <div className="flex flex-wrap gap-1.5">
+                    {departments.map((d) => {
+                      const on = editing.deptos!.includes(d.name);
+                      return (
+                        <button key={d.name} type="button" onClick={() => setEditing({ ...editing, deptos: on ? editing.deptos!.filter((x) => x !== d.name) : [...editing.deptos!, d.name] })}
+                          className={cn('rounded-full border px-2.5 py-0.5 text-[12.5px]', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-ink hover:bg-field')}>
+                          <span className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: d.color ?? '#6366f1' }} />{d.name}
+                        </button>
+                      );
+                    })}
+                  </div>)}
+            </div>
             <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
               {PERMISSION_GROUPS.map((g) => (
                 <div key={g.label} className="space-y-1.5">

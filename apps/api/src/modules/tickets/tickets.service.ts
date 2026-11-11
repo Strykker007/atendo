@@ -137,6 +137,31 @@ export class TicketsService {
     return u.departmentIds?.length ? [...u.departmentIds] : null;
   }
 
+  /**
+   * Tickets que "me dizem respeito" para o não lido (docs/tickets.md#não-lidos): sou responsável ou
+   * participante, ou está aberto sem responsável num setor que eu atendo (alguém precisa pegar).
+   * Ticket que só vejo por ter `view_all` não acende o menu.
+   */
+  private paraMim(u: AuthUser): Prisma.TicketWhereInput {
+    const s = this.setores(u);
+    const paraPegar: Prisma.TicketWhereInput | null = has(u, 'tickets.manage') ? {} : has(u, 'tickets.handle') ? (s ? { departmentId: { in: s } } : { departmentId: { not: null } }) : null;
+    return { OR: [{ participants: { some: { userId: u.id } } }, ...(paraPegar ? [{ AND: [paraPegar, { status: 'open' as const }, { participants: { none: { role: 'responsible' } } }] }] : [])] };
+  }
+
+  /** Dos tickets dados, os que mudaram depois da última vez que a pessoa abriu (ou nunca abriu). */
+  private async naoLidos(u: AuthUser, rows: { id: string; updatedAt: Date }[]): Promise<Set<string>> {
+    if (!rows.length) return new Set();
+    const lidos = await this.prisma.ticketRead.findMany({ where: { userId: u.id, ticketId: { in: rows.map((r) => r.id) } }, select: { ticketId: true, seenAt: true } });
+    const visto = new Map(lidos.map((l) => [l.ticketId, l.seenAt]));
+    return new Set(rows.filter((r) => { const v = visto.get(r.id); return !v || v < r.updatedAt; }).map((r) => r.id));
+  }
+
+  /** Abriu o detalhe (ou acabou de mexer nele): lido agora. */
+  private async marcarLido(u: AuthUser, ticketId: string) {
+    const agora = new Date();
+    await this.prisma.ticketRead.upsert({ where: { ticketId_userId: { ticketId, userId: u.id } }, create: { ticketId, userId: u.id, seenAt: agora }, update: { seenAt: agora } }).catch(() => undefined);
+  }
+
   private visible(u: AuthUser): Prisma.TicketWhereInput {
     if (has(u, 'tickets.view_all') || has(u, 'tickets.manage')) return { tenantId: u.tenantId };
     const ou: Prisma.TicketWhereInput[] = [{ createdById: u.id }, { participants: { some: { userId: u.id } } }];
@@ -235,7 +260,10 @@ export class TicketsService {
       this.prisma.ticket.findMany({ where, include: LIST_INCLUDE, orderBy: [{ updatedAt: 'desc' }], skip: (page - 1) * PAGE, take: PAGE }),
       this.prisma.ticket.count({ where }),
     ]);
-    return { items: rows.map((t) => this.present(u, t)), total, page, pageSize: PAGE };
+    // não lido só nos que me dizem respeito (os ids vêm do mesmo filtro do resumo)
+    const meus = rows.length ? await this.prisma.ticket.findMany({ where: { AND: [{ id: { in: rows.map((r) => r.id) } }, this.paraMim(u)] }, select: { id: true, updatedAt: true } }) : [];
+    const novos = await this.naoLidos(u, meus);
+    return { items: rows.map((t) => ({ ...this.present(u, t), unread: novos.has(t.id) })), total, page, pageSize: PAGE };
   }
 
   /** Contagens do menu e das abas. */
@@ -254,11 +282,16 @@ export class TicketsService {
       this.prisma.ticket.count({ where: { AND: [base, { status: { in: ['open', 'in_progress'] }, dueAt: { lt: agora } }] } }),
       this.prisma.ticket.count({ where: { AND: [base, paraPegar, { status: 'open' }] } }),
     ]);
-    return { mine, department, onHold, holdExpired, overdue, toPick };
+    // não lidos (docs/tickets.md#não-lidos): os ativos que me dizem respeito e mudaram depois que abri
+    const candidatos = await this.prisma.ticket.findMany({ where: { AND: [base, ativos, this.paraMim(u)] }, select: { id: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 500 });
+    const unread = (await this.naoLidos(u, candidatos)).size;
+    return { mine, department, onHold, holdExpired, overdue, toPick, unread };
   }
 
   async get(u: AuthUser, id: string) {
     const t = await this.load(u, id);
+    // abrir o detalhe é ler; toda escrita também devolve por aqui, então quem mexeu não fica com "não lido"
+    await this.marcarLido(u, id);
     const events = await this.prisma.ticketEvent.findMany({ where: { ticketId: id }, orderBy: { createdAt: 'asc' }, include: { actor: pessoa } });
     const conversa = t.conversationId
       ? await this.prisma.conversation.findUnique({ where: { id: t.conversationId }, select: { id: true, numberId: true, departmentId: true, contact: { select: { name: true, phone: true } } } })

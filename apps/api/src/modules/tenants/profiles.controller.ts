@@ -1,5 +1,6 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsArray, IsObject, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
+import { Prisma } from '@prisma/client';
 import { DEFAULT_PERMISSIONS, PERMISSIONS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -8,11 +9,14 @@ import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
 import { PermissionsService } from '../auth/permissions.service';
 import { grantable } from '../auth/permissions';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
+import { parseAccessTemplate, sanitizeAccessTemplate, type AccessTemplate } from './access-template';
 
 class ProfileDto {
   @IsString() @MaxLength(60) name: string;
   @IsOptional() @IsString() @MaxLength(200) description?: string;
   @IsArray() permissions: string[];
+  /** acesso padrão (números, recebe auto., departamentos); null = tira o padrão. Ver access-template.ts */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsObject() accessTemplate?: Record<string, unknown> | null;
 }
 
 /**
@@ -39,8 +43,26 @@ export class ProfilesController {
     return this.prisma.accessProfile.findMany({
       where: { tenantId: u.tenantId },
       orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
-      select: { id: true, name: true, description: true, permissions: true, isSystem: true, systemRole: true, customized: true, _count: { select: { users: true } } },
+      select: { id: true, name: true, description: true, permissions: true, isSystem: true, systemRole: true, customized: true, accessTemplate: true, _count: { select: { users: true } } },
     });
+  }
+
+  /**
+   * Modelo de acesso recortado ao cliente. "Recebe auto." é hierarquia da conta (só o admin define,
+   * como na tela de Acesso): para os demais, a parte de recebimento fica como estava.
+   */
+  private async template(u: AuthUser, raw: unknown, current: unknown): Promise<Prisma.InputJsonValue | typeof Prisma.DbNull | undefined> {
+    if (raw === undefined) return undefined;
+    const t = parseAccessTemplate(raw);
+    if (!t) return Prisma.DbNull;
+    const [numeros, deptos] = await Promise.all([
+      this.prisma.whatsAppNumber.findMany({ where: { tenantId: u.tenantId, deletedAt: null }, select: { id: true } }),
+      this.prisma.department.findMany({ where: { tenantId: u.tenantId }, select: { id: true } }),
+    ]);
+    const admin = u.role === 'tenant_admin' || u.role === 'super_admin' || !!u.impersonatorId;
+    const antes = parseAccessTemplate(current);
+    const receber: Pick<AccessTemplate, 'receiveAll' | 'receiveNumberIds'> = admin ? t : { receiveAll: antes?.receiveAll ?? true, receiveNumberIds: antes?.receiveNumberIds ?? [] };
+    return sanitizeAccessTemplate({ ...t, ...receber }, numeros.map((n) => n.id), deptos.map((d) => d.id)) as unknown as Prisma.InputJsonValue;
   }
 
   @Post()
@@ -48,8 +70,10 @@ export class ProfilesController {
   async create(@CurrentUser() u: AuthUser, @Body() dto: ProfileDto) {
     const permissions = grantable({ role: u.role, profilePermissions: u.permissions ?? null }, dto.permissions);
     try {
-      return await this.prisma.accessProfile.create({ data: { tenantId: u.tenantId, name: dto.name.trim(), description: dto.description?.trim() || null, permissions } });
-    } catch {
+      const accessTemplate = await this.template(u, dto.accessTemplate, null);
+      return await this.prisma.accessProfile.create({ data: { tenantId: u.tenantId, name: dto.name.trim(), description: dto.description?.trim() || null, permissions, ...(accessTemplate !== undefined && { accessTemplate }) } });
+    } catch (err) {
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) throw err;
       throw new ConflictException('Já existe um perfil com esse nome.');
     }
   }
@@ -63,11 +87,13 @@ export class ProfilesController {
     // o vocabulário do cliente (Porteiro, Supervisor…), pois a referência técnica é systemRole.
     const name = current.systemRole === 'tenant_admin' ? current.name : (dto.name?.trim() ?? current.name);
     const permissions = dto.permissions ? grantable({ role: u.role, profilePermissions: u.permissions ?? null }, dto.permissions) : undefined;
+    // o modelo do Administrador não teria efeito: admin vê tudo
+    const accessTemplate = current.systemRole === 'tenant_admin' ? undefined : await this.template(u, dto.accessTemplate, current.accessTemplate);
 
     const updated = await this.prisma.accessProfile.update({
       where: { id },
       // a partir da primeira edição, o perfil padrão deixa de acompanhar o catálogo
-      data: { name, description: dto.description?.trim() ?? current.description, permissions, ...(permissions && current.isSystem && { customized: true }) },
+      data: { name, description: dto.description?.trim() ?? current.description, permissions, ...(accessTemplate !== undefined && { accessTemplate }), ...(permissions && current.isSystem && { customized: true }) },
     });
     this.permissions.invalidate();
     return updated;

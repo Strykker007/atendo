@@ -1,7 +1,7 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd';
-import { CalendarClock, ChevronLeft, ChevronRight, Plus, Undo2 } from 'lucide-react';
+import { CalendarClock, ChevronLeft, ChevronRight, Plus, Undo2, Unlock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -24,13 +24,30 @@ const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 const dm = (ymd: string) => ymd.slice(8, 10) + '/' + ymd.slice(5, 7);
 const diaSemana = (ymd: string) => DIAS[toDate(ymd).getUTCDay()];
+const fimDeSemana = (ymd: string) => [0, 6].includes(toDate(ymd).getUTCDay());
 const hojeLocal = () => new Date().toLocaleDateString('sv-SE');
+const diaMes = (ymd: string) => `${Number(ymd.slice(8, 10))} de ${MESES[Number(ymd.slice(5, 7)) - 1]}`;
+/** "10 a 16 de novembro" / "27 de outubro a 2 de novembro" */
+const tituloSemana = (f: string, t: string) => f.slice(5, 7) === t.slice(5, 7) ? `${Number(f.slice(8, 10))} a ${diaMes(t)}` : `${diaMes(f)} a ${diaMes(t)}`;
+/** 480 → "8h", 510 → "8h30" */
+const duracao = (min: number) => `${Math.floor(min / 60)}h${min % 60 ? String(min % 60).padStart(2, '0') : ''}`;
 
-/** Cor fixa por pessoa (na ordem da equipe), legível no claro e no escuro. */
-const corDe = (i: number) => {
-  const h = (i * 67) % 360;
-  return { background: `hsl(${h} 70% 50% / 0.14)`, borderColor: `hsl(${h} 60% 45% / 0.55)` };
-};
+/**
+ * Cor fixa por pessoa (na ordem da equipe), usada com parcimônia: só a bolinha e a faixa fina à
+ * esquerda do cartão — o cartão em si é neutro. Matizes escolhidos para ficarem distintos.
+ */
+const MATIZES = [217, 158, 330, 28, 262, 188, 352, 95, 45, 290, 135, 8];
+const corDe = (i: number) => `hsl(${MATIZES[i % MATIZES.length]} 55% ${i >= MATIZES.length ? 38 : 50}%)`;
+
+/** Tela estreita (celular): o mês vira bolinhas e cada dia abre a semana. */
+const QUERY_ESTREITA = '(max-width: 639px)';
+function useEstreita() {
+  return useSyncExternalStore(
+    (cb) => { const m = window.matchMedia(QUERY_ESTREITA); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb); },
+    () => window.matchMedia(QUERY_ESTREITA).matches,
+    () => false,
+  );
+}
 
 type Turno = CalendarShift & { nome: string; cor: number; editavel: boolean };
 type Mover = { turno: Turno; toDate: string };
@@ -42,6 +59,7 @@ type Mover = { turno: Turno; toDate: string };
  */
 export default function CalendarioEscalaPage() {
   const pode = useCan('team.manage');
+  const estreita = useEstreita();
   const [visao, setVisao] = useState<'semana' | 'mes'>('semana');
   const [ref, setRef] = useState(hojeLocal);
   const [pessoa, setPessoa] = useState('');
@@ -69,10 +87,18 @@ export default function CalendarioEscalaPage() {
   const data = cal.data;
 
   const porDia = useMemo(() => agrupar(data, pessoa), [data, pessoa]);
-  const titulo = visao === 'semana'
-    ? `${dm(from)} a ${dm(to)}`
-    : `${MESES[toDate(ref).getUTCMonth()]} de ${toDate(ref).getUTCFullYear()}`;
+  // horas de cada pessoa no período mostrado (no mês, só os dias do mês — a grade tem sobras)
+  const horas = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of data?.shifts ?? []) {
+      if (visao === 'mes' && s.date.slice(0, 7) !== ref.slice(0, 7)) continue;
+      m.set(s.userId, (m.get(s.userId) ?? 0) + s.minutes);
+    }
+    return m;
+  }, [data, visao, ref]);
+  const titulo = visao === 'semana' ? tituloSemana(from, to) : `${MESES[toDate(ref).getUTCMonth()]} de ${toDate(ref).getUTCFullYear()}`;
   const passo = (n: number) => setRef(visao === 'semana' ? addDays(ref, 7 * n) : ymdOf(new Date(Date.UTC(toDate(ref).getUTCFullYear(), toDate(ref).getUTCMonth() + n, 1, 12))));
+  const abrirSemana = (d: string) => { setRef(d); setVisao('semana'); };
 
   function onDragEnd(r: DropResult) {
     if (!r.destination || !data) return;
@@ -87,50 +113,70 @@ export default function CalendarioEscalaPage() {
 
   const pessoas = data?.users ?? [];
   const semEscala = pessoas.filter((p) => !p.scheduleId);
+  const navBtn = 'h-8 grid place-items-center text-muted hover:text-ink hover:bg-field transition-colors';
 
   return (
-    <PageShell width="max-w-6xl">
+    <PageShell width="max-w-7xl">
       <PageHeader
         title="Calendário da escala"
         subtitle="Os turnos de cada dia. Arraste um turno para outro dia para remanejar ou passar para outra pessoa; clique para dar folga."
-        action={<Button onClick={() => setNovo({ date: data?.today ?? hojeLocal() })}><Plus size={14} /> Turno extra</Button>}
+        action={<Button onClick={() => setNovo({ date: data?.today ?? hojeLocal(), userId: pessoa || undefined })}><Plus size={14} /> Turno extra</Button>}
       />
       <EscalasTabs />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg border border-line bg-panel p-0.5">
+      {/* barra: navegação + período à esquerda, Semana/Mês à direita */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex items-center overflow-hidden rounded-xl border border-line bg-panel">
+          <button type="button" className={cn(navBtn, 'w-8')} aria-label="Anterior" onClick={() => passo(-1)}><ChevronLeft size={16} /></button>
+          <button type="button" className={cn(navBtn, 'px-3 border-x border-line text-[13px] font-medium')} onClick={() => setRef(data?.today ?? hojeLocal())}>Hoje</button>
+          <button type="button" className={cn(navBtn, 'w-8')} aria-label="Próximo" onClick={() => passo(1)}><ChevronRight size={16} /></button>
+        </div>
+        <h2 className="font-display text-lg font-semibold text-ink first-letter:uppercase">{titulo}</h2>
+        <div className="ml-auto flex rounded-xl border border-line bg-panel p-0.5">
           {(['semana', 'mes'] as const).map((v) => (
             <button key={v} type="button" onClick={() => setVisao(v)} aria-pressed={visao === v}
-              className={cn('rounded-md px-3 py-1.5 text-[13px] font-medium', visao === v ? 'bg-accent-soft text-accent-ink' : 'text-muted hover:text-ink')}>
+              className={cn('rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors', visao === v ? 'bg-field text-ink' : 'text-muted hover:text-ink')}>
               {v === 'semana' ? 'Semana' : 'Mês'}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1">
-          <button type="button" className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-field" aria-label="Anterior" onClick={() => passo(-1)}><ChevronLeft size={16} /></button>
-          <button type="button" className="rounded-md px-2 py-1 text-[13px] text-muted hover:text-ink hover:bg-field" onClick={() => setRef(data?.today ?? hojeLocal())}>Hoje</button>
-          <button type="button" className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-field" aria-label="Próximo" onClick={() => passo(1)}><ChevronRight size={16} /></button>
-        </div>
-        <p className="font-display font-semibold text-ink capitalize">{titulo}</p>
-        <select className={cn(inputCls, 'w-48 ml-auto')} aria-label="Filtrar por pessoa" value={pessoa} onChange={(e) => setPessoa(e.target.value)}>
-          <option value="">Toda a equipe</option>
-          {pessoas.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
       </div>
 
+      {/* legenda da equipe: bolinha da cor, escala e horas no período; clicar filtra */}
       {!!pessoas.length && (
-        <ul className="flex flex-wrap gap-1.5" aria-label="Legenda">
-          {pessoas.map((p, i) => (
-            <li key={p.id} className="rounded-full border px-2 py-0.5 text-[11.5px] text-ink" style={corDe(i)}>
-              {p.name}{p.scheduleName ? <span className="text-muted"> · {p.scheduleName}</span> : <span className="text-faint"> · sem escala</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {!!semEscala.length && (
-        <p className="text-[12px] text-faint">
-          Sem escala, ninguém é travado por horário: o turno extra de {semEscala.map((p) => p.name).join(', ')} aparece aqui só para organizar.
-        </p>
+        <section className="rounded-2xl border border-line bg-panel p-3" aria-label="Equipe">
+          <div className="mb-2 flex items-center gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Equipe</p>
+            <p className="text-[11px] text-faint">{pessoa ? 'mostrando uma pessoa' : 'clique em alguém para ver só os turnos dela'}</p>
+            {pessoa && <button type="button" className="ml-auto text-[12px] font-medium text-accent-ink hover:underline" onClick={() => setPessoa('')}>Mostrar todos</button>}
+          </div>
+          <ul className="flex flex-wrap gap-1.5">
+            {pessoas.map((p, i) => {
+              const ativo = pessoa === p.id;
+              const h = horas.get(p.id) ?? 0;
+              return (
+                <li key={p.id}>
+                  <button type="button" aria-pressed={ativo} onClick={() => setPessoa(ativo ? '' : p.id)}
+                    className={cn('flex items-center gap-2 rounded-lg border px-2.5 py-1 text-left transition',
+                      ativo ? 'border-line-strong bg-field' : 'border-line hover:bg-field',
+                      pessoa && !ativo && 'opacity-50 hover:opacity-100')}>
+                    <Ponto i={i} />
+                    <span className="text-[12.5px] font-medium text-ink">{p.name}</span>
+                    <span className="text-[11px] text-muted">
+                      {p.scheduleName ?? <span className="text-faint">sem escala</span>}
+                      {h > 0 && <> · <span className="tabular-nums">{duracao(h)}</span></>}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {!!semEscala.length && (
+            <p className="mt-2 border-t border-line pt-2 text-[11.5px] text-faint">
+              Sem escala, ninguém é travado por horário: o turno extra de {semEscala.map((p) => p.name).join(', ')} aparece aqui só para organizar.
+            </p>
+          )}
+        </section>
       )}
 
       {cal.isLoading ? <SkeletonRows /> : !pessoas.length ? (
@@ -138,23 +184,23 @@ export default function CalendarioEscalaPage() {
       ) : (
         <DragDropContext onDragEnd={onDragEnd}>
           {visao === 'semana' ? (
-            <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-              <div className="grid grid-cols-7 gap-2 min-w-[980px]">
-                {dias.map((d) => (
-                  <Coluna key={d} date={d} hoje={d === data?.today} grupo={porDia.get(d)} onAbrir={setAberto} onNovo={() => setNovo({ date: d, userId: pessoa || undefined })}
-                    onDesfazerFolga={(id) => removeExc.mutate(id, { onSuccess: () => toast.ok('Folga desfeita.'), onError: (e) => toast.err(e) })} />
-                ))}
-              </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-7">
+              {dias.map((d) => (
+                <Coluna key={d} date={d} hoje={d === data?.today} passado={!!data && d < data.today} grupo={porDia.get(d)} onAbrir={setAberto} onNovo={() => setNovo({ date: d, userId: pessoa || undefined })}
+                  onDesfazerFolga={(id) => removeExc.mutate(id, { onSuccess: () => toast.ok('Folga desfeita.'), onError: (e) => toast.err(e) })} />
+              ))}
             </div>
           ) : (
-            <div className="rounded-2xl border border-line bg-panel overflow-hidden">
+            <div className="overflow-hidden rounded-2xl border border-line bg-panel">
               <div className="grid grid-cols-7 border-b border-line bg-field/60">
-                {['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom'].map((d) => <p key={d} className="px-2 py-1.5 text-[11.5px] font-medium text-muted uppercase">{d}</p>)}
+                {['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom'].map((d, i) => (
+                  <p key={d} className={cn('px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide sm:text-left', i >= 5 ? 'text-faint' : 'text-muted')}>{d}</p>
+                ))}
               </div>
               <div className="grid grid-cols-7">
                 {dias.map((d) => (
-                  <CelulaMes key={d} date={d} hoje={d === data?.today} foraDoMes={d.slice(0, 7) !== ref.slice(0, 7)} grupo={porDia.get(d)} onAbrir={setAberto}
-                    onNovo={() => setNovo({ date: d, userId: pessoa || undefined })} />
+                  <CelulaMes key={d} date={d} hoje={d === data?.today} foraDoMes={d.slice(0, 7) !== ref.slice(0, 7)} grupo={porDia.get(d)} estreita={estreita}
+                    onAbrir={setAberto} onSemana={() => abrirSemana(d)} onNovo={() => setNovo({ date: d, userId: pessoa || undefined })} />
                 ))}
               </div>
             </div>
@@ -207,28 +253,36 @@ function agrupar(data: ScheduleCalendar | undefined, pessoa: string) {
   return map;
 }
 
+/** Bolinha com a cor da pessoa — o único ponto de cor por pessoa na tela. */
+function Ponto({ i, apagado }: { i: number; apagado?: boolean }) {
+  return <span aria-hidden className={cn('h-2 w-2 shrink-0 rounded-full', apagado && 'opacity-40')} style={{ background: corDe(i) }} />;
+}
+
 function CartaoTurno({ t, index, compacto, onAbrir }: { t: Turno; index: number; compacto?: boolean; onAbrir: (t: Turno) => void }) {
   return (
     <Draggable draggableId={`${t.userId}|${t.date}`} index={index} isDragDisabled={!t.editavel}>
-      {(p) => (
+      {(p, s) => (
         <button
           type="button"
           ref={p.innerRef}
           {...p.draggableProps}
           {...p.dragHandleProps}
           onClick={() => onAbrir(t)}
-          style={{ ...corDe(t.cor), ...p.draggableProps.style }}
-          className={cn('w-full text-left rounded-lg border', compacto ? 'px-1.5 py-0.5 text-[11px] mb-1' : 'px-2 py-1.5 mb-1.5')}
+          style={{ borderLeftColor: corDe(t.cor), ...p.draggableProps.style }}
+          className={cn('w-full rounded-md border border-l-[3px] border-line bg-panel text-left transition-colors hover:bg-field',
+            compacto ? 'mb-1 px-1.5 py-0.5 text-[11px]' : 'mb-1.5 px-2 py-1.5',
+            s.isDragging && 'shadow-lg')}
           title={`${t.nome} · ${t.start}–${t.end}${t.source === 'extra' ? ' · turno extra' : ''}`}
         >
           {compacto ? (
-            <span className="block truncate text-ink"><span className="text-muted">{t.start}</span> {t.nome}</span>
+            <span className="block truncate text-ink"><span className="tabular-nums text-muted">{t.start}</span> {t.nome.split(' ')[0]}{t.source === 'extra' && <span className="text-warn-ink"> +</span>}</span>
           ) : (
             <>
-              <span className="block truncate text-[13px] font-medium text-ink">{t.nome}</span>
-              <span className="block text-[11.5px] text-muted">
-                {t.start}–{t.end}{t.source === 'extra' && <span className="ml-1 rounded bg-warn-soft text-warn-ink px-1">extra</span>}
+              <span className="flex items-center gap-1">
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{t.nome}</span>
+                {t.source === 'extra' && <span className="shrink-0 rounded bg-warn-soft px-1 text-[10px] font-medium text-warn-ink">extra</span>}
               </span>
+              <span className="block text-[11px] tabular-nums text-muted">{t.start}–{t.end} · {duracao(t.minutes)}</span>
             </>
           )}
         </button>
@@ -237,30 +291,44 @@ function CartaoTurno({ t, index, compacto, onAbrir }: { t: Turno; index: number;
   );
 }
 
-function Coluna({ date, hoje, grupo, onAbrir, onNovo, onDesfazerFolga }: { date: string; hoje: boolean; grupo?: Grupo; onAbrir: (t: Turno) => void; onNovo: () => void; onDesfazerFolga: (id: string) => void }) {
+function Coluna({ date, hoje, passado, grupo, onAbrir, onNovo, onDesfazerFolga }: { date: string; hoje: boolean; passado: boolean; grupo?: Grupo; onAbrir: (t: Turno) => void; onNovo: () => void; onDesfazerFolga: (id: string) => void }) {
+  const turnos = grupo?.turnos ?? [];
+  const folgas = grupo?.folgas ?? [];
+  const liberados = grupo?.liberados ?? [];
   return (
-    <div className={cn('rounded-2xl border bg-panel flex flex-col min-h-64', hoje ? 'border-accent' : 'border-line')}>
-      <div className="flex items-center gap-1 px-3 pt-2.5 pb-1.5">
-        <p className={cn('flex-1 text-[12.5px] font-medium', hoje ? 'text-accent-ink' : 'text-ink')}>
-          <span className="capitalize">{diaSemana(date)}</span> <span className="text-muted">{dm(date)}</span>
-        </p>
-        <span className="text-[11px] text-faint">{grupo?.turnos.length ?? 0}</span>
-        <button type="button" className="p-1 rounded text-muted hover:text-ink hover:bg-field" aria-label={`Turno extra em ${dm(date)}`} onClick={onNovo}><Plus size={13} /></button>
+    <div className={cn('flex min-h-40 flex-col rounded-2xl border lg:min-h-80',
+      hoje ? 'border-accent' : 'border-line',
+      fimDeSemana(date) ? 'bg-field/40' : 'bg-panel', passado && !hoje && 'opacity-70')}>
+      <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
+        <span className={cn('grid h-8 w-8 place-items-center rounded-full font-display text-[14px] font-semibold', hoje ? 'bg-accent text-white' : 'text-ink')}>{Number(date.slice(8, 10))}</span>
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className={cn('block text-[11px] font-semibold uppercase tracking-wide', hoje ? 'text-accent-ink' : 'text-muted')}>{diaSemana(date)}{hoje && ' · hoje'}</span>
+          <span className="block text-[11px] text-faint">{turnos.length ? `${turnos.length} no turno` : 'ninguém escalado'}</span>
+        </span>
+        <button type="button" className="rounded-md p-1 text-faint hover:bg-field hover:text-ink" aria-label={`Turno extra em ${dm(date)}`} title="Turno extra neste dia" onClick={onNovo}><Plus size={14} /></button>
       </div>
       <Droppable droppableId={date}>
         {(p, s) => (
-          <div ref={p.innerRef} {...p.droppableProps} className={cn('flex-1 px-2 pb-2 rounded-b-2xl', s.isDraggingOver && 'bg-accent-soft/50')}>
-            {(grupo?.turnos ?? []).map((t, i) => <CartaoTurno key={`${t.userId}|${t.date}`} t={t} index={i} onAbrir={onAbrir} />)}
+          <div ref={p.innerRef} {...p.droppableProps} className={cn('flex-1 rounded-b-2xl p-2 transition-colors', s.isDraggingOver && 'bg-accent-soft/60')}>
+            {turnos.map((t, i) => <CartaoTurno key={`${t.userId}|${t.date}`} t={t} index={i} onAbrir={onAbrir} />)}
             {p.placeholder}
-            {(grupo?.folgas ?? []).map((f) => (
-              <div key={f.id} className="mb-1.5 flex items-center gap-1 rounded-lg border border-dashed border-line px-2 py-1 text-[12px] text-faint">
-                <span className="flex-1 truncate line-through" title={f.reason ?? undefined}>{f.nome}</span>
-                <span>folga</span>
-                <button type="button" className="p-0.5 rounded hover:text-ink" aria-label={`Desfazer folga de ${f.nome}`} onClick={() => onDesfazerFolga(f.id)}><Undo2 size={12} /></button>
-              </div>
-            ))}
-            {(grupo?.liberados ?? []).map((l, i) => (
-              <p key={i} className="mb-1 truncate rounded-md px-2 py-0.5 text-[11px] text-muted" style={corDe(l.cor)}>🔓 {l.nome} · plantão liberado</p>
+            {!turnos.length && !s.isDraggingOver && <p className="py-3 text-center text-[11.5px] text-faint">Sem turnos</p>}
+            {!!folgas.length && (
+              <>
+                <p className="mb-1 mt-2 text-[10.5px] font-semibold uppercase tracking-wide text-faint">Folga</p>
+                {folgas.map((f) => (
+                  <div key={f.id} className="mb-1 flex items-center gap-1.5 rounded-md border border-dashed border-line px-1.5 py-1 text-[12px] text-muted" title={f.reason ?? undefined}>
+                    <Ponto i={f.cor} apagado />
+                    <span className="min-w-0 flex-1 truncate">{f.nome}</span>
+                    <button type="button" className="rounded p-0.5 text-faint hover:bg-field hover:text-ink" aria-label={`Desfazer folga de ${f.nome}`} title="Desfazer folga" onClick={() => onDesfazerFolga(f.id)}><Undo2 size={12} /></button>
+                  </div>
+                ))}
+              </>
+            )}
+            {liberados.map((l, i) => (
+              <p key={i} className="mb-1 flex items-center gap-1.5 truncate rounded-md bg-field px-1.5 py-0.5 text-[11px] text-muted">
+                <Unlock size={11} className="shrink-0" /> {l.nome} · plantão liberado
+              </p>
             ))}
           </div>
         )}
@@ -269,19 +337,48 @@ function Coluna({ date, hoje, grupo, onAbrir, onNovo, onDesfazerFolga }: { date:
   );
 }
 
-function CelulaMes({ date, hoje, foraDoMes, grupo, onAbrir, onNovo }: { date: string; hoje: boolean; foraDoMes: boolean; grupo?: Grupo; onAbrir: (t: Turno) => void; onNovo: () => void }) {
+/** No mês cabem 3 turnos por dia; o resto vira "+N", que abre a semana daquele dia. */
+const MAX_NO_MES = 3;
+
+function CelulaMes({ date, hoje, foraDoMes, grupo, estreita, onAbrir, onSemana, onNovo }: { date: string; hoje: boolean; foraDoMes: boolean; grupo?: Grupo; estreita: boolean; onAbrir: (t: Turno) => void; onSemana: () => void; onNovo: () => void }) {
+  const turnos = grupo?.turnos ?? [];
+  const folgas = grupo?.folgas.length ?? 0;
+  const fundo = cn('group flex min-h-16 flex-col border-b border-r border-line sm:min-h-32 [&:nth-child(7n)]:border-r-0',
+    foraDoMes ? 'bg-field/50' : fimDeSemana(date) ? 'bg-field/25' : '');
+  const numero = (
+    <span className={cn('grid h-6 w-6 place-items-center rounded-full text-[12px] font-medium', hoje ? 'bg-accent text-white' : foraDoMes ? 'text-faint' : 'text-ink')}>{Number(date.slice(8, 10))}</span>
+  );
+
+  // celular: sem espaço para nome — bolinhas; tocar abre a semana
+  if (estreita) {
+    return (
+      <button type="button" className={cn(fundo, 'items-center gap-1 pt-1')} onClick={onSemana} aria-label={`${dm(date)}: ${turnos.length} no turno`}>
+        {numero}
+        <span className="flex flex-wrap justify-center gap-0.5 px-0.5">
+          {turnos.slice(0, 6).map((t) => <span key={t.userId} className="h-1.5 w-1.5 rounded-full" style={{ background: corDe(t.cor) }} />)}
+        </span>
+        {turnos.length > 6 && <span className="text-[9px] text-faint">+{turnos.length - 6}</span>}
+      </button>
+    );
+  }
+
+  const visiveis = turnos.slice(0, MAX_NO_MES);
+  const resto = turnos.length - visiveis.length;
   return (
-    <div className={cn('group border-b border-r border-line min-h-28 flex flex-col', foraDoMes && 'bg-field/40')}>
-      <div className="flex items-center px-1.5 pt-1">
-        <span className={cn('text-[12px] rounded-full w-6 h-6 grid place-items-center', hoje ? 'bg-accent text-white' : foraDoMes ? 'text-faint' : 'text-ink')}>{Number(date.slice(8, 10))}</span>
-        {!!grupo?.folgas.length && <span className="ml-1 text-[10.5px] text-faint" title={grupo.folgas.map((f) => f.nome).join(', ')}>{grupo.folgas.length} folga{grupo.folgas.length > 1 ? 's' : ''}</span>}
-        <button type="button" className="ml-auto p-0.5 rounded text-faint opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-ink" aria-label={`Turno extra em ${dm(date)}`} onClick={onNovo}><Plus size={12} /></button>
+    <div className={fundo}>
+      <div className="flex items-center gap-1 px-1.5 pt-1.5">
+        {numero}
+        {!!folgas && <span className="rounded-full bg-field px-1.5 text-[10px] text-muted" title={grupo!.folgas.map((f) => f.nome).join(', ')}>{folgas} folga{folgas > 1 ? 's' : ''}</span>}
+        <button type="button" className="ml-auto rounded p-0.5 text-faint opacity-0 hover:text-ink focus:opacity-100 group-hover:opacity-100" aria-label={`Turno extra em ${dm(date)}`} onClick={onNovo}><Plus size={12} /></button>
       </div>
       <Droppable droppableId={date}>
         {(p, s) => (
-          <div ref={p.innerRef} {...p.droppableProps} className={cn('flex-1 px-1 pb-1 max-h-36 overflow-y-auto', s.isDraggingOver && 'bg-accent-soft/50')}>
-            {(grupo?.turnos ?? []).map((t, i) => <CartaoTurno key={`${t.userId}|${t.date}`} t={t} index={i} compacto onAbrir={onAbrir} />)}
+          <div ref={p.innerRef} {...p.droppableProps} className={cn('flex-1 px-1 pb-1 pt-1 transition-colors', s.isDraggingOver && 'bg-accent-soft/60')}>
+            {visiveis.map((t, i) => <CartaoTurno key={`${t.userId}|${t.date}`} t={t} index={i} compacto onAbrir={onAbrir} />)}
             {p.placeholder}
+            {resto > 0 && (
+              <button type="button" className="w-full rounded px-1.5 text-left text-[11px] font-medium text-muted hover:bg-field hover:text-ink" onClick={onSemana}>+{resto} {resto > 1 ? 'outros' : 'outro'}</button>
+            )}
           </div>
         )}
       </Droppable>

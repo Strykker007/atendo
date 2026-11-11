@@ -37,6 +37,8 @@ describe('canReceiveTransfer', () => {
 
   it('departamento restrito: não recebe conversa de outro departamento', () => {
     expect(canReceiveTransfer(user({ departmentIds: ['vendas'] }), { numberId: 'n3', departmentId: 'suporte' }, companyNumbers)).toBe(false);
-    expect(canReceiveTransfer(user({ departmentIds: ['vendas'], permissions: ['conversations.view_all'] }), { numberId: 'n3', departmentId: 'suporte' }, companyNumbers)).toBe(true);
+    // hierarquia (docs/departamentos.md#hierarquia): ver toda a equipe não atravessa departamento
+    expect(canReceiveTransfer(user({ departmentIds: ['vendas'], permissions: ['conversations.view_all'] }), { numberId: 'n3', departmentId: 'suporte' }, companyNumbers)).toBe(false);
+    expect(canReceiveTransfer(user({ departmentIds: ['vendas'], role: 'tenant_admin' }), { numberId: 'n3', departmentId: 'suporte' }, companyNumbers)).toBe(true);
   });
 });

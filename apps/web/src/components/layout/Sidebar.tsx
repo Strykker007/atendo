@@ -90,12 +90,12 @@ const naRota = (path: string, r: string) => path === r || path.startsWith(`${r}/
 /** Menu lateral: expansível ou recolhido só com ícones. Fundo escuro nos dois temas. */
 export function Sidebar() {
   const path = usePathname();
-  const { sidebarCollapsed: collapsed, toggleSidebar, numberId } = useUI();
+  const { sidebarCollapsed: collapsed, toggleSidebar, numberIds } = useUI();
   const versao = useAppVersion();
   const pending = useNav((s) => s.pending);
   const mode = useTheme((s) => s.mode);
   const me = useMe();
-  const counts = useConversationCounts(numberId);
+  const counts = useConversationCounts(numberIds);
   const minhas = usePermissions();
   const permitido = (p: Permission) => minhas.includes(p);
   const usage = useUsage();
@@ -115,6 +115,9 @@ export function Sidebar() {
 
   async function logout() {
     setLeaving(true);
+    // "devolver atendimentos de quem saiu" ligado na empresa: sair do painel devolve os abertos para a
+    // fila na hora (docs/redistribuicao-automatica.md#saiu-do-plantão). Desligado, a API não mexe
+    await api('/me/shift/handoff?auto=1', { method: 'POST' }).catch(() => undefined);
     await api('/auth/logout', { method: 'POST' }).catch(() => undefined);
     setAccessToken(null);
     window.location.href = '/login';
@@ -154,7 +157,9 @@ export function Sidebar() {
   // o Painel do parceiro é prefixo das outras telas dele: só ativo na própria rota
   const estaAtivo = (i: NavItem) => (target ? target === i.href : i.href === '/parceiro' ? path === i.href : rotasDo(i).some((r) => naRota(path, r)));
   // tickets sem responsável no meu setor (aberto pelo fluxo, pela portaria…): alguém precisa pegar (docs/tickets.md#no-painel)
-  const tickets = useTicketsSummary(me.data?.role !== 'super_admin' && !!usage.data?.limits?.features?.includes('tickets') && (['tickets.handle', 'tickets.manage'] as Permission[]).some(permitido)).data?.toPick ?? 0;
+  // número do menu = tickets NÃO LIDOS que me dizem respeito (novo pra mim, comentário, transferência…),
+  // como as conversas (docs/tickets.md#não-lidos). Qualquer um que atua em ticket vê, não só quem pega
+  const tickets = useTicketsSummary(me.data?.role !== 'super_admin' && !!usage.data?.limits?.features?.includes('tickets') && (['tickets.create', 'tickets.handle', 'tickets.manage'] as Permission[]).some(permitido)).data?.unread ?? 0;
   const badgeDe = (i: NavItem) => (i.href === '/conversas' && waiting > 0 ? waiting : i.href.startsWith('/escalas') && pedidos > 0 ? pedidos : i.href === '/tickets' && tickets > 0 ? tickets : null);
 
   return (

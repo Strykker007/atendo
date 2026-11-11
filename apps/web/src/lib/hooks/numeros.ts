@@ -12,6 +12,7 @@ import type { MessageTemplate, TemplateValues } from '@atendo/shared';
 import { receiveSystemNotice, type SystemNotice } from './avisos';
 import { playMessageSound, unlockMessageSound } from '../message-sound';
 import { useUI } from '../store';
+import { alertInternalMessage } from '../internal-alert';
 import { toast } from '@/components/ui/Toast';
 import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
 import { receiveCall, type CallEvent } from '@/components/layout/CallAlert';
@@ -71,7 +72,17 @@ export const useConnectNumber = () => {
 export const useUpdateNumber = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; label?: string; color?: string; isActive?: boolean; sendDelay?: SendDelayProfile; sendDailyLimit?: number; campaignDailyLimit?: number; endWarmup?: boolean; sendLimits?: Partial<SendLimits> | null; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    // reservar muda quem enxerga quais conversas: listas e contadores recarregam
+    onSettled: (_d, _e, v) => { if (v.defaultDepartmentId !== undefined) qc.invalidateQueries({ queryKey: ['departments'] }); if (v.reserved !== undefined || v.defaultDepartmentId !== undefined) { qc.invalidateQueries({ queryKey: ['conversations'] }); qc.invalidateQueries({ queryKey: ['agents'] }); } },
+    mutationFn: ({ id, ...body }: { id: string; label?: string; color?: string; isActive?: boolean; reserved?: boolean; defaultDepartmentId?: string | null; sendDelay?: SendDelayProfile; sendDailyLimit?: number; campaignDailyLimit?: number; endWarmup?: boolean; sendLimits?: Partial<SendLimits> | null; infraCostMonth?: number }) => api(`/numbers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: invalidateNumbers(qc),
+  });
+};
+/** Quem recebe atendimento automático do número (docs/distribuicao-por-numero.md). */
+export const useSetNumberReceivers = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, userIds }: { id: string; userIds: string[] }) => api<{ receiverIds: string[] }>(`/numbers/${id}/receivers`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
     onSuccess: invalidateNumbers(qc),
   });
 };
@@ -261,8 +272,9 @@ export function useRealtime() {
       upsertInternalMessage(qc, m);
       const eu = qc.getQueryData<{ id: string }>(['me'])?.id;
       // canal Suporte não aparece no widget do cliente: não toca por uma conversa que ele não vê
-      const suporte = qc.getQueryData<{ id: string; isSupport?: boolean }[]>(['internal-chats'])?.some((c) => c.id === m.chatId && c.isSupport);
-      if (m.authorId !== eu && !suporte && !useUI.getState().soundMuted) playMessageSound();
+      const chat = qc.getQueryData<{ id: string; name: string; isGroup: boolean; isSupport?: boolean }[]>(['internal-chats'])?.find((c) => c.id === m.chatId);
+      // aviso de sistema ("Ana adicionou Bruno") não chama atenção; o resto ganha som próprio + cartão
+      if (m.authorId !== eu && !chat?.isSupport && !m.system) alertInternalMessage(m, chat);
     });
     socket.on('internal_chat', () => { qc.invalidateQueries({ queryKey: ['internal-chats'] }); });
     // canal de suporte, lado do dono (sala `owners`): mensagem de qualquer cliente

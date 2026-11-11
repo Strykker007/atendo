@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ACCESS_BLOCK_MESSAGES, api, ApiError, setAccessToken, SESSION_EXPIRED_MESSAGE } from '@/lib/api';
 import { AccessRequestModal } from '@/components/auth/AccessRequestModal';
 import { Button } from '@/components/ui/Button';
+import { useUI } from '@/lib/store';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,6 +32,8 @@ export default function LoginPage() {
     try {
       const r = await api<{ accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }, false);
       setAccessToken(r.accessToken);
+      // filtro de números das conversas volta ao padrão de quem entrou (computador compartilhado)
+      useUI.getState().resetNumbersOnLogin();
       // só caminho interno: `next` vem da URL e não pode virar redirecionamento para fora
       const next = new URLSearchParams(location.search).get('next');
       router.replace(next && /^\/(?![\/\\])/.test(next) ? next : '/conversas');

@@ -11,6 +11,8 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { UsageService } from '../billing/usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
+import { GeminiProvider } from './providers/gemini.provider';
+import type { Prisma } from '@prisma/client';
 
 interface Credentials { apiKey: string }
 
@@ -36,6 +38,7 @@ export class AiOwnKeyService {
     private readonly crypto: CryptoService,
     private readonly usage: UsageService,
     private readonly registry: AiProviderRegistry,
+    private readonly gemini: GeminiProvider,
   ) {}
 
   /** Chave em uso: gravada **e** o plano inclui. Perdeu o recurso = volta para a IA da plataforma. */
@@ -97,6 +100,35 @@ export class AiOwnKeyService {
     return this.status(tenantId);
   }
 
+  /**
+   * Uso da chave própria hoje e no mês (dia de São Paulo) + situação dos modelos do Gemini
+   * (docs/15-ia.md#uso-da-chave-própria). "No limite" = chamadas que esbarraram na cota do
+   * fornecedor (o agente tenta de novo depois); "pelo saldo" = o grátis acabou e o saldo de IA pagou.
+   */
+  async todayUsage(tenantId: string) {
+    const own = await this.resolve(tenantId);
+    const now = new Date();
+    const today = new Date(`${now.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })}T00:00:00-03:00`);
+    const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const count = (since: Date, extra: Prisma.AiUsageWhereInput) => this.prisma.aiUsage.count({ where: { tenantId, occurredAt: { gte: since }, kind: { not: 'knowledge' }, ...extra } });
+    const limited = { ownKey: true, OR: [{ error: { contains: 'limite' } }, { error: { contains: 'quota', mode: 'insensitive' as const } }] };
+    const [okToday, limitedToday, failedToday, creditToday, okMonth, creditMonth] = await Promise.all([
+      count(today, { ownKey: true, error: null }),
+      count(today, limited),
+      count(today, { ownKey: true, NOT: [{ error: null }, limited] }),
+      count(today, { error: null, creditBrl: { gt: 0 } }),
+      count(month, { ownKey: true, error: null }),
+      count(month, { error: null, creditBrl: { gt: 0 } }),
+    ]);
+    const models = own?.provider === 'gemini' ? await this.gemini.state(own.apiKey, own.model) : [];
+    return {
+      provider: own?.provider ?? null,
+      today: { answered: okToday, limited: limitedToday, failed: failedToday, viaCredit: creditToday },
+      month: { answered: okMonth, viaCredit: creditMonth },
+      models,
+    };
+  }
+
   async remove(tenantId: string) {
     const { count } = await this.prisma.aiCredential.deleteMany({ where: { tenantId } });
     if (!count) throw new NotFoundException('Nenhuma chave gravada');
@@ -121,6 +153,11 @@ export class AiOwnKeyController {
   @Get()
   status(@CurrentUser() u: AuthUser) {
     return this.keys.status(u.tenantId);
+  }
+
+  @Get('usage')
+  usage(@CurrentUser() u: AuthUser) {
+    return this.keys.todayUsage(u.tenantId);
   }
 
   @Put()

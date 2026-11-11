@@ -7,11 +7,13 @@ import { BillingModule } from '../billing/billing.module';
 import { AiController } from './ai.controller';
 import { AiAgentsController, AiAgentsService } from './ai-agents';
 import { AiOwnKeyController, AiOwnKeyService } from './ai-own-key';
+import { AiCreditsAdminController, AiCreditsController, AiCreditsService } from './ai-credits';
 import { AiService } from './ai.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
 import { AnthropicProvider } from './providers/anthropic.provider';
 import { OpenAiProvider } from './providers/openai.provider';
+import { GeminiProvider } from './providers/gemini.provider';
 import { KnowledgeService } from './knowledge.service';
 import { embedModel, embeddingsOn } from './providers/embeddings';
 
@@ -46,8 +48,8 @@ class AiProcessor extends TrackedWorkerHost {
 /** IA: copiloto do atendente, agentes com etapas (docs/agente-ia.md) e motor de fluxos (AiService exportado). */
 @Module({
   imports: [BullModule.registerQueue({ name: QUEUE_AI, defaultJobOptions: { removeOnComplete: 20, removeOnFail: 50 } }), AuthModule, BillingModule],
-  controllers: [AiController, AiAgentsController, AiOwnKeyController],
-  providers: [AiService, AiAgentsService, KnowledgeService, AiOwnKeyService, AiUsageService, AiProviderRegistry, AnthropicProvider, OpenAiProvider, AiReconcileScheduler, AiProcessor],
+  controllers: [AiController, AiAgentsController, AiOwnKeyController, AiCreditsController, AiCreditsAdminController],
+  providers: [AiService, AiAgentsService, KnowledgeService, AiOwnKeyService, AiCreditsService, AiUsageService, AiProviderRegistry, AnthropicProvider, OpenAiProvider, GeminiProvider, AiReconcileScheduler, AiProcessor],
   exports: [AiService, AiUsageService, AiAgentsService],
 })
 export class AiModule {}

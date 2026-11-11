@@ -10,6 +10,7 @@ import { useFinance, useMe, type DiscountGrant, type DiscountSource } from '@/li
 import { Button } from '@/components/ui/Button';
 import { useBrand } from '@/lib/brand-context';
 import { PixMigration } from '@/components/billing/PixMigration';
+import { AiCreditsAdmin } from '@/components/billing/AiCreditsAdmin';
 import { ClientCostsTab } from '@/components/billing/ClientCostsTab';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -25,7 +26,7 @@ const Tip = ({ active, payload, label }: { active?: boolean; payload?: { name: s
   </div>
 ) : null;
 
-type Tab = 'visao' | 'teste' | 'faturas' | 'descontos' | 'margem' | 'pix';
+type Tab = 'visao' | 'teste' | 'faturas' | 'descontos' | 'margem' | 'pix' | 'ia';
 
 const ORIGEM: Record<DiscountSource, string> = { checkout: 'Checkout', tenant_create: 'Novo cliente', manual: 'Dono, no cliente', bulk: 'Dono, aplicar a todos', plan_return: 'Voltou ao plano' };
 const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '');
@@ -91,7 +92,7 @@ export default function AdminPage() {
         {/* fechamento do mês: a receber, atrasados, custos, folha e parte de cada sócio (docs/36) */}
         <Link href="/admin/fechamento" className="inline-flex items-center gap-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white px-3 py-2 text-sm font-medium"><Landmark size={15} /> Fechamento</Link>
         <div className="flex items-center gap-1 rounded-lg bg-field p-0.5 text-sm">
-          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Custo por cliente'], ['pix', 'Cobrança por Pix']] as [Tab, string][]).map(([t, l]) => (
+          {([['visao', 'Visão geral'], ['teste', 'Em teste'], ['faturas', 'Faturas'], ['descontos', 'Descontos'], ['margem', 'Custo por cliente'], ['pix', 'Cobrança por Pix'], ['ia', 'Saldo de IA']] as [Tab, string][]).map(([t, l]) => (
             <button key={t} onClick={() => setTab(t)} className={cn('px-3 py-1.5 rounded-md font-medium', tab === t ? 'bg-panel shadow-sm text-ink' : 'text-muted hover:text-ink')}>{l}</button>
           ))}
         </div>
@@ -101,6 +102,7 @@ export default function AdminPage() {
       {fin.isLoading && <SkeletonCards count={4} />}
 
       {tab === 'pix' && <PixMigration />}
+      {tab === 'ia' && <AiCreditsAdmin />}
 
       {d && tab === 'visao' && (
         <>

@@ -58,7 +58,7 @@ const OverviewQuery = z.object({
   companyId: ReportCompany,
 });
 /** Linha do comparativo por empresa (`GET /reports/companies`). */
-type KpisDoEscopo = { conversations: number; closed: number; waitingNow: number; avgFirstResponseMin: number | null; won: number; lost: number; revenue: number; avgTicket: number | null; winRate: number | null };
+type KpisDoEscopo = { conversations: number; closed: number; waitingNow: number; avgFirstResponseMin: number | null; medianFirstResponseMin: number | null; won: number; lost: number; revenue: number; avgTicket: number | null; winRate: number | null };
 
 /** `numberIds` = escopo de números da pessoa/empresa selecionada (`escopoDe`); ausente = todos do cliente */
 type Filtro = { tagIds?: string[]; agentId?: string; numberIds?: string[] };
@@ -196,7 +196,7 @@ export class ReportsController {
       () => this.prisma.conversation.count({ where: { ...conv, status: 'in_progress' } }),
       () => this.prisma.message.count({ where: { direction: 'in', createdAt: { gte: from, lt: to }, conversation: conv } }),
       () => this.prisma.message.count({ where: { direction: 'out', internal: false, createdAt: { gte: from, lt: to }, conversation: conv } }),
-      () => this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }, nums),
+      () => this.firstResponse(t, base, nums),
       () => this.query(t, { ...base, metric: 'conversations', groupBy: 'day' }, nums),
       // quem encerrou no período (um encerramento = um atendimento); pelo dono ATUAL da conversa
       // ficavam de fora os atendimentos já fechados e os de quem saiu da fila
@@ -212,7 +212,6 @@ export class ReportsController {
       .filter((v) => !filtro.agentId || v.userId === filtro.agentId);
     const wonTotal = vendas.reduce((a, v) => a + Number(v.won), 0);
     const revenueTotal = Math.round(vendas.reduce((a, v) => a + Number(v.revenue) * 100, 0)) / 100;
-    const respVals = firstResp.filter((r) => r.value > 0).map((r) => r.value);
     // atendimentos INICIADOS no período (conversa nova + reaberta): cada um cai em um dia só
     const total = byDay.reduce((a, r) => a + r.value, 0);
     const [sales, lostReasons] = await Promise.all([this.sales(t, from, to, filtro), this.load.run(() => this.lostReasons(t, from, to, filtro))]);
@@ -225,7 +224,10 @@ export class ReportsController {
         inProgressNow,
         messagesIn: msgsIn,
         messagesOut: msgsOut,
-        avgFirstResponseMin: respVals.length ? respVals.reduce((a, b) => a + b, 0) / respVals.length : null,
+        avgFirstResponseMin: firstResp.avg,
+        /** mediana: o valor "típico" — a média sobe muito com poucos atendimentos que esperaram a noite toda */
+        medianFirstResponseMin: firstResp.median,
+        firstResponseCount: firstResp.count,
         won: wonTotal,
         lost,
         revenue: revenueTotal,
@@ -289,6 +291,22 @@ export class ReportsController {
     };
   }
 
+  /**
+   * 1ª resposta do período inteiro (docs/relatorios-desempenho.md#1ª-resposta): média e mediana sobre
+   * TODOS os atendimentos com resposta — antes era a média das médias por situação da conversa, sem peso.
+   */
+  private async firstResponse(t: string, base: Omit<ReportDefinition, 'metric' | 'groupBy'>, nums?: string[]) {
+    const def = { ...base, metric: 'avg_first_response_min' as const, groupBy: 'status' as const };
+    const [avg, median, count] = await Promise.all([
+      this.query(t, def, nums, { overall: true }),
+      this.query(t, def, nums, { overall: true, median: true }),
+      this.query(t, def, nums, { overall: true, count: true }),
+    ]);
+    const n = count[0]?.value ?? 0;
+    // sem nenhum atendimento respondido no período: "—" de verdade, não zero
+    return { avg: n ? avg[0].value : null, median: n ? median[0].value : null, count: n };
+  }
+
   /** Indicadores do comparativo por empresa — a mesma régua dos cartões da visão pronta. */
   private async kpisDoEscopo(t: string, from: Date, to: Date, filtro: Filtro & { numberIds: string[] }): Promise<KpisDoEscopo> {
     const base = { from, to, filters: { tagIds: filtro.tagIds, agentId: filtro.agentId }, chart: 'bar' as const };
@@ -307,18 +325,18 @@ export class ReportsController {
       () => this.prisma.conversationEvent.count({ where: fechou }),
       () => this.prisma.conversationEvent.count({ where: { ...fechou, outcome: 'lost' } }),
       () => this.prisma.conversation.count({ where: { tenantId: t, numberId: { in: nums }, ticketExempt: false, status: 'waiting', ...(filtro.agentId && { assigneeId: filtro.agentId }) } }),
-      () => this.query(t, { ...base, metric: 'avg_first_response_min', groupBy: 'status' }, nums),
+      () => this.firstResponse(t, base, nums),
       () => this.prisma.$queryRaw<{ userId: string; won: number; revenue: number }[]>(vendasPorConsultorSql(t, from, to, filtro.tagIds ? this.eventoTemTag(filtro.tagIds) : undefined, nums)),
     ]);
     const v = vendas.filter((x) => !filtro.agentId || x.userId === filtro.agentId);
     const won = v.reduce((a, x) => a + Number(x.won), 0);
     const revenue = Math.round(v.reduce((a, x) => a + Number(x.revenue) * 100, 0)) / 100;
-    const resp = firstResp.filter((r) => r.value > 0).map((r) => r.value);
     return {
       conversations: iniciados.reduce((a, r) => a + r.value, 0),
       closed,
       waitingNow,
-      avgFirstResponseMin: resp.length ? resp.reduce((a, b) => a + b, 0) / resp.length : null,
+      avgFirstResponseMin: firstResp.avg,
+      medianFirstResponseMin: firstResp.median,
       won,
       lost,
       revenue,
@@ -741,10 +759,13 @@ export class ReportsController {
    * contagens de mensagens. Conversa de contato isento de ticket (`ticketExempt`) fica de fora
    * de todas, inclusive das mensagens (docs/contatos-isentos.md).
    */
-  private async query(tenantId: string, d: ReportDefinition, numberIds?: string[]): Promise<{ label: string; value: number }[]> {
+  private async query(tenantId: string, d: ReportDefinition, numberIds?: string[], opts: { overall?: boolean; median?: boolean; count?: boolean } = {}): Promise<{ label: string; value: number }[]> {
     const porEncerramento = ['closed', 'revenue', 'won', 'lost', 'win_rate'].includes(d.metric);
     const usaMensagens = d.metric === 'messages_in' || d.metric === 'messages_out';
-    const porInicio = d.metric === 'conversations';
+    // 1ª resposta é medida por ATENDIMENTO (conversa nova ou reaberta), como o volume — antes só
+    // contava conversas criadas no período e o cliente com base antiga via "—" (docs/relatorios-desempenho.md#1ª-resposta)
+    const primeiraResposta = d.metric === 'avg_first_response_min';
+    const porInicio = d.metric === 'conversations' || primeiraResposta;
     // instante que cai na janela (e define o dia/semana/mês do agrupamento)
     const quando = porEncerramento ? Prisma.sql`e."createdAt"` : usaMensagens ? Prisma.sql`m."createdAt"` : porInicio ? Prisma.sql`i.em` : Prisma.sql`c."createdAt"`;
     const dim = {
@@ -762,6 +783,7 @@ export class ReportsController {
       // motivo do encerramento (só faz sentido em métrica de encerramento)
       reason: porEncerramento ? Prisma.sql`coalesce(cr.name, '(sem motivo)')` : Prisma.sql`'(só em encerramentos)'`,
     }[d.groupBy];
+    const dimFinal = opts.overall ? Prisma.sql`'total'` : dim;
 
     // com o join de tags uma linha vira várias: as contagens são por id distinto
     const metric = {
@@ -769,7 +791,12 @@ export class ReportsController {
       // importada do histórico do provider não é atendimento feito pelo painel
       messages_in: Prisma.sql`count(distinct m.id) filter (where m.direction = 'in' and not m.imported)`,
       messages_out: Prisma.sql`count(distinct m.id) filter (where m.direction = 'out' and not m.internal and not m.imported)`,
-      avg_first_response_min: Prisma.sql`avg(extract(epoch from (fr.first_out - c."createdAt")) / 60)`,
+      // da 1ª mensagem do contato no atendimento até a 1ª resposta HUMANA (sem resposta ainda = fora)
+      avg_first_response_min: opts.count
+        ? Prisma.sql`count(*)`
+        : opts.median
+        ? Prisma.sql`percentile_cont(0.5) within group (order by extract(epoch from (fo.first_out - fi.first_in)) / 60)`
+        : Prisma.sql`avg(extract(epoch from (fo.first_out - fi.first_in)) / 60)`,
       closed: Prisma.sql`count(distinct e.id)`,
       // por tag, a venda com duas tags entra nas duas barras (uma vez em cada) — é o esperado
       revenue: Prisma.sql`coalesce(sum(e."outcomeValue"), 0)`,
@@ -825,14 +852,25 @@ export class ReportsController {
         ? Prisma.sql`left join lateral (select distinct x as id from unnest(e."tagIds" || e."tagSnapshot") as x) etid on true left join tags t on t.id = etid.id`
         : Prisma.sql`left join conversation_tags ct on ct."conversationId" = c.id left join tags t on t.id = ct."tagId"`);
     }
-    if (d.metric === 'avg_first_response_min') {
-      joins.push(Prisma.sql`left join lateral (
-        select min(mo."createdAt") as first_out from messages mo where mo."conversationId" = c.id and mo.direction = 'out' and not mo.imported
-      ) fr on true`);
+    if (primeiraResposta) {
+      // relógio: a 1ª mensagem do contato a partir do início do atendimento (a reabertura é gravada
+      // logo depois da mensagem que a causou: 2 min de folga). Atendimento puxado pela equipe, sem
+      // mensagem do contato, não tem espera para medir.
+      // resposta: 1ª enviada depois disso por PESSOA — pelo painel (`authorId`) ou pelo celular
+      // (`raw` do provider). Robô, boas-vindas e fluxo não têm nenhum dos dois e não contam
+      joins.push(Prisma.sql`join lateral (
+        select min(mi."createdAt") as first_in from messages mi
+        where mi."conversationId" = c.id and mi.direction = 'in' and not mi.imported and mi."createdAt" >= i.em - interval '2 minutes'
+      ) fi on fi.first_in is not null`);
+      joins.push(Prisma.sql`join lateral (
+        select min(mo."createdAt") as first_out from messages mo
+        where mo."conversationId" = c.id and mo.direction = 'out' and not mo.internal and not mo.imported
+          and (mo."authorId" is not null or mo.raw is not null) and mo."createdAt" >= fi.first_in
+      ) fo on fo.first_out is not null`);
     }
 
     const rows = await this.prisma.$queryRaw<{ label: string; value: number | null }[]>(Prisma.sql`
-      select ${dim} as label, ${metric}::float as value
+      select ${dimFinal} as label, ${metric}::float as value
       from conversations c
       ${joins.length ? Prisma.join(joins, '\n') : Prisma.empty}
       where ${Prisma.join(filters, ' and ')}

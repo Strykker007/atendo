@@ -29,7 +29,8 @@ function fakePrisma(rows: Row[]) {
     count: async ({ where }: any) => rows.filter((r) => matches(r, where)).length,
     update: async ({ where, data }: any) => { const r = rows.find((x) => x.id === where.id)!; Object.assign(r, data); return pick(r); },
   };
-  return { user, refreshToken: { create: async () => ({}) } };
+  // sem número reservado: o escopo de números fica como está
+  return { user, refreshToken: { create: async () => ({}) }, whatsAppNumber: { findMany: async () => [] } };
 }
 
 const at = (n: number) => new Date(2026, 9, 23, 0, n);

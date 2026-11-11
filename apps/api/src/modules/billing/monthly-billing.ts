@@ -79,6 +79,9 @@ export interface ReminderMail {
   payUrl: string;
   /** página da cobrança no Asaas (QR, boleto/cartão) */
   invoiceUrl: string | null;
+  /** assinatura por boleto: linha digitável e PDF */
+  boletoLine?: string | null;
+  boletoUrl?: string | null;
 }
 
 /** Assunto, texto e HTML do lembrete: valor, vencimento, QR e o código para copiar. */
@@ -91,7 +94,9 @@ export function reminderMail(m: ReminderMail) {
     `Valor: ${brl(m.value)}`,
     `Vencimento: ${dataBR(m.dueDate)}`,
     '',
-    ...(m.pixPayload ? ['Pix copia e cola:', m.pixPayload, ''] : []),
+    ...(m.boletoLine ? ['Linha digitável do boleto:', m.boletoLine, ''] : []),
+    ...(m.boletoUrl ? ['Boleto (PDF):', m.boletoUrl, ''] : []),
+    ...(m.pixPayload ? [m.boletoLine || m.boletoUrl ? 'Ou pague por Pix (copia e cola):' : 'Pix copia e cola:', m.pixPayload, ''] : []),
     'Pagar pelo painel:',
     m.payUrl,
     ...(m.invoiceUrl ? ['', 'Ou pela página da cobrança:', m.invoiceUrl] : []),
@@ -101,8 +106,11 @@ export function reminderMail(m: ReminderMail) {
   const botao = (href: string, rotulo: string) => `<a href="${esc(href)}" style="background:#2f5bea;color:#fff;padding:11px 18px;border-radius:8px;text-decoration:none;display:inline-block;font-weight:600">${esc(rotulo)}</a>`;
   const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;color:#1e2433;max-width:560px;margin:0 auto;padding:24px">
 <h2 style="font-size:19px;margin:0 0 6px">Sua mensalidade ${esc(quando)}</h2>
-<p style="margin:0 0 18px;color:#4b5563">${esc(m.brand)} · pagamento por Pix</p>
+<p style="margin:0 0 18px;color:#4b5563">${esc(m.brand)} · pagamento por ${m.boletoLine || m.boletoUrl ? 'boleto ou Pix' : 'Pix'}</p>
 <table style="border-collapse:collapse;margin:0 0 18px;font-size:15px"><tr><td style="padding:4px 16px 4px 0;color:#6b7280">Valor</td><td style="padding:4px 0;font-weight:700;font-size:18px">${esc(brl(m.value))}</td></tr><tr><td style="padding:4px 16px 4px 0;color:#6b7280">Vencimento</td><td style="padding:4px 0;font-weight:600">${esc(dataBR(m.dueDate))}</td></tr></table>
+${m.boletoLine ? `<p style="margin:0 0 6px;color:#4b5563">Linha digitável do boleto:</p><div style="font-family:Menlo,Consolas,monospace;font-size:13px;word-break:break-all;background:#f3f4f6;border-radius:8px;padding:12px;margin:0 0 10px">${esc(m.boletoLine)}</div>` : ''}
+${m.boletoUrl ? `<p style="margin:0 0 18px">${botao(m.boletoUrl, 'Baixar boleto (PDF)')}</p>` : ''}
+${m.qrUrl && (m.boletoLine || m.boletoUrl) ? `<p style="margin:0 0 6px;color:#4b5563;font-weight:600">Prefere Pix? Cai na hora:</p>` : ''}
 ${m.qrUrl ? `<p style="margin:0 0 6px;color:#4b5563">Aponte a câmera do app do banco:</p><img src="${esc(m.qrUrl)}" width="220" height="220" alt="QR Code Pix" style="display:block;border:1px solid #e5e7eb;border-radius:12px;margin:0 0 18px">` : ''}
 ${m.pixPayload ? `<p style="margin:0 0 6px;color:#4b5563">Ou copie o código Pix (copia e cola):</p><div style="font-family:Menlo,Consolas,monospace;font-size:12px;word-break:break-all;background:#f3f4f6;border-radius:8px;padding:12px;margin:0 0 18px">${esc(m.pixPayload)}</div>` : ''}
 <p style="margin:0 0 10px">${botao(m.payUrl, 'Pagar pelo painel')}</p>

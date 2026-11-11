@@ -13,7 +13,7 @@ import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
 
 // ---------- Tipos da API v3 do Asaas (só o que usamos) ----------
 
-export type AsaasBillingType = 'PIX' | 'CREDIT_CARD';
+export type AsaasBillingType = 'PIX' | 'BOLETO' | 'CREDIT_CARD';
 
 export interface AsaasCustomerInput {
   name?: string;
@@ -54,6 +54,8 @@ export interface AsaasPayment {
   dueDate: string;
   paymentDate?: string | null;
   invoiceUrl?: string | null;
+  /** PDF do boleto (cobrança BOLETO/UNDEFINED) */
+  bankSlipUrl?: string | null;
   description?: string | null;
   externalReference?: string | null;
   deleted?: boolean;
@@ -84,6 +86,8 @@ export interface PaymentView {
   dueDate: string;
   invoiceUrl: string | null;
   pix: { encodedImage: string; payload: string; expirationDate: string } | null;
+  /** boleto registrado no CPF/CNPJ do cliente: PDF + linha digitável */
+  boleto: { url: string | null; line: string | null } | null;
 }
 
 const PAID = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
@@ -97,6 +101,8 @@ export const BULK_REF = 'bulk:';
 const ymd = (d = new Date()) => new Date(d.getTime() - 3 * 3_600_000).toISOString().slice(0, 10);
 const fromYmd = (s: string) => new Date(`${s}T00:00:00-03:00`);
 const onlyDigits = (s?: string) => (s ? s.replace(/\D/g, '') : undefined);
+/** Assinatura nova por boleto vence em 3 dias: boleto pago hoje só compensa em 1–3 dias úteis. */
+const BOLETO_FIRST_DUE_DAYS = 3;
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /**
@@ -116,9 +122,11 @@ export const contractedCharge = (s: { priceMonth: unknown; units: number; plan: 
 
 /** cobrança de ativação (instalação + 1ª mensalidade): `activation:<activation_charges.id>` */
 export const ACTIVATION_REF = 'activation:';
+/** compra de saldo de IA: `aicredit:<ai_credit_purchases.id>` (docs/15-ia.md#saldo-de-ia) */
+export const AI_CREDIT_REF = 'aicredit:';
 
 /**
- * Integração com o Asaas (API v3) — PIX e cartão recorrentes.
+ * Integração com o Asaas (API v3) — PIX, boleto e cartão recorrentes.
  *
  * Mesmo modelo do Stripe (stripe.service.ts): o tenant vira um Customer no primeiro checkout,
  * a assinatura do Asaas é a fonte da verdade e `subscriptions`/`invoices` são espelhos
@@ -172,6 +180,19 @@ export class AsaasService {
   private transferListener: ((t: AsaasTransfer, event: string) => Promise<void>) | null = null;
   onTransfer(fn: (t: AsaasTransfer, event: string) => Promise<void>) {
     this.transferListener = fn;
+  }
+
+  /**
+   * Cobranças avulsas de outros módulos, pelo prefixo do `externalReference` (ex.: saldo de IA,
+   * registrado pelo módulo de IA — que depende do billing). Paga ou estornada.
+   */
+  private readonly refHandlers: { prefix: string; fn: (id: string, event: 'paid' | 'refunded', paidAt: Date) => Promise<void> }[] = [];
+  onReference(prefix: string, fn: (id: string, event: 'paid' | 'refunded', paidAt: Date) => Promise<void>) {
+    this.refHandlers.push({ prefix, fn });
+  }
+  private refHandler(p: AsaasPayment) {
+    const h = this.refHandlers.find((x) => p.externalReference?.startsWith(x.prefix));
+    return h && { id: p.externalReference!.slice(h.prefix.length), fn: h.fn };
   }
 
   /** Pix de saída para uma chave. `externalReference` amarra a transferência ao pagamento do parceiro. */
@@ -232,6 +253,12 @@ export class AsaasService {
   /** Assinatura recorrente. Primeiro vencimento hoje (o cliente paga para começar) ou `nextDueDate` (migração: mantém o vencimento que ele já tinha). */
   async createSubscription(dto: { customer: string; billingType: AsaasBillingType; value: number; cycle: 'MONTHLY' | 'YEARLY'; description: string; externalReference: string; creditCardToken?: string; remoteIp?: string; nextDueDate?: string }) {
     return this.request<AsaasSubscription>('POST', '/subscriptions', { ...dto, nextDueDate: dto.nextDueDate ?? ymd() });
+  }
+
+  /** Linha digitável do boleto (o PDF vem em `bankSlipUrl` da cobrança). */
+  async getBoletoLine(paymentId: string) {
+    const r = await this.request<{ identificationField: string }>('GET', `/payments/${encodeURIComponent(paymentId)}/identificationField`);
+    return r.identificationField || null;
   }
 
   async getPixQrCode(paymentId: string) {
@@ -301,6 +328,8 @@ export class AsaasService {
     // gratuito/personalizado são atribuídos pelo dono — mesma trava do Stripe
     if (!isStripeBillable(plan.billingCycle)) throw new BadRequestException('Este plano não é assinado online. Fale com a equipe para ativá-lo.');
     if (input.billingType === 'CREDIT_CARD' && (!input.card || !input.holder)) throw new BadRequestException('Informe os dados do cartão e do titular');
+    // boleto registrado precisa do endereço do pagador
+    if (input.billingType === 'BOLETO' && (!onlyDigits(input.customer.postalCode) || !input.customer.addressNumber?.trim())) throw new BadRequestException('Informe CEP e número do endereço para emitir o boleto');
 
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { tenant: { select: { planOverride: true } } } });
     // valor negociado pelo dono para ESTE plano (trocar de plano volta ao de tabela) — docs/05#personalização-por-cliente
@@ -331,7 +360,8 @@ export class AsaasService {
       if (token) await this.request('PUT', `/subscriptions/${subscriptionId}/creditCard`, { creditCardToken: token, remoteIp: input.remoteIp });
       await this.prisma.subscription.update({ where: { tenantId }, data: { planId: plan.id, priceMonth } });
     } else {
-      const remote = await this.createSubscription({ customer, billingType: input.billingType, value, cycle, description, externalReference: tenantId, creditCardToken: token, remoteIp: input.remoteIp });
+      const nextDueDate = input.billingType === 'BOLETO' ? ymd(new Date(Date.now() + BOLETO_FIRST_DUE_DAYS * 86_400_000)) : undefined;
+      const remote = await this.createSubscription({ customer, billingType: input.billingType, value, cycle, description, externalReference: tenantId, creditCardToken: token, remoteIp: input.remoteIp, nextDueDate });
       subscriptionId = remote.id;
       const now = new Date();
       const end = new Date(now);
@@ -393,7 +423,8 @@ export class AsaasService {
     else await this.syncInvoice(tenantId, p);
     // PIX também é aceito em boleto/indefinido; cartão não tem QR
     const pix = withPix && !paid && p.billingType !== 'CREDIT_CARD' ? await this.getPixQrCode(p.id).catch(() => null) : null;
-    return { id: p.id, status: p.status, paid, billingType: p.billingType, value: p.value, dueDate: p.dueDate, invoiceUrl: p.invoiceUrl ?? null, pix: pix && { encodedImage: pix.encodedImage, payload: pix.payload, expirationDate: pix.expirationDate } };
+    const boleto = withPix && !paid && p.billingType === 'BOLETO' ? { url: p.bankSlipUrl ?? null, line: await this.getBoletoLine(p.id).catch(() => null) } : null;
+    return { id: p.id, status: p.status, paid, billingType: p.billingType, value: p.value, dueDate: p.dueDate, invoiceUrl: p.invoiceUrl ?? null, pix: pix && { encodedImage: pix.encodedImage, payload: pix.payload, expirationDate: pix.expirationDate }, boleto };
   }
 
   // ---------- Webhook ----------
@@ -417,8 +448,12 @@ export class AsaasService {
           await this.syncInvoice(tenant.id, payment);
           return this.addOverage(tenant.id, payment);
         case 'PAYMENT_DELETED':
-        case 'PAYMENT_REFUNDED':
-          return this.syncInvoice(tenant.id, payment, 'void');
+        case 'PAYMENT_REFUNDED': {
+          await this.syncInvoice(tenant.id, payment, 'void');
+          const h = event === 'PAYMENT_REFUNDED' ? this.refHandler(payment) : null;
+          if (h) await h.fn(h.id, 'refunded', new Date());
+          return;
+        }
         default:
           return this.syncInvoice(tenant.id, payment);
       }
@@ -439,7 +474,9 @@ export class AsaasService {
     // cobrança avulsa de excedente: o período é o do uso, não o do vencimento
     const ref = p.externalReference?.startsWith(OVERAGE_REF) ? p.externalReference.split(':')[2] : null;
     const period = ref ?? periodOf(fromYmd(p.dueDate));
-    const amounts = ref ? { baseAmount: 0, overageAmount: p.value } : { baseAmount: p.value, overageAmount: 0 };
+    // excedente e avulsas de outros módulos (saldo de IA) entram como avulso, não como mensalidade
+    // (comissão de parceiro é só sobre `baseAmount`)
+    const amounts = ref || this.refHandler(p) ? { baseAmount: 0, overageAmount: p.value } : { baseAmount: p.value, overageAmount: 0 };
     const paidAt = status === 'paid' ? (p.paymentDate ? fromYmd(p.paymentDate) : new Date()) : null;
     await this.prisma.invoice.upsert({
       where: { externalId: p.id },
@@ -456,6 +493,8 @@ export class AsaasService {
       return this.completeActivation(p.externalReference.slice(ACTIVATION_REF.length), 'asaas', p.paymentDate ? fromYmd(p.paymentDate) : new Date());
     }
     await this.syncInvoice(tenantId, p, 'paid');
+    const h = this.refHandler(p);
+    if (h) return h.fn(h.id, 'paid', p.paymentDate ? fromYmd(p.paymentDate) : new Date());
     if (!p.subscription) return; // avulsa (excedente): só a fatura muda
     await this.activateSubscription(tenantId, p.subscription, p.dueDate, p.id);
   }
@@ -581,7 +620,9 @@ ${env.WEB_ORIGIN}`,
       subject: `Sua mensalidade ${senderName()} venceu`,
       text: `A cobrança de ${brl(p.value)} com vencimento em ${fromYmd(p.dueDate).toLocaleDateString('pt-BR')} não foi paga.
 
-Pague até ${graceUntil.toLocaleDateString('pt-BR')} para não ter o envio de mensagens suspenso. PIX e cartão em:
+Pague até ${graceUntil.toLocaleDateString('pt-BR')} para não ter o envio de mensagens suspenso. PIX, boleto e cartão em:
+
+(Se já pagou o boleto, desconsidere: a compensação leva de 1 a 3 dias úteis e a baixa é automática.)
 
 ${env.WEB_ORIGIN}/plano
 

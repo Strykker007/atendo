@@ -50,6 +50,7 @@
 | [21 — Site (landing page)](21-site.md) | Dev / Marketing | App `apps/site`: landing pública da VogoChat em domínio próprio, seções, onde editar textos, deploy |
 | [Fila de atendimento](fila-de-atendimento.md) | Dev / Cliente | Robô distribui a fila por igual até o limite por atendente; atendente não puxa; pausa (almoço, reunião) |
 | [Redistribuição automática](redistribuicao-automatica.md) | Dev / Cliente | Conversa sem resposta há X min vai para o atendente online menos ocupado; tempo cresce da base ao teto conforme a carga |
+| [Quem recebe automaticamente](distribuicao-por-numero.md) | Dev / Cliente | Por número: só os marcados recebem da fila, Distribuidor e redistribuição; o resto vê e assume na mão |
 | [Agente de IA com etapas](agente-ia.md) | Dev / Cliente | Tela Agentes de IA: persona, roteiro em etapas, ferramentas do sistema (transferir, etiquetar, ficha, encerrar), simulador e o bloco IA modo Agente |
 | [22 — Agente de IA](22-agente-ia.md) | Dev / Produto | Plano: agente que atende e negocia com ferramentas e limites, e onde mais a IA entra no produto |
 | [23 — Evolution: desempenho](23-evolution-desempenho.md) | Ops | Incidente de CPU de 16/10/2026: índices no banco da Evolution, teto do histórico, manutenção de `shared_buffers` e limite de CPU |

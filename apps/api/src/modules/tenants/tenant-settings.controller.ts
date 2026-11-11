@@ -77,6 +77,9 @@ class SettingsDto {
   @IsOptional() @IsInt() @Min(1) @Max(240) autoReassignBaseMinutes?: number;
   @IsOptional() @IsInt() @Min(1) @Max(480) autoReassignMaxMinutes?: number;
   @IsOptional() @IsInt() @Min(1) @Max(10) autoReassignMaxTimes?: number;
+  /** devolver para a fila os atendimentos de quem saiu (docs/redistribuicao-automatica.md#saiu-do-plantão) */
+  @IsOptional() @IsBoolean() releaseAwayEnabled?: boolean;
+  @IsOptional() @IsInt() @Min(5) @Max(240) releaseAwayMinutes?: number;
   // fila de atendimento (docs/fila-de-atendimento.md)
   @IsOptional() @IsBoolean() autoDistribute?: boolean;
   @IsOptional() @IsInt() @Min(1) @Max(50) autoDistributeMax?: number;

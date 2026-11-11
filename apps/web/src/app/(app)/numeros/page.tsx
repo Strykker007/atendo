@@ -1,13 +1,14 @@
 'use client';
 import { useState } from 'react';
-import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone, BookUser, Unplug, RotateCw } from 'lucide-react';
+import { Plus, QrCode, ArrowLeftRight, RefreshCw, Trash2, Power, ShieldCheck, Smartphone, BookUser, Unplug, RotateCw, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
-import { useCan, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useDisconnectNumber, useRestartNumber, useUsage, useSyncPhonebook, type NumberItem } from '@/lib/hooks';
+import { useCan, useDepartments, useMe, useNumbers, useConnectNumber, useUpdateNumber, useDeleteNumber, useDisconnectNumber, useRestartNumber, useUsage, useSyncPhonebook, type NumberItem } from '@/lib/hooks';
 import { Button } from '@/components/ui/Button';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
 import { SendingCard } from '@/components/numbers/SendingCard';
+import { NumberReceivers } from '@/components/numbers/NumberReceivers';
 import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { NUMBER_PALETTE } from '@/components/chat/ChannelBadge';
@@ -27,6 +28,11 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 export default function NumerosPage() {
   // a API já recusava sem esta permissão; a tela é que continuava oferecendo o botão
   const podeGerenciar = useCan('numbers.manage');
+  // reservar decide quem enxerga o número: só o admin da conta (a API recusa os demais)
+  const me = useMe();
+  const podeReservar = me.data?.role === 'tenant_admin' || !!me.data?.impersonatorId;
+  const departamentos = useDepartments();
+  const deptAtivos = (departamentos.data ?? []).filter((d) => d.isActive);
   const numbers = useNumbers();
   const usage = useUsage();
   const connect = useConnectNumber();
@@ -66,6 +72,30 @@ export default function NumerosPage() {
       // pausa após queda forçada: a API recusou de propósito — explica e deixa decidir
       if (err instanceof ApiError && err.code === 'reconnect_paused') setPausado(n);
       else toast.err(err);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleReserved(n: NumberItem) {
+    setBusyId(n.id);
+    try {
+      await update.mutateAsync({ id: n.id, reserved: !n.reserved });
+      toast.ok(n.reserved ? 'Número liberado: quem opera todos os números volta a vê-lo' : 'Número reservado: só quem está marcado nele em Equipe vê as conversas');
+    } catch (err) {
+      toast.err(err);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function setDepartamento(n: NumberItem, departmentId: string | null) {
+    setBusyId(n.id);
+    try {
+      await update.mutateAsync({ id: n.id, defaultDepartmentId: departmentId });
+      toast.ok(departmentId ? 'Pronto: as conversas deste número (as sem departamento) ficaram neste departamento' : 'As próximas conversas deste número entram sem departamento');
+    } catch (err) {
+      toast.err(err);
     } finally {
       setBusyId(null);
     }
@@ -142,7 +172,32 @@ export default function NumerosPage() {
                   <span className={cn('w-2.5 h-2.5 rounded-full', st.cls)} />
                   <span className="text-ink">{st.label}</span>
                   {!n.isActive && <span className="text-xs text-faint">· desativado</span>}
+                  {n.reserved && !podeReservar && <span className="inline-flex items-center gap-1 text-xs text-muted"><Lock size={11} /> reservado</span>}
                 </div>
+
+                {/* número reservado (docs/18-perfis-de-acesso.md#número-reservado) */}
+                {podeReservar && (
+                  <label className="flex items-start gap-2 rounded-lg bg-field px-3 py-2 text-[12.5px] cursor-pointer">
+                    <input type="checkbox" className="mt-0.5" checked={!!n.reserved} disabled={busyId === n.id} onChange={() => void toggleReserved(n)} />
+                    <span>
+                      <span className="inline-flex items-center gap-1 font-semibold text-ink"><Lock size={12} /> Reservado</span>
+                      <span className="block text-muted">Só quem tem este número marcado em Equipe vê as conversas dele. Quem está com &quot;todos os números&quot; deixa de ver.</span>
+                    </span>
+                  </label>
+                )}
+                {/* departamento do número (docs/departamentos.md#departamento-do-número) */}
+                {podeReservar && deptAtivos.length > 0 && (
+                  <label className="flex flex-wrap items-center gap-2 rounded-lg bg-field px-3 py-2 text-[12.5px]">
+                    <span className="font-semibold text-ink">Departamento das conversas</span>
+                    <select className="rounded-md bg-panel border border-line px-2 py-1 text-[12.5px]" value={n.defaultDepartmentId ?? ''} disabled={busyId === n.id} onChange={(e) => void setDepartamento(n, e.target.value || null)}>
+                      <option value="">Nenhum</option>
+                      {deptAtivos.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                    <span className="w-full text-muted">Toda conversa que entra por este número já nasce neste departamento (o filtro por departamento passa a funcionar). Transferir para outro continua valendo.</span>
+                  </label>
+                )}
+                {/* quem recebe atendimento automático (docs/distribuicao-por-numero.md) */}
+                {podeReservar && <NumberReceivers number={n} />}
 
                 {/* cor do canal: é ela que identifica o número na lista de conversas e no chat */}
                 {gerencia && (

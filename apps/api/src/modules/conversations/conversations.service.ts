@@ -31,8 +31,9 @@ import { buildTransferMessage, DEFAULT_DEPARTMENT_TRANSFER_TEXT, DEFAULT_TRANSFE
 import { buildCloseMessage, DEFAULT_CLOSE_TEXT } from './close-message';
 import { canReceiveTransfer } from './transfer-scope';
 import { PermissionsService } from '../auth/permissions.service';
-import { isTicketExempt } from '../ignored-contacts/ignored-contacts';
+import { exemptMode, isTicketExempt } from '../ignored-contacts/ignored-contacts';
 import type { Principal } from '../auth/permissions';
+import { clip } from '../../common/clip';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -382,6 +383,35 @@ export class ConversationsService {
   }
 
   /**
+   * Quem pode RECEBER sozinho (fila, redistribuição): quem enxerga a conversa E está na lista de
+   * "quem recebe automaticamente" do número (docs/distribuicao-por-numero.md). Número sem lista =
+   * todos que enxergam, como antes. A transferência manual continua usando `receiversOf`.
+   */
+  async autoReceiversOf(tenantId: string, conv: { numberId: string; departmentId: string | null }, users: { id: string; role: Principal['role'] }[]) {
+    const lista = await this.numberReceivers(conv.numberId);
+    let candidatos = lista ? users.filter((u) => lista.has(u.id)) : users;
+    // conversa com departamento: recebe sozinho só quem É do departamento. "Ver todas" (gerente)
+    // serve para enxergar e assumir na mão, não para entrar no sorteio de outro setor — mesma régua
+    // do bloco Distribuidor. Departamento sem ninguém não restringe (senão ninguém receberia)
+    const membros = await this.departmentMembers(conv.departmentId);
+    if (membros) candidatos = candidatos.filter((u) => membros.has(u.id));
+    return candidatos.length ? this.receiversOf(tenantId, conv, candidatos) : [];
+  }
+
+  /** Participantes do departamento; null = sem departamento ou departamento sem ninguém. */
+  private async departmentMembers(departmentId: string | null): Promise<Set<string> | null> {
+    if (!departmentId) return null;
+    const rows = await this.prisma.userDepartment.findMany({ where: { departmentId }, select: { userId: true } });
+    return rows.length ? new Set(rows.map((r) => r.userId)) : null;
+  }
+
+  /** Lista de quem recebe automaticamente do número; null = sem lista (todos que enxergam). */
+  async numberReceivers(numberId: string): Promise<Set<string> | null> {
+    const rows = await this.prisma.numberReceiver.findMany({ where: { numberId }, select: { userId: true } });
+    return rows.length ? new Set(rows.map((r) => r.userId)) : null;
+  }
+
+  /**
    * Redistribuição automática (docs/redistribuicao-automatica.md). Só troca se a conversa continua
    * como foi lida — mesmo dono, mesmo status, contato ainda esperando desde o mesmo momento. Se
    * alguém respondeu, assumiu ou transferiu no meio, não mexe (devolve false).
@@ -501,6 +531,40 @@ export class ConversationsService {
     await this.registrar({ tenantId, conversationId: id, type: 'released', actorId: by.id, fromStatus: conv.status, toStatus: 'waiting' });
     this.gateway.emitConversation(tenantId, updated);
     return updated;
+  }
+
+  /** Departamento padrão do número, se ainda ativo (docs/departamentos.md#departamento-do-número). */
+  private async departamentoPadrao(tenantId: string, id: string | null) {
+    if (!id) return null;
+    return (await this.prisma.department.count({ where: { id, tenantId, isActive: true } })) ? id : null;
+  }
+
+  /**
+   * Status de uma conversa NOVA aberta pelo painel conforme a lista de isentos: conversa livre já
+   * nasce aberta e sem dono (docs/contatos-isentos.md#conversa-livre); o resto nasce em Aguardando.
+   */
+  private async novaConversaPorModo(tenantId: string, phone: string) {
+    const modo = await exemptMode(this.prisma, tenantId, phone);
+    return modo === 'free'
+      ? { status: 'in_progress' as const, assigneeId: null, ticketExempt: true }
+      : { status: 'waiting' as const, ticketExempt: modo !== 'none' };
+  }
+
+  /**
+   * Devolução automática de quem saiu do plantão (docs/redistribuicao-automatica.md#saiu-do-plantão).
+   * Só devolve se a conversa continua aberta e com a mesma pessoa: se ela voltou e respondeu, ou
+   * alguém já assumiu, não mexe. Sem mensagem ao contato.
+   */
+  async releaseSystem(tenantId: string, id: string, fromAssigneeId: string, reason: string, note: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { status: true } });
+    if (!conv) return false;
+    const r = await this.prisma.conversation.updateMany({ where: { id, tenantId, assigneeId: fromAssigneeId, status: { not: 'closed' } }, data: { assigneeId: null, status: 'waiting' } });
+    if (!r.count) return false;
+    const updated = await this.prisma.conversation.findUniqueOrThrow({ where: { id } });
+    await this.registrar({ tenantId, conversationId: id, type: 'released', actorId: null, fromStatus: conv.status, toStatus: 'waiting', reason });
+    this.gateway.emitConversation(tenantId, updated);
+    await this.systemNote(id, note).catch((err) => this.log.warn(`nota da devolução não gravada (${id}): ${err instanceof Error ? err.message : err}`));
+    return true;
   }
 
   async one(tenantId: string, id: string) {
@@ -657,7 +721,7 @@ export class ConversationsService {
     }));
     if (!created.fresh) return created.message;
     const message = created.message;
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: messagePreview({ type: template ? 'template' : media ? media.type : 'text', text: shown, mediaName: media?.name }).slice(0, 120), awaitingSince: null } });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date(), lastMessagePreview: clip(messagePreview({ type: template ? 'template' : media ? media.type : 'text', text: shown, mediaName: media?.name }), 120), awaitingSince: null } });
     await enqueueOutbound(this.outbound, message, { minGapMs: opts?.minGapMs });
     this.gateway.emitMessage(conv.tenantId, this.present(message));
     return message;
@@ -837,7 +901,7 @@ export class ConversationsService {
       closeReasonId: motivo?.id ?? null,
       stageTagId: transitorias.get(conversationId)?.stage ?? null,
       tagSnapshot: transitorias.get(conversationId)?.ids ?? [],
-      viaFlow: d.flowName.slice(0, 120),
+      viaFlow: clip(d.flowName, 120),
     });
     await this.limparTransitorias([conversationId]);
     if (pagos.ids.length && d.outcome === 'won') await this.prisma.budget.updateMany({ where: { id: { in: pagos.ids }, closeEventId: null }, data: { closeEventId: evento.id } });
@@ -963,7 +1027,7 @@ export class ConversationsService {
       data: {
         status: conv.status === 'waiting' ? 'in_progress' : conv.status,
         lastMessageAt: new Date(),
-        lastMessagePreview: messagePreview({ type: input.template ? 'template' : input.type, text: input.text, mediaName: input.media?.fileName }).slice(0, 120),
+        lastMessagePreview: clip(messagePreview({ type: input.template ? 'template' : input.type, text: input.text, mediaName: input.media?.fileName }), 120),
         awaitingSince: null,
         unreadCount: 0,
       },
@@ -1123,7 +1187,7 @@ export class ConversationsService {
       // conversa nova nasce com quem abriu (assumida), fora da fila: vazia na fila, outro pegaria.
       // Existente fica como está — encerrada continua encerrada até alguém reabrir ou escrever.
       if (!conv) {
-        conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) } });
+        conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, lastMessageAt: new Date(), departmentId: await this.departamentoPadrao(tenantId, number.defaultDepartmentId), ...(await this.novaConversaPorModo(tenantId, contact.phone)) } });
         await this.claim(tenantId, conv.id, author);
         return { conversationId: conv.id, status: 'in_progress' as const, message: null };
       }
@@ -1148,7 +1212,7 @@ export class ConversationsService {
 
     if (!conv) {
       // nasce na fila sem dono: o `send` faz "responder = assumir" e põe em atendimento
-      conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', lastMessageAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) } });
+      conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, lastMessageAt: new Date(), departmentId: await this.departamentoPadrao(tenantId, number.defaultDepartmentId), ...(await this.novaConversaPorModo(tenantId, contact.phone)) } });
     } else if (conv.status === 'closed') {
       conv = await this.setStatus(tenantId, conv.id, 'in_progress', author.id);
     }
@@ -1430,7 +1494,7 @@ export class ConversationsService {
     // era a última da conversa: a prévia da lista mostra o texto novo
     const ultima = await this.prisma.message.findFirst({ where: { conversationId: plan.conversationId, internal: false, deletedAt: null }, orderBy: [{ createdAt: 'desc' }, { queueSeq: 'desc' }], select: { id: true } });
     if (ultima?.id === message.id) {
-      const conv = await this.prisma.conversation.update({ where: { id: plan.conversationId }, data: { lastMessagePreview: messagePreview({ type: message.type, text: novo }).slice(0, 120) } });
+      const conv = await this.prisma.conversation.update({ where: { id: plan.conversationId }, data: { lastMessagePreview: clip(messagePreview({ type: message.type, text: novo }), 120) } });
       this.gateway.emitConversation(tenantId, conv);
     }
     const presented = this.present(message);

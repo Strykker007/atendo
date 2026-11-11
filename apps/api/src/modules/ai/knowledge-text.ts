@@ -126,8 +126,15 @@ export const searchableOf = (c: Pick<Chunk, 'heading' | 'text'>) => (c.heading &
  * nunca bate palavra por palavra), sem acento e só [a-z0-9] — nada do contato vira operador.
  * O dicionário português tira "de", "que", "o" e reduz "obras" → "obra".
  */
+/**
+ * Palavras de conversa que o dicionário do Postgres não tira e que, no OU, puxavam trecho sem
+ * relação ("vou ficar 3 dias" trazia o artigo dos animais). Quem pergunta o assunto continua
+ * achando pela busca por significado.
+ */
+const CHAT_WORDS = new Set(['quais', 'qual', 'quero', 'queria', 'gostaria', 'preciso', 'precisava', 'saber', 'entao', 'temos', 'tem', 'sou', 'vou', 'ficar', 'fico', 'aqui', 'voces', 'voce', 'sobre', 'isso', 'favor', 'obrigado', 'obrigada', 'bom', 'boa', 'tarde', 'noite', 'ola', 'oi', 'tudo', 'bem', 'alguem', 'ajudar', 'duvida', 'pergunta', 'informacao', 'informar']);
+
 export function keywordQuery(q: string): string | null {
-  const words = [...new Set(fold(q).match(/[a-z]{3,}|\d+/g) ?? [])].slice(0, 16);
+  const words = [...new Set((fold(q).match(/[a-z]{3,}|\d+/g) ?? []).filter((w) => !CHAT_WORDS.has(w)))].slice(0, 16);
   return words.length ? words.join(' | ') : null;
 }
 

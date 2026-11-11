@@ -12,7 +12,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 
 export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number; /** aparece ao encerrar como "Comprou" */ showOnWon?: boolean; /** aparece ao encerrar como "Não comprou" */ showOnLost?: boolean; /** opostas diretas: marcar esta tira estas (nos dois sentidos) */ conflictIds?: string[] }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
-export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; /** teto de transmissão por 24h (QR Code) */ campaignDailyLimit?: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** conectado, mas parou de receber (chaves corrompidas) — ler o QR de novo */ receiveStalledAt?: string | null; /** reconectou neste instante: mensagens de quando estava fora ainda chegando (NumberSyncNotice) */ syncStartedAt?: string | null; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean }
+export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; /** teto de transmissão por 24h (QR Code) */ campaignDailyLimit?: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** conectado, mas parou de receber (chaves corrompidas) — ler o QR de novo */ receiveStalledAt?: string | null; /** reconectou neste instante: mensagens de quando estava fora ainda chegando (NumberSyncNotice) */ syncStartedAt?: string | null; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean; /** só quem tem o número marcado em Equipe enxerga (docs/18-perfis-de-acesso.md#número-reservado) */ reserved?: boolean; /** quem recebe atendimento automático (docs/distribuicao-por-numero.md); vazio = todos que enxergam */ receiverIds?: string[]; /** departamento em que as conversas do número nascem (docs/departamentos.md#departamento-do-número) */ defaultDepartmentId?: string | null }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
 export type ProviderConfig = { instanceName?: string } | { phoneNumberId: string; wabaId: string; accessToken: string };
 export type ConversationOrigin = 'organic' | 'ad' | 'post' | 'link';
@@ -158,14 +158,14 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export type ConversationsQuery = { status: ConversationTab; numberId: string | null; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null; onlyTickets?: boolean };
+export type ConversationsQuery = { status: ConversationTab; /** vazio/ausente = todos os números */ numberIds?: string[]; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null; onlyTickets?: boolean };
 /** Tamanho da página no servidor (`take` padrão de GET /conversations). Página cheia = pode haver mais. */
 export const CONVERSATIONS_PAGE = 50;
 
 function conversationsParams(q: ConversationsQuery) {
   // "Livres": contatos isentos de ticket, em qualquer status (docs/contatos-isentos.md)
   const p = new URLSearchParams(q.status === 'free' ? { free: '1' } : { status: q.status });
-  if (q.numberId) p.set('numberId', q.numberId);
+  if (q.numberIds?.length) p.set('numberId', [...q.numberIds].sort().join(','));
   if (q.departmentId) p.set('departmentId', q.departmentId);
   if (q.onlyTickets && q.status !== 'free') p.set('ticket', '1');
   if (q.assigneeId) p.set('assigneeId', q.assigneeId);
@@ -231,12 +231,12 @@ export const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
   qc.invalidateQueries({ queryKey: ['conversation-counts'] });
 };
 
-export const useConversationCounts = (numberId: string | null, departmentId: string | null = null, onlyTickets = false) =>
+export const useConversationCounts = (numberIds: string[] = [], departmentId: string | null = null, onlyTickets = false) =>
   useQuery({
-    queryKey: ['conversation-counts', numberId, departmentId, onlyTickets],
+    queryKey: ['conversation-counts', [...numberIds].sort().join(','), departmentId, onlyTickets],
     queryFn: () => {
       const p = new URLSearchParams();
-      if (numberId) p.set('numberId', numberId);
+      if (numberIds.length) p.set('numberId', [...numberIds].sort().join(','));
       if (departmentId) p.set('departmentId', departmentId);
       if (onlyTickets) p.set('ticket', '1');
       return api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number; free: number }>(`/conversations/counts${p.toString() ? `?${p}` : ''}`);

@@ -13,8 +13,16 @@ interface UIState {
   companyId: string | null;
   /** lista de conversas agrupada por atendente (ícone de duas pessoas) */
   groupByAssignee: boolean;
-  /** número (perfil) selecionado; null = todos */
-  numberId: string | null;
+  /** números marcados no filtro das conversas; vazio = todos (docs/18-perfis-de-acesso.md#número-padrão) */
+  numberIds: string[];
+  /**
+   * De quem é o filtro de números guardado neste navegador. Outra pessoa entrando (computador da
+   * portaria) ou login novo (`''`) faz a tela aplicar o padrão da pessoa (`useDefaultNumbers`).
+   * null = ainda não conferido (quem vem da versão anterior mantém o que tinha)
+   */
+  numbersFor: string | null;
+  /** login novo: o filtro de números volta ao padrão de quem entrou */
+  resetNumbersOnLogin: () => void;
   /** filtro de departamento: id, 'none' (sem departamento) ou null = todos */
   departmentId: string | null;
   status: ConversationTab;
@@ -41,7 +49,8 @@ interface UIState {
   /** troca de unidade: o número e a conversa abertos eram da outra, então saem junto */
   setCompany: (id: string | null) => void;
   toggleGroupByAssignee: () => void;
-  setNumber: (id: string | null) => void;
+  /** troca os números do filtro; `owner` grava de quem é (aplicação do padrão) */
+  setNumbers: (ids: string[], owner?: string) => void;
   setDepartment: (id: string | null) => void;
   /** keep = true mantém a conversa selecionada (usado ao responder) */
   setStatus: (s: ConversationTab, keep?: boolean) => void;
@@ -67,7 +76,8 @@ export const useUI = create<UIState>()(
       companyId: null,
       // fila agrupada por atendente é o padrão (docs/empresas.md#fila-agrupada-por-atendente)
       groupByAssignee: true,
-      numberId: null,
+      numberIds: [],
+      numbersFor: null,
       departmentId: null,
       status: 'waiting',
       tagIds: [],
@@ -83,9 +93,14 @@ export const useUI = create<UIState>()(
       closedNavGroups: [],
       toggleNavGroup: (id) => set((s) => ({ closedNavGroups: s.closedNavGroups.includes(id) ? s.closedNavGroups.filter((g) => g !== id) : [...s.closedNavGroups, id] })),
       toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
-      setCompany: (companyId) => set({ companyId, numberId: null, conversationId: null }),
+      setCompany: (companyId) => set({ companyId, numberIds: [], conversationId: null }),
       toggleGroupByAssignee: () => set((s) => ({ groupByAssignee: !s.groupByAssignee })),
-      setNumber: (numberId) => set({ numberId, conversationId: null }),
+      setNumbers: (numberIds, owner) => set((s) => {
+        const igual = numberIds.length === s.numberIds.length && numberIds.every((id) => s.numberIds.includes(id));
+        // a conversa aberta só fecha quando o filtro muda de fato (aplicar o mesmo padrão não fecha nada)
+        return { numberIds, numbersFor: owner ?? s.numbersFor, ...(igual ? {} : { conversationId: null }) };
+      }),
+      resetNumbersOnLogin: () => set({ numbersFor: '' }),
       setDepartment: (departmentId) => set({ departmentId }),
       setStatus: (status, keep) => set((s) => ({ status, conversationId: keep ? s.conversationId : null })),
       setTags: (tagIds) => set({ tagIds }),
@@ -104,8 +119,17 @@ export const useUI = create<UIState>()(
       name: 'atendo-ui',
       // v1: agrupar por atendente passou a vir marcado — quem tinha o padrão antigo (desmarcado e
       // nunca mexeu) ganha o novo uma vez; daqui para a frente vale a escolha da pessoa
-      version: 1,
-      migrate: (persisted, version) => (version < 1 ? { ...(persisted as object), groupByAssignee: true } : persisted) as UIState,
-      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, closedNavGroups: s.closedNavGroups, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberId: s.numberId, departmentId: s.departmentId, conversationId: s.conversationId, soundMuted: s.soundMuted, securePhotos: s.securePhotos }) },
+      // v2: o filtro de um número só (`numberId`) virou lista (`numberIds`)
+      version: 2,
+      migrate: (persisted, version) => {
+        let p = (persisted ?? {}) as Record<string, unknown>;
+        if (version < 1) p = { ...p, groupByAssignee: true };
+        if (version < 2) {
+          const { numberId, ...rest } = p;
+          p = { ...rest, numberIds: typeof numberId === 'string' && numberId ? [numberId] : [], numbersFor: null };
+        }
+        return p as unknown as UIState;
+      },
+      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, closedNavGroups: s.closedNavGroups, rightPanelOpen: s.rightPanelOpen, companyId: s.companyId, groupByAssignee: s.groupByAssignee, numberIds: s.numberIds, numbersFor: s.numbersFor, departmentId: s.departmentId, conversationId: s.conversationId, soundMuted: s.soundMuted, securePhotos: s.securePhotos }) },
   ),
 );

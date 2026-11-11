@@ -135,9 +135,16 @@ entrada e saída, custo em USD e BRL calculado na hora, latência, e `error` qua
 próprio cliente (fora da cota e do teto). Ver [15](15-ia.md).
 
 **ai_credentials** — chave de IA do próprio cliente (feature `ai_own_key`), uma por tenant:
-`provider` (openai | anthropic), `credentials` criptografado `{ apiKey }`, `model` opcional,
+`provider` (openai | anthropic | gemini), `credentials` criptografado `{ apiKey }`, `model` opcional,
 `keyLast4`, `lastError`/`lastErrorAt` — migração `20270202000000_ai_own_key` (também adiciona
 `ai_usage.ownKey`). Ver [15](15-ia.md#chave-própria-do-cliente).
+
+**ai_credit_wallets** / **ai_credit_purchases** — saldo de IA pré-pago: carteira por tenant
+(`balanceBrl` Decimal(12,4), `autoUseOnFreeLimit`) e compras (`amountBrl`, `status`
+pending/paid/canceled, `externalId` único no Asaas, `paidVia` asaas/manual, `note`). Mais
+`ai_usage.creditBrl` (o que saiu do saldo naquela chamada) e `platform_settings.aiCreditMarkupPct`
+(margem do dono, padrão 100) — migração `20270215000000_ai_credits` (aditiva). Ver
+[15](15-ia.md#saldo-de-ia).
 
 **usage_counters** — agregado mensal reconciliado (`tenantId + period` únicos).
 

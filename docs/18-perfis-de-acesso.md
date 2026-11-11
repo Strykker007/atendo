@@ -101,8 +101,9 @@ e "Ver permissões" com a lista por extenso. O editor agrupa as permissões por 
 |---|---|---|---|
 | GET | `/profiles` | — | Lista (com `systemRole`); realinha ao catálogo os padrão não editados |
 | GET | `/profiles/catalog` | — | Catálogo + permissões de quem pediu |
-| POST | `/profiles` | `profiles.manage` | Cria (filtra por `grantable`) |
-| PATCH | `/profiles/:id` | `profiles.manage` | Edita (filtra por `grantable`) |
+| POST | `/profiles` | `profiles.manage` | Cria (filtra por `grantable`). `accessTemplate?` = [acesso padrão](#acesso-padrão-do-perfil) |
+| PATCH | `/profiles/:id` | `profiles.manage` | Edita (filtra por `grantable`). `accessTemplate`: objeto grava, `null` tira |
+| POST | `/tenants/me/profiles/:id/apply-access` | `team.manage` | Reaplica o acesso padrão em quem tem o perfil → `{ applied }` |
 | DELETE | `/profiles/:id` | `profiles.manage` | Exclui (recusa só o Administrador) |
 | PATCH | `/tenants/me/agents/:id` | `team.manage` | `profileId` vincula; `""` desvincula. `name`: admin da conta renomeia qualquer pessoa; gerente, só atendentes. `email`/`role` (`agent`\|`manager`): mesma regra de alcance, `role` só pelo admin; revogam as sessões e invalidam o cache de permissões |
 | POST | `/tenants/me/agents/bulk` | `team.manage` | Cadastro em massa: `{ profileId?, people: [{ name, email, profileId? }] }` (1–50) — ver [Cadastro em massa](#cadastro-em-massa) |
@@ -184,9 +185,53 @@ seria o furo.
 
 O dono do sistema nunca é restringido: é ele quem dá suporte entrando como o cliente.
 
+### Número reservado
+
+"Nenhum marcado = todos" tinha um furo: cadastrar o número do gerente (ou da administração)
+deixava esse número visível para toda a equipe sem marcação, até alguém lembrar de restringir
+cada pessoa. Agora o número pode ser **reservado** (Números → caixa "Reservado", só o admin da
+conta; a API recusa os demais com 403):
+
+| Quem | Vê o número reservado? |
+|---|---|
+| Marcado nele em Equipe | sim |
+| Sem marcação nenhuma (atendente, gerente) | **não** — opera todos os **não** reservados |
+| Admin da conta sem marcação | sim (responde pela conta) |
+| Dono do sistema / entrando como | sim |
+
+A regra vive em um ponto só: `PermissionsService.scope` troca o "vazio" pela lista dos números
+abertos (`openNumbersOf`, cache de 15 s limpo ao reservar, criar ou excluir número). Daí em diante
+tudo que já respeitava o escopo (lista e contadores, `ConversationScopeGuard`, `GET /numbers`,
+transferência, fila, redistribuição, relatórios, contatos) respeita o reservado sem código novo. Só o
+bloco **Distribuidor** do fluxo tem consulta própria e foi ajustado. Todos os números reservados e a
+pessoa sem marcação = nenhum número (`NO_NUMBER`), nunca "todos".
+
+`linkedNumberIds` (no `AuthUser`) guarda o que está marcado em Equipe sem esse recorte: é ele que
+decide se quem cadastra um número novo passa a operá-lo (só quem já é restrito). Efeito colateral
+consciente: o relatório diário por e-mail é "do cliente inteiro", então quem não vê o reservado deixa
+de recebê-lo.
+
+Banco: `whatsapp_numbers.reserved` (migration `20270208000000_reserved_numbers_default_filter_release_away`).
+
+### Número padrão (filtro ao abrir)
+
+A tela de conversas abre filtrada nos números padrão da pessoa (`users.defaultNumberIds`, vários
+permitidos). Ex.: o concierge opera Portaria e Concierge, mas entra vendo só Concierge; troca para
+"Todos" quando precisa.
+
+- Onde configura: **Equipe → Números → "Abre filtrado"** (estrela ao lado de cada número que a
+  pessoa opera; vale para qualquer um da equipe, inclusive admin, porque não dá nem tira acesso), ou
+  a própria pessoa no filtro das conversas → **Salvar como meu padrão** (`PUT /tenants/me/default-numbers`).
+- Quando aplica: no login, e sempre que o filtro guardado no navegador for de outra pessoa
+  (computador compartilhado da portaria). Quem não tem padrão entra em "Todos os números". O filtro
+  guardado diz de quem é (`numbersFor` no store `atendo-ui`, v2).
+- Só vale o que a pessoa ainda opera: `/auth/me` devolve `defaultNumberIds` já cruzado com o escopo.
+- O filtro das conversas agora aceita **vários números** (`numberId=a,b` em `GET /conversations` e
+  `/conversations/counts`; `narrowTo` cruza cada um com o escopo).
+
 ### Departamentos (outro escopo de dados)
 
-Mesmo desenho, em `auth/department-scope.ts` + `user_departments`: sem departamento = vê tudo; participante de algum (e sem `conversations.view_all`) vê os seus + os sem departamento. Aplicado nos mesmos pontos da tabela acima. Detalhes em [Departamentos](departamentos.md).
+Mesmo desenho, em `auth/department-scope.ts` + `user_departments`: sem departamento = vê tudo; participante de algum (que não seja admin da conta) vê o seu alcance + os sem departamento — o gestor (`conversations.view_all`) alcança também os departamentos abaixo do dele, nunca os de cima ([Hierarquia](departamentos.md#hierarquia)). Os números de departamentos fora do alcance também saem da lista dela. Aplicado nos mesmos pontos da tabela acima. Detalhes em [Departamentos](departamentos.md).
 
 ## Onde cada permissão aparece na tela
 
@@ -214,6 +259,65 @@ A API sempre recusou o que o perfil não permite — o problema era a **tela con
 | `campaigns.manage` | ainda sem tela (módulo sem interface) |
 
 **Três checagens usavam o papel em vez da permissão** (`role !== 'agent'`) e foram trocadas: ver a fila da equipe, transferir e nota interna. Era o que impedia um "atendente líder" com perfil personalizado de enxergar a equipe — e o que deixava um gerente continuar vendo depois de o acesso ser retirado.
+
+## Tela de acesso
+
+Pedido de 11/11/2026: "todo tipo de delegação de acesso deve ser centralizado num canto só". Antes
+eram quatro lugares (perfil na Equipe, números num modal, participantes em Configurações →
+Departamentos, "quem recebe" em Números). Agora é **Equipe → Acesso** de cada pessoa
+(`components/settings/AccessModal.tsx`; clicar no perfil, nos departamentos ou nos números da linha
+abre a mesma janela):
+
+| Bloco | O que define | Grava |
+|---|---|---|
+| 1. O que pode fazer | perfil de acesso (lista de ações); botão **Acesso total** marca todos os números (inclusive reservados), tira os departamentos e escolhe um perfil que vê todas as conversas | `profileId` |
+| 2. Números | por número: **Vê** (todos — menos reservados — ou só os marcados), **Abre filtrado** (estrela) e **Recebe auto.** (só o admin da conta) | `numberIds`, `defaultNumberIds`, `receiveNumberIds` |
+| 3. Departamentos | setores da pessoa | `departmentIds` |
+
+Tudo vai num `PATCH /tenants/me/agents/:id`. `receiveNumberIds` é a visão por pessoa da lista por
+número (`number_receivers`, onde vazio = todos que veem): desmarcar num número sem lista cria a lista
+com todos que veem menos ela; tirar o único da lista também (vazia voltaria a incluí-la); número que
+ela não vê fica de fora da conta. Administrador da conta: só "abre filtrado" (o resto é acesso total).
+
+Trocar o perfil no bloco 1 para um que tem [acesso padrão](#acesso-padrão-do-perfil) mostra **Aplicar**,
+que preenche os blocos 2 e 3 com o padrão (ainda é preciso salvar).
+
+Os outros lugares viraram **só leitura** com link para cá: participantes em Configurações →
+Departamentos e "Recebe automaticamente" em Números. Continuam fora desta tela o que é do **número**
+(Reservado, departamento das conversas) e da **empresa** (empresas/unidades).
+
+## Acesso padrão do perfil
+
+Pedido de 11/11/2026: "sempre que for mexer em regra escalável tem que ser replicada em perfil, para
+criar em massa — se eu tiver que configurar isso tudo na mão acaba com minha escala". **Regra do
+projeto**: toda configuração de acesso por pessoa precisa existir também no acesso padrão do perfil.
+
+`access_profiles.accessTemplate` (JSONB, migration `20270214000000_profile_access_template`; null =
+sem padrão, como antes). Formato em `tenants/access-template.ts`:
+
+| Campo | Na tela de Acesso |
+|---|---|
+| `allNumbers` / `numberIds` | Vê (todos menos reservados / só os marcados) |
+| `defaultNumberIds` | Abre filtrado |
+| `receiveAll` / `receiveNumberIds` | Recebe auto. — `receiveAll` = de tudo que vê, inclusive números criados depois |
+| `departmentIds` | Departamentos |
+
+- **Onde se define**: Equipe → Perfis de acesso → editar → caixa **Acesso padrão** (mesma tabela da
+  tela de Acesso, `components/settings/AccessGrid.tsx`). Recebe auto. só o admin da conta define (para
+  os demais a API mantém o que estava). O Administrador não tem padrão (vê tudo).
+- **É cópia, não vínculo**: aplicado, vira o acesso da pessoa, que pode ser ajustado sem mexer no
+  perfil; mudar o perfil não muda quem já o tem.
+- **Quando se aplica** (`applyProfileAccess` em `tenants.module.ts`):
+  - ao criar a pessoa — individual (com senha ou convite) e [em massa](#cadastro-em-massa);
+  - na tela de Acesso, ao trocar para o perfil → botão **Aplicar**;
+  - **Reaplicar** no cartão do perfil → todas as pessoas do perfil (confirma antes: substitui os ajustes
+    individuais). Gerente só reaplica em atendentes; dono do sistema fica de fora.
+- **Duplicar** (ícone de cópia no cartão do perfil): abre "Duplicar perfil" com nome "X (cópia)",
+  descrição, permissões e acesso padrão copiados; salva como perfil novo (`POST /profiles`). A API corta
+  as permissões que quem duplica não pode conceder. A cópia é um perfil comum (sem `systemRole`): quem
+  for criado nela tem papel técnico `agent`, mesmo copiando o Gerente — o que vale são as permissões.
+- Ids velhos (número excluído, departamento apagado) são ignorados, nunca erro. Recebimento que deixaria
+  um número sem ninguém é pulado em vez de travar o cadastro.
 
 ## Quais números cada pessoa atende
 

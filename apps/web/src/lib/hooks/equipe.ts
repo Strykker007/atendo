@@ -10,7 +10,7 @@ import { ALL_PERMISSIONS } from '@atendo/shared';
 
 // ---- Equipe ----
 export type Role = 'tenant_admin' | 'manager' | 'agent' | 'super_admin';
-export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; /** pessoa de outra empresa (docs/multiempresa.md): login, senha e convite são os de lá */ linked?: boolean; typingSpeed?: TypingSpeed; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null; scheduleId?: string | null; isTemporary?: boolean; accessExpiresAt?: string | null; expiredAt?: string | null; profile?: { id: string; name: string } | null; numbers?: { numberId: string }[]; departments?: { departmentId: string }[] }
+export interface Agent { id: string; name: string; email: string; role: Role; isActive: boolean; /** pessoa de outra empresa (docs/multiempresa.md): login, senha e convite são os de lá */ linked?: boolean; typingSpeed?: TypingSpeed; lastLoginAt: string | null; invitedAt?: string | null; passwordSetAt?: string | null; scheduleId?: string | null; isTemporary?: boolean; accessExpiresAt?: string | null; expiredAt?: string | null; profile?: { id: string; name: string } | null; numbers?: { numberId: string }[]; departments?: { departmentId: string }[]; /** números em que a tela de conversas abre filtrada; vazio = todos */ defaultNumberIds?: string[] }
 export const useAgents = () => useQuery({ queryKey: ['agents'], queryFn: () => api<Agent[]>('/tenants/me/agents') });
 export const useCreateAgent = () => {
   const qc = useQueryClient();
@@ -40,5 +40,17 @@ export const useChangePassword = () => useMutation({ mutationFn: (b: { current: 
 
 export const useUpdateAgent = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; email?: string; role?: 'agent' | 'manager'; isActive?: boolean; password?: string; profileId?: string; numberIds?: string[]; typingSpeed?: TypingSpeed }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); } });
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; email?: string; role?: 'agent' | 'manager'; isActive?: boolean; password?: string; profileId?: string; numberIds?: string[]; defaultNumberIds?: string[]; departmentIds?: string[]; receiveNumberIds?: string[]; typingSpeed?: TypingSpeed }) => api(`/tenants/me/agents/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['usage'] }); if (v.departmentIds) qc.invalidateQueries({ queryKey: ['departments'] }); if (v.receiveNumberIds || v.numberIds) qc.invalidateQueries({ queryKey: ['numbers'] }); } });
+};
+
+/** "Salvar como meu padrão" no filtro de números das conversas (docs/18-perfis-de-acesso.md#número-padrão). */
+export const useSaveMyDefaultNumbers = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (numberIds: string[]) => api<{ defaultNumberIds: string[] }>('/tenants/me/default-numbers', { method: 'PUT', body: JSON.stringify({ numberIds }) }),
+    onSuccess: (r) => {
+      qc.setQueryData(['me'], (old: object | undefined) => (old ? { ...old, defaultNumberIds: r.defaultNumberIds } : old));
+      qc.invalidateQueries({ queryKey: ['agents'] });
+    },
+  });
 };

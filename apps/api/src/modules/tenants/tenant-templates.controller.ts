@@ -34,6 +34,8 @@ class RolloutDto {
   @IsOptional() @IsBoolean() settings?: boolean;
   @IsOptional() @IsBoolean() aiAgents?: boolean;
   @IsOptional() @IsBoolean() ticketTypes?: boolean;
+  /** departamentos do modelo que o cliente não tem (com a hierarquia) */
+  @IsOptional() @IsBoolean() departments?: boolean;
   /** só calcula (prévia), sem gravar */
   @IsOptional() @IsBoolean() dryRun?: boolean;
 }

@@ -46,6 +46,7 @@ ocupado: tirar a conversa de alguém cedo só troca de fila, não atende mais r�
 - **online** = painel aberto, no turno e fora de [pausa](fila-de-atendimento.md#pausa) (a mesma presença do bloco Distribuidor);
 - com a [fila de atendimento](fila-de-atendimento.md) ligada, quem está no limite de atendimentos não recebe;
 - com acesso à conversa (número e departamento — mesma régua da transferência manual);
+- se o número tem lista de [quem recebe automaticamente](distribuicao-por-numero.md), só quem está nela;
 - fora quem está com ela e quem **já a recebeu nesta espera** (sem pingue-pongue);
 - entre os que sobram, o com **menos conversas abertas** (empate: ordem fixa).
 
@@ -64,6 +65,31 @@ a equipe responde, a espera acaba e a contagem zera.
 
 A troca só acontece se a conversa continua como foi lida (mesmo dono, status e início da espera):
 se alguém respondeu ou assumiu no meio do minuto, nada muda.
+
+## Saiu do plantão
+
+Terceira regra da mesma seção: **Devolver os atendimentos de quem saiu do plantão**
+(`tenant_settings.releaseAwayEnabled`, desligada por padrão; `releaseAwayMinutes`, 30, entre 5 e 240).
+Resolve o atendimento que ficava preso com quem já foi embora: o próximo plantão via a conversa com
+outra pessoa e o contato ficava sem resposta.
+
+| Como a pessoa saiu | Quando devolve |
+|---|---|
+| Clicou em **Sair** (menu) ou **Sair agora** / passagem expirou na [tela de fim de turno](escalas.md#fim-de-turno) | na hora (`POST /me/shift/handoff?auto=1`, que não faz nada com a regra desligada) |
+| Fechou o painel, o computador desligou, o turno acabou (sessão travada sai da presença) | depois de `releaseAwayMinutes` fora |
+
+- **Fora** = sem presença (painel aberto e no turno, a mesma do Distribuidor). **Pausa não conta
+  como fora**: quem está em pausa segura os atendimentos.
+- Só **atendente e gerente**: o admin da conta fica com os dele. Vale também para quem não tem escala
+  (por isso o relógio é a presença, e não o fim do turno).
+- Devolve para **Aguardando**, sem dono, com evento `released` sem ator (`reason` = `saiu do plantão`),
+  nota interna "↩️ Devolvida para a fila automaticamente…" e **nenhuma mensagem ao contato**. Conversas
+  livres (isentas de ticket) não entram. Se a pessoa voltou e respondeu, ou alguém assumiu, nada muda
+  (`ConversationsService.releaseSystem` confere o dono antes de trocar).
+- Relógio de cada pessoa no Redis (`presence:away:<tenant>`, userId → desde quando), no mesmo job de
+  minuto da redistribuição (`AutoReassignService.runReleaseAway`; regra pura em
+  `auto-reassign/release-away.ts`, testes em `test/release-away.test.ts`). Reinício rápido da API não
+  devolve nada: o mínimo é 5 minutos.
 
 ## Código
 

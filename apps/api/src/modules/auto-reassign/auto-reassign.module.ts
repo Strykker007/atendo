@@ -9,12 +9,18 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { AUTO_REASSIGN_REASON, pickReassignTarget, reassignAfterMinutes, waitingClockStart } from './auto-reassign';
+import { RedisService } from '../../common/redis/redis.service';
+import { awayDecision, RELEASE_AWAY_REASON, releasableRole, releaseAwayNote } from './release-away';
 
 export const QUEUE_AUTO_REASSIGN = 'auto-reassign';
 /** por rodada e por cliente: o resto fica para o próximo minuto (a fila não trava o worker) */
 const BATCH = 50;
 
 /**
+ * Saiu do plantão (docs/redistribuicao-automatica.md#saiu-do-plantão): quem está fora do painel
+ * (fechou, saiu, o turno acabou) há `releaseAwayMinutes` tem os atendimentos abertos devolvidos para
+ * a fila. Pausa não conta como fora. Roda no mesmo job da redistribuição, antes dela.
+ *
  * Redistribuição automática de conversas órfãs (docs/redistribuicao-automatica.md). A cada minuto,
  * para cada cliente com a regra ligada: mede a carga, calcula o tempo (base → teto) e passa para o
  * atendente online menos ocupado as conversas cujo contato espera resposta há mais que isso.
@@ -27,9 +33,11 @@ export class AutoReassignService {
     private readonly prisma: PrismaService,
     private readonly conversations: ConversationsService,
     private readonly gateway: ConversationsGateway,
+    private readonly redis: RedisService,
   ) {}
 
   async runDue(now = new Date()) {
+    await this.runReleaseAway(now).catch((e) => this.log.warn(`devolução de quem saiu falhou: ${e instanceof Error ? e.message : e}`));
     const tenants = await this.prisma.tenantSettings.findMany({
       where: { OR: [{ autoReassignWaiting: true }, { autoReassignAssigned: true }], tenant: { isActive: true } },
       select: { tenantId: true, autoReassignWaiting: true, autoReassignAssigned: true, autoReassignBaseMinutes: true, autoReassignMaxMinutes: true, autoReassignMaxTimes: true },
@@ -37,6 +45,45 @@ export class AutoReassignService {
     for (const t of tenants) {
       await this.runTenant(t, now).catch((e) => this.log.warn(`redistribuição do cliente ${t.tenantId} falhou: ${e instanceof Error ? e.message : e}`));
     }
+  }
+
+  /** Saiu do plantão: ver `awayDecision` (release-away.ts). */
+  async runReleaseAway(now = new Date()) {
+    const tenants = await this.prisma.tenantSettings.findMany({ where: { releaseAwayEnabled: true, tenant: { isActive: true } }, select: { tenantId: true, releaseAwayMinutes: true } });
+    for (const t of tenants) {
+      await this.releaseAwayTenant(t.tenantId, t.releaseAwayMinutes, now).catch((e) => this.log.warn(`devolução do cliente ${t.tenantId} falhou: ${e instanceof Error ? e.message : e}`));
+    }
+  }
+
+  private async releaseAwayTenant(tenantId: string, minutes: number, now: Date) {
+    const key = awayKey(tenantId);
+    // conversas livres (isentas de ticket) não têm fila: ficam com quem está
+    const abertas = await this.prisma.conversation.groupBy({ by: ['assigneeId'], where: { tenantId, status: { not: 'closed' }, assigneeId: { not: null }, ticketExempt: false }, _count: { _all: true } });
+    if (!abertas.length) {
+      await this.redis.del(key);
+      return;
+    }
+    const pessoas = await this.prisma.user.findMany({ where: { tenantId, id: { in: abertas.map((a) => a.assigneeId!) } }, select: { id: true, name: true, role: true } });
+    const [online, paused, marcas] = await Promise.all([this.gateway.onlineUserIds(tenantId), this.gateway.pausedUserIds(tenantId), this.redis.hgetall(key)]);
+    const vistos = new Set<string>();
+    for (const p of pessoas) {
+      if (!releasableRole(p.role)) continue;
+      vistos.add(p.id);
+      const desde = marcas[p.id] ? Number(marcas[p.id]) : null;
+      const d = awayDecision(online.has(p.id) || paused.has(p.id), desde, now.getTime(), minutes);
+      if (d === 'clear') { if (desde != null) await this.redis.hdel(key, p.id); continue; }
+      if (d === 'mark') { await this.redis.hset(key, p.id, String(now.getTime())); continue; }
+      if (d === 'wait') continue;
+      const convs = await this.prisma.conversation.findMany({ where: { tenantId, assigneeId: p.id, status: { not: 'closed' }, ticketExempt: false }, select: { id: true }, take: BATCH });
+      let n = 0;
+      for (const c of convs) if (await this.conversations.releaseSystem(tenantId, c.id, p.id, RELEASE_AWAY_REASON, releaseAwayNote(p.name, minutes))) n++;
+      // mais que um lote: o relógio continua marcado e o resto sai no próximo minuto
+      if (convs.length < BATCH) await this.redis.hdel(key, p.id);
+      if (n) this.log.log(`cliente ${tenantId}: ${n} atendimento(s) de ${p.id} devolvido(s) para a fila (fora há ${minutes}+ min)`);
+    }
+    // quem não tem mais atendimento aberto (ou saiu da lista) não precisa de relógio
+    const sobras = Object.keys(marcas).filter((id) => !vistos.has(id));
+    if (sobras.length) await this.redis.hdel(key, ...sobras);
   }
 
   private async runTenant(
@@ -90,7 +137,7 @@ export class AutoReassignService {
       const nestaEspera = autos.filter((a) => a.conversationId === c.id && a.createdAt >= since);
       if (nestaEspera.length >= cfg.autoReassignMaxTimes) continue;
       const exclude = new Set([...(c.assigneeId ? [c.assigneeId] : []), ...nestaEspera.map((a) => a.targetId).filter((x): x is string => !!x)]);
-      const eligible = (await this.conversations.receiversOf(tenantId, c, agents.filter((a) => !exclude.has(a.id)))).filter((id) => (openCount[id] ?? 0) < limite);
+      const eligible = (await this.conversations.autoReceiversOf(tenantId, c, agents.filter((a) => !exclude.has(a.id)))).filter((id) => (openCount[id] ?? 0) < limite);
       const chosen = pickReassignTarget({ eligible, online: onlineIds, exclude, openCount });
       if (!chosen) continue;
 
@@ -105,6 +152,9 @@ export class AutoReassignService {
     }
   }
 }
+
+/** Desde quando cada pessoa com atendimento aberto está fora (HASH por cliente: userId → ms). */
+const awayKey = (tenantId: string) => `presence:away:${tenantId}`;
 
 /** Verifica a cada minuto. `upsertJobScheduler` é idempotente entre instâncias. */
 @Injectable()

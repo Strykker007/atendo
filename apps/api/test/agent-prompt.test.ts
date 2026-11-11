@@ -45,6 +45,12 @@ describe('agentSystemPrompt', () => {
 });
 
 describe('parseAgentReply', () => {
+  it('quebra de linha crua dentro do reply (Gemini) não derruba a rodada', () => {
+    const raw = '```json\n{"reply": "Pelo Art. 20.2, não dá para reservar!\n\nOs valores:\\n• Gourmet 01: 20%", "next_stage": "", "actions": [], "done": false}\n```';
+    const t = parse(raw);
+    expect(t?.reply).toBe('Pelo Art. 20.2, não dá para reservar!\n\nOs valores:\n• Gourmet 01: 20%');
+  });
+
   it('aceita JSON embrulhado em ```json', () => {
     const t = parse('```json\n{"reply":"Olá! Como posso ajudar?","next_stage":"","actions":[]}\n```');
     expect(t).toMatchObject({ reply: 'Olá! Como posso ajudar?', stageId: 'inicio', actions: [] });

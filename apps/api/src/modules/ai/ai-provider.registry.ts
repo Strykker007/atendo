@@ -5,6 +5,7 @@ import type { AiProvider } from './ai.types';
 import { isLocalEndpoint } from './providers/base-url';
 import { AnthropicProvider } from './providers/anthropic.provider';
 import { OpenAiProvider } from './providers/openai.provider';
+import { GeminiProvider } from './providers/gemini.provider';
 
 /**
  * Qual fornecedor de IA está em uso. Trocar = mudar `AI_PROVIDER` no ambiente;
@@ -15,6 +16,7 @@ export class AiProviderRegistry {
   constructor(
     private readonly anthropic: AnthropicProvider,
     private readonly openai: OpenAiProvider,
+    private readonly gemini: GeminiProvider,
   ) {}
 
   /** true quando há fornecedor e chave — endpoint local (Ollama) dispensa chave. */
@@ -29,6 +31,6 @@ export class AiProviderRegistry {
 
   /** Adapter de um fornecedor específico — chave própria do cliente, independente de `AI_PROVIDER`. */
   of(kind: AiKeyProvider): AiProvider {
-    return kind === 'openai' ? this.openai : this.anthropic;
+    return kind === 'openai' ? this.openai : kind === 'gemini' ? this.gemini : this.anthropic;
   }
 }

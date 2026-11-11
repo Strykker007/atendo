@@ -110,8 +110,35 @@ export function documentLines(sources?: KnowledgeHit[] | null): string[] {
     ...sources.map((h) => `--- ${h.docName}${h.heading ? ` · ${h.heading}` : ''} ---\n${h.text}`),
     '--- fim dos trechos ---',
     'Responda com base nesses trechos. Quando ajudar, cite a fonte de forma curta ("pelo regimento, Art. 12"). Se os trechos não respondem exatamente, não complete com suposição.',
+    // pergunta composta ("quais são e quanto custa, sou hóspede"): o modelo respondia só a restrição
+    'Responda TODAS as partes da pergunta. Se alguma regra impede o que o contato quer, explique a regra E informe também o que ele perguntou (lista, valores, horários) que estiver nos trechos.',
+    // "20% do salário mínimo" é o preço: o modelo dizia "não tenho o valor"
+    'Valor escrito como percentual ou fórmula (ex.: "20% do salário mínimo vigente") É o valor: informe exatamente assim. Só converta para reais se a BASE DE CONHECIMENTO trouxer a base do cálculo (ex.: o valor do salário mínimo).',
     '',
   ];
+}
+
+/**
+ * Quebra de linha/tab "crua" dentro de uma string JSON vira escape. O modelo às vezes escreve a
+ * lista do `reply` com Enter de verdade em vez de `\n` — JSON inválido, e a rodada inteira ia para
+ * humano (visto com o Gemini em ~1 de 16 respostas longas).
+ */
+export function escapeRawControlChars(json: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of json) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      else if (ch === '\n') { out += '\\n'; continue; }
+      else if (ch === '\r') { out += '\\r'; continue; }
+      else if (ch === '\t') { out += '\\t'; continue; }
+    } else if (ch === '"') inString = true;
+    out += ch;
+  }
+  return out;
 }
 
 /** O primeiro objeto JSON da resposta (o modelo às vezes embrulha em ```json). */
@@ -119,12 +146,14 @@ function extractJson(raw: string): Record<string, unknown> | null {
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start < 0 || end <= start) return null;
-  try {
-    const v = JSON.parse(raw.slice(start, end + 1));
-    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-  } catch {
-    return null;
+  const body = raw.slice(start, end + 1);
+  for (const candidate of [body, escapeRawControlChars(body)]) {
+    try {
+      const v = JSON.parse(candidate);
+      return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+    } catch { /* tenta a versão com escape */ }
   }
+  return null;
 }
 
 const str = (v: unknown, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');

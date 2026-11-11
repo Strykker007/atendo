@@ -181,7 +181,10 @@ export default function RelatoriosPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Kpi icon={<MessageSquare size={15} />} label="Atendimentos no período" value={overview.data.kpis.conversations.toLocaleString('pt-BR')} sub={`${overview.data.kpis.messagesIn.toLocaleString('pt-BR')} recebidas · ${overview.data.kpis.messagesOut.toLocaleString('pt-BR')} enviadas`} />
             <Kpi icon={<Inbox size={15} />} label="Na fila agora" value={String(overview.data.kpis.waitingNow)} sub={`${overview.data.kpis.inProgressNow} em atendimento`} tone={overview.data.kpis.waitingNow > 5 ? 'warn' : undefined} />
-            <Kpi icon={<Clock size={15} />} label="1ª resposta (média)" value={overview.data.kpis.avgFirstResponseMin != null ? fmtMin(overview.data.kpis.avgFirstResponseMin) : '—'} sub="do contato escrever até a equipe responder" tone={overview.data.kpis.avgFirstResponseMin != null && overview.data.kpis.avgFirstResponseMin > 30 ? 'warn' : undefined} />
+            {/* mediana = o tempo típico; a média aparece embaixo (sobe muito com quem escreveu de madrugada) — docs/relatorios-desempenho.md#1ª-resposta */}
+            <Kpi icon={<Clock size={15} />} label="1ª resposta (típica)" value={overview.data.kpis.medianFirstResponseMin != null ? fmtMin(overview.data.kpis.medianFirstResponseMin) : '—'}
+              sub={overview.data.kpis.avgFirstResponseMin != null ? `média ${fmtMin(overview.data.kpis.avgFirstResponseMin)} · ${(overview.data.kpis.firstResponseCount ?? 0).toLocaleString('pt-BR')} atendimentos respondidos` : 'do contato escrever até alguém da equipe responder'}
+              tone={overview.data.kpis.medianFirstResponseMin != null && overview.data.kpis.medianFirstResponseMin > 30 ? 'warn' : undefined} />
             {/* encerrados ÷ iniciados passava de 100%: quem foi aberto antes do período também encerra nele */}
             <Kpi icon={<CheckCircle2 size={15} />} label="Encerrados no período" value={overview.data.kpis.closed.toLocaleString('pt-BR')} sub="inclui os iniciados antes do período" />
           </div>
@@ -478,7 +481,7 @@ function PorEmpresa({ rows, onAbrir, vendas }: { rows: CompanyReportRow[]; onAbr
                 <td className="py-2 pr-4 text-right tabular-nums">{r.conversations.toLocaleString('pt-BR')}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{r.closed.toLocaleString('pt-BR')}</td>
                 <td className={cn('py-2 pr-4 text-right tabular-nums', r.waitingNow > 5 && 'text-warn-ink font-semibold')}>{r.waitingNow}</td>
-                <td className="py-2 pr-4 text-right tabular-nums">{r.avgFirstResponseMin != null ? fmtMin(r.avgFirstResponseMin) : '—'}</td>
+                <td className="py-2 pr-4 text-right tabular-nums" title={r.avgFirstResponseMin != null ? `média ${fmtMin(r.avgFirstResponseMin)}` : undefined}>{r.medianFirstResponseMin != null ? fmtMin(r.medianFirstResponseMin) : '—'}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{r.won.toLocaleString('pt-BR')}</td>
                 {vendas && <td className="py-2 pr-4 text-right tabular-nums">{fmtBRL(r.revenue)}</td>}
                 {vendas && <td className="py-2 pr-4 text-right tabular-nums">{r.avgTicket != null ? fmtBRL(r.avgTicket) : '—'}</td>}

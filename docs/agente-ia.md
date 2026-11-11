@@ -67,7 +67,11 @@ regra toda do nosso lado. Alvos de outro cliente são descartados ao salvar o ag
 grava `vars._agentStage` e `vars._aiTurns` no `FlowRun` e executa as ações, cada uma com **nota
 interna** "🤖 Agente "Ana" transferiu para Vendas — quer comprar" (mudança de etapa também).
 Uma rodada por vez por conversa: a mensagem que chega durante a rodada entra no histórico da
-próxima. Qualquer erro → mensagem de falha do bloco e saída Não conseguiu.
+próxima. Qualquer erro → mensagem de falha do bloco e saída Não conseguiu — **exceto** IA no
+limite do plano grátis (`AiBusyError`, Gemini): a rodada é reagendada (job `ai-retry` da fila
+`flows`, com `vars._aiRetry`/`_aiRetryN`), até 5 vezes e no máximo 5 min por espera, com nota
+interna na primeira. Cota do dia esgotada ou tentativas acabadas → Não conseguiu, com nota. Ver
+[Gemini e o plano grátis](15-ia.md#gemini-e-o-plano-grátis).
 
 ## Documentos
 
@@ -93,7 +97,10 @@ contato como pergunta:
 
 1. **por palavra**: `to_tsquery('portuguese', …)` no `tsv` — dicionário português (obras → obra),
    sem acento dos dois lados, palavras com OU, só `[a-z0-9]` (nada do contato vira operador);
-   número de artigo entra ("art 12");
+   número de artigo entra ("art 12"); palavras de conversa ("quero", "saber", "vou", "ficar",
+   "quais"…, `CHAT_WORDS`) ficam de fora — no OU elas puxavam artigo sem relação ("vou ficar 3
+   dias" trazia o de animais). "dia/dias" ficam: ligam a prazos do regimento ("locação superior a
+   45 dias");
 2. **por significado** (só com `AI_EMBED_API_KEY`): embedding da pergunta comparado com os dos
    trechos **na API**, sem pgvector — vetores de 512 posições (2 KB) normalizados, produto
    escalar; 400 trechos levam milissegundos;
@@ -104,6 +111,17 @@ No prompt entram como **TRECHOS DOS DOCUMENTOS** (documento · capítulo), com a
 só com eles e citar a fonte de forma curta. Agente com documento e nada encontrado: o prompt diz
 que nenhum trecho fala do assunto e proíbe supor — a IA diz que vai verificar e chama um
 atendente. Agente sem documento: nada muda. Falha na busca não derruba a rodada.
+
+O prompt também manda **responder todas as partes** da pergunta (com uma regra que impede o que o
+contato quer, explicar a regra e ainda informar a lista/valores pedidos) e tratar **valor em
+percentual ou fórmula** ("20% do salário mínimo vigente") como o próprio valor — antes o modelo
+dizia "não tenho o preço". Para mostrar em reais, ponha a base na BASE DE CONHECIMENTO do agente
+(ex.: "Salário mínimo vigente: R$ …"). Visto no teste de 11/11/2026 com o regimento da ID Vida
+Urbana (pergunta de hóspede sobre salões e valores).
+
+**JSON tolerante:** quebra de linha "crua" dentro do `reply` (o Gemini às vezes escreve a lista com
+Enter de verdade) é escapada antes de ler (`escapeRawControlChars`); antes a rodada virava "resposta
+que não deu para entender" e ia para humano (~1 em 16 respostas longas).
 
 **Embeddings**: no envio, a busca por palavra já funciona; os embeddings saem no job
 `knowledge-embed` da fila `ai` (worker). Ao subir a API com chave configurada (ou trocar
@@ -127,6 +145,45 @@ AI_EMBED_MODEL=text-embedding-3-small         # Gemini: gemini-embedding-001
 AI_EMBED_PRICE_PER_1M=0.02
 AI_EMBED_DIMENSIONS=512      # 0 = tamanho padrão do modelo
 ```
+
+### Embeddings locais
+
+Ollama no próprio servidor, sem chave e sem custo: `AI_EMBED_BASE_URL=http://ollama:11434/v1`,
+`AI_EMBED_MODEL=bge-m3` (multilíngue, lê até 8 mil tokens, 1.024 dimensões). Serviço `ollama`
+ativo em `infra/docker-compose.prod.yml` desde 11/11/2026 (teto de 2,5 GB, 2 CPUs, um pedido por
+vez). O modelo só carrega no primeiro uso e fica 24 h na memória depois do último (`KEEP_ALIVE`);
+sem documento, o container usa ~30 MB.
+
+**Produção, uma vez** (o `ollama` não está no `APP_SERVICES` do `scripts/deploy.sh`):
+
+```bash
+cd /home/ubuntu/atendo
+C="docker compose -f infra/docker-compose.prod.yml --env-file .env.production"
+$C up -d --no-deps ollama
+$C exec ollama ollama pull bge-m3                # ~1,2 GB, uma vez (fica no volume)
+# no .env.production: AI_EMBED_BASE_URL=http://ollama:11434/v1  e  AI_EMBED_MODEL=bge-m3
+$C up -d --no-deps api worker                    # API e worker leem as variáveis novas
+```
+
+Ordem importa: com as variáveis e sem o modelo baixado, a indexação falha e o documento fica só
+com a busca por palavra até ser reprocessado.
+
+- Endereço local (localhost, IP privado, `.local` ou nome de serviço do compose sem ponto) =
+  `isLocalEndpoint`: liga a busca por significado sem `AI_EMBED_API_KEY`, custo zero, **lote de 4
+  trechos com 180 s** por lote (em CPU cada trecho leva segundos) e **sem `dimensions`** (o modelo
+  local devolve o tamanho dele; `embedModel` fica só o nome).
+- **Dev:** serviço `ollama` no `infra/docker-compose.yml` com profile `ia` (não sobe no `up` comum):
+  `docker compose -f infra/docker-compose.yml --profile ia up -d ollama`, depois
+  `... exec ollama ollama pull bge-m3` e no `.env` `AI_EMBED_BASE_URL=http://localhost:11434/v1`,
+  `AI_EMBED_MODEL=bge-m3`. Reinicie API e worker (o job de embeddings roda no worker).
+- Não use `paraphrase-multilingual`: lê só ~128 tokens, e os trechos têm ~250–300.
+- Medição (11/11/2026, Docker com 2 CPUs ARM do Apple M1, bge-m3 do Ollama 0.6.8): modelo carregado
+  1,8 GB; pergunta 0,13 s (máx. 0,25 s); 200 trechos de ~1.050 caracteres (~240 tokens) em 5,5 min
+  (1,65 s/trecho); 5/5 perguntas acharam o artigo certo; primeira carga 23 s. No servidor de
+  produção (4 núcleos Neoverse-N1, mais lentos por núcleo) estimativa de 1,5–2× isso, até a
+  medição lá com `scripts/bench-embed.py <url> bge-m3 200` (só leitura: gera texto sintético).
+- Durante uma indexação a pergunta espera na fila do Ollama; passando de 8 s, a busca segue só por
+  palavra (nada quebra).
 
 Quando passar a valer a pena (dezenas de milhares de trechos num agente), o caminho é um Postgres
 separado com pgvector — não trocar a imagem do banco principal (Alpine → Debian muda a ordenação

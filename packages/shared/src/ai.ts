@@ -56,6 +56,9 @@ export const AI_MODEL_PRICE: Record<string, AiModelPrice> = {
   // OpenAI
   'gpt-4o-mini': { inputPer1k: 0.00015, outputPer1k: 0.0006 },
   'gpt-4o': { inputPer1k: 0.0025, outputPer1k: 0.01 },
+  // Google (Gemini) — no plano grátis do AI Studio não há cobrança; o valor fica só de referência
+  'gemini-2.5-flash': { inputPer1k: 0.0003, outputPer1k: 0.0025 },
+  'gemini-2.5-flash-lite': { inputPer1k: 0.0001, outputPer1k: 0.0004 },
 };
 /**
  * Fornecedores aceitos na **chave própria do cliente** (feature `ai_own_key`). Sempre o endpoint
@@ -64,6 +67,14 @@ export const AI_MODEL_PRICE: Record<string, AiModelPrice> = {
 export const AI_KEY_PROVIDERS = {
   openai: { label: 'OpenAI (ChatGPT)', defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o'], keyHint: 'sk-…', consoleUrl: 'https://platform.openai.com/api-keys' },
   anthropic: { label: 'Anthropic (Claude)', defaultModel: 'claude-haiku-4-5-20251001', models: ['claude-haiku-4-5-20251001', 'claude-sonnet-5'], keyHint: 'sk-ant-…', consoleUrl: 'https://console.anthropic.com/settings/keys' },
+  /**
+   * Gemini (Google AI Studio): tem plano **grátis**, com limite de pedidos por minuto e por dia
+   * (por modelo). Os modelos da lista são tentados em ordem quando um bate o limite
+   * (docs/15-ia.md#gemini-e-o-plano-grátis).
+   */
+  // lite primeiro: mais pedidos grátis por dia e suficiente para tirar dúvida de regimento. Modelo
+  // que não está no plano grátis da chave responde 429 com limite 0 e só "esfria" até o dia seguinte.
+  gemini: { label: 'Google (Gemini)', defaultModel: 'gemini-3.5-flash-lite', models: ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], keyHint: 'AIza…', consoleUrl: 'https://aistudio.google.com/apikey' },
 } as const;
 export type AiKeyProvider = keyof typeof AI_KEY_PROVIDERS;
 export const AI_KEY_PROVIDER_IDS = Object.keys(AI_KEY_PROVIDERS) as AiKeyProvider[];

@@ -40,6 +40,8 @@ export interface SettingsUpdate {
   autoReassignBaseMinutes?: number;
   autoReassignMaxMinutes?: number;
   autoReassignMaxTimes?: number;
+  releaseAwayEnabled?: boolean;
+  releaseAwayMinutes?: number;
   autoDistribute?: boolean;
   autoDistributeMax?: number;
   autoDistributeLockClaim?: boolean;

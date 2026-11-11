@@ -21,6 +21,8 @@ import { onScheduleMiss } from './schedule-misses';
 import { AiService } from '../ai/ai.service';
 import { AiAgentsService } from '../ai/ai-agents';
 import { describeAction } from '../ai/agent-prompt';
+import { AiBusyError } from '../ai/ai-busy';
+import { randomUUID } from 'node:crypto';
 import { SurveyRunnerService } from '../satisfaction/survey-runner.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { TenantSettingsService } from '../tenants/tenant-settings.service';
@@ -49,7 +51,19 @@ export interface ReplyTimeoutJob { runId: string; nodeId: string; until: string 
 /** Intervalo entre mensagens automáticas (boas-vindas, faixa de horário): o resto da sequência, já interpolado. */
 /** `waited`: o atraso do 1º item já foi esperado (vira só piso desde a entrega anterior). */
 export interface AutoContentJob { conversationId: string; items: ContentItem[]; waited?: boolean }
-export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob | AutoContentJob;
+/**
+ * Nova tentativa do bloco Agente quando a IA está no limite do plano grátis (docs/15-ia.md#gemini-e-o-plano-grátis).
+ * `token` = `vars._aiRetry`: só vale se o run ainda espera no mesmo nó e ninguém rodou o agente nesse meio-tempo.
+ */
+export interface AiRetryJob { runId: string; nodeId: string; token: string }
+export type FlowJob = FlowResumeJob | BotUnpauseJob | ReplyTimeoutJob | AutoContentJob | AiRetryJob;
+
+const AI_RETRY_VAR = '_aiRetry';
+const AI_RETRY_N_VAR = '_aiRetryN';
+/** tentativas seguidas antes de entregar para a equipe */
+const AI_RETRY_MAX = 5;
+/** espera máxima por tentativa: mais que isso (ex.: cota do dia) entrega para a equipe */
+const AI_RETRY_MAX_WAIT_MS = 5 * 60_000;
 
 /** Atraso antes de um item do Conteúdo, em segundos (0 a CONTENT_MAX_DELAY_SEC). */
 const contentDelaySec = (it: ContentItem) => Math.min(CONTENT_MAX_DELAY_SEC, Math.max(0, Number(it.delay) || 0));
@@ -441,6 +455,23 @@ export class FlowEngineService {
     await this.next(run.id, REPLY_TIMEOUT_HANDLE);
   }
 
+  /** Job `ai-retry`: roda de novo a rodada do agente que esbarrou no limite da IA. */
+  async aiRetry(job: AiRetryJob) {
+    const run = await this.prisma.flowRun.findUnique({ where: { id: job.runId }, include: { conversation: JOB_CONV } });
+    if (!run || run.status !== 'waiting' || run.currentNodeId !== job.nodeId || (run.vars as Record<string, string>)[AI_RETRY_VAR] !== job.token) return;
+    if (botPaused(run.conversation)) return; // atendente assumiu: não responde por cima
+    const blocked = jobBlocked(run.conversation);
+    if (blocked) return this.finish(run.id, 'stopped', blocked);
+    const claimed = await this.prisma.flowRun.updateMany({ where: { id: run.id, status: 'waiting', currentNodeId: job.nodeId, vars: { path: [AI_RETRY_VAR], equals: job.token } }, data: { status: 'running' } });
+    if (!claimed.count) return;
+    const { node } = await this.load(run.id);
+    if (node?.type !== 'ai' || node.data.mode !== 'agent') return this.finish(run.id, 'failed', 'nó do agente não existe mais');
+    const out = await this.agentStep(run.id, node);
+    if (out === 'ended') return;
+    if (out === 'wait') { await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'waiting' } }); return; }
+    return this.next(run.id, out);
+  }
+
   // ---------- execução ----------
 
   private async load(runId: string) {
@@ -781,12 +812,15 @@ export class FlowEngineService {
   private async agentStep(runId: string, node: Extract<FlowNode, { type: 'ai' }>): Promise<'wait' | 'done' | 'fallback' | 'ended'> {
     const run = await this.prisma.flowRun.findUniqueOrThrow({ where: { id: runId }, include: { flow: true, conversation: { include: { contact: true } } } });
     const nota = (t: string) => this.conversations.systemNote(run.conversationId, t).catch(() => undefined);
+    // a rodada que roda agora consome a nova tentativa pendente (o job antigo fica sem efeito)
+    const { [AI_RETRY_VAR]: _pendente, [AI_RETRY_N_VAR]: retriesRaw, ...vars } = run.vars as Record<string, string>;
+    void _pendente;
+    const retries = Number(retriesRaw ?? 0);
     try {
       await this.ai.assertFeature(run.tenantId, 'ai_flows');
       if (!node.data.aiAgentId) return 'fallback';
       const agent = await this.aiAgents.config(run.tenantId, node.data.aiAgentId);
       if (!agent.isActive) { await nota(`🤖 Agente "${agent.name}" está desligado: conversa entregue para a equipe.`); return 'fallback'; }
-      const vars = run.vars as Record<string, string>;
       const turns = Number(vars._aiTurns ?? 0);
       // freio de custo: passou do limite, entrega para humano
       if (turns >= agent.maxReplies) { await nota(`🤖 Agente "${agent.name}" chegou ao limite de ${agent.maxReplies} respostas nesta conversa.`); return 'fallback'; }
@@ -833,6 +867,16 @@ export class FlowEngineService {
       }
       return turn.done ? 'done' : 'wait';
     } catch (err) {
+      // IA no limite do plano grátis: em vez de entregar para humano, tenta de novo daqui a pouco
+      if (err instanceof AiBusyError && !err.daily && retries < AI_RETRY_MAX && err.retryAfterMs <= AI_RETRY_MAX_WAIT_MS) {
+        const token = randomUUID();
+        const delay = err.retryAfterMs + Math.floor(Math.random() * 5000); // espalha quem ficou esperando junto
+        await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, [AI_RETRY_VAR]: token, [AI_RETRY_N_VAR]: String(retries + 1) } } });
+        await this.queue.add('ai-retry', { runId, nodeId: node.id, token }, { delay, jobId: `ai-retry-${runId}-${token}`, removeOnComplete: true });
+        if (!retries) await nota(`🤖 IA no limite de pedidos do plano grátis: respondendo em ~${Math.ceil(delay / 1000)}s.`);
+        return 'wait';
+      }
+      if (err instanceof AiBusyError) await nota(`🤖 ${err.daily ? 'O limite diário do plano grátis da IA acabou' : 'A IA continuou no limite do plano grátis'}: conversa entregue para a equipe.`);
       this.log.warn(`agente de IA no fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
       if (node.data.fallbackText) await this.send(run.conversationId, node.data.fallbackText).catch(() => undefined);
       return 'fallback';
@@ -986,6 +1030,12 @@ export class FlowEngineService {
     switch (d.kind) {
       case 'add_tag': {
         if (!d.tagId) break;
+        // tag apagada (ou de outro tenant) depois do fluxo montado: pula o nó e segue — antes a FK
+        // derrubava a execução inteira e o contato ficava sem o resto do fluxo
+        if (!(await this.prisma.tag.count({ where: { id: d.tagId, tenantId: run.tenantId } }))) {
+          await this.warnTeam(run, 'Adicionar tag: a tag escolhida foi apagada. O fluxo seguiu sem marcar — escolha a tag de novo no fluxo.');
+          break;
+        }
         // mesma troca do chat: sai só quem conflita direto com a tag marcada
         const opostas = [...((await conflictMap(this.prisma, [d.tagId])).get(d.tagId) ?? [])];
         if (d.scope === 'contact') {
@@ -1218,14 +1268,16 @@ export class FlowEngineService {
       await this.conversations.setStatusSystem(conv.id, 'waiting');
       return true;
     }
+    // número reservado (docs/18-perfis-de-acesso.md#número-reservado): "sem marcação = todos" não vale para ele
+    const reservado = !!(await this.prisma.whatsAppNumber.findUnique({ where: { id: conv.numberId }, select: { reserved: true } }))?.reserved;
     const users = await this.prisma.user.findMany({
       where: {
         tenantId: run.tenantId,
         isActive: true,
         role: { not: 'super_admin' },
         ...(node.data.agentIds?.length && { id: { in: node.data.agentIds } }),
-        // sem linha em user_numbers = opera todos os números
-        OR: [{ numbers: { none: {} } }, { numbers: { some: { numberId: conv.numberId } } }],
+        // sem linha em user_numbers = opera todos os números (no reservado, só o admin da conta)
+        OR: [{ numbers: { none: {} }, ...(reservado && { role: 'tenant_admin' as const }) }, { numbers: { some: { numberId: conv.numberId } } }],
         // com departamento: só quem é dele (aqui não vale "sem vínculo = todos": distribuir
         // Vendas para quem nunca foi posto em Vendas é justamente o que o bloco evita)
         ...(departmentId && { departments: { some: { departmentId } } }),
@@ -1233,6 +1285,12 @@ export class FlowEngineService {
       select: { id: true },
     });
     let ids = users.map((u) => u.id);
+    // sem atendentes escolhidos no bloco: vale a lista "quem recebe automaticamente" do número
+    // (docs/distribuicao-por-numero.md). Escolhidos no bloco = decisão de quem montou o fluxo
+    if (!node.data.agentIds?.length) {
+      const lista = await this.conversations.numberReceivers(conv.numberId);
+      if (lista) ids = ids.filter((id) => lista.has(id));
+    }
     // só quem está com o painel aberto e no turno (presença no Redis — o fluxo roda no worker).
     // Ninguém online = saída "Ninguém disponível"; sem ela ligada, a conversa fica em Aguardando
     if (node.data.onlyOnline) {

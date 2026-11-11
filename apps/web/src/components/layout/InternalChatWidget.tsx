@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { ArrowLeft, Check, ChevronDown, ChevronUp, Headset, LogOut, Plus, Reply, Send, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
+import { useWidget } from '@/lib/internal-chat-store';
+import { askNotification, canAskNotification } from '@/lib/internal-alert';
+import { ArrowLeft, BellRing, Check, ChevronDown, ChevronUp, Headset, LogOut, Plus, Reply, Send, Trash2, UserMinus, UserPlus, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import {
@@ -10,32 +10,6 @@ import {
   useOpenStaffChat, useOpenSupportChat, useRemoveInternalMember, useRenameInternalChat, useSendInternalMessage, useSupportChats, useSupportCounts, useStaffChats, useStaffUsers, useSupportTenants, useSupportTicketAction,
   type ChatScope, type InternalChat, type InternalMessage, type InternalUser, type SupportTicket, type SupportView,
 } from '@/lib/hooks';
-
-/**
-/**
- * Estado do widget, por navegador: aberto/minimizado, canto onde está preso e conversa aberta.
- * Fica fora do `useUI` para não misturar com a tela de conversas.
- */
-interface WidgetState {
-  open: boolean;
-  minimized: boolean;
-  /** lateral em que o widget fica preso (trava magnética) */
-  side: 'left' | 'right';
-  /** altura do ponto de ancoragem (centro do botão redondo), em px; null = embaixo */
-  y: number | null;
-  chatId: string | null;
-  set: (p: Partial<Omit<WidgetState, 'set'>>) => void;
-}
-const useWidget = create<WidgetState>()(persist(
-  (set) => ({ open: false, minimized: false, side: 'right', y: null, chatId: null, set: (p) => set(p) }),
-  {
-    name: 'atendo-chat-interno',
-    // v1: a posição livre (`pos`) virou lado + altura — a antiga é descartada
-    version: 1,
-    migrate: (s) => ({ ...(s as object), side: 'right', y: null }) as unknown as WidgetState,
-    partialize: (s) => ({ open: s.open, minimized: s.minimized, side: s.side, y: s.y, chatId: s.chatId }),
-  },
-));
 
 const W = 340;
 const H = 480;
@@ -96,6 +70,9 @@ export function InternalChatWidget() {
   // dono: também a equipe do suporte (colegas super_admin) — docs/chat-interno.md#equipe-do-suporte
   const chatsStaff = useStaffChats(ehDono || donoMarcado);
   const naoLidas = [...(listaChats ?? []), ...(ehDono || donoMarcado ? chatsStaff.data ?? [] : [])].reduce((a, c) => a + (c.unread ?? 0), 0);
+  useUnreadTitle(naoLidas);
+  const [podePedir, setPodePedir] = useState(false);
+  useEffect(() => { setPodePedir(canAskNotification()); }, []);
   const equipe = useInternalUsers(ehEquipe);
   const colegas = useStaffUsers(ehDono);
   // entrando como: a única conversa é o canal de suporte do cliente, aberto direto
@@ -199,6 +176,14 @@ export function InternalChatWidget() {
         </button>
         <button data-no-drag type="button" onClick={() => set({ open: false })} className="p-1 rounded hover:bg-white/10" aria-label="Fechar"><X size={15} /></button>
       </div>
+      {!minimized && podePedir && (
+        <div className="flex items-center gap-2 border-b border-line bg-accent-soft px-3 py-1.5 text-[12px] text-accent-ink">
+          <BellRing size={13} className="shrink-0" />
+          <span className="flex-1">Receber aviso da equipe mesmo com o painel em segundo plano</span>
+          <button type="button" onClick={() => { void askNotification().then(() => setPodePedir(false)); }} className="font-semibold underline">Ativar</button>
+          <button type="button" onClick={() => setPodePedir(false)} aria-label="Agora não" className="opacity-70 hover:opacity-100"><X size={12} /></button>
+        </div>
+      )}
       {!minimized && (aberta
         ? <ChatView chat={aberta} meId={me.data!.id} scope={aberta.isStaff ? 'staff' : entrandoComo ? 'support' : scope} api={aberta.isStaff ? 'staff' : entrandoComo ? 'team' : scope} onLeave={() => set({ chatId: null })} />
         : ehDono
@@ -880,4 +865,24 @@ function GroupPanel({ chat, meId, onBack, onLeave }: { chat: InternalChat; meId:
       </div>
     </div>
   );
+}
+
+const TITLE_RE = /^\(\d+\+?\) 💬 /;
+/**
+ * "(3) 💬 Atendo" no título da aba enquanto houver mensagem da equipe não lida — dá para ver de
+ * outra aba/janela. A navegação do Next troca o título; o observer recoloca o contador.
+ */
+function useUnreadTitle(n: number) {
+  useEffect(() => {
+    const aplicar = () => {
+      const base = document.title.replace(TITLE_RE, '');
+      const novo = n > 0 ? `(${n > 99 ? '99+' : n}) 💬 ${base}` : base;
+      if (document.title !== novo) document.title = novo;
+    };
+    aplicar();
+    const el = document.querySelector('title');
+    const obs = el ? new MutationObserver(aplicar) : null;
+    if (el && obs) obs.observe(el, { childList: true, characterData: true, subtree: true });
+    return () => { obs?.disconnect(); document.title = document.title.replace(TITLE_RE, ''); };
+  }, [n]);
 }

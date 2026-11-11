@@ -5,6 +5,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { PermissionsService } from '../auth/permissions.service';
 import { provisionedTags, type TemplateContent, type TemplateSettings } from './tenant-template';
 import { createAgentsFromPortable, createTicketTypesFromPortable } from './portable-db';
+import { createTemplateDepartments } from './tenant-provisioning.service';
+import { parseAccessTemplate } from './access-template';
 
 /** O que replicar do modelo. Cada parte é opcional — o dono escolhe só o que quer mexer. */
 export interface RolloutParts {
@@ -22,6 +24,8 @@ export interface RolloutParts {
   aiAgents?: boolean;
   /** cria os tipos de ticket do modelo que o cliente não tem (pelo nome; não altera os dele) */
   ticketTypes?: boolean;
+  /** cria os departamentos do modelo que o cliente não tem, já na hierarquia (não altera os dele) */
+  departments?: boolean;
 }
 
 export interface RolloutTenantResult {
@@ -34,6 +38,7 @@ export interface RolloutTenantResult {
   settings: { changed: string[] };
   aiAgents: { created: string[] };
   ticketTypes: { created: string[] };
+  departments: { created: string[] };
 }
 
 const lower = (s: string) => s.trim().toLowerCase();
@@ -71,7 +76,8 @@ export class TemplateRolloutService {
       if (!p) throw new BadRequestException(`O perfil "${name}" não está no modelo.`);
       return p;
     });
-    if (!profiles.length && !parts.closeReasons && !parts.tags && !parts.settings && !parts.aiAgents && !parts.ticketTypes) throw new BadRequestException('Escolha o que aplicar.');
+    if (!profiles.length && !parts.closeReasons && !parts.tags && !parts.settings && !parts.aiAgents && !parts.ticketTypes && !parts.departments) throw new BadRequestException('Escolha o que aplicar.');
+    if (parts.departments && !content.departments?.length) throw new BadRequestException('O modelo não tem departamentos.');
     if (parts.aiAgents && !content.aiAgents?.length) throw new BadRequestException('O modelo não tem agentes de IA.');
     if (parts.ticketTypes && !content.ticketTypes?.length) throw new BadRequestException('O modelo não tem tipos de ticket.');
     if (parts.settings && !content.settings) throw new BadRequestException('O modelo não tem configurações de atendimento — nada para aplicar.');
@@ -101,9 +107,12 @@ export class TemplateRolloutService {
         settings: { changed: [] },
         aiAgents: { created: [] },
         ticketTypes: { created: [] },
+        departments: { created: [] },
       };
       // um cliente por transação: falha num não deixa o outro pela metade
       await this.prisma.$transaction(async (tx) => {
+        // departamentos antes dos perfis: o acesso padrão do perfil cita o departamento pelo nome
+        if (parts.departments && content.departments) await createTemplateDepartments(tx, t.id, content.departments, r.departments.created, dryRun);
         if (profiles.length) await this.applyProfiles(tx, t.id, profiles, r, dryRun);
         if (parts.closeReasons) await this.applyCloseReasons(tx, t.id, motivos, !!parts.replaceCloseReasons, r, dryRun);
         if (parts.tags) await this.applyTags(tx, t.id, tags, r, dryRun);
@@ -116,14 +125,26 @@ export class TemplateRolloutService {
     }
 
     if (!dryRun) {
-      if (profiles.length) this.permissions.invalidate();
-      this.log.log(`modelo aplicado em ${out.length} cliente(s): ${JSON.stringify({ profiles: parts.profiles, closeReasons: parts.closeReasons, replace: parts.replaceCloseReasons, tags: parts.tags, settings: parts.settings })}`);
+      if (profiles.length || parts.departments) this.permissions.invalidate();
+      this.log.log(`modelo aplicado em ${out.length} cliente(s): ${JSON.stringify({ profiles: parts.profiles, closeReasons: parts.closeReasons, replace: parts.replaceCloseReasons, tags: parts.tags, settings: parts.settings, departments: parts.departments })}`);
     }
     return out;
   }
 
   private async applyProfiles(tx: Prisma.TransactionClient, tenantId: string, profiles: TemplateContent['profiles'], r: RolloutTenantResult, dryRun: boolean) {
-    const existentes = await tx.accessProfile.findMany({ where: { tenantId }, select: { id: true, name: true, permissions: true, isSystem: true, systemRole: true } });
+    const existentes = await tx.accessProfile.findMany({ where: { tenantId }, select: { id: true, name: true, permissions: true, isSystem: true, systemRole: true, accessTemplate: true } });
+    const deptIdByName = new Map((await tx.department.findMany({ where: { tenantId }, select: { id: true, name: true } })).map((d) => [d.name.toLowerCase(), d.id]));
+    /**
+     * Acesso padrão do modelo no perfil do cliente: troca só os departamentos (pelo nome; os que o
+     * cliente não tem ficam de fora). Os números são do cliente: o que ele já marcou fica.
+     */
+    const acesso = (p: TemplateContent['profiles'][number], atual: unknown) => {
+      if (!p.access) return undefined;
+      const antes = parseAccessTemplate(atual) ?? { allNumbers: true, numberIds: [], defaultNumberIds: [], receiveAll: true, receiveNumberIds: [], departmentIds: [] };
+      const departmentIds = p.access.departments.map((n) => deptIdByName.get(n.toLowerCase())).filter((id): id is string => !!id && !id.startsWith('novo:'));
+      const mesmo = antes.departmentIds.length === departmentIds.length && departmentIds.every((id) => antes.departmentIds.includes(id)) && !!parseAccessTemplate(atual);
+      return { value: { ...antes, departmentIds }, changed: !mesmo };
+    };
     for (const p of profiles) {
       if (p.name === ADMIN) continue;
       const atual = p.systemRole ? existentes.find((e) => e.systemRole === p.systemRole) : existentes.find((e) => e.name === p.name);
@@ -131,14 +152,16 @@ export class TemplateRolloutService {
         // Gerente/Atendente que o cliente ainda não materializou nascem como perfil padrão já ajustado
         const system = !!p.systemRole || SYSTEM_PROFILES.some((s) => s.name === p.name);
         const systemRole = p.systemRole ?? SYSTEM_PROFILES.find((s) => s.name === p.name)?.role;
-        if (!dryRun) await tx.accessProfile.create({ data: { tenantId, name: p.name, description: p.description ?? null, permissions: p.permissions, isSystem: system, systemRole, customized: system } });
+        const a = acesso(p, null);
+        if (!dryRun) await tx.accessProfile.create({ data: { tenantId, name: p.name, description: p.description ?? null, permissions: p.permissions, isSystem: system, systemRole, customized: system, ...(a && { accessTemplate: a.value }) } });
         r.profiles.created.push(p.name);
         continue;
       }
       const igual = atual.permissions.length === p.permissions.length && p.permissions.every((x) => atual.permissions.includes(x));
-      if (igual) continue;
+      const a = acesso(p, atual.accessTemplate);
+      if (igual && !a?.changed) continue;
       // perfil padrão passa a `customized`: senão o alinhamento ao catálogo desfaria a matriz
-      if (!dryRun) await tx.accessProfile.update({ where: { id: atual.id }, data: { name: p.systemRole ? p.name : atual.name, permissions: p.permissions, ...(atual.isSystem && { customized: true }) } });
+      if (!dryRun) await tx.accessProfile.update({ where: { id: atual.id }, data: { name: p.systemRole ? p.name : atual.name, permissions: p.permissions, ...(a?.changed && { accessTemplate: a.value }), ...(atual.isSystem && { customized: true }) } });
       r.profiles.updated.push(p.name);
     }
   }
@@ -224,6 +247,21 @@ export class TemplateRolloutService {
     if (settings.requireSignature !== undefined && settings.requireSignature !== atual.requireSignature) { data.requireSignature = settings.requireSignature; r.settings.changed.push(`Assinatura obrigatória: ${sim(settings.requireSignature)}`); }
     if (settings.wonLabel && settings.wonLabel !== atual.wonLabel) { data.wonLabel = settings.wonLabel; r.settings.changed.push(`Resultado positivo: “${settings.wonLabel}”`); }
     if (settings.lostLabel && settings.lostLabel !== atual.lostLabel) { data.lostLabel = settings.lostLabel; r.settings.changed.push(`Resultado negativo: “${settings.lostLabel}”`); }
+    const rotulos: [keyof TemplateSettings & keyof typeof atual, string][] = [
+      ['autoReassignWaiting', 'Redistribuir quem aguarda'],
+      ['autoReassignAssigned', 'Redistribuir quem está com atendente'],
+      ['autoReassignBaseMinutes', 'Redistribuição: minutos iniciais'],
+      ['autoReassignMaxMinutes', 'Redistribuição: minutos máximos'],
+      ['autoReassignMaxTimes', 'Redistribuição: vezes no máximo'],
+      ['releaseAwayEnabled', 'Saiu do plantão'],
+      ['releaseAwayMinutes', 'Saiu do plantão: minutos'],
+    ];
+    for (const [k, rotulo] of rotulos) {
+      const v = settings[k];
+      if (v === undefined || v === atual[k]) continue;
+      (data as Record<string, unknown>)[k] = v;
+      r.settings.changed.push(`${rotulo}: ${typeof v === 'boolean' ? sim(v) : v}`);
+    }
     if (!dryRun && Object.keys(data).length) await tx.tenantSettings.update({ where: { tenantId }, data });
   }
 }

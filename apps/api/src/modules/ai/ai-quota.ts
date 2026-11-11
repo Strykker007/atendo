@@ -62,3 +62,24 @@ export function platformBudgetStatus(spentBrl: number, budgetBrl: number) {
   const level = [...PLATFORM_ALERT_LEVELS].reverse().find((l) => pct >= l) ?? null;
   return { blocked: pct >= 100, level };
 }
+
+/**
+ * IA da plataforma com o **saldo de IA** pré-pago (docs/15-ia.md#saldo-de-ia). Puro. Ordem:
+ * incluído no plano → saldo → excedente na fatura → bloqueia. O saldo passa por cima do teto de
+ * gasto e da quota (o cliente já pagou), mas não de assinatura suspensa/cancelada.
+ */
+export function decideWithCredit(
+  plan: Parameters<typeof decideCanUseAi>[0],
+  used: AiUsageSnapshot,
+  balanceBrl: number,
+): AiQuotaDecision & { credit?: boolean } {
+  const base = decideCanUseAi(plan, used);
+  if (base.ok && !base.overage) return base;
+  if (!plan || plan.status === 'suspended' || plan.status === 'canceled') return base;
+  if (balanceBrl > 0) return { ok: true, credit: true };
+  if (base.ok) return base;
+  return { ok: false, reason: `${base.reason}. Compre saldo de IA em Plano e uso para continuar.` };
+}
+
+/** Quanto sai do saldo: custo real × (1 + margem%). Arredondado em 6 casas, como o ledger. */
+export const creditCharge = (costBrl: number, markupPct: number) => Math.round(costBrl * (1 + Math.max(0, markupPct) / 100) * 1e6) / 1e6;

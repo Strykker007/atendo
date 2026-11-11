@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { Building2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -10,12 +11,41 @@ import { useAgents, useDepartments, useCreateDepartment, useUpdateDepartment, us
 
 const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#0ea5e9', '#ef4444', '#8b5cf6', '#14b8a6', '#64748b', '#f97316'];
 
-type Draft = { id?: string; name: string; description: string; color: string; isActive: boolean; userIds: string[] };
+type Draft = { id?: string; name: string; description: string; color: string; isActive: boolean; parentId: string; userIds: string[] };
+
+/** Lista em árvore (pai, depois os filhos recuados) com a profundidade de cada um. */
+function emArvore(lista: Department[]): { d: Department; nivel: number }[] {
+  const ids = new Set(lista.map((d) => d.id));
+  const filhos = (pai: string | null) => lista.filter((d) => (d.parentId && ids.has(d.parentId) ? d.parentId : null) === pai);
+  const out: { d: Department; nivel: number }[] = [];
+  const visto = new Set<string>();
+  const descer = (pai: string | null, nivel: number) => {
+    for (const d of filhos(pai)) {
+      if (visto.has(d.id)) continue;
+      visto.add(d.id);
+      out.push({ d, nivel });
+      descer(d.id, nivel + 1);
+    }
+  };
+  descer(null, 0);
+  return out;
+}
+
+/** O próprio departamento e todos abaixo dele: não podem ser escolhidos como "acima" (seria ciclo). */
+function abaixoDe(lista: Department[], id: string): Set<string> {
+  const out = new Set([id]);
+  for (let mudou = true; mudou; ) {
+    mudou = false;
+    for (const d of lista) if (d.parentId && out.has(d.parentId) && !out.has(d.id)) { out.add(d.id); mudou = true; }
+  }
+  return out;
+}
 
 /**
  * Departamentos (Vendas, Suporte, Balcão…): separam a fila. Quem participa de algum
- * departamento passa a ver só as conversas dele(s) e as sem departamento — a não ser que
- * tenha "Ver os atendimentos de toda a equipe". Ver docs/departamentos.md.
+ * departamento passa a ver só as conversas dele(s) e as sem departamento. Com hierarquia, o
+ * gestor (vê toda a equipe) vê também os departamentos abaixo do dele, nunca os de cima.
+ * Ver docs/departamentos.md#hierarquia.
  */
 export function DepartmentsSection() {
   const departments = useDepartments();
@@ -31,13 +61,14 @@ export function DepartmentsSection() {
 
   function abrir(d?: Department) {
     setEditing(d
-      ? { id: d.id, name: d.name, description: d.description ?? '', color: d.color, isActive: d.isActive, userIds: d.users.map((u) => u.user.id) }
-      : { name: '', description: '', color: PALETTE[lista.length % PALETTE.length], isActive: true, userIds: [] });
+      ? { id: d.id, name: d.name, description: d.description ?? '', color: d.color, isActive: d.isActive, parentId: d.parentId ?? '', userIds: d.users.map((u) => u.user.id) }
+      : { name: '', description: '', color: PALETTE[lista.length % PALETTE.length], isActive: true, parentId: '', userIds: [] });
   }
 
   async function salvar() {
     if (!editing) return;
-    const body = { name: editing.name.trim(), description: editing.description.trim() || null, color: editing.color, isActive: editing.isActive, userIds: editing.userIds };
+    // participantes não vão daqui: quem é de qual setor se define na tela única de Acesso (Equipe)
+    const body = { name: editing.name.trim(), description: editing.description.trim() || null, color: editing.color, isActive: editing.isActive, parentId: editing.parentId || null };
     try {
       if (editing.id) await update.mutateAsync({ id: editing.id, ...body });
       else await create.mutateAsync(body);
@@ -58,8 +89,9 @@ export function DepartmentsSection() {
         <div className="min-w-0 flex-1">
           <h2 className="font-display font-semibold text-ink">Departamentos</h2>
           <p className="text-sm text-muted">
-            Separe a fila por área (Vendas, Suporte, Balcão…). Quem participa de um departamento vê só as conversas dele e as sem departamento;
-            gerentes e quem vê os atendimentos de toda a equipe continuam vendo tudo. Fluxos podem direcionar a conversa (blocos Distribuidor e Ação).
+            Separe a fila por área (Vendas, Suporte, Balcão…). Quem participa de um departamento vê só as conversas dele e as sem departamento.
+            Coloque um departamento abaixo de outro para montar a hierarquia: o gestor de cima vê os de baixo, o de baixo não vê os de cima.
+            Só o administrador da conta vê todos. Fluxos podem direcionar a conversa (blocos Distribuidor e Ação).
           </p>
         </div>
         <Button onClick={() => abrir()} icon={<Plus size={16} />}>Novo departamento</Button>
@@ -69,8 +101,9 @@ export function DepartmentsSection() {
       {!departments.isLoading && lista.length === 0 && <p className="text-sm text-muted rounded-lg bg-field px-3 py-3">Nenhum departamento ainda. Sem departamentos, toda a equipe vê a mesma fila.</p>}
 
       <ul className="divide-y divide-line">
-        {lista.map((d) => (
-          <li key={d.id} className={cn('flex items-center gap-3 py-2.5', !d.isActive && 'opacity-60')}>
+        {emArvore(lista).map(({ d, nivel }) => (
+          <li key={d.id} className={cn('flex items-center gap-3 py-2.5', !d.isActive && 'opacity-60')} style={{ paddingLeft: nivel ? Math.min(nivel, 4) * 20 : undefined }}>
+            {nivel > 0 && <span className="text-faint -mr-1 shrink-0" aria-hidden>└</span>}
             <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${d.color} 16%, transparent)`, color: d.color }}><Building2 size={16} /></span>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-ink truncate">{d.name}{!d.isActive && <span className="ml-1.5 text-[11px] font-normal text-muted">(desativado)</span>}</div>
@@ -101,6 +134,12 @@ export function DepartmentsSection() {
           <form onSubmit={(e) => { e.preventDefault(); void salvar(); }} className="space-y-3">
             <Field label="Nome"><input className={inputCls} value={editing.name} maxLength={40} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Vendas" required autoFocus /></Field>
             <Field label="Descrição (opcional)"><input className={inputCls} value={editing.description} maxLength={200} onChange={(e) => setEditing({ ...editing, description: e.target.value })} placeholder="Orçamentos e novos contatos" /></Field>
+            <Field label="Fica abaixo de" hint="O gestor do departamento de cima vê este; quem é só deste não vê o de cima.">
+              <select className={inputCls} value={editing.parentId} onChange={(e) => setEditing({ ...editing, parentId: e.target.value })}>
+                <option value="">Nenhum (topo)</option>
+                {lista.filter((d) => !editing.id || !abaixoDe(lista, editing.id).has(d.id)).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </Field>
             <Field label="Cor">
               <div className="flex flex-wrap gap-2 pt-1">
                 {PALETTE.map((c) => (
@@ -108,19 +147,13 @@ export function DepartmentsSection() {
                 ))}
               </div>
             </Field>
-            <Field label="Participantes" hint="Quem participa vê as conversas deste departamento (e as sem departamento). Sem participantes, só quem vê toda a equipe enxerga as conversas daqui.">
-              <div className="max-h-52 overflow-y-auto rounded-lg border border-line divide-y divide-line">
-                {pessoas.length === 0 && <div className="px-3 py-2 text-xs text-muted">Nenhum membro na equipe.</div>}
-                {pessoas.map((a) => {
-                  const on = editing.userIds.includes(a.id);
-                  return (
-                    <label key={a.id} className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink cursor-pointer hover:bg-field">
-                      <input type="checkbox" checked={on} onChange={(e) => setEditing({ ...editing, userIds: e.target.checked ? [...editing.userIds, a.id] : editing.userIds.filter((x) => x !== a.id) })} />
-                      <span className="truncate">{a.name}</span>
-                      {!a.isActive && <span className="text-[11px] text-muted">(inativo)</span>}
-                    </label>
-                  );
-                })}
+            {/* só leitura: delegação de acesso fica num lugar só — Equipe → Acesso (docs/18-perfis-de-acesso.md#tela-de-acesso) */}
+            <Field label="Participantes" hint="Quem participa recebe as conversas deste departamento e só enxerga as daqui (e as dos departamentos abaixo, se for gestor) e as sem departamento.">
+              <div className="rounded-lg border border-line px-3 py-2 text-sm">
+                {editing.userIds.length
+                  ? <span className="text-ink">{pessoas.filter((a) => editing.userIds.includes(a.id)).map((a) => a.name).join(', ')}</span>
+                  : <span className="text-muted">Ninguém ainda.</span>}
+                <p className="mt-1 text-[12px] text-muted">Para incluir ou tirar alguém, abra <Link href="/equipe" className="underline">Equipe</Link> → <b>Acesso</b> da pessoa. Todo acesso é definido lá.</p>
               </div>
             </Field>
             <label className="flex items-center gap-2 text-sm text-ink"><input type="checkbox" checked={editing.isActive} onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })} /> Departamento ativo</label>
@@ -136,7 +169,7 @@ export function DepartmentsSection() {
       <ConfirmDialog
         open={!!deleting}
         title="Excluir departamento"
-        text={`Excluir "${deleting?.name}"? ${deleting?._count.conversations ? `As ${deleting._count.conversations} conversa(s) aberta(s) dele ficam sem departamento e passam a aparecer para toda a equipe. ` : ''}Fluxos que apontam para ele passam a avisar a equipe (o Distribuidor segue por "Ninguém disponível"). Para só parar de usar, prefira desativar.`}
+        text={`Excluir "${deleting?.name}"? ${lista.some((d) => d.parentId === deleting?.id) ? 'Os departamentos abaixo dele vão para o topo. ' : ''}${deleting?._count.conversations ? `As ${deleting._count.conversations} conversa(s) aberta(s) dele ficam sem departamento e passam a aparecer para toda a equipe. ` : ''}Fluxos que apontam para ele passam a avisar a equipe (o Distribuidor segue por "Ninguém disponível"). Para só parar de usar, prefira desativar.`}
         confirmLabel="Excluir"
         danger
         onConfirm={async () => {

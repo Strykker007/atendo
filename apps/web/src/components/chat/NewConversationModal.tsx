@@ -22,7 +22,9 @@ const SEM_RESULTADOS: StartCandidates = { contacts: [], phonebook: [] };
  * (tela Contatos).
  */
 export function NewConversationModal({ onClose, contact: inicial, onOpened }: { onClose: () => void; contact?: ContatoSel; onOpened?: (conversationId: string) => void }) {
-  const { numberId: filtroNumero, setStatus, setConversation } = useUI();
+  const { numberIds: filtroNumeros, setStatus, setConversation } = useUI();
+  // com um número só no filtro, a conversa nova sai por ele
+  const filtroNumero = filtroNumeros.length === 1 ? filtroNumeros[0] : null;
   const numbers = useNumbers();
   // desconectado também aparece (no fim): serve para só abrir a conversa, sem enviar
   const conectados = useMemo(() => (numbers.data ?? []).filter((n) => n.isActive).sort((a, b) => Number(b.status === 'connected') - Number(a.status === 'connected')), [numbers.data]);
