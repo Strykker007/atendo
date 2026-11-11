@@ -42,20 +42,20 @@ describe('cota do Gemini', () => {
 describe('GeminiProvider', () => {
   it('modelo no limite: passa para o próximo na mesma rodada e lembra do limite', async () => {
     const redis = fakeRedis();
-    const f = vi.fn().mockResolvedValueOnce(reply(429, perMinute)).mockResolvedValueOnce(ok('gemini-2.5-flash-lite'));
+    const f = vi.fn().mockResolvedValueOnce(reply(429, perMinute)).mockResolvedValueOnce(ok('gemini-3.5-flash'));
     vi.stubGlobal('fetch', f);
     const p = new GeminiProvider(redis as never);
     const out = await p.complete(req);
-    expect(out.model).toBe('gemini-2.5-flash-lite');
+    expect(out.model).toBe('gemini-3.5-flash');
     expect(f).toHaveBeenCalledTimes(2);
     // próxima rodada nem tenta o modelo que está esfriando
-    f.mockResolvedValueOnce(ok('gemini-2.5-flash-lite'));
+    f.mockResolvedValueOnce(ok('gemini-3.5-flash'));
     await p.complete(req);
-    expect(JSON.parse(f.mock.calls[2][1].body).model).toBe('gemini-2.5-flash-lite');
+    expect(JSON.parse(f.mock.calls[2][1].body).model).toBe('gemini-3.5-flash');
   });
 
   it('todos no limite: AiBusyError com a menor espera; cota do dia marca daily', async () => {
-    const f = vi.fn().mockResolvedValueOnce(reply(429, perMinute)).mockResolvedValueOnce(reply(429, perDay));
+    const f = vi.fn().mockResolvedValueOnce(reply(429, perMinute)).mockImplementation(async () => reply(429, perDay));
     vi.stubGlobal('fetch', f);
     const err = await new GeminiProvider(fakeRedis() as never).complete(req).catch((e) => e);
     expect(err).toBeInstanceOf(AiBusyError);

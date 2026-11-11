@@ -72,7 +72,9 @@ export const AI_KEY_PROVIDERS = {
    * (por modelo). Os modelos da lista são tentados em ordem quando um bate o limite
    * (docs/15-ia.md#gemini-e-o-plano-grátis).
    */
-  gemini: { label: 'Google (Gemini)', defaultModel: 'gemini-2.5-flash', models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], keyHint: 'AIza…', consoleUrl: 'https://aistudio.google.com/apikey' },
+  // lite primeiro: mais pedidos grátis por dia e suficiente para tirar dúvida de regimento. Modelo
+  // que não está no plano grátis da chave responde 429 com limite 0 e só "esfria" até o dia seguinte.
+  gemini: { label: 'Google (Gemini)', defaultModel: 'gemini-3.5-flash-lite', models: ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], keyHint: 'AIza…', consoleUrl: 'https://aistudio.google.com/apikey' },
 } as const;
 export type AiKeyProvider = keyof typeof AI_KEY_PROVIDERS;
 export const AI_KEY_PROVIDER_IDS = Object.keys(AI_KEY_PROVIDERS) as AiKeyProvider[];

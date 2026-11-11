@@ -143,6 +143,10 @@ carregado).
   `isLocalEndpoint`: liga a busca por significado sem `AI_EMBED_API_KEY`, custo zero, **lote de 4
   trechos com 180 s** por lote (em CPU cada trecho leva segundos) e **sem `dimensions`** (o modelo
   local devolve o tamanho dele; `embedModel` fica só o nome).
+- **Dev:** serviço `ollama` no `infra/docker-compose.yml` com profile `ia` (não sobe no `up` comum):
+  `docker compose -f infra/docker-compose.yml --profile ia up -d ollama`, depois
+  `... exec ollama ollama pull bge-m3` e no `.env` `AI_EMBED_BASE_URL=http://localhost:11434/v1`,
+  `AI_EMBED_MODEL=bge-m3`. Reinicie API e worker (o job de embeddings roda no worker).
 - Não use `paraphrase-multilingual`: lê só ~128 tokens, e os trechos têm ~250–300.
 - Medição (11/11/2026, Docker com 2 CPUs ARM do Apple M1, bge-m3 do Ollama 0.6.8): modelo carregado
   1,8 GB; pergunta 0,13 s (máx. 0,25 s); 200 trechos de ~1.050 caracteres (~240 tokens) em 5,5 min
