@@ -97,7 +97,10 @@ contato como pergunta:
 
 1. **por palavra**: `to_tsquery('portuguese', …)` no `tsv` — dicionário português (obras → obra),
    sem acento dos dois lados, palavras com OU, só `[a-z0-9]` (nada do contato vira operador);
-   número de artigo entra ("art 12");
+   número de artigo entra ("art 12"); palavras de conversa ("quero", "saber", "vou", "ficar",
+   "quais"…, `CHAT_WORDS`) ficam de fora — no OU elas puxavam artigo sem relação ("vou ficar 3
+   dias" trazia o de animais). "dia/dias" ficam: ligam a prazos do regimento ("locação superior a
+   45 dias");
 2. **por significado** (só com `AI_EMBED_API_KEY`): embedding da pergunta comparado com os dos
    trechos **na API**, sem pgvector — vetores de 512 posições (2 KB) normalizados, produto
    escalar; 400 trechos levam milissegundos;
@@ -108,6 +111,17 @@ No prompt entram como **TRECHOS DOS DOCUMENTOS** (documento · capítulo), com a
 só com eles e citar a fonte de forma curta. Agente com documento e nada encontrado: o prompt diz
 que nenhum trecho fala do assunto e proíbe supor — a IA diz que vai verificar e chama um
 atendente. Agente sem documento: nada muda. Falha na busca não derruba a rodada.
+
+O prompt também manda **responder todas as partes** da pergunta (com uma regra que impede o que o
+contato quer, explicar a regra e ainda informar a lista/valores pedidos) e tratar **valor em
+percentual ou fórmula** ("20% do salário mínimo vigente") como o próprio valor — antes o modelo
+dizia "não tenho o preço". Para mostrar em reais, ponha a base na BASE DE CONHECIMENTO do agente
+(ex.: "Salário mínimo vigente: R$ …"). Visto no teste de 11/11/2026 com o regimento da ID Vida
+Urbana (pergunta de hóspede sobre salões e valores).
+
+**JSON tolerante:** quebra de linha "crua" dentro do `reply` (o Gemini às vezes escreve a lista com
+Enter de verdade) é escapada antes de ler (`escapeRawControlChars`); antes a rodada virava "resposta
+que não deu para entender" e ia para humano (~1 em 16 respostas longas).
 
 **Embeddings**: no envio, a busca por palavra já funciona; os embeddings saem no job
 `knowledge-embed` da fila `ai` (worker). Ao subir a API com chave configurada (ou trocar
