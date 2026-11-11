@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, KeyRound, Power, Users, Pencil, UsersRound, X, ClipboardPaste } from 'lucide-react';
+import { Plus, KeyRound, Power, Users, Pencil, UsersRound, X, ClipboardPaste, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
@@ -9,9 +9,10 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { refresh } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAgents, useCreateAgent, useCreateAgentsBulk, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, type Agent, type BulkAgentResult } from '@/lib/hooks';
+import { useAgents, useCreateAgent, useCreateAgentsBulk, useUpdateAgent, useUsage, useMe, useResendInvite, useInviteLink, useProfiles, useCan, useDepartments, type Agent, type BulkAgentResult } from '@/lib/hooks';
 import { AccessProfiles } from '@/components/settings/AccessProfiles';
 import { NumberScopeButton } from '@/components/settings/NumberScope';
+import { AccessModal } from '@/components/settings/AccessModal';
 import { MailCheck, Send, Link as LinkIcon, History } from 'lucide-react';
 import NextLink from 'next/link';
 import { TYPING_SPEEDS, TYPING_SPEED_KEYS, type TypingSpeed } from '@atendo/shared';
@@ -23,7 +24,6 @@ export default function EquipePage() {
   const isAdmin = canManageTeam;
   const agents = useAgents();
   const profiles = useProfiles();
-  const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
   const [savingSpeedId, setSavingSpeedId] = useState<string | null>(null);
   const usage = useUsage();
   const create = useCreateAgent();
@@ -33,6 +33,8 @@ export default function EquipePage() {
   const createMany = useCreateAgentsBulk();
   const [resetting, setResetting] = useState<Agent | null>(null);
   const [editing, setEditing] = useState<Agent | null>(null);
+  /** tela única de acesso (perfil, números, departamentos, quem recebe) — docs/18-perfis-de-acesso.md#tela-de-acesso */
+  const [acesso, setAcesso] = useState<Agent | null>(null);
   const qc = useQueryClient();
   // nome: admin da conta edita de qualquer pessoa; gerente, só dos atendentes (a API repete a regra)
   const canRename = (a: Agent) => canManageTeam && (a.role === 'agent' || (a.role === 'manager' && me.data?.role !== 'manager') || (a.role === 'tenant_admin' && me.data?.role === 'tenant_admin'));
@@ -96,24 +98,17 @@ export default function EquipePage() {
     </div>
   );
 
-  const perfil = (a: Agent) => canManageTeam && a.role !== 'tenant_admin' && a.role !== 'super_admin' ? (
-    <select
-      value={a.profile?.id ?? ''}
-      disabled={savingProfileId === a.id}
-      onChange={async (e) => {
-        setSavingProfileId(a.id);
-        try { await update.mutateAsync({ id: a.id, profileId: e.target.value }); toast.ok('Perfil atualizado'); }
-        catch (err) { toast.err(err); } finally { setSavingProfileId(null); }
-      }}
-      className={selectCls}
-    >
-      {/* sem perfil o acesso vem do papel — é o estado de quem existia antes dos perfis */}
-      <option value="">Padrão do papel ({ROLE_LABEL[a.role]})</option>
-      {profiles.data?.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
-    </select>
-  ) : (
-    <span className={cn('text-xs rounded-full px-2 py-0.5 whitespace-nowrap', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{a.profile?.name ?? ROLE_LABEL[a.role]}</span>
-  );
+  // perfil, departamentos e números: só resumo — editar é na tela única de Acesso
+  const abreAcesso = (a: Agent) => (canManageTeam && a.role !== 'super_admin' ? () => setAcesso(a) : undefined);
+  const perfil = (a: Agent) => {
+    const chip = <span className={cn('text-xs rounded-full px-2 py-0.5 whitespace-nowrap', a.role === 'agent' ? 'bg-field text-muted' : a.role === 'manager' ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink')}>{a.role === 'tenant_admin' ? 'Admin · acesso total' : a.profile?.name ?? `Padrão (${ROLE_LABEL[a.role]})`}</span>;
+    const abrir = abreAcesso(a);
+    return abrir ? <button type="button" onClick={abrir} title="Editar acesso" className="hover:opacity-80">{chip}</button> : chip;
+  };
+  const departamentos = (a: Agent) => {
+    const abrir = abreAcesso(a);
+    return abrir ? <button type="button" onClick={abrir} title="Editar acesso" className="text-left hover:opacity-80"><Departamentos agent={a} /></button> : <Departamentos agent={a} />;
+  };
 
   const digitacao = (a: Agent) => canManageTeam ? (
     <select
@@ -145,6 +140,9 @@ export default function EquipePage() {
   /** `compacto` (tabela): só ícones, com dica no mouse; no cartão do celular os botões do convite levam texto. */
   const acoes = (a: Agent, compacto = false) => (
     <>
+      {abreAcesso(a) && (
+        <Button size={compacto ? 'icon' : 'sm'} variant="ghost" className={cn(compacto && 'border-0 bg-transparent text-faint hover:text-ink')} icon={<ShieldCheck size={compacto ? 15 : 12} />} title="Acesso: perfil, números, departamentos e quem recebe" aria-label={`Acesso de ${a.name}`} onClick={abreAcesso(a)}>{compacto ? undefined : 'Acesso'}</Button>
+      )}
       {isAdmin && a.invitedAt && !a.passwordSetAt && (
         <>
           <Button
@@ -208,6 +206,7 @@ export default function EquipePage() {
                 <tr>
                   <th className="px-4 py-2.5">Pessoa</th>
                   <th className="px-4 py-2.5">Perfil de acesso</th>
+                  <th className="px-4 py-2.5">Departamentos</th>
                   <th className="px-4 py-2.5">Números</th>
                   <th className="px-4 py-2.5 hidden lg:table-cell" title="Velocidade do &quot;digitando…&quot; que o contato vê nas mensagens que a pessoa não digitou (resposta rápida, texto colado, encaminhada, agendada). Máximo de 10 segundos por mensagem.">Digitação</th>
                   <th className="px-4 py-2.5">Último acesso</th>
@@ -219,7 +218,8 @@ export default function EquipePage() {
                   <tr key={a.id} className={cn('align-middle', !a.isActive && 'opacity-50')}>
                     <td className="px-4 py-3 min-w-48">{pessoa(a)}</td>
                     <td className="px-4 py-3">{perfil(a)}</td>
-                    <td className="px-4 py-3"><NumberScopeButton agent={a} /></td>
+                    <td className="px-4 py-3">{departamentos(a)}</td>
+                    <td className="px-4 py-3"><NumberScopeButton agent={a} onOpen={abreAcesso(a) ?? (() => undefined)} /></td>
                     <td className="px-4 py-3 hidden lg:table-cell">{digitacao(a)}</td>
                     <td className="px-4 py-3 text-muted whitespace-nowrap">{ultimoAcesso(a)}</td>
                     <td className="px-4 py-3"><div className="flex items-center justify-end gap-0.5 whitespace-nowrap">{acoes(a, true)}</div></td>
@@ -235,7 +235,8 @@ export default function EquipePage() {
                 {pessoa(a)}
                 <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm">
                   <dt className="text-xs text-muted">Perfil</dt><dd className="min-w-0">{perfil(a)}</dd>
-                  <dt className="text-xs text-muted">Números</dt><dd className="min-w-0"><NumberScopeButton agent={a} /></dd>
+                  <dt className="text-xs text-muted">Departamentos</dt><dd className="min-w-0">{departamentos(a)}</dd>
+                  <dt className="text-xs text-muted">Números</dt><dd className="min-w-0"><NumberScopeButton agent={a} onOpen={abreAcesso(a) ?? (() => undefined)} /></dd>
                   <dt className="text-xs text-muted">Digitação</dt><dd className="min-w-0">{digitacao(a)}</dd>
                   <dt className="text-xs text-muted">Último acesso</dt><dd className="min-w-0 text-muted">{ultimoAcesso(a)}</dd>
                 </dl>
@@ -280,6 +281,7 @@ export default function EquipePage() {
           return r.results;
         }).catch((err) => { toast.err(err); return null; })}
       />
+      {acesso && <AccessModal agent={agents.data?.find((x) => x.id === acesso.id) ?? acesso} open onClose={() => setAcesso(null)} />}
       <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditEmail={!!editing && canEditEmail(editing)} isSelf={editing?.id === me.data?.id} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
@@ -492,5 +494,27 @@ function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canE
         <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText="Salvando…" disabled={!f.name.trim() || !dirty}>Salvar</Button></div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Departamentos da pessoa (docs/departamentos.md). Quem participa entra na distribuição das
+ * conversas do setor e, sem "ver todas as conversas", só enxerga as do setor e as sem setor.
+ * Para mudar: Configurações → Departamentos.
+ */
+function Departamentos({ agent }: { agent: Agent }) {
+  const departamentos = useDepartments();
+  const ids = new Set((agent.departments ?? []).map((d) => d.departmentId));
+  const meus = (departamentos.data ?? []).filter((d) => ids.has(d.id));
+  if (!meus.length) return <span className="text-xs text-faint" title="Sem departamento: vê as conversas de todos os setores (respeitando os números)">Nenhum</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {meus.map((d) => (
+        <span key={d.id} className={cn('inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11.5px] text-ink', !d.isActive && 'opacity-50')} title={d.isActive ? d.description ?? d.name : `${d.name} (desativado)`}>
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: d.color }} />
+          {d.name}
+        </span>
+      ))}
+    </span>
   );
 }

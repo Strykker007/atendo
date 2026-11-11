@@ -22,6 +22,21 @@ ledger de uso. O histórico é **permanente e auditável** — não existe apaga
 | Quem é removido perde o acesso na hora (404) e o histórico anterior continua na auditoria | `removeMember` |
 | "Online agora" = está com o painel aberto (sockets conectados, mesmo mecanismo do monitor do dono) | `GET /internal-chat/users` |
 
+## Avisos
+
+Antes, mensagem da equipe só tocava o mesmo "plim" de mensagem de cliente e passava despercebida no
+meio do atendimento. Agora (`lib/internal-alert.ts`, chamado no `internal_message` do socket):
+
+| Aviso | Quando |
+|---|---|
+| **Som próprio** (três notas subindo, `playInternalSound`) | sempre que outra pessoa escreve; respeita "silenciar sons" |
+| **Cartão na tela** (`toast.message`): "💬 Ana" ou "💬 Ana em Grupo", prévia e **Abrir conversa** (abre o widget direto nela — `openInternalChat`). Mensagens seguidas da mesma conversa trocam o cartão em vez de empilhar; some em 12 s | em qualquer página, menos para quem já está com aquela conversa aberta e a aba visível |
+| **Notificação do sistema** (Windows/macOS), uma por conversa (`tag`); clicar foca o painel e abre a conversa | aba em segundo plano e permissão dada. A faixa "Receber aviso… — **Ativar**" aparece no widget enquanto o navegador não tiver a resposta (a permissão só pode ser pedida com clique) |
+| **Título da aba** "(3) 💬 …" | enquanto houver não lidas (`useUnreadTitle` no widget) |
+
+Avisos de sistema do grupo ("Ana adicionou Bruno") e o canal Suporte (escondido do cliente) não avisam.
+Com o painel **fechado** não há aviso: seria Web Push (service worker + inscrição por navegador), ainda não feito.
+
 ## Suporte
 
 Canal direto entre o cliente e o **suporte do sistema** (o dono, `super_admin`), dentro do mesmo chat.

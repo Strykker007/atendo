@@ -15,6 +15,8 @@ export interface TicketRow {
   comments: number;
   /** a pessoa atua (pode comentar, congelar, transferir, resolver) */
   canAct: boolean;
+  /** só na lista: me diz respeito e mudou depois que abri (docs/tickets.md#não-lidos) */
+  unread?: boolean;
   /** tipo (docs/tickets.md#tipos-de-ticket) */
   type: { id: string; name: string; color: string } | null;
   /** campos do tipo (rótulos) e o que foi preenchido, por chave */
@@ -51,8 +53,21 @@ const qs = (q: TicketQuery) => {
 };
 
 export const useTickets = (q: TicketQuery) => useQuery({ queryKey: ['tickets', q], queryFn: () => api<{ items: TicketRow[]; total: number; page: number; pageSize: number }>(`/tickets?${qs(q)}`), placeholderData: keepPreviousData });
-export const useTicketsSummary = (enabled = true) => useQuery({ queryKey: ['tickets-summary'], enabled, queryFn: () => api<{ mine: number; department: number; onHold: number; holdExpired: number; overdue: number; /** abertos sem responsável no meu setor: alguém precisa pegar */ toPick: number }>('/tickets/summary'), refetchInterval: 120_000 });
-export const useTicket = (id: string | null) => useQuery({ queryKey: ['ticket', id], enabled: !!id, queryFn: () => api<TicketDetail>(`/tickets/${id}`) });
+export const useTicketsSummary = (enabled = true) => useQuery({ queryKey: ['tickets-summary'], enabled, queryFn: () => api<{ mine: number; department: number; onHold: number; holdExpired: number; overdue: number; /** abertos sem responsável no meu setor: alguém precisa pegar */ toPick: number; /** ativos que me dizem respeito e mudaram depois que abri — o número do menu */ unread?: number }>('/tickets/summary'), refetchInterval: 120_000 });
+export const useTicket = (id: string | null) => {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ['ticket', id],
+    enabled: !!id,
+    // abrir marca como lido na API: o número do menu e o ponto da lista apagam na hora
+    queryFn: async () => {
+      const t = await api<TicketDetail>(`/tickets/${id}`);
+      qc.invalidateQueries({ queryKey: ['tickets-summary'] });
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      return t;
+    },
+  });
+};
 export const useConversationTickets = (conversationId: string | null, enabled = true) =>
   useQuery({ queryKey: ['tickets', 'conversation', conversationId], enabled: enabled && !!conversationId, queryFn: () => api<ConversationTicket[]>(`/tickets/conversation/${conversationId}`) });
 export const useTicketOptions = (enabled = true) => useQuery({ queryKey: ['ticket-options'], enabled, queryFn: () => api<TicketOptions>('/tickets/options'), staleTime: 60_000 });

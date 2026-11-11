@@ -250,9 +250,17 @@ Ao passar de **80%** e **100%** da unidade do plano (mensagens **ou** conversas)
 
 Os dois coexistem; o **env escolhe quem vende**: com `ASAAS_API_KEY` preenchida, checkouts novos vão para o Asaas (PIX + cartão, em modal na própria tela `/plano`); sem ela, para o Stripe. Assinaturas que já existem seguem no gateway onde nasceram (`subscriptions.gateway`) — o webhook do Stripe continua processando as dele enquanto `STRIPE_SECRET_KEY` existir. Um cliente com assinatura viva no Stripe não consegue abrir outra no Asaas (400), para não ser cobrado duas vezes. `GET /billing/usage` devolve `gateway` (dos checkouts novos) e `subscriptionGateway` (da assinatura atual): o front mostra o portal do Stripe ou o botão "Pagar" do Asaas conforme o segundo.
 
-## Cobrança com Asaas (PIX + cartão)
+## Cobrança com Asaas (PIX, boleto e cartão)
 
 Código: `apps/api/src/modules/billing/asaas.service.ts` (+ `asaas.controller.ts`). Mesmo modelo do Stripe: tenant vira Customer (`tenants.asaasCustomerId`), a assinatura do Asaas é a fonte da verdade, `subscriptions`/`invoices` são espelhos. No Asaas não há "price": o valor (`priceMonth`, ou `priceYear` com ciclo `YEARLY` no plano anual) vai na própria assinatura, então plano não precisa de sync.
+
+### Boleto
+
+Checkout com `billingType: 'BOLETO'` cria a assinatura recorrente por boleto no Asaas. O boleto é **registrado no CPF/CNPJ do Customer** (o pagador é o cliente), então o checkout exige **CEP e número** (`customer.postalCode`/`addressNumber`, 400 sem eles). Assinatura nova por boleto vence em **3 dias** (`BOLETO_FIRST_DUE_DAYS`), não hoje: o boleto compensa em 1–3 dias úteis. Troca para boleto numa assinatura que já existe muda a forma da cobrança em aberto (`updatePendingPayments`).
+
+- **Renovação**: quem gera o boleto de cada ciclo é o próprio Asaas, sozinho, antes do vencimento. O nosso lembrete ([abaixo](#lembretes-da-mensalidade)) leva a linha digitável e o PDF.
+- **Tela**: `PaymentView.boleto = { url (bankSlipUrl), line (GET /payments/:id/identificationField) }`. O modal mostra linha digitável + "Baixar boleto (PDF)" e, recolhido, o Pix da mesma cobrança (o boleto do Asaas também aceita Pix, que cai na hora).
+- **Carência**: a compensação de 1–3 dias úteis cabe na `graceDays` padrão (5). Plano com `graceDays` menor que 3 suspende quem pagou o boleto no dia.
 
 ### Configurar
 
@@ -318,9 +326,9 @@ Modelo: `activation_charges` (`items` jsonb, `discount`, `totalValue`, `firstMon
 | no dia do vencimento | "vence hoje" | `invoices.remindedDueAt` |
 | vencida | o aviso de atraso que já existia (`onOverdue`) | — |
 
-A marca é reservada **antes** do envio (`updateMany` onde ainda é nula): duas instâncias do job não mandam o mesmo e-mail; se o provedor falhar, a marca volta e o próximo job tenta de novo. Cartão não recebe lembrete (debita sozinho).
+A marca é reservada **antes** do envio (`updateMany` onde ainda é nula): duas instâncias do job não mandam o mesmo e-mail; se o provedor falhar, a marca volta e o próximo job tenta de novo. Cartão não recebe lembrete (debita sozinho); Pix e boleto recebem.
 
-**E-mail** (`reminderMail`, pelo `MailService` — Brevo): para o `billingEmail` e os admins do cliente; assunto *"Sua mensalidade {marca} de R$ X vence em dd/mm"*; valor, vencimento, **QR Code** (imagem servida por `GET /billing/pix/:paymentId/qr.png?s=…` — URL assinada por cobrança com HMAC da `ENCRYPTION_KEY`; o Gmail bloqueia imagem em base64), **Pix copia e cola**, botão *Pagar pelo painel* (`/plano?pagar=1`, que abre direto o QR) e o link da cobrança no Asaas. A marca é o nome do remetente do `MAIL_FROM`.
+**E-mail** (`reminderMail`, pelo `MailService` — Brevo): para o `billingEmail` e os admins do cliente; assunto *"Sua mensalidade {marca} de R$ X vence em dd/mm"*; valor, vencimento, na assinatura por boleto a **linha digitável** e o botão *Baixar boleto (PDF)* (com o Pix logo abaixo como alternativa), **QR Code** (imagem servida por `GET /billing/pix/:paymentId/qr.png?s=…` — URL assinada por cobrança com HMAC da `ENCRYPTION_KEY`; o Gmail bloqueia imagem em base64), **Pix copia e cola**, botão *Pagar pelo painel* (`/plano?pagar=1`, que abre direto o QR) e o link da cobrança no Asaas. A marca é o nome do remetente do `MAIL_FROM`.
 
 **Aviso no painel** (`GET /billing/usage` → `billingNotice`, só para quem tem `billing.manage`; lido das faturas espelhadas, sem ir ao Asaas): `needs_document` (pede o CPF/CNPJ) ou `payment_due` (*"Sua mensalidade de R$ X vence em dd/mm"* + **Pagar com Pix**, a partir de 5 dias antes). Vencida, fica o aviso de pagamento pendente que já existia.
 
@@ -344,8 +352,11 @@ Autenticado pelo header `asaas-access-token` (comparação em tempo constante). 
 | `PAYMENT_RECEIVED` / `PAYMENT_CONFIRMED` | fatura `paid`; assinatura → `active`, `graceUntil = null`, `currentPeriodEnd` = `nextDueDate` da assinatura no Asaas (só avança, nunca volta) |
 | `PAYMENT_OVERDUE` | fatura segue `open`; assinatura `active`/`trialing` → `past_due` com `graceUntil = hoje + graceDays` + e-mail aos admins. O job diário suspende quando a carência vence (mesmo `suspendOverdue` do Stripe). Banner no topo de todas as telas com "Pagar agora" |
 | `PAYMENT_CREATED` | espelha a fatura; se for cobrança de ciclo (não a primeira), cobra o **excedente** do mês que fechou como cobrança avulsa (`billingType: UNDEFINED`, `externalReference = overage:<tenant>:<YYYY-MM>`), uma vez por mês |
-| `PAYMENT_DELETED` / `PAYMENT_REFUNDED` | fatura `void` |
+| `PAYMENT_DELETED` / `PAYMENT_REFUNDED` | fatura `void`; estorno de [saldo de IA](15-ia.md#saldo-de-ia) tira o valor da carteira |
 | `SUBSCRIPTION_DELETED` / `INACTIVATED` | assinatura → `canceled`, só se ainda for a atual do tenant |
+
+Cobranças avulsas de outros módulos são roteadas pelo prefixo do `externalReference`
+(`AsaasService.onReference`): `aicredit:<id>` = compra de [saldo de IA](15-ia.md#saldo-de-ia).
 
 O polling do modal aplica o mesmo efeito de `PAYMENT_RECEIVED` (idempotente): em dev o webhook não chega e, em produção, pode atrasar.
 

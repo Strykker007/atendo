@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, NotFoundException, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -13,6 +13,7 @@ import { ProfilesController } from './profiles.controller';
 import { NoTenantOk, PartnerOk } from '../auth/tenant.guard';
 import { creatorCompanyIds, teamCompanyIds, teamWhere } from '../auth/team-scope';
 import { canUseNumber } from '../auth/number-scope';
+import { canReceiveTransfer } from '../conversations/transfer-scope';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { BillingModule } from '../billing/billing.module';
 import { TenantSettingsService } from './tenant-settings.service';
@@ -29,6 +30,7 @@ import { TenantTemplatesController } from './tenant-templates.controller';
 import { SystemOwnersController } from './system-owners.controller';
 import { TemplateRolloutService } from './template-rollout.service';
 import { LOGIN_EMAIL_SELECT, loginEmail } from '../auth/login-email';
+import { parseAccessTemplate, sanitizeAccessTemplate } from './access-template';
 
 const VINCULO_SEM_CONVITE = 'Esta pessoa entra pelo login de outra empresa (vínculo): não tem convite.';
 
@@ -107,6 +109,12 @@ class UpdateAgentDto {
   @IsOptional() @IsString() profileId?: string;
   /** Números que a pessoa opera. Lista vazia = todos (ver number-scope.ts). */
   @IsOptional() @IsArray() @IsUUID('4', { each: true }) numberIds?: string[];
+  /** Números em que a tela de conversas já abre filtrada (docs/18-perfis-de-acesso.md#número-padrão). Vazio = todos */
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('4', { each: true }) defaultNumberIds?: string[];
+  /** Departamentos da pessoa (tela única de Acesso, docs/18-perfis-de-acesso.md#tela-de-acesso) */
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsUUID('4', { each: true }) departmentIds?: string[];
+  /** Números em que a pessoa RECEBE atendimento automático (docs/distribuicao-por-numero.md). Só o admin da conta */
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsUUID('4', { each: true }) receiveNumberIds?: string[];
   /** Redefinir senha do atendente */
   @IsOptional() @IsString() @MinLength(8) password?: string;
   /** Velocidade do "digitando…" simulado das mensagens que ele não digitou (TYPING_SPEEDS) */
@@ -130,6 +138,10 @@ function cleanProfile(p: TenantProfileDto) {
 }
 
 /** Gestão de clientes (super_admin) e de atendentes (tenant_admin). */
+class DefaultNumbersDto {
+  @IsArray() @ArrayMaxSize(50) @IsUUID('4', { each: true }) numberIds!: string[];
+}
+
 @Controller('tenants')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 class TenantsController {
@@ -236,7 +248,7 @@ class TenantsController {
    */
   @Get('me/agents')
   async agents(@CurrentUser() u: AuthUser) {
-    const rows = await this.prisma.user.findMany({ where: { tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true, name: true, ...LOGIN_EMAIL_SELECT, primaryUserId: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, scheduleId: true, isTemporary: true, accessExpiresAt: true, expiredAt: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
+    const rows = await this.prisma.user.findMany({ where: { tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true, name: true, ...LOGIN_EMAIL_SELECT, primaryUserId: true, role: true, isActive: true, typingSpeed: true, lastLoginAt: true, invitedAt: true, passwordSetAt: true, scheduleId: true, isTemporary: true, accessExpiresAt: true, expiredAt: true, defaultNumberIds: true, profile: { select: { id: true, name: true } }, numbers: { select: { numberId: true } }, departments: { select: { departmentId: true } } } });
     // vínculo (pessoa de outra empresa, docs/multiempresa.md): mostra o login dela; não tem convite pendente
     return rows.map(({ primaryUser: _p, primaryUserId, ...r }) => ({ ...r, email: loginEmail({ email: r.email, primaryUser: _p }) ?? '', linked: !!primaryUserId }));
   }
@@ -257,6 +269,7 @@ class TenantsController {
     });
     if (!profileId) await this.provisioning.linkRoleProfile(u.tenantId, created.id, role);
     await this.linkToCreatorCompanies(u, created.id);
+    await this.applyProfileAccess(u, created.id);
     return created;
   }
 
@@ -335,6 +348,121 @@ class TenantsController {
     this.permissions.invalidate();
   }
 
+  /**
+   * "Recebe automaticamente" visto pela PESSOA (tela de Acesso). A lista é por número, e lista vazia
+   * quer dizer "todos que enxergam" — então:
+   * - marcar num número sem lista: já recebe, nada muda;
+   * - desmarcar num número sem lista: a lista passa a ser todos que enxergam o número, menos ela;
+   * - nos números com lista: entra ou sai dela. Se ela era a única, a lista vira "todos que enxergam,
+   *   menos ela" (lista vazia seria todos, ela inclusive); ninguém mais enxerga = recusa.
+   */
+  private async setReceives(tenantId: string, userId: string, receiveNumberIds: string[], tolerant = false) {
+    const quer = new Set(receiveNumberIds);
+    const numeros = await this.prisma.whatsAppNumber.findMany({ where: { tenantId, deletedAt: null }, select: { id: true, receivers: { select: { userId: true } } } });
+    const equipe = await this.prisma.user.findMany({ where: { tenantId, isActive: true, role: { not: 'super_admin' } }, select: { id: true, role: true } });
+    const companyNumbers = await this.permissions.companyNumbers(tenantId);
+    const escopos = new Map(await Promise.all(equipe.map(async (p) => [p.id, { role: p.role, ...(await this.permissions.scope({ id: p.id, role: p.role })) }] as const)));
+    const enxerga = (pid: string, numberId: string) => { const sc = escopos.get(pid); return !!sc && canReceiveTransfer(sc, { numberId, departmentId: null }, companyNumbers); };
+    for (const n of numeros) {
+      // número que ela não vê não entra na conta (senão "não marcado" tiraria todo mundo dele)
+      if (!enxerga(userId, n.id)) {
+        if (quer.has(n.id) && !tolerant) throw new BadRequestException('A pessoa só recebe de um número que ela vê. Marque o número em "Vê" antes.');
+        continue;
+      }
+      const lista = n.receivers.map((r) => r.userId);
+      const recebe = !lista.length || lista.includes(userId);
+      if (quer.has(n.id) === recebe) continue;
+      if (quer.has(n.id)) {
+        await this.prisma.numberReceiver.create({ data: { numberId: n.id, userId } });
+      } else if (lista.length > 1) {
+        await this.prisma.numberReceiver.delete({ where: { numberId_userId: { numberId: n.id, userId } } });
+      } else {
+        // sem lista, ou ela é a única da lista: tirar deixaria a lista vazia, que é "todos" (ela inclusive).
+        // Passa a ser todos que enxergam o número, menos ela
+        const outros = equipe.filter((p) => p.id !== userId && enxerga(p.id, n.id)).map((p) => p.id);
+        if (!outros.length) {
+          // modelo do perfil: pular o número em vez de travar o cadastro inteiro
+          if (tolerant) continue;
+          throw new BadRequestException('Ninguém mais vê este número: alguém precisa receber os atendimentos dele.');
+        }
+        await this.prisma.$transaction([
+          this.prisma.numberReceiver.deleteMany({ where: { numberId: n.id } }),
+          this.prisma.numberReceiver.createMany({ data: outros.map((uid) => ({ numberId: n.id, userId: uid })), skipDuplicates: true }),
+        ]);
+      }
+    }
+  }
+
+  /** Só ids de números deste cliente (vêm do corpo da requisição), sem repetir. */
+  /**
+   * Copia o acesso padrão do perfil da pessoa (docs/18-perfis-de-acesso.md#acesso-padrão-do-perfil):
+   * números, abre filtrado, departamentos e recebe auto. Perfil sem modelo = não mexe em nada.
+   * Ids velhos (número excluído, departamento apagado) são ignorados, nunca erro: é cadastro em massa.
+   * Devolve se aplicou.
+   */
+  private async applyProfileAccess(u: AuthUser, userId: string): Promise<boolean> {
+    const alvo = await this.prisma.user.findFirst({ where: { id: userId, tenantId: u.tenantId }, select: { role: true, profile: { select: { accessTemplate: true } } } });
+    const bruto = parseAccessTemplate(alvo?.profile?.accessTemplate);
+    // admin da conta vê tudo: o modelo não se aplica a ele
+    if (!alvo || !bruto || alvo.role === 'tenant_admin' || alvo.role === 'super_admin') return false;
+    const [numeros, deptos] = await Promise.all([
+      this.prisma.whatsAppNumber.findMany({ where: { tenantId: u.tenantId, deletedAt: null }, select: { id: true } }),
+      this.prisma.department.findMany({ where: { tenantId: u.tenantId }, select: { id: true } }),
+    ]);
+    const t = sanitizeAccessTemplate(bruto, numeros.map((n) => n.id), deptos.map((d) => d.id));
+    // quem é restrito por empresa só mexe nos números que opera (mesma regra do PATCH)
+    const restrito = teamCompanyIds(u) !== null;
+    const marcados = t.allNumbers ? [] : t.numberIds.filter((id) => !restrito || canUseNumber(u, id));
+    await this.prisma.$transaction([
+      this.prisma.userNumber.deleteMany({ where: { userId, ...(restrito && { numberId: { in: u.numberIds ?? [] } }) } }),
+      this.prisma.userNumber.createMany({ data: marcados.map((numberId) => ({ userId, numberId })), skipDuplicates: true }),
+      this.prisma.userDepartment.deleteMany({ where: { userId } }),
+      this.prisma.userDepartment.createMany({ data: t.departmentIds.map((departmentId) => ({ userId, departmentId })), skipDuplicates: true }),
+      this.prisma.user.update({ where: { id: userId }, data: { defaultNumberIds: t.defaultNumberIds } }),
+    ]);
+    this.permissions.invalidate();
+    await this.setReceives(u.tenantId, userId, t.receiveAll ? numeros.map((n) => n.id) : t.receiveNumberIds, true);
+    return true;
+  }
+
+  /**
+   * Reaplica o acesso padrão do perfil em todas as pessoas que o usam (o perfil mudou, ou a equipe foi
+   * cadastrada antes do modelo existir). Sobrescreve os ajustes individuais delas — a tela confirma antes.
+   */
+  @Post('me/profiles/:id/apply-access')
+  @RequirePermission('team.manage')
+  async applyProfileAccessToAll(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    const perfil = await this.prisma.accessProfile.findFirst({ where: { id, tenantId: u.tenantId }, select: { accessTemplate: true } });
+    if (!perfil) throw new NotFoundException('Perfil não encontrado.');
+    if (!parseAccessTemplate(perfil.accessTemplate)) throw new BadRequestException('Este perfil não tem acesso padrão.');
+    // gerente só mexe no nível operacional (mesma régua do PATCH); dono do sistema fica de fora
+    const pessoas = await this.prisma.user.findMany({
+      where: { tenantId: u.tenantId, profileId: id, isSystemOwner: false, role: { in: u.role === 'manager' ? ['agent'] : ['agent', 'manager'] }, ...teamWhere(u) },
+      select: { id: true },
+    });
+    let applied = 0;
+    for (const p of pessoas) if (await this.applyProfileAccess(u, p.id)) applied++;
+    return { applied };
+  }
+
+  private async tenantNumberIds(tenantId: string, ids: string[]) {
+    const rows = await this.prisma.whatsAppNumber.findMany({ where: { id: { in: [...new Set(ids)] }, tenantId, deletedAt: null }, select: { id: true } });
+    const ok = new Set(rows.map((n) => n.id));
+    return [...new Set(ids)].filter((id) => ok.has(id));
+  }
+
+  /**
+   * "Salvar como meu padrão" no filtro de números das conversas: a própria pessoa grava os números
+   * em que a tela abre (docs/18-perfis-de-acesso.md#número-padrão). Só os que ela opera.
+   */
+  @Put('me/default-numbers')
+  async setMyDefaultNumbers(@CurrentUser() u: AuthUser, @Body() dto: DefaultNumbersDto) {
+    const ids = (await this.tenantNumberIds(u.tenantId, dto.numberIds)).filter((id) => canUseNumber(u, id));
+    await this.prisma.user.update({ where: { id: u.id, tenantId: u.tenantId }, data: { defaultNumberIds: ids } });
+    this.permissions.invalidate();
+    return { defaultNumberIds: ids };
+  }
+
   /** Alguém da equipe que quem pede enxerga; fora do escopo = 404 (não confirma que existe). */
   private async teamMember(u: AuthUser, id: string) {
     const row = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, ...teamWhere(u) }, select: { id: true, passwordSetAt: true, primaryUserId: true } });
@@ -348,6 +476,7 @@ class TenantsController {
     if (profileId) await this.prisma.user.update({ where: { id: user.id }, data: { profileId } });
     else await this.provisioning.linkRoleProfile(u.tenantId, user.id, role);
     await this.linkToCreatorCompanies(u, user.id);
+    await this.applyProfileAccess(u, user.id);
     // devolve o link mesmo quando o e-mail saiu: e-mail cai em spam e some
     const invite = link ?? (await this.auth.inviteLink(user.id)).link;
     return { id: user.id, name: user.name, email: user.email, role: user.role, invited: true, inviteLink: invite, emailSent: !!link };
@@ -382,8 +511,10 @@ class TenantsController {
   @Patch('me/agents/:id')
   @RequirePermission('team.manage')
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
-    const { password, profileId, numberIds, ...rest } = dto;
+    const { password, profileId, numberIds, departmentIds, receiveNumberIds, ...rest } = dto;
     await this.teamMember(u, id);
+    if (receiveNumberIds && u.role !== 'tenant_admin' && !u.impersonatorId) throw new ForbiddenException('Só o administrador da conta define quem recebe os atendimentos.');
+    if (dto.defaultNumberIds) rest.defaultNumberIds = await this.tenantNumberIds(u.tenantId, dto.defaultNumberIds);
     if (dto.name !== undefined && !dto.name.trim()) throw new BadRequestException('Informe o nome.');
     if (dto.name !== undefined) rest.name = dto.name.trim();
     // gerente não promove ninguém a gerente (mesma regra do convite)
@@ -415,7 +546,8 @@ class TenantsController {
     // conta edita de qualquer pessoa (inclusive de outro admin): é só rótulo, não muda acesso.
     // O e-mail (login) de outro admin — ou o próprio — também só o admin da conta troca
     const only = (keys: string[]) => Object.entries(dto).every(([k, v]) => keys.includes(k) || v === undefined);
-    const editable = only(['typingSpeed'])
+    // número padrão é preferência de tela (não dá nem tira acesso): vale como a velocidade de digitação
+    const editable = only(['typingSpeed', 'defaultNumberIds'])
       ? (['agent', 'manager', 'tenant_admin'] as const)
       : u.role === 'manager' ? (['agent'] as const)
       : u.role === 'tenant_admin' && only(['name', 'email', 'typingSpeed']) ? (['agent', 'manager', 'tenant_admin'] as const)
@@ -423,7 +555,7 @@ class TenantsController {
     // Dono do sistema na equipe (docs/donos-do-sistema.md): trocar senha, login, papel, perfil ou
     // desativar daria a quem é só admin do cliente a conta de dono — e com ela todos os clientes.
     // Nome e velocidade de digitação seguem livres; o resto, só outro dono
-    if (!u.systemOwner && !only(['name', 'typingSpeed'])) {
+    if (!u.systemOwner && !only(['name', 'typingSpeed', 'defaultNumberIds'])) {
       const alvo = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId }, select: { isSystemOwner: true } });
       if (alvo?.isSystemOwner) throw new ForbiddenException('Esta pessoa é dona do sistema: só outro dono altera o acesso dela.');
     }
@@ -447,12 +579,23 @@ class TenantsController {
         this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: id, numberId: n.id })), skipDuplicates: true }),
       ]);
     }
+    if (departmentIds) {
+      // só departamentos deste cliente: os ids vêm do corpo da requisição
+      const validos = await this.prisma.department.findMany({ where: { id: { in: [...new Set(departmentIds)] }, tenantId: u.tenantId }, select: { id: true } });
+      if (validos.length !== new Set(departmentIds).size) throw new BadRequestException('Algum departamento não foi encontrado.');
+      await this.prisma.$transaction([
+        this.prisma.userDepartment.deleteMany({ where: { userId: id } }),
+        this.prisma.userDepartment.createMany({ data: validos.map((d) => ({ userId: id, departmentId: d.id })), skipDuplicates: true }),
+      ]);
+    }
+    if (numberIds || departmentIds || profileId !== undefined) this.permissions.invalidate();
+    if (receiveNumberIds) await this.setReceives(u.tenantId, id, receiveNumberIds);
     // trocou o papel e continua num perfil padrão: acompanha o novo papel (perfil sob medida fica)
     if (dto.role !== undefined && profileId === undefined) {
       const cur = await this.prisma.user.findUnique({ where: { id }, select: { profile: { select: { isSystem: true } } } });
       if (cur?.profile?.isSystem) await this.provisioning.linkRoleProfile(u.tenantId, id, dto.role);
     }
-    if (profileId !== undefined || numberIds || dto.role !== undefined) this.permissions.invalidate();
+    if (profileId !== undefined || numberIds || dto.defaultNumberIds || dto.role !== undefined) this.permissions.invalidate();
     return updated;
   }
 }

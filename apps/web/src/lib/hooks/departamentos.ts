@@ -6,11 +6,13 @@ import { invConv, type Conversation } from './core';
 
 export interface Department {
   id: string; name: string; description: string | null; color: string; isActive: boolean; createdAt: string;
+  /** departamento acima (docs/departamentos.md#hierarquia); null = topo */
+  parentId: string | null;
   users: { user: { id: string; name: string; isActive: boolean } }[];
   /** conversas abertas (não encerradas) no departamento */
   _count: { conversations: number };
 }
-export type DepartmentInput = { name: string; description?: string | null; color?: string; isActive?: boolean; userIds?: string[] };
+export type DepartmentInput = { name: string; description?: string | null; color?: string; isActive?: boolean; parentId?: string | null; userIds?: string[] };
 
 export const useDepartments = () => useQuery({ queryKey: ['departments'], queryFn: () => api<Department[]>('/departments'), staleTime: 60_000 });
 

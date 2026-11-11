@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Paperclip, X, Users, UsersRound, ShieldAlert, Loader2, Phone, Tags, ChevronDown } from 'lucide-react';
+import { Paperclip, X, Users, UsersRound, ShieldAlert, Loader2, Phone, Tags, ChevronDown, FileUp, Contact } from 'lucide-react';
 import { formatPhone } from '@/components/ui/PhoneInput';
 import { cn } from '@/lib/utils';
 import { Modal, inputCls } from '@/components/ui/Modal';
@@ -14,6 +14,7 @@ import {
 } from '@/lib/hooks';
 import { QrRiskModal } from './QrRiskModal';
 import { CampaignCostBox } from './CampaignCostBox';
+import { ContactPicker, type PickedContact } from './ContactPicker';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const diasAtras = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
@@ -28,6 +29,8 @@ function normalizar(t: string): string | null {
   if (d.length === 10 || d.length === 11) return `55${d}`;
   return d.length >= 12 && d.length <= 15 ? d : null;
 }
+/** telefones dentro de uma planilha/texto qualquer (ignora nomes, e-mails e outras colunas) */
+const telefonesDoTexto = (t: string) => (t.match(/\+?\d[\d\s().-]{8,18}\d/g) ?? []).filter((x) => normalizar(x));
 
 /**
  * Nova transmissão. O público soma o que for preenchido: telefones (digitados/colados, viram
@@ -64,6 +67,7 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
   const [telefones, setTelefones] = useState<string[]>([]);
   const [digitando, setDigitando] = useState('');
   const [groupIds, setGroupIds] = useState<string[]>([]);
+  const [contatos, setContatos] = useState<PickedContact[]>([]);
   const [riscoAberto, setRiscoAberto] = useState(false);
 
   const conectados = (numbers.data ?? []).filter((n) => n.isActive && n.status === 'connected');
@@ -91,9 +95,10 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
       ...(usaPeriodo && { closingFrom: new Date(`${deIso}T00:00:00`).toISOString(), closingTo: new Date(new Date(`${ateIso}T00:00:00`).getTime() + 86_400_000).toISOString() }),
     }),
     ...(validos.length && { phones: validos }),
+    ...(contatos.length && { contactIds: contatos.map((c) => c.id) }),
     ...(groupIds.length && !oficial && { groupIds }),
   };
-  const temPublico = todos || usaFiltros || validos.length > 0 || (!oficial && groupIds.length > 0);
+  const temPublico = todos || usaFiltros || validos.length > 0 || contatos.length > 0 || (!oficial && groupIds.length > 0);
 
   /** texto digitado/colado → etiquetas (sem repetir o mesmo número) */
   function adicionar(texto: string) {
@@ -104,6 +109,14 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
       return [...l, ...novos.filter((t) => { const k = normalizar(t) ?? t; if (vistos.has(k)) return false; vistos.add(k); return true; })];
     });
     setDigitando('');
+  }
+  /** planilha exportada em CSV (ou .txt): pega só o que parece telefone, de qualquer coluna */
+  async function importarArquivo(f: File) {
+    if (f.size > 5_000_000) return toast.err('Arquivo grande demais (máx. 5 MB).');
+    const achados = telefonesDoTexto(await f.text());
+    if (!achados.length) return toast.err('Nenhum telefone encontrado no arquivo. Exporte a planilha como CSV.');
+    adicionar(achados.join('\n'));
+    toast.ok(`${achados.length} telefone(s) importado(s)`);
   }
   // espera parar de mexer antes de contar
   const [publicoAtual, setPublicoAtual] = useState(audience);
@@ -228,7 +241,7 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
                 className="flex-1 min-w-[160px] bg-transparent outline-none text-sm py-0.5"
                 value={digitando}
                 inputMode="tel"
-                placeholder={telefones.length ? 'Mais um…' : 'Digite com DDD e aperte Enter, ou cole uma lista'}
+                placeholder={telefones.length ? 'Mais um…' : 'Digite com DDD e Enter, ou cole a coluna inteira da planilha'}
                 onChange={(e) => setDigitando(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ',' || e.key === ';') { e.preventDefault(); adicionar(digitando); }
@@ -240,14 +253,23 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
               />
             </div>
             <div className="flex flex-wrap items-center gap-x-3 text-[11.5px] text-faint">
+              <label className="inline-flex items-center gap-1 cursor-pointer text-accent-ink hover:underline">
+                <FileUp size={12} /> Importar planilha (.csv)
+                <input type="file" hidden accept=".csv,.txt,text/csv,text/plain" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importarArquivo(f); }} />
+              </label>
               <span>Sem DDI vira Brasil (+55). Número novo vira contato; a conversa aparece em Encerradas depois do envio.</span>
               {telefones.length > 0 && <button type="button" onClick={() => setTelefones([])} className="text-muted hover:text-ink underline">Limpar todos</button>}
             </div>
           </div>
 
           <div className="space-y-2 border-t border-line pt-3">
+            <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink"><Contact size={13} /> Escolher contatos <span className="font-normal text-muted">— marque na lista</span></span>
+            <ContactPicker value={contatos} onChange={setContatos} />
+          </div>
+
+          <div className="space-y-2 border-t border-line pt-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink"><Tags size={13} /> Contatos da base</span>
+              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink"><Tags size={13} /> Por tag ou todos</span>
               <label className="flex items-center gap-1.5 text-[12.5px] text-muted cursor-pointer">
                 <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} /> Todos os contatos
               </label>
@@ -337,7 +359,7 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
           )}
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-[12.5px]">
-            {!temPublico && <span className="text-muted">Adicione telefones, escolha tags ou marque “Todos os contatos”.</span>}
+            {!temPublico && <span className="text-muted">Adicione telefones, marque contatos, escolha tags ou marque “Todos os contatos”.</span>}
             {temPublico && !p && <span className="text-muted inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Contando…</span>}
             {p && (
               <>

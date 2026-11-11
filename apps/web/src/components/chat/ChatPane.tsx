@@ -46,6 +46,7 @@ import { TemplateSendModal } from './TemplateSendModal';
 import { useMinuto } from './ConversationList';
 import { structuredBody, ForwardedLabel } from './messages/MessageContent';
 import { messagePreview } from '@atendo/shared';
+import { formatPhone } from '@/components/ui/PhoneInput';
 
 /** Sem filtro: a API aceita qualquer arquivo (exceto HTML/SVG/JS — ver ACTIVE_CONTENT em media.controller.ts). */
 const ACCEPT_ALL = '';
@@ -170,7 +171,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   }, [ticketsDaConversa.data]);
   const abrirTicket = (msg?: Message) => conv && setTicketDe({
     conversationId: conv.id,
-    contato: conv.contact.name ?? `+${conv.contact.phone}`,
+    contato: conv.contact.name ?? formatPhone(conv.contact.phone),
     ...(msg && { messageId: msg.id, trecho: messagePreview(msg) }),
   });
   // "Ver na conversa" do ticket: carrega páginas antigas até achar a mensagem e rola até ela
@@ -577,7 +578,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const contatoFrio = conv.number.provider !== 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
   /** quem aparece como autor da citação recebida e na faixa "Respondendo a …" */
-  const nomeContato = conv.contact.name ?? `+${conv.contact.phone}`;
+  const nomeContato = conv.contact.name ?? formatPhone(conv.contact.phone);
   // conversa de outra pessoa: ninguém responde por ela (a API recusa) — só nota interna
   podeResponderRef.current = !noteMode && !ownedByOther && !numberOffline && !quotaHit && conv.status !== 'closed';
   /** atalho para a nota nas barras em que não dá para responder (encerrada, número caído, cota) */
@@ -649,7 +650,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <ZoomableAvatar name={conv.contact.name ?? conv.contact.phone} phone={conv.contact.phone} src={conv.contact.avatarUrl} />
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-sm text-ink flex items-center gap-1.5 min-w-0">
-            <span className="truncate">{conv.contact.name ?? `+${conv.contact.phone}`}</span>
+            <span className="truncate">{conv.contact.name ?? formatPhone(conv.contact.phone)}</span>
             <DepartmentBadge department={conv.department} className="shrink-0 max-w-[140px]" />
             {botPaused(conv) && (
               <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink" title="Automação pausada só nesta conversa">
@@ -659,11 +660,11 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           </div>
           {typing ? (
             <div className="text-xs text-ok font-medium truncate animate-fade-in" aria-live="polite">
-              {conv.contact.name ?? `+${conv.contact.phone}`} {typing.state === 'recording' ? 'está gravando áudio…' : 'está digitando…'}
+              {conv.contact.name ?? formatPhone(conv.contact.phone)} {typing.state === 'recording' ? 'está gravando áudio…' : 'está digitando…'}
             </div>
           ) : (
           <div className="text-xs text-muted truncate tnum flex items-center gap-1.5">
-            <span className="truncate">{conv.contact.isGroup ? 'Grupo do WhatsApp' : `+${conv.contact.phone}`}{conv.assignee && ` · ${conv.assignee.name}`}</span>
+            <span className="truncate">{conv.contact.isGroup ? 'Grupo do WhatsApp' : formatPhone(conv.contact.phone)}{conv.assignee && ` · ${conv.assignee.name}`}</span>
             <OriginBadge origin={conv.origin} data={conv.originData} detailed />
           </div>
           )}

@@ -10,7 +10,7 @@
  * contexto que não retomou), cai num `<audio>` com o mesmo som em WAV — que também é o caminho
  * do "Testar som": tocado dentro do clique, sai sempre.
  */
-type Kind = 'message' | 'alarm';
+type Kind = 'message' | 'alarm' | 'internal';
 
 /** [frequência Hz, início s, duração s] de cada tom */
 const TONES: Record<Kind, [number, number, number][]> = {
@@ -18,8 +18,10 @@ const TONES: Record<Kind, [number, number, number][]> = {
   message: [[880, 0, 0.22], [1320, 0.12, 0.22]],
   // alarme: três pares agudos, ~1,6 s — diferente do plim, para não passar despercebido
   alarm: [0, 0.55, 1.1].flatMap((t): [number, number, number][] => [[988, t, 0.18], [1480, t + 0.2, 0.25]]),
+  // mensagem da equipe (chat interno): três notas subindo, ~0,6 s — não se confunde com o plim de cliente
+  internal: [[523, 0, 0.16], [659, 0.15, 0.16], [784, 0.3, 0.3]],
 };
-const VOLUME: Record<Kind, number> = { message: 0.25, alarm: 0.45 };
+const VOLUME: Record<Kind, number> = { message: 0.25, alarm: 0.45, internal: 0.35 };
 
 let ctx: AudioContext | null = null;
 let lastAt = 0;
@@ -130,6 +132,14 @@ export function playMessageSound() {
   if (now - lastAt < MIN_GAP_MS) return;
   lastAt = now;
   play('message');
+}
+
+/** Mensagem da equipe no chat interno — som próprio, para não passar como mensagem de cliente. */
+export function playInternalSound() {
+  const now = Date.now();
+  if (now - lastAt < MIN_GAP_MS) return;
+  lastAt = now;
+  play('internal');
 }
 
 /** Alarme de atendimento transferido para você — sem intervalo mínimo com o plim. */

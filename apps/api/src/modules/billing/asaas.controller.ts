@@ -18,6 +18,9 @@ class CustomerDto {
   @Matches(/^[\d.\-/ ]{11,20}$/, { message: 'CPF/CNPJ inválido' }) cpfCnpj: string;
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsString() @MaxLength(20) mobilePhone?: string;
+  /** obrigatórios no boleto (registro do pagador) */
+  @IsOptional() @Matches(/^[\d-]{8,9}$/, { message: 'CEP inválido' }) postalCode?: string;
+  @IsOptional() @IsString() @Length(1, 10) addressNumber?: string;
 }
 
 class CardDto {
@@ -39,13 +42,13 @@ class HolderDto {
 
 class AsaasCheckoutDto {
   @IsUUID() planId: string;
-  @IsIn(['PIX', 'CREDIT_CARD']) billingType: AsaasBillingType;
+  @IsIn(['PIX', 'BOLETO', 'CREDIT_CARD']) billingType: AsaasBillingType;
   @ValidateNested() @Type(() => CustomerDto) customer: CustomerDto;
   @IsOptional() @ValidateNested() @Type(() => CardDto) card?: CardDto;
   @IsOptional() @ValidateNested() @Type(() => HolderDto) holder?: HolderDto;
 }
 
-/** Checkout e cobranças do Asaas (PIX + cartão) para o admin do tenant. */
+/** Checkout e cobranças do Asaas (PIX, boleto e cartão) para o admin do tenant. */
 @Controller('billing/asaas')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @RequirePermission('billing.manage')

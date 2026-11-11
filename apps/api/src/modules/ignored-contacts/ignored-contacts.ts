@@ -14,12 +14,24 @@ export function normalizeExemptPhone(raw: string) {
  * entre os números da loja. Sem isto o robô de um responderia o outro, que responderia de volta.
  */
 export async function isTicketExempt(prisma: PrismaService, tenantId: string, phone: string) {
+  return (await exemptMode(prisma, tenantId, phone)) !== 'none';
+}
+
+/**
+ * Como a conversa deste telefone se comporta (docs/contatos-isentos.md):
+ * - `none`: atendimento comum;
+ * - `exempt`: isento (segue a fila, sem relatório);
+ * - `free`: conversa livre — sempre aberta, sem dono, ninguém encerra (marcado na lista com "Conversa livre").
+ * Número da própria conta é `exempt`.
+ */
+export async function exemptMode(prisma: PrismaService, tenantId: string, phone: string): Promise<'none' | 'exempt' | 'free'> {
   const d = normalizeExemptPhone(phone);
-  if (!d) return false;
+  if (!d) return 'none';
   const variants = phoneVariants(d);
   const [listed, own] = await Promise.all([
-    prisma.ignoredContact.findFirst({ where: { tenantId, phone: { in: variants } }, select: { id: true } }),
+    prisma.ignoredContact.findMany({ where: { tenantId, phone: { in: variants } }, select: { freeChat: true } }),
     prisma.whatsAppNumber.findFirst({ where: { tenantId, deletedAt: null, phone: { in: variants } }, select: { id: true } }),
   ]);
-  return !!(listed || own);
+  if (listed.some((l) => l.freeChat)) return 'free';
+  return listed.length || own ? 'exempt' : 'none';
 }

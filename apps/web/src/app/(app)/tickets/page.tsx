@@ -164,7 +164,8 @@ function Linha({ t, onAbrir }: { t: TicketRow; onAbrir: () => void }) {
         <span className="text-xs text-faint tnum pt-0.5 w-10 shrink-0">#{t.number}</span>
         <span className="min-w-0 flex-1 space-y-1">
           <span className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-ink truncate">{t.title}</span>
+            {t.unread && <span className="w-2 h-2 rounded-full bg-accent shrink-0" aria-label="Novidade não lida" title="Novo ou com novidade desde a última vez que você abriu" />}
+            <span className={cn('truncate text-ink', t.unread ? 'font-bold' : 'font-medium')}>{t.title}</span>
             <TipoChip type={t.type} />
             <Chip status={t.status} />
             <Origem source={t.source} />

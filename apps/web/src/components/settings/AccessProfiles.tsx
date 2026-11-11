@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { BarChart3, Check, ChevronDown, Layers, Lock, MessagesSquare, Pencil, Plus, Shield, ShieldCheck, Trash2, Users, Wallet } from 'lucide-react';
+import { BarChart3, Check, ChevronDown, Layers, Lock, MessagesSquare, Pencil, Plus, Copy, RefreshCw, Shield, ShieldCheck, Trash2, Users, Wallet, Wand2 } from 'lucide-react';
 import { PERMISSIONS, PERMISSION_GROUPS, type Permission } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { useProfiles, useCreateProfile, useUpdateProfile, useDeleteProfile, useCan, useMe, type AccessProfile } from '@/lib/hooks';
+import { useProfiles, useCreateProfile, useUpdateProfile, useDeleteProfile, useApplyProfileAccess, useCan, useMe, useNumbers, useDepartments, type AccessProfile, type AccessTemplate } from '@/lib/hooks';
+import { AccessGrid, type AccessState } from './AccessGrid';
 
 /**
  * Perfis de acesso: o cliente monta o que cada função pode fazer.
@@ -23,6 +24,9 @@ export function AccessProfiles() {
   const remove = useDeleteProfile();
   const [editing, setEditing] = useState<Partial<AccessProfile> | null>(null);
   const [deleting, setDeleting] = useState<AccessProfile | null>(null);
+  const [reaplicando, setReaplicando] = useState<AccessProfile | null>(null);
+  const aplicar = useApplyProfileAccess();
+  const canTeam = useCan('team.manage');
 
   // ninguém pode conceder o que não tem — a API corta de novo, isto é só para a tela não
   // oferecer uma caixa que seria descartada no salvamento
@@ -42,7 +46,10 @@ export function AccessProfiles() {
 
       {/* items-start: abrir as permissões de um cartão não estica os vizinhos da linha (ficavam altos e vazios) */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 items-start">
-        {profiles.data?.map((p) => <ProfileCard key={p.id} profile={p} canManage={canManage} onEdit={() => setEditing(p)} onDelete={() => setDeleting(p)} />)}
+        {profiles.data?.map((p) => <ProfileCard key={p.id} profile={p} canManage={canManage} onEdit={() => setEditing(p)} onDelete={() => setDeleting(p)}
+          // cópia completa: permissões + acesso padrão, sem id (salva como perfil novo). A API corta o que quem copia não pode conceder
+          onCopy={() => setEditing({ name: `${p.name} (cópia)`.slice(0, 60), description: p.description, permissions: p.permissions, accessTemplate: p.accessTemplate ?? null })}
+          onReapply={canTeam ? () => setReaplicando(p) : undefined} />)}
       </div>
 
       <ProfileModal
@@ -59,6 +66,15 @@ export function AccessProfiles() {
             setEditing(null);
           } catch (err) { toast.err(err); }
         }}
+      />
+
+      <ConfirmDialog
+        open={!!reaplicando}
+        onClose={() => setReaplicando(null)}
+        title="Reaplicar acesso padrão"
+        confirmLabel="Reaplicar"
+        text={`As ${reaplicando?._count.users ?? 0} pessoa(s) com o perfil "${reaplicando?.name}" passam a ter os números, departamentos e recebimento do acesso padrão. Ajustes feitos pessoa por pessoa serão substituídos.`}
+        onConfirm={async () => { if (!reaplicando) return; try { const r = await aplicar.mutateAsync(reaplicando.id); toast.ok(`Acesso padrão aplicado em ${r.applied} pessoa(s)`); } catch (err) { toast.err(err); throw err; } }}
       />
 
       <ConfirmDialog
@@ -87,8 +103,15 @@ const TOTAL = PERMISSION_GROUPS.reduce((n, g) => n + g.items.length, 0);
  * Cartão do perfil: quantas pessoas usam, quanto de cada área ele libera (barra por grupo) e,
  * aberto, a lista por extenso — "o que esta pessoa pode fazer?" é a pergunta de quem abre aqui.
  */
-function ProfileCard({ profile: p, canManage, onEdit, onDelete }: { profile: AccessProfile; canManage: boolean; onEdit: () => void; onDelete: () => void }) {
+function ProfileCard({ profile: p, canManage, onEdit, onDelete, onCopy, onReapply }: { profile: AccessProfile; canManage: boolean; onEdit: () => void; onDelete: () => void; onCopy: () => void; onReapply?: () => void }) {
   const [aberto, setAberto] = useState(false);
+  const numbers = useNumbers();
+  const departments = useDepartments();
+  const t = p.accessTemplate;
+  const nomesDeptos = t ? (departments.data ?? []).filter((d) => t.departmentIds.includes(d.id)).map((d) => d.name) : [];
+  const resumoModelo = t
+    ? `${t.allNumbers ? 'todos os números' : `${(numbers.data ?? []).filter((n) => t.numberIds.includes(n.id)).length} número(s)`} · ${nomesDeptos.length ? nomesDeptos.join(', ') : 'sem departamento'}`
+    : null;
   const total = p.permissions.length >= TOTAL;
   return (
     <article className="rounded-2xl bg-panel border border-line p-4 flex flex-col gap-3">
@@ -106,6 +129,7 @@ function ProfileCard({ profile: p, canManage, onEdit, onDelete }: { profile: Acc
         </div>
         {canManage && (
           <div className="flex shrink-0 -mr-1 -mt-1">
+            <button title="Duplicar (permissões e acesso padrão)" aria-label={`Duplicar ${p.name}`} onClick={onCopy} className="text-faint hover:text-accent-ink p-1.5 rounded-lg hover:bg-field"><Copy size={15} /></button>
             <button title="Editar" aria-label={`Editar ${p.name}`} onClick={onEdit} className="text-faint hover:text-accent-ink p-1.5 rounded-lg hover:bg-field"><Pencil size={15} /></button>
             {p.systemRole !== 'tenant_admin' && <button title="Excluir" aria-label={`Excluir ${p.name}`} onClick={onDelete} className="text-faint hover:text-danger p-1.5 rounded-lg hover:bg-field"><Trash2 size={15} /></button>}
           </div>
@@ -113,6 +137,16 @@ function ProfileCard({ profile: p, canManage, onEdit, onDelete }: { profile: Acc
       </header>
 
       {p.description && <p className="text-[12.5px] text-muted line-clamp-2">{p.description}</p>}
+
+      {resumoModelo && (
+        <div className="flex items-start gap-2 rounded-lg bg-field px-3 py-2 text-[12px]">
+          <Wand2 size={13} className="mt-0.5 shrink-0 text-accent-ink" />
+          <span className="min-w-0 flex-1"><b className="text-ink">Acesso padrão:</b> <span className="text-muted">{resumoModelo}</span></span>
+          {onReapply && p._count.users > 0 && (
+            <button type="button" onClick={onReapply} title="Aplicar o acesso padrão em quem já tem este perfil" className="shrink-0 inline-flex items-center gap-1 font-semibold text-accent-ink hover:underline"><RefreshCw size={11} /> Reaplicar</button>
+          )}
+        </div>
+      )}
 
       {p.permissions.length === 0 ? (
         <p className="text-[12.5px] text-muted rounded-lg bg-field px-3 py-2">Nenhuma permissão extra — só atende as próprias conversas.</p>
@@ -171,20 +205,50 @@ function ProfileModal({ open, profile, canGrant, pending, onClose, onSubmit }: {
   canGrant: (p: Permission) => boolean;
   pending: boolean;
   onClose: () => void;
-  onSubmit: (b: { name: string; description?: string; permissions: Permission[] }) => void;
+  onSubmit: (b: { name: string; description?: string; permissions: Permission[]; accessTemplate?: AccessTemplate | null }) => void;
 }) {
+  const me = useMe();
+  const numbers = useNumbers();
+  const departments = useDepartments();
+  const souAdmin = me.data?.role === 'tenant_admin' || me.data?.role === 'super_admin' || !!me.data?.impersonatorId;
+  const [comModelo, setComModelo] = useState(false);
+  const [modelo, setModelo] = useState<AccessState>({ todos: true, ve: [], padrao: [], recebe: [], deptos: [] });
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selected, setSelected] = useState<Permission[]>([]);
   const [key, setKey] = useState('');
 
   // recarrega os campos quando o modal abre para outro perfil
-  const id = profile?.id ?? 'novo';
+  // cópia: sem id, mas com nome — chave própria para recarregar os campos
+  const id = profile?.id ?? (profile?.name ? `copia:${profile.name}` : 'novo');
+  if (!open && key) setKey('');
   if (open && key !== id) {
     setKey(id);
     setName(profile?.name ?? '');
     setDescription(profile?.description ?? '');
     setSelected(profile?.permissions ?? []);
+    const t = profile?.accessTemplate;
+    setComModelo(!!t);
+    const lista = numbers.data ?? [];
+    const ves = t && !t.allNumbers ? t.numberIds : lista.filter((n) => !n.reserved).map((n) => n.id);
+    setModelo(t
+      ? { todos: t.allNumbers, ve: t.allNumbers ? [] : t.numberIds, padrao: t.defaultNumberIds, deptos: t.departmentIds, recebe: t.receiveAll ? ves : t.receiveNumberIds }
+      : { todos: true, ve: [], padrao: [], deptos: [], recebe: ves });
+  }
+
+  /** Estado da tabela → modelo da API. "Recebe" igual a tudo que vê vira `receiveAll` (inclui números novos). */
+  function paraModelo(): AccessTemplate | null {
+    if (!comModelo) return null;
+    const vistos = (numbers.data ?? []).filter((n) => (modelo.todos ? !n.reserved : modelo.ve.includes(n.id))).map((n) => n.id);
+    const recebe = modelo.recebe.filter((id) => vistos.includes(id));
+    return {
+      allNumbers: modelo.todos,
+      numberIds: modelo.todos ? [] : modelo.ve,
+      defaultNumberIds: modelo.padrao.filter((id) => vistos.includes(id)),
+      departmentIds: modelo.deptos,
+      receiveAll: recebe.length === vistos.length,
+      receiveNumberIds: recebe,
+    };
   }
 
   const toggle = (p: Permission) => setSelected((s) => (s.includes(p) ? s.filter((x) => x !== p) : [...s, p]));
@@ -196,9 +260,9 @@ function ProfileModal({ open, profile, canGrant, pending, onClose, onSubmit }: {
   const concediveis = PERMISSION_GROUPS.flatMap((g) => g.items).filter(canGrant);
 
   return (
-    <Modal open={open} onClose={onClose} title={profile?.id ? 'Editar perfil' : 'Novo perfil'} width="max-w-3xl">
+    <Modal open={open} onClose={onClose} title={profile?.id ? 'Editar perfil' : profile?.name ? 'Duplicar perfil' : 'Novo perfil'} width="max-w-3xl">
       <form
-        onSubmit={(e) => { e.preventDefault(); onSubmit({ name, description: description || undefined, permissions: selected }); }}
+        onSubmit={(e) => { e.preventDefault(); onSubmit({ name, description: description || undefined, permissions: selected, ...(profile?.systemRole !== 'tenant_admin' && { accessTemplate: paraModelo() }) }); }}
         className="space-y-5"
       >
         <div className="grid gap-3 sm:grid-cols-2">
@@ -268,6 +332,27 @@ function ProfileModal({ open, profile, canGrant, pending, onClose, onSubmit }: {
             );
           })}
         </div>
+
+        {profile?.systemRole !== 'tenant_admin' && (
+          <section className="rounded-xl border border-line p-3 space-y-3">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={comModelo} onChange={(e) => setComModelo(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[var(--accent)]" />
+              <span>
+                <span className="text-sm font-semibold text-ink inline-flex items-center gap-1.5"><Wand2 size={14} /> Acesso padrão</span>
+                <span className="block text-[12.5px] text-muted">
+                  Números, onde a tela abre filtrada, de onde recebe automaticamente e departamentos. Quem for criado com este perfil (um a um ou em massa) já nasce assim;
+                  na tela de Acesso, trocar para este perfil oferece aplicar. Depois dá para ajustar cada pessoa sem mexer no perfil.
+                </span>
+              </span>
+            </label>
+            {comModelo && (
+              <>
+                <AccessGrid numbers={numbers.data ?? []} departments={departments.data ?? []} value={modelo} onChange={setModelo} canReceive={souAdmin} viewAll={selected.includes('conversations.view_all')} />
+                {profile?.id && (profile._count?.users ?? 0) > 0 && <p className="text-[12px] text-muted">Mudar aqui não altera quem já tem o perfil. Para isso, use <b>Reaplicar</b> no cartão do perfil.</p>}
+              </>
+            )}
+          </section>
+        )}
 
         <div className="flex justify-end gap-2 sticky bottom-0 -mx-5 -mb-5 px-5 py-3 bg-panel border-t border-line">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>

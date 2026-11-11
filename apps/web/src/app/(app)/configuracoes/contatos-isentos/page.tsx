@@ -9,7 +9,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { inputCls } from '@/components/ui/Modal';
 import { PhoneInput } from '@/components/ui/PhoneInput';
-import { useAddIgnoredContact, useCan, useIgnoredContacts, useRemoveIgnoredContact, useStartCandidates } from '@/lib/hooks';
+import { useAddIgnoredContact, useCan, useIgnoredContacts, useRemoveIgnoredContact, useSetIgnoredFreeChat, useStartCandidates } from '@/lib/hooks';
 
 /** "5511999998888" → "+55 11 99999-8888". Fora do padrão BR devolve só com o "+". */
 function formatPhone(d: string) {
@@ -27,6 +27,7 @@ export default function ContatosIsentosPage() {
   const lista = useIgnoredContacts();
   const add = useAddIgnoredContact();
   const remove = useRemoveIgnoredContact();
+  const setFree = useSetIgnoredFreeChat();
   const [phone, setPhone] = useState('');
   const [label, setLabel] = useState('');
   // busca de contato existente, com debounce
@@ -51,7 +52,7 @@ export default function ContatosIsentosPage() {
 
       <p className="flex items-start gap-2 rounded-lg bg-accent-soft px-3 py-2 text-[12.5px] text-accent-ink">
         <BellOff size={15} className="shrink-0 mt-0.5" />
-        <span>A mensagem continua chegando e pode ser respondida, mas fica em <b>Conversas livres</b> (nos filtros da lista de conversas): não entra na fila, não aciona o robô, não tem dono e não conta em nenhum relatório de desempenho (TMA, TMR, volume, ranking).</span>
+        <span>A mensagem chega e é respondida normalmente, mas não aciona o robô e não conta em nenhum relatório de desempenho (TMA, TMR, volume, ranking). Por padrão segue a fila (Aguardando → Atendendo → Encerrado). Marque <b>Conversa livre</b> para quem fala com a equipe toda hora (síndico, gestor, diretoria): a conversa fica sempre aberta, sem dono, qualquer um responde sem assumir e ninguém precisa encerrar.</span>
       </p>
 
       {podeGerir && (
@@ -110,6 +111,13 @@ export default function ContatosIsentosPage() {
                 <p className="truncate text-sm font-medium text-ink">{r.label || r.contact?.name || formatPhone(r.phone)}</p>
                 <p className="text-[12px] text-faint">{formatPhone(r.phone)}{r.contact?.name && r.label && r.label !== r.contact.name ? ` · ${r.contact.name}` : ''}</p>
               </div>
+              {podeGerir ? (
+                <label className="flex shrink-0 items-center gap-1.5 text-[12px] text-muted cursor-pointer" title="Sempre aberta e sem dono: qualquer um responde sem assumir e ninguém encerra">
+                  <input type="checkbox" checked={r.freeChat} disabled={setFree.isPending}
+                    onChange={() => setFree.mutate({ id: r.id, freeChat: !r.freeChat }, { onSuccess: () => toast.ok(r.freeChat ? 'Volta a seguir a fila (Aguardando → Atendendo → Encerrado)' : 'Conversa livre: aberta, sem dono, ninguém precisa encerrar'), onError: (err) => toast.err(err) })} />
+                  Conversa livre
+                </label>
+              ) : r.freeChat && <span className="shrink-0 text-[12px] text-muted">Conversa livre</span>}
               {podeGerir && (
                 <button
                   type="button"

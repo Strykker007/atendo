@@ -47,6 +47,32 @@ conseguia falar com ele — "fulano está atendendo".
   `sendToPhone`): antes ela nascia sem a marca e só ficava isenta quando o contato respondia —
   nesse meio-tempo o dono travava e o atendimento podia entrar em relatório.
 
+### Conversa livre
+
+Opção por contato da lista (`ignored_contacts.freeChat`, migration `20270210000000_exempt_free_chat`;
+caixa **Conversa livre** em cada linha da tela, `PATCH /ignored-contacts/:id { freeChat }`, ou ao
+cadastrar). Para quem fala com a equipe a toda hora — síndico, gestor, diretoria — e não é atendimento:
+antes cada plantão encerrava, a próxima mensagem reabria em Aguardando, alguém assumia, outro tinha de
+pegar de quem assumiu… (caso da ID Vida Urbana, 10/11/2026).
+
+| | Isento comum (padrão) | Conversa livre |
+|---|---|---|
+| Status | segue a fila: Aguardando → Atendendo → Encerrado | sempre **aberta** (`in_progress`), sem dono |
+| Responder | assume (sem travar os outros) | **não assume**: qualquer um que vê o número responde |
+| Encerrar | sim, sem resultado | não há o que encerrar (botão some, como no grupo) |
+| Mensagem nova | reabre/marca espera | não reabre nem marca espera; ligação perdida também não |
+| Fila, Distribuidor, redistribuição, saiu do plantão | só se estiver em Aguardando | nunca |
+| Relatórios e robô | fora | fora |
+
+É o mesmo "chat livre" do grupo (`LIVRE` na API, `isFreeChat` no front) — que até 27/10 era o
+comportamento de todo isento; agora é escolha por contato, porque outro cliente pediu que o isento comum
+continuasse na fila. Regra única em `exemptMode` (`ignored-contacts.ts`: `none` / `exempt` / `free`),
+usada na entrada ao vivo, na resposta pelo celular, na recuperação de histórico, na ligação e na conversa
+aberta pelo painel (`novaConversaPorModo`).
+
+Ligar: **todas** as conversas do telefone (inclusive encerradas) ficam abertas e sem dono, na hora.
+Desligar (ou tirar da lista): as que estavam livres voltam para **Aguardando**.
+
 ### Entrar e sair da lista
 
 - **Entrou**: as conversas que já existem com aquele telefone só ganham `ticketExempt = true`.

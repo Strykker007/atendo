@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { inputCls } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
-import { useAiOwnKey, useRemoveAiOwnKey, useSaveAiOwnKey } from '@/lib/hooks';
+import { useAiOwnKey, useAiOwnKeyUsage, useRemoveAiOwnKey, useSaveAiOwnKey } from '@/lib/hooks';
 
 /**
  * Chave de IA própria (feature `ai_own_key`, docs/15-ia.md#chave-própria-do-cliente). A empresa
- * cola a chave da OpenAI ou da Anthropic; a IA dela passa a rodar nessa conta, fora da cota de
+ * cola a chave da OpenAI, da Anthropic ou do Google (Gemini, que tem plano grátis); a IA dela passa a rodar nessa conta, fora da cota de
  * interações do plano. A chave é validada no fornecedor antes de gravar e nunca volta para a tela.
  */
 export function AiOwnKeySection() {
@@ -43,7 +43,7 @@ export function AiOwnKeySection() {
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
       <div>
         <h2 className="font-display font-semibold text-ink flex items-center gap-2"><KeyRound size={16} className="text-accent" /> Chave de IA própria</h2>
-        <p className="text-xs text-muted mt-0.5">Use a sua conta da OpenAI (ChatGPT) ou da Anthropic (Claude). O consumo é cobrado direto pelo fornecedor e não entra no limite de interações do plano.</p>
+        <p className="text-xs text-muted mt-0.5">Use a sua conta da OpenAI (ChatGPT), da Anthropic (Claude) ou do Google (Gemini, que tem plano grátis). O consumo é cobrado direto pelo fornecedor e não entra no limite de interações do plano.</p>
       </div>
 
       {!s.feature && s.connected && (
@@ -61,6 +61,7 @@ export function AiOwnKeySection() {
             {s.feature && <Button variant="ghost" size="sm" onClick={() => { setProvider(s.provider ?? 'openai'); setModel(''); setTrocando(true); }}>Trocar chave</Button>}
             <Button variant="subtle" size="sm" onClick={() => setSaindo(true)}>Apagar</Button>
           </div>
+          {s.inUse && <OwnKeyUsage />}
           {s.lastError && (
             <p className="flex items-start gap-2 rounded-xl bg-warn/10 px-4 py-2.5 text-xs text-ink">
               <AlertTriangle size={14} className="text-warn shrink-0 mt-0.5" />
@@ -81,9 +82,14 @@ export function AiOwnKeySection() {
             ))}
           </div>
           <ol className="text-xs text-muted list-decimal pl-4 space-y-0.5">
-            <li>Crie a chave em <a href={info.consoleUrl} target="_blank" rel="noreferrer" className="text-accent underline">{new URL(info.consoleUrl).host}</a> e confira se a conta tem crédito.</li>
+            <li>Crie a chave em <a href={info.consoleUrl} target="_blank" rel="noreferrer" className="text-accent underline">{new URL(info.consoleUrl).host}</a>{provider === 'gemini' ? '. No plano grátis não precisa de cartão.' : ' e confira se a conta tem crédito.'}</li>
             <li>Cole aqui. O sistema confere a chave no fornecedor antes de gravar; ela fica criptografada e não aparece de novo.</li>
           </ol>
+          {provider === 'gemini' && (
+            <p className="rounded-lg bg-accent-soft px-3 py-2 text-xs text-accent-ink">
+              <b>Plano grátis do Gemini:</b> tem limite de pedidos por minuto e por dia. Quando um modelo chega no limite, o sistema usa o outro; se os dois estiverem no limite, o agente de IA responde alguns segundos depois. Se o limite do dia acabar, a conversa vai para a equipe até a meia-noite do horário do Pacífico (~4h/5h de Brasília). No plano grátis, o Google pode usar as conversas para melhorar os produtos dele. Para dados sensíveis, ative o faturamento no Google.
+            </p>
+          )}
           <input className={inputCls} type="password" autoComplete="off" placeholder={info.keyHint} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
           <select className={inputCls} value={model} onChange={(e) => setModel(e.target.value)}>
             <option value="">Modelo padrão ({info.defaultModel})</option>
@@ -106,5 +112,44 @@ export function AiOwnKeySection() {
         onConfirm={() => remove.mutateAsync().then(() => toast.ok('Chave apagada'), toast.err)}
       />
     </section>
+  );
+}
+
+const hora = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+/** Uso de hoje e do mês pela chave + situação dos modelos do Gemini (docs/15-ia.md#uso-da-chave-própria). */
+function OwnKeyUsage() {
+  const u = useAiOwnKeyUsage(true).data;
+  if (!u) return null;
+  const n = (v: number) => v.toLocaleString('pt-BR');
+  return (
+    <div className="rounded-xl border border-line px-4 py-3 space-y-2 text-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Stat label="Respostas hoje" value={n(u.today.answered)} />
+        <Stat label="No limite (respondidas depois)" value={n(u.today.limited)} />
+        <Stat label="Pagas com o saldo hoje" value={n(u.today.viaCredit)} />
+        <Stat label="No mês" value={`${n(u.month.answered)}${u.month.viaCredit ? ` + ${n(u.month.viaCredit)} pelo saldo` : ''}`} />
+      </div>
+      {u.models.length > 0 && (
+        <ul className="flex flex-wrap gap-2 text-xs">
+          {u.models.map((m) => (
+            <li key={m.model} className={`rounded-full border px-2.5 py-1 ${m.state === 'free' ? 'border-ok/40 text-ok' : m.state === 'daily' ? 'border-danger/40 text-danger' : 'border-warn/40 text-warn'}`}>
+              {m.model}: {m.state === 'free' ? 'livre' : m.state === 'daily' ? `limite do dia até ${m.until ? hora(m.until) : '—'}` : `limite do minuto até ${m.until ? hora(m.until) : '—'}`}
+            </li>
+          ))}
+        </ul>
+      )}
+      {u.today.failed > 0 && <p className="text-xs text-muted">{n(u.today.failed)} chamada(s) falharam hoje por outro motivo.</p>}
+      <p className="text-[11px] text-faint">O limite exato de cada modelo aparece no painel do fornecedor (no Gemini: aistudio.google.com, em Uso). Quando o grátis acaba, o saldo de IA (em Plano e uso) continua respondendo.</p>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-field px-3 py-2">
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className="font-semibold text-ink">{value}</div>
+    </div>
   );
 }

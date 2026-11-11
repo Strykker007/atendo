@@ -9,6 +9,7 @@ export interface DailyReportKpis {
   closed: number;
   waitingNow: number;
   avgFirstResponseMin: number | null;
+  medianFirstResponseMin?: number | null;
   won: number;
   lost: number;
   revenue: number;
@@ -58,6 +59,7 @@ export function buildDailyReportEmail(r: DailyReportInput): { subject: string; t
     ['Atendimentos iniciados', String(k.conversations)],
     ['Encerrados', String(k.closed)],
     ['Aguardando agora', String(k.waitingNow)],
+    ['1ª resposta (típica)', minutos(k.medianFirstResponseMin ?? null)],
     ['1ª resposta (média)', minutos(k.avgFirstResponseMin)],
     ...(r.salesEnabled
       ? ([[r.wonLabel, String(k.won)], ['Faturamento', brl(k.revenue)], ['Conversão', pct(k.winRate === null ? null : k.winRate * 100)], [r.lostLabel, String(k.lost)]] as [string, string][])

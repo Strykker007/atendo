@@ -35,14 +35,17 @@ export function numberFilter(user: Scoped): { in: string[] } | undefined {
 }
 
 /**
- * Interseção do que o usuário pediu com o que ele pode ver. Devolve `null` quando o pedido
+ * Interseção do que o usuário pediu (um número ou vários) com o que ele pode ver. Devolve `null` quando o pedido
  * não sobra nada — quem chama transforma isso em "lista vazia", nunca em "sem filtro":
  * ignorar o pedido mostraria justamente os números que a pessoa não deveria ver.
  */
-export function narrowTo(user: Scoped, requested?: string | null): { in: string[] } | string | null | undefined {
-  if (!requested) return numberFilter(user);
-  if (canUseNumber(user, requested)) return requested;
-  return null;
+export function narrowTo(user: Scoped, requested?: string | readonly string[] | null): { in: string[] } | string | null | undefined {
+  // vários números no filtro (docs/18-perfis-de-acesso.md#número-padrão): "a,b" ou lista
+  const pedidos = [...new Set((typeof requested === 'string' ? requested.split(',') : (requested ?? [])).map((s) => s.trim()).filter(Boolean))];
+  if (!pedidos.length) return numberFilter(user);
+  const ok = pedidos.filter((id) => canUseNumber(user, id));
+  if (!ok.length) return null;
+  return ok.length === 1 ? ok[0] : { in: ok };
 }
 
 /**

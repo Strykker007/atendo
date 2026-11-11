@@ -169,6 +169,8 @@ export class MonthlyBillingService {
     const to = [...new Set([tenant.billingEmail, ...(await this.usage.adminEmails(tenantId))].filter((e): e is string => !!e))];
     if (!to.length) return;
     const pix = await this.asaas.getPixQrCode(p.id).catch(() => null);
+    const boleto = p.billingType === 'BOLETO';
+    const boletoLine = boleto ? await this.asaas.getBoletoLine(p.id).catch(() => null) : null;
     const mail = reminderMail({
       brand: senderName(),
       kind,
@@ -178,6 +180,8 @@ export class MonthlyBillingService {
       qrUrl: pix ? `${env.API_PUBLIC_URL}/billing/pix/${encodeURIComponent(p.id)}/qr.png?s=${qrSignature(env.ENCRYPTION_KEY, p.id)}` : null,
       payUrl: `${env.WEB_ORIGIN}/plano?pagar=1`,
       invoiceUrl: p.invoiceUrl ?? null,
+      boletoLine,
+      boletoUrl: boleto ? p.bankSlipUrl ?? null : null,
     });
     try {
       await this.mail.send({ to, ...mail });

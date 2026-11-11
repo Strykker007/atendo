@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Copy, CreditCard, ExternalLink, QrCode } from 'lucide-react';
+import { Barcode, CheckCircle2, Copy, CreditCard, Download, ExternalLink, QrCode } from 'lucide-react';
 import { cn, formatCardExpiry, formatCardNumber, formatCep, formatDoc, formatPhoneBR } from '@/lib/utils';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -13,10 +13,12 @@ const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', curren
 
 /**
  * Checkout do Asaas. Dois modos:
- * - `plan`: assinar/trocar de plano — escolhe PIX ou cartão e envia;
- * - `payment`: pagar uma cobrança já gerada (renovação ou atraso) — vai direto ao QR.
+ * - `plan`: assinar/trocar de plano — escolhe PIX, boleto ou cartão e envia;
+ * - `payment`: pagar uma cobrança já gerada (renovação ou atraso) — vai direto ao QR/boleto.
  *
  * PIX: mostra QR + copia e cola e consulta a situação a cada 4 s até o pagamento cair.
+ * Boleto: registrado no CPF/CNPJ do pagador (pede CEP e número); mostra linha digitável + PDF e,
+ * como alternativa, o Pix da mesma cobrança. Cada renovação gera o boleto sozinha no Asaas.
  * Cartão: os dados vão para a API só para serem tokenizados no Asaas; nada fica salvo aqui.
  */
 /** `escopo`: para quem vale a troca (ex.: as empresas do grupo) — com várias empresas, sem isso não dá para saber. */
@@ -27,7 +29,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
   const { brandName } = useBrand();
   const customer = useAsaasCustomer(open);
   const checkout = useAsaasCheckout();
-  const [method, setMethod] = useState<'PIX' | 'CREDIT_CARD'>('PIX');
+  const [method, setMethod] = useState<'PIX' | 'BOLETO' | 'CREDIT_CARD'>('PIX');
   const [doc, setDoc] = useState('');
   const [card, setCard] = useState({ holderName: '', number: '', expiry: '', ccv: '' });
   const [holder, setHolder] = useState({ email: '', postalCode: '', addressNumber: '', phone: '' });
@@ -66,7 +68,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
       const r = await checkout.mutateAsync({
         planId: plan.id,
         billingType: method,
-        customer: { cpfCnpj: doc, email: holder.email || undefined, mobilePhone: holder.phone || undefined },
+        customer: { cpfCnpj: doc, email: holder.email || undefined, mobilePhone: holder.phone || undefined, ...(method === 'BOLETO' && { postalCode: holder.postalCode, addressNumber: holder.addressNumber }) },
         ...(method === 'CREDIT_CARD' && {
           card: { holderName: card.holderName, number: card.number, expiryMonth: mm ?? '', expiryYear: yy?.length === 2 ? `20${yy}` : yy ?? '', ccv: card.ccv },
           holder: { name: card.holderName, email: holder.email, cpfCnpj: doc, postalCode: holder.postalCode, addressNumber: holder.addressNumber, phone: holder.phone },
@@ -80,7 +82,7 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
     }
   }
 
-  const copy = (text: string) => navigator.clipboard.writeText(text).then(() => toast.ok('Código PIX copiado'), () => toast.err('Não foi possível copiar'));
+  const copy = (text: string, what = 'Código PIX') => navigator.clipboard.writeText(text).then(() => toast.ok(`${what} copiado`), () => toast.err('Não foi possível copiar'));
   const valor = plan ? (plan.billingCycle === 'yearly' && plan.priceYear != null ? `${brl(Number(plan.priceYear))}/ano` : `${brl(Number(plan.priceMonth))}/mês`) : payment ? brl(payment.value) : '';
 
   return (
@@ -92,12 +94,12 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
           <p className="mt-3 font-medium">Pagamento confirmado!</p>
         </div>
       ) : payment ? (
-        <PaymentStep payment={status.data ? { ...status.data, pix: payment.pix } : payment} onCopy={copy} />
+        <PaymentStep payment={status.data ? { ...status.data, pix: payment.pix, boleto: payment.boleto } : payment} onCopy={copy} />
       ) : (
         <form onSubmit={submit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            {([['PIX', 'PIX', <QrCode key="p" size={16} />], ['CREDIT_CARD', 'Cartão de crédito', <CreditCard key="c" size={16} />]] as const).map(([v, label, icon]) => (
-              <button key={v} type="button" onClick={() => setMethod(v)} className={cn('flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm', method === v ? 'border-accent ring-1 ring-accent text-accent-ink bg-accent-soft' : 'border-line text-ink hover:bg-field')}>
+          <div className="grid grid-cols-3 gap-2">
+            {([['PIX', 'PIX', <QrCode key="p" size={16} />], ['BOLETO', 'Boleto', <Barcode key="b" size={16} />], ['CREDIT_CARD', 'Cartão', <CreditCard key="c" size={16} />]] as const).map(([v, label, icon]) => (
+              <button key={v} type="button" onClick={() => setMethod(v)} className={cn('flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2.5 text-sm', method === v ? 'border-accent ring-1 ring-accent text-accent-ink bg-accent-soft' : 'border-line text-ink hover:bg-field')}>
                 {icon}{label}
               </button>
             ))}
@@ -140,27 +142,65 @@ export function AsaasCheckoutModal({ plan, payment: initial, escopo, onClose }: 
               <p className="text-xs text-faint">A cobrança se renova sozinha no cartão a cada ciclo. Os dados do cartão vão direto para o Asaas e não ficam salvos no {brandName}.</p>
             </>
           )}
+          {method === 'BOLETO' && (
+            <>
+              <Field label="E-mail para receber o boleto">
+                <input className={inputCls} type="email" value={holder.email} onChange={(e) => setHolder({ ...holder, email: e.target.value })} required />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="CEP">
+                  <input className={inputCls} value={holder.postalCode} onChange={(e) => setHolder({ ...holder, postalCode: formatCep(e.target.value) })} placeholder="00000-000" required inputMode="numeric" autoComplete="postal-code" />
+                </Field>
+                <Field label="Número">
+                  <input className={inputCls} value={holder.addressNumber} onChange={(e) => setHolder({ ...holder, addressNumber: e.target.value })} required />
+                </Field>
+              </div>
+              <p className="text-xs text-faint">O boleto sai registrado no CPF/CNPJ informado e vence em 3 dias. A cada renovação, o novo boleto chega por e-mail 5 dias antes do vencimento. A compensação leva de 1 a 3 dias úteis — o boleto também aceita Pix, que cai na hora.</p>
+            </>
+          )}
           {method === 'PIX' && <p className="text-xs text-faint">Geramos o QR code agora. A cada renovação, uma nova cobrança PIX fica disponível nesta tela e chega por e-mail.</p>}
 
-          <Button type="submit" className="w-full" loading={checkout.isPending}>{method === 'PIX' ? 'Gerar PIX' : `Pagar ${valor}`}</Button>
+          <Button type="submit" className="w-full" loading={checkout.isPending}>{method === 'PIX' ? 'Gerar PIX' : method === 'BOLETO' ? 'Gerar boleto' : `Pagar ${valor}`}</Button>
         </form>
       )}
     </Modal>
   );
 }
 
-function PaymentStep({ payment, onCopy }: { payment: AsaasPayment; onCopy: (t: string) => void }) {
+function PaymentStep({ payment, onCopy }: { payment: AsaasPayment; onCopy: (t: string, what?: string) => void }) {
+  const boleto = payment.boleto;
+  if (boleto && (boleto.line || boleto.url)) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-muted">Boleto de {payment.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}, vencimento {new Date(`${payment.dueDate}T12:00:00Z`).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}.</p>
+        {boleto.line && (
+          <div className="space-y-1.5">
+            <div className="text-xs text-muted">Linha digitável</div>
+            <div className="flex gap-2">
+              <input readOnly value={boleto.line} className={cn(inputCls, 'font-mono text-xs')} onFocus={(e) => e.target.select()} />
+              <Button type="button" size="sm" icon={<Copy size={13} />} onClick={() => onCopy(boleto.line!, 'Linha digitável')}>Copiar</Button>
+            </div>
+          </div>
+        )}
+        {boleto.url && (
+          <a href={boleto.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-accent-ink underline">
+            <Download size={14} /> Baixar boleto (PDF)
+          </a>
+        )}
+        {payment.pix && (
+          <details className="rounded-lg border border-line px-3 py-2 text-sm">
+            <summary className="cursor-pointer text-ink">Pagar por Pix (cai na hora)</summary>
+            <div className="mt-3"><PixBlock pix={payment.pix} onCopy={onCopy} /></div>
+          </details>
+        )}
+        <p className="text-xs text-faint">A baixa é automática. Boleto compensa em 1 a 3 dias úteis.</p>
+      </div>
+    );
+  }
   if (payment.pix) {
     return (
-      <div className="text-center space-y-4">
-        <img src={`data:image/png;base64,${payment.pix.encodedImage}`} alt="QR code PIX" className="mx-auto w-56 h-56 rounded-lg border border-line bg-white p-1" />
-        <div className="space-y-1.5">
-          <div className="text-xs text-muted">PIX copia e cola</div>
-          <div className="flex gap-2">
-            <input readOnly value={payment.pix.payload} className={cn(inputCls, 'font-mono text-xs')} onFocus={(e) => e.target.select()} />
-            <Button type="button" size="sm" icon={<Copy size={13} />} onClick={() => onCopy(payment.pix!.payload)}>Copiar</Button>
-          </div>
-        </div>
+      <div className="space-y-4">
+        <PixBlock pix={payment.pix} onCopy={onCopy} />
         <p className="text-xs text-faint flex items-center justify-center gap-2">
           <span className="w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin" />
           Aguardando pagamento — esta tela atualiza sozinha.
@@ -177,6 +217,21 @@ function PaymentStep({ payment, onCopy }: { payment: AsaasPayment; onCopy: (t: s
           Abrir cobrança <ExternalLink size={13} />
         </a>
       )}
+    </div>
+  );
+}
+
+function PixBlock({ pix, onCopy }: { pix: NonNullable<AsaasPayment['pix']>; onCopy: (t: string) => void }) {
+  return (
+    <div className="text-center space-y-4">
+      <img src={`data:image/png;base64,${pix.encodedImage}`} alt="QR code PIX" className="mx-auto w-56 h-56 rounded-lg border border-line bg-white p-1" />
+      <div className="space-y-1.5">
+        <div className="text-xs text-muted">PIX copia e cola</div>
+        <div className="flex gap-2">
+          <input readOnly value={pix.payload} className={cn(inputCls, 'font-mono text-xs')} onFocus={(e) => e.target.select()} />
+          <Button type="button" size="sm" icon={<Copy size={13} />} onClick={() => onCopy(pix.payload)}>Copiar</Button>
+        </div>
+      </div>
     </div>
   );
 }

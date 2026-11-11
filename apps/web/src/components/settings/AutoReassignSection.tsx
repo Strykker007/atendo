@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { inputCls } from '@/components/ui/Modal';
 import { useTenantSettings, useUpdateTenantSettings } from '@/lib/hooks';
 import { Regra } from './ClosingSection';
+import { cn } from '@/lib/utils';
 
 /**
  * Redistribuição automática de conversas órfãs (docs/redistribuicao-automatica.md). A cada minuto o
@@ -20,11 +21,13 @@ export function AutoReassignSection() {
   const [base, setBase] = useState(15);
   const [max, setMax] = useState(30);
   const [vezes, setVezes] = useState(2);
+  const [fora, setFora] = useState(30);
   useEffect(() => {
     if (!s) return;
     setBase(s.autoReassignBaseMinutes);
     setMax(s.autoReassignMaxMinutes);
     setVezes(s.autoReassignMaxTimes);
+    setFora(s.releaseAwayMinutes);
   }, [s]);
   if (!s) return null;
 
@@ -56,6 +59,21 @@ export function AutoReassignSection() {
         onToggle={() => alternar('autoReassignAssigned', 'Conversas paradas serão passadas adiante', 'Quem assumiu fica com a conversa')}
         titulo="Com atendente, mas sem resposta"
         desc="Quem assumiu não respondeu o contato no tempo: passa para outra pessoa, com nota interna na conversa." />
+      <Regra on={s.releaseAwayEnabled} disabled={update.isPending}
+        onToggle={() => update.mutateAsync({ releaseAwayEnabled: !s.releaseAwayEnabled }).then(() => toast.ok(!s.releaseAwayEnabled ? 'Atendimentos de quem sair voltam para a fila' : 'Atendimentos ficam com quem saiu')).catch(toast.err)}
+        titulo="Devolver os atendimentos de quem saiu do plantão"
+        desc="Quem clica em Sair (ou Sair agora no fim do turno) devolve os atendimentos abertos na hora. Quem fecha o painel sem sair, ou tem o turno encerrado, devolve depois do tempo abaixo. Pausa não conta como saída, e o administrador da conta fica com os dele." />
+      {s.releaseAwayEnabled && (
+        <div className="flex flex-wrap items-end gap-2 pl-1">
+          <label className="block space-y-1">
+            <span className="text-xs font-semibold text-muted">Devolver depois de quantos minutos fora do painel</span>
+            <input className={cn(inputCls, 'w-32')} type="number" min={5} max={240} value={fora} onChange={(e) => setFora(num(e.target.value))} />
+          </label>
+          <Button size="sm" variant="subtle" disabled={fora === s.releaseAwayMinutes || fora < 5 || fora > 240} loading={update.isPending}
+            onClick={() => update.mutateAsync({ releaseAwayMinutes: fora }).then(() => toast.ok('Tempo salvo')).catch(toast.err)}>Salvar</Button>
+          {(fora < 5 || fora > 240) && <p className="w-full text-xs text-warn">Entre 5 e 240 minutos.</p>}
+        </div>
+      )}
 
       {ligado && (
         <div className="space-y-3 border-t border-line pt-3">

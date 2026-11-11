@@ -23,6 +23,9 @@ const hora = (ms: number) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2
 const mmss = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 async function sair(code?: string) {
+  // empresa com "devolver atendimentos de quem saiu" ligado: devolve já, sem esperar o tempo da regra
+  // (docs/redistribuicao-automatica.md#saiu-do-plantão). Desligado, a API não mexe em nada
+  await api('/me/shift/handoff?auto=1', { method: 'POST' }).catch(() => undefined);
   await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => undefined);
   location.href = code ? `/login?bloqueio=${code}` : '/login';
 }

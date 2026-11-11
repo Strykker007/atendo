@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtAuthGuard, ShiftLockOk } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -53,8 +53,14 @@ export class ShiftController {
   /** Devolve para a fila todos os atendimentos abertos que estão comigo. */
   @Post('handoff')
   @HttpCode(200)
-  async handoff(@CurrentUser() u: AuthUser) {
-    const abertos = await this.prisma.conversation.findMany({ where: { tenantId: u.tenantId, assigneeId: u.id, status: { not: 'closed' } }, select: { id: true } });
+  async handoff(@CurrentUser() u: AuthUser, @Query('auto') auto?: string) {
+    // `auto=1`: "Sair agora" / fim da passagem. Só devolve se a empresa ligou a devolução de quem
+    // saiu (docs/redistribuicao-automatica.md#saiu-do-plantão); senão os atendimentos ficam como estão
+    if (auto === '1') {
+      const cfg = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { releaseAwayEnabled: true } });
+      if (!cfg?.releaseAwayEnabled || (u.role !== 'agent' && u.role !== 'manager')) return { released: 0 };
+    }
+    const abertos = await this.prisma.conversation.findMany({ where: { tenantId: u.tenantId, assigneeId: u.id, status: { not: 'closed' }, ...(auto === '1' && { ticketExempt: false }) }, select: { id: true } });
     // pelo mesmo caminho do "Devolver" do chat: registra no histórico e avisa as telas
     for (const c of abertos) await this.conversations.release(u.tenantId, c.id, u);
     return { released: abertos.length };

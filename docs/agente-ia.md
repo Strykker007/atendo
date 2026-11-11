@@ -67,7 +67,11 @@ regra toda do nosso lado. Alvos de outro cliente são descartados ao salvar o ag
 grava `vars._agentStage` e `vars._aiTurns` no `FlowRun` e executa as ações, cada uma com **nota
 interna** "🤖 Agente "Ana" transferiu para Vendas — quer comprar" (mudança de etapa também).
 Uma rodada por vez por conversa: a mensagem que chega durante a rodada entra no histórico da
-próxima. Qualquer erro → mensagem de falha do bloco e saída Não conseguiu.
+próxima. Qualquer erro → mensagem de falha do bloco e saída Não conseguiu — **exceto** IA no
+limite do plano grátis (`AiBusyError`, Gemini): a rodada é reagendada (job `ai-retry` da fila
+`flows`, com `vars._aiRetry`/`_aiRetryN`), até 5 vezes e no máximo 5 min por espera, com nota
+interna na primeira. Cota do dia esgotada ou tentativas acabadas → Não conseguiu, com nota. Ver
+[Gemini e o plano grátis](15-ia.md#gemini-e-o-plano-grátis).
 
 ## Documentos
 

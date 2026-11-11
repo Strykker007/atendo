@@ -6,6 +6,7 @@ import { Skeleton, SkeletonCards } from '@/components/ui/Skeleton';
 import { useUsage, usePlans, useInvoices, useCheckout, usePortal, useMe, useAiUsage, useHasFeature, useCan, useAsaasPending, useCompanies, type Plan, type AsaasPayment } from '@/lib/hooks';
 import { AsaasCheckoutModal } from '@/components/billing/AsaasCheckoutModal';
 import { MetaCostsSection } from '@/components/billing/MetaCostsSection';
+import { AiCreditsSection } from '@/components/billing/AiCreditsSection';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
@@ -201,6 +202,9 @@ function PlanoInner() {
         {L.maxCompanies != null && <Meter icon={<Store size={18} />} label="Empresas / unidades" used={u.used.companies ?? 0} max={L.maxCompanies} hard />}
         <AiMeter limits={L} />
       </div>
+
+      {/* saldo de IA pré-pago (docs/15-ia.md#saldo-de-ia) */}
+      {isAdmin && <AiCreditsSection />}
 
       <div className="rounded-2xl bg-panel border border-line p-5 text-sm text-muted space-y-1">
         <p className="font-medium text-ink">Como funciona o limite</p>

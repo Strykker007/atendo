@@ -17,12 +17,12 @@ export const useCheckout = () => useMutation({ mutationFn: (planId: string) => a
 export const usePortal = () => useMutation({ mutationFn: () => api<{ url: string }>('/billing/portal', { method: 'POST' }) });
 
 // ---- Cobrança (Asaas: PIX + cartão) ----
-export interface AsaasPayment { id: string; status: string; paid: boolean; billingType: string; value: number; dueDate: string; invoiceUrl: string | null; pix: { encodedImage: string; payload: string; expirationDate: string } | null }
+export interface AsaasPayment { id: string; status: string; paid: boolean; billingType: string; value: number; dueDate: string; invoiceUrl: string | null; pix: { encodedImage: string; payload: string; expirationDate: string } | null; boleto?: { url: string | null; line: string | null } | null }
 export interface AsaasCustomerData { name: string; cpfCnpj: string; email: string | null; mobilePhone: string | null; postalCode: string | null; addressNumber: string | null }
 export interface AsaasCheckoutInput {
   planId: string;
-  billingType: 'PIX' | 'CREDIT_CARD';
-  customer: { name?: string; cpfCnpj: string; email?: string; mobilePhone?: string };
+  billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD';
+  customer: { name?: string; cpfCnpj: string; email?: string; mobilePhone?: string; postalCode?: string; addressNumber?: string };
   card?: { holderName: string; number: string; expiryMonth: string; expiryYear: string; ccv: string };
   holder?: { name: string; email: string; cpfCnpj: string; postalCode: string; addressNumber: string; phone: string };
 }

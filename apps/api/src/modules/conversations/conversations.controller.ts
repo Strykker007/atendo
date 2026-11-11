@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException, UnprocessableEntityException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsInt, IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ConversationOrigin, ConversationOutcome, ConversationStatus } from '@prisma/client';
 import { ConversationsService, DELETE_NOTICE, FORWARD_MAX_TARGETS, MESSAGES_PAGE } from './conversations.service';
@@ -26,7 +26,8 @@ class ListDto {
   @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() free?: boolean;
   /** filtro "Gera ticket": só contatos que abrem atendimento (tira os isentos e as livres) */
   @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() ticket?: boolean;
-  @IsOptional() @IsUUID() numberId?: string;
+  /** um número ou vários separados por vírgula (filtro com mais de um número marcado) */
+  @IsOptional() @Matches(/^[0-9a-f-]{36}(,[0-9a-f-]{36}){0,49}$/i, { message: 'numberId inválido' }) numberId?: string;
   /** id do departamento ou `none` (só as sem departamento) */
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;
   @IsOptional() @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean))) @IsArray() tagIds?: string[];
@@ -311,7 +312,8 @@ export class ConversationsController {
   counts(@CurrentUser() u: AuthUser, @Query('numberId') numberId?: string, @Query('departmentId') departmentId?: string, @Query('ticket') ticket?: string) {
     // fora do DTO: valida aqui o mesmo formato do filtro da lista
     const dept = departmentId === 'none' || (departmentId && /^[0-9a-f-]{36}$/i.test(departmentId)) ? departmentId : undefined;
-    return this.conversations.counts(u.tenantId, u, numberId || undefined, dept, ticket === '1');
+    const numeros = numberId && /^[0-9a-f-]{36}(,[0-9a-f-]{36}){0,49}$/i.test(numberId) ? numberId : undefined;
+    return this.conversations.counts(u.tenantId, u, numeros, dept, ticket === '1');
   }
 
   @Get(':id')

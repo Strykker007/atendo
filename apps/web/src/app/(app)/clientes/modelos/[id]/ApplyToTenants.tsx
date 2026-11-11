@@ -14,7 +14,7 @@ import { useRolloutTenantTemplate, useTenants, type TemplateRolloutResult, type 
  * Comprou / Não comprou, tags que faltam) para quem já existe. Sempre passa pela prévia: o dono
  * vê cliente por cliente o que muda antes de gravar.
  */
-export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags, settings, aiAgents = [], ticketTypes = [] }: {
+export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags, settings, aiAgents = [], ticketTypes = [], departments = [] }: {
   open: boolean;
   onClose: () => void;
   templateId: string;
@@ -27,6 +27,8 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
   /** nomes dos agentes de IA e dos tipos de ticket do modelo salvo */
   aiAgents?: string[];
   ticketTypes?: string[];
+  /** departamentos do modelo (nomes) */
+  departments?: string[];
 }) {
   const tenants = useTenants();
   const rollout = useRolloutTenantTemplate();
@@ -39,6 +41,7 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
   const [comAjustes, setComAjustes] = useState(false);
   const [comAgentes, setComAgentes] = useState(false);
   const [comTipos, setComTipos] = useState(false);
+  const [comDeptos, setComDeptos] = useState(false);
   const resumoAjustes = settings ? resumoSettings(settings) : '';
   const labels = templateOutcomeLabels(settings);
   const [todos, setTodos] = useState(true);
@@ -61,8 +64,9 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
     ...(comAjustes && { settings: true }),
     ...(comAgentes && { aiAgents: true }),
     ...(comTipos && { ticketTypes: true }),
+    ...(comDeptos && { departments: true }),
   });
-  const algo = perfis.length > 0 || motivos || comTags || comAjustes;
+  const algo = perfis.length > 0 || motivos || comTags || comAjustes || comTipos || comAgentes || comDeptos;
   const alvo = todos ? ativos.length : escolhidos.length;
   // mudou a escolha: a prévia antiga não vale mais
   const mexer = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setPrevia(null); };
@@ -123,6 +127,11 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
             </Check>
           </div>
           <div className="rounded-xl border border-line p-3">
+            <Check checked={comDeptos} disabled={!departments.length} onChange={mexer(setComDeptos)}>
+              Departamentos que faltam <span className="text-muted">— {departments.length ? `cria os do modelo que o cliente não tem, já na hierarquia (${departments.join(', ')}); os dele não mudam. Marque junto com os perfis para o acesso padrão deles achar os departamentos` : 'o modelo não tem'}</span>
+            </Check>
+          </div>
+          <div className="rounded-xl border border-line p-3">
             <Check checked={comTipos} disabled={!ticketTypes.length} onChange={mexer(setComTipos)}>
               Tipos de ticket que faltam <span className="text-muted">— {ticketTypes.length ? `cria os do modelo que o cliente não tem (${ticketTypes.join(', ')}); os dele não mudam` : 'o modelo não tem'}</span>
             </Check>
@@ -173,6 +182,7 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
                   <Linha rotulo="Motivos desativados" itens={r.closeReasons.deactivated} perigo />
                   <Linha rotulo="Tags criadas" itens={r.tags.created} />
                   <Linha rotulo="Configurações" itens={r.settings?.changed ?? []} />
+                  <Linha rotulo="Departamentos criados" itens={r.departments?.created ?? []} />
                   <Linha rotulo="Tipos de ticket criados" itens={r.ticketTypes?.created ?? []} />
                   <Linha rotulo="Agentes de IA criados" itens={r.aiAgents?.created ?? []} />
                 </li>
@@ -193,7 +203,7 @@ export function ApplyToTenantsModal({ open, onClose, templateId, profiles, tags,
 }
 
 const temMudanca = (r: TemplateRolloutResult) =>
-  [r.profiles.created, r.profiles.updated, r.closeReasons.created, r.closeReasons.updated, r.closeReasons.reactivated, r.closeReasons.deactivated, r.tags.created, r.settings?.changed ?? [], r.ticketTypes?.created ?? [], r.aiAgents?.created ?? []].some((l) => l.length > 0);
+  [r.profiles.created, r.profiles.updated, r.closeReasons.created, r.closeReasons.updated, r.closeReasons.reactivated, r.closeReasons.deactivated, r.tags.created, r.settings?.changed ?? [], r.ticketTypes?.created ?? [], r.aiAgents?.created ?? [], r.departments?.created ?? []].some((l) => l.length > 0);
 
 /** "sem venda · assinatura obrigatória · Resolvido / Não resolvido" — o que o modelo define */
 export function resumoSettings(s: TemplateSettings) {
@@ -202,6 +212,8 @@ export function resumoSettings(s: TemplateSettings) {
     s.salesEnabled !== undefined && (s.salesEnabled ? 'encerramento com venda' : 'encerramento sem venda'),
     s.requireSignature !== undefined && (s.requireSignature ? 'assinatura obrigatória' : 'assinatura opcional'),
     (s.wonLabel || s.lostLabel) && `resultados “${labels.won}” / “${labels.lost}”`,
+    (s.autoReassignWaiting !== undefined || s.autoReassignAssigned !== undefined) && `redistribuição ${s.autoReassignWaiting || s.autoReassignAssigned ? 'ligada' : 'desligada'}`,
+    s.releaseAwayEnabled !== undefined && (s.releaseAwayEnabled ? `saiu do plantão em ${s.releaseAwayMinutes ?? 30} min` : 'saiu do plantão desligado'),
   ].filter(Boolean).join(' · ');
 }
 

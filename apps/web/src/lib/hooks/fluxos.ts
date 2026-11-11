@@ -101,7 +101,7 @@ export const useImpersonate = () => useMutation({ mutationFn: (tenantId: string)
 // ---- Relatórios: visão pronta ----
 export interface ReportOverview {
   period: { from: string; to: string };
-  kpis: { conversations: number; closed: number; waitingNow: number; inProgressNow: number; messagesIn: number; messagesOut: number; avgFirstResponseMin: number | null; won: number; lost: number; revenue: number; winRate: number | null };
+  kpis: { conversations: number; closed: number; waitingNow: number; inProgressNow: number; messagesIn: number; messagesOut: number; avgFirstResponseMin: number | null; /** valor típico (a média sobe com poucas esperas longas) */ medianFirstResponseMin?: number | null; firstResponseCount?: number; won: number; lost: number; revenue: number; winRate: number | null };
   series: Record<'byDay' | 'byAgent' | 'byOrigin' | 'byCampaign' | 'byTag' | 'byStatus', { label: string; value: number }[]>;
   /** vendas do período (tabela `sales`): total em R$, quantidade, ticket médio e por dia/atendente */
   sales: { total: number; count: number; avgTicket: number | null; byDay: { label: string; value: number }[]; byAgent: { label: string; value: number; count: number; avgTicket: number }[]; /** origem: Pix automático × orçamento pago por fora × no encerramento */ bySource: { source: 'asaas' | 'manual' | 'close'; value: number; count: number }[]; /** estornados no período (fora do faturado) */ refunds: { count: number; value: number } };

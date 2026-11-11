@@ -157,3 +157,17 @@ body { background: var(--bg); color: var(--ink); -webkit-font-smoothing: antiali
 
 /* números tabulares em horários, contadores e telefones */
 .tnum { font-variant-numeric: tabular-nums; }
+
+/*
+ * Celular (navegador ou app na tela inicial): o iPhone dá zoom ao tocar num campo com letra menor que
+ * 16px e não volta sozinho — atrapalhava digitar no chat e nos formulários. Em tela de toque, todo campo
+ * de texto fica com 16px. Não trava o zoom de pinça (acessibilidade): só evita o zoom automático.
+ */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: 16px !important;
+  }
+}

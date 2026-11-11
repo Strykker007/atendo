@@ -30,7 +30,7 @@ o e-mail nunca conta diferente do painel. Período = ontem, de 00:00 a 00:00 no 
 
 | Bloco | Conteúdo |
 |---|---|
-| Indicadores | atendimentos iniciados, encerrados, aguardando agora, 1ª resposta média; com venda: Comprou, faturamento, conversão, Não comprou |
+| Indicadores | atendimentos iniciados, encerrados, aguardando agora, 1ª resposta típica (mediana) e média; com venda: Comprou, faturamento, conversão, Não comprou |
 | Ranking da equipe | posição pela pontuação do ranking (pesos do cliente), atendimentos, vendas, faturamento, conversão, tempo médio, satisfação (média e respostas) |
 | Motivos | os 3 motivos de "Não comprou" mais frequentes |
 

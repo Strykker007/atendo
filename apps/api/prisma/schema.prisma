@@ -71,6 +71,8 @@ model Tenant {
   shiftExceptions   ShiftException[]
   aiAgents          AiAgent[]
   aiCredential      AiCredential?
+  aiCreditWallet    AiCreditWallet?
+  aiCreditPurchases AiCreditPurchase[]
   scheduleAccessRequests ScheduleAccessRequest[]
   numbers       WhatsAppNumber[]
   contacts      Contact[]
@@ -180,6 +182,9 @@ model User {
   /// recebe o relatório diário por e-mail (docs/relatorio-diario.md). Por vínculo: a mesma pessoa
   /// escolhe em cada empresa. Só vale com a feature `daily_report` no plano e `reports.view`
   dailyReportEmail Boolean @default(false)
+  /// Números que a tela de conversas já abre filtrada ao entrar (docs/18-perfis-de-acesso.md#número-padrão).
+  /// Vazio = "Todos os números". Só vale o que a pessoa ainda opera
+  defaultNumberIds String[] @default([])
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -195,6 +200,7 @@ model User {
   assigned      Conversation[] @relation("assignee")
   ticketsCreated     Ticket[]            @relation("ticketCreator")
   ticketRoles        TicketParticipant[]
+  ticketReads        TicketRead[]
   ticketEvents       TicketEvent[]
   /// sócio no fechamento financeiro (docs/36-fechamento-financeiro.md)
   financePartner FinancePartner? @relation("financePartner")
@@ -206,6 +212,8 @@ model User {
   totpConfirmedAt DateTime?
   messages      Message[]
   numbers       UserNumber[]
+  /// números em que a pessoa recebe atendimento automático (docs/distribuicao-por-numero.md)
+  receivesFrom  NumberReceiver[]
   events        ConversationEvent[] @relation("eventActor")
   eventsAbout   ConversationEvent[] @relation("eventTarget")
   sales         Sale[]
@@ -389,6 +397,21 @@ model UserNumber {
   @@map("user_numbers")
 }
 
+/// Quem RECEBE atendimento automático (fila, Distribuidor, redistribuição) de um número — separado
+/// de quem o enxerga (`UserNumber`). Gerente vê tudo e assume na mão, mas não entra no sorteio.
+/// Número sem nenhuma linha = todos que o enxergam recebem (como antes). docs/distribuicao-por-numero.md
+model NumberReceiver {
+  numberId String
+  userId   String
+
+  number WhatsAppNumber @relation(fields: [numberId], references: [id], onDelete: Cascade)
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([numberId, userId])
+  @@index([userId])
+  @@map("number_receivers")
+}
+
 /// Empresa/unidade do cliente (matriz, filial Centro, filial Norte…). Agrupa números: quem
 /// opera a unidade enxerga só as conversas dos números dela. Ver docs/empresas.md.
 /// Quantas o cliente pode ter vem de `PlanLimits.maxCompanies`.
@@ -446,15 +469,23 @@ model Department {
   /// desativado: some dos seletores (fluxo, transferência, filtro) mas as conversas que já
   /// estão nele continuam nele — desativar não pode esconder nem embaralhar atendimento
   isActive    Boolean  @default(true)
+  /// departamento acima deste (docs/departamentos.md#hierarquia): o gestor de cima vê os de baixo,
+  /// o de baixo não vê os de cima. Pai excluído → este vira de topo
+  parentId    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent        Department?      @relation("departmentTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Department[]     @relation("departmentTree")
   users         UserDepartment[]
   conversations Conversation[]
+  /// números cujas conversas nascem neste departamento
+  numbers       WhatsAppNumber[] @relation("numberDefaultDepartment")
   tickets       Ticket[]
 
   @@unique([tenantId, name])
+  @@index([parentId])
   @@map("departments")
 }
 
@@ -489,6 +520,10 @@ model AccessProfile {
   /// perfil padrão que o cliente editou. Enquanto for falso, as permissões acompanham o
   /// catálogo — senão um perfil criado hoje não ganharia as funcionalidades de amanhã.
   customized  Boolean  @default(false)
+  /// acesso padrão do perfil (docs/18-perfis-de-acesso.md#acesso-padrão-do-perfil): números, número
+  /// padrão, recebe auto. e departamentos copiados para a pessoa ao criar, ao trocar de perfil (na tela)
+  /// ou ao reaplicar em massa. Formato `AccessTemplate` (tenants/access-template.ts); null = sem padrão
+  accessTemplate Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -654,6 +689,10 @@ model TenantSettings {
   autoReassignMaxMinutes  Int @default(30)
   /// quantas vezes a MESMA espera pode ser redistribuída (evita a conversa rodar a equipe inteira)
   autoReassignMaxTimes    Int @default(2)
+  /// Devolver para a fila os atendimentos de quem saiu (fim do plantão, painel fechado) — docs/redistribuicao-automatica.md#saiu-do-plantão
+  releaseAwayEnabled      Boolean @default(false)
+  /// minutos fora (painel fechado ou fora do turno, sem pausa) até devolver (5–240)
+  releaseAwayMinutes      Int @default(30)
   // ---- fila de atendimento com distribuição automática (docs/fila-de-atendimento.md) ----
   /// a fila entrega sozinha os contatos em Aguardando para quem está disponível, até o limite
   autoDistribute          Boolean @default(false)
@@ -743,6 +782,13 @@ model WhatsAppNumber {
   sendDailyLimit Int          @default(0)
   /// teto de mensagens de TRANSMISSÃO por 24h neste número (só pesa no QR Code; a Meta tem o tier dela). Dono do sistema ajusta
   campaignDailyLimit Int      @default(200)
+  /// Reservado (docs/18-perfis-de-acesso.md#número-reservado): só quem tem o número marcado em Equipe
+  /// (e o admin) enxerga. Quem "opera todos" passa a operar todos os NÃO reservados
+  reserved       Boolean      @default(false)
+  /// Departamento em que as conversas deste número nascem (docs/departamentos.md#departamento-do-número).
+  /// Só preenche conversa SEM departamento; transferir para outro continua valendo. null = nenhum
+  defaultDepartmentId String?
+  defaultDepartment   Department? @relation("numberDefaultDepartment", fields: [defaultDepartmentId], references: [id], onDelete: SetNull)
   /// quando o número conectou pela primeira vez — número novo sobe o volume aos poucos
   warmupStartedAt DateTime?
   /// Limites da fila de envio (`Partial<SendLimits>` do shared); o que faltar = padrão do provider
@@ -781,6 +827,8 @@ model WhatsAppNumber {
   usage         MessageUsage[]
   metaCosts     MetaCostDaily[]
   users         UserNumber[]
+  /// quem recebe atendimento automático deste número; vazio = todos que o enxergam (docs/distribuicao-por-numero.md)
+  receivers     NumberReceiver[]
   campaigns     Campaign[]
   phonebook     PhonebookEntry[]
   groups        WhatsAppGroup[]
@@ -789,6 +837,7 @@ model WhatsAppNumber {
   @@unique([tenantId, phone])
   @@index([tenantId])
   @@index([companyId])
+  @@index([defaultDepartmentId])
   @@map("whatsapp_numbers")
 }
 
@@ -2207,7 +2256,7 @@ model AiKnowledgeChunk {
 model AiCredential {
   id          String    @id @default(uuid())
   tenantId    String    @unique
-  /// openai | anthropic (sempre o endpoint oficial)
+  /// openai | anthropic | gemini (sempre o endpoint oficial)
   provider    String
   /// `{ apiKey }` via CryptoService.encryptJson — nunca em claro
   credentials String
@@ -2245,6 +2294,9 @@ model AiUsage {
   /// feita com a chave do próprio cliente (`ai_credentials`): fora da cota, do teto e do
   /// orçamento da plataforma; o custo fica só como referência (quem paga é o cliente)
   ownKey         Boolean    @default(false)
+  /// descontado do saldo de IA do cliente (custo × (1 + margem)); 0 = não usou saldo
+  /// (docs/15-ia.md#saldo-de-ia)
+  creditBrl      Decimal    @default(0) @db.Decimal(12, 6)
   occurredAt     DateTime   @default(now())
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2622,9 +2674,50 @@ model PlatformSettings {
   /// pelo Asaas e a migração automática diária. Desligado: nada disso aparece — só quem já foi
   /// migrado pelo dono continua com a mensalidade e os lembretes (docs/05#liberar-para-os-clientes)
   asaasClientBilling Boolean @default(false)
+  /// margem sobre o custo real da IA no saldo de IA do cliente, em % (100 = cobra o dobro do custo)
+  aiCreditMarkupPct Int @default(100)
   updatedAt DateTime @updatedAt
 
   @@map("platform_settings")
+}
+
+/// Saldo de IA pré-pago do cliente (docs/15-ia.md#saldo-de-ia): comprado por Pix e descontado
+/// a cada resposta da IA da plataforma que passou do incluído no plano (ou quando o grátis da
+/// chave própria acabou no dia).
+model AiCreditWallet {
+  tenantId   String   @id
+  balanceBrl Decimal  @default(0) @db.Decimal(12, 4)
+  /// chave própria no limite do dia: continua respondendo pela IA da plataforma, com o saldo
+  autoUseOnFreeLimit Boolean @default(true)
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("ai_credit_wallets")
+}
+
+/// Compra de saldo de IA: Pix avulso no Asaas da plataforma, ou crédito lançado pelo dono.
+model AiCreditPurchase {
+  id          String    @id @default(uuid())
+  tenantId    String
+  amountBrl   Decimal   @db.Decimal(12, 2)
+  /// pending | paid | canceled
+  status      String    @default("pending")
+  /// cobrança no Asaas (`pay_…`)
+  externalId  String?   @unique
+  invoiceUrl  String?
+  paidAt      DateTime?
+  /// asaas | manual (dono lançou: cortesia, pagou por fora)
+  paidVia     String?
+  note        String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("ai_credit_purchases")
 }
 
 model SystemNotice {
@@ -2790,6 +2883,9 @@ model IgnoredContact {
   phone       String
   /// apelido para a lista (ex.: "Fornecedor X", "Diretoria")
   label       String?
+  /// Conversa livre (docs/contatos-isentos.md#conversa-livre): sempre aberta e sem dono, qualquer um
+  /// responde sem assumir e ninguém precisa encerrar. Falso = isento comum (segue a fila, sem relatório)
+  freeChat    Boolean  @default(false)
   createdById String?
   createdAt   DateTime @default(now())
 
@@ -3194,6 +3290,8 @@ model Ticket {
   type         TicketType?         @relation(fields: [typeId], references: [id], onDelete: SetNull)
   participants TicketParticipant[]
   events       TicketEvent[]
+  /// quando cada pessoa abriu o ticket pela última vez (não lido = mudou depois disso)
+  reads        TicketRead[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status])
@@ -3204,6 +3302,21 @@ model Ticket {
 }
 
 /// Quem atua no ticket: um `responsible` e quantos `participant` precisar (adm + portaria…).
+/// Leitura do ticket por pessoa (docs/tickets.md#não-lidos): não lido = ticket que me diz respeito e
+/// mudou (criado, comentado, transferido…) depois do meu `seenAt`. Abrir o detalhe grava agora.
+model TicketRead {
+  ticketId String
+  userId   String
+  seenAt   DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
+  @@index([userId])
+  @@map("ticket_reads")
+}
+
 model TicketParticipant {
   ticketId String
   userId   String

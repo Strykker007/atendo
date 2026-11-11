@@ -52,6 +52,7 @@ export interface CompanyReportRow {
   closed: number;
   waitingNow: number;
   avgFirstResponseMin: number | null;
+  medianFirstResponseMin?: number | null;
   won: number;
   lost: number;
   revenue: number;

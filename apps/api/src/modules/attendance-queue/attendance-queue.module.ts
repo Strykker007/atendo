@@ -180,7 +180,8 @@ export class AttendanceQueueService implements OnModuleInit {
     for (const c of fila) {
       // todo mundo no limite: o resto espera (não adianta conferir conversa por conversa)
       if (agents.every((a) => (openCount[a.id] ?? 0) >= max)) break;
-      const eligible = await this.conversations.receiversOf(tenantId, c, agents);
+      // só quem recebe automaticamente deste número (docs/distribuicao-por-numero.md)
+      const eligible = await this.conversations.autoReceiversOf(tenantId, c, agents);
       const chosen = pickQueueAgent(eligible, openCount, max);
       if (!chosen) continue;
       const n = (openCount[chosen] ?? 0) + 1;

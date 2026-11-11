@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronDown, ChevronRight, ShieldCheck, QrCode, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX, Smartphone, BellOff, Bell } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX, Smartphone, BellOff, Bell } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview } from '@/lib/utils';
 import { useUI } from '@/lib/store';
@@ -18,9 +18,11 @@ import type { ConversationOrigin } from '@/lib/hooks';
 import { SkeletonConversations } from '@/components/ui/Skeleton';
 import { BulkCloseModal } from './BulkCloseModal';
 import { NewConversationModal } from './NewConversationModal';
+import { NumberFilter, useDefaultNumbers } from './NumberFilter';
 import { Button } from '@/components/ui/Button';
 import { usePersistedState } from '@/lib/persisted';
 import { isFreeChat, useCan } from '@/lib/hooks';
+import { formatPhone } from '@/components/ui/PhoneInput';
 
 /** Semáforo: cada status tem cor (texto/faixa) e fundo suave. */
 export const STATUS_META: Record<ConversationStatus, { label: string; short: string; color: string; soft: string; bar: string }> = {
@@ -50,7 +52,7 @@ export function useMinuto() {
 }
 
 export function ConversationList() {
-  const { companyId, numberId, setNumber, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation, groupByAssignee, toggleGroupByAssignee, soundMuted, setSoundMuted, closeFilter, setCloseFilter, onlyTickets, setOnlyTickets } = useUI();
+  const { companyId, numberIds, departmentId, setDepartment, status, setStatus, tagIds, setTags, origin, setOrigin, assigneeId, setAssignee, conversationId, setConversation, groupByAssignee, toggleGroupByAssignee, soundMuted, setSoundMuted, closeFilter, setCloseFilter, onlyTickets, setOnlyTickets } = useUI();
   const motivos = useCloseReasons();
   const labels = useOutcomeLabels();
   // motivo filtrado: aparece como etiqueta em cada conversa (todas foram encerradas por ele)
@@ -62,11 +64,13 @@ export function ConversationList() {
   const agents = useAgents();
   const [search, setSearch] = useState('');
   const numbers = useNumbers();
+  // filtro de números padrão de quem entrou (docs/18-perfis-de-acesso.md#número-padrão)
+  useDefaultNumbers();
   const tags = useTags();
   const departments = useDepartments();
   // desativado sai do seletor, a não ser que seja o filtro atual (senão o select ficaria vazio)
   const deptOptions = (departments.data ?? []).filter((d) => d.isActive || d.id === departmentId);
-  const counts = useConversationCounts(numberId, departmentId, onlyTickets && status !== 'free');
+  const counts = useConversationCounts(numberIds, departmentId, onlyTickets && status !== 'free');
   const agora = useMinuto();
   /**
    * Filtros escondidos atrás do ícone.
@@ -90,7 +94,7 @@ export function ConversationList() {
     else if (status === 'free') setStatus('in_progress');
   };
   const abaMeta = status === 'free' ? FREE_META : STATUS_META[status];
-  const filtroLista = { status, numberId, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome, onlyTickets };
+  const filtroLista = { status, numberIds, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome, onlyTickets };
   const conversations = useConversations(filtroLista);
   // rolou até o fim: páginas seguintes (a primeira é a que o tempo real atualiza)
   const anteriores = useOlderConversations(filtroLista, conversations.data);
@@ -103,9 +107,17 @@ export function ConversationList() {
     obs.observe(el);
     return () => obs.disconnect();
   }, [anteriores.temMais, anteriores.carregar]);
-  const selectedNumber = numbers.data?.find((n) => n.id === numberId);
   // com uma empresa escolhida no menu, o seletor oferece só os números dela (docs/empresas.md)
-  const numerosDaEmpresa = (numbers.data ?? []).filter((n) => !companyId || n.companyId === companyId);
+  // departamento escolhido: o seletor de números mostra os números desse departamento e os sem
+  // departamento (docs/departamentos.md#departamento-do-número) — os dois filtros andam juntos
+  const numerosDaEmpresa = (numbers.data ?? []).filter((n) => (!companyId || n.companyId === companyId) && (!departmentId || departmentId === 'none' || !n.defaultDepartmentId || n.defaultDepartmentId === departmentId));
+  const { setNumbers } = useUI();
+  useEffect(() => {
+    if (!numbers.data || !numberIds.length) return;
+    const ok = numberIds.filter((id) => numerosDaEmpresa.some((n) => n.id === id));
+    // número de outro departamento no filtro = lista vazia sem motivo aparente: sai do filtro
+    if (ok.length !== numberIds.length) setNumbers(ok);
+  }, [departmentId, numbers.data]); // eslint-disable-line react-hooks/exhaustive-deps
   // seções do modo agrupado que a pessoa recolheu (chave = id do atendente ou FILA)
   const [recolhidos, setRecolhidos] = usePersistedState<string[]>('grupos-recolhidos', []);
   const filtrosAtivos = (tagIds.length ? 1 : 0) + (origin ? 1 : 0) + (assigneeId ? 1 : 0) + (ordem !== 'recent' ? 1 : 0) + (closeFilter.outcome || closeFilter.reasonId ? 1 : 0) + (filtroTicket !== 'all' ? 1 : 0);
@@ -118,7 +130,7 @@ export function ConversationList() {
   // a lista inteira "sumir" depois de responder.
   const aberta = useConversation(conversationId).data;
   const [fixada, setFixada] = useState<Conversation | null>(null);
-  useEffect(() => { setFixada(null); }, [status, numberId, departmentId, origin, assigneeId, tagIds, search, ordem]);
+  useEffect(() => { setFixada(null); }, [status, numberIds, departmentId, origin, assigneeId, tagIds, search, ordem]);
   useEffect(() => {
     const c = conversations.data?.find((x) => x.id === conversationId);
     if (c) setFixada(c);
@@ -134,7 +146,7 @@ export function ConversationList() {
   const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
-  useEffect(() => { setMarcados([]); setSelecionando(false); }, [status, numberId, departmentId, origin, assigneeId]);
+  useEffect(() => { setMarcados([]); setSelecionando(false); }, [status, numberIds, departmentId, origin, assigneeId]);
   // "Sem consultor" só existe em Encerradas: em "Atendendo" toda conversa tem dono
   useEffect(() => { if (assigneeId === 'none' && status !== 'closed') setAssignee(null); }, [assigneeId, status, setAssignee]);
   // filtro guardado de um departamento que foi excluído: volta para "todos" em vez de lista vazia
@@ -151,28 +163,7 @@ export function ConversationList() {
       {/* Seletor de número (perfil): primeiro escolhe o número, depois vê as conversas dele.
           Departamento ao lado, só quando o cliente tem algum cadastrado */}
       <div className="h-12 px-2.5 flex items-center gap-1.5 border-b border-line">
-        <div className="relative flex-1 min-w-0">
-          <select
-            value={numberId ?? ''}
-            onChange={(e) => setNumber(e.target.value || null)}
-            className="w-full appearance-none rounded-lg bg-field text-ink pl-8 pr-24 py-1.5 text-[12.5px] font-display font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40"
-          >
-            <option value="">Todos os números</option>
-            {numerosDaEmpresa.map((n) => (
-              <option key={n.id} value={n.id}>{n.label} · {n.phone.slice(-4)}</option>
-            ))}
-          </select>
-          <span className={cn('absolute left-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full ring-[3px]', selectedNumber ? (selectedNumber.status === 'connected' ? 'bg-ok ring-ok/25' : 'bg-warn ring-warn/25') : 'bg-faint ring-line')} />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none">
-            {selectedNumber && (
-              <span className={cn('inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-wider rounded px-1.5 py-0.5', selectedNumber.provider === 'meta' ? 'bg-meta-soft text-meta-ink' : 'bg-evo-soft text-evo-ink')}>
-                {selectedNumber.provider === 'meta' ? <ShieldCheck size={10} /> : <QrCode size={10} />}
-                {selectedNumber.provider === 'meta' ? 'Meta' : 'QR'}
-              </span>
-            )}
-            <ChevronDown size={15} className="text-faint" />
-          </div>
-        </div>
+        <NumberFilter options={numerosDaEmpresa} />
         {(deptOptions.length > 0 || departmentId) && (
           <div className="relative w-[42%] shrink-0">
             <select
@@ -467,7 +458,7 @@ function pagoNaConversa(c: Conversation) {
 }
 
 function ConversationRow({ c, active, onClick, agora, selecionando, marcado, encerramento }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean; encerramento: 'lugar' | 'extra' | null }) {
-  const name = c.contact.name ?? `+${c.contact.phone}`;
+  const name = c.contact.name ?? formatPhone(c.contact.phone);
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   // livre (contato isento) em "Atendendo": cor e selo próprios, para não parecer atendimento
   const livre = isFreeChat(c);

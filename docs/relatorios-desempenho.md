@@ -34,6 +34,25 @@ e no ranking. Listas paginadas (auditoria, vendas) não usam cache, só o limite
 - `survey_responses (tenantId, sentAt)` e `(tenantId, agentId, sentAt)` — satisfação.
 - `sales (tenantId, closedAt)` e `(tenantId, userId, closedAt)` — vendas.
 
+## 1ª resposta
+
+Corrigida em 11/11/2026 (caso ID Vida Urbana: o cartão aparecia "—" com dezenas de atendimentos no dia).
+
+| | Antes | Agora |
+|---|---|---|
+| Quais atendimentos | só conversas **criadas** no período | todo atendimento **iniciado** no período: conversa nova **ou reaberta** (mesma régua de "Atendimentos no período") |
+| Relógio começa | na criação da conversa (em reaberta, meses antes) | na 1ª mensagem do contato no atendimento (2 min de folga antes da reabertura) |
+| Resposta | qualquer enviada, inclusive robô | 1ª enviada por **pessoa**: pelo painel (`authorId`) ou pelo celular (`raw` do provider); robô/fluxo/boas-vindas não contam; nota interna e histórico importado também não |
+| Valor do cartão | média das médias por situação da conversa (aguardando/atendendo/encerrada), sem peso | **mediana** (tempo típico) em destaque; média e quantidade de atendimentos respondidos embaixo |
+
+Por que mediana: na ID Vida Urbana (7 dias, 349 atendimentos respondidos) a média dá 391 min e a
+mediana 2,3 min — quem escreve à noite e só é respondido de manhã puxa a média. Atendimento sem
+resposta ainda fica fora (não tem tempo para medir). Sem nenhum respondido no período: "—".
+
+Código: `ReportsController.firstResponse` (média, mediana e contagem sobre o período inteiro) e a
+métrica `avg_first_response_min` de `query()` (gráficos por dia/consultor/número usam a média com a
+mesma régua). Comparativo por empresa e relatório diário por e-mail mostram a mediana ("típica") e a média.
+
 ## Ao criar um relatório novo
 
 1. Toda consulta passa por `this.load.run(() => …)` (ou `this.load.all([() => …])`).

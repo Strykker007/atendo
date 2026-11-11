@@ -14,7 +14,9 @@ import { UnknownMessageFallback } from './UnknownMessageFallback';
  */
 export function structuredBody(m: Message): ReactNode | null {
   const c = m.content;
-  if (c?.kind === 'buttons') return <ButtonsMessage text={m.text} header={c.header} footer={c.footer} buttons={c.buttons} />;
+  // botão de resposta numa mensagem RECEBIDA (ex.: "Ativar conversa" de uma empresa) é para nós tocarmos:
+  // clicável no painel, responde com o título do botão citando a mensagem
+  if (c?.kind === 'buttons') return <ButtonsMessage text={m.text} header={c.header} footer={c.footer} buttons={c.buttons} replyTo={m.direction === 'in' ? { conversationId: m.conversationId, externalId: m.externalId ?? undefined } : undefined} />;
   if (c?.kind === 'list') return <ListMessage text={m.text} header={c.header} footer={c.footer} buttonText={c.buttonText} sections={c.sections} />;
   if (c?.kind === 'location') return <LocationMessage {...c} text={m.text} />;
   if (c?.kind === 'contacts') return <><ContactMessage contacts={c.contacts} />{m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}</>;

@@ -61,6 +61,8 @@ export class JwtAuthGuard implements CanActivate {
     req.user.systemOwner = scope.systemOwner;
     req.user.numberIds = scope.numberIds;
     req.user.ownNumberIds = scope.numberIds;
+    req.user.linkedNumberIds = scope.linkedNumberIds;
+    req.user.defaultNumberIds = scope.defaultNumberIds;
     req.user.companyRestricted = scope.companyIds.length > 0;
     req.user.departmentIds = scope.departmentIds;
 

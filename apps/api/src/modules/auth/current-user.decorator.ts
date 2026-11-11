@@ -39,6 +39,10 @@ export interface AuthUser {
   companyIds?: string[];
   /** números vinculados direto à pessoa (`user_numbers`), antes do recorte da empresa; vazio = todos */
   ownNumberIds?: string[];
+  /** o que está marcado em Equipe, sem o recorte do número reservado; vazio = "todos" na tela */
+  linkedNumberIds?: string[];
+  /** números em que a tela de conversas abre filtrada (`users.defaultNumberIds`, só os que opera); vazio = todos */
+  defaultNumberIds?: string[];
   /** a pessoa é vinculada a empresas específicas (`user_companies`); false = enxerga todas */
   companyRestricted?: boolean;
   /** o cliente separa também equipe, planilha de contatos e transmissões por empresa (`tenant_settings.companyIsolation`) */

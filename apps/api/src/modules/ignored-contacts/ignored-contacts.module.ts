@@ -1,5 +1,5 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Module, NotFoundException, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
-import { IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -9,13 +9,19 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { phoneVariants } from '../conversations/phone-variants';
-import { normalizeExemptPhone } from './ignored-contacts';
+import { exemptMode, normalizeExemptPhone } from './ignored-contacts';
 
 class CreateIgnoredDto {
   /** telefone digitado (com DDI) — ou `contactId` de um contato existente */
   @ValidateIf((o: CreateIgnoredDto) => !o.contactId) @IsString() @MaxLength(40) phone?: string;
   @IsOptional() @IsUUID() contactId?: string;
   @IsOptional() @IsString() @MaxLength(80) label?: string;
+  /** conversa livre: sempre aberta, sem dono, ninguém encerra (docs/contatos-isentos.md#conversa-livre) */
+  @IsOptional() @IsBoolean() freeChat?: boolean;
+}
+
+class UpdateIgnoredDto {
+  @IsBoolean() freeChat!: boolean;
 }
 
 /**
@@ -61,9 +67,20 @@ class IgnoredContactsController {
     if (phone.length < 8 || phone.length > 15) throw new BadRequestException('Telefone inválido. Use o número com DDI e DDD (ex.: 5511999998888).');
     const ja = await this.prisma.ignoredContact.findFirst({ where: { tenantId: u.tenantId, phone: { in: phoneVariants(phone) } }, select: { id: true } });
     if (ja) throw new ConflictException('Este telefone já está na lista.');
-    const row = await this.prisma.ignoredContact.create({ data: { tenantId: u.tenantId, phone, label, createdById: u.id } });
-    await this.marcarConversas(u.tenantId, phone, true);
+    const row = await this.prisma.ignoredContact.create({ data: { tenantId: u.tenantId, phone, label, createdById: u.id, freeChat: !!dto.freeChat } });
+    await this.marcarConversas(u.tenantId, phone);
     return row;
+  }
+
+  /** Liga/desliga "Conversa livre" de quem já está na lista. */
+  @Patch(':id')
+  @RequirePermission('settings.manage')
+  async update(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateIgnoredDto) {
+    const row = await this.prisma.ignoredContact.findFirst({ where: { id, tenantId: u.tenantId } });
+    if (!row) throw new NotFoundException('Registro não encontrado');
+    const saved = await this.prisma.ignoredContact.update({ where: { id: row.id }, data: { freeChat: dto.freeChat } });
+    await this.marcarConversas(u.tenantId, row.phone);
+    return saved;
   }
 
   /**
@@ -83,7 +100,7 @@ class IgnoredContactsController {
       throw new NotFoundException('Este contato não está na lista de isentos.');
     }
     await this.prisma.ignoredContact.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
-    for (const r of rows) await this.marcarConversas(u.tenantId, r.phone, false);
+    for (const r of rows) await this.marcarConversas(u.tenantId, r.phone);
     return { ok: true };
   }
 
@@ -93,26 +110,33 @@ class IgnoredContactsController {
     const row = await this.prisma.ignoredContact.findFirst({ where: { id, tenantId: u.tenantId } });
     if (!row) throw new NotFoundException('Registro não encontrado');
     await this.prisma.ignoredContact.delete({ where: { id: row.id } });
-    await this.marcarConversas(u.tenantId, row.phone, false);
+    await this.marcarConversas(u.tenantId, row.phone);
     return { ok: true };
   }
 
   /**
-   * Aplica a regra às conversas que já existem com este telefone: só troca a marca. Status, dono
-   * e espera ficam como estão — aguardando continua aguardando até alguém assumir, e daí segue
-   * Atendendo → Encerrado normalmente; a marca só tira dos relatórios (docs/contatos-isentos.md).
-   * Saindo da lista, a conversa "livre" de antes (aberta sem dono, que ninguém via) volta para a fila.
+   * Aplica a regra (depois de mexer na lista) às conversas que já existem com este telefone:
+   * - isento comum: só troca a marca. Status, dono e espera ficam — aguardando continua aguardando
+   *   até alguém assumir, e segue Atendendo → Encerrado; a marca só tira dos relatórios;
+   * - conversa livre: todas ficam abertas e sem dono, inclusive as encerradas (ninguém mais encerra);
+   * - saiu da lista ou deixou de ser livre: a conversa livre (aberta sem dono) volta para a fila.
    */
-  private async marcarConversas(tenantId: string, phone: string, exempt: boolean) {
+  private async marcarConversas(tenantId: string, phone: string) {
+    const modo = await exemptMode(this.prisma, tenantId, phone);
     const convs = await this.prisma.conversation.findMany({
-      where: { tenantId, ticketExempt: !exempt, contact: { phone: { in: phoneVariants(phone) } } },
-      select: { id: true, status: true, assigneeId: true },
+      where: { tenantId, contact: { phone: { in: phoneVariants(phone) }, isGroup: false } },
+      select: { id: true, status: true, assigneeId: true, ticketExempt: true },
     });
     for (const c of convs) {
-      const updated = await this.prisma.conversation.update({
-        where: { id: c.id },
-        data: { ticketExempt: exempt, ...(!exempt && c.status === 'in_progress' && !c.assigneeId && { status: 'waiting' as const }) },
-      });
+      const livreHoje = c.ticketExempt && c.status === 'in_progress' && !c.assigneeId;
+      let data: { ticketExempt: boolean; status?: 'in_progress' | 'waiting'; assigneeId?: null; awaitingSince?: null } | null = null;
+      if (modo === 'free') {
+        if (!livreHoje) data = { ticketExempt: true, status: 'in_progress', assigneeId: null, awaitingSince: null };
+      } else if (c.ticketExempt !== (modo === 'exempt') || livreHoje) {
+        data = { ticketExempt: modo === 'exempt', ...(livreHoje && { status: 'waiting' as const }) };
+      }
+      if (!data) continue;
+      const updated = await this.prisma.conversation.update({ where: { id: c.id }, data });
       this.gateway.emitConversation(tenantId, updated);
     }
   }

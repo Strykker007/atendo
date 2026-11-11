@@ -18,6 +18,9 @@ Next.js 15 (App Router), React 19, Tailwind, TanStack Query, Zustand, Socket.IO 
 
 Responsivo:
 - `< md` (celular): mostra **ou** a lista **ou** o chat (botão voltar no cabeçalho).
+- **Sem zoom ao tocar em campo** (11/11/2026): o iPhone (Safari e app na tela inicial) dá zoom em campo com
+  letra < 16px. `globals.css` força 16px em `input`/`textarea`/`select`/`contenteditable` só em tela de
+  toque (`hover: none` e `pointer: coarse`); o zoom de pinça continua liberado (não usamos `maximum-scale`).
 - `< lg`: tags do chat descem para uma linha abaixo do cabeçalho.
 - `TagPicker exclusive` (só no cabeçalho do chat — tags do atendimento e do contato): marcar uma tag tira as opostas diretas dela (`Tag.conflictIds`) e avisa com `toast.warn`. Nos filtros (lista, relatórios, transmissões) fica sem `exclusive`: "A ou B" é filtro válido. A API aplica a mesma regra.
 - `< xl`: painel de respostas rápidas some (toggle no cabeçalho do chat).
@@ -324,7 +327,7 @@ Emoji, menção e resposta rápida entram **no ponto do cursor**, não no fim: e
 
 **Digitando**: `useTyping(conversationId)` lê `['typing', id]`. Enquanto houver estado, o cabeçalho troca a linha do telefone por "Fulano está digitando…"/"está gravando áudio…" e o fim da lista ganha um balão com três pontos em onda (`.typing-dot`). Se nenhum evento novo chegar em 5 s (`TYPING_TIMEOUT_MS`), o indicador some sozinho — o "parou" do WhatsApp às vezes não vem.
 
-**Tipos de mensagem** (`components/chat/messages/`): `structuredBody(m)` decide o corpo da bolha pelo `m.content` — `ButtonsMessage` (texto + botões como prévia; "Copiar" copia o código/Pix para o atendente e `url` abre o link, o resto é só o que o contato vê), `ListMessage` (cabeçalho, texto e "Ver opções" que expande as linhas), `LocationMessage` (card com link para o Google Maps — sem mapa estático, que exigiria chave) e `ContactMessage` (avatar, nome, telefones e copiar número). Tipo sem `content` (linhas antigas) ou `unknown` cai em `UnknownMessageFallback`: mostra o texto se houver, senão "Mensagem interativa recebida"/"Conteúdo não suportado para visualização" — nunca a palavra `unknown`. Sem `content`, a bolha segue o caminho comum (`MediaBody` + texto).
+**Tipos de mensagem** (`components/chat/messages/`): `structuredBody(m)` decide o corpo da bolha pelo `m.content` — `ButtonsMessage` (texto + botões; "Copiar" copia o código/Pix para o atendente e `url` abre o link. Na mensagem **enviada**, resposta/ligação são só prévia do que o contato vê. Na **recebida** — outra empresa mandou "Ativar conversa" para nós —, o botão de resposta é clicável e responde com o título dele citando a mensagem, o mesmo que tocar no celular; antes o atendente achava que só dava pelo telefone, caso do STAY em 10/11/2026), `ListMessage` (cabeçalho, texto e "Ver opções" que expande as linhas), `LocationMessage` (card com link para o Google Maps — sem mapa estático, que exigiria chave) e `ContactMessage` (avatar, nome, telefones e copiar número). Tipo sem `content` (linhas antigas) ou `unknown` cai em `UnknownMessageFallback`: mostra o texto se houver, senão "Mensagem interativa recebida"/"Conteúdo não suportado para visualização" — nunca a palavra `unknown`. Sem `content`, a bolha segue o caminho comum (`MediaBody` + texto).
 
 **Encaminhada**: `m.forwarded` põe no topo da bolha a seta + "_Encaminhada_" (`ForwardedLabel`; score ≥ 5 → "Encaminhada com frequência").
 
