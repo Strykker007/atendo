@@ -37,12 +37,23 @@ Correção: migration `20270216000000_conversation_assignee_contact_idx` com os 
 ### 2. `flow_runs` também lida inteira — origem a confirmar
 São 62 mil varreduras completas (1,5 bilhão de linhas). A tabela é pequena (36 mil linhas), mas
 cresce a cada fluxo. Sem `pg_stat_statements` não dá para saber qual consulta causa. **Próximo passo:**
-ligar `pg_stat_statements` no Postgres de produção (precisa reiniciar o Postgres: fica com o
-responsável pelo deploy) e então ver as consultas mais caras.
+[ligar o `pg_stat_statements`](#ligar-pg_stat_statements) e então ver as consultas mais caras.
 
-### 3. Containers sem limite de memória
-Só worker, backup e evolution-db têm limite (e só de CPU). Um vazamento em um container consome a
-RAM da VM inteira e derruba todos. Recomendação: `mem_limit` em api, worker, evolution e redis.
+### 3. Containers sem limite de memória — aplicado na aplicação
+Só worker, backup e evolution-db tinham limite (e só de CPU). Um vazamento em um container consumia a
+RAM da VM inteira e derrubava todos. Agora há `mem_limit` em `infra/docker-compose.prod.yml`, aplicado
+pelo deploy comum (`scripts/deploy.sh`), que já recria esses serviços:
+
+| Serviço | Uso normal | Teto |
+|---|---|---|
+| api (cada réplica) | ~0,3 GB | 1,5 GB |
+| worker (cada réplica) | ~0,16 GB | 2 GB (importação de histórico e mídia) |
+| web | ~0,1 GB | 768 MB |
+| site | ~40 MB | 384 MB |
+
+Ao bater no teto, o kernel mata só aquele container e o `restart: unless-stopped` o sobe de novo.
+O Redis já tem `--maxmemory 2gb`. Evolution e Postgres ficaram sem teto: são serviços protegidos, e
+recriar a Evolution reconecta todos os números (docs/27-deploy-evolution.md).
 
 ### 4. Evolution é o custo que cresce por número
 evolution + evolution-db somam ~3,9 GB para 90 números (~43 MB por número). **Estimativa:** com
@@ -66,9 +77,31 @@ São 1,75 mi de mensagens em 30 dias com 70 clientes. Com 1000 clientes, a proje
   banco (item 1, corrigido) e falta medir o item 2. Teste de carga recomendado antes.
 - **1000 empresas:** o limite é a Evolution (item 4) e o volume de mensagens (item 5), não o código da API.
 
+## Ligar pg_stat_statements
+
+O compose já pede `shared_preload_libraries=pg_stat_statements`, mas o Postgres é serviço protegido:
+o deploy comum avisa "configuração no compose difere" e **não aplica**. Passo manual, num horário
+calmo: o Postgres fica fora por ~10 s e a API e o worker reconectam sozinhos.
+
+```bash
+cd /home/ubuntu/atendo
+C="docker compose -f infra/docker-compose.prod.yml --env-file .env.production"
+$C up -d --no-deps postgres                      # recria só o Postgres (dados no volume)
+$C exec postgres sh -c 'psql -U "$POSTGRES_USER" -d atendo -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"'
+```
+
+Depois de algumas horas de uso, a leitura (pode ir pelo `scripts/prod/read.sh`):
+
+```sql
+select calls, round(total_exec_time) ms_total, round(mean_exec_time::numeric, 1) ms_media, rows, left(query, 160) consulta
+from pg_stat_statements order by total_exec_time desc limit 20;
+```
+
+Para voltar: tirar os dois `-c` do `command` do Postgres e repetir o `up -d --no-deps postgres`.
+
 ## Próximos passos
-1. Deploy da migration do item 1.
-2. Ligar `pg_stat_statements` e investigar o item 2.
-3. `mem_limit` nos containers (item 3).
+1. Deploy da migration do item 1 e dos tetos de memória do item 3.
+2. Ligar `pg_stat_statements` (seção acima) e investigar o item 2.
+3. ~~`mem_limit` nos containers~~ (feito na aplicação; Evolution fica para a próxima troca de imagem dela).
 4. Teste de carga em ambiente separado, com números impossíveis (DDD 00).
 5. Limpeza de código morto (knip + revisão manual, por módulo).

@@ -35,6 +35,9 @@ services:
     deploy: { replicas: 2 }
     expose: ["4000"]
     cpu_shares: 2048
+    # teto de memória (docs/escalabilidade.md#3): uso normal ~0,3 GB por réplica; um vazamento
+    # morre aqui e reinicia sozinho, em vez de consumir a RAM da VM e derrubar Postgres/Evolution
+    mem_limit: 1.5g
 
   worker:
     <<: *api-image
@@ -44,6 +47,8 @@ services:
     # filas (envio, fluxos, campanhas) aguentam segundos de atraso; a tela do atendente não
     cpu_shares: 512
     cpus: 1.0
+    # uso normal ~0,16 GB; folga para importação de histórico e mídia
+    mem_limit: 2g
 
   web:
     build:
@@ -57,6 +62,7 @@ services:
     restart: unless-stopped
     expose: ["3000"]
     cpu_shares: 1024
+    mem_limit: 768m
 
   # Site público (docs/21-site.md): landing + /privacidade (URL exigida pela Meta no app)
   site:
@@ -70,6 +76,7 @@ services:
     restart: unless-stopped
     expose: ["3000"]
     cpu_shares: 256
+    mem_limit: 384m
 
   # Proxy reverso com HTTPS automático (Let's Encrypt). Domínios vêm do .env.production.
   caddy:
@@ -93,7 +100,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-atendo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
       POSTGRES_DB: atendo
-    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB"]
+    # pg_stat_statements (docs/escalabilidade.md#ligar-pg_stat_statements): registra as consultas
+    # mais caras. Serviço protegido: o deploy comum NÃO aplica — passo manual no doc.
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=top"]
     cpu_shares: 2048
     volumes: ["./volumes/postgres:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-atendo}"], interval: 5s, retries: 10 }
