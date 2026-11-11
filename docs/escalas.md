@@ -193,10 +193,15 @@ Cada aba exige a permissão da API dela e some sem ela; o item do menu aparece c
 na primeira permitida. Configurações mantém atalhos nos lugares antigos.
 
 - **Calendário** (`/escalas/calendario`, `team.manage`): **Semana** em quadro (uma coluna por dia,
-  um cartão por turno, cor por pessoa; arrastar para outro dia abre o "Remanejar turno", onde também
-  se escolhe outra pessoa) e **Mês** em grade (arrastar entre dias igual). Clicar no turno: dar
-  folga, remover o extra ou passar para outro dia/pessoa. **+** no dia lança turno extra. Folgas
-  aparecem riscadas com "desfazer"; plantões liberados, com 🔓.
+  com o número do dia, "N no turno" e um cartão por turno: nome, horário, duração e selo "extra";
+  fim de semana com fundo mais escuro, dias passados esmaecidos; no celular os dias empilham) e
+  **Mês** em grade (até 3 turnos por dia; o resto vira "+N outros", que abre a semana daquele dia;
+  no celular, só bolinhas — tocar no dia abre a semana). Arrastar para outro dia abre o "Remanejar
+  turno", onde também se escolhe outra pessoa. Cor por pessoa com parcimônia: só a bolinha e a faixa
+  fina à esquerda do cartão (cartão neutro). **Legenda Equipe**: bolinha, escala e horas no
+  período; clicar em alguém filtra o calendário só para essa pessoa. Clicar no turno: dar folga,
+  remover o extra ou passar para outro dia/pessoa. **+** no dia lança turno extra. Folgas ficam num
+  bloco "Folga" com "desfazer"; plantões liberados, com cadeado aberto.
 - **Escalas de trabalho** (`/escalas/turnos`, `team.manage`; `/configuracoes/escalas` e `/settings/schedules`
   redirecionam): criar/editar escalas (12x36, 44h, personalizada) e associar cada atendente/gerente.
 - **Horário de atendimento** (`/escalas/horario-atendimento`, `settings.manage`): quadros, faixas e
