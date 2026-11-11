@@ -1,15 +1,11 @@
 'use client';
-import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
 import { Eye, LogOut } from 'lucide-react';
-import { impersonation, setAccessToken, api } from '@/lib/api';
+import { impersonation, setAccessToken, api, reloadInto } from '@/lib/api';
 import { useMe } from '@/lib/hooks';
 
 /** Faixa fixa quando o dono está "dentro" de um cliente. Sair volta à conta dele (empresa própria ou Clientes). */
 export function ImpersonationBanner() {
   const me = useMe();
-  const qc = useQueryClient();
-  const router = useRouter();
   const imp = typeof window !== 'undefined' ? impersonation.get() : null;
   if (!me.data?.impersonatorId || !imp) return null;
 
@@ -18,10 +14,9 @@ export function ImpersonationBanner() {
     setAccessToken(null);
     // refresh devolve o token do dono (sem impersonação, pois o flag já foi limpo)
     try { const r = await api<{ accessToken: string }>('/auth/refresh', { method: 'POST' }, false); setAccessToken(r.accessToken); } catch { /* login pedirá de novo */ }
-    qc.clear();
     // dono com empresa própria volta às conversas dela; sem empresa, à lista de clientes; parceiro, aos clientes dele
     const eu = await api<{ tenantId: string | null; role: string }>('/auth/me').catch(() => null);
-    router.replace(eu?.role === 'partner' ? '/parceiro/clientes' : eu?.tenantId ? '/conversas' : '/clientes');
+    await reloadInto(eu?.role === 'partner' ? '/parceiro/clientes' : eu?.tenantId ? '/conversas' : '/clientes');
   }
 
   return (

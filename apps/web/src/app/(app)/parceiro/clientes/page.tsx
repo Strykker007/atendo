@@ -1,14 +1,12 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
 import { Building2, Copy, ExternalLink, LogIn, Plus, QrCode } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Empty, PageHeader, PageShell } from '@/components/ui/Page';
 import { Field, Modal, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
-import { impersonation, setAccessToken } from '@/lib/api';
+import { impersonation, reloadInto } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   useImpersonate, usePartnerActivation, usePartnerClients, usePartnerCreateActivation, usePartnerCreateClient, usePartnerPlans, usePartnerTemplates, type PartnerClient,
@@ -22,8 +20,6 @@ const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]
 export default function ParceiroClientes() {
   const clients = usePartnerClients();
   const impersonate = useImpersonate();
-  const qc = useQueryClient();
-  const router = useRouter();
   const [novo, setNovo] = useState(false);
   const [ativando, setAtivando] = useState<PartnerClient | null>(null);
   const [entrando, setEntrando] = useState<string | null>(null);
@@ -31,12 +27,10 @@ export default function ParceiroClientes() {
   async function entrar(c: PartnerClient) {
     setEntrando(c.id);
     try {
-      const r = await impersonate.mutateAsync(c.id);
+      await impersonate.mutateAsync(c.id);
       impersonation.set({ tenantId: c.id, name: c.name });
-      setAccessToken(r.accessToken);
-      qc.clear();
-      router.push('/configuracoes');
-    } catch (err) { toast.err(err); } finally { setEntrando(null); }
+      await reloadInto('/configuracoes');
+    } catch (err) { toast.err(err); setEntrando(null); }
   }
 
   return (
