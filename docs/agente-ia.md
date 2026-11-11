@@ -132,6 +132,26 @@ AI_EMBED_PRICE_PER_1M=0.02
 AI_EMBED_DIMENSIONS=512      # 0 = tamanho padrão do modelo
 ```
 
+### Embeddings locais
+
+Ollama no próprio servidor, sem chave e sem custo: `AI_EMBED_BASE_URL=http://ollama:11434/v1`,
+`AI_EMBED_MODEL=bge-m3` (multilíngue, lê até 8 mil tokens, 1.024 dimensões). Serviço pronto e
+comentado em `infra/docker-compose.prod.yml` (2,5 GB, 2 CPUs, um pedido por vez, modelo sempre
+carregado).
+
+- Endereço local (localhost, IP privado, `.local` ou nome de serviço do compose sem ponto) =
+  `isLocalEndpoint`: liga a busca por significado sem `AI_EMBED_API_KEY`, custo zero, **lote de 4
+  trechos com 180 s** por lote (em CPU cada trecho leva segundos) e **sem `dimensions`** (o modelo
+  local devolve o tamanho dele; `embedModel` fica só o nome).
+- Não use `paraphrase-multilingual`: lê só ~128 tokens, e os trechos têm ~250–300.
+- Medição (11/11/2026, Docker com 2 CPUs ARM do Apple M1, bge-m3 do Ollama 0.6.8): modelo carregado
+  1,8 GB; pergunta 0,13 s (máx. 0,25 s); 200 trechos de ~1.050 caracteres (~240 tokens) em 5,5 min
+  (1,65 s/trecho); 5/5 perguntas acharam o artigo certo; primeira carga 23 s. No servidor de
+  produção (4 núcleos Neoverse-N1, mais lentos por núcleo) estimativa de 1,5–2× isso, até a
+  medição lá com `scripts/bench-embed.py <url> bge-m3 200` (só leitura: gera texto sintético).
+- Durante uma indexação a pergunta espera na fila do Ollama; passando de 8 s, a busca segue só por
+  palavra (nada quebra).
+
 Quando passar a valer a pena (dezenas de milhares de trechos num agente), o caminho é um Postgres
 separado com pgvector — não trocar a imagem do banco principal (Alpine → Debian muda a ordenação
 de texto e pede reindexação).

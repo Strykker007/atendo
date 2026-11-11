@@ -12,7 +12,8 @@ export function isLocalEndpoint(url = env.AI_BASE_URL) {
   if (!url) return false;
   try {
     const host = new URL(url).hostname.toLowerCase();
-    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.localhost') || /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+    // nome sem ponto = serviço do docker-compose (ex.: http://ollama:11434), sempre interno
+    return !host.includes('.') && !host.includes(':') ? true : host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.localhost') || /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
   } catch {
     return false;
   }
