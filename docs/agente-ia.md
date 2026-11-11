@@ -149,9 +149,24 @@ AI_EMBED_DIMENSIONS=512      # 0 = tamanho padrão do modelo
 ### Embeddings locais
 
 Ollama no próprio servidor, sem chave e sem custo: `AI_EMBED_BASE_URL=http://ollama:11434/v1`,
-`AI_EMBED_MODEL=bge-m3` (multilíngue, lê até 8 mil tokens, 1.024 dimensões). Serviço pronto e
-comentado em `infra/docker-compose.prod.yml` (2,5 GB, 2 CPUs, um pedido por vez, modelo sempre
-carregado).
+`AI_EMBED_MODEL=bge-m3` (multilíngue, lê até 8 mil tokens, 1.024 dimensões). Serviço `ollama`
+ativo em `infra/docker-compose.prod.yml` desde 11/11/2026 (teto de 2,5 GB, 2 CPUs, um pedido por
+vez). O modelo só carrega no primeiro uso e fica 24 h na memória depois do último (`KEEP_ALIVE`);
+sem documento, o container usa ~30 MB.
+
+**Produção, uma vez** (o `ollama` não está no `APP_SERVICES` do `scripts/deploy.sh`):
+
+```bash
+cd /home/ubuntu/atendo
+C="docker compose -f infra/docker-compose.prod.yml --env-file .env.production"
+$C up -d --no-deps ollama
+$C exec ollama ollama pull bge-m3                # ~1,2 GB, uma vez (fica no volume)
+# no .env.production: AI_EMBED_BASE_URL=http://ollama:11434/v1  e  AI_EMBED_MODEL=bge-m3
+$C up -d --no-deps api worker                    # API e worker leem as variáveis novas
+```
+
+Ordem importa: com as variáveis e sem o modelo baixado, a indexação falha e o documento fica só
+com a busca por palavra até ser reprocessado.
 
 - Endereço local (localhost, IP privado, `.local` ou nome de serviço do compose sem ponto) =
   `isLocalEndpoint`: liga a busca por significado sem `AI_EMBED_API_KEY`, custo zero, **lote de 4

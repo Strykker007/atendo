@@ -119,19 +119,20 @@ services:
     volumes: ["./volumes/redis:/data"]
 
   # Embeddings locais dos documentos do agente de IA (docs/agente-ia.md#embeddings-locais).
-  # DESLIGADO: descomente quando o primeiro cliente enviar documento. Depois, no .env.production:
-  #   AI_EMBED_BASE_URL=http://ollama:11434/v1  AI_EMBED_MODEL=bge-m3  (sem chave; dimensões ignoradas)
-  # e baixe o modelo uma vez: docker compose ... exec ollama ollama pull bge-m3
-  # Limites medidos em 11/11/2026: bge-m3 carregado = 1,8 GB; teto de 2,5 GB e 2 CPUs protegem
-  # Postgres e Evolution (o kernel mata o Ollama, nunca os bancos). Sem porta publicada.
-  # ollama:
-  #   image: ollama/ollama:0.6.8
-  #   restart: unless-stopped
-  #   mem_limit: 2.5g
-  #   cpus: 2
-  #   cpu_shares: 256
-  #   environment: { OLLAMA_NUM_PARALLEL: "1", OLLAMA_MAX_LOADED_MODELS: "1", OLLAMA_KEEP_ALIVE: "24h" }
-  #   volumes: ["./volumes/ollama:/root/.ollama"]
+  # No .env.production: AI_EMBED_BASE_URL=http://ollama:11434/v1  AI_EMBED_MODEL=bge-m3
+  # (sem chave; dimensões ignoradas). Fora do APP_SERVICES do deploy comum: a 1ª subida e o
+  # `ollama pull bge-m3` são manuais (doc acima). Parado (sem documento) usa ~30 MB: o modelo só
+  # carrega no primeiro uso. Limites medidos em 11/11/2026: bge-m3 carregado = 1,8 GB; teto de
+  # 2,5 GB e 2 CPUs protegem Postgres e Evolution (o kernel mata o Ollama, nunca os bancos).
+  # Sem porta publicada.
+  ollama:
+    image: ollama/ollama:0.6.8
+    restart: unless-stopped
+    mem_limit: 2.5g
+    cpus: 2
+    cpu_shares: 256
+    environment: { OLLAMA_NUM_PARALLEL: "1", OLLAMA_MAX_LOADED_MODELS: "1", OLLAMA_KEEP_ALIVE: "24h" }
+    volumes: ["./volumes/ollama:/root/.ollama"]
 
   # Provider QR code. Para muitos números, repita este bloco como evolution-2, evolution-3 (shards).
   evolution:
