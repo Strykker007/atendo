@@ -1271,6 +1271,9 @@ model Conversation {
   @@index([tenantId, departmentId, status])
   @@index([numberId, contactId])
   @@index([tenantId, ticketExempt, lastMessageAt(sort: Desc)])
+  /// busca por atendente (capacidade, "minhas conversas", fim de turno) e por contato sem número: sem estes, varredura da tabela inteira (docs/escalabilidade.md)
+  @@index([assigneeId, status])
+  @@index([contactId])
   aiUsage   AiUsage[]
 
   @@map("conversations")
