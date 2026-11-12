@@ -151,7 +151,8 @@ export function Sidebar() {
       : [...doCliente.filter((g) => g.id !== 'conta'), dono, ...doCliente.filter((g) => g.id === 'conta')];
   const closed = useUI((s) => s.closedNavGroups);
   const toggleGroup = useUI((s) => s.toggleNavGroup);
-  const waiting = counts.data?.waiting ?? 0;
+  // só quem espera resposta: a respondida pelo celular (falta só assumir) não é fila
+  const waiting = (counts.data?.waiting ?? 0) - (counts.data?.waiting_device ?? 0);
   // pedidos de autorização de plantão esperando resposta (docs/escalas.md#pedido-de-autorização)
   const pedidos = useAccessRequests(me.data?.role !== 'super_admin' && permitido('team.manage')).data?.length ?? 0;
   // o Painel do parceiro é prefixo das outras telas dele: só ativo na própria rota

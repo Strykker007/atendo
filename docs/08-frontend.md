@@ -276,6 +276,7 @@ O ícone mostra **um contador quando há filtro ligado**, e aparece "Limpar filt
 Cada conversa aberta mostra **há quanto tempo está sem resposta** (`awaitingSince`), com a cor subindo junto com o atraso (até 15min neutro, 15–60min âmbar, acima de 1h vermelho). Conversa já respondida ou encerrada não mostra nada: selo em tudo vira ruído e ninguém repara nos vermelhos.
 
 Selo **📱 Celular** (âmbar): conversa em Aguardando, sem dono, cuja última resposta saiu pelo **celular** da loja, fora do painel (`deviceReplyAt`, ver [06 › conversations](06-modelo-de-dados.md)). O celular não diz quem respondeu, então alguém precisa assumir pelo painel. Some quando o contato volta a escrever, quando alguém assume ou quando o status muda.
+Essas conversas **não contam como fila**: o número de Aguardando (aba e menu lateral) desconta `waiting_device` do `GET /conversations/counts`, e na lista elas vão para a seção recolhível **"Sem atendente · Respondidas pelo celular"**, no fim. Isso vale na lista comum e no modo agrupado por atendente, onde a seção fica depois da Fila. Motivo: na ID Vida Urbana (12/11/2026), 33 das 78 conversas em Aguardando eram respostas dadas pelo celular e escondiam quem de fato esperava atendimento.
 
 O chip **Esperando há mais tempo** reordena a lista (`sort=waiting`), e a escolha fica guardada. Um `setInterval` só, no componente da lista, mantém os selos atualizados — um por linha seriam cinquenta relógios, e sem nenhum o "5min" continuaria dizendo 5min duas horas depois.
 

@@ -239,7 +239,8 @@ export const useConversationCounts = (numberIds: string[] = [], departmentId: st
       if (numberIds.length) p.set('numberId', [...numberIds].sort().join(','));
       if (departmentId) p.set('departmentId', departmentId);
       if (onlyTickets) p.set('ticket', '1');
-      return api<{ waiting: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number; free: number }>(`/conversations/counts${p.toString() ? `?${p}` : ''}`);
+      // waiting_device: parte de `waiting` respondida pelo celular (ninguém esperando resposta)
+      return api<{ waiting: number; waiting_device?: number; in_progress: number; closed: number; in_progress_mine: number; in_progress_all: number; free: number }>(`/conversations/counts${p.toString() ? `?${p}` : ''}`);
     },
     refetchInterval: 30_000,
   });

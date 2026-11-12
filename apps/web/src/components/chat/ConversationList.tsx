@@ -191,11 +191,13 @@ export function ConversationList() {
         <div className="grid grid-cols-3 gap-1 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
           {ORDER.map((s) => {
             const m = STATUS_META[s];
-            const n = counts.data?.[s];
+            // Aguardando conta só quem espera resposta; as respondidas pelo celular vão no título
+            const cel = s === 'waiting' ? (counts.data?.waiting_device ?? 0) : 0;
+            const n = counts.data?.[s] === undefined ? undefined : counts.data[s] - cel;
             const on = status === s;
             // mesmo rótulo para todos os perfis (atendente comum continua vendo só as dele)
             return (
-              <button key={s} onClick={() => setStatus(s)} title={m.label} className={cn('min-w-0 rounded-md py-1.5 px-1 transition-colors flex items-center justify-center gap-1', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink hover:bg-panel/60')}>
+              <button key={s} onClick={() => setStatus(s)} title={cel ? `${m.label} · mais ${cel} respondida(s) pelo celular, no fim da lista` : m.label} className={cn('min-w-0 rounded-md py-1.5 px-1 transition-colors flex items-center justify-center gap-1', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink hover:bg-panel/60')}>
                 <span className="truncate">{m.short}</span>
                 {n !== undefined && <span className={cn('shrink-0 tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px]', on ? 'bg-white/20 text-white' : cn(m.soft, m.color))}>{n}</span>}
               </button>
@@ -379,7 +381,7 @@ export function ConversationList() {
             <p className="text-sm text-muted">Nenhuma conversa em <b className="text-ink">{abaMeta.short.toLowerCase()}</b>.</p>
           </div>
         )}
-        {(groupByAssignee ? agruparPorAtendente(linhas) : [{ key: '', nome: '', itens: linhas, naoLidas: 0 }]).map((g) => {
+        {(groupByAssignee ? agruparPorAtendente(linhas) : separarCelular(linhas)).map((g) => {
           const fechado = !!g.key && recolhidos.includes(g.key);
           return (
             <div key={g.key || 'lista'}>
@@ -390,7 +392,7 @@ export function ConversationList() {
                   className="sticky top-0 z-[1] w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-panel border-b border-line text-left hover:bg-field"
                 >
                   {fechado ? <ChevronRight size={14} className="text-faint shrink-0" /> : <ChevronDown size={14} className="text-faint shrink-0" />}
-                  <span className={cn('text-[12px] font-semibold truncate', g.key === FILA ? 'text-wait' : 'text-ink')}>{g.nome}</span>
+                  <span className={cn('text-[12px] font-semibold truncate', g.key === FILA ? 'text-wait' : g.key === CELULAR ? 'text-muted' : 'text-ink')}>{g.nome}</span>
                   <span className="tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-field text-muted shrink-0">{g.itens.length}</span>
                   {g.naoLidas > 0 && <span className="ml-auto tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0" title="Mensagens não lidas">{g.naoLidas}</span>}
                 </button>
@@ -428,22 +430,45 @@ export function ConversationList() {
 
 /** Chave da seção das conversas sem atendente (aguardando distribuição). */
 const FILA = '__fila__';
+/** Chave da seção das respondidas pelo celular: sem dono, mas ninguém esperando resposta. */
+const CELULAR = '__celular__';
+const NOME_CELULAR = 'Sem atendente · Respondidas pelo celular';
+
+/** Em Aguardando, sem dono e a última resposta saiu pelo celular da loja (selo 📱 Celular). */
+const respondidaPeloCelular = (c: Conversation) => c.status === 'waiting' && !c.assignee && !!c.deviceReplyAt;
+
+type Grupo = { key: string; nome: string; itens: Conversation[]; naoLidas: number };
 
 /**
- * Modo agrupado: uma seção por atendente responsável, em ordem alfabética, e a fila (sem
- * atendente) por último. Dentro de cada seção a ordem é a mesma da lista — o agrupamento não
- * reordena, só separa; quem estava esperando há mais tempo continua no topo da seção dele.
+ * Lista comum: as respondidas pelo celular vão para uma seção no fim (recolhível), para a fila
+ * mostrar só quem espera resposta. Sem nenhuma, a lista fica como sempre, sem cabeçalho.
+ */
+function separarCelular(lista: Conversation[]): Grupo[] {
+  const cel = lista.filter(respondidaPeloCelular);
+  if (!cel.length) return [{ key: '', nome: '', itens: lista, naoLidas: 0 }];
+  const resto = lista.filter((c) => !respondidaPeloCelular(c));
+  return [
+    ...(resto.length ? [{ key: '', nome: '', itens: resto, naoLidas: 0 }] : []),
+    { key: CELULAR, nome: NOME_CELULAR, itens: cel, naoLidas: cel.reduce((s, c) => s + c.unreadCount, 0) },
+  ];
+}
+
+/**
+ * Modo agrupado: uma seção por atendente responsável, em ordem alfabética, depois a fila (sem
+ * atendente) e, por último, as respondidas pelo celular. Dentro de cada seção a ordem é a mesma
+ * da lista — o agrupamento não reordena, só separa; quem espera há mais tempo continua no topo.
  */
 function agruparPorAtendente(lista: Conversation[]) {
-  const grupos = new Map<string, { key: string; nome: string; itens: Conversation[]; naoLidas: number }>();
+  const grupos = new Map<string, Grupo>();
   for (const c of lista) {
-    const key = c.assignee?.id ?? FILA;
-    const g = grupos.get(key) ?? { key, nome: c.assignee?.name ?? 'Sem atendente · Fila', itens: [], naoLidas: 0 };
+    const key = respondidaPeloCelular(c) ? CELULAR : (c.assignee?.id ?? FILA);
+    const g = grupos.get(key) ?? { key, nome: key === CELULAR ? NOME_CELULAR : (c.assignee?.name ?? 'Sem atendente · Fila'), itens: [], naoLidas: 0 };
     g.itens.push(c);
     g.naoLidas += c.unreadCount;
     grupos.set(key, g);
   }
-  return [...grupos.values()].sort((a, b) => Number(a.key === FILA) - Number(b.key === FILA) || a.nome.localeCompare(b.nome, 'pt-BR'));
+  const ordem = (k: string) => (k === CELULAR ? 2 : k === FILA ? 1 : 0);
+  return [...grupos.values()].sort((a, b) => ordem(a.key) - ordem(b.key) || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
 /**
