@@ -16,24 +16,22 @@ export const parouDeReceber = (n: NumberItem) => n.isActive && n.status === 'con
 export function ReceiveStalledCard({ number }: { number: NumberItem }) {
   if (!parouDeReceber(number)) return null;
   return (
-    <div className="rounded-xl border border-danger/40 bg-danger-soft p-3 space-y-2 text-[13px] text-ink">
-      <p className="flex items-center gap-1.5 font-semibold text-sm text-danger-ink"><MessageSquareOff size={16} /> Este número parou de receber mensagens</p>
+    <div className="rounded-xl border border-line bg-field p-3 space-y-2 text-[13px] text-ink">
+      <p className="flex items-center gap-1.5 font-semibold text-sm text-ink"><MessageSquareOff size={15} className="text-muted" /> Mensagens recebidas não estão chegando</p>
       <p>
-        Desde <b>{hora(number.receiveStalledAt!)}</b> as mensagens enviadas saem, mas <b>nenhuma mensagem de contato chega</b> e nenhuma
-        confirmação de entrega volta — mesmo aparecendo &quot;Conectado&quot;. A conexão com o WhatsApp perdeu a chave que abre as mensagens
-        recebidas. Não é bloqueio do WhatsApp e nada foi apagado.
+        Desde <b>{hora(number.receiveStalledAt!)}</b> as mensagens enviadas saem normalmente, mas as dos contatos não estão chegando ao
+        painel. É uma falha na conexão com o sistema, não no WhatsApp, e nada foi apagado.
       </p>
-      <p className="font-medium">Como resolver:</p>
+      <p className="font-medium">Para resolver:</p>
       <ol className="list-decimal pl-5 space-y-0.5">
-        <li>Clique em <b>Reiniciar conexão</b> neste número e, depois de 1 minuto, peça para alguém mandar uma mensagem para ele. Se a mensagem aparecer no painel, pronto — este aviso some em alguns minutos.</li>
+        <li>Clique em <b>Reiniciar conexão</b> neste número e, depois de 1 minuto, peça para alguém mandar uma mensagem para ele. Se aparecer no painel, está resolvido.</li>
         <li>
-          Se não aparecer, a chave está estragada e só um pareamento novo resolve (2 minutos, com o celular do número em mãos): clique em <b>Desconectar</b>,
-          depois em <b>Conectar (QR)</b>, e leia o código no celular em <b>WhatsApp → Aparelhos conectados → Conectar aparelho</b>. Teste de novo com uma mensagem.
+          Se não aparecer, conecte de novo (2 minutos, com o celular do número em mãos): <b>Desconectar</b>, depois <b>Conectar (QR)</b>, e leia o
+          código no celular em <b>WhatsApp → Aparelhos conectados → Conectar aparelho</b>.
         </li>
       </ol>
       <p className="text-muted">
-        As conversas e o histórico continuam. As mensagens que os contatos mandaram enquanto o número estava assim <b>não aparecem depois</b> —
-        confira no próprio celular quem escreveu nesse período.
+        As conversas e o histórico continuam. O que os contatos mandaram nesse intervalo fica no celular do número.
       </p>
       {!number.manageable && <p className="text-muted">Você não gerencia a conexão deste número: peça ao administrador da conta.</p>}
     </div>
@@ -63,13 +61,13 @@ export function ReceiveStalledBanner() {
     setOcultos(novos);
     try { localStorage.setItem(OCULTO_KEY, JSON.stringify(novos)); } catch { /* storage bloqueado */ }
   };
-  const nomes = parados.map((n) => `"${n.label}" (+${n.phone})`).join(', ');
+  const nomes = parados.map((n) => `"${n.label}"`).join(', ');
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-danger text-white">
-      <MessageSquareOff size={16} className="shrink-0" />
-      <span className="flex-1">{parados.length > 1 ? 'Os números' : 'O número'} {nomes} {parados.length > 1 ? 'pararam' : 'parou'} de receber mensagens de contatos. É preciso ler o QR de novo.</span>
-      <Link href="/numeros" className="underline font-medium whitespace-nowrap">Como resolver</Link>
-      <button type="button" onClick={ocultar} className="p-0.5 rounded hover:bg-white/15" title="Ocultar este aviso (volta se acontecer de novo)" aria-label="Ocultar aviso"><X size={15} /></button>
+    <div className="flex items-center gap-2 px-4 py-1 text-[12.5px] bg-field text-muted border-b border-line">
+      <MessageSquareOff size={14} className="shrink-0" />
+      <span className="flex-1">{parados.length > 1 ? 'Os números' : 'O número'} {nomes} {parados.length > 1 ? 'não estão' : 'não está'} recebendo mensagens no painel.</span>
+      <Link href="/numeros" className="underline whitespace-nowrap text-ink">Como resolver</Link>
+      <button type="button" onClick={ocultar} className="p-0.5 rounded hover:bg-panel" title="Ocultar este aviso (volta se acontecer de novo)" aria-label="Ocultar aviso"><X size={14} /></button>
     </div>
   );
 }

@@ -338,18 +338,17 @@ enviadas quanto recebidas, sem campanha).
   `POST /numbers/:id/connect` responde **409 `reconnect_paused`** durante a pausa; com
   `{ force: true }` reconecta (fica no log quem confirmou). Não é bloqueio duro: o negócio
   pode precisar do número, mas decide sabendo do risco.
-- **Tela** (`components/numbers/WaRemovedNotice.tsx`): faixa no topo de todas as telas
-  (`WaRemovedBanner`) enquanto o número derrubado segue fora (até 24 h), card no número em
-  **Números** e, ao tentar reconectar na pausa, modal com o porquê e o que fazer. **O tom
-  depende da repetição** (`quedaRepetida` = `waRemovedCount > 1`):
-  - **1ª queda**: amarelo, "Número desconectado… é comum e quase sempre se resolve só
-    reconectando". Lista as causas comuns (aparelho removido, celular sem internet, troca de
-    celular), sem falar em banimento. O botão do modal é "Reconectar agora".
-  - **2ª queda em 24 h**: vermelho, "caiu várias vezes seguidas". Aí explica o risco de
-    restrição, manda olhar o aviso no celular, esperar e, se continuar, falar com o suporte
-    sobre a API oficial. O botão é "Entendi o risco, reconectar agora".
-  - Motivo (12/11/2026): o texto antigo falava em banimento já na 1ª queda e assustava os
-    clientes, mas em 30 dias 22 das 29 quedas voltaram ao normal só reconectando.
+- **Tela** (`components/numbers/WaRemovedNotice.tsx`): faixa fina no topo (`WaRemovedBanner`)
+  enquanto o número segue fora (até 24 h), card no número em **Números** e, ao reconectar dentro
+  da pausa, o modal "Reconectar o número" com os botões "Reconectar mais tarde" e "Reconectar agora".
+  **Tom sempre neutro** (cinza, `bg-field`), sem vermelho e sem as palavras risco, banimento,
+  restrição ou denúncia: "o WhatsApp encerrou a conexão… é comum e se resolve reconectando", as
+  causas comuns e a sugestão de esperar até o fim da pausa. Na 2ª queda em 24 h, só acrescenta
+  "se continuar desconectando, fale com o suporte". O 409 da API diz "Sugerimos esperar um pouco
+  antes de reconectar". Motivo (12/11/2026): os avisos vermelhos falando em banimento assustavam
+  os clientes, e em 30 dias 22 das 29 quedas voltaram só reconectando. O mesmo tom vale para
+  "Mensagens recebidas não estão chegando" (`ReceiveStalledNotice.tsx`) e para o checklist antes
+  do QR (`QrModal.tsx`).
 
 ### Versão da Evolution
 
