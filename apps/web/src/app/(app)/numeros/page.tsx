@@ -13,7 +13,7 @@ import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { NUMBER_PALETTE } from '@/components/chat/ChannelBadge';
 import { Modal } from '@/components/ui/Modal';
-import { WaRemovedCard, WaRemovedExplanation } from '@/components/numbers/WaRemovedNotice';
+import { WaRemovedCard, WaRemovedExplanation, quedaRepetida } from '@/components/numbers/WaRemovedNotice';
 import { ReceiveStalledCard } from '@/components/numbers/ReceiveStalledNotice';
 import { NumberSyncCard } from '@/components/numbers/NumberSyncNotice';
 import { ApiError } from '@/lib/api';
@@ -258,11 +258,11 @@ export default function NumerosPage() {
       <SwitchProviderModal number={switching} onClose={() => setSwitching(null)} onDone={afterConnect} />
       <QrModal numberId={qr?.id ?? null} initialQr={qr?.initial} onClose={() => setQr(null)} />
       {pausado && (
-        <Modal open onClose={() => setPausado(null)} title="Melhor esperar para reconectar" width="max-w-xl">
+        <Modal open onClose={() => setPausado(null)} title={quedaRepetida(pausado) ? 'Melhor esperar para reconectar' : 'Uma pausa curta antes de reconectar'} width="max-w-xl">
           <div className="space-y-4">
             <WaRemovedExplanation number={pausado} />
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="ghost" onClick={() => { const n = pausado; setPausado(null); reconnect(n, true); }}>Entendi o risco, reconectar agora</Button>
+              <Button variant="ghost" onClick={() => { const n = pausado; setPausado(null); reconnect(n, true); }}>{quedaRepetida(pausado) ? 'Entendi o risco, reconectar agora' : 'Reconectar agora'}</Button>
               <Button onClick={() => setPausado(null)}>Vou esperar</Button>
             </div>
           </div>
