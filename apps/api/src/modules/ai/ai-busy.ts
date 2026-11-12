@@ -10,11 +10,15 @@ export class AiBusyError extends ServiceUnavailableException {
     readonly retryAfterMs: number,
     /** acabou a cota do dia (volta à meia-noite do Pacífico) — não vale ficar reagendando */
     readonly daily: boolean,
+    /** o fornecedor não respondeu no prazo (Gemini às vezes trava 20 s+), sem ter batido cota */
+    readonly slow = false,
   ) {
     super(
       daily
         ? 'O limite diário do plano grátis da IA acabou. Volta a funcionar depois da meia-noite (horário do Pacífico, ~4h/5h de Brasília).'
-        : `A IA está no limite de pedidos por minuto do plano grátis. Tente de novo em ${Math.ceil(retryAfterMs / 1000)}s.`,
+        : slow
+          ? `A IA (Google) está lenta e não respondeu a tempo. Tente de novo em ${Math.ceil(retryAfterMs / 1000)}s.`
+          : `A IA está no limite de pedidos por minuto do plano grátis. Tente de novo em ${Math.ceil(retryAfterMs / 1000)}s.`,
     );
   }
 }
