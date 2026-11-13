@@ -6,7 +6,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { cn } from '@/lib/utils';
+import { cn, readableColor } from '@/lib/utils';
 import { useAgents, useDepartments, useCreateDepartment, useUpdateDepartment, useDeleteDepartment, type Department } from '@/lib/hooks';
 
 const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#0ea5e9', '#ef4444', '#8b5cf6', '#14b8a6', '#64748b', '#f97316'];
@@ -104,7 +104,7 @@ export function DepartmentsSection() {
         {emArvore(lista).map(({ d, nivel }) => (
           <li key={d.id} className={cn('flex items-center gap-3 py-2.5', !d.isActive && 'opacity-60')} style={{ paddingLeft: nivel ? Math.min(nivel, 4) * 20 : undefined }}>
             {nivel > 0 && <span className="text-faint -mr-1 shrink-0" aria-hidden>└</span>}
-            <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${d.color} 16%, transparent)`, color: d.color }}><Building2 size={16} /></span>
+            <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${readableColor(d.color)} 16%, transparent)`, color: readableColor(d.color) }}><Building2 size={16} /></span>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-ink truncate">{d.name}{!d.isActive && <span className="ml-1.5 text-[11px] font-normal text-muted">(desativado)</span>}</div>
               <div className="text-xs text-muted truncate">

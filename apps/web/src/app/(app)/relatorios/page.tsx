@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Play, Save, Download, BarChart3, LineChart as LineIcon, PieChart as PieIcon, Bookmark, Trash2, Table2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, readableColor } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -413,7 +413,7 @@ function Vendas({ overview, range, vendas, onAuditar }: { overview: NonNullable<
                   const auditavel = !!r.closeReasonId || r.label !== '(sem motivo)';
                   return (
                     <button key={`${r.closeReasonId ?? ''}-${r.label}`} type="button" disabled={!auditavel} onClick={() => onAuditar({ outcome: 'lost', ...(r.closeReasonId ? { closeReasonId: r.closeReasonId } : { reason: r.label }), label: r.label })} title={auditavel ? 'Ver esses atendimentos' : undefined} className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[12px] text-ink hover:bg-field disabled:opacity-50 disabled:cursor-default">
-                      {r.color && <span className="w-2 h-2 rounded-full" style={{ background: r.color }} />}{r.label} <b className="tnum">{r.value}</b>
+                      {r.color && <span className="w-2 h-2 rounded-full" style={{ background: readableColor(r.color) }} />}{r.label} <b className="tnum">{r.value}</b>
                     </button>
                   );
                 })}

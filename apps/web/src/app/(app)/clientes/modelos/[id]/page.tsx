@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { ArrowLeft, Bot, Building2, DoorClosed, Send, GripVertical, Shapes, Lock, Pencil, Plus, RotateCcw, Shield, Star, Trash2, Upload, Workflow, X } from 'lucide-react';
 import { DEFAULT_LOSS_REASONS, DEFAULT_PERMISSIONS, PERMISSIONS, PERMISSION_GROUPS, SYSTEM_PROFILES, type Permission } from '@atendo/shared';
-import { cn } from '@/lib/utils';
+import { cn, readableColor } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -240,7 +240,7 @@ function DepartmentsSection({ value, onChange }: { value: TemplateDepartment[]; 
           {arvore.map(({ d, nivel }) => (
             <div key={d.name} className="flex items-center gap-2 px-3 py-2" style={{ paddingLeft: 12 + Math.min(nivel, 4) * 20 }}>
               {nivel > 0 && <span className="text-faint" aria-hidden>└</span>}
-              <span className="w-6 h-6 rounded-md grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${d.color ?? '#6366f1'} 16%, transparent)`, color: d.color ?? '#6366f1' }}><Building2 size={13} /></span>
+              <span className="w-6 h-6 rounded-md grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${readableColor(d.color ?? '#6366f1')} 16%, transparent)`, color: readableColor(d.color ?? '#6366f1') }}><Building2 size={13} /></span>
               <span className="min-w-0 flex-1 text-sm text-ink truncate">{d.name}{d.description && <span className="text-muted text-xs"> · {d.description}</span>}</span>
               <button title="Editar" className="text-faint hover:text-accent-ink p-1" onClick={() => setEditing({ original: d.name, name: d.name, color: d.color ?? '#6366f1', description: d.description ?? '', parent: d.parent ?? '' })}><Pencil size={14} /></button>
               <button title="Remover" className="text-faint hover:text-danger p-1" onClick={() => remover(d.name)}><Trash2 size={14} /></button>

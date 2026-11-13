@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, ChevronDown, ChevronRight, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX, Smartphone, BellOff, Bell } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
-import { cn, formatPreview } from '@/lib/utils';
+import { cn, formatPreview, readableColor } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { QueueBar } from '@/components/queue/Queue';
 import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
@@ -659,9 +659,9 @@ function PilulaTag({ t, className }: { t: TagDoCard; className?: string }) {
     return <span title={`${t.name} — tag principal (etapa no Kanban)`} className={cn('inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md text-white', className)} style={{ background: t.color }}><Star size={8} className="fill-current shrink-0" /><span className="truncate">{t.name}</span></span>;
   }
   if (t.tipo === 'contato') {
-    return <span title={`${t.name} — tag do contato (permanente)`} className={cn('truncate text-[10px] font-semibold px-1.5 py-0.5 rounded-md border', className)} style={{ borderColor: t.color, color: t.color }}>📌 {t.name}</span>;
+    return <span title={`${t.name} — tag do contato (permanente)`} className={cn('truncate text-[10px] font-semibold px-1.5 py-0.5 rounded-md border', className)} style={{ borderColor: readableColor(t.color), color: readableColor(t.color) }}>📌 {t.name}</span>;
   }
-  return <span title={t.name} className={cn('truncate text-[10px] font-semibold px-1.5 py-0.5 rounded-md', className)} style={{ background: `color-mix(in srgb, ${t.color} 18%, transparent)`, color: t.color }}>{t.name}</span>;
+  return <span title={t.name} className={cn('truncate text-[10px] font-semibold px-1.5 py-0.5 rounded-md', className)} style={{ background: `color-mix(in srgb, ${readableColor(t.color)} 18%, transparent)`, color: readableColor(t.color) }}>{t.name}</span>;
 }
 
 /**

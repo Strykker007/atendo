@@ -1,6 +1,6 @@
 'use client';
 import { CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, readableColor } from '@/lib/utils';
 import { useOutcomeLabels, type Conversation } from '@/lib/hooks';
 
 const RESULTADO = {
@@ -11,10 +11,11 @@ const RESULTADO = {
 
 /** Etiqueta de um motivo, nas cores dele (mesmo visual do modal de encerrar). */
 export function ReasonChip({ reason, small }: { reason: { name: string; color: string }; small?: boolean }) {
+  const c = readableColor(reason.color);
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-full border font-medium truncate max-w-full', small ? 'px-1.5 py-px text-[10.5px]' : 'px-2 py-0.5 text-[11.5px]')}
-      style={{ color: reason.color, borderColor: `color-mix(in srgb, ${reason.color} 60%, transparent)`, background: `color-mix(in srgb, ${reason.color} 12%, transparent)` }} title={`Motivo: ${reason.name}`}>
-      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: reason.color }} />
+      style={{ color: c, borderColor: `color-mix(in srgb, ${c} 60%, transparent)`, background: `color-mix(in srgb, ${c} 12%, transparent)` }} title={`Motivo: ${reason.name}`}>
+      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c }} />
       <span className="truncate">{reason.name}</span>
     </span>
   );

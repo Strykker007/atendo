@@ -214,7 +214,7 @@ function ReasonsList() {
                       <li ref={drag.innerRef} {...drag.draggableProps} className={cn('flex items-center gap-2 px-3 py-1.5 bg-panel text-sm', snap.isDragging && 'shadow-lg rounded-lg ring-1 ring-line')}>
                         <span {...drag.dragHandleProps} className="text-faint hover:text-ink cursor-grab" title="Arraste para ordenar"><GripVertical size={14} /></span>
                         <div className="relative shrink-0">
-                          <button type="button" onClick={() => setCorDe(corDe === r.id ? null : r.id)} aria-label={`Cor de ${r.name}`} className="w-4 h-4 rounded-full block hover:ring-2 hover:ring-line" style={{ background: r.color }} />
+                          <button type="button" onClick={() => setCorDe(corDe === r.id ? null : r.id)} aria-label={`Cor de ${r.name}`} className="w-4 h-4 rounded-full block ring-1 ring-line-strong hover:ring-2" style={{ background: r.color }} />
                           {corDe === r.id && <ColorPopover value={r.color} onClose={() => setCorDe(null)} onPick={(c) => { setCorDe(null); void salvar(r, { color: c }); }} />}
                         </div>
                         <input className="flex-1 min-w-0 bg-transparent text-ink focus:outline-none focus:ring-1 focus:ring-accent/40 rounded px-1" defaultValue={r.name} maxLength={80} aria-label="Nome do motivo"

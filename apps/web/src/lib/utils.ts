@@ -63,3 +63,19 @@ export function formatDoc(v: string) {
   if (d.length <= 11) return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/(\d{3})\.(\d{3})\.(\d{3})(\d{1,2})$/, '$1.$2.$3-$4');
   return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/, (_, a, b, c, e, f) => `${a}.${b}.${c}/${e}${f ? `-${f}` : ''}`);
 }
+
+/**
+ * Cor escolhida pelo cliente (motivo, tag, departamento) usada como texto, borda ou bolinha.
+ * Preto some no modo noturno e branco/amarelo-claro some no claro: cor muito escura ou muito clara
+ * vira `var(--ink)`, que é escura no tema claro e clara no noturno. As demais passam iguais.
+ * Em prod (13/11/2026) 799 de 1.028 motivos estavam em #000000.
+ */
+export function readableColor(color: string | null | undefined, fallback = '#94a3b8'): string {
+  const c = color || fallback;
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c.trim());
+  if (!m) return c;
+  const h = m[1].length === 3 ? m[1].replace(/./g, '$&$&') : m[1];
+  const lin = (i: number) => { const v = parseInt(h.slice(i, i + 2), 16) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const l = 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4);
+  return l < 0.05 || l > 0.8 ? 'var(--ink)' : c;
+}

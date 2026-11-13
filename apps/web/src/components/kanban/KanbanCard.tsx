@@ -3,7 +3,7 @@ import { Maximize2, Star } from 'lucide-react';
 import type { KanbanCard as Card, KanbanColumn } from '@atendo/shared';
 import { Avatar } from '@/components/chat/Avatar';
 import { SeloEspera, formatTime } from '@/components/chat/ConversationList';
-import { cn, formatPreview } from '@/lib/utils';
+import { cn, formatPreview, readableColor } from '@/lib/utils';
 import { formatPhone } from '@/components/ui/PhoneInput';
 
 /**
@@ -55,14 +55,14 @@ export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote }
             disabled={!t.isKanban}
             onClick={(e) => { e.stopPropagation(); onPromote(t.id); }}
             className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded-md', t.isKanban ? 'hover:brightness-90 cursor-pointer' : 'cursor-default')}
-            style={{ background: `color-mix(in srgb, ${t.color} 18%, transparent)`, color: t.color }}
+            style={{ background: `color-mix(in srgb, ${readableColor(t.color)} 18%, transparent)`, color: readableColor(t.color) }}
             title={t.isKanban ? `Tornar "${t.name}" a principal (move o card)` : 'Esta tag não é etapa do Kanban'}
           >
             {t.name}
           </button>
         ))}
         {card.contactTags.map((t) => (
-          <span key={`c-${t.id}`} title="Tag do contato (permanente)" className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border" style={{ borderColor: t.color, color: t.color }}>📌 {t.name}</span>
+          <span key={`c-${t.id}`} title="Tag do contato (permanente)" className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border" style={{ borderColor: readableColor(t.color), color: readableColor(t.color) }}>📌 {t.name}</span>
         ))}
       </div>
 
