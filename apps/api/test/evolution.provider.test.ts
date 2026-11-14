@@ -325,6 +325,29 @@ describe('EvolutionProvider.send', () => {
     expect(res).toEqual({ externalId: 'EVO-ENVIADA', status: MessageStatus.SENT, billingCategory: BillingCategory.UNOFFICIAL });
   });
 
+  it('citada apagada/editada pelo contato (conteúdo null na Evolution): reenvia sem a citação', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      const body = JSON.parse(init.body);
+      calls.push({ path: String(url), body });
+      if (body.quoted) return { ok: false, status: 400, json: async () => ({ status: 400, error: 'Bad Request', response: { message: ["TypeError: Cannot read properties of undefined (reading 'undefined')"] } }) } as any;
+      return { ok: true, json: async () => ({ key: { id: 'EVO-ENVIADA' } }) } as any;
+    }));
+    const res = await provider.send(ctx, { to: '5511999999999', type: MessageType.TEXT, text: 'olá', quotedExternalId: 'CITADA' } as any);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].body.quoted).toEqual({ key: { id: 'CITADA' } });
+    expect(calls[1].body.quoted).toBeUndefined();
+    expect(res.externalId).toBe('EVO-ENVIADA');
+  });
+
+  it('outro erro com citação não reenvia', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      calls.push({ path: String(url), body: JSON.parse(init.body) });
+      return { ok: false, status: 400, json: async () => ({ response: { message: ['número não existe'] } }) } as any;
+    }));
+    await expect(provider.send(ctx, { to: '5511999999999', type: MessageType.TEXT, text: 'olá', quotedExternalId: 'CITADA' } as any)).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
   it('menu vira lista numerada — conta QR não recebe botão de forma confiável', async () => {
     await provider.send(ctx, {
       to: '5511999999999',
