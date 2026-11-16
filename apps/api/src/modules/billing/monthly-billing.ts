@@ -46,13 +46,15 @@ export const BOLETO_MIN_DAYS = 3;
  * 1º vencimento da assinatura por boleto: o do cliente, mas nunca antes de hoje + 3 dias (boleto
  * vencido no dia em que nasce não dá tempo de pagar — e o Asaas não cria cobrança no passado).
  */
-export const boletoFirstDueDate = (currentPeriodEnd: Date, hoje = diaSP()) => {
+export const boletoFirstDueDate = (currentPeriodEnd: Date, hoje = diaSP(), opts: { openCharge?: boolean; cycle?: 'monthly' | 'yearly' } = {}) => {
   const minimo = diaSP(new Date(Date.parse(`${hoje}T12:00:00Z`) + BOLETO_MIN_DAYS * 86_400_000));
-  const d = diaSP(currentPeriodEnd);
+  // Pix avulso de Vencimentos ainda em aberto: ele já cobra o ciclo atual — a assinatura começa
+  // no seguinte (senão o cliente recebe duas cobranças do mesmo mês)
+  const d = opts.openCharge ? addMonths(diaSP(currentPeriodEnd), opts.cycle === 'yearly' ? 12 : 1) : diaSP(currentPeriodEnd);
   return d < minimo ? minimo : d;
 };
 
-const addMonths = (ymd: string, n: number) => {
+export const addMonths = (ymd: string, n: number) => {
   const [y, m, d] = ymd.split('-').map(Number);
   const alvo = new Date(Date.UTC(y, m - 1 + n, 1));
   // dia 31 em mês de 30 vira o último dia do mês (mesma regra do Asaas)

@@ -98,7 +98,8 @@ export class MonthlyBillingService {
         await this.asaas.enableNotifications(s.tenant.asaasCustomerId).catch((err) => this.log.warn(`avisos do Asaas tenant ${s.tenantId}: ${err?.message ?? err}`));
       }
       if (skip) { if (skip !== 'already' && skip !== 'free') out.push({ ...base, dueDate: null, result: skip }); continue; }
-      const dueDate = boletoFirstDueDate(s.currentPeriodEnd);
+      const openCharge = (await this.prisma.invoice.count({ where: { tenantId: s.tenantId, status: 'open', externalId: { not: null } } })) > 0;
+      const dueDate = boletoFirstDueDate(s.currentPeriodEnd, undefined, { openCharge, cycle: s.plan.billingCycle === 'yearly' ? 'yearly' : 'monthly' });
       if (opts.dryRun) { out.push({ ...base, dueDate, result: 'would_enroll' }); continue; }
       try {
         await this.enrollOne(s.tenantId, { value, cycle, dueDate, planName: s.plan.name });

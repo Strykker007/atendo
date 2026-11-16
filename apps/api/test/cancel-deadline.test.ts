@@ -37,4 +37,8 @@ describe('1º vencimento do boleto', () => {
     expect(boletoFirstDueDate(new Date('2026-11-09T12:00:00-03:00'), '2026-11-16')).toBe('2026-11-19');
     expect(boletoFirstDueDate(new Date('2026-11-17T12:00:00-03:00'), '2026-11-16')).toBe('2026-11-19');
   });
+  it('Pix avulso em aberto: começa no ciclo seguinte', () => {
+    expect(boletoFirstDueDate(new Date('2026-11-09T12:00:00-03:00'), '2026-11-16', { openCharge: true })).toBe('2026-12-09');
+    expect(boletoFirstDueDate(new Date('2026-12-03T12:00:00-03:00'), '2026-11-16', { openCharge: true })).toBe('2027-01-03');
+  });
 });
