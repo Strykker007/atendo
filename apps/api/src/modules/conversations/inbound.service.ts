@@ -278,7 +278,9 @@ export class InboundService {
     const isento = modo !== 'none';
     if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento, livre);
     if (livre && conversation && (conversation.status !== 'in_progress' || conversation.assigneeId)) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
-    else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, conversation.assigneeId ? 'in_progress' : 'waiting');
+    // contato voltou depois do encerramento: atendimento novo, vai para a fila (Aguardando, sem dono).
+    // Antes voltava para o último atendente, inclusive desativado ou fora do turno (16/11/2026)
+    else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, 'waiting');
     else if (!livre && conversation?.status === 'in_progress' && !conversation.assigneeId) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'waiting' } });
     conversation ??= await this.prisma.conversation.create({
       data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: livre ? 'in_progress' : 'waiting', ticketExempt: isento },

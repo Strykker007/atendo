@@ -1,3 +1,5 @@
+import { ModuleRef } from '@nestjs/core';
+import { ConversationsService } from '../conversations/conversations.service';
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Module, NotFoundException, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -156,6 +158,7 @@ class TenantsController {
     private readonly shift: ShiftAccessService,
     private readonly usage: UsageService,
     private readonly creation: TenantCreationService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   @Get()
@@ -566,6 +569,13 @@ class TenantsController {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
       // desativado: o access token já emitido para de valer agora, não daqui a 15 min
       if (dto.isActive === false) await this.shift.cutSessions([id]);
+    }
+    // desativado: os atendimentos abertos dele voltam para a fila — senão ficavam presos com quem
+    // não entra mais (16/11/2026). Busca tardia: o módulo de conversas importa o de fluxos, que importa este
+    if (dto.isActive === false) {
+      const conversations = this.moduleRef.get(ConversationsService, { strict: false });
+      const abertas = await this.prisma.conversation.findMany({ where: { tenantId: u.tenantId, assigneeId: id, status: { not: 'closed' } }, select: { id: true } });
+      for (const c of abertas) await conversations.releaseSystem(u.tenantId, c.id, id, 'desativado', `${updated.name} foi desativado: a conversa voltou para a fila.`).catch(() => undefined);
     }
 
     if (numberIds) {
