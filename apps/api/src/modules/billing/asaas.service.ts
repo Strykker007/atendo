@@ -93,6 +93,8 @@ export interface PaymentView {
 const PAID = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
 /** assinatura que ainda vale: trocar de plano é alterar esta, não criar outra */
 const LIVE: SubscriptionStatus[] = ['active', 'past_due', 'trialing', 'suspended'];
+/** cliente marcado em atraso tarde (job diário) ainda tem esse prazo, com o e-mail, antes de suspender */
+const MIN_AVISO_MS = 2 * 86_400_000;
 const OVERAGE_REF = 'overage:';
 /** cobrança consolidada do painel de vencimentos: `bulk:<tenant>:<uuid>` */
 export const BULK_REF = 'bulk:';
@@ -606,21 +608,59 @@ ${env.WEB_ORIGIN}`,
    */
   private async onOverdue(tenantId: string, p: AsaasPayment) {
     await this.syncInvoice(tenantId, p);
-    if (!p.subscription) return;
+    // Pix avulso do painel de Vencimentos (assinatura sem gateway): não há assinatura no Asaas
+    if (!p.subscription) { await this.markOverdueDues(tenantId); return; }
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true } });
     if (!sub || sub.externalId !== p.subscription || !['active', 'trialing'].includes(sub.status)) return;
     const graceDays = (sub.plan.limits as { graceDays?: number })?.graceDays ?? 5;
     const graceUntil = new Date(Date.now() + graceDays * 86_400_000);
     await this.prisma.subscription.update({ where: { tenantId }, data: { status: 'past_due', graceUntil } });
     this.log.warn(`tenant ${tenantId}: cobrança ${p.id} vencida → past_due até ${graceUntil.toISOString()}`);
+    await this.overdueMail(tenantId, p.value, fromYmd(p.dueDate), graceUntil);
+  }
+
+  /**
+   * Mensalidade cobrada por Pix avulso (painel de Vencimentos) em assinatura **sem gateway**: o Asaas
+   * não tem assinatura para o `onOverdue` acompanhar, e até 16/11/2026 o cliente continuava `active`
+   * com a cobrança vencida, sem nunca suspender. Fatura do ciclo (item `group`) em aberto depois
+   * do vencimento → `past_due` com a carência do plano contada do vencimento, mas no mínimo
+   * `MIN_AVISO_MS` a partir de agora: quem é marcado tarde recebe o aviso antes de ser suspenso. Daí
+   * o `suspendOverdue` do job diário suspende. Roda no webhook (um cliente) e no job diário (todos).
+   */
+  async markOverdueDues(tenantId?: string, now = new Date()): Promise<number> {
+    const invoices = await this.prisma.invoice.findMany({
+      where: {
+        status: 'open', dueAt: { lt: now }, externalId: { not: null }, ...(tenantId && { tenantId }),
+        tenant: { isActive: true, subscription: { is: { gateway: null, status: { in: ['active', 'trialing'] }, awaitingActivation: false } } },
+      },
+      select: { tenantId: true, externalId: true, totalAmount: true, dueAt: true, items: true, tenant: { select: { subscription: { select: { plan: { select: { limits: true } } } } } } },
+      orderBy: { dueAt: 'asc' },
+    });
+    const marcados = new Set<string>();
+    for (const inv of invoices) {
+      if (marcados.has(inv.tenantId) || !inv.dueAt) continue;
+      const items = (inv.items ?? []) as unknown as ConsolidatedItem[];
+      if (!items.some((it) => it.kind === 'group')) continue;
+      const graceDays = (inv.tenant.subscription?.plan.limits as { graceDays?: number } | undefined)?.graceDays ?? 5;
+      const graceUntil = new Date(Math.max(inv.dueAt.getTime() + graceDays * 86_400_000, now.getTime() + MIN_AVISO_MS));
+      const r = await this.prisma.subscription.updateMany({ where: { tenantId: inv.tenantId, gateway: null, status: { in: ['active', 'trialing'] } }, data: { status: 'past_due', graceUntil } });
+      if (!r.count) continue;
+      marcados.add(inv.tenantId);
+      this.log.warn(`tenant ${inv.tenantId}: mensalidade avulsa ${inv.externalId} vencida → past_due até ${graceUntil.toISOString()}`);
+      await this.overdueMail(inv.tenantId, Number(inv.totalAmount), inv.dueAt, graceUntil);
+    }
+    return marcados.size;
+  }
+
+  private async overdueMail(tenantId: string, value: number, dueAt: Date, graceUntil: Date) {
     const to = await this.usage.adminEmails(tenantId);
     if (!to.length) return;
     this.mail.send({
       to,
       subject: `Sua mensalidade ${senderName()} venceu`,
-      text: `A cobrança de ${brl(p.value)} com vencimento em ${fromYmd(p.dueDate).toLocaleDateString('pt-BR')} não foi paga.
+      text: `A cobrança de ${brl(value)} com vencimento em ${dueAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} não foi paga.
 
-Pague até ${graceUntil.toLocaleDateString('pt-BR')} para não ter o envio de mensagens suspenso. PIX, boleto e cartão em:
+Pague até ${graceUntil.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} para não ter o envio de mensagens suspenso. PIX, boleto e cartão em:
 
 (Se já pagou o boleto, desconsidere: a compensação leva de 1 a 3 dias úteis e a baixa é automática.)
 
