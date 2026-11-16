@@ -3,6 +3,19 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.20.0 — 2026-11-16
+
+- fix(cobranca): mensalidade avulsa vencida suspende o cliente sem gateway
+- fix(whatsapp): resposta citando mensagem apagada pelo contato sai sem a citação
+- fix(web): motivos, tags e departamentos em cor muito escura legíveis no modo noturno
+- fix(numeros): avisos de conexão em tom neutro, sem alarde
+- fix(numeros): aviso de número desconectado sem alarde na primeira queda
+- feat(conversas): grupos e conversas livres numa seção própria em Atendendo
+- feat(conversas): respondidas pelo celular saem da contagem e vão para o fim de Aguardando
+- fix(ia): Gemini travado troca de modelo e o agente tenta de novo em vez de desistir
+- fix(ia): documentos no Ollama gravam os vetores a cada 8 trechos
+- fix(web): trocar de empresa recarrega a página e nunca grava no cliente anterior
+
 ## 1.19.0 — 2026-11-11
 
 - chore(infra): liga o Ollama (bge-m3) em produção para os documentos do agente
