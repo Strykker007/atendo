@@ -47,7 +47,8 @@ function PlanoInner() {
   const [asaasPlan, setAsaasPlan] = useState<Plan | null>(null);
   const [asaasPay, setAsaasPay] = useState<AsaasPayment | null>(null);
   // conta nova com a ativação em aberto: o Pix dela é a "cobrança em aberto" do Asaas (docs/05#cobrança-de-ativação)
-  const asaasSub = u?.subscriptionGateway === 'asaas' || u?.billingNotice?.kind === 'activation_due';
+  // sem gateway com Pix avulso de Vencimentos em aberto: o "Pagar com Pix" abre o QR dele
+  const asaasSub = u?.subscriptionGateway === 'asaas' || u?.billingNotice?.kind === 'activation_due' || (u?.billingNotice?.kind === 'payment_due' && u.billingNotice.hasCharge === true);
   const pending = useAsaasPending(isAdmin && asaasSub);
   const openPayment = pending.data?.payment ?? null;
   const closeAsaas = useCallback(() => { setAsaasPlan(null); setAsaasPay(null); }, []);

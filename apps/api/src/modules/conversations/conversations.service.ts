@@ -802,6 +802,9 @@ export class ConversationsService {
 
   async setStatusSystem(conversationId: string, status: ConversationStatus) {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true, botPausedAt: true } });
+    if (status === 'closed' && antes?.status !== 'closed' && await this.reaberturaSilenciosa(conversationId)) {
+      return this.fecharDeNovo(conversationId);
+    }
     // quem atendeu de fato (antes de mudar o status): o último da equipe que respondeu neste atendimento
     const atendeu = status === 'closed' ? await this.quemAtendeu(conversationId) : null;
     const conv = await this.prisma.conversation.update({
@@ -2013,6 +2016,28 @@ export class ConversationsService {
       select: { authorId: true },
     });
     return m?.authorId ?? null;
+  }
+
+  /**
+   * A conversa saiu de "encerrada" sem evento: o fluxo de encerramento (`startOnClose`, pesquisa /
+   * pós-venda) ou o aviso ao contato reabriram só para falar. O último evento que mudou o status
+   * ainda é o encerramento — o atendimento já foi contado e tem o desfecho de quem encerrou.
+   */
+  private async reaberturaSilenciosa(conversationId: string): Promise<boolean> {
+    const ultimo = await this.prisma.conversationEvent.findFirst({ where: { conversationId, toStatus: { not: null } }, orderBy: { createdAt: 'desc' }, select: { toStatus: true } });
+    return ultimo?.toStatus === 'closed';
+  }
+
+  /**
+   * Fecha de novo depois do fluxo de encerramento **sem** registrar outro `closed` e sem tocar no
+   * desfecho (`lastClose*`): antes (até 16/11/2026) cada encerramento com fluxo virava dois
+   * atendimentos nos relatórios — 2.735 em 7 dias — e o segundo apagava o resultado e o motivo.
+   */
+  private async fecharDeNovo(conversationId: string) {
+    const conv = await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'closed', closedAt: new Date(), deviceReplyAt: null, ...BOT_PAUSE_CLEAR } });
+    await this.encerrarFluxosPausados([conversationId]);
+    this.gateway.emitConversation(conv.tenantId, conv);
+    return conv;
   }
 
   private async registrar(e: {
