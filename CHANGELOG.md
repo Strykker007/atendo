@@ -3,6 +3,11 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.20.2 — 2026-11-16
+
+- fix(conversas): respondida pelo celular também não volta sozinha para o atendente
+- fix(conversas): reaberta pelo contato vai para a fila e desativar libera os atendimentos
+
 ## 1.20.1 — 2026-11-16
 
 - fix(web): entrar em outro cliente volta a abrir o cliente escolhido
