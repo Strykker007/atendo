@@ -40,9 +40,9 @@ export class BillingProcessor extends TrackedWorkerHost {
       await this.dues.syncAllGroups();
     }
     if (job.name === 'monthly-reminders') {
-      // mensalidade por Pix (docs/05#migração-para-o-asaas): migra quem já pode (só com
-      // ASAAS_AUTO_ENROLL e a cobrança liberada para os clientes) e manda os lembretes com o Pix
-      if (env.ASAAS_AUTO_ENROLL && (await this.monthly.clientBilling())) await this.monthly.enrollAll({ dryRun: false });
+      // assinatura no Asaas (docs/05#migração-para-o-asaas): com ASAAS_AUTO_ENROLL, põe no Asaas
+      // todo cliente pago que já tem CPF/CNPJ (inclusive os novos); depois, lembretes de quem não está lá
+      if (env.ASAAS_AUTO_ENROLL) await this.monthly.enrollAll({ dryRun: false });
       await this.monthly.sendReminders();
     }
   }

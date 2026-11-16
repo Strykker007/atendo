@@ -75,7 +75,7 @@ export interface FinanceOverview {
   invoices: { id: string; tenant: string; period: string; total: number; overage: number; status: string; dueAt: string | null; paidAt: string | null; hostedUrl: string | null }[];
   /** em teste sem pagamento, por fim do teste (mais próximo primeiro). daysLeft < 0 = teste vencido */
   trials: { tenant: string; plan: string; price: number; startedAt: string; endsAt: string; daysIn: number; daysLeft: number }[];
-  subscriptions: { tenant: string; plan: string; price: number; status: string; periodEnd: string; cancelAtPeriodEnd: boolean; graceUntil: string | null }[];
+  subscriptions: { tenant: string; plan: string; price: number; status: string; periodEnd: string; cancelAtPeriodEnd: boolean; graceUntil: string | null; gateway: string | null; cancelBy: string | null }[];
   /** livro de descontos inteiro, mais recente primeiro (docs/05#livro-de-descontos) */
   discounts: DiscountGrant[];
 }

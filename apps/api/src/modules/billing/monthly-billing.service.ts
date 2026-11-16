@@ -7,7 +7,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailService, senderName } from '../../common/mail/mail.service';
 import { UsageService } from './usage.service';
 import { AsaasService, chargeOf, contractedCharge } from './asaas.service';
-import { REMINDER_DAYS, diaSP, diasEntre, enrollSkip, firstDueDate, qrSignature, reminderKind, reminderMail, type EnrollSkip, type ReminderKind } from './monthly-billing';
+import { REMINDER_DAYS, boletoFirstDueDate, cancelDeadline, diaSP, diasEntre, enrollSkip, qrSignature, reminderKind, reminderMail, type EnrollSkip, type ReminderKind } from './monthly-billing';
 
 export interface EnrollResult { tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null; result: 'enrolled' | 'would_enroll' | EnrollSkip | 'error'; error?: string }
 
@@ -93,8 +93,12 @@ export class MonthlyBillingService {
       const { value, cycle } = this.charge(s);
       const base = { tenantId: s.tenantId, tenant: s.tenant.name, plan: s.plan.name, value };
       const skip = enrollSkip({ gateway: s.gateway, status: s.status, billingCycle: s.plan.billingCycle, isFree: s.plan.isFree, value, document: s.tenant.document });
+      if (skip === 'already' && s.gateway === 'asaas' && !opts.dryRun && s.tenant.asaasCustomerId) {
+        // já assina pelo Asaas: só liga os avisos do Asaas (nasciam desligados até 16/11/2026)
+        await this.asaas.enableNotifications(s.tenant.asaasCustomerId).catch((err) => this.log.warn(`avisos do Asaas tenant ${s.tenantId}: ${err?.message ?? err}`));
+      }
       if (skip) { if (skip !== 'already' && skip !== 'free') out.push({ ...base, dueDate: null, result: skip }); continue; }
-      const dueDate = firstDueDate(s.currentPeriodEnd);
+      const dueDate = boletoFirstDueDate(s.currentPeriodEnd);
       if (opts.dryRun) { out.push({ ...base, dueDate, result: 'would_enroll' }); continue; }
       try {
         await this.enrollOne(s.tenantId, { value, cycle, dueDate, planName: s.plan.name });
@@ -118,7 +122,8 @@ export class MonthlyBillingService {
       postalCode: tenant.zipCode || undefined,
       addressNumber: tenant.addressNumber || undefined,
     });
-    const remote = await this.asaas.createSubscription({ customer, billingType: 'PIX', value: c.value, cycle: c.cycle, description: `${senderName()} ${c.planName}`, externalReference: tenantId, nextDueDate: c.dueDate });
+    // boleto (o Asaas põe o Pix no mesmo documento): ele gera as parcelas e manda os lembretes
+    const remote = await this.asaas.createSubscription({ customer, billingType: 'BOLETO', value: c.value, cycle: c.cycle, description: `${senderName()} ${c.planName}`, externalReference: tenantId, nextDueDate: c.dueDate });
     // só vira Asaas se ainda estava sem gateway: duas rodadas juntas (job + botão) não podem deixar
     // duas assinaturas cobrando — a que perdeu é cancelada no Asaas
     const claimed = await this.prisma.subscription.updateMany({ where: { tenantId, gateway: null }, data: { gateway: 'asaas', externalId: remote.id } });
@@ -126,9 +131,33 @@ export class MonthlyBillingService {
       await this.asaas.cancelSubscription(remote.id).catch((err) => this.log.error(`assinatura Asaas ${remote.id} duplicada não cancelada: ${err?.message ?? err}`));
       return;
     }
+    // o vencimento passa a ser o da 1ª parcela (o painel e a data limite para cancelar leem daqui)
+    await this.prisma.subscription.update({ where: { tenantId }, data: { currentPeriodEnd: new Date(`${c.dueDate}T23:59:59-03:00`) } });
     this.log.log(`tenant ${tenantId} migrado para o Asaas: ${remote.id}, ${c.value} ${c.cycle}, 1º vencimento ${c.dueDate}`);
-    // a 1ª cobrança já existe: o lembrete sai agora se o vencimento estiver perto (não espera o job)
-    await this.remindTenant(tenantId).catch((err) => this.log.warn(`lembrete pós-migração tenant ${tenantId}: ${err?.message ?? err}`));
+    // a 1ª parcela já existe e o Asaas avisa o cliente dela na hora; aqui só espelha a fatura
+    await this.remindTenant(tenantId).catch((err) => this.log.warn(`fatura pós-migração tenant ${tenantId}: ${err?.message ?? err}`));
+  }
+
+  /**
+   * Cliente novo ou que acabou de ganhar CPF/CNPJ/plano pago: entra na assinatura do Asaas na hora,
+   * sem esperar o job (docs/05#clientes-novos). Melhor esforço: falha fica no log e o job tenta de novo.
+   */
+  async enrollIfReady(tenantId: string) {
+    if (!this.enabled) return;
+    const [r] = await this.enrollAll({ dryRun: false, tenantId }).catch((err) => {
+      this.log.warn(`assinatura Asaas do tenant ${tenantId}: ${err?.message ?? err}`);
+      return [];
+    });
+    return r;
+  }
+
+  /**
+   * Data limite para cancelar (docs/05#data-limite-para-cancelar): até quando dá para cancelar a
+   * assinatura do Asaas sem que a próxima parcela seja gerada. Só para quem assina pelo Asaas.
+   */
+  cancelInfo(sub: { gateway: string | null; status: string; currentPeriodEnd: Date; plan: { billingCycle: string } } | null) {
+    if (!sub || sub.gateway !== 'asaas' || !['active', 'trialing', 'past_due'].includes(sub.status)) return null;
+    return cancelDeadline(diaSP(sub.currentPeriodEnd), sub.plan.billingCycle === 'yearly' ? 'yearly' : 'monthly', env.ASAAS_SUBSCRIPTION_LEAD_DAYS);
   }
 
   /** O cliente informou o CPF/CNPJ no aviso do painel: grava e migra na hora. */
@@ -216,50 +245,16 @@ export class MonthlyBillingService {
   }
 
   /**
-   * Lembrete de um cliente: a cobrança em aberto vem do Asaas (não depende do webhook ter
-   * chegado), é espelhada em `invoices` e a marca do lembrete é reservada ANTES do envio
-   * (`updateMany` onde ainda está nula) — duas instâncias do job não mandam o mesmo e-mail.
+   * Assinatura no Asaas: quem manda o lembrete (boleto + Pix, antes, no dia e depois do vencimento)
+   * é o próprio Asaas desde 16/11/2026 — mandar o nosso também duplicaria. Aqui só espelha a parcela
+   * em aberto em `invoices` (aviso do painel e Financeiro), sem depender do webhook ter chegado.
    */
   async remindTenant(tenantId: string) {
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
     if (!sub?.externalId || sub.gateway !== 'asaas') return;
     const p = await this.asaas.openSubscriptionPayment(sub.externalId);
-    if (!p || p.billingType === 'CREDIT_CARD') return; // cartão debita sozinho: não há o que lembrar
+    if (!p) return;
     await this.asaas.view(tenantId, p, false); // espelha a fatura (e dá baixa se já estiver paga)
-    const inv = await this.prisma.invoice.findUnique({ where: { externalId: p.id } });
-    if (!inv || inv.status !== 'open') return;
-    const kind = reminderKind(diaSP(), p.dueDate, { soon: !!inv.remindedSoonAt, due: !!inv.remindedDueAt });
-    if (!kind) return;
-    const marca = kind === 'due' ? { remindedDueAt: new Date(), remindedSoonAt: inv.remindedSoonAt ?? new Date() } : { remindedSoonAt: new Date() };
-    const reservado = await this.prisma.invoice.updateMany({ where: { id: inv.id, ...(kind === 'due' ? { remindedDueAt: null } : { remindedSoonAt: null }) }, data: marca });
-    if (!reservado.count) return;
-
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { billingEmail: true } });
-    const to = [...new Set([tenant.billingEmail, ...(await this.usage.adminEmails(tenantId))].filter((e): e is string => !!e))];
-    if (!to.length) return;
-    const pix = await this.asaas.getPixQrCode(p.id).catch(() => null);
-    const boleto = p.billingType === 'BOLETO';
-    const boletoLine = boleto ? await this.asaas.getBoletoLine(p.id).catch(() => null) : null;
-    const mail = reminderMail({
-      brand: senderName(),
-      kind,
-      value: p.value,
-      dueDate: p.dueDate,
-      pixPayload: pix?.payload ?? null,
-      qrUrl: pix ? `${env.API_PUBLIC_URL}/billing/pix/${encodeURIComponent(p.id)}/qr.png?s=${qrSignature(env.ENCRYPTION_KEY, p.id)}` : null,
-      payUrl: `${env.WEB_ORIGIN}/plano?pagar=1`,
-      invoiceUrl: p.invoiceUrl ?? null,
-      boletoLine,
-      boletoUrl: boleto ? p.bankSlipUrl ?? null : null,
-    });
-    try {
-      await this.mail.send({ to, ...mail });
-      this.log.log(`lembrete "${kind}" da cobrança ${p.id} (tenant ${tenantId}) enviado para ${to.length} e-mail(s)`);
-    } catch (err) {
-      // falhou no provedor: devolve a marca para o próximo job tentar de novo
-      await this.prisma.invoice.update({ where: { id: inv.id }, data: kind === 'due' ? { remindedDueAt: null } : { remindedSoonAt: null } });
-      throw err;
-    }
   }
 
   /** PNG do QR Pix de uma cobrança (a URL do e-mail é assinada; ver `qrSignature`). */

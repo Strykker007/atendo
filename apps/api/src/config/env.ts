@@ -101,6 +101,12 @@ const schema = z.object({
    * (com prévia) ou quando o próprio cliente informa o CPF/CNPJ no painel (docs/05#migração-para-o-asaas).
    */
   ASAAS_AUTO_ENROLL: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  /**
+   * Com quantos dias de antecedência o Asaas gera cada parcela da assinatura (padrão da conta: 40;
+   * o gerente de contas pode mudar para 14 ou 7). Define a data limite para cancelar sem que a
+   * próxima parcela nasça (docs/05-planos-e-cobranca.md#data-limite-para-cancelar).
+   */
+  ASAAS_SUBSCRIPTION_LEAD_DAYS: z.coerce.number().int().min(1).max(60).default(40),
   RESEND_API_KEY: z.string().optional().default(''),
   /** Brevo (ex-Sendinblue): se preenchida, tem prioridade sobre o Resend */
   BREVO_API_KEY: z.string().optional().default(''),

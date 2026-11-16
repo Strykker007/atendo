@@ -39,6 +39,44 @@ export const firstDueDate = (currentPeriodEnd: Date, hoje = diaSP()) => {
   return d < hoje ? hoje : d;
 };
 
+/** Assinatura por boleto vence em pelo menos 3 dias: boleto pago hoje só compensa em 1–3 dias úteis. */
+export const BOLETO_MIN_DAYS = 3;
+
+/**
+ * 1º vencimento da assinatura por boleto: o do cliente, mas nunca antes de hoje + 3 dias (boleto
+ * vencido no dia em que nasce não dá tempo de pagar — e o Asaas não cria cobrança no passado).
+ */
+export const boletoFirstDueDate = (currentPeriodEnd: Date, hoje = diaSP()) => {
+  const minimo = diaSP(new Date(Date.parse(`${hoje}T12:00:00Z`) + BOLETO_MIN_DAYS * 86_400_000));
+  const d = diaSP(currentPeriodEnd);
+  return d < minimo ? minimo : d;
+};
+
+const addMonths = (ymd: string, n: number) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const alvo = new Date(Date.UTC(y, m - 1 + n, 1));
+  // dia 31 em mês de 30 vira o último dia do mês (mesma regra do Asaas)
+  const ultimo = new Date(Date.UTC(alvo.getUTCFullYear(), alvo.getUTCMonth() + 1, 0)).getUTCDate();
+  alvo.setUTCDate(Math.min(d, ultimo));
+  return alvo.toISOString().slice(0, 10);
+};
+const addDays = (ymd: string, n: number) => new Date(Date.parse(`${ymd}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * Data limite para cancelar (docs/05-planos-e-cobranca.md#data-limite-para-cancelar). O Asaas gera
+ * cada parcela `leadDays` dias antes do vencimento; cancelada a assinatura antes disso, a parcela
+ * não nasce. `nextCharge`: a próxima parcela que AINDA NÃO foi gerada (vencimentos andam um ciclo
+ * a partir de `anchorDue`); `cancelBy`: último dia para cancelar sem que ela seja gerada.
+ */
+export function cancelDeadline(anchorDue: string, cycle: 'monthly' | 'yearly', leadDays: number, hoje = diaSP()) {
+  const passo = cycle === 'yearly' ? 12 : 1;
+  let k = 0;
+  let due = anchorDue;
+  // a primeira parcela cuja geração (vencimento − leadDays) ainda está no futuro
+  while (addDays(due, -leadDays) <= hoje) due = addMonths(anchorDue, (k += passo));
+  return { nextCharge: due, cancelBy: addDays(due, -leadDays - 1) };
+}
+
 export type ReminderKind = 'soon' | 'due';
 
 /**

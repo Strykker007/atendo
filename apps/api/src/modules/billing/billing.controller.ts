@@ -274,7 +274,7 @@ export class BillingController {
     const gw = await this.gateway();
     // dono do sistema não é cliente: não tem plano nem uso
     if (!user.tenantId) {
-      return { period: periodOf(), billingEnabled: !!gw, gateway: gw, subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, customPlan: null, overageAmount: 0, quota: null, billingNotice: null, noTenant: true };
+      return { period: periodOf(), billingEnabled: !!gw, gateway: gw, subscriptionGateway: null, cancelAtPeriodEnd: false, graceUntil: null, planId: null, used: { messages: 0, templates: 0, conversations: 0, numbers: 0, agents: 0, flows: 0, quickReplies: 0, companies: 0, messagesIn: 0 }, limits: null, status: null, plan: null, freePlan: null, billingCycle: null, priceMonth: null, units: 1, billingType: 'INDIVIDUAL' as const, priceChange: null, currentPeriodEnd: null, cancelDeadline: null, customPlan: null, overageAmount: 0, quota: null, billingNotice: null, noTenant: true };
     }
     // aviso da mensalidade só para quem paga (e só lê o banco: esta rota roda a cada minuto)
     const podePagar = user.role === 'super_admin' || !!user.impersonatorId || !!user.permissions?.includes('billing.manage');
@@ -320,6 +320,8 @@ export class BillingController {
           ? { priceMonth: Number(sub.plan.priceMonth), at: sub.plan.priceAppliesToExistingAt }
           : null,
       currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+      /** assinatura no Asaas: próxima parcela ainda não gerada e o último dia para cancelar sem ela (docs/05#data-limite-para-cancelar) */
+      cancelDeadline: this.monthly.cancelInfo(sub ?? null),
       /** plano com condições negociadas pelo dono (valor e/ou limites); `expiresAt` null = sem data */
       customPlan: sub && overrideActive(sub.tenant.planOverride, sub.planId) ? { expiresAt: sub.tenant.planOverride.expiresAt } : null,
       overageAmount: counter ? Number(counter.overageAmount) : 0,

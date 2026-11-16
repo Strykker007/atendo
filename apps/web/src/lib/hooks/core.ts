@@ -129,6 +129,8 @@ export interface Usage {
   /** condições negociadas com o dono (valor e/ou limites) — `expiresAt` null = sem data */
   customPlan: { expiresAt: string | null } | null;
   currentPeriodEnd: string | null;
+  /** assinatura no Asaas: próxima parcela ainda não gerada e o último dia para cancelar sem ela (AAAA-MM-DD) */
+  cancelDeadline: { nextCharge: string; cancelBy: string } | null;
   overageAmount: number;
   /**
    * Uso x limite já calculado pela API com a mesma regra do envio (unidade do plano: mensagens

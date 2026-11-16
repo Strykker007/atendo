@@ -24,6 +24,7 @@ import { SchedulesService } from './schedules.service';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
 import { StripeService } from '../billing/stripe.service';
 import { DuesService } from '../billing/dues.service';
+import { MonthlyBillingService } from '../billing/monthly-billing.service';
 import { UsageService } from '../billing/usage.service';
 import { TYPING_SPEED_KEYS, type Permission, type TypingSpeed } from '@atendo/shared';
 import { TenantProvisioningService } from './tenant-provisioning.service';
@@ -159,6 +160,7 @@ class TenantsController {
     private readonly usage: UsageService,
     private readonly creation: TenantCreationService,
     private readonly moduleRef: ModuleRef,
+    private readonly monthly: MonthlyBillingService,
   ) {}
 
   @Get()
@@ -214,6 +216,9 @@ class TenantsController {
       await this.prisma.tenant.update({ where: { id }, data: { billingType: dto.billingType } });
       await this.dues.syncGroupUnits(id);
     }
+    // cliente pago que agora tem CPF/CNPJ (ou acabou de ir para um plano pago): já entra na
+    // assinatura do Asaas, com boleto e lembretes (docs/05#clientes-novos)
+    await this.monthly.enrollIfReady(id);
     return this.prisma.tenant.findUniqueOrThrow({ where: { id }, include: { subscription: { include: { plan: true } } } });
   }
 
