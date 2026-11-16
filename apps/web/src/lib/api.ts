@@ -84,6 +84,21 @@ export function tenantOfToken(t: string | null): string | null {
   } catch { return null; }
 }
 
+/**
+ * Dono/parceiro "entrando como" um cliente (guardado na aba): troca o token da sessão base pelo
+ * de impersonação. Vale na renovação e **no boot da página** — a troca de cliente recarrega a
+ * página (`reloadInto`), e sem isto o boot ficava com o token da sessão base (o cliente onde o
+ * login está) e todo cliente escolhido no seletor mostrava o mesmo (16/11/2026).
+ */
+export async function applyImpersonation() {
+  const imp = impersonation.get();
+  if (!imp || !accessToken) return;
+  // falha de rede não derruba a sessão: segue com o token base (o banner some e dá para entrar de novo)
+  const i = await fetch(`${API}/tenants/${imp.tenantId}/impersonate`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => null);
+  if (i?.ok) setAccessToken((await i.json()).accessToken);
+  else impersonation.set(null);
+}
+
 async function doRefresh(): Promise<boolean> {
   lastRefreshStatus = null;
   // o cookie de sessão é um só para todas as abas: trocar de empresa em outra aba faz esta
@@ -96,13 +111,7 @@ async function doRefresh(): Promise<boolean> {
   if (!r.ok) return false;
   // pelo setter: o socket do tempo real precisa saber do token novo
   setAccessToken((await r.json()).accessToken);
-  // se o dono estava dentro de um cliente, volta para lá com um token novo de impersonação
-  const imp = impersonation.get();
-  if (imp) {
-    const i = await fetch(`${API}/tenants/${imp.tenantId}/impersonate`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${accessToken}` } });
-    if (i.ok) setAccessToken((await i.json()).accessToken);
-    else impersonation.set(null);
-  }
+  await applyImpersonation();
   if (antes && tenantOfToken(accessToken) !== antes) {
     location.reload();
     return new Promise<boolean>(() => undefined); // a página vai recarregar: ninguém usa o token velho

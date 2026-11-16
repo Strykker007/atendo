@@ -61,6 +61,7 @@ para os admins de um cliente usam isso, então o síndico admin recebe pelo e-ma
 - Só para dono: **Recentes** (os últimos 5 clientes visitados, no `localStorage`) e **Todos os
   clientes**, com busca sem acento. Escolher um cliente = "entrar como" (`POST /tenants/:id/impersonate`).
 - Aparece para quem é dono ou tem mais de uma empresa. Setas + Enter navegam; Esc fecha.
+- **Na recarga, o boot reaplica o cliente escolhido** (`applyImpersonation` em `lib/api.ts`, chamado no layout depois do `/auth/refresh` e na renovação): o cookie é a sessão base (o login, ou a empresa do `/auth/switch`), e o "entrando como" fica só na aba. Sem isso (bug de 16/11/2026), todo cliente escolhido no seletor abria o da sessão base.
 - **Trocar recarrega a página inteira** (`window.location.assign`), indo para Conversas (ou
   Parceiro/Admin), e zera os filtros salvos do cliente anterior (empresa, números, departamento,
   conversa aberta). Antes só trocava o token e navegava: a tela aberta (ex.: lista de fluxos)
