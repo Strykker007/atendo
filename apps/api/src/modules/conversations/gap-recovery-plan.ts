@@ -73,11 +73,12 @@ export function planoDaRecuperacao(conv: ConversaAtual | null, livre: boolean, m
     return plano;
   }
 
-  // a última é nossa (respondida pelo celular): a espera acabou; encerrada volta como "em atendimento",
-  // igual à mensagem digitada no celular ao vivo (InboundService.ingestFromDevice)
+  // a última é nossa (respondida pelo celular): a espera acabou; encerrada reabre em Aguardando sem
+  // dono, igual à mensagem digitada no celular ao vivo (InboundService.ingestFromDevice) — nunca volta
+  // sozinha para o último atendente (16/11/2026)
   plano.awaitingSince = null;
   const ultima = novas.at(-1)!;
-  if (!conv) plano.status = 'in_progress';
-  else if (conv.status === 'closed' && !naCarencia(conv.closedAt, ultima.timestamp)) plano.status = 'in_progress';
+  if (!conv) plano.status = 'waiting';
+  else if (conv.status === 'closed' && !naCarencia(conv.closedAt, ultima.timestamp)) plano.status = 'waiting';
   return plano;
 }

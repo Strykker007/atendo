@@ -108,7 +108,7 @@ Status posteriores (delivered/read) chegam por webhook e `applyStatus` só avan�
 - **`claim()` é atômico**: `updateMany` com `where: { assigneeId: null OR = eu }`. Se `count === 0`, alguém ganhou antes → `409 Conflict` com o nome de quem assumiu. Não há janela entre "ler" e "gravar".
 - **Responder = assumir** com a mesma condição atômica (`send()`), então nem precisa clicar em *Assumir*. Admin responde conversa alheia sem tomar a posse.
 - **`list()`/`counts()` recebem o viewer**: atendente comum em `in_progress` vê só as suas; admin vê todas ou filtra por `assigneeId`. `waiting` e `closed` são de todos.
-- `transfer()` (dono ou admin) e `release()` (volta a `waiting`, sem dono). Encerrar mantém o dono no histórico; reabrir em `in_progress` = quem reabriu assume.
+- `transfer()` (dono ou admin) e `release()` (volta a `waiting`, sem dono). Encerrar mantém o dono no histórico; reabrir em `in_progress` = quem reabriu assume. **Conversa encerrada que volta a ter mensagem** — do contato ou **respondida pelo celular** do número (ao vivo em `ingestFromDevice` ou na recuperação em lote, `planoDaRecuperacao`) — reabre em `waiting`, **sem dono** (vai para a fila; a do celular com o selo `deviceReplyAt`). Nunca é atribuída sozinha ao atendente anterior: até 16/11/2026 a resposta pelo celular devolvia ao último atendente, mesmo desativado. **Desativar uma pessoa** (`PATCH /tenants/me/agents/:id` com `isActive: false`) devolve à fila as conversas abertas dela (`releaseSystem`, evento `released` com `reason = desativado` e nota no chat).
 - Toda mudança de posse emite `conversation` no socket → as listas das outras atendentes atualizam e a conversa some/aparece na hora.
 
 ## Tempo real

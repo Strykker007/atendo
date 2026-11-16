@@ -33,9 +33,9 @@ describe('planoDaRecuperacao', () => {
     expect(p).toEqual({ ultima: 1, lastInboundAt: t('16:10'), unreadIncrement: 0, awaitingSince: null });
   });
 
-  it('encerrada e a última é nossa depois da carência: volta como em atendimento (igual ao celular ao vivo)', () => {
+  it('encerrada e a última é nossa depois da carência: reabre em Aguardando sem dono (igual ao celular ao vivo)', () => {
     const p = planoDaRecuperacao(conv({ status: 'closed', closedAt: t('10:00') }), false, [env('16:15')]);
-    expect(p.status).toBe('in_progress');
+    expect(p.status).toBe('waiting');
   });
 
   it('mais antigas que a conversa: entram no histórico e a conversa não volta no tempo', () => {
@@ -60,9 +60,9 @@ describe('planoDaRecuperacao', () => {
     expect(p.status).toBe('waiting');
   });
 
-  it('pessoa nova: conversa nasce na fila (recebida) ou em atendimento (só enviada)', () => {
+  it('pessoa nova: conversa nasce na fila, recebida ou só enviada (sem dono não fica em atendimento)', () => {
     expect(planoDaRecuperacao(null, false, [rec('16:10')]).status).toBe('waiting');
-    expect(planoDaRecuperacao(null, false, [env('16:10')]).status).toBe('in_progress');
+    expect(planoDaRecuperacao(null, false, [env('16:10')]).status).toBe('waiting');
   });
 
   it('chat livre (grupo): nunca fila nem espera', () => {

@@ -268,7 +268,7 @@ export class InboundService {
     // dono, vai para Aguardando com o selo "Respondida pelo celular" (`deviceReplyAt`) para
     // alguém assumir. "Em atendimento" sem dono não pode existir: o atendente só vê na aba dele
     // o que é dele, e a conversa sumia para todo mundo menos o gerente (docs/06-modelo-de-dados.md).
-    // Encerrada: falar de novo começa outro atendimento, com a mesma regra. Exceção: a despedida
+    // Encerrada: falar de novo começa outro atendimento, sempre sem dono (Aguardando + selo). Exceção: a despedida
     // pelo celular logo depois de encerrar ("eu que agradeço", "atendimento finalizado ✅") entra
     // no histórico sem reabrir (carência, reopen.ts).
     // grupo: chat livre, sem reabrir atendimento; contato isento segue a regra comum (docs/contatos-isentos.md)
@@ -278,7 +278,9 @@ export class InboundService {
     const isento = modo !== 'none';
     if (conversation && conversation.ticketExempt !== isento) conversation = await this.aplicarIsencao(conversation, isento, livre);
     if (livre && conversation && (conversation.status !== 'in_progress' || conversation.assigneeId)) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'in_progress', assigneeId: null } });
-    else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, conversation.assigneeId ? 'in_progress' : 'waiting');
+    // encerrada e respondida pelo celular: atendimento novo, vai para Aguardando sem dono (com o selo
+    // abaixo). Antes voltava para o último atendente, inclusive desativado (16/11/2026)
+    else if (conversation?.status === 'closed' && !naCarencia(conversation.closedAt, msg.timestamp)) conversation = await this.conversations.setStatusSystem(conversation.id, 'waiting');
     else if (!livre && conversation?.status === 'in_progress' && !conversation.assigneeId) conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: { status: 'waiting' } });
     conversation ??= await this.prisma.conversation.create({
       data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: livre ? 'in_progress' : 'waiting', ticketExempt: isento },
