@@ -326,6 +326,11 @@ Modelo: `activation_charges` (`items` jsonb, `discount`, `totalValue`, `firstMon
 | no dia do vencimento | "vence hoje" | `invoices.remindedDueAt` |
 | vencida | o aviso de atraso que já existia (`onOverdue`) | — |
 
+**Sem gateway (cobrança manual) também recebe** (`remindManual`, mesmo job; desde 16/11/2026 — antes só quem tinha assinatura no Asaas): plano pago, `active`/`past_due`, sem ativação pendente.
+- Com o **Pix avulso de Vencimentos** em aberto (fatura com item `group`): mesmo e-mail, com QR e copia e cola, vencimento da fatura; marca em `invoices.remindedSoonAt/remindedDueAt`. Vencida → `markOverdueDues` (atraso com carência e e-mail, ver *Vencimento*).
+- **Sem cobrança gerada**: vencimento = `currentPeriodEnd`, valor = o contratado; o e-mail leva a `/plano/vencimentos`, onde o cliente gera o Pix. Marca no Redis (`billing:lembrete:<tenant>:<vencimento>:<tipo>`, 60 dias). Vencida: **um** aviso ("venceu em dd/mm") só no dia seguinte ao vencimento — quem já estava vencido antes não recebe rajada; o status não muda sozinho.
+- Aviso no painel: `payment_due` também para eles, com `hasCharge` (false → o "Pagar com Pix" leva a Vencimentos; true → abre o QR do Pix avulso, `GET /billing/asaas/pending`).
+
 A marca é reservada **antes** do envio (`updateMany` onde ainda é nula): duas instâncias do job não mandam o mesmo e-mail; se o provedor falhar, a marca volta e o próximo job tenta de novo. Cartão não recebe lembrete (debita sozinho); Pix e boleto recebem.
 
 **E-mail** (`reminderMail`, pelo `MailService` — Brevo): para o `billingEmail` e os admins do cliente; assunto *"Sua mensalidade {marca} de R$ X vence em dd/mm"*; valor, vencimento, na assinatura por boleto a **linha digitável** e o botão *Baixar boleto (PDF)* (com o Pix logo abaixo como alternativa), **QR Code** (imagem servida por `GET /billing/pix/:paymentId/qr.png?s=…` — URL assinada por cobrança com HMAC da `ENCRYPTION_KEY`; o Gmail bloqueia imagem em base64), **Pix copia e cola**, botão *Pagar pelo painel* (`/plano?pagar=1`, que abre direto o QR) e o link da cobrança no Asaas. A marca é o nome do remetente do `MAIL_FROM`.

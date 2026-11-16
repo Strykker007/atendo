@@ -1,11 +1,13 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { RedisService } from '../../common/redis/redis.service';
+import { Prisma } from '@prisma/client';
 import { cpfCnpjDigits, isValidCpfCnpj } from '@atendo/shared';
 import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailService, senderName } from '../../common/mail/mail.service';
 import { UsageService } from './usage.service';
 import { AsaasService, chargeOf, contractedCharge } from './asaas.service';
-import { REMINDER_DAYS, diaSP, diasEntre, enrollSkip, firstDueDate, qrSignature, reminderKind, reminderMail, type EnrollSkip } from './monthly-billing';
+import { REMINDER_DAYS, diaSP, diasEntre, enrollSkip, firstDueDate, qrSignature, reminderKind, reminderMail, type EnrollSkip, type ReminderKind } from './monthly-billing';
 
 export interface EnrollResult { tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null; result: 'enrolled' | 'would_enroll' | EnrollSkip | 'error'; error?: string }
 
@@ -25,6 +27,7 @@ export class MonthlyBillingService {
     private readonly asaas: AsaasService,
     private readonly mail: MailService,
     private readonly usage: UsageService,
+    private readonly redis: RedisService,
   ) {}
 
   get enabled() {
@@ -139,11 +142,77 @@ export class MonthlyBillingService {
     return { enrolled: r?.result === 'enrolled' };
   }
 
-  /** Job diário: lembretes de todas as assinaturas no Asaas. */
+  /** Job diário: lembretes de todas as assinaturas pagas — no Asaas e as sem gateway (cobrança manual). */
   async sendReminders() {
     if (!this.enabled) return;
     const subs = await this.prisma.subscription.findMany({ where: { gateway: 'asaas', externalId: { not: null }, status: { in: ['active', 'trialing', 'past_due'] }, tenant: { isActive: true } }, select: { tenantId: true } });
     for (const s of subs) await this.remindTenant(s.tenantId).catch((err) => this.log.warn(`lembrete tenant ${s.tenantId}: ${err?.message ?? err}`));
+    const manuais = await this.prisma.subscription.findMany({ where: { gateway: null, awaitingActivation: false, status: { in: ['active', 'past_due'] }, plan: { isFree: false }, tenant: { isActive: true } }, select: { tenantId: true } });
+    for (const s of manuais) await this.remindManual(s.tenantId).catch((err) => this.log.warn(`lembrete (manual) tenant ${s.tenantId}: ${err?.message ?? err}`));
+  }
+
+  /** Mensalidade em aberto de quem não tem assinatura no Asaas: o Pix avulso de Vencimentos, ou nada gerado ainda. */
+  private async manualDue(sub: { tenantId: string; currentPeriodEnd: Date; priceMonth: unknown; units: number; plan: Parameters<typeof chargeOf>[0] }) {
+    const inv = await this.prisma.invoice.findFirst({ where: { tenantId: sub.tenantId, status: 'open', externalId: { not: null }, dueAt: { not: null }, items: { not: Prisma.AnyNull } }, orderBy: { dueAt: 'asc' } });
+    const doGrupo = inv && ((inv.items ?? []) as unknown as { kind: string }[]).some((it) => it.kind === 'group');
+    if (inv?.dueAt && doGrupo) return { invoice: inv, value: Number(inv.totalAmount), dueDate: diaSP(inv.dueAt) };
+    const value = this.charge(sub).value;
+    return value > 0 ? { invoice: null, value, dueDate: diaSP(sub.currentPeriodEnd) } : null;
+  }
+
+  /**
+   * Lembrete de quem paga sem assinatura no Asaas (docs/05#lembretes-da-mensalidade). Com o Pix
+   * avulso de Vencimentos em aberto: o mesmo e-mail do Asaas, com o QR, e a marca fica na fatura.
+   * Sem cobrança gerada: o vencimento é o `currentPeriodEnd` e o e-mail leva a Vencimentos, onde o
+   * cliente gera o Pix; a marca fica no Redis (não há fatura). Vencida sem cobrança: um aviso só, no
+   * dia seguinte ao vencimento — quem já estava vencido antes de 16/11/2026 não recebe uma rajada.
+   */
+  async remindManual(tenantId: string) {
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true } });
+    if (!sub || sub.gateway) return;
+    const due = await this.manualDue(sub);
+    if (!due) return;
+    const hoje = diaSP();
+    let kind: ReminderKind | 'overdue' | null;
+    let reservar: () => Promise<boolean>;
+    let devolver: () => Promise<unknown>;
+    if (due.invoice) {
+      const inv = due.invoice;
+      kind = reminderKind(hoje, due.dueDate, { soon: !!inv.remindedSoonAt, due: !!inv.remindedDueAt });
+      const marca = kind === 'due' ? { remindedDueAt: new Date(), remindedSoonAt: inv.remindedSoonAt ?? new Date() } : { remindedSoonAt: new Date() };
+      reservar = async () => (await this.prisma.invoice.updateMany({ where: { id: inv.id, ...(kind === 'due' ? { remindedDueAt: null } : { remindedSoonAt: null }) }, data: marca })).count > 0;
+      devolver = () => this.prisma.invoice.update({ where: { id: inv.id }, data: kind === 'due' ? { remindedDueAt: null } : { remindedSoonAt: null } });
+    } else {
+      kind = diasEntre(hoje, due.dueDate) === -1 ? 'overdue' : reminderKind(hoje, due.dueDate, { soon: false, due: false });
+      const chave = `billing:lembrete:${tenantId}:${due.dueDate}:${kind}`;
+      reservar = async () => (await this.redis.set(chave, '1', 'EX', 60 * 86_400, 'NX')) === 'OK';
+      devolver = () => this.redis.del(chave);
+    }
+    if (!kind || !(await reservar())) return;
+
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { billingEmail: true } });
+    const to = [...new Set([tenant.billingEmail, ...(await this.usage.adminEmails(tenantId))].filter((e): e is string => !!e))];
+    if (!to.length) return;
+    const paymentId = due.invoice?.externalId ?? null;
+    const pix = paymentId ? await this.asaas.getPixQrCode(paymentId).catch(() => null) : null;
+    const mail = reminderMail({
+      brand: senderName(),
+      kind,
+      value: due.value,
+      dueDate: due.dueDate,
+      pixPayload: pix?.payload ?? null,
+      qrUrl: pix && paymentId ? `${env.API_PUBLIC_URL}/billing/pix/${encodeURIComponent(paymentId)}/qr.png?s=${qrSignature(env.ENCRYPTION_KEY, paymentId)}` : null,
+      // sem cobrança gerada, o Pix sai em Vencimentos
+      payUrl: paymentId ? `${env.WEB_ORIGIN}/plano?pagar=1` : `${env.WEB_ORIGIN}/plano/vencimentos`,
+      invoiceUrl: due.invoice?.hostedUrl ?? null,
+    });
+    try {
+      await this.mail.send({ to, ...mail });
+      this.log.log(`lembrete "${kind}" (sem gateway${paymentId ? `, cobrança ${paymentId}` : ', sem cobrança'}) do tenant ${tenantId} enviado para ${to.length} e-mail(s)`);
+    } catch (err) {
+      await devolver();
+      throw err;
+    }
   }
 
   /**
@@ -214,6 +283,13 @@ export class MonthlyBillingService {
       if (a) return { kind: 'activation_due' as const, value: Number(a.totalValue), dueDate: diaSP(a.dueDate), daysLeft: diasEntre(diaSP(), diaSP(a.dueDate)), items: a.items as unknown as { description: string; value: number }[] };
     }
     if (!sub.gateway) {
+      // mensalidade vencendo (Pix avulso em aberto ou só a data): mesmo aviso de quem está no Asaas
+      if (!sub.plan.isFree && ['active', 'trialing'].includes(sub.status)) {
+        const due = await this.manualDue(sub);
+        const hoje = diaSP();
+        const dias = due ? diasEntre(hoje, due.dueDate) : null;
+        if (due && dias !== null && dias >= 0 && dias <= REMINDER_DAYS) return { kind: 'payment_due' as const, value: due.value, dueDate: due.dueDate, daysLeft: dias, hasCharge: !!due.invoice };
+      }
       // pedir o CPF/CNPJ só quando a cobrança por Pix estiver liberada para os clientes
       if (!(await this.clientBilling())) return null;
       const skip = enrollSkip({ gateway: null, status: sub.status, billingCycle: sub.plan.billingCycle, isFree: sub.plan.isFree, value: this.charge(sub).value, document: sub.tenant.document });
@@ -225,6 +301,6 @@ export class MonthlyBillingService {
     const inv = await this.prisma.invoice.findFirst({ where: { tenantId, status: 'open', externalId: { not: null }, baseAmount: { gt: 0 }, dueAt: { lte: limite } }, orderBy: { dueAt: 'asc' } });
     if (!inv?.dueAt) return null;
     const dueDate = diaSP(inv.dueAt);
-    return { kind: 'payment_due' as const, value: Number(inv.totalAmount), dueDate, daysLeft: diasEntre(hoje, dueDate) };
+    return { kind: 'payment_due' as const, value: Number(inv.totalAmount), dueDate, daysLeft: diasEntre(hoje, dueDate), hasCharge: true };
   }
 }

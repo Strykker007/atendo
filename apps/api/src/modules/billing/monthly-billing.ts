@@ -68,7 +68,8 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 export interface ReminderMail {
   brand: string;
-  kind: ReminderKind;
+  /** `overdue`: só sem gateway e sem cobrança (com cobrança, o aviso de atraso é o do `onOverdue`/`markOverdueDues`) */
+  kind: ReminderKind | 'overdue';
   value: number;
   dueDate: string;
   /** Pix copia e cola */
@@ -86,7 +87,7 @@ export interface ReminderMail {
 
 /** Assunto, texto e HTML do lembrete: valor, vencimento, QR e o código para copiar. */
 export function reminderMail(m: ReminderMail) {
-  const quando = m.kind === 'due' ? 'vence hoje' : `vence em ${dataBR(m.dueDate)}`;
+  const quando = m.kind === 'due' ? 'vence hoje' : m.kind === 'overdue' ? `venceu em ${dataBR(m.dueDate)}` : `vence em ${dataBR(m.dueDate)}`;
   const subject = `Sua mensalidade ${m.brand} de ${brl(m.value)} ${quando}`;
   const text = [
     `Sua mensalidade ${m.brand} ${quando}.`,

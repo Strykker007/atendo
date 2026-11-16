@@ -67,7 +67,7 @@ function MensalidadeBanner({ notice, atrasada }: { notice: Usage['billingNotice'
     <div className={`flex flex-wrap items-center gap-2 px-4 py-1.5 text-[13px] ${notice.daysLeft <= 0 ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink'}`}>
       <QrCode size={16} className="shrink-0" />
       <span className="flex-1 min-w-[200px]">Sua mensalidade de <b>{brl(notice.value)}</b> {quando}. Pague por Pix pelo painel — a baixa é automática.</span>
-      <Link href="/plano?pagar=1" className="underline font-medium whitespace-nowrap">Pagar com Pix</Link>
+      <Link href={notice.hasCharge === false ? '/plano/vencimentos' : '/plano?pagar=1'} className="underline font-medium whitespace-nowrap">Pagar com Pix</Link>
     </div>
   );
 }
