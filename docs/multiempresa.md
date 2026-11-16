@@ -61,6 +61,15 @@ para os admins de um cliente usam isso, então o síndico admin recebe pelo e-ma
 - Só para dono: **Recentes** (os últimos 5 clientes visitados, no `localStorage`) e **Todos os
   clientes**, com busca sem acento. Escolher um cliente = "entrar como" (`POST /tenants/:id/impersonate`).
 - Aparece para quem é dono ou tem mais de uma empresa. Setas + Enter navegam; Esc fecha.
+- **Trocar recarrega a página inteira** (`window.location.assign`), indo para Conversas (ou
+  Parceiro/Admin), e zera os filtros salvos do cliente anterior (empresa, números, departamento,
+  conversa aberta). Antes só trocava o token e navegava: a tela aberta (ex.: lista de fluxos)
+  podia continuar com os dados do cliente anterior, e uma renovação de token já em andamento
+  gravava o token antigo por cima do novo — o seletor mostrava um cliente e as alterações caíam
+  no outro. Na recarga, o token vem do cookie (membro) ou da impersonação guardada na aba (dono).
+- **Outra aba trocou de empresa:** o cookie de sessão é um só por navegador. Se uma renovação
+  (`doRefresh` em `lib/api.ts`) voltar com um cliente diferente do token atual, a aba recarrega e
+  passa a mostrar o cliente real, em vez de exibir um e gravar no outro.
 
 ## Quem cria e desfaz vínculos
 

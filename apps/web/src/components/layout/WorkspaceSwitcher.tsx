@@ -1,10 +1,8 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
 import { Building2, Check, ChevronsUpDown, Eye, KeyRound, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, impersonation, setAccessToken } from '@/lib/api';
+import { api, impersonation, reloadInto } from '@/lib/api';
 import { toast } from '@/components/ui/Toast';
 import { useImpersonate, useMemberships, useTenants, type Membership } from '@/lib/hooks';
 
@@ -34,8 +32,6 @@ export function WorkspaceSwitcher({ collapsed, owner }: { collapsed: boolean; ow
   const memberships = useMemberships();
   const tenants = useTenants(owner);
   const impersonate = useImpersonate();
-  const qc = useQueryClient();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
@@ -83,28 +79,22 @@ export function WorkspaceSwitcher({ collapsed, owner }: { collapsed: boolean; ow
 
   if (!visivel) return null;
 
+
   async function escolher(it: Item) {
     setBusy(true);
     try {
       if (it.kind === 'membro') {
         if (it.m.current && !vendo) { setOpen(false); return; }
-        const r = await api<{ accessToken: string }>('/auth/switch', { method: 'POST', body: JSON.stringify({ userId: it.m.userId }) });
+        await api<{ accessToken: string }>('/auth/switch', { method: 'POST', body: JSON.stringify({ userId: it.m.userId }) });
         impersonation.set(null);
-        setAccessToken(r.accessToken);
-        qc.clear();
-        setOpen(false);
-        router.replace(it.m.tenantId ? '/conversas' : it.m.role === 'partner' ? '/parceiro' : '/admin');
-        return;
+        return reloadInto(it.m.tenantId ? '/conversas' : it.m.role === 'partner' ? '/parceiro' : '/admin');
       }
       if (vendo?.tenantId === it.tenantId) { setOpen(false); return; }
-      const r = await impersonate.mutateAsync(it.tenantId);
+      await impersonate.mutateAsync(it.tenantId);
       impersonation.set({ tenantId: it.tenantId, name: it.label });
       recentes.add(it.tenantId);
-      setAccessToken(r.accessToken);
-      qc.clear();
-      setOpen(false);
-      router.push('/conversas');
-    } catch (err) { toast.err(err); } finally { setBusy(false); }
+      return reloadInto('/conversas');
+    } catch (err) { toast.err(err); setBusy(false); }
   }
 
   function onKeyDown(e: React.KeyboardEvent) {

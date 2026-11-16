@@ -142,6 +142,18 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async send(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
+    try {
+      return await this.sendOnce(ctx, m, media);
+    } catch (err) {
+      if (!m.quotedExternalId || !citacaoQuebrada(err)) throw err;
+      // A citada foi apagada/editada pelo contato: a Evolution guarda o conteúdo dela como `null` e o
+      // Baileys quebra ao montar a citação, antes de enviar nada. Sem a citação o texto sai normal.
+      this.logger.warn(`Envio citando ${m.quotedExternalId}: citada sem conteúdo na Evolution, enviando sem citação`);
+      return this.sendOnce(ctx, { ...m, quotedExternalId: undefined }, media);
+    }
+  }
+
+  private async sendOnce(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
     const name = this.instance(ctx);
     let r: any;
     // citação vai em todo tipo de envio (texto, mídia e voz): a Evolution acha a citada pelo id
@@ -909,6 +921,15 @@ export function parseCall(c: any, externalNumberId: string): InboundCall | null 
     status,
     at: Number.isNaN(date.getTime()) ? new Date() : date,
   };
+}
+
+/**
+ * Erro do Baileys ao citar mensagem cujo conteúdo a Evolution zerou (contato apagou/editou: `message`
+ * = null, status EDITED): "Cannot read properties of undefined (reading 'undefined')". Em prod, 39
+ * falhas em 9,4 mil respostas com citação (7 dias até 14/11/2026).
+ */
+export function citacaoQuebrada(err: unknown): boolean {
+  return err instanceof ProviderSendError && /cannot read propert(y|ies) of (undefined|null)/i.test(err.message);
 }
 
 export function parseGroupList(rows: unknown): { jid: string; name: string; size: number }[] {

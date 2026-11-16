@@ -873,10 +873,10 @@ export class FlowEngineService {
         const delay = err.retryAfterMs + Math.floor(Math.random() * 5000); // espalha quem ficou esperando junto
         await this.prisma.flowRun.update({ where: { id: runId }, data: { vars: { ...vars, [AI_RETRY_VAR]: token, [AI_RETRY_N_VAR]: String(retries + 1) } } });
         await this.queue.add('ai-retry', { runId, nodeId: node.id, token }, { delay, jobId: `ai-retry-${runId}-${token}`, removeOnComplete: true });
-        if (!retries) await nota(`🤖 IA no limite de pedidos do plano grátis: respondendo em ~${Math.ceil(delay / 1000)}s.`);
+        if (!retries) await nota(err.slow ? `🤖 IA (Google) lenta agora: tentando de novo em ~${Math.ceil(delay / 1000)}s.` : `🤖 IA no limite de pedidos do plano grátis: respondendo em ~${Math.ceil(delay / 1000)}s.`);
         return 'wait';
       }
-      if (err instanceof AiBusyError) await nota(`🤖 ${err.daily ? 'O limite diário do plano grátis da IA acabou' : 'A IA continuou no limite do plano grátis'}: conversa entregue para a equipe.`);
+      if (err instanceof AiBusyError) await nota(`🤖 ${err.daily ? 'O limite diário do plano grátis da IA acabou' : err.slow ? 'A IA (Google) continuou sem responder' : 'A IA continuou no limite do plano grátis'}: conversa entregue para a equipe.`);
       this.log.warn(`agente de IA no fluxo ${run.flowId}: ${err instanceof Error ? err.message : err}`);
       if (node.data.fallbackText) await this.send(run.conversationId, node.data.fallbackText).catch(() => undefined);
       return 'fallback';

@@ -135,7 +135,7 @@ function ColdLimit({ number }: { number: NumberItem }) {
           />
         </label>
       ) : (
-        <p className="pl-5 text-[11px] text-warn-ink">Sem limite: o atendente pode chamar quantos contatos quiser. O risco de bloqueio volta se muitos não responderem ou denunciarem.</p>
+        <p className="pl-5 text-[11px] text-muted">Sem limite: o atendente pode chamar quantos contatos quiser. Funciona melhor quando a maioria dos contatos responde.</p>
       )}
     </div>
   );

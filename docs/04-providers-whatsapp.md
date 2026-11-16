@@ -227,7 +227,7 @@ Envelopes (`ephemeralMessage`, `viewOnceMessage*`, `documentWithCaptionMessage`,
 - *Recebida* — Evolution: o `contextInfo` vem pendurado no tipo da mensagem **ou**, quando a resposta é texto puro (`conversation`), no topo do webhook, fora de `message` — o parser olha os dois (`contextoDaCitacao`); sem isso a resposta a status digitada no celular chegava como texto solto (o mesmo vale para o `externalAdReply` do clique em anúncio, `referralOf`). Mensagens gravadas antes da correção: `pnpm --filter @atendo/api quoted:backfill` simula a partir do `raw` salvo, `-- --apply` grava (`scripts/backfill-quoted.ts`). `contextInfo.stanzaId` → `quotedExternalId`, `contextInfo.quotedMessage` → `quotedPreview` (texto ou rótulo da mídia, `providers/quoted.ts`), `remoteJid/participant = status@broadcast` → `quotedFromStatus`; em status com foto/vídeo, `quotedMedia` (`kind`, `mimeType` e a miniatura `jpegThumbnail` em base64). Meta: `context.id` → `quotedExternalId` (a Meta não manda o conteúdo citado; sem a citada no banco a bolha mostra só o rótulo genérico).
 - *Gravada* — `Message.quotedId` (id no provider), `quotedMessageId` (FK para a citada, resolvida por `externalId` + tenant no `InboundService`/`send`; null se ela não está no banco), `quotedPreview`, `quotedFromStatus`, `quotedMediaUrl`/`quotedMediaMime` (foto/vídeo do status citado no nosso storage). O `present()` monta `quoted: QuotedRef` (autor, tipo, resumo, `mediaUrl` assinada, `mediaType`) a partir da citada ou, sem ela, do `quotedPreview`.
 - *Mídia do status* — depois de gravar a mensagem, o `InboundProcessor` chama `fetchQuotedMedia` (Evolution: `getBase64FromMediaMessage` com o próprio `quotedMessage`, que traz url + mediaKey) e guarda no storage. Se falhar (status já expirou, payload sem mediaKey), guarda a miniatura `jpegThumbnail`. O `quotedMediaMime` já entra na criação da mensagem (a tela mostra "carregando"); sem mídia nem miniatura, o worker o limpa (`quotedMediaFailed`). Falha aqui nunca derruba a mensagem. Migração `20261029000200_quoted_status_media`.
-- *Enviada* — o painel manda `quotedExternalId`; o `OutboundProcessor` repassa `message.quotedId`. Meta: `context: { message_id }` em qualquer tipo. Evolution: `quoted: { key: { id } }` em `sendText`, `sendMedia` e `sendWhatsAppAudio` (a Evolution acha a citada no próprio banco pelo id).
+- *Enviada* — o painel manda `quotedExternalId`; o `OutboundProcessor` repassa `message.quotedId`. Meta: `context: { message_id }` em qualquer tipo. Evolution: `quoted: { key: { id } }` em `sendText`, `sendMedia` e `sendWhatsAppAudio` (a Evolution acha a citada no próprio banco pelo id). Se o contato apagou ou editou a citada, a Evolution guarda o conteúdo dela como `null` (status `EDITED`) e o Baileys quebra ao montar a citação — `Cannot read properties of undefined (reading 'undefined')`, antes de enviar nada. Nesse erro (`citacaoQuebrada`) o `EvolutionProvider.send` reenvia uma vez **sem a citação** e registra um aviso no log: o texto chega, só sem a resposta vinculada. Antes disso a mensagem falhava sem retry (39 de 9,4 mil respostas com citação em 7 dias, até 14/11/2026).
 
 **Encaminhada**: Evolution lê `contextInfo.isForwarded` + `forwardingScore`; Meta lê `context.forwarded` / `context.frequently_forwarded` (sem score — `frequently` vira 5). Vai para `Message.forwarded`/`forwardingScore`. Mensagem encaminhada traz `context` sem `id` na Meta: não é citação.
 
@@ -338,11 +338,17 @@ enviadas quanto recebidas, sem campanha).
   `POST /numbers/:id/connect` responde **409 `reconnect_paused`** durante a pausa; com
   `{ force: true }` reconecta (fica no log quem confirmou). Não é bloqueio duro: o negócio
   pode precisar do número, mas decide sabendo do risco.
-- **Tela**: faixa vermelha no topo de todas as telas (`WaRemovedBanner`) enquanto o número
-  derrubado segue fora (até 24 h), card no número em **Números** e, ao tentar reconectar na
-  pausa, modal com o porquê e o que fazer (`components/numbers/WaRemovedNotice.tsx`). O texto
-  é para o cliente leigo: deixa claro que não foi falha do sistema, lista os motivos e manda
-  olhar o aviso de restrição no celular antes de reconectar.
+- **Tela** (`components/numbers/WaRemovedNotice.tsx`): faixa fina no topo (`WaRemovedBanner`)
+  enquanto o número segue fora (até 24 h), card no número em **Números** e, ao reconectar dentro
+  da pausa, o modal "Reconectar o número" com os botões "Reconectar mais tarde" e "Reconectar agora".
+  **Tom sempre neutro** (cinza, `bg-field`), sem vermelho e sem as palavras risco, banimento,
+  restrição ou denúncia: "o WhatsApp encerrou a conexão… é comum e se resolve reconectando", as
+  causas comuns e a sugestão de esperar até o fim da pausa. Na 2ª queda em 24 h, só acrescenta
+  "se continuar desconectando, fale com o suporte". O 409 da API diz "Sugerimos esperar um pouco
+  antes de reconectar". Motivo (12/11/2026): os avisos vermelhos falando em banimento assustavam
+  os clientes, e em 30 dias 22 das 29 quedas voltaram só reconectando. O mesmo tom vale para
+  "Mensagens recebidas não estão chegando" (`ReceiveStalledNotice.tsx`) e para o checklist antes
+  do QR (`QrModal.tsx`).
 
 ### Versão da Evolution
 

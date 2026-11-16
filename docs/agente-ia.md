@@ -172,6 +172,10 @@ com a busca por palavra até ser reprocessado.
   `isLocalEndpoint`: liga a busca por significado sem `AI_EMBED_API_KEY`, custo zero, **lote de 4
   trechos com 180 s** por lote (em CPU cada trecho leva segundos) e **sem `dimensions`** (o modelo
   local devolve o tamanho dele; `embedModel` fica só o nome).
+- O job grava a cada **8 trechos** no local (`embedJobBatch`; 256 nos fornecedores pagos), então
+  o "Preparando busca por significado" sobe aos poucos. Em prod (12/11/2026) o regimento de 137
+  trechos levou ~10 min, com ~20 s por lote de 4. Antes gravava tudo só no fim, e a tela ficava em
+  0% até acabar.
 - **Dev:** serviço `ollama` no `infra/docker-compose.yml` com profile `ia` (não sobe no `up` comum):
   `docker compose -f infra/docker-compose.yml --profile ia up -d ollama`, depois
   `... exec ollama ollama pull bge-m3` e no `.env` `AI_EMBED_BASE_URL=http://localhost:11434/v1`,

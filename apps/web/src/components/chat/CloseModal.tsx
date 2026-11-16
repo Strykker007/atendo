@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, readableColor } from '@/lib/utils';
 import { CheckCircle2, XCircle, Plus, Trash2, Check, EyeOff, Star } from 'lucide-react';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -78,15 +78,15 @@ export function CloseTagsField({ outcome, value, onChange }: { outcome: CloseOut
               onClick={() => alternar(t.id)}
               className={cn('inline-flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-0.5 text-[12.5px] transition', on ? 'font-semibold' : 'font-medium opacity-80 hover:opacity-100')}
               style={{
-                color: t.color,
-                borderColor: on ? t.color : `color-mix(in srgb, ${t.color} 45%, transparent)`,
-                background: `color-mix(in srgb, ${t.color} ${on ? 22 : 8}%, transparent)`,
-                boxShadow: on ? `0 0 0 1px ${t.color}` : undefined,
+                color: readableColor(t.color),
+                borderColor: on ? readableColor(t.color) : `color-mix(in srgb, ${readableColor(t.color)} 45%, transparent)`,
+                background: `color-mix(in srgb, ${readableColor(t.color)} ${on ? 22 : 8}%, transparent)`,
+                boxShadow: on ? `0 0 0 1px ${readableColor(t.color)}` : undefined,
               }}
             >
               {/* bolinha cheia na cor da tag; escolhida, cresce e ganha o ✓ dentro */}
-              <span className={cn('rounded-full shrink-0 grid place-items-center transition-all', on ? 'w-3.5 h-3.5' : 'w-2 h-2')} style={{ background: t.color }}>
-                {on && <Check size={9} strokeWidth={4} className="text-white" />}
+              <span className={cn('rounded-full shrink-0 grid place-items-center transition-all', on ? 'w-3.5 h-3.5' : 'w-2 h-2')} style={{ background: readableColor(t.color) }}>
+                {on && <Check size={9} strokeWidth={4} className={readableColor(t.color) === 'var(--ink)' ? 'text-panel' : 'text-white'} />}
               </span>
               {t.name}
             </button>
@@ -118,12 +118,14 @@ export function CloseReasonField({ outcome, value, onChange, erro, opcional }: {
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Motivo do encerramento">
         {lista.map((r) => {
           const on = value === r.id;
+          const c = readableColor(r.color);
           return (
             <button key={r.id} type="button" role="radio" aria-checked={on} onClick={() => onChange(on ? null : r.id)}
               className={cn('inline-flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-0.5 text-[12.5px] transition', on ? 'font-semibold' : 'font-medium opacity-80 hover:opacity-100')}
-              style={{ color: r.color, borderColor: on ? r.color : `color-mix(in srgb, ${r.color} 45%, transparent)`, background: `color-mix(in srgb, ${r.color} ${on ? 22 : 8}%, transparent)`, boxShadow: on ? `0 0 0 1px ${r.color}` : undefined }}>
-              <span className={cn('rounded-full shrink-0 grid place-items-center transition-all', on ? 'w-3.5 h-3.5' : 'w-2 h-2')} style={{ background: r.color }}>
-                {on && <Check size={9} strokeWidth={4} className="text-white" />}
+              style={{ color: c, borderColor: on ? c : `color-mix(in srgb, ${c} 45%, transparent)`, background: `color-mix(in srgb, ${c} ${on ? 22 : 8}%, transparent)`, boxShadow: on ? `0 0 0 1px ${c}` : undefined }}>
+              <span className={cn('rounded-full shrink-0 grid place-items-center transition-all', on ? 'w-3.5 h-3.5' : 'w-2 h-2')} style={{ background: c }}>
+                {/* bolinha neutra (cor de texto do tema): o check usa a cor do fundo para aparecer */}
+                {on && <Check size={9} strokeWidth={4} className={c === 'var(--ink)' ? 'text-panel' : 'text-white'} />}
               </span>
               {r.name}
             </button>

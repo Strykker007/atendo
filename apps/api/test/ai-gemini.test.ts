@@ -54,6 +54,26 @@ describe('GeminiProvider', () => {
     expect(JSON.parse(f.mock.calls[2][1].body).model).toBe('gemini-3.5-flash');
   });
 
+  it('modelo travado (timeout): passa para o próximo sem esfriar o lento', async () => {
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    const redis = fakeRedis();
+    const f = vi.fn().mockRejectedValueOnce(timeout).mockResolvedValueOnce(ok('gemini-3.5-flash'));
+    vi.stubGlobal('fetch', f);
+    const out = await new GeminiProvider(redis as never).complete(req);
+    expect(out.model).toBe('gemini-3.5-flash');
+    expect(redis.store.size).toBe(0);
+  });
+
+  it('todos lentos: AiBusyError slow com espera curta (o fluxo reagenda, não entrega para a equipe)', async () => {
+    const timeout = Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeout));
+    const err = await new GeminiProvider(fakeRedis() as never).complete({ ...req, timeoutMs: 3_000 }).catch((e) => e);
+    expect(err).toBeInstanceOf(AiBusyError);
+    expect(err.slow).toBe(true);
+    expect(err.daily).toBe(false);
+    expect(err.retryAfterMs).toBe(5_000);
+  });
+
   it('todos no limite: AiBusyError com a menor espera; cota do dia marca daily', async () => {
     const f = vi.fn().mockResolvedValueOnce(reply(429, perMinute)).mockImplementation(async () => reply(429, perDay));
     vi.stubGlobal('fetch', f);

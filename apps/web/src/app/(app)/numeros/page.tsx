@@ -258,12 +258,12 @@ export default function NumerosPage() {
       <SwitchProviderModal number={switching} onClose={() => setSwitching(null)} onDone={afterConnect} />
       <QrModal numberId={qr?.id ?? null} initialQr={qr?.initial} onClose={() => setQr(null)} />
       {pausado && (
-        <Modal open onClose={() => setPausado(null)} title="Melhor esperar para reconectar" width="max-w-xl">
+        <Modal open onClose={() => setPausado(null)} title="Reconectar o número" width="max-w-xl">
           <div className="space-y-4">
             <WaRemovedExplanation number={pausado} />
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="ghost" onClick={() => { const n = pausado; setPausado(null); reconnect(n, true); }}>Entendi o risco, reconectar agora</Button>
-              <Button onClick={() => setPausado(null)}>Vou esperar</Button>
+              <Button variant="ghost" onClick={() => setPausado(null)}>Reconectar mais tarde</Button>
+              <Button onClick={() => { const n = pausado; setPausado(null); reconnect(n, true); }}>Reconectar agora</Button>
             </div>
           </div>
         </Modal>

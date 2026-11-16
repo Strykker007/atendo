@@ -1,7 +1,5 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
 import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal, Download, QrCode } from 'lucide-react';
 import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDialog';
 import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
@@ -14,7 +12,7 @@ import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useBrand } from '@/lib/brand-context';
-import { impersonation, setAccessToken } from '@/lib/api';
+import { impersonation, reloadInto } from '@/lib/api';
 import { useTenants, useTenantsLive, useCreateTenant, useUpdateTenant, useSetTenantActive, useImpersonate, usePlans, useMe, useTenantTemplates, type Plan, type TenantRow, type TenantProfile, type TenantLive, type TenantLiveNumber } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -225,8 +223,6 @@ export default function ClientesPage() {
   const plans = usePlans();
   const update = useUpdateTenant();
   const impersonate = useImpersonate();
-  const qc = useQueryClient();
-  const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [modelos, setModelos] = useState(false);
   const [editando, setEditando] = useState<TenantRow | null>(null);
@@ -254,12 +250,10 @@ export default function ClientesPage() {
   async function enter(t: TenantRow) {
     setBusy(t.id);
     try {
-      const r = await impersonate.mutateAsync(t.id);
+      await impersonate.mutateAsync(t.id);
       impersonation.set({ tenantId: t.id, name: t.name });
-      setAccessToken(r.accessToken);
-      qc.clear();
-      router.push('/conversas');
-    } catch (err) { toast.err(err); } finally { setBusy(null); }
+      await reloadInto('/conversas');
+    } catch (err) { toast.err(err); setBusy(null); }
   }
   async function patch(t: TenantRow, body: { name?: string; isActive?: boolean; planId?: string; subscriptionStatus?: string }) {
     setBusy(t.id);

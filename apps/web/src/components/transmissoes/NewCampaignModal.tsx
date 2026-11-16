@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Paperclip, X, Users, UsersRound, ShieldAlert, Loader2, Phone, Tags, ChevronDown, FileUp, Contact } from 'lucide-react';
 import { formatPhone } from '@/components/ui/PhoneInput';
-import { cn } from '@/lib/utils';
+import { cn, readableColor } from '@/lib/utils';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
@@ -292,7 +292,7 @@ export function NewCampaignModal({ onClose }: { onClose: () => void }) {
                           return (
                             <button key={t.id} type="button" aria-pressed={on} onClick={() => setClosingTagIds((l) => (on ? l.filter((x) => x !== t.id) : [...l, t.id]))}
                               className={cn('inline-flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-0.5 text-[12px] transition', on ? 'font-semibold' : 'opacity-80 hover:opacity-100')}
-                              style={{ color: t.color, borderColor: on ? t.color : `color-mix(in srgb, ${t.color} 45%, transparent)`, background: `color-mix(in srgb, ${t.color} ${on ? 22 : 8}%, transparent)` }}>
+                              style={{ color: readableColor(t.color), borderColor: on ? readableColor(t.color) : `color-mix(in srgb, ${readableColor(t.color)} 45%, transparent)`, background: `color-mix(in srgb, ${readableColor(t.color)} ${on ? 22 : 8}%, transparent)` }}>
                               <span className="w-2 h-2 rounded-full" style={{ background: t.color }} />{t.name}
                             </button>
                           );

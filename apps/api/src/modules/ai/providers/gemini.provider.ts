@@ -10,6 +10,9 @@ import { postWithRetry, providerError } from './retry';
 const OFFICIAL = 'https://generativelanguage.googleapis.com/v1beta/openai';
 /** 429 aqui é cota (minuto/dia), não sobrecarga: não adianta repetir em 0,7s — troca de modelo. */
 const RETRYABLE = new Set([500, 502, 503]);
+/** prazo de um modelo quando ainda há outro na lista (2 tentativas cabem nos 20 s do AI_TIMEOUT_MS) */
+const SLOW_MODEL_MS = 9_000;
+const isTimeout = (err: unknown) => err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
 
 const keyId = (apiKey: string) => createHash('sha256').update(apiKey).digest('hex').slice(0, 16);
 const coolKey = (apiKey: string, model: string) => `ai:gemini:cool:${keyId(apiKey)}:${model}`;
@@ -36,22 +39,34 @@ export class GeminiProvider implements AiProvider {
     const deadline = Date.now() + req.timeoutMs;
     let wait = Infinity;
     let allDaily = true;
+    let slow = false;
 
-    for (const model of modelChain(req.model || this.defaultModel, AI_KEY_PROVIDERS.gemini.models)) {
+    const chain = modelChain(req.model || this.defaultModel, AI_KEY_PROVIDERS.gemini.models);
+    for (const [i, model] of chain.entries()) {
       const [coolMs, isDaily] = await Promise.all([this.redis.pttl(coolKey(apiKey, model)), this.redis.exists(dailyKey(apiKey, model))]);
       if (coolMs > 0) { wait = Math.min(wait, coolMs); allDaily &&= isDaily === 1; continue; }
       const left = deadline - Date.now();
       if (left < 2000) break;
 
-      const { res, json } = await postWithRetry(
-        `${OFFICIAL}/chat/completions`,
-        {
-          headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ model, max_tokens: req.maxTokens, temperature: req.temperature, messages: [{ role: 'system', content: req.system }, ...req.messages] }),
-        },
-        left,
-        RETRYABLE,
-      );
+      // com outro modelo depois, este não come o prazo todo: o Gemini às vezes trava 20 s+ num
+      // pedido que costuma levar 1–2 s, e o seguinte quase sempre responde
+      let r: Awaited<ReturnType<typeof postWithRetry>>;
+      try {
+        r = await postWithRetry(
+          `${OFFICIAL}/chat/completions`,
+          {
+            headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ model, max_tokens: req.maxTokens, temperature: req.temperature, messages: [{ role: 'system', content: req.system }, ...req.messages] }),
+          },
+          i < chain.length - 1 ? Math.min(left, SLOW_MODEL_MS) : left,
+          RETRYABLE,
+        );
+      } catch (err) {
+        if (!isTimeout(err)) throw err;
+        slow = true;
+        continue;
+      }
+      const { res, json } = r;
       if (res.ok) {
         return {
           text: String(json.choices?.[0]?.message?.content ?? '').trim(),
@@ -68,9 +83,10 @@ export class GeminiProvider implements AiProvider {
       wait = Math.min(wait, quota.retryAfterMs);
       allDaily &&= quota.daily;
     }
-    // sobrou pouco do prazo, sem ter batido limite: espera curta e tenta de novo
-    if (wait === Infinity) { wait = 10_000; allDaily = false; }
-    throw new AiBusyError(wait, allDaily);
+    // sobrou pouco do prazo (ou o Google não respondeu), sem ter batido limite: espera curta e
+    // tenta de novo — o bloco Agente reagenda em vez de entregar a conversa para a equipe
+    if (wait === Infinity) { wait = slow ? 5_000 : 10_000; allDaily = false; }
+    throw new AiBusyError(wait, allDaily, slow && wait <= 10_000);
   }
 
   /** Situação de cada modelo para a tela: livre, no limite do minuto ou do dia (e até quando). */

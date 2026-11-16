@@ -1,72 +1,69 @@
 'use client';
 import Link from 'next/link';
-import { ShieldAlert } from 'lucide-react';
+import { Unplug } from 'lucide-react';
 import { useNumbers, type NumberItem } from '@/lib/hooks';
 
-/** quanto tempo o alerta fica no topo depois da queda (a pausa repetida é de 24h) */
+/** quanto tempo o aviso fica no topo depois da queda (a pausa repetida é de 24h) */
 const ALERTA_MS = 24 * 3_600_000;
 
 const hora = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
-/** o WhatsApp derrubou e o número segue fora — o caso que precisa de atenção */
+/** o WhatsApp derrubou e o número segue fora */
 export const foiRemovido = (n: NumberItem) => !!n.waRemovedAt && n.status !== 'connected' && Date.now() - new Date(n.waRemovedAt).getTime() < ALERTA_MS;
 export const emPausa = (n: NumberItem) => !!n.reconnectBlockedUntil && new Date(n.reconnectBlockedUntil).getTime() > Date.now();
+/** 2ª queda (ou mais) em 24h: a pausa sugerida é maior (24h) */
+export const quedaRepetida = (n: NumberItem) => (n.waRemovedCount ?? 0) > 1;
 
 /**
- * Explicação para o cliente de por que o número caiu (docs/04-providers-whatsapp.md). Escrita
- * para quem não é técnico: o primeiro reflexo é achar que o sistema falhou e reconectar na hora
- * — e reconectar em cima da queda é justamente o que costuma virar restrição da conta.
+ * Explicação para o cliente de por que o número desconectou (docs/04-providers-whatsapp.md).
+ * **Tom neutro de propósito, sempre**: nada de vermelho, "risco", "banimento", "restrição" ou
+ * "denúncia". Os avisos alarmantes assustavam os clientes, e em 30 dias (até 12/11/2026) 22 de 29
+ * quedas voltaram só reconectando. A orientação útil continua: esperar um pouco antes de reconectar.
  */
 export function WaRemovedExplanation({ number }: { number: NumberItem }) {
-  const repetida = (number.waRemovedCount ?? 0) > 1;
+  const pausa = number.reconnectBlockedUntil && emPausa(number) ? hora(number.reconnectBlockedUntil) : null;
   return (
     <div className="space-y-2 text-[13px] text-ink">
       <p>
-        Em <b>{hora(number.waRemovedAt!)}</b> o <b>próprio WhatsApp encerrou a conexão</b> deste número com o sistema.
-        Não foi uma falha do sistema nem alguém clicando em &quot;Desconectar&quot; aqui.
-        {repetida && <> Esta é a <b>{number.waRemovedCount}ª queda em 24 horas</b> — sinal forte de que o WhatsApp está de olho no número.</>}
+        Em <b>{hora(number.waRemovedAt!)}</b> o WhatsApp encerrou a conexão deste número com o sistema. Isso é comum e se resolve
+        reconectando pelo QR Code. As conversas continuam aqui.
       </p>
-      <p className="font-medium">Isso acontece por um destes motivos:</p>
-      <ul className="list-disc pl-5 space-y-0.5">
-        <li>alguém removeu o aparelho em <b>WhatsApp → Aparelhos conectados</b>, no celular do número;</li>
-        <li>o WhatsApp considerou o uso suspeito: conexão pelo WhatsApp QR Code (Conexão Web), <b>contatos bloqueando ou denunciando</b> o número, ou conteúdo contra a política comercial dele (por exemplo, venda de medicamentos).</li>
-      </ul>
-      <p className="font-medium">O que fazer:</p>
-      <ol className="list-decimal pl-5 space-y-0.5">
-        <li>Abra o WhatsApp no celular do número e veja se aparece aviso de <b>restrição ou banimento</b>. Se aparecer, siga as instruções de lá — normalmente dá para pedir revisão.</li>
-        <li>
-          <b>Espere antes de reconectar</b>
-          {number.reconnectBlockedUntil && emPausa(number) && <> — o recomendado é a partir de <b>{hora(number.reconnectBlockedUntil)}</b></>}.
-          Reconectar logo em seguida é o que costuma transformar a queda em restrição da conta.
-        </li>
-        <li>Se voltar a cair, considere a <b>Meta Cloud API</b>, que não depende de QR Code.</li>
-      </ol>
+      <p className="text-muted">
+        Costuma acontecer quando o aparelho é removido em <b>WhatsApp → Aparelhos conectados</b>, quando o celular fica muito tempo sem
+        internet ou quando o WhatsApp é reinstalado.
+      </p>
+      <p className="text-muted">
+        {pausa
+          ? <>Sugerimos reconectar a partir de <b>{pausa}</b>: uma pausa antes de ler o QR deixa a conexão mais estável.</>
+          : <>Antes de reconectar, confira se o WhatsApp do celular está funcionando normalmente.</>}
+        {quedaRepetida(number) && <> Se continuar desconectando, fale com o suporte que a gente ajuda.</>}
+      </p>
     </div>
   );
 }
 
-/** Card na tela Números. */
+/** Card na tela Números: discreto, mesmo tom em qualquer caso. */
 export function WaRemovedCard({ number }: { number: NumberItem }) {
   if (!foiRemovido(number)) return null;
   return (
-    <div className="rounded-xl border border-danger/40 bg-danger-soft p-3 space-y-2">
-      <p className="flex items-center gap-1.5 font-semibold text-sm text-danger-ink"><ShieldAlert size={16} /> O WhatsApp desconectou este número</p>
+    <div className="rounded-xl border border-line bg-field p-3 space-y-2">
+      <p className="flex items-center gap-1.5 font-semibold text-sm text-ink"><Unplug size={15} className="text-muted" /> Número desconectado</p>
       <WaRemovedExplanation number={number} />
     </div>
   );
 }
 
-/** Faixa no topo de todas as telas enquanto um número derrubado pelo WhatsApp segue fora. */
+/** Faixa discreta no topo enquanto um número desconectado pelo WhatsApp segue fora. */
 export function WaRemovedBanner() {
   const numbers = useNumbers();
   const caidos = (numbers.data ?? []).filter((n) => n.isActive && foiRemovido(n));
   if (!caidos.length) return null;
-  const nomes = caidos.map((n) => `"${n.label}" (+${n.phone})`).join(', ');
+  const nomes = caidos.map((n) => `"${n.label}"`).join(', ');
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-[13px] bg-danger text-white">
-      <ShieldAlert size={16} className="shrink-0" />
-      <span className="flex-1">O WhatsApp desconectou {caidos.length > 1 ? 'os números' : 'o número'} {nomes}. Não reconecte antes de ler o que fazer.</span>
-      <Link href="/numeros" className="underline font-medium whitespace-nowrap">Entender o motivo</Link>
+    <div className="flex items-center gap-2 px-4 py-1 text-[12.5px] bg-field text-muted border-b border-line">
+      <Unplug size={14} className="shrink-0" />
+      <span className="flex-1">{caidos.length > 1 ? `Os números ${nomes} estão desconectados.` : `O número ${nomes} está desconectado.`}</span>
+      <Link href="/numeros" className="underline whitespace-nowrap text-ink">Reconectar</Link>
     </div>
   );
 }

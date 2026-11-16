@@ -415,7 +415,7 @@ export class NumbersController {
         code: 'reconnect_paused',
         until: n.reconnectBlockedUntil,
         removedCount: n.waRemovedCount,
-        message: 'O WhatsApp desconectou este número há pouco. Reconectar agora aumenta o risco de restrição da conta.',
+        message: 'O WhatsApp desconectou este número há pouco. Sugerimos esperar um pouco antes de reconectar.',
       });
     }
     if (n.reconnectBlockedUntil && n.reconnectBlockedUntil > new Date()) this.log.warn(`Número ${n.label} (${n.phone}) reconectado durante a pausa, confirmado por ${user.id}`);

@@ -9,7 +9,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AppLogger } from '../../common/observability/app-logger';
 import { AiUsageService } from './ai-usage.service';
 import { HITS_MAX_CHARS, HITS_TOP, chunkText, dot, fold, fuse, keywordQuery, packVector, searchableOf, unpackVector } from './knowledge-text';
-import { embed, embedCostUsd, embedModel, embeddingsOn } from './providers/embeddings';
+import { embed, embedCostUsd, embedJobBatch, embedModel, embeddingsOn } from './providers/embeddings';
 
 export const QUEUE_AI_KNOWLEDGE = 'ai';
 /** quantos candidatos cada busca traz antes de juntar */
@@ -199,7 +199,8 @@ export class KnowledgeService {
     const model = embedModel();
     const where: Prisma.AiKnowledgeChunkWhereInput = { ...(docId ? { docId } : {}), OR: [{ embedding: null }, { embedModel: { not: model } }] };
     for (;;) {
-      const batch = await this.prisma.aiKnowledgeChunk.findMany({ where, take: 256, orderBy: [{ docId: 'asc' }, { position: 'asc' }], select: { id: true, tenantId: true, heading: true, text: true } });
+      // rodada pequena no Ollama: o progresso aparece na tela a cada ~40 s em vez de só no fim
+      const batch = await this.prisma.aiKnowledgeChunk.findMany({ where, take: embedJobBatch(), orderBy: [{ docId: 'asc' }, { position: 'asc' }], select: { id: true, tenantId: true, heading: true, text: true } });
       if (!batch.length) return;
       const started = Date.now();
       const { vectors, tokens } = await embed(batch.map((c) => searchableOf(c)));

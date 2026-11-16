@@ -61,8 +61,35 @@ let refreshBlock: string | null = null;
 let lastRefreshStatus: number | null = null;
 export const refreshRefused = () => lastRefreshStatus === 401 || lastRefreshStatus === 403;
 
+/**
+ * Entrar em outro cliente/empresa (seletor, "Entrar" em Clientes, portal do parceiro, sair do
+ * "entrando como"): página nova do zero (docs/multiempresa.md#seletor). Só trocar o token e
+ * navegar deixava a tela aberta com dados do cliente anterior, e uma renovação já a caminho
+ * podia gravar o token antigo por cima do novo — a tela mostrava um cliente e gravava no outro.
+ * Na recarga, o token vem do cookie (membro) ou da impersonação guardada na aba (dono/parceiro).
+ * Zera os filtros salvos do cliente anterior (empresa, números, departamento, conversa aberta).
+ */
+export function reloadInto(destino: string): Promise<never> {
+  useUI.setState({ companyId: null, numberIds: [], departmentId: null, conversationId: null });
+  window.location.assign(destino);
+  return new Promise<never>(() => undefined);
+}
+
+/** Cliente do token (campo `tenantId` do JWT); null = sem token, dono fora de cliente ou token ilegível. */
+export function tenantOfToken(t: string | null): string | null {
+  if (!t) return null;
+  try {
+    const b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return (JSON.parse(atob(b64)) as { tenantId?: string | null }).tenantId ?? null;
+  } catch { return null; }
+}
+
 async function doRefresh(): Promise<boolean> {
   lastRefreshStatus = null;
+  // o cookie de sessão é um só para todas as abas: trocar de empresa em outra aba faz esta
+  // renovação voltar com OUTRO cliente. A tela continuaria mostrando o antigo e gravaria no
+  // novo sem ninguém perceber (docs/multiempresa.md#seletor) — então recarrega.
+  const antes = tenantOfToken(accessToken);
   const r = await fetch(`${API}/auth/refresh`, { method: 'POST', credentials: 'include' });
   lastRefreshStatus = r.status;
   if (r.status === 403) refreshBlock = (await r.json().catch(() => ({}))).code ?? null;
@@ -75,6 +102,10 @@ async function doRefresh(): Promise<boolean> {
     const i = await fetch(`${API}/tenants/${imp.tenantId}/impersonate`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${accessToken}` } });
     if (i.ok) setAccessToken((await i.json()).accessToken);
     else impersonation.set(null);
+  }
+  if (antes && tenantOfToken(accessToken) !== antes) {
+    location.reload();
+    return new Promise<boolean>(() => undefined); // a página vai recarregar: ninguém usa o token velho
   }
   return true;
 }

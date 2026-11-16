@@ -98,15 +98,15 @@ export function QrModal({ numberId, initialQr, onClose }: { numberId: string | n
  * a pessoa confirma os três —, mas obriga a ler antes de conectar.
  */
 const ITENS = [
-  { t: 'O número já é usado no celular há pelo menos 14 dias', d: 'Conversas, áudios e grupos de verdade. Chip novo conectado direto no sistema é o padrão que o WhatsApp mais pune.' },
-  { t: 'O chip foi registrado no WhatsApp há mais de 24 horas', d: 'Registrar e conectar logo em seguida é sinal de automação.' },
-  { t: 'Removi os aparelhos antigos em "Dispositivos conectados"', d: 'Faça isso antes de ler o QR, não depois — remover depois derruba a conexão nova.' },
+  { t: 'O número já é usado no celular há pelo menos 14 dias', d: 'Com conversas de verdade. Número com uso no celular conecta de forma mais estável.' },
+  { t: 'O chip foi registrado no WhatsApp há mais de 24 horas', d: 'Esperar um dia depois de ativar o WhatsApp deixa a conexão mais estável.' },
+  { t: 'Removi os aparelhos antigos em "Dispositivos conectados"', d: 'Faça isso antes de ler o QR, não depois: remover depois desconecta a conexão nova.' },
 ];
 
 function ChecklistAntesDoQr({ checks, onChange }: { checks: boolean[]; onChange: (c: boolean[]) => void }) {
   return (
     <div className="text-left space-y-3">
-      <p className="text-sm text-muted">Antes de conectar, confirme. Número que cai na primeira semana quase sempre falha em um destes pontos:</p>
+      <p className="text-sm text-muted">Antes de conectar, confira estes pontos. Eles ajudam a conexão a ficar estável:</p>
       {ITENS.map((it, i) => (
         <label key={i} className="flex gap-3 rounded-lg border border-line p-3 cursor-pointer hover:bg-field">
           <input type="checkbox" className="mt-0.5" checked={checks[i]} onChange={(e) => onChange(checks.map((c, j) => (j === i ? e.target.checked : c)))} />

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, MinusCircle, Search, ExternalLink, Lock, Paperclip, X } from 'lucide-react';
 import { MESSAGE_TYPE_LABEL, type MessageType } from '@atendo/shared';
-import { cn } from '@/lib/utils';
+import { cn, readableColor } from '@/lib/utils';
 import { inputCls, Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { fmtBRL } from '@/components/reports/ReportChart';
@@ -191,7 +191,7 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
 
 function TagPill({ t }: { t: { id: string; name: string; color: string } }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[11.5px] font-medium whitespace-nowrap" style={{ color: t.color, borderColor: t.color, background: `color-mix(in srgb, ${t.color} 12%, transparent)` }}>
+    <span className="inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[11.5px] font-medium whitespace-nowrap" style={{ color: readableColor(t.color), borderColor: readableColor(t.color), background: `color-mix(in srgb, ${readableColor(t.color)} 12%, transparent)` }}>
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: t.color }} />{t.name}
     </span>
   );

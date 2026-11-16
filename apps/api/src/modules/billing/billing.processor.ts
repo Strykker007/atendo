@@ -6,6 +6,7 @@ import { StripeService } from './stripe.service';
 import { DuesService } from './dues.service';
 import { PlanOverridesService } from './plan-overrides.service';
 import { MonthlyBillingService } from './monthly-billing.service';
+import { AsaasService } from './asaas.service';
 import { env } from '../../config/env';
 import { QUEUE_BILLING } from '../whatsapp/queues';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
@@ -18,6 +19,7 @@ export class BillingProcessor extends TrackedWorkerHost {
     private readonly dues: DuesService,
     private readonly overrides: PlanOverridesService,
     private readonly monthly: MonthlyBillingService,
+    private readonly asaas: AsaasService,
   ) {
     super(QUEUE_BILLING);
   }
@@ -25,6 +27,8 @@ export class BillingProcessor extends TrackedWorkerHost {
     if (job.name === 'reconcile') {
       await this.usage.reconcile();
       // carência vencida sem pagamento → suspende (envio bloqueado, recebimento continua)
+      // mensalidade avulsa (Vencimentos) vencida em assinatura sem gateway → past_due com carência
+      await this.asaas.markOverdueDues();
       await this.stripe.suspendOverdue();
       // degustação gratuita vencida → suspende; gratuito permanente só rola a data
       await this.stripe.expireFreePlans();

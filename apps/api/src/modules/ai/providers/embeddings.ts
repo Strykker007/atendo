@@ -11,6 +11,11 @@ const BATCH = 64;
 const LOCAL_BATCH = 4;
 const LOCAL_TIMEOUT_MS = 180_000;
 const local = () => isLocalEndpoint(env.AI_EMBED_BASE_URL);
+/**
+ * Trechos por rodada do job (`embedPending`): grava a cada rodada. No local, um regimento de 137
+ * trechos levava ~10 min e só gravava no fim — a tela ficava em 0% o tempo todo, parecendo travada.
+ */
+export const embedJobBatch = () => (local() ? LOCAL_BATCH * 2 : 256);
 
 const base = () => env.AI_EMBED_BASE_URL.replace(/\/+$/, '');
 
