@@ -3,6 +3,11 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.20.4 — 2026-11-17
+
+- fix(conversas): nome do contato no topo da conversa não some espremido pelas ações
+- feat(escalas): renovar acesso temporário expirado
+
 ## 1.20.3 — 2026-11-17
 
 - feat(equipe): editar pessoa escolhe o perfil de acesso, como na criação
