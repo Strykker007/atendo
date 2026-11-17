@@ -521,7 +521,14 @@ class TenantsController {
   async updateAgent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
     const { password, profileId, numberIds, departmentIds, receiveNumberIds, ...rest } = dto;
     await this.teamMember(u, id);
-    if (receiveNumberIds && u.role !== 'tenant_admin' && !u.impersonatorId) throw new ForbiddenException('Só o administrador da conta define quem recebe os atendimentos.');
+    if (dto.isActive === true) {
+      // temporário expirado: ativar não adianta (o login continua recusado) — renova com prazo novo
+      const temp = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId }, select: { isTemporary: true, expiredAt: true, accessExpiresAt: true } });
+      if (temp?.isTemporary && (temp.expiredAt || (temp.accessExpiresAt && temp.accessExpiresAt <= new Date()))) {
+        throw new BadRequestException('Este acesso temporário expirou. Para liberar de novo, use "Renovar" em Escalas → Aprovações e escolha o novo prazo.');
+      }
+    }
+    if (receiveNumberIds &&u.role !== 'tenant_admin' && !u.impersonatorId) throw new ForbiddenException('Só o administrador da conta define quem recebe os atendimentos.');
     if (dto.defaultNumberIds) rest.defaultNumberIds = await this.tenantNumberIds(u.tenantId, dto.defaultNumberIds);
     if (dto.name !== undefined && !dto.name.trim()) throw new BadRequestException('Informe o nome.');
     if (dto.name !== undefined) rest.name = dto.name.trim();

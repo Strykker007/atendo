@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { CalendarClock, Check, Copy, Hand, KeyRound, ShieldCheck, TimerOff, UserPlus, X } from 'lucide-react';
+import { CalendarClock, Check, Copy, Hand, KeyRound, RotateCcw, ShieldCheck, TimerOff, UserPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -9,8 +9,8 @@ import { toast } from '@/components/ui/Toast';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { EscalasTabs } from '@/components/escalas/EscalasTabs';
 import {
-  useAccessRequests, useCan, useCreateOverride, useCreateTemporaryUser, useDecideAccessRequest, useExpireTemporaryUser, useRevokeOverride, useScheduleOverrides, useTeamShifts, useTemporaryUsers, useWorkSchedules,
-  type AccessRequest, type TeamShift,
+  useAccessRequests, useCan, useCreateOverride, useCreateTemporaryUser, useDecideAccessRequest, useExpireTemporaryUser, useRenewTemporaryUser, useRevokeOverride, useScheduleOverrides, useTeamShifts, useTemporaryUsers, useWorkSchedules,
+  type AccessRequest, type TeamShift, type TemporaryUser,
 } from '@/lib/hooks';
 
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -34,6 +34,7 @@ export default function AprovacoesPage() {
   const expirar = useExpireTemporaryUser();
   const [autorizar, setAutorizar] = useState<TeamShift | true | null>(null);
   const [gerar, setGerar] = useState(false);
+  const [renovar, setRenovar] = useState<TemporaryUser | null>(null);
   const pedidos = useAccessRequests();
   const decidir = useDecideAccessRequest();
   const [aprovar, setAprovar] = useState<AccessRequest | null>(null);
@@ -139,6 +140,7 @@ export default function AprovacoesPage() {
                   <Button size="sm" variant="subtle" loading={expirar.isPending && expirar.variables === t.id}
                     onClick={() => expirar.mutate(t.id, { onSuccess: () => toast.ok('Acesso encerrado.'), onError: (err) => toast.err(err) })}><TimerOff size={13} /> Encerrar agora</Button>
                 )}
+                <Button size="sm" variant="subtle" onClick={() => setRenovar(t)}><RotateCcw size={13} /> Renovar</Button>
               </li>
             ))}
           </ul>
@@ -147,8 +149,25 @@ export default function AprovacoesPage() {
 
       {autorizar && <OverrideModal pessoa={autorizar === true ? null : autorizar} equipe={escalados} onClose={() => setAutorizar(null)} />}
       {gerar && <TemporaryModal onClose={() => setGerar(false)} />}
+      {renovar && <RenewModal pessoa={renovar} onClose={() => setRenovar(null)} />}
       {aprovar && <ApproveRequestModal pedido={aprovar} onClose={() => setAprovar(null)} />}
     </PageShell>
+  );
+}
+
+/** Renovar acesso temporário: mesma conta e senha, prazo novo contado a partir de agora */
+function RenewModal({ pessoa, onClose }: { pessoa: TemporaryUser; onClose: () => void }) {
+  const renovar = useRenewTemporaryUser();
+  const [hours, setHours] = useState(12);
+  return (
+    <Modal open onClose={onClose} title={`Renovar acesso · ${pessoa.name}`} width="max-w-sm">
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); renovar.mutate({ id: pessoa.id, hours }, { onSuccess: (r) => { toast.ok(`Acesso liberado até ${quando(r.accessExpiresAt)}.`); onClose(); }, onError: (err) => toast.err(err) }); }}>
+        <Field label="Válido por (horas)" hint="Contado a partir de agora. O login e a senha continuam os mesmos.">
+          <input type="number" className={inputCls} min={1} max={72} value={hours} onChange={(e) => setHours(Math.max(1, Math.min(72, Number(e.target.value) || 1)))} required autoFocus />
+        </Field>
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose} disabled={renovar.isPending}>Cancelar</Button><Button type="submit" loading={renovar.isPending} loadingText="Renovando…">Renovar</Button></div>
+      </form>
+    </Modal>
   );
 }
 
