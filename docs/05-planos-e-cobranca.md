@@ -269,7 +269,9 @@ Checkout com `billingType: 'BOLETO'` cria a assinatura recorrente por boleto no 
 3. Cartão: a tokenização (`/creditCard/tokenizeCreditCard`) precisa estar habilitada na conta do Asaas — em produção é pedida ao gerente da conta. No sandbox já vem ligada.
 4. `ASAAS_AUTO_ENROLL=true` (opcional, padrão `false`): o job diário migra sozinho para o Asaas quem paga sem gateway e já tem CPF/CNPJ ([Migração](#migração-para-o-asaas)). Ligue depois da primeira migração conferida pela prévia.
 
-Os clientes no Asaas são criados com `notificationDisabled: true`: quem avisa da cobrança é o painel e o **nosso** e-mail (Brevo), com o Pix ([Lembretes](#lembretes-da-mensalidade)) — o Asaas mandando também duplicaria a cobrança, e SMS/WhatsApp dele custam por envio.
+Desde 16/11/2026 os clientes no Asaas são criados com `notificationDisabled: false`: **quem avisa da mensalidade de quem assina pelo Asaas é o próprio Asaas** (e-mail/SMS com boleto e Pix; padrão da conta: 10 dias antes, no dia e depois do vencimento; SMS/WhatsApp dele custam por envio, configure no painel do Asaas). O nosso e-mail (Brevo) ficou só para quem ainda está sem gateway ([Lembretes](#lembretes-da-mensalidade)). Quem já assinava antes disso nascia com os avisos desligados: a rodada de migração (`enrollAll` sem `dryRun`) liga os avisos deles (`enableNotifications`).
+
+5. `ASAAS_SUBSCRIPTION_LEAD_DAYS` (padrão `40`): com quantos dias de antecedência o Asaas gera cada parcela (padrão da conta; o gerente de contas pode trocar para 14 ou 7). Define a [data limite para cancelar](#data-limite-para-cancelar).
 
 ### Liberar para os clientes
 
@@ -280,7 +282,7 @@ Os clientes no Asaas são criados com `notificationDisabled: true`: quem avisa d
 | Aviso "informe o CPF/CNPJ" no topo | não aparece | aparece para quem paga sem gateway e não tem documento |
 | `POST /billing/monthly/document` | 400 | grava e migra na hora |
 | "Assinar"/"Mudar para este" em `/plano` (`gateway` dos checkouts novos) | Stripe, se houver chave; senão "fale com o suporte". `POST /billing/asaas/checkout` = 400, exceto para quem já assina pelo Asaas | Asaas |
-| Migração diária automática (`ASAAS_AUTO_ENROLL`) | não roda | roda |
+| Migração diária automática (`ASAAS_AUTO_ENROLL`) | roda (desde 16/11/2026 só depende da env) | roda |
 | Migração pelo botão do dono (prévia → migrar) | funciona | funciona |
 | Quem já foi migrado: mensalidade, lembretes, aviso "vence em…", "Pagar" | continua | continua |
 
@@ -288,12 +290,28 @@ Liberar **só depois do webhook configurado** no painel do Asaas.
 
 ### Migração para o Asaas
 
-<a id="migração-para-o-asaas"></a>Quem paga hoje **sem gateway** (cobrança manual) passa para uma assinatura recorrente por **Pix** no Asaas, **sem ação do cliente**, mantendo o **valor contratado** (`subscriptions.priceMonth`, senão o do plano, × unidades) e o **vencimento** que já tinha (`currentPeriodEnd`; se já passou, hoje). Código: `billing/monthly-billing.service.ts` (+ regras puras em `monthly-billing.ts`).
+<a id="migração-para-o-asaas"></a>Quem paga hoje **sem gateway** (cobrança manual) passa para uma assinatura recorrente por **boleto** no Asaas (o boleto do Asaas traz o Pix no mesmo documento; até 16/11/2026 era só Pix), **sem ação do cliente**, mantendo o **valor contratado** (`subscriptions.priceMonth`, senão o do plano, × unidades) e o **vencimento** que já tinha (`currentPeriodEnd`). Vencido ou a menos de 3 dias: **hoje + 3 dias** (`boletoFirstDueDate`; boleto leva até 3 dias úteis para compensar). Com **Pix avulso de Vencimentos em aberto**, ele já cobra o ciclo atual: a assinatura começa no **ciclo seguinte** (sem duas cobranças do mesmo mês); o Pix avulso continua valendo. O `currentPeriodEnd` passa a ser o 1º vencimento no Asaas. Código: `billing/monthly-billing.service.ts` (+ regras puras em `monthly-billing.ts`).
 
 - **Quem entra** (`enrollSkip`): sem gateway, plano pago mensal/anual, assinatura `active`/`trialing`/`past_due` e `tenants.document` com **CPF/CNPJ válido** (dígitos verificadores, `isValidCpfCnpj` no shared). Fica de fora: gratuito/personalizado, sem valor, suspenso/cancelado, e **sem documento** — esse vê no topo do painel *"Ative o pagamento automático… falta só o CPF ou CNPJ"*; ao salvar (`POST /billing/monthly/document`), é migrado na hora.
 - **Como rodar**: Financeiro → **Cobrança por Pix** (`PixMigration`, só o dono do sistema): **Ver prévia** (`POST /billing/monthly/enroll {dryRun:true}` — quem entra, valor, 1º vencimento, quem fica de fora e por quê) e **Migrar N cliente(s)**. Cada linha "Vai migrar" tem **Migrar só este** (`{dryRun:false, tenantId}`) — para começar por um cliente (ex.: quem vence primeiro) sem mexer nos outros; não depende de "Liberar para os clientes". Depois, `ASAAS_AUTO_ENROLL=true` mantém a migração diária de quem completar o cadastro.
-- **Por cliente**: cria/atualiza o Customer (razão social ou nome, CPF/CNPJ, `billingEmail`, telefone, CEP) e a assinatura `PIX` com `nextDueDate` = vencimento atual. Só grava `gateway = 'asaas'` se ainda estava sem gateway (`updateMany`); se outra rodada ganhou, a assinatura duplicada é cancelada no Asaas. O lembrete sai logo em seguida se o vencimento estiver a até 5 dias.
+- **Por cliente**: cria/atualiza o Customer (razão social ou nome, CPF/CNPJ, `billingEmail`, telefone, CEP) e a assinatura `BOLETO` com `nextDueDate` = 1º vencimento. Só grava `gateway = 'asaas'` se ainda estava sem gateway (`updateMany`); se outra rodada ganhou, a assinatura duplicada é cancelada no Asaas. O Asaas gera a 1ª parcela na hora e avisa o cliente; a fatura é espelhada em `invoices` em seguida.
 - **Depois de migrado vale o fluxo do Asaas**: pagou → `active` e o vencimento anda (webhook); venceu sem pagar → `past_due` com a carência do plano (`graceDays`, padrão 5) e **suspensão do envio** quando ela acaba — na cobrança manual nada suspendia sozinho. A 1ª cobrança não cobra excedente; a partir da 2ª, excedente do mês anterior vira cobrança avulsa (`addOverage`).
+
+### Clientes novos
+
+<a id="clientes-novos"></a>Cliente pago entra na assinatura do Asaas **assim que tiver CPF/CNPJ**, sem esperar ninguém rodar a migração (`MonthlyBillingService.enrollIfReady` → `enrollAll({tenantId})`; melhor esforço, a falha só vai para o log):
+- o dono salva o cliente em **Clientes** (`PATCH /tenants/:id`: cadastro com o CPF/CNPJ, troca para plano pago);
+- o admin do cliente informa o CPF/CNPJ no aviso do painel (`POST /billing/monthly/document`);
+- paga a [cobrança de ativação](#cobrança-de-ativação) (a recorrente nasce por boleto no fim do 1º ciclo);
+- o job diário (`ASAAS_AUTO_ENROLL=true`) pega quem ficou para trás.
+
+Cliente criado sem CPF/CNPJ (o formulário de criação não pede) fica de fora até o documento ser preenchido.
+
+### Data limite para cancelar
+
+<a id="data-limite-para-cancelar"></a>O Asaas gera cada parcela da assinatura **40 dias antes do vencimento** (`ASAAS_SUBSCRIPTION_LEAD_DAYS`). Se a assinatura for cancelada no Asaas antes disso, a parcela não nasce; depois, ela já existe e precisa ser paga ou apagada à mão. `cancelDeadline` (`monthly-billing.ts`) anda um ciclo de cada vez a partir do `currentPeriodEnd` até a primeira parcela cuja geração ainda está no futuro (`nextCharge`) e devolve `cancelBy` = `nextCharge` − 40 dias − 1 (o último dia inteiro). Mês curto: dia 31 vira o último dia do mês, como no Asaas.
+- Cliente: **Plano e uso** mostra *"Cancelar sem a próxima parcela até dd/mm/aaaa"* (`GET /billing/usage` → `cancelDeadline: {nextCharge, cancelBy}`, só para assinatura viva no Asaas).
+- Dono: `GET /billing/finance` → `subscriptions[].cancelBy` (e `gateway`).
 
 ### Cobrança de ativação
 
@@ -303,7 +321,7 @@ Liberar **só depois do webhook configurado** no painel do Asaas.
 - **Itens**: vêm sugeridos *Instalação e configuração* (valor a digitar) e *1ª mensalidade — Plano* (valor contratado: personalizado, senão o do plano × unidades). Lista livre (até 20, `kind` `setup`/`first_month`/`other`), desconto, vencimento (padrão +3 dias) e CPF/CNPJ (exigido pelo Asaas; vai para o cadastro). Total mínimo R$ 5,00. Uma cobrança em aberto por cliente.
 - **Gerar**: cria/atualiza o Customer, Pix avulso (`billingType: PIX`, `externalReference = activation:<id>`), espelha em `invoices` (entra no Faturado × Recebido) e liga `subscriptions.awaitingActivation`. E-mail para os admins com os itens e o link `/plano?pagar=1`.
 - **Enquanto não paga**: o cliente entra e configura tudo (números, equipe, fluxos), mas **não envia** — `UsageService.limits` devolve `status = awaiting_activation` e `decideCanSend` recusa ("Conta aguardando ativação…"). O admin (`billing.manage`) vê a faixa **Ative sua conta** (`billingNotice.kind = activation_due`) com **Pagar com Pix**, que abre o QR em Plano e uso (é a cobrança em aberto do Customer); os demais veem "Conta aguardando ativação" no lugar do aviso de uso. A migração para o Asaas (`enrollAll`/automática) pula quem aguarda ativação.
-- **Pago** (webhook `PAYMENT_RECEIVED/CONFIRMED`, ou a consulta do modal do Pix — quem vira a ativação para `paid` primeiro aplica): `awaitingActivation = false`, assinatura `active` de hoje até +1 ciclo, e — se ainda sem gateway, com CPF/CNPJ e valor > 0 — **assinatura Pix recorrente no Asaas** com 1º vencimento no fim desse ciclo (daí valem lembretes, carência e suspensão). Falha ao criar a recorrente só gera log: usar *Migrar só este*. E-mail "Sua conta está ativa".
+- **Pago** (webhook `PAYMENT_RECEIVED/CONFIRMED`, ou a consulta do modal do Pix — quem vira a ativação para `paid` primeiro aplica): `awaitingActivation = false`, assinatura `active` de hoje até +1 ciclo, e — se ainda sem gateway, com CPF/CNPJ e valor > 0 — **assinatura recorrente por boleto no Asaas** com 1º vencimento no fim desse ciclo (daí valem lembretes, carência e suspensão). Falha ao criar a recorrente só gera log: usar *Migrar só este*. E-mail "Sua conta está ativa".
 - **Pagou por fora**: botão no modal — ativa igual e cancela o Pix no Asaas.
 - **Cancelar Pix**: apaga no Asaas, fatura `void`, tira o bloqueio. Se o Asaas já recebeu, ativa em vez de cancelar.
 
@@ -318,15 +336,13 @@ Modelo: `activation_charges` (`items` jsonb, `discount`, `totalValue`, `firstMon
 
 ### Lembretes da mensalidade
 
-<a id="lembretes-da-mensalidade"></a>Job `monthly-reminders` da fila de cobrança, todo dia às **12:00 UTC (9h em Brasília)**. Para cada assinatura no Asaas, busca a cobrança em aberto **no Asaas** (não depende do webhook ter chegado), espelha em `invoices` e decide (`reminderKind`):
+<a id="lembretes-da-mensalidade"></a>Job `monthly-reminders` da fila de cobrança, todo dia às **12:00 UTC (9h em Brasília)**.
 
-| Quando | Lembrete | Marca |
-|---|---|---|
-| de 5 dias antes até a véspera (uma vez — quem migrou a 3 dias do vencimento recebe já) | "vence em dd/mm" | `invoices.remindedSoonAt` |
-| no dia do vencimento | "vence hoje" | `invoices.remindedDueAt` |
-| vencida | o aviso de atraso que já existia (`onOverdue`) | — |
+**Assinatura no Asaas: quem lembra é o Asaas** (desde 16/11/2026; antes era o nosso e-mail). O job só busca a parcela em aberto **no Asaas** e espelha em `invoices` (aviso do painel e Financeiro), sem depender do webhook. Mandar o nosso e-mail também duplicaria o aviso.
 
-**Sem gateway (cobrança manual) também recebe** (`remindManual`, mesmo job; desde 16/11/2026 — antes só quem tinha assinatura no Asaas): plano pago, `active`/`past_due`, sem ativação pendente.
+O nosso e-mail (`reminderKind`): de 5 dias antes até a véspera, uma vez, "vence em dd/mm"; no dia, "vence hoje".
+
+**Quem recebe: só quem está sem gateway (cobrança manual)** (`remindManual`, mesmo job): plano pago, `active`/`past_due`, sem ativação pendente.
 - Com o **Pix avulso de Vencimentos** em aberto (fatura com item `group`): mesmo e-mail, com QR e copia e cola, vencimento da fatura; marca em `invoices.remindedSoonAt/remindedDueAt`. Vencida → `markOverdueDues` (atraso com carência e e-mail, ver *Vencimento*).
 - **Sem cobrança gerada**: vencimento = `currentPeriodEnd`, valor = o contratado; o e-mail leva a `/plano/vencimentos`, onde o cliente gera o Pix. Marca no Redis (`billing:lembrete:<tenant>:<vencimento>:<tipo>`, 60 dias). Vencida: **um** aviso ("venceu em dd/mm") só no dia seguinte ao vencimento — quem já estava vencido antes não recebe rajada; o status não muda sozinho.
 - Aviso no painel: `payment_due` também para eles, com `hasCharge` (false → o "Pagar com Pix" leva a Vencimentos; true → abre o QR do Pix avulso, `GET /billing/asaas/pending`).

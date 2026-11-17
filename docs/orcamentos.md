@@ -157,6 +157,7 @@ Para não haver furo nem duplicidade, o encerramento **absorve** o pagamento (`b
 - **Não comprou** com pagamento confirmado: recusado (`400 budget_paid`) — o botão fica desabilitado. Fluxo que encerra como perda vira venda, com aviso para a equipe.
 - **Em massa**: conversas com pagamento ficam abertas (`withPayment` na resposta) — encerrar uma a uma.
 - **Sem encerramento** (ou encerrada pela automação): o pagamento segue contando sozinho.
+- **Contato isento** (`conversations.ticketExempt`, [contatos isentos](contatos-isentos.md)): nem o encerramento nem o pagamento contam como venda (`vendasPorConsultorSql`). Ele já ficava fora dos concluídos; contar a venda dele fazia a conversão do ranking passar de 100%.
 
 **Estorno**: botão **Estornar** na lista do orçamento (gestão — `settings.manage`). Pix automático pede a devolução ao Asaas (`POST /payments/:id/refund`); por fora, só registra. Também chega pelo webhook (`PAYMENT_REFUNDED`). O orçamento vira `REFUNDED`, a venda ganha `refundedAt` e sai do faturamento, da meta e do ranking (se já estava num encerramento, desconta do valor dele). Estorno parcial ou em andamento só gera nota na conversa — conferir no Asaas. **Desfazer pago** existe só para corrigir clique errado no pago por fora ainda não encerrado; o resto é estorno. Os webhooks já cadastrados são alinhados à lista de eventos (pagamento + estorno) quando a API sobe.
 

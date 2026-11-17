@@ -44,12 +44,14 @@ export default function EquipePage() {
   // e-mail de outro admin (ou o próprio): só o admin da conta — o papel continua fora do alcance
   // vínculo (docs/multiempresa.md): o login é o da empresa principal da pessoa — ninguém daqui troca
   const canEditEmail = (a: Agent) => !a.linked && (canEditAccess(a) || (canManageTeam && me.data?.role === 'tenant_admin' && a.role === 'tenant_admin'));
-  async function saveEdit(a: Agent, b: { name?: string; email?: string; role?: 'agent' | 'manager' }) {
+  async function saveEdit(a: Agent, b: { name?: string; email?: string; profileId?: string }) {
     try {
       await update.mutateAsync({ id: a.id, ...b });
       // o próprio nome também vai no token: renova para o painel já mostrar o novo
       if (a.id === me.data?.id) { await refresh(); qc.invalidateQueries({ queryKey: ['me'] }); }
-      toast.ok(b.email || b.role ? 'Usuário atualizado — a pessoa precisa entrar de novo' : 'Usuário atualizado');
+      // perfil de outro nível (atendente ↔ gerente) muda o papel, que vai no token
+      const outroNivel = b.profileId !== undefined && (profiles.data?.find((p) => p.id === b.profileId)?.systemRole === 'manager') !== (a.role === 'manager');
+      toast.ok(b.email || outroNivel ? 'Usuário atualizado — a pessoa precisa entrar de novo' : 'Usuário atualizado');
       setEditing(null);
     } catch (err) { toast.err(err); }
   }
@@ -282,7 +284,7 @@ export default function EquipePage() {
         }).catch((err) => { toast.err(err); return null; })}
       />
       {acesso && <AccessModal agent={agents.data?.find((x) => x.id === acesso.id) ?? acesso} open onClose={() => setAcesso(null)} />}
-      <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditEmail={!!editing && canEditEmail(editing)} isSelf={editing?.id === me.data?.id} canEditRole={me.data?.role !== 'manager'} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
+      <EditAgentModal agent={editing} onClose={() => setEditing(null)} canEditAccess={!!editing && canEditAccess(editing)} canEditEmail={!!editing && canEditEmail(editing)} isSelf={editing?.id === me.data?.id} profiles={me.data?.role === 'manager' ? selectableProfiles.filter((p) => p.systemRole !== 'manager') : selectableProfiles} onSubmit={(b) => editing && saveEdit(editing, b)} pending={update.isPending} />
       <ResetPasswordModal agent={resetting} onClose={() => setResetting(null)} onSubmit={(password) => resetting && update.mutateAsync({ id: resetting.id, password }).then(() => { toast.ok('Senha redefinida'); setResetting(null); }).catch(toast.err)} pending={update.isPending} />
     </PageShell>
   );
@@ -457,17 +459,20 @@ function ResetPasswordModal({ agent, onClose, onSubmit, pending }: { agent: Agen
   );
 }
 
-function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canEditEmail, isSelf, canEditRole }: { agent: Agent | null; onClose: () => void; onSubmit: (b: { name?: string; email?: string; role?: 'agent' | 'manager' }) => void; pending: boolean; canEditAccess: boolean; canEditEmail: boolean; isSelf: boolean; canEditRole: boolean }) {
-  const [f, setF] = useState<{ name: string; email: string; role: 'agent' | 'manager' }>({ name: '', email: '', role: 'agent' });
+function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canEditEmail, isSelf, profiles }: { agent: Agent | null; onClose: () => void; onSubmit: (b: { name?: string; email?: string; profileId?: string }) => void; pending: boolean; canEditAccess: boolean; canEditEmail: boolean; isSelf: boolean; profiles: { id: string; name: string; systemRole?: 'tenant_admin' | 'manager' | 'agent' | null }[] }) {
+  const [f, setF] = useState<{ name: string; email: string; profileId: string }>({ name: '', email: '', profileId: '' });
   const [forId, setForId] = useState<string | null>(null);
   // preenche com os dados atuais ao abrir para outra pessoa
-  if (agent && forId !== agent.id) { setForId(agent.id); setF({ name: agent.name, email: agent.email, role: agent.role === 'manager' ? 'manager' : 'agent' }); }
+  if (agent && forId !== agent.id) { setForId(agent.id); setF({ name: agent.name, email: agent.email, profileId: agent.profile?.id ?? '' }); }
   if (!agent && forId) setForId(null);
-  // manda só o que mudou: e-mail/papel encerram as sessões da pessoa
+  const atual = agent?.profile ?? null;
+  // perfil atual fora da lista (tem permissão que quem edita não tem): aparece, mas não se escolhe de volta
+  const foraDaLista = !!atual && !profiles.some((p) => p.id === atual.id);
+  // manda só o que mudou: e-mail e perfil de outro nível (atendente ↔ gerente) encerram as sessões da pessoa
   const changes = agent ? {
     ...(f.name.trim() !== agent.name && { name: f.name.trim() }),
     ...(canEditEmail && f.email.trim().toLowerCase() !== agent.email.toLowerCase() && { email: f.email.trim().toLowerCase() }),
-    ...(canEditAccess && canEditRole && f.role !== agent.role && { role: f.role }),
+    ...(canEditAccess && f.profileId && f.profileId !== (atual?.id ?? '') && { profileId: f.profileId }),
   } : {};
   const dirty = Object.keys(changes).length > 0;
   return (
@@ -479,16 +484,13 @@ function EditAgentModal({ agent, onClose, onSubmit, pending, canEditAccess, canE
         ) : (
           <p className="text-xs text-muted">{agent?.email}</p>
         )}
-        {canEditAccess && canEditRole && (
-          <Field label="Papel">
-            <div className="grid grid-cols-2 gap-2">
-              {(['agent', 'manager'] as const).map((r) => (
-                <button type="button" key={r} onClick={() => setF({ ...f, role: r })} className={cn('rounded-lg border px-3 py-2 text-left', f.role === r ? 'border-accent bg-accent-soft' : 'border-line hover:bg-field')}>
-                  <div className="text-sm font-semibold text-ink">{r === 'agent' ? 'Atendente' : 'Gerente'}</div>
-                  <div className="text-[11px] text-muted">{r === 'agent' ? 'Atende as próprias conversas' : 'Vê todas, transfere, orienta por nota interna'}</div>
-                </button>
-              ))}
-            </div>
+        {canEditAccess && (
+          <Field label="Perfil de acesso" hint="O perfil define o que a pessoa pode fazer. Números e departamentos ficam em Acesso (clique no perfil na lista).">
+            <select className={inputCls} value={f.profileId} onChange={(e) => setF({ ...f, profileId: e.target.value })}>
+              {!atual && <option value="">Padrão do papel</option>}
+              {atual && foraDaLista && <option value={atual.id} disabled>{atual.name}</option>}
+              {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
           </Field>
         )}
         <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button><Button type="submit" loading={pending} loadingText="Salvando…" disabled={!f.name.trim() || !dirty}>Salvar</Button></div>

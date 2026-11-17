@@ -29,6 +29,9 @@ const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', curren
 const qtdMes = (n: number | null, oque: string, ilimitado: string) => (n === null ? `${oque} ${ilimitado}/mês` : `${n.toLocaleString('pt-BR')} ${oque}/mês`);
 const qtd = (n: number | null | undefined, um: string, varios: string) => (n == null ? `${varios} ilimitados` : `${n} ${n === 1 ? um : varios}`);
 
+/** 'AAAA-MM-DD' → dd/mm/aaaa sem passar por Date (evita voltar um dia pelo fuso) */
+const dataYmd = (ymd: string) => ymd.split('-').reverse().join('/');
+
 export default function PlanoPage() {
   return <Suspense><PlanoInner /></Suspense>;
 }
@@ -146,6 +149,13 @@ function PlanoInner() {
           <div className="text-xs text-muted">{u.freePlan ? 'Gratuidade' : asaasSub ? 'Próximo vencimento' : 'Renova em'}</div>
           <div className="font-medium">{u.freePlan ? (fimGratis ? `até ${fimGratis}` : 'Permanente') : u.currentPeriodEnd ? new Date(u.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'}</div>
         </div>
+        {u.cancelDeadline && (
+          // o Asaas gera cada parcela 40 dias antes: cancelando até esta data, a próxima não nasce
+          <div title={`Cancelando até esta data, a parcela de ${dataYmd(u.cancelDeadline.nextCharge)} não é gerada.`}>
+            <div className="text-xs text-muted">Cancelar sem a próxima parcela até</div>
+            <div className="font-medium">{dataYmd(u.cancelDeadline.cancelBy)}</div>
+          </div>
+        )}
         <span className={cn('text-xs rounded-full px-2.5 py-1', st.cls)}>{st.label}</span>
         {/* portal só existe no Stripe; no Asaas o caminho é pagar a cobrança em aberto aqui */}
         {isAdmin && !u.freePlan && (u.subscriptionGateway ?? u.gateway) === 'stripe' && (

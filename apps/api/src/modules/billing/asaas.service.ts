@@ -219,9 +219,10 @@ export class AsaasService {
       postalCode: onlyDigits(data.postalCode),
       addressNumber: data.addressNumber,
       externalReference: tenantId,
-      // quem avisa é o painel + o nosso e-mail com o Pix (docs/05#lembretes-da-mensalidade): o
-      // Asaas mandando também duplicaria a cobrança (e SMS/WhatsApp dele custam por envio)
-      notificationDisabled: true,
+      // quem avisa da mensalidade é o próprio Asaas (e-mail/SMS com boleto e Pix, antes, no dia e
+      // depois do vencimento — docs/05#lembretes-da-mensalidade); o nosso e-mail fica para quem
+      // ainda não tem assinatura no Asaas
+      notificationDisabled: false,
     };
     if (tenant.asaasCustomerId) {
       await this.request('PUT', `/customers/${tenant.asaasCustomerId}`, body);
@@ -230,6 +231,11 @@ export class AsaasService {
     const c = await this.request<AsaasCustomer>('POST', '/customers', body);
     await this.prisma.tenant.update({ where: { id: tenantId }, data: { asaasCustomerId: c.id } });
     return c.id;
+  }
+
+  /** Liga os avisos do Asaas num cliente já cadastrado (até 16/11/2026 eles nasciam desligados). */
+  async enableNotifications(customerId: string) {
+    await this.request('PUT', `/customers/${customerId}`, { notificationDisabled: false });
   }
 
   /** Dados já cadastrados no Asaas, para preencher o checkout de novo sem redigitar. */
@@ -563,10 +569,11 @@ export class AsaasService {
     if (this.enabled && !sub.gateway && !sub.plan.isFree && value > 0 && sub.tenant.document) {
       try {
         const customer = await this.customerFromProfile(tenantId);
-        const remote = await this.createSubscription({ customer, billingType: 'PIX', value, cycle, description: `${senderName()} ${sub.plan.name}`, externalReference: tenantId, nextDueDate: ymd(end) });
+        // boleto (com Pix no mesmo documento): o Asaas gera as parcelas e manda os lembretes
+        const remote = await this.createSubscription({ customer, billingType: 'BOLETO', value, cycle, description: `${senderName()} ${sub.plan.name}`, externalReference: tenantId, nextDueDate: ymd(end) });
         const ok = await this.prisma.subscription.updateMany({ where: { tenantId, gateway: null }, data: { gateway: 'asaas', externalId: remote.id } });
         if (!ok.count) await this.cancelSubscription(remote.id).catch(() => undefined);
-        else this.log.log(`tenant ${tenantId}: mensalidade por Pix no Asaas ${remote.id}, ${value} ${cycle}, 1º vencimento ${ymd(end)}`);
+        else this.log.log(`tenant ${tenantId}: mensalidade por boleto no Asaas ${remote.id}, ${value} ${cycle}, 1º vencimento ${ymd(end)}`);
       } catch (err) {
         this.log.error(`tenant ${tenantId}: ativado, mas a mensalidade recorrente não foi criada no Asaas (${(err as Error)?.message ?? err}) — use Financeiro → Cobrança por Pix → Migrar só este`);
       }
@@ -579,7 +586,7 @@ export class AsaasService {
         subject: `Sua conta ${senderName()} está ativa`,
         text: `Recebemos o pagamento de ${brl(Number(charge.totalValue))}. Sua conta está ativa e o envio de mensagens já está liberado.
 
-A próxima mensalidade vence em ${end.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} — avisamos por e-mail com o Pix alguns dias antes.
+A próxima mensalidade vence em ${end.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} — o boleto (com Pix) chega por e-mail alguns dias antes.
 
 ${env.WEB_ORIGIN}`,
       }).catch(() => undefined);

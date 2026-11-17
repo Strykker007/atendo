@@ -3,6 +3,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { periodOf } from './usage.service';
 import { grantDiscountIn } from './discount-ledger.service';
 import { overridePrice } from './plan-override';
+import { env } from '../../config/env';
+import { cancelDeadline, diaSP } from './monthly-billing';
 
 /**
  * Relatório financeiro do dono do Atendo (super_admin).
@@ -148,7 +150,9 @@ export class FinanceService {
         listPrice: g.listPrice, priceMonth: g.priceMonth, discountPercent: g.discountPercent, units: g.units,
         startsAt: g.startsAt, endsAt: g.endsAt, closedAt: g.closedAt, grantedBy: g.grantedByName, createdAt: g.createdAt,
       })),
-      subscriptions: subs.map((s) => ({ tenant: s.tenant.name, plan: s.plan.name, price: price(s), status: s.status, periodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd, graceUntil: s.graceUntil })),
+      subscriptions: subs.map((s) => ({ tenant: s.tenant.name, plan: s.plan.name, price: price(s), status: s.status, periodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd, graceUntil: s.graceUntil,
+        // assinatura no Asaas: último dia para cancelar sem gerar a próxima parcela (docs/05#data-limite-para-cancelar)
+        gateway: s.gateway, cancelBy: s.gateway === 'asaas' && s.status !== 'canceled' && s.status !== 'suspended' ? cancelDeadline(diaSP(s.currentPeriodEnd), s.plan.billingCycle === 'yearly' ? 'yearly' : 'monthly', env.ASAAS_SUBSCRIPTION_LEAD_DAYS).cancelBy : null })),
     };
   }
 }

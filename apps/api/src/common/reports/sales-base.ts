@@ -13,6 +13,10 @@ import { Prisma } from '@prisma/client';
  * o filtro ligado os pagamentos avulsos ficam de fora.
  *
  * `numberIds` = escopo de números (empresa selecionada no painel): só vendas de conversas desses números.
+ *
+ * Contato isento (`conversations.ticketExempt`, docs/contatos-isentos.md) fica fora, como em todo
+ * relatório: os concluídos já não o contavam, e a venda dele sobre concluídos sem ele levava a
+ * conversão do ranking acima de 100% (ID Vida Urbana, 11/2026).
  */
 export function vendasPorConsultorSql(tenantId: string, from: Date, to: Date, eventoExtra?: Prisma.Sql, numberIds?: string[]) {
   const escopo = (col: Prisma.Sql) => (numberIds ? Prisma.sql`and ${col} in (select cs.id from conversations cs where cs."numberId" in (${Prisma.join(numberIds)}))` : Prisma.empty);
@@ -24,6 +28,7 @@ export function vendasPorConsultorSql(tenantId: string, from: Date, to: Date, ev
       from conversation_events e
       where e."tenantId" = ${tenantId} and e.type = 'closed' and e.outcome = 'won' and not e."ignoreInReports"
         and e."actorId" is not null and e."createdAt" >= ${from} and e."createdAt" < ${to}
+        and not exists (select 1 from conversations ce where ce.id = e."conversationId" and ce."ticketExempt")
         ${eventoExtra ? Prisma.sql`and ${eventoExtra}` : Prisma.empty}
         ${escopo(Prisma.sql`e."conversationId"`)}
       union all
@@ -31,6 +36,7 @@ export function vendasPorConsultorSql(tenantId: string, from: Date, to: Date, ev
       from budgets b
       where b."tenantId" = ${tenantId} and b.status = 'PAID' and b."closeEventId" is null
         and b."paidAt" >= ${from} and b."paidAt" < ${to}
+        and not exists (select 1 from conversations cb where cb.id = b."conversationId" and cb."ticketExempt")
         ${eventoExtra ? Prisma.sql`and false` : Prisma.empty}
         ${escopo(Prisma.sql`b."conversationId"`)}
     ) x
