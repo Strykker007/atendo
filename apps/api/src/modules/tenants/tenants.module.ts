@@ -540,12 +540,17 @@ class TenantsController {
     }
     // `passwordSetAt` é o que libera o login de quem foi convidado: sem isto, definir a
     // senha pelo painel não adiantava nada e o usuário continuava travado no convite
-    const base = profileId === undefined ? rest : { ...rest, profileId: profileId || null };
     if (profileId) {
-      // perfil de outro cliente não entra: o id vem do corpo da requisição
-      const ok = await this.prisma.accessProfile.count({ where: { id: profileId, tenantId: u.tenantId } });
-      if (!ok) throw new BadRequestException('Perfil de acesso não encontrado.');
+      // mesma regra da criação (agentAccess): perfil deste cliente, nunca o de admin, sem permissão
+      // que quem edita não tem — e o papel acompanha o perfil (perfil de gerente = papel gerente)
+      const acesso = await this.agentAccess(u, { profileId });
+      if (dto.role === undefined) {
+        const atual = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId }, select: { role: true } });
+        if (atual && (atual.role === 'agent' || atual.role === 'manager') && atual.role !== acesso.role) rest.role = acesso.role;
+      }
     }
+    const roleChanged = rest.role !== undefined;
+    const base = profileId === undefined ? rest : { ...rest, profileId: profileId || null };
     const data = password
       ? { ...base, passwordHash: await this.auth.hashPassword(password), passwordSetAt: new Date() }
       : base;
@@ -570,7 +575,7 @@ class TenantsController {
     const updated = await this.prisma.user.update({ where: { id, tenantId: u.tenantId, role: { in: [...editable] } }, data, select: { id: true, name: true, email: true, role: true, isActive: true } });
     // revoga sessões ativas ao trocar senha, desativar, ou mudar login/papel (vão no token).
     // Depois do update: se a edição for recusada, ninguém é deslogado à toa
-    if (password || dto.isActive === false || dto.email !== undefined || dto.role !== undefined) {
+    if (password || dto.isActive === false || dto.email !== undefined || roleChanged) {
       await this.prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
       // desativado: o access token já emitido para de valer agora, não daqui a 15 min
       if (dto.isActive === false) await this.shift.cutSessions([id]);
@@ -610,7 +615,7 @@ class TenantsController {
       const cur = await this.prisma.user.findUnique({ where: { id }, select: { profile: { select: { isSystem: true } } } });
       if (cur?.profile?.isSystem) await this.provisioning.linkRoleProfile(u.tenantId, id, dto.role);
     }
-    if (profileId !== undefined || numberIds || dto.defaultNumberIds || dto.role !== undefined) this.permissions.invalidate();
+    if (profileId !== undefined || numberIds || dto.defaultNumberIds || roleChanged) this.permissions.invalidate();
     return updated;
   }
 }

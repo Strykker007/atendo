@@ -145,6 +145,13 @@ convites saem em sequência.
 dele (perfil padrão de gerente → `manager`; qualquer outro → `agent`). Com um **modelo de perfil**, Gerente/Atendente vêm com a matriz do modelo
 (`customized`) e membros novos entram no perfil do papel — ver [20](20-modelos-de-perfil.md).
 
+**Editar uma pessoa já criada** (lápis na Equipe) mostra o mesmo seletor **Perfil de acesso** da
+criação, no lugar do antigo "Papel". `PATCH /tenants/me/agents/:id` com `profileId` passa pela mesma
+validação da criação: o perfil tem de ser deste cliente, não pode ser o de admin e não pode ter
+permissão que quem edita não tem. Gerente também não atribui perfil de gerente. O papel técnico
+acompanha o perfil; quando muda (atendente ↔ gerente), as sessões da pessoa são encerradas, porque o
+papel vai no token. A tela de **Acesso** usa o mesmo endpoint e segue a mesma regra.
+
 ## Próximo passo
 
 Restrição por número (item 7 de [16](16-lacunas-primeiro-cliente.md)) encaixa aqui: é escopo
