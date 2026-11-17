@@ -99,7 +99,7 @@ export class InboundService {
     // chegou mensagem de cliente: se o número estava marcado "parou de receber", já voltou
     if (number.receiveStalledAt) await this.voltouAReceber(number.id, number.tenantId);
 
-    let contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
+    let contact = await this.findContact(number.tenantId, msg.from)
       ?? (isGroupJid(msg.from) ? await this.createGroupContact(number, msg.from) : await this.createContact(number, msg.from, msg.contactName));
     if (msg.contactName) contact = await this.restaurarAgenda(number.tenantId, contact, msg.contactName);
     // o pushName só troca nome que também veio do WhatsApp (ou contato ainda sem nome): nome da
@@ -239,7 +239,7 @@ export class InboundService {
   private async ingestFromDevice(number: WhatsAppNumber, msg: InboundMessage) {
     // sem pushName: o desta mensagem é de quem a enviou (o dono do número), não do contato.
     // Nome só da agenda; senão chega na primeira mensagem que o contato mandar.
-    const contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone: msg.from } } })
+    const contact = await this.findContact(number.tenantId, msg.from)
       ?? (isGroupJid(msg.from) ? await this.createGroupContact(number, msg.from) : await this.createContact(number, msg.from));
 
     // mesma regra da entrada: uma conversa por pessoa neste número (ver reopen.ts)
@@ -369,7 +369,7 @@ export class InboundService {
     let imported = 0;
     for (const [phone, lista] of porContato) {
       const nome = lista.find((m) => !m.fromMe && m.contactName)?.contactName;
-      const contact = (await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone } } })) ?? (await this.createContact(number, phone, nome));
+      const contact = (await this.findContact(number.tenantId, phone)) ?? (await this.createContact(number, phone, nome));
       const ultima = lista.reduce((a, b) => (a.timestamp > b.timestamp ? a : b)).timestamp;
       const conversation = (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
         ?? (await this.prisma.conversation.create({ data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'closed', lastMessageAt: ultima } }));
@@ -414,7 +414,7 @@ export class InboundService {
 
   private async recuperarDoContato(number: WhatsAppNumber, phone: string, msgs: InboundMessage[]) {
     const nome = msgs.find((m) => !m.fromMe && m.contactName)?.contactName;
-    const contact = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId: number.tenantId, phone } } })
+    const contact = await this.findContact(number.tenantId, phone)
       ?? (isGroupJid(phone) ? await this.createGroupContact(number, phone) : await this.createContact(number, phone, nome));
     let conversation = await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } });
 
@@ -691,6 +691,19 @@ export class InboundService {
    * "Ficha" do grupo liberado para as conversas: o telefone é o jid e o nome vem da lista de
    * grupos do número (o pushName de cada mensagem é de quem escreveu, não do grupo).
    */
+  /**
+   * Contato da mensagem recebida: forma exata primeiro; senão a mesma pessoa com/sem o nono
+   * dígito. A Meta devolve o `wa_id` sem o 9 em muitos celulares antigos — quem foi chamado pelo
+   * painel (digitado com o 9) respondia e virava um segundo contato, numa conversa nova.
+   */
+  private async findContact(tenantId: string, phone: string) {
+    const exato = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId, phone } } });
+    if (exato || isGroupJid(phone)) return exato;
+    const formas = phoneVariants(phone).filter((v) => v !== phone);
+    if (!formas.length) return null;
+    return this.prisma.contact.findFirst({ where: { tenantId, phone: { in: formas }, isGroup: false }, orderBy: { createdAt: 'asc' } });
+  }
+
   private async createGroupContact(number: WhatsAppNumber, jid: string) {
     const g = await this.prisma.whatsAppGroup.findUnique({ where: { numberId_jid: { numberId: number.id, jid } }, select: { name: true } });
     return this.prisma.contact.upsert({
