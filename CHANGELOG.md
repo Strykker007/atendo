@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.20.3 — 2026-11-17
+
+- feat(equipe): editar pessoa escolhe o perfil de acesso, como na criação
+- fix(relatorios): venda de contato isento não conta (conversão do ranking passava de 100%)
+- fix(cobranca): com Pix avulso em aberto, a assinatura do Asaas começa no ciclo seguinte
+- feat(cobranca): assinatura por boleto no Asaas, lembretes pelo Asaas e data limite para cancelar
+
 ## 1.20.2 — 2026-11-16
 
 - fix(conversas): respondida pelo celular também não volta sozinha para o atendente
