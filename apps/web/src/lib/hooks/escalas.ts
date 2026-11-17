@@ -112,6 +112,14 @@ export const useCreateTemporaryUser = () => {
     onSuccess: () => { invalidar(qc); qc.invalidateQueries({ queryKey: ['usage'] }); },
   });
 };
+/** Renova um acesso temporário (expirado ou valendo) por mais `hours` horas, a partir de agora */
+export const useRenewTemporaryUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { id: string; hours: number }) => api<{ ok: true; accessExpiresAt: string }>(`/users/temporary/${b.id}/renew`, { method: 'POST', body: JSON.stringify({ hours: b.hours }) }),
+    onSuccess: () => { invalidar(qc); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['agents'] }); },
+  });
+};
 export const useExpireTemporaryUser = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/users/temporary/${id}/expire`, { method: 'POST' }), onSuccess: () => { invalidar(qc); qc.invalidateQueries({ queryKey: ['usage'] }); } });

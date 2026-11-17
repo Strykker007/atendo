@@ -130,6 +130,18 @@ Expirar = `isActive = false`, `expiredAt = agora` e todos os refresh tokens revo
 serve para outro dia. Conta inativa deixa de contar em `maxAgents`. Status na listagem:
 `ACTIVE`, `EXPIRED` (venceu ou foi encerrada) ou `INACTIVE` (desativada pela equipe).
 
+### Renovar acesso temporário
+
+`POST /users/temporary/:id/renew` com `{ hours }` (1…72) volta a liberar a conta, expirada ou ainda
+valendo. Ela fica com `isActive = true`, `expiredAt = null` e `accessExpiresAt = agora + horas`. O
+login e a senha continuam os mesmos. Se a conta estava inativa, ela volta a ocupar vaga do plano, e
+por isso a renovação confere `maxAgents` antes, como na criação. Na tela, é o botão **Renovar** em
+Escalas → Aprovações → Acessos temporários.
+
+**Ativar pela Equipe não renova.** Antes, isso só ligava `isActive`: a pessoa aparecia ativa, mas o
+login continuava dando "acesso temporário expirou". Agora o `PATCH /tenants/me/agents/:id` com
+`isActive: true` numa conta temporária vencida responde 400 e manda usar o Renovar.
+
 ## Calendário: folga, turno extra e troca (`shift_exceptions`)
 
 A escala continua sendo uma **regra**; o calendário mostra os turnos que ela dá em cada dia e
@@ -185,6 +197,7 @@ Todas exigem `team.manage` e filtram pelo `tenantId` do usuário logado — meno
 | GET | `/users/temporary` | Contas temporárias (últimas 100) com `status` |
 | POST | `/users/temporary` | `{name, hours (1–72), scheduleId?, numberIds?}` → `{id, name, email, password, accessExpiresAt}`. Respeita `maxAgents` |
 | POST | `/users/temporary/:id/expire` | Encerra o acesso antes do prazo |
+| POST | `/users/temporary/:id/renew` | Libera de novo por `hours` horas a partir de agora (mesma conta e senha) |
 
 ## Telas
 

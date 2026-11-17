@@ -648,9 +648,11 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           </button>
         )}
         <ZoomableAvatar name={conv.contact.name ?? conv.contact.phone} phone={conv.contact.phone} src={conv.contact.avatarUrl} />
-        <div className="min-w-0 flex-1">
+        {/* o nome tem largura garantida (base 14rem, mínimo 9rem): com `flex-1` e base 0, as ações
+            espremiam o nome até sumir antes de quebrarem para a linha de baixo */}
+        <div className="min-w-[9rem] flex-[1_1_14rem]">
           <div className="font-semibold text-sm text-ink flex items-center gap-1.5 min-w-0">
-            <span className="truncate">{conv.contact.name ?? formatPhone(conv.contact.phone)}</span>
+            <span className="truncate" title={conv.contact.name ?? formatPhone(conv.contact.phone)}>{conv.contact.name ?? formatPhone(conv.contact.phone)}</span>
             <DepartmentBadge department={conv.department} className="shrink-0 max-w-[140px]" />
             {botPaused(conv) && (
               <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 bg-warn-soft text-warn-ink" title="Automação pausada só nesta conversa">

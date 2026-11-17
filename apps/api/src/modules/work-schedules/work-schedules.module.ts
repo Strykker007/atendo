@@ -17,6 +17,7 @@ import { localOf } from '../tenants/schedule-clock';
 import { TZ_DEFAULT } from '../../common/time';
 import { BillingModule } from '../billing/billing.module';
 import { PlanLimitGuard, RequireLimit } from '../billing/plan-limit.guard';
+import { UsageService } from '../billing/usage.service';
 import { TenantsModule } from '../tenants/tenants.module';
 import { TenantProvisioningService } from '../tenants/tenant-provisioning.service';
 import { ConversationsModule } from '../conversations/conversations.module';
@@ -63,6 +64,10 @@ class OverrideDto {
   /** por quantas horas a liberação vale, a partir de agora */
   @IsInt() @Min(1) @Max(72) hours: number;
   @IsOptional() @IsString() @MaxLength(200) reason?: string;
+}
+/** Renovar acesso temporário: nova validade, contada a partir de agora */
+class RenewTemporaryDto {
+  @IsInt() @Min(1) @Max(72) hours: number;
 }
 class TemporaryUserDto {
   @IsString() @MinLength(1) @MaxLength(80) name: string;
@@ -234,6 +239,7 @@ class UsersScheduleController {
     private readonly shift: ShiftAccessService,
     private readonly provisioning: TenantProvisioningService,
     private readonly gateway: ConversationsGateway,
+    private readonly usage: UsageService,
   ) {}
 
   /** Associa (ou tira) a escala de um colaborador. Gerente só mexe em atendentes, como na equipe. */
@@ -301,6 +307,22 @@ class UsersScheduleController {
       await this.prisma.userNumber.createMany({ data: valid.map((n) => ({ userId: user.id, numberId: n.id })), skipDuplicates: true });
     }
     return { ...user, password, accessExpiresAt };
+  }
+
+  /**
+   * Renova um acesso temporário (expirado ou ainda valendo): volta a valer por `hours` horas a partir
+   * de agora, com a mesma conta e a mesma senha. Reativar pela Equipe não basta: a conta continuaria
+   * expirada (docs/escalas.md#renovar-acesso-temporário).
+   */
+  @Post('temporary/:id/renew')
+  async renewTemporary(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: RenewTemporaryDto) {
+    const target = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, isTemporary: true, ...teamWhere(u) }, select: { id: true, isActive: true } });
+    if (!target) throw new NotFoundException('Acesso temporário não encontrado.');
+    // conta desativada volta a ocupar vaga do plano: mesma conta da criação (PlanLimitGuard)
+    if (!target.isActive) await this.usage.assertRoom(u.tenantId, 'maxAgents');
+    const accessExpiresAt = new Date(Date.now() + dto.hours * 3_600_000);
+    await this.prisma.user.update({ where: { id: target.id }, data: { isActive: true, expiredAt: null, accessExpiresAt } });
+    return { ok: true, accessExpiresAt };
   }
 
   /** Encerra o acesso temporário antes do prazo (status EXPIRED, sessões derrubadas). */
