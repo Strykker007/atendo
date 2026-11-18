@@ -62,6 +62,20 @@ suportado e duplicaria tudo.
   mexe na janela de 24 h da API. Erro `131060` = mensagem para aparelho não suportado — o cliente
   vê no app. Para sair, só pelo app (a API de descadastro não vale).
 
+## Portfólio do cliente
+
+Ao terminar a janela, o Atendo lê o **portfólio** (Business Manager) dono da WABA, com o nome e a
+situação da verificação. Esse dado aparece na mensagem de sucesso e no cartão do número em
+**Números**: "Portfólio X · verificado". É o uso da permissão `business_management`
+(`MetaProvider.businessInfo`):
+- o id do portfólio vem do evento da janela (`business_id`) ou de `GET /{waba}?fields=owner_business_info`;
+- depois, `GET /{business_id}?fields=id,name,verification_status`, feito com o token do número.
+
+No cartão, a leitura é na hora: `GET /numbers/:id/meta-business`, com cache de 10 min na tela. Se a
+Meta falhar, o cadastro não é desfeito; o cartão só não mostra o portfólio.
+
+Roteiro do vídeo e respostas da análise do app: [39 — Análise do app na Meta](39-app-review-meta.md).
+
 ## O que configurar na Meta (uma vez)
 
 1. **Tornar-se Tech Provider** no app (painel do app → WhatsApp → *Tech Provider* / "Torne-se um

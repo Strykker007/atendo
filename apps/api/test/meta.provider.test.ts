@@ -336,3 +336,34 @@ describe('describeMetaError', () => {
     expect(describeMetaError(undefined, 'padrão')).toBe('padrão');
   });
 });
+
+// permissão business_management: portfólio dono da WABA (docs/meta-cadastro-incorporado.md#portfólio-do-cliente)
+describe('MetaProvider.businessInfo', () => {
+  let urls: string[];
+  afterEach(() => vi.unstubAllGlobals());
+  const responder = (porCaminho: Record<string, unknown>) => {
+    urls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(String(url));
+      const chave = Object.keys(porCaminho).find((k) => String(url).includes(k));
+      return { ok: true, json: async () => (chave ? porCaminho[chave] : {}) } as any;
+    }));
+  };
+
+  it('acha o portfólio pelo dono da WABA e lê nome e verificação', async () => {
+    responder({ 'waba-1?fields=owner_business_info': { owner_business_info: { id: '987654', name: 'X' } }, '987654?fields=id,name,verification_status': { id: '987654', name: 'Farmácia Teste', verification_status: 'verified' } });
+    expect(await provider.businessInfo(ctx)).toEqual({ id: '987654', name: 'Farmácia Teste', verificationStatus: 'verified' });
+    expect(urls).toHaveLength(2);
+  });
+
+  it('WABA sem dono informado: null, sem segunda chamada', async () => {
+    responder({ 'waba-1?fields=owner_business_info': {} });
+    expect(await provider.businessInfo(ctx)).toBeNull();
+    expect(urls).toHaveLength(1);
+  });
+
+  it('erro da Meta sobe (a rota devolve como `error`)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: { message: 'missing permission', code: 200 } }) }) as any));
+    await expect(provider.businessInfo(ctx)).rejects.toThrow();
+  });
+});

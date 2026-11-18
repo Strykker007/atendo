@@ -41,11 +41,16 @@ export const useCreateNumber = () => {
 export const useMetaSignupConfig = (enabled = true) =>
   useQuery({ queryKey: ['meta-signup-config'], enabled, staleTime: 10 * 60_000, retry: false, queryFn: () => api<{ enabled: boolean; appId: string | null; configId: string | null; graphVersion: string }>('/numbers/meta-signup/config') });
 
+/** Portfólio da Meta dono do número (docs/meta-cadastro-incorporado.md#portfólio-do-cliente). */
+export interface MetaBusiness { id: string; name: string | null; verificationStatus: string | null }
+export const useMetaBusiness = (numberId: string, enabled: boolean) =>
+  useQuery({ queryKey: ['meta-business', numberId], enabled, staleTime: 10 * 60_000, retry: false, queryFn: () => api<{ business: MetaBusiness | null; error?: string }>(`/numbers/${numberId}/meta-business`) });
+
 export const useMetaSignup = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { code: string; wabaId: string; phoneNumberId?: string; label: string; coexist?: boolean }) =>
-      api<NumberItem & { verifiedName: string | null; registerError: string | null; syncErrors?: string[] }>('/numbers/meta-signup', { method: 'POST', body: JSON.stringify(body) }),
+    mutationFn: (body: { code: string; wabaId: string; phoneNumberId?: string; businessId?: string; label: string; coexist?: boolean }) =>
+      api<NumberItem & { verifiedName: string | null; registerError: string | null; syncErrors?: string[]; business?: MetaBusiness | null }>('/numbers/meta-signup', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };

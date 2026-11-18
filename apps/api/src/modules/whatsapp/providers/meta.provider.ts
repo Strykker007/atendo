@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { MessageStatus, MessageType, NumberStatus, BillingCategory, templateParams } from '@atendo/shared';
 import type { InboundMessage, MessageTemplate, OutboundMessage, SendResult, StatusUpdate } from '@atendo/shared';
@@ -18,6 +18,9 @@ export interface MetaNumberConfig {
   coexist?: boolean;
 }
 
+/** portfólio (Business Manager) dono da WABA — `verificationStatus`: verified, not_verified, pending… */
+export interface MetaBusinessInfo { id: string; name: string | null; verificationStatus: string | null }
+
 /** um ponto do `pricing_analytics` (granularidade diária) */
 export interface MetaPricingPoint {
   start: number;
@@ -36,6 +39,7 @@ export interface MetaPricingPoint {
 @Injectable()
 export class MetaProvider implements WhatsAppProvider {
   readonly kind = 'meta' as const;
+  private readonly log = new Logger(MetaProvider.name);
   private readonly base = `https://graph.facebook.com/${env.META_GRAPH_VERSION}`;
 
   private cfg(ctx: NumberContext): MetaNumberConfig {
@@ -70,7 +74,27 @@ export class MetaProvider implements WhatsAppProvider {
    * na Cloud API com um PIN novo. A inscrição do app na WABA fica no `connect`, como no manual.
    * Registro recusado (número com PIN de outro sistema) não impede o cadastro: volta em `registerError`.
    */
-  async embeddedSignup(code: string, wabaId: string, phoneNumberId?: string, coexist = false) {
+  /**
+   * Portfólio (Business Manager) dono da WABA: nome e situação da verificação, mostrados no cartão do
+   * número. É o uso da permissão `business_management` (docs/meta-cadastro-incorporado.md#portfólio-do-cliente):
+   * o id vem da janela (`business_id`) ou do dono da WABA (`owner_business_info`).
+   */
+  async businessInfo(ctx: NumberContext): Promise<MetaBusinessInfo | null> {
+    return this.businessOf(this.cfg(ctx));
+  }
+
+  private async businessOf(cfg: MetaNumberConfig, businessId?: string): Promise<MetaBusinessInfo | null> {
+    let id = businessId;
+    if (!id && cfg.wabaId) {
+      const w = await this.graph<{ owner_business_info?: { id?: string } }>(cfg, `${cfg.wabaId}?fields=owner_business_info`);
+      id = w.owner_business_info?.id;
+    }
+    if (!id) return null;
+    const b = await this.graph<{ id: string; name?: string; verification_status?: string }>(cfg, `${id}?fields=id,name,verification_status`);
+    return { id: b.id, name: b.name ?? null, verificationStatus: b.verification_status ?? null };
+  }
+
+  async embeddedSignup(code: string, wabaId: string, phoneNumberId?: string, coexist = false, businessId?: string) {
     if (!env.META_APP_ID || !env.META_APP_SECRET) throw new BadRequestException('Cadastro pela Meta não está configurado neste servidor.');
     const q = new URLSearchParams({ client_id: env.META_APP_ID, client_secret: env.META_APP_SECRET, code });
     const res = await fetch(`${this.base}/oauth/access_token?${q}`);
@@ -84,8 +108,10 @@ export class MetaProvider implements WhatsAppProvider {
     }
     const cfg: MetaNumberConfig = { accessToken: tok.access_token, phoneNumberId, wabaId, ...(coexist && { coexist: true }) };
     const info = await this.graph<{ display_phone_number?: string; verified_name?: string }>(cfg, `${phoneNumberId}?fields=display_phone_number,verified_name`);
+    // portfólio do cliente: só informativo — falhar aqui não impede o cadastro
+    const business = await this.businessOf(cfg, businessId).catch((err) => { this.log.warn(`cadastro incorporado: portfólio não lido (${err instanceof Error ? err.message : err})`); return null; });
     // coexistência: o número já está registrado pelo aplicativo — /register derrubaria o app
-    if (coexist) return { config: cfg, phone: (info.display_phone_number ?? '').replace(/\D/g, ''), verifiedName: info.verified_name ?? null, registerError: undefined };
+    if (coexist) return { config: cfg, phone: (info.display_phone_number ?? '').replace(/\D/g, ''), verifiedName: info.verified_name ?? null, registerError: undefined, business };
     const pin = String(randomInt(0, 1_000_000)).padStart(6, '0');
     let registerError: string | undefined;
     await this.graph(cfg, `${phoneNumberId}/register`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', pin }) })
@@ -95,6 +121,7 @@ export class MetaProvider implements WhatsAppProvider {
       phone: (info.display_phone_number ?? '').replace(/\D/g, ''),
       verifiedName: info.verified_name ?? null,
       registerError,
+      business,
     };
   }
 

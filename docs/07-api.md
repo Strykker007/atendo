@@ -57,6 +57,7 @@ Access token expira em 15 min (`JWT_ACCESS_TTL`). O front renova sozinho em 401 
 | GET | `/numbers` | todos | Números do tenant. `manageable` = quem pediu pode gerenciar a conexão daquele número (ver [Perfis de acesso](18-perfis-de-acesso.md#gestão-da-conexão-do-número)). `warmup` = fase do aquecimento (`{phase, newConvPerHour, minGapMs, endsAt}` ou `null`, ver [Envio](envio.md#aquecimento)) |
 | GET | `/numbers/:id/phonebook?q=&cursor=` | quem opera o número | Agenda do celular do número (sincronizada da Evolution), alfabética, 50 por página: `{ items: [{id, phone, name, contactId}], nextCursor, total? }` (`total` só na 1ª página). `q` filtra por nome ou telefone — [busca textual](#busca-textual-de-contatos). `contactId` preenchido = a pessoa já é contato |
 | POST | `/numbers/:id/contacts/sync` | `numbers.manage` + escopo | Relê agora a agenda de contatos do celular (só Evolution conectado; senão 400). Entra na fila do worker — devolve `{ queued: true }`. Uma vez por dia por número (429 antes de 24 h da última). Também roda sozinho uma vez por dia ([Providers](04-providers-whatsapp.md)) |
+| GET | `/numbers/:id/meta-business` | `numbers.manage` | Portfólio da Meta dono do número oficial, lido na hora (permissão `business_management`): `{ business: { id, name, verificationStatus } \| null, error? }`. Fora da Meta, `business: null`; falha da Meta volta em `error` |
 | GET | `/numbers/:id/templates?refresh=1` | quem opera o número | Templates **aprovados** (HSM) da WABA do número, normalizados em `MessageTemplate` (`@atendo/shared`): nome, idioma, categoria, cabeçalho/corpo/rodapé, botões e variáveis (`headerParams`, `bodyParams` — `1`, `2`… ou nomes). Cache de 5 min por número no processo da API; `refresh=1` busca de novo na Meta. Evolution = `[]`. Cabeçalho de mídia vem em `headerFormat`; botões que pedem valor (link com `{{1}}`, cupom) em `dynamicButtons` (posição + tipo). O que o painel ainda não preenche (cabeçalho de localização, botão de formulário/catálogo, autenticação) vem com `unsupported` (motivo). Na escolha enviada (`template` do envio, start, transmissão, lembrete): `buttons` (`{ "<posição>": valor }`) e `headerMediaKey`/`headerMediaName` (chave de `POST /uploads`) |
 | POST | `/numbers` | `numbers.manage` | Cria e conecta (respeita `maxNumbers`). Quem é restrito a alguns números passa a operar o que criou |
 | PUT | `/numbers/:id/provider` | `numbers.manage` + escopo | **Troca de provider**. Número já usado em outro card → 409 (antes de desligar o atual) |
@@ -238,7 +239,7 @@ Rotas `/partners/*`, `/partner-program/*`, `/partner-payouts/*` (dono) e `/partn
 
 ### Tickets internos
 
-`GET /numbers/meta-signup/config` (`numbers.manage`) → `{enabled, appId, configId, graphVersion}` e `POST /numbers/meta-signup` `{code, wabaId, phoneNumberId, label}` (cadastro pela janela da Meta) em [Cadastro incorporado](meta-cadastro-incorporado.md).
+`GET /numbers/meta-signup/config` (`numbers.manage`) → `{enabled, appId, configId, graphVersion}` e `POST /numbers/meta-signup` `{code, wabaId, phoneNumberId, businessId?, label}` (devolve também `business`) (cadastro pela janela da Meta) em [Cadastro incorporado](meta-cadastro-incorporado.md).
 
 Rotas `/billing/meta-costs`, `/billing/meta-costs/refresh` e `/billing/meta-budget` em [Gasto com a Meta](gasto-meta.md#api).
 
