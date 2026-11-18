@@ -22,5 +22,6 @@ export * from './finance.js';
 export * from './tickets.js';
 export * from './secure-media.js';
 export * from './ranking.js';
+export * from './vocab.js';
 export * from './documents.js';
 export * from './partners.js';

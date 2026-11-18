@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
 import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, ScheduleConfig, WelcomeMessage, WelcomeMode, RankingWeights, BudgetQuoteItems } from '@atendo/shared';
-import { ALL_PERMISSIONS } from '@atendo/shared';
+import { ALL_PERMISSIONS, salesVocab } from '@atendo/shared';
 
 // ---- Configurações do cliente (fuso, atendimento ativo, fluxos padrão, boas-vindas) ----
 export interface TenantSettings {
@@ -70,10 +70,7 @@ export function useOutcomeLabels(): OutcomeLabels {
  * Use em todo texto de UI que nomeia a pessoa da equipe ou o contato, em vez de escrever fixo.
  */
 export function useVocab() {
-  const vendas = useTenantSettings().data?.salesEnabled ?? true;
-  return vendas
-    ? { vendas, pessoa: 'Consultor', pessoas: 'consultores', lead: 'lead', leads: 'leads' }
-    : { vendas, pessoa: 'Atendente', pessoas: 'atendentes', lead: 'contato', leads: 'contatos' };
+  return salesVocab(useTenantSettings().data?.salesEnabled ?? true);
 }
 const invSettings = (qc: ReturnType<typeof useQueryClient>) => () => { qc.invalidateQueries({ queryKey: ['tenant-settings'] }); qc.invalidateQueries({ queryKey: ['schedules'] }); };
 export const useUpdateTenantSettings = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: SettingsPatch) => api('/settings', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: invSettings(qc) }); };

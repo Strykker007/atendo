@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { RANKING_METRICS, RANKING_METRIC_HINT, RANKING_METRIC_LABEL, RANKING_WEIGHTS_DEFAULT, type RankingMetric, type RankingWeights } from '@atendo/shared';
+import { RANKING_METRICS, RANKING_WEIGHTS_DEFAULT, rankingMetricHint, rankingMetricLabel, rankingMetricsFor, type RankingMetric, type RankingWeights } from '@atendo/shared';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
@@ -31,8 +31,6 @@ const PRESETS: { key: string; label: string; range: () => [string, string] }[] =
 type SortKey = 'score' | 'name' | 'closed' | 'won' | 'revenue' | 'conversionRate' | 'avgHandleMin' | 'satisfaction';
 const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 const fmtMin = (m: number | null) => (m == null ? '—' : m < 60 ? `${m.toFixed(0)} min` : m < 1440 ? `${(m / 60).toFixed(1)} h` : `${(m / 1440).toFixed(1)} d`);
-/** Nome da métrica: sem venda, "Vendas"/"Conversão" levam o nome do resultado positivo da empresa. */
-const rotuloMetrica = (k: RankingMetric, vendas: boolean, wonLabel: string) => (vendas ? RANKING_METRIC_LABEL[k] : k === 'won' ? wonLabel : k === 'conversion' ? `Taxa de “${wonLabel}”` : RANKING_METRIC_LABEL[k]);
 const fmtPct = (v: number) => `${v.toFixed(v % 1 ? 1 : 0)}%`;
 
 export default function RankingPage() {
@@ -73,7 +71,7 @@ export default function RankingPage() {
 
   const podio = q.data?.ranking.slice(0, 3) ?? [];
   const toggle = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'name' && key !== 'avgHandleMin' }));
-  const composicao = (r: ConsultantRankingRow, w: RankingWeights) => RANKING_METRICS.filter((k) => w[k]).map((k) => `${rotuloMetrica(k, vendas, labels.won)}: ${r.scoreParts?.[k] == null ? 'sem dado' : `${r.scoreParts[k]!.toFixed(0)}/100`} (peso ${w[k]})`).join('\n');
+  const composicao = (r: ConsultantRankingRow, w: RankingWeights) => RANKING_METRICS.filter((k) => w[k]).map((k) => `${rankingMetricLabel(k, vendas, labels.won)}: ${r.scoreParts?.[k] == null ? 'sem dado' : `${r.scoreParts[k]!.toFixed(0)}/100`} (peso ${w[k]})`).join('\n');
 
   const escala = q.data?.satisfactionScale;
   const comNota = satisfacao.has && !!escala;
@@ -186,7 +184,7 @@ export default function RankingPage() {
               </table>
             </section>
           )}
-          <p className="text-[11px] text-faint">Pontuação = média ponderada de cada métrica de 0 a 100 em relação ao melhor do período (passe o mouse para ver a composição); sem pesquisa ou sem TMA, o peso vai para as outras. Pesos: {RANKING_METRICS.filter((k) => q.data!.weights[k]).map((k) => `${rotuloMetrica(k, vendas, labels.won)} ${q.data!.weights[k]}`).join(' · ')}. Concluídos = atendimentos encerrados pelo consultor (encerramento automático e interno não contam) + orçamentos pagos ainda sem encerramento. Conversão = vendas ÷ concluídos. TMA = do início do atendimento (ou da reabertura) até o encerramento.{comNota && ' Satisfação = média da pergunta principal da pesquisa de satisfação (escala mais usada no período); NPS só na escala de 1 a 10.'}</p>
+          <p className="text-[11px] text-faint">Pontuação = média ponderada de cada métrica de 0 a 100 em relação ao melhor do período (passe o mouse para ver a composição); sem pesquisa ou sem TMA, o peso vai para as outras. Pesos: {RANKING_METRICS.filter((k) => q.data!.weights[k]).map((k) => `${rankingMetricLabel(k, vendas, labels.won)} ${q.data!.weights[k]}`).join(' · ')}. Concluídos = atendimentos encerrados pelo consultor (encerramento automático e interno não contam) + orçamentos pagos ainda sem encerramento. Conversão = vendas ÷ concluídos. TMA = do início do atendimento (ou da reabertura) até o encerramento.{comNota && ' Satisfação = média da pergunta principal da pesquisa de satisfação (escala mais usada no período); NPS só na escala de 1 a 10.'}</p>
         </>
       )}
       </>}
@@ -233,9 +231,9 @@ function Th({ label, k, sort, onClick, right }: { label: string; k: SortKey; sor
 /** Pesos da pontuação (gestão — `settings.manage`). Cada um de 0 a 100; o que vale é a proporção entre eles. */
 function PesosModal({ atuais, vendas, wonLabel, onClose }: { atuais: RankingWeights; vendas: boolean; wonLabel: string; onClose: () => void }) {
   // sem venda o faturamento não existe (a API já zera o peso — effectiveRankingWeights)
-  const metricas = RANKING_METRICS.filter((k) => vendas || k !== 'revenue');
-  const rotulo = (k: RankingMetric) => rotuloMetrica(k, vendas, wonLabel);
-  const dica = (k: RankingMetric) => (vendas ? RANKING_METRIC_HINT[k] : k === 'won' ? `Quantidade de “${wonLabel}” em relação à maior` : k === 'conversion' ? `“${wonLabel}” ÷ concluídos, suavizada para quem atendeu pouco` : RANKING_METRIC_HINT[k]);
+  const metricas = rankingMetricsFor(vendas);
+  const rotulo = (k: RankingMetric) => rankingMetricLabel(k, vendas, wonLabel);
+  const dica = (k: RankingMetric) => rankingMetricHint(k, vendas, wonLabel);
   const [w, setW] = useState<RankingWeights>(atuais);
   useEffect(() => setW(atuais), [atuais]);
   const update = useUpdateTenantSettings();
@@ -259,7 +257,7 @@ function PesosModal({ atuais, vendas, wonLabel, onClose }: { atuais: RankingWeig
               <span className="block font-medium text-ink">{rotulo(k)}</span>
               <span className="block text-xs text-muted">{dica(k)}</span>
             </span>
-            <input type="number" min={0} max={100} className={cn(inputCls, 'w-20 text-right tnum')} value={w[k]} onChange={(e) => setW({ ...w, [k]: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} aria-label={`Peso de ${RANKING_METRIC_LABEL[k]}`} />
+            <input type="number" min={0} max={100} className={cn(inputCls, 'w-20 text-right tnum')} value={w[k]} onChange={(e) => setW({ ...w, [k]: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} aria-label={`Peso de ${rotulo(k)}`} />
             <span className="w-12 text-right text-xs text-muted tnum">{total ? `${Math.round(((w[k] || 0) / total) * 100)}%` : '—'}</span>
           </label>
         ))}

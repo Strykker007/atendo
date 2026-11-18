@@ -14,7 +14,7 @@ vende, o que já foi corrigido e o que falta. Complementa [34 — Condomínios](
 | **Recursos do plano** (`PlanLimits.features`) | Telas inteiras (tickets, ranking, pesquisas, agenda, transmissões) | [05](05-planos-e-cobranca.md) |
 
 Regra: **não existe "modo condomínio" nem `if` por segmento.** O texto que nomeia a equipe ou o
-contato usa `useVocab()` (`apps/web/src/lib/hooks/configuracoes.ts`):
+contato usa `useVocab()` (`apps/web/src/lib/hooks/configuracoes.ts`, que chama `salesVocab` do `packages/shared/src/vocab.ts`). Nomes das métricas do ranking: `rankingMetricLabel`/`rankingMetricHint`/`rankingMetricsFor` (`shared/ranking.ts`). Testes: `apps/api/test/ranking-weights.test.ts` e `ticket-types.test.ts`.
 
 | | Com venda | Sem venda |
 |---|---|---|

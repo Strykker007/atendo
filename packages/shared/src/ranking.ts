@@ -25,6 +25,21 @@ export const RANKING_METRIC_HINT: Record<RankingMetric, string> = {
   handleTime: 'Quanto mais rápido, mais pontos (o mais rápido do período = 100)',
 };
 
+/**
+ * Nome e explicação da métrica na tela. Sem venda, "Vendas"/"Conversão" levam o nome do resultado
+ * positivo da empresa ("Resolvido", "Taxa de “Resolvido”").
+ */
+export function rankingMetricLabel(k: RankingMetric, salesEnabled: boolean, wonLabel: string): string {
+  if (salesEnabled) return RANKING_METRIC_LABEL[k];
+  return k === 'won' ? wonLabel : k === 'conversion' ? `Taxa de “${wonLabel}”` : RANKING_METRIC_LABEL[k];
+}
+export function rankingMetricHint(k: RankingMetric, salesEnabled: boolean, wonLabel: string): string {
+  if (salesEnabled) return RANKING_METRIC_HINT[k];
+  return k === 'won' ? `Quantidade de “${wonLabel}” em relação à maior` : k === 'conversion' ? `“${wonLabel}” ÷ concluídos, suavizada para quem atendeu pouco` : RANKING_METRIC_HINT[k];
+}
+/** Métricas que a empresa pode pesar: sem venda não existe faturamento. */
+export const rankingMetricsFor = (salesEnabled: boolean): RankingMetric[] => RANKING_METRICS.filter((k) => salesEnabled || k !== 'revenue');
+
 /** Pesos válidos: inteiros de 0 a 100; todos zero (ou inválidos) = padrão. */
 export function normalizeRankingWeights(raw: unknown): RankingWeights {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<RankingMetric, unknown>>;
