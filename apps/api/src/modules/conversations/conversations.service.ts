@@ -280,18 +280,15 @@ export class ConversationsService {
     // isento conta nas abas como qualquer atendimento (relatório é que não o vê)
     // com o filtro "Gera ticket", as abas contam só quem abre atendimento
     const base: Prisma.ConversationWhereInput = { ...escopo, NOT: LIVRE, ...(onlyTickets && { ticketExempt: false }) };
-    const [waiting, waitingDevice, closed, mine, all, free] = await Promise.all([
+    const [waiting, closed, mine, all, free] = await Promise.all([
       this.prisma.conversation.count({ where: { ...base, status: 'waiting' } }),
-      // dentro de Aguardando: respondida pelo celular da loja, sem dono e sem o contato ter escrito
-      // depois — ninguém está esperando, falta só alguém assumir. A tela não conta como fila
-      this.prisma.conversation.count({ where: { ...base, status: 'waiting', assigneeId: null, deviceReplyAt: { not: null }, awaitingSince: null } }),
       this.prisma.conversation.count({ where: { ...base, status: 'closed' } }),
       this.prisma.conversation.count({ where: { ...base, status: 'in_progress', assigneeId: viewer.id } }),
       this.prisma.conversation.count({ where: { ...base, status: 'in_progress' } }),
       this.prisma.conversation.count({ where: { ...escopo, ticketExempt: true } }),
     ]);
     // atendente comum conta só as suas em atendimento; admin conta todas
-    return { waiting, waiting_device: waitingDevice, in_progress: may(viewer, 'conversations.view_all') ? all : mine, closed, in_progress_mine: mine, in_progress_all: all, free };
+    return { waiting, in_progress: may(viewer, 'conversations.view_all') ? all : mine, closed, in_progress_mine: mine, in_progress_all: all, free };
   }
 
   /**

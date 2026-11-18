@@ -191,13 +191,12 @@ export function ConversationList() {
         <div className="grid grid-cols-3 gap-1 rounded-lg bg-field p-1 text-[11.5px] font-semibold">
           {ORDER.map((s) => {
             const m = STATUS_META[s];
-            // Aguardando conta só quem espera resposta; as respondidas pelo celular vão no título
-            const cel = s === 'waiting' ? (counts.data?.waiting_device ?? 0) : 0;
-            const n = counts.data?.[s] === undefined ? undefined : counts.data[s] - cel;
+            // respondida pelo celular sem dono conta como fila: alguém precisa assumir
+            const n = counts.data?.[s];
             const on = status === s;
             // mesmo rótulo para todos os perfis (atendente comum continua vendo só as dele)
             return (
-              <button key={s} onClick={() => setStatus(s)} title={cel ? `${m.label} · mais ${cel} respondida(s) pelo celular, no fim da lista` : m.label} className={cn('min-w-0 rounded-md py-1.5 px-1 transition-colors flex items-center justify-center gap-1', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink hover:bg-panel/60')}>
+              <button key={s} onClick={() => setStatus(s)} title={m.label} className={cn('min-w-0 rounded-md py-1.5 px-1 transition-colors flex items-center justify-center gap-1', on ? 'bg-side text-white shadow-sm' : 'text-muted hover:text-ink hover:bg-panel/60')}>
                 <span className="truncate">{m.short}</span>
                 {n !== undefined && <span className={cn('shrink-0 tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px]', on ? 'bg-white/20 text-white' : cn(m.soft, m.color))}>{n}</span>}
               </button>
@@ -393,7 +392,7 @@ export function ConversationList() {
                   className="sticky top-0 z-[1] w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-panel border-b border-line text-left hover:bg-field"
                 >
                   {fechado ? <ChevronRight size={14} className="text-faint shrink-0" /> : <ChevronDown size={14} className="text-faint shrink-0" />}
-                  <span className={cn('text-[12px] font-semibold truncate', g.key === FILA ? 'text-wait' : g.key === CELULAR || g.key === LIVRES ? 'text-muted' : 'text-ink')}>{g.nome}</span>
+                  <span className={cn('text-[12px] font-semibold truncate', g.key === FILA ? 'text-wait' : g.key === LIVRES ? 'text-muted' : 'text-ink')}>{g.nome}</span>
                   <span className="tnum text-[10px] font-bold rounded-full px-1.5 min-w-[18px] text-center bg-field text-muted shrink-0">{g.itens.length}</span>
                   {g.naoLidas > 0 && <span className="ml-auto tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0" title="Mensagens não lidas">{g.naoLidas}</span>}
                 </button>
@@ -431,16 +430,13 @@ export function ConversationList() {
 
 /** Chave da seção das conversas sem atendente (aguardando distribuição). */
 const FILA = '__fila__';
-/** Chave da seção das respondidas pelo celular: sem dono, mas ninguém esperando resposta. */
-const CELULAR = '__celular__';
 /** Chave da seção das livres (grupos e isentos sem dono) que a aba Atendendo mostra junto. */
 const LIVRES = '__livres__';
 /** Seções que não são fila, na ordem em que aparecem no fim da lista. */
 const SECOES_EXTRAS: { key: string; nome: string; de: (c: Conversation) => boolean }[] = [
   // livre não é fila nem tem dono: antes caía em "Sem atendente · Fila" e parecia gente esperando
   { key: LIVRES, nome: 'Grupos e conversas livres', de: isFreeChat },
-  // em Aguardando, sem dono e a última resposta saiu pelo celular da loja (selo 📱 Celular)
-  { key: CELULAR, nome: 'Sem atendente · Respondidas pelo celular', de: (c) => c.status === 'waiting' && !c.assignee && !!c.deviceReplyAt },
+  // respondida pelo celular NÃO sai da fila: escondida no fim, ficava sem ninguém assumir
 ];
 const secaoExtra = (c: Conversation) => SECOES_EXTRAS.find((s) => s.de(c));
 
@@ -448,8 +444,8 @@ type Grupo = { key: string; nome: string; itens: Conversation[]; naoLidas: numbe
 const somaNaoLidas = (l: Conversation[]) => l.reduce((s, c) => s + c.unreadCount, 0);
 
 /**
- * Lista comum: livres e respondidas pelo celular vão para seções no fim (recolhíveis), para o
- * topo mostrar só o que é atendimento de verdade. Sem nenhuma, a lista fica como sempre.
+ * Lista comum: livres vão para uma seção no fim (recolhível), para o topo mostrar só o que é
+ * atendimento de verdade. Sem nenhuma, a lista fica como sempre.
  */
 function separarSecoes(lista: Conversation[]): Grupo[] {
   const extras = SECOES_EXTRAS.map((s) => ({ key: s.key, nome: s.nome, itens: lista.filter((c) => secaoExtra(c)?.key === s.key) })).filter((g) => g.itens.length);
@@ -460,7 +456,7 @@ function separarSecoes(lista: Conversation[]): Grupo[] {
 
 /**
  * Modo agrupado: uma seção por atendente responsável, em ordem alfabética, depois a fila (sem
- * atendente) e, por último, livres e respondidas pelo celular. Dentro de cada seção a ordem é a
+ * atendente) e, por último, as livres. Dentro de cada seção a ordem é a
  * mesma da lista — o agrupamento não reordena, só separa; quem espera há mais tempo fica no topo.
  */
 function agruparPorAtendente(lista: Conversation[]) {
@@ -473,7 +469,7 @@ function agruparPorAtendente(lista: Conversation[]) {
     g.naoLidas += c.unreadCount;
     grupos.set(key, g);
   }
-  const ordem = (k: string) => (k === FILA ? 1 : k === LIVRES ? 2 : k === CELULAR ? 3 : 0);
+  const ordem = (k: string) => (k === FILA ? 1 : k === LIVRES ? 2 : 0);
   return [...grupos.values()].sort((a, b) => ordem(a.key) - ordem(b.key) || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
