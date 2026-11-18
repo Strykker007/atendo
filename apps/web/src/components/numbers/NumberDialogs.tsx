@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { PhoneInput } from '@/components/ui/PhoneInput';
@@ -20,6 +20,8 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
   const signupCfg = useMetaSignupConfig(open);
   const incorporado = ps.provider === 'meta' && !!signupCfg.data?.enabled;
   const [manual, setManual] = useState(false);
+  // reabrir volta para a janela da Meta: o "preencher manualmente" de antes ficava grudado até recarregar
+  useEffect(() => { if (open) setManual(false); }, [open]);
   const formularioManual = !incorporado || manual;
 
   async function submit(e: React.FormEvent) {

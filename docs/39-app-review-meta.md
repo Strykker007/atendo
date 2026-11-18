@@ -17,6 +17,22 @@ app, e o app registrado como **Tech Provider**.
 
 ## 1. Antes de gravar
 
+**Onde o botão aparece:** só em **produção**, em **Números → Adicionar número → Meta Cloud API**. Não
+aparece em **Credenciais** de um número que já existe, que é só para trocar token e IDs. Também não aparece
+no ambiente local, que não tem `META_APP_ID`, `META_ES_CONFIG_ID` e `META_APP_SECRET`. Antes da aprovação,
+a janela da Meta funciona para quem tem função no app (administrador, desenvolvedor ou testador). É assim
+que se grava o vídeo antes de ter o acesso avançado.
+
+**Se a janela abrir mas der erro:**
+- Confira se o seu usuário do Facebook tem função no app (*Funções do app*).
+- Confira se o domínio `app.vogochatplus.com.br` está liberado para o SDK JS.
+- Confira se a configuração do `META_ES_CONFIG_ID` é do tipo **WhatsApp Embedded Signup**.
+
+Se mesmo assim não funcionar, grave o vídeo pelo caminho manual (*preencher manualmente*):
+- O resto do roteiro não muda: cartão com o portfólio, templates e mensagens.
+- Avise nas instruções de teste que o cadastro incorporado aguarda a aprovação.
+
+
 - [ ] **Deploy** desta versão em produção. O portfólio no cartão só existe depois do deploy, e sem ele o
   vídeo não mostra o `business_management`.
 - [ ] **Grave em `app.vogochatplus.com.br`**, não no ambiente local: o revisor confere o domínio.
