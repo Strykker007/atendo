@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { RANKING_METRICS, RANKING_METRIC_HINT, RANKING_METRIC_LABEL, RANKING_WEIGHTS_DEFAULT, type RankingWeights } from '@atendo/shared';
+import { RANKING_METRICS, RANKING_WEIGHTS_DEFAULT, rankingMetricHint, rankingMetricLabel, rankingMetricsFor, type RankingMetric, type RankingWeights } from '@atendo/shared';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
@@ -12,7 +12,7 @@ import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { SkeletonCards } from '@/components/ui/Skeleton';
-import { useCan, useConsultantRanking, useHasFeature, useOutcomeLabels, useTags, useUpdateTenantSettings, type ConsultantRankingRow } from '@/lib/hooks';
+import { useCan, useConsultantRanking, useHasFeature, useOutcomeLabels, useTags, useUpdateTenantSettings, useVocab, type ConsultantRankingRow } from '@/lib/hooks';
 import { FeatureLocked } from '@/components/billing/FeatureLocked';
 import { GoalsBoard } from '@/components/reports/GoalsBoard';
 
@@ -39,6 +39,10 @@ export default function RankingPage() {
   const satisfacao = useHasFeature('satisfaction_surveys');
   const [aba, setAba] = useState<'ranking' | 'metas'>('ranking');
   const labels = useOutcomeLabels();
+  // sem venda: sem faturamento, "vendas" vira o resultado positivo da empresa ("Resolvido")
+  const vocab = useVocab();
+  const vendas = vocab.vendas;
+  const titulo = vendas ? 'Ranking de consultores' : 'Ranking da equipe';
   const tags = useTags();
   const [preset, setPreset] = useState('mes');
   const [range, setRange] = useState<[string, string]>(PRESETS[2].range());
@@ -63,11 +67,11 @@ export default function RankingPage() {
   }, [q.data, sort]);
 
   if (!podeVer) return <PageShell><p className="text-sm text-muted">Seu perfil de acesso não inclui relatórios.</p></PageShell>;
-  if (!feature.loading && !feature.has) return <FeatureLocked title="Ranking de consultores" text="Pódio de vendas, conversão e TMA de cada consultor, com metas mensais e quanto falta para batê-las." />;
+  if (!feature.loading && !feature.has) return <FeatureLocked title={titulo} text={vendas ? 'Pódio de vendas, conversão e TMA de cada consultor, com metas mensais e quanto falta para batê-las.' : `Pódio por atendimentos concluídos, “${labels.won}”, satisfação e TMA de cada atendente, com metas mensais.`} />;
 
   const podio = q.data?.ranking.slice(0, 3) ?? [];
   const toggle = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'name' && key !== 'avgHandleMin' }));
-  const composicao = (r: ConsultantRankingRow, w: RankingWeights) => RANKING_METRICS.filter((k) => w[k]).map((k) => `${RANKING_METRIC_LABEL[k]}: ${r.scoreParts?.[k] == null ? 'sem dado' : `${r.scoreParts[k]!.toFixed(0)}/100`} (peso ${w[k]})`).join('\n');
+  const composicao = (r: ConsultantRankingRow, w: RankingWeights) => RANKING_METRICS.filter((k) => w[k]).map((k) => `${rankingMetricLabel(k, vendas, labels.won)}: ${r.scoreParts?.[k] == null ? 'sem dado' : `${r.scoreParts[k]!.toFixed(0)}/100`} (peso ${w[k]})`).join('\n');
 
   const escala = q.data?.satisfactionScale;
   const comNota = satisfacao.has && !!escala;
@@ -76,8 +80,8 @@ export default function RankingPage() {
   return (
     <PageShell width="max-w-6xl">
       <PageHeader
-        title="Ranking de consultores"
-        subtitle="Posição pela pontuação (0 a 100): faturamento, vendas, conversão, satisfação e tempo de atendimento, com os pesos da empresa."
+        title={titulo}
+        subtitle={vendas ? 'Posição pela pontuação (0 a 100): faturamento, vendas, conversão, satisfação e tempo de atendimento, com os pesos da empresa.' : `Posição pela pontuação (0 a 100): quantidade e taxa de “${labels.won}”, satisfação e tempo de atendimento, com os pesos da empresa.`}
         action={
           <div className="flex items-center gap-3">
             {podePesos && <button type="button" onClick={() => setPesos(true)} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink"><SlidersHorizontal size={15} /> Pesos</button>}
@@ -124,10 +128,10 @@ export default function RankingPage() {
           {podio.length ? (
             <div className="grid gap-3 sm:grid-cols-3 items-end">
               {/* 2º, 1º, 3º: o campeão no meio e mais alto */}
-              {[podio[1], podio[0], podio[2]].map((r, i) => r ? <PodiumCard key={r.userId} row={r} wonLabel={labels.won} /> : <div key={i} className="hidden sm:block" />)}
+              {[podio[1], podio[0], podio[2]].map((r, i) => r ? <PodiumCard key={r.userId} row={r} wonLabel={labels.won} vendas={vendas} /> : <div key={i} className="hidden sm:block" />)}
             </div>
           ) : (
-            <p className="rounded-2xl border border-dashed border-line bg-panel p-10 text-center text-sm text-muted">Nenhum atendimento encerrado por consultor no período.</p>
+            <p className="rounded-2xl border border-dashed border-line bg-panel p-10 text-center text-sm text-muted">Nenhum atendimento encerrado por {vocab.pessoa.toLowerCase()} no período.</p>
           )}
 
           {rows.length > 0 && (
@@ -139,9 +143,9 @@ export default function RankingPage() {
                     <Th label="Nome" k="name" sort={sort} onClick={toggle} />
                     <Th label="Pontuação" k="score" sort={sort} onClick={toggle} right />
                     <Th label="Concluídos" k="closed" sort={sort} onClick={toggle} right />
-                    <Th label="Vendas" k="won" sort={sort} onClick={toggle} right />
-                    <Th label="Faturamento" k="revenue" sort={sort} onClick={toggle} right />
-                    <Th label="Conversão" k="conversionRate" sort={sort} onClick={toggle} right />
+                    <Th label={vendas ? 'Vendas' : labels.won} k="won" sort={sort} onClick={toggle} right />
+                    {vendas && <Th label="Faturamento" k="revenue" sort={sort} onClick={toggle} right />}
+                    <Th label={vendas ? 'Conversão' : `Taxa de “${labels.won}”`} k="conversionRate" sort={sort} onClick={toggle} right />
                     <Th label="TMA" k="avgHandleMin" sort={sort} onClick={toggle} right />
                     {comNota && <Th label={escala === 'scale_10' ? 'Satisfação / NPS' : 'Satisfação'} k="satisfaction" sort={sort} onClick={toggle} right />}
                   </tr>
@@ -154,7 +158,7 @@ export default function RankingPage() {
                       <td className="py-2.5 px-2 text-right tnum font-semibold text-ink" title={composicao(r, q.data!.weights)}>{r.score.toFixed(1)}</td>
                       <td className="py-2.5 px-2 text-right tnum">{r.closed}</td>
                       <td className="py-2.5 px-2 text-right tnum">{r.won}</td>
-                      <td className="py-2.5 px-2 text-right tnum">{fmtBRL(r.revenue)}</td>
+                      {vendas && <td className="py-2.5 px-2 text-right tnum">{fmtBRL(r.revenue)}</td>}
                       <td className="py-2.5 px-2 text-right tnum">
                         <div className="inline-flex items-center gap-2">
                           <span className="hidden md:block w-16 h-1.5 rounded-full bg-field overflow-hidden"><span className="block h-full bg-accent" style={{ width: `${Math.min(100, r.conversionRate)}%` }} /></span>
@@ -171,7 +175,7 @@ export default function RankingPage() {
                     <td className="py-2 pl-4" colSpan={3}>Equipe</td>
                     <td className="py-2 px-2 text-right tnum">{q.data.totals.closed}</td>
                     <td className="py-2 px-2 text-right tnum">{q.data.totals.won}</td>
-                    <td className="py-2 px-2 text-right tnum">{fmtBRL(q.data.totals.revenue)}</td>
+                    {vendas && <td className="py-2 px-2 text-right tnum">{fmtBRL(q.data.totals.revenue)}</td>}
                     <td className="py-2 px-2 text-right tnum">{fmtPct(q.data.totals.conversionRate)}</td>
                     <td className="py-2 px-2 pr-4" />
                     {comNota && <td className="py-2 px-2 pr-4" />}
@@ -180,11 +184,11 @@ export default function RankingPage() {
               </table>
             </section>
           )}
-          <p className="text-[11px] text-faint">Pontuação = média ponderada de cada métrica de 0 a 100 em relação ao melhor do período (passe o mouse para ver a composição); sem pesquisa ou sem TMA, o peso vai para as outras. Pesos: {RANKING_METRICS.filter((k) => q.data!.weights[k]).map((k) => `${RANKING_METRIC_LABEL[k]} ${q.data!.weights[k]}`).join(' · ')}. Concluídos = atendimentos encerrados pelo consultor (encerramento automático e interno não contam) + orçamentos pagos ainda sem encerramento. Conversão = vendas ÷ concluídos. TMA = do início do atendimento (ou da reabertura) até o encerramento.{comNota && ' Satisfação = média da pergunta principal da pesquisa de satisfação (escala mais usada no período); NPS só na escala de 1 a 10.'}</p>
+          <p className="text-[11px] text-faint">Pontuação = média ponderada de cada métrica de 0 a 100 em relação ao melhor do período (passe o mouse para ver a composição); sem pesquisa ou sem TMA, o peso vai para as outras. Pesos: {RANKING_METRICS.filter((k) => q.data!.weights[k]).map((k) => `${rankingMetricLabel(k, vendas, labels.won)} ${q.data!.weights[k]}`).join(' · ')}. Concluídos = atendimentos encerrados pelo consultor (encerramento automático e interno não contam) + orçamentos pagos ainda sem encerramento. Conversão = vendas ÷ concluídos. TMA = do início do atendimento (ou da reabertura) até o encerramento.{comNota && ' Satisfação = média da pergunta principal da pesquisa de satisfação (escala mais usada no período); NPS só na escala de 1 a 10.'}</p>
         </>
       )}
       </>}
-      {pesos && q.data && <PesosModal atuais={q.data.weights} onClose={() => setPesos(false)} />}
+      {pesos && q.data && <PesosModal atuais={q.data.weights} vendas={vendas} wonLabel={labels.won} onClose={() => setPesos(false)} />}
     </PageShell>
   );
 }
@@ -195,7 +199,7 @@ const PODIO = [
   { icon: Trophy, cls: 'border-orange-500/50 bg-gradient-to-b from-orange-500/15 to-transparent', badge: 'bg-orange-400 text-orange-950' },
 ];
 
-function PodiumCard({ row, wonLabel }: { row: ConsultantRankingRow; wonLabel: string }) {
+function PodiumCard({ row, wonLabel, vendas }: { row: ConsultantRankingRow; wonLabel: string; vendas: boolean }) {
   const p = PODIO[row.position - 1];
   const Icon = p.icon;
   return (
@@ -204,10 +208,10 @@ function PodiumCard({ row, wonLabel }: { row: ConsultantRankingRow; wonLabel: st
       <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{row.position}º lugar</div>
       <div className="font-display font-semibold text-ink truncate">{row.name}</div>
       <div className="mt-2 text-3xl font-semibold tnum text-ink">{row.score.toFixed(1)}</div>
-      <div className="text-[11px] text-muted">pontos · {row.won} {wonLabel.toLowerCase()} · {fmtBRL(row.revenue)}</div>
+      <div className="text-[11px] text-muted">pontos · {row.won} {wonLabel.toLowerCase()}{vendas && <> · {fmtBRL(row.revenue)}</>}</div>
       <div className="mt-2 flex justify-center gap-3 text-[12px] text-muted tnum">
         <span>{row.closed} concluídos</span>
-        <span>{fmtPct(row.conversionRate)} conv.</span>
+        <span>{fmtPct(row.conversionRate)} {vendas ? 'conv.' : wonLabel.toLowerCase()}</span>
       </div>
     </div>
   );
@@ -225,12 +229,16 @@ function Th({ label, k, sort, onClick, right }: { label: string; k: SortKey; sor
 }
 
 /** Pesos da pontuação (gestão — `settings.manage`). Cada um de 0 a 100; o que vale é a proporção entre eles. */
-function PesosModal({ atuais, onClose }: { atuais: RankingWeights; onClose: () => void }) {
+function PesosModal({ atuais, vendas, wonLabel, onClose }: { atuais: RankingWeights; vendas: boolean; wonLabel: string; onClose: () => void }) {
+  // sem venda o faturamento não existe (a API já zera o peso — effectiveRankingWeights)
+  const metricas = rankingMetricsFor(vendas);
+  const rotulo = (k: RankingMetric) => rankingMetricLabel(k, vendas, wonLabel);
+  const dica = (k: RankingMetric) => rankingMetricHint(k, vendas, wonLabel);
   const [w, setW] = useState<RankingWeights>(atuais);
   useEffect(() => setW(atuais), [atuais]);
   const update = useUpdateTenantSettings();
   const qc = useQueryClient();
-  const total = RANKING_METRICS.reduce((a, k) => a + (w[k] || 0), 0);
+  const total = metricas.reduce((a, k) => a + (w[k] || 0), 0);
   async function salvar() {
     try {
       await update.mutateAsync({ rankingWeights: w });
@@ -243,13 +251,13 @@ function PesosModal({ atuais, onClose }: { atuais: RankingWeights; onClose: () =
     <Modal open onClose={onClose} title="Pesos da pontuação">
       <div className="space-y-3 text-sm">
         <p className="text-muted">Quanto cada métrica pesa na posição. Vale a proporção: 40 e 20 é o mesmo que 2 e 1. Zero tira a métrica da conta.</p>
-        {RANKING_METRICS.map((k) => (
+        {metricas.map((k) => (
           <label key={k} className="flex items-center gap-3">
             <span className="flex-1 min-w-0">
-              <span className="block font-medium text-ink">{RANKING_METRIC_LABEL[k]}</span>
-              <span className="block text-xs text-muted">{RANKING_METRIC_HINT[k]}</span>
+              <span className="block font-medium text-ink">{rotulo(k)}</span>
+              <span className="block text-xs text-muted">{dica(k)}</span>
             </span>
-            <input type="number" min={0} max={100} className={cn(inputCls, 'w-20 text-right tnum')} value={w[k]} onChange={(e) => setW({ ...w, [k]: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} aria-label={`Peso de ${RANKING_METRIC_LABEL[k]}`} />
+            <input type="number" min={0} max={100} className={cn(inputCls, 'w-20 text-right tnum')} value={w[k]} onChange={(e) => setW({ ...w, [k]: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} aria-label={`Peso de ${rotulo(k)}`} />
             <span className="w-12 text-right text-xs text-muted tnum">{total ? `${Math.round(((w[k] || 0) / total) * 100)}%` : '—'}</span>
           </label>
         ))}

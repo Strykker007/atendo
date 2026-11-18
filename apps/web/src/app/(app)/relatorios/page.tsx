@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { TagPicker } from '@/components/chat/TagPicker';
 import { ReportChart, METRIC_LABEL, GROUP_LABEL, fmtLabel, fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useReportCompanyOptions, useOutcomeLabels, useHasFeature, useTenantSettings, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
+import { useAgents, useCan, useNumbers, useTags, useRunReport, useSavedReports, useSaveReport, useDeleteSavedReport, useReportOverview, useReportCompanies, useReportCompanyOptions, useOutcomeLabels, useHasFeature, useTenantSettings, useVocab, type CompanyReportRow, type ReportDefinition, type ReportResult, type SavedReport } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 import { Building2 } from 'lucide-react';
 import { MessageSquare, Clock, CheckCircle2, Inbox, ChevronDown, ChevronUp, SlidersHorizontal, DollarSign, Receipt, Target, Trophy, ThumbsUp, Wallet, EyeOff } from 'lucide-react';
@@ -69,6 +69,7 @@ export default function RelatoriosPage() {
   // atendimentos internos: auditoria de quem tirou atendimento dos relatórios (mesma regra da API)
   const podeAuditar = useCan('profiles.manage');
   const labels = useOutcomeLabels();
+  const vocab = useVocab();
   // encerramento sem venda (condomínio, suporte): some faturamento, ticket e pagamentos; o resto
   // (resultado, conversão, motivos) segue com os nomes da empresa (docs/06-modelo-de-dados.md#encerramento-sem-venda)
   const vendas = useTenantSettings().data?.salesEnabled ?? true;
@@ -165,9 +166,9 @@ export default function RelatoriosPage() {
           <Field label="Tag">
             <TagPicker field tags={tags.data ?? []} value={tagIds} onChange={setTagIds} placeholder="Todas as tags" />
           </Field>
-          <Field label="Consultor">
+          <Field label={vocab.pessoa}>
             <select className={inputCls} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-              <option value="">Todos os consultores</option>
+              <option value="">Todos os {vocab.pessoas}</option>
               {agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
             </select>
           </Field>
@@ -194,7 +195,8 @@ export default function RelatoriosPage() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card title="Atendimentos por dia" hint="Conversas novas + contatos que voltaram"><ReportChart def={{ metric: 'conversations', groupBy: 'day', from: range[0], to: range[1], filters: {}, chart: 'line' }} series={overview.data.series.byDay} height={220} /></Card>
             <Card title="Atendimentos por atendente" hint="Encerrados no período, por quem encerrou"><ReportChart def={{ metric: 'closed', groupBy: 'agent', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byAgent} height={220} /></Card>
-            <Card title="De onde vêm os leads" hint="Orgânico × anúncio × link"><ReportChart def={{ metric: 'conversations', groupBy: 'origin', from: range[0], to: range[1], filters: {}, chart: 'pie' }} series={overview.data.series.byOrigin} height={220} /></Card>
+            {/* origem/campanha é marketing de venda: sem venda o card vira "Tags mais usadas" (abaixo) e este some */}
+            {vendas && <Card title="De onde vêm os leads" hint="Orgânico × anúncio × link"><ReportChart def={{ metric: 'conversations', groupBy: 'origin', from: range[0], to: range[1], filters: {}, chart: 'pie' }} series={overview.data.series.byOrigin} height={220} /></Card>}
             <Card title={overview.data.series.byCampaign.length ? 'Leads por campanha (anúncio)' : 'Tags mais usadas'} hint={overview.data.series.byCampaign.length ? 'Qual anúncio está trazendo conversa' : 'Como a equipe está classificando'}>
               <ReportChart def={{ metric: 'conversations', groupBy: overview.data.series.byCampaign.length ? 'campaign' : 'tag', from: range[0], to: range[1], filters: {}, chart: 'bar' }} series={overview.data.series.byCampaign.length ? overview.data.series.byCampaign : overview.data.series.byTag} height={220} />
             </Card>
@@ -261,7 +263,7 @@ export default function RelatoriosPage() {
               </select>
             </Field>
             <Field label="Tags"><TagPicker field tags={tags.data ?? []} value={def.filters.tagIds ?? []} onChange={(ids) => setFilter('tagIds', ids.length ? ids : undefined)} placeholder="Qualquer tag" /></Field>
-            <Field label="Consultor">
+            <Field label={vocab.pessoa}>
               <select className={inputCls} value={def.filters.agentId ?? ''} onChange={(e) => setFilter('agentId', e.target.value || undefined)}>
                 <option value="">Todos</option>{agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
               </select>

@@ -8,7 +8,7 @@ import { MoneyInput } from '@/components/ui/MoneyInput';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
-import { useAgents, useCan, useGoalsProgress, useMonthGoals, useOutcomeLabels, useSaveGoals, type GoalRow, type GoalStatus, type GoalTarget, type MonthGoals } from '@/lib/hooks';
+import { useAgents, useCan, useGoalsProgress, useMonthGoals, useOutcomeLabels, useSaveGoals, useVocab, type GoalRow, type GoalStatus, type GoalTarget, type MonthGoals } from '@/lib/hooks';
 
 const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 const fmtPct = (v: number | null) => (v == null ? '—' : `${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
@@ -29,6 +29,9 @@ const STATUS: Record<GoalStatus, { label: string; cls: string; bar: string }> = 
 export function GoalsBoard() {
   const [month, setMonth] = useState(mesAtual());
   const labels = useOutcomeLabels();
+  // sem venda (condomínio, escritório): meta só de quantidade de "Resolvido", sem faturamento
+  const vocab = useVocab();
+  const vendas = vocab.vendas;
   const q = useGoalsProgress(month);
   const podeEditar = useCan('team.manage');
   const [editando, setEditando] = useState(false);
@@ -40,7 +43,7 @@ export function GoalsBoard() {
         <Field label="Mês">
           <input type="month" className={cn(inputCls, 'w-44')} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
         </Field>
-        {d && (
+        {d && vendas && (
           <div className="flex-1 min-w-[16rem]">
             <div className="flex justify-between text-[12px] text-muted mb-1">
               <span>Equipe: <b className="text-ink tnum">{fmtBRL(d.team.revenue)}</b>{d.team.revenueTarget ? <> de {fmtBRL(d.team.revenueTarget)} ({fmtPct(d.team.revenuePct)})</> : ' (sem meta de valor)'}</span>
@@ -59,7 +62,7 @@ export function GoalsBoard() {
       {q.isLoading && <SkeletonCards count={3} />}
       {d && d.ranking.length === 0 && (
         <p className="rounded-2xl border border-dashed border-line bg-panel p-10 text-center text-sm text-muted">
-          Nenhuma meta nem venda neste mês.{podeEditar && ' Clique em “Definir metas” para começar.'}
+          Nenhuma meta nem {vendas ? 'venda' : `“${labels.won}”`} neste mês.{podeEditar && ' Clique em “Definir metas” para começar.'}
         </p>
       )}
       {d && d.ranking.length > 0 && (
@@ -68,8 +71,8 @@ export function GoalsBoard() {
             <thead className="text-left text-xs uppercase tracking-wide text-muted border-b border-line">
               <tr>
                 <th className="py-2.5 pl-4 pr-2 w-10">#</th>
-                <th className="py-2.5 px-2">Consultor</th>
-                <th className="py-2.5 px-2">Faturamento</th>
+                <th className="py-2.5 px-2">{vocab.pessoa}</th>
+                {vendas && <th className="py-2.5 px-2">Faturamento</th>}
                 <th className="py-2.5 px-2 text-right">{labels.won}</th>
                 <th className="py-2.5 px-2 text-right">Atingido</th>
                 <th className="py-2.5 px-2 text-right">Projeção</th>
@@ -77,21 +80,21 @@ export function GoalsBoard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {d.ranking.map((r) => <Linha key={r.userId} r={r} elapsedPct={d.elapsedPct} />)}
+              {d.ranking.map((r) => <Linha key={r.userId} r={r} elapsedPct={d.elapsedPct} vendas={vendas} wonLabel={labels.won} />)}
             </tbody>
           </table>
         </section>
       )}
       <p className="text-[11px] text-faint">
-        Realizado = vendas encerradas como “{labels.won}” pelo consultor no mês (mesma base do ranking). A marca na barra é onde ele deveria estar hoje no ritmo do mês; projeção = o ritmo atual levado até o fim do mês. Com meta de valor e de quantidade, o atingido é a média das duas e a situação é a pior.
+        Realizado = {vendas ? 'vendas encerradas' : 'atendimentos encerrados'} como “{labels.won}” pelo {vocab.pessoa.toLowerCase()} no mês (mesma base do ranking). A marca na barra é onde ele deveria estar hoje no ritmo do mês; projeção = o ritmo atual levado até o fim do mês. {vendas && ' Com meta de valor e de quantidade, o atingido é a média das duas e a situação é a pior.'}
       </p>
 
-      {editando && <GoalsEditor month={month} onClose={() => setEditando(false)} />}
+      {editando && <GoalsEditor month={month} vendas={vendas} wonLabel={labels.won} onClose={() => setEditando(false)} />}
     </div>
   );
 }
 
-function Linha({ r, elapsedPct }: { r: GoalRow; elapsedPct: number }) {
+function Linha({ r, elapsedPct, vendas, wonLabel }: { r: GoalRow; elapsedPct: number; vendas: boolean; wonLabel: string }) {
   const st = r.status ? STATUS[r.status] : null;
   return (
     <tr className={cn('hover:bg-field/50', !r.isActive && 'opacity-60')}>
@@ -100,7 +103,7 @@ function Linha({ r, elapsedPct }: { r: GoalRow; elapsedPct: number }) {
         <div className="text-ink font-medium">{r.name}</div>
         <div className="text-[11px] text-faint">{r.goalSource === 'own' ? 'meta própria' : r.goalSource === 'default' ? 'meta padrão' : 'sem meta'}</div>
       </td>
-      <td className="py-2.5 px-2 min-w-[12rem]">
+      {vendas && <td className="py-2.5 px-2 min-w-[12rem]">
         <div className="flex justify-between text-[12px] tnum"><span className="text-ink">{fmtBRL(r.revenue)}</span>{r.revenueTarget != null && <span className="text-muted">de {fmtBRL(r.revenueTarget)}</span>}</div>
         {r.revenueTarget != null && (
           <div className="relative mt-1 h-1.5 rounded-full bg-field overflow-hidden">
@@ -108,11 +111,11 @@ function Linha({ r, elapsedPct }: { r: GoalRow; elapsedPct: number }) {
             <span className="absolute inset-y-0 w-0.5 bg-ink/50" style={{ left: `${Math.min(100, elapsedPct)}%` }} />
           </div>
         )}
-      </td>
+      </td>}
       <td className="py-2.5 px-2 text-right tnum">{r.won}{r.wonTarget != null && <span className="text-muted">/{r.wonTarget}</span>}</td>
       <td className="py-2.5 px-2 text-right tnum font-semibold">{fmtPct(r.attainment)}</td>
       <td className="py-2.5 px-2 text-right tnum text-muted text-[12px]">
-        {r.revenueProjection != null ? fmtBRL(r.revenueProjection) : r.wonProjection != null ? `${r.wonProjection} vendas` : '—'}
+        {vendas && r.revenueProjection != null ? fmtBRL(r.revenueProjection) : r.wonProjection != null ? `${r.wonProjection} ${vendas ? 'vendas' : wonLabel.toLowerCase()}` : '—'}
       </td>
       <td className="py-2.5 px-2 pr-4">{st ? <span className={cn('text-[11px] font-semibold rounded-full px-2 py-0.5', st.cls)}>{st.label}</span> : <span className="text-[11px] text-faint">—</span>}</td>
     </tr>
@@ -126,7 +129,8 @@ const deServidor = (g: MonthGoals | undefined): { padrao: GoalTarget; porUsuario
 });
 
 /** Metas do mês: padrão (vale para atendente sem meta própria) + meta de cada um. */
-function GoalsEditor({ month, onClose }: { month: string; onClose: () => void }) {
+function GoalsEditor({ month, vendas, wonLabel, onClose }: { month: string; vendas: boolean; wonLabel: string; onClose: () => void }) {
+  const qtd = vendas ? 'Vendas' : wonLabel;
   const agents = useAgents();
   const atual = useMonthGoals(month);
   const save = useSaveGoals();
@@ -172,8 +176,8 @@ function GoalsEditor({ month, onClose }: { month: string; onClose: () => void })
         <div className="rounded-xl border border-line p-3 space-y-2">
           <div className="text-sm font-medium text-ink">Meta padrão <span className="text-[11px] font-normal text-muted">vale para todo atendente sem meta própria</span></div>
           <div className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-2 text-[12.5px] text-muted">Faturamento <MoneyInput className="w-36" nullable value={padrao.revenueTarget} onChange={(v) => setPadrao((p) => ({ ...p, revenueTarget: v }))} aria-label="Meta padrão de faturamento" /></label>
-            <label className="flex items-center gap-2 text-[12.5px] text-muted">Vendas <input type="number" min={0} className={cn(inputCls, 'w-24')} value={padrao.wonTarget ?? ''} onChange={(e) => setPadrao((p) => ({ ...p, wonTarget: e.target.value ? Math.max(0, Math.floor(Number(e.target.value))) : null }))} aria-label="Meta padrão de vendas" /></label>
+            {vendas && <label className="flex items-center gap-2 text-[12.5px] text-muted">Faturamento <MoneyInput className="w-36" nullable value={padrao.revenueTarget} onChange={(v) => setPadrao((p) => ({ ...p, revenueTarget: v }))} aria-label="Meta padrão de faturamento" /></label>}
+            <label className="flex items-center gap-2 text-[12.5px] text-muted">{qtd} <input type="number" min={0} className={cn(inputCls, 'w-24')} value={padrao.wonTarget ?? ''} onChange={(e) => setPadrao((p) => ({ ...p, wonTarget: e.target.value ? Math.max(0, Math.floor(Number(e.target.value))) : null }))} aria-label="Meta padrão de vendas" /></label>
           </div>
         </div>
 
@@ -183,8 +187,8 @@ function GoalsEditor({ month, onClose }: { month: string; onClose: () => void })
             return (
               <div key={a.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
                 <span className="flex-1 min-w-[8rem] text-[13px] text-ink truncate">{a.name}{!a.isActive && <span className="ml-1 text-[11px] text-faint">(inativo)</span>}</span>
-                <MoneyInput className="w-36" nullable value={g?.revenueTarget ?? null} onChange={(v) => mudar(a.id, { revenueTarget: v })} aria-label={`Meta de faturamento de ${a.name}`} />
-                <input type="number" min={0} placeholder="vendas" className={cn(inputCls, 'w-24')} value={g?.wonTarget ?? ''} onChange={(e) => mudar(a.id, { wonTarget: e.target.value ? Math.max(0, Math.floor(Number(e.target.value))) : null })} aria-label={`Meta de vendas de ${a.name}`} />
+                {vendas && <MoneyInput className="w-36" nullable value={g?.revenueTarget ?? null} onChange={(v) => mudar(a.id, { revenueTarget: v })} aria-label={`Meta de faturamento de ${a.name}`} />}
+                <input type="number" min={0} placeholder={qtd.toLowerCase()} className={cn(inputCls, 'w-24')} value={g?.wonTarget ?? ''} onChange={(e) => mudar(a.id, { wonTarget: e.target.value ? Math.max(0, Math.floor(Number(e.target.value))) : null })} aria-label={`Meta de vendas de ${a.name}`} />
               </div>
             );
           })}

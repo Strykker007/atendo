@@ -25,6 +25,21 @@ export const RANKING_METRIC_HINT: Record<RankingMetric, string> = {
   handleTime: 'Quanto mais rápido, mais pontos (o mais rápido do período = 100)',
 };
 
+/**
+ * Nome e explicação da métrica na tela. Sem venda, "Vendas"/"Conversão" levam o nome do resultado
+ * positivo da empresa ("Resolvido", "Taxa de “Resolvido”").
+ */
+export function rankingMetricLabel(k: RankingMetric, salesEnabled: boolean, wonLabel: string): string {
+  if (salesEnabled) return RANKING_METRIC_LABEL[k];
+  return k === 'won' ? wonLabel : k === 'conversion' ? `Taxa de “${wonLabel}”` : RANKING_METRIC_LABEL[k];
+}
+export function rankingMetricHint(k: RankingMetric, salesEnabled: boolean, wonLabel: string): string {
+  if (salesEnabled) return RANKING_METRIC_HINT[k];
+  return k === 'won' ? `Quantidade de “${wonLabel}” em relação à maior` : k === 'conversion' ? `“${wonLabel}” ÷ concluídos, suavizada para quem atendeu pouco` : RANKING_METRIC_HINT[k];
+}
+/** Métricas que a empresa pode pesar: sem venda não existe faturamento. */
+export const rankingMetricsFor = (salesEnabled: boolean): RankingMetric[] => RANKING_METRICS.filter((k) => salesEnabled || k !== 'revenue');
+
 /** Pesos válidos: inteiros de 0 a 100; todos zero (ou inválidos) = padrão. */
 export function normalizeRankingWeights(raw: unknown): RankingWeights {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<RankingMetric, unknown>>;
@@ -33,6 +48,18 @@ export function normalizeRankingWeights(raw: unknown): RankingWeights {
     return [k, Number.isFinite(v) ? Math.min(100, Math.max(0, Math.round(v))) : RANKING_WEIGHTS_DEFAULT[k]];
   })) as RankingWeights;
   return RANKING_METRICS.some((k) => w[k] > 0) ? w : { ...RANKING_WEIGHTS_DEFAULT };
+}
+
+/**
+ * Pesos que valem para a empresa. Sem venda (`salesEnabled = false`: condomínio, escritório,
+ * suporte) não existe faturamento: o peso dele sai da conta, senão 35% da nota de todo mundo era
+ * zero fixo. Quantidade e taxa do resultado positivo ("Resolvido") continuam.
+ */
+export function effectiveRankingWeights(raw: unknown, salesEnabled: boolean): RankingWeights {
+  const w = normalizeRankingWeights(raw);
+  if (salesEnabled) return w;
+  const sem = { ...w, revenue: 0 };
+  return RANKING_METRICS.some((k) => sem[k] > 0) ? sem : { ...RANKING_WEIGHTS_DEFAULT, revenue: 0 };
 }
 
 export interface RankingInput {
@@ -65,8 +92,9 @@ export function rankingScores(rows: RankingInput[], weights: RankingWeights, sat
   const out = new Map<string, { score: number; parts: RankingParts }>();
   for (const r of rows) {
     const parts: RankingParts = {
-      revenue: maxRevenue > 0 ? pct((r.revenue / maxRevenue) * 100) : 0,
-      won: maxWon > 0 ? pct((r.won / maxWon) * 100) : 0,
+      // ninguém faturou/fechou no período: a métrica não diferencia ninguém, fica sem dado
+      revenue: maxRevenue > 0 ? pct((r.revenue / maxRevenue) * 100) : null,
+      won: maxWon > 0 ? pct((r.won / maxWon) * 100) : null,
       conversion: r.closed > 0 && maxConv > 0 ? pct((conv(r) / maxConv) * 100) : null,
       satisfaction: r.satisfactionAvg != null && satisfactionMax ? pct((r.satisfactionAvg / satisfactionMax) * 100) : null,
       handleTime: r.avgHandleMin != null && minTma ? pct((minTma / Math.max(1, r.avgHandleMin)) * 100) : null,

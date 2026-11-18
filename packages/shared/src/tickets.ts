@@ -170,6 +170,26 @@ export const TICKET_TYPE_PRESETS: TicketTypePreset[] = [
     ],
   },
   {
+    // administradora: quem escreve é gestor predial/síndico, não o morador (docs/34-condominios.md)
+    niche: 'administradora', label: 'Administradora de condomínios',
+    types: [
+      { name: '2ª via de boleto', color: '#0ea5e9', priority: 'normal', dueDays: 1, fields: [f('Condomínio', 'text', { required: true }), f('Unidade', 'text', { required: true }), f('Mês de referência')] },
+      { name: 'Solicitação administrativa', color: '#6366f1', priority: 'normal', dueDays: 3, fields: [f('Condomínio', 'text', { required: true }), f('Assunto', 'select', { options: ['Documento', 'Cadastro', 'Assembleia', 'Comunicado', 'Outro'] }), f('Detalhes', 'longtext', { required: true })] },
+      { name: 'Orçamento de prestador', color: '#f59e0b', priority: 'normal', dueDays: 7, fields: [f('Condomínio', 'text', { required: true }), f('Serviço', 'longtext', { required: true }), f('Prestadores consultados', 'longtext'), f('Valor aprovado', 'number')] },
+      { name: 'Manutenção', color: '#ef4444', priority: 'high', dueDays: 3, fields: [f('Condomínio', 'text', { required: true }), f('Local'), f('Problema', 'longtext', { required: true })] },
+    ],
+  },
+  {
+    // escritório: o caso dura meses e passa por prazos; o ticket guarda processo e prazo fatal
+    niche: 'juridico', label: 'Escritório jurídico',
+    types: [
+      { name: 'Consulta inicial', color: '#3b82f6', priority: 'normal', dueDays: 2, fields: [f('Cliente', 'text', { required: true }), f('Área', 'select', { options: ['Cível', 'Trabalhista', 'Família', 'Previdenciário', 'Tributário', 'Criminal', 'Empresarial', 'Outra'] }), f('Resumo do caso', 'longtext', { required: true })] },
+      { name: 'Andamento de processo', color: '#6366f1', priority: 'normal', dueDays: 2, fields: [f('Cliente', 'text', { required: true }), f('Número do processo', 'text', { required: true }), f('O que o cliente perguntou', 'longtext')] },
+      { name: 'Envio de documentos', color: '#10b981', priority: 'normal', dueDays: 5, fields: [f('Cliente', 'text', { required: true }), f('Número do processo'), f('Documentos pendentes', 'longtext', { required: true })] },
+      { name: 'Prazo / audiência', color: '#ef4444', priority: 'urgent', dueDays: null, fields: [f('Número do processo', 'text', { required: true }), f('Data', 'date', { required: true }), f('Tipo', 'select', { options: ['Audiência', 'Prazo processual', 'Perícia', 'Reunião'] }), f('Observações', 'longtext')] },
+    ],
+  },
+  {
     niche: 'farmacia', label: 'Farmácia / drogaria',
     types: [
       { name: 'Encomenda de produto', color: '#10b981', priority: 'normal', dueDays: 2, fields: [f('Produto', 'text', { required: true }), f('Quantidade', 'number'), f('Retirada ou entrega', 'select', { options: ['Retirada', 'Entrega'] }), f('Endereço')] },

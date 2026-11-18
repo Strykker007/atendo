@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { PageHeader, PageShell } from '@/components/ui/Page';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { SkeletonCards } from '@/components/ui/Skeleton';
-import { useAgents, useCan, useHasFeature, useSatisfactionReport, useSurveys } from '@/lib/hooks';
+import { useAgents, useCan, useHasFeature, useSatisfactionReport, useSurveys, useVocab } from '@/lib/hooks';
 import { FeatureLocked } from '@/components/billing/FeatureLocked';
 import { useUI } from '@/lib/store';
 
@@ -42,6 +42,7 @@ export default function SatisfactionReportPage() {
   const router = useRouter();
   const { setConversation } = useUI();
   const agents = useAgents();
+  const vocab = useVocab();
   const feature = useHasFeature('satisfaction_surveys');
   const surveys = useSurveys(feature.has);
   const [preset, setPreset] = useState('30d');
@@ -60,7 +61,7 @@ export default function SatisfactionReportPage() {
   const max = SURVEY_SCALE_MAX[escala];
 
   if (!podeVer) return <PageShell><p className="text-sm text-muted">Seu perfil de acesso não inclui relatórios.</p></PageShell>;
-  if (!feature.loading && !feature.has) return <FeatureLocked title="Satisfação no atendimento" text="Nota média, NPS e feedbacks dos contatos por consultor, a partir da pesquisa enviada no encerramento." />;
+  if (!feature.loading && !feature.has) return <FeatureLocked title="Satisfação no atendimento" text={`Nota média, NPS e feedbacks dos contatos por ${vocab.pessoa.toLowerCase()}, a partir da pesquisa enviada no encerramento.`} />;
 
   const totalDist = d ? Math.max(1, ...d.totals.distribution.map((x) => x.count)) : 1;
   const chip = (on: boolean) => cn('text-xs font-semibold px-2.5 py-1.5 rounded-lg border', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field');
@@ -69,7 +70,7 @@ export default function SatisfactionReportPage() {
     <PageShell width="max-w-6xl">
       <PageHeader
         title="Satisfação no atendimento"
-        subtitle="Notas das pesquisas enviadas ao encerrar o atendimento, da equipe e de cada consultor."
+        subtitle={`Notas das pesquisas enviadas ao encerrar o atendimento, da equipe e de cada ${vocab.pessoa.toLowerCase()}.`}
         action={
           <div className="flex items-center gap-3">
             <Link href="/pesquisas" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink"><Settings2 size={15} /> Pesquisas</Link>
@@ -100,7 +101,7 @@ export default function SatisfactionReportPage() {
               {surveys.data?.map((s) => <option key={s.id} value={s.id}>{s.name}{!s.isActive ? ' (desativada)' : ''}</option>)}
             </select>
           </Field>
-          <Field label="Consultor">
+          <Field label={vocab.pessoa}>
             <select className={inputCls} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
               <option value="">Toda a equipe</option>
               {agents.data?.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -146,12 +147,12 @@ export default function SatisfactionReportPage() {
             </section>
 
             <section className="rounded-2xl bg-panel border border-line overflow-x-auto">
-              <h2 className="text-sm font-semibold text-ink px-4 pt-4 pb-2">Por consultor</h2>
+              <h2 className="text-sm font-semibold text-ink px-4 pt-4 pb-2">Por {vocab.pessoa.toLowerCase()}</h2>
               {d.byAgent.length === 0 ? <p className="px-4 pb-4 text-sm text-muted">Nenhuma pesquisa enviada no período.</p> : (
                 <table className="w-full text-sm">
                   <thead className="text-left text-xs uppercase tracking-wide text-muted border-b border-line">
                     <tr>
-                      <th className="py-2 pl-4 pr-2">Consultor</th>
+                      <th className="py-2 pl-4 pr-2">{vocab.pessoa}</th>
                       <th className="py-2 px-2 text-right">{escala === 'csat_3' ? '% Bom' : 'Média'}</th>
                       {escala === 'scale_10' && <th className="py-2 px-2 text-right">NPS</th>}
                       <th className="py-2 px-2 text-right">Respostas</th>
@@ -161,7 +162,7 @@ export default function SatisfactionReportPage() {
                   </thead>
                   <tbody className="divide-y divide-line">
                     {d.byAgent.map((r) => (
-                      <tr key={r.agentId ?? 'sem'} className={cn('hover:bg-field/50 cursor-pointer', agentId && r.agentId === agentId && 'bg-accent-soft/40')} onClick={() => r.agentId && setAgentId(r.agentId === agentId ? '' : r.agentId)} title="Filtrar os comentários por este consultor">
+                      <tr key={r.agentId ?? 'sem'} className={cn('hover:bg-field/50 cursor-pointer', agentId && r.agentId === agentId && 'bg-accent-soft/40')} onClick={() => r.agentId && setAgentId(r.agentId === agentId ? '' : r.agentId)} title={`Filtrar os comentários por este ${vocab.pessoa.toLowerCase()}`}>
                         <td className="py-2 pl-4 pr-2 text-ink font-medium">{r.name}</td>
                         <td className="py-2 px-2 text-right tnum font-semibold">{escala === 'csat_3' ? fmtPct(r.satisfiedPct) : fmtNota(r.avg)}</td>
                         {escala === 'scale_10' && <td className="py-2 px-2 text-right tnum">{r.nps ?? '—'}</td>}
@@ -241,7 +242,7 @@ export default function SatisfactionReportPage() {
               </div>
             )}
           </section>
-          <p className="text-[11px] text-faint">Base: pesquisas enviadas no período. O consultor é o dono do atendimento no encerramento. Taxa de resposta = notas ÷ enviadas; recusa = “0” ou “Não responder”.</p>
+          <p className="text-[11px] text-faint">Base: pesquisas enviadas no período. O {vocab.pessoa.toLowerCase()} é o dono do atendimento no encerramento. Taxa de resposta = notas ÷ enviadas; recusa = “0” ou “Não responder”.</p>
         </>
       )}
     </PageShell>

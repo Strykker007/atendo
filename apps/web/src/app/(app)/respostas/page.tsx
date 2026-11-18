@@ -188,7 +188,7 @@ export default function RespostasPage() {
       )}
 
       {folders.isLoading && <SkeletonRows rows={3} />}
-      {folders.data?.length === 0 && <Empty icon={<Zap size={36} />} title="Nenhuma pasta" text='Crie uma pasta como "Saudações" ou "Pós-venda" e adicione respostas.' />}
+      {folders.data?.length === 0 && <Empty icon={<Zap size={36} />} title="Nenhuma pasta" text='Crie uma pasta como "Saudações" ou "Horários" e adicione respostas.' />}
 
       <DragDropContext onDragEnd={onDragEnd}>
         <Droppable droppableId="folders" type="FOLDER">

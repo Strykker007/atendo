@@ -42,7 +42,10 @@ Tabela `ticket_types`; o ticket guarda `typeId` e os valores em `fields` (`{chav
 valor continua no ticket mesmo se o campo sair do tipo depois.
 
 **Modelos por nicho** (`TICKET_TYPE_PRESETS`, `packages/shared/src/tickets.ts`): Condomínio/portaria
-(Manutenção, Reserva de área, Encomenda, Ocorrência), Farmácia (Encomenda de produto, Entrega,
+(Manutenção, Reserva de área, Encomenda, Ocorrência), Administradora de condomínios (2ª via de
+boleto, Solicitação administrativa, Orçamento de prestador, Manutenção — campo Condomínio em todos),
+Escritório jurídico (Consulta inicial, Andamento de processo, Envio de documentos, Prazo/audiência —
+com Número do processo), Farmácia (Encomenda de produto, Entrega,
 Troca), Clínica (Retorno, Resultado de exame, Autorização de convênio), Serviços/assistência (Ordem
 de serviço, Orçamento, Garantia) e Genérico. Importar adiciona os do nicho (nome repetido é
 pulado); depois a empresa edita.
