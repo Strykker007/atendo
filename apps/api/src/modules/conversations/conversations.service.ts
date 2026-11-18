@@ -34,6 +34,7 @@ import { PermissionsService } from '../auth/permissions.service';
 import { exemptMode, isTicketExempt } from '../ignored-contacts/ignored-contacts';
 import type { Principal } from '../auth/permissions';
 import { clip } from '../../common/clip';
+import { outboundMediaType } from './sticker';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -995,6 +996,8 @@ export class ConversationsService {
       const nome = (await this.prisma.user.findUnique({ where: { id: authorId }, select: { name: true } }))?.name?.trim();
       if (nome) input = { ...input, text: signText(input.text, nome) };
     }
+    // .webp sem legenda sai como figurinha, não como foto (sticker.ts)
+    if (!input.template) input = { ...input, type: outboundMediaType(input.type, input.media?.mimeType, input.text) as OutboundMessage['type'] };
     const created = await this.createOnce(conv.id, key, () => this.prisma.message.create({
       data: {
         idempotencyKey: key,

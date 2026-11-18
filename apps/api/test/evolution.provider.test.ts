@@ -377,6 +377,12 @@ describe('EvolutionProvider.send', () => {
     expect(calls[0].body).toMatchObject({ mediatype: 'image', media: Buffer.from('img').toString('base64'), mimetype: 'image/png', fileName: 'a.png', caption: 'olha' });
   });
 
+  it('figurinha vai pelo sendSticker (pelo sendMedia chegaria como foto)', async () => {
+    await provider.send(ctx, { to: '5511999999999', type: MessageType.STICKER } as any, { data: Buffer.from('webp'), mimeType: 'image/webp', fileName: 'f.webp' });
+    expect(calls[0].path).toContain('/message/sendSticker/');
+    expect(calls[0].body).toMatchObject({ number: '5511999999999', sticker: Buffer.from('webp').toString('base64') });
+  });
+
   it('usa o shard configurado no número em vez do servidor padrão', async () => {
     await provider.send({ ...ctx, config: { instanceName: INSTANCE, baseUrl: 'http://evo-2:8080', apiKey: 'chave-do-shard' } }, { to: '5511999999999', type: MessageType.TEXT, text: 'oi' } as any);
     expect(calls[0].path.startsWith('http://evo-2:8080')).toBe(true);

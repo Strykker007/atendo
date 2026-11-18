@@ -185,6 +185,13 @@ envio devolve o texto ao campo. Fora do modo de responder (nota interna, número
 conversa encerrada…) a resposta só entra no campo. A contagem com Cancelar/Editar e a
 configuração `quickReplyDelaySec` foram retiradas (migração `20261112000000_drop_quick_reply_delay`).
 
+### Figurinhas (.webp)
+O painel anexa `.webp` como imagem, mas a API grava e envia **como figurinha** quando não há
+legenda (`outboundMediaType`, `apps/api/src/modules/conversations/sticker.ts`). A Evolution manda pelo
+`/message/sendSticker`, e a Meta, com `type: sticker`. Antes de 18/11/2026 saía como foto pelo
+`sendMedia`: chegava como foto, e parte ficava em "enviado" sem chegar ao cliente (Farmácia Amor & Saúde, 13
+de 98). Com legenda continua imagem, porque figurinha não leva texto.
+
 ### Envio frio
 
 Mensagem para quem **não escreveu naquele número nas últimas 24 h** (a mesma janela da Meta,
