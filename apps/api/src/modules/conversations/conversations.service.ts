@@ -34,7 +34,7 @@ import { PermissionsService } from '../auth/permissions.service';
 import { exemptMode, isTicketExempt } from '../ignored-contacts/ignored-contacts';
 import type { Principal } from '../auth/permissions';
 import { clip } from '../../common/clip';
-import { outboundMediaType } from './sticker';
+import { dedupeStickers, outboundMediaType } from './sticker';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -58,6 +58,8 @@ const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permis
  * fora dos relatórios (docs/contatos-isentos.md).
  */
 export const LIVRE = { ticketExempt: true, status: 'in_progress', assigneeId: null } satisfies Prisma.ConversationWhereInput;
+/** quantas figurinhas o seletor mostra */
+const STICKERS_RECENT_MAX = 60;
 const ehLivre = (c: { ticketExempt: boolean; status: string; assigneeId: string | null }) => c.ticketExempt && c.status === 'in_progress' && !c.assigneeId;
 
 
@@ -998,6 +1000,8 @@ export class ConversationsService {
     }
     // .webp sem legenda sai como figurinha, não como foto (sticker.ts)
     if (!input.template) input = { ...input, type: outboundMediaType(input.type, input.media?.mimeType, input.text) as OutboundMessage['type'] };
+    // figurinha não leva texto: o WhatsApp não mostraria, e o histórico não pode mostrar o que não saiu
+    if (input.type === 'sticker') input = { ...input, text: undefined, media: input.media && { ...input.media, caption: undefined } };
     const created = await this.createOnce(conv.id, key, () => this.prisma.message.create({
       data: {
         idempotencyKey: key,
@@ -1262,7 +1266,29 @@ export class ConversationsService {
     return { sent, failed };
   }
 
+  /**
+   * Figurinhas recentes da empresa para o seletor do campo de mensagem (docs/envio.md#figurinhas):
+   * recebidas e enviadas nas conversas que a pessoa enxerga, mais recentes primeiro, sem repetir.
+   * Enviar uma delas reaproveita o arquivo do storage (`POST :id/messages` com `type: sticker`).
+   */
+  async recentStickers(tenantId: string, viewer: Viewer, limit = STICKERS_RECENT_MAX) {
+    const escopo = numberFilter(viewer);
+    const rows = await this.prisma.message.findMany({
+      where: { type: 'sticker', deletedAt: null, internal: false, mediaUrl: { startsWith: `media/${tenantId}/` }, conversation: { tenantId, ...(escopo && { numberId: escopo }), ...departmentWhere(viewer) } },
+      orderBy: { createdAt: 'desc' },
+      take: 400,
+      select: { id: true, mediaUrl: true, raw: true },
+    });
+    return dedupeStickers(rows as { id: string; mediaUrl: string; raw: unknown }[], Math.min(limit, STICKERS_RECENT_MAX))
+      .map((r) => ({ id: r.id, key: r.mediaUrl, url: this.storage.signedUrl(r.mediaUrl) }));
+  }
+
   private forwardInput(tenantId: string, m: Message): Parameters<ConversationsService['send']>[3] {
+    if (m.type === 'sticker') {
+      if (!m.mediaUrl || !m.mediaUrl.startsWith(`media/${tenantId}/`)) throw new BadRequestException('A figurinha ainda não está disponível para encaminhar.');
+      // figurinha não leva texto
+      return { type: 'sticker', mediaKey: m.mediaUrl, media: { url: m.mediaUrl, mimeType: m.mediaMime ?? 'image/webp', fileName: m.mediaName ?? undefined }, forwarded: true };
+    }
     const media = ['image', 'video', 'audio', 'document'] as const;
     if ((media as readonly string[]).includes(m.type)) {
       // a mídia é reaproveitada do nosso storage; ainda baixando (ou falhou) não há o que mandar
@@ -1275,7 +1301,6 @@ export class ConversationsService {
         forwarded: true,
       };
     }
-    if (m.type === 'sticker') throw new BadRequestException('Figurinha não pode ser encaminhada.');
     const text = textoParaEncaminhar(m.text, m.content as unknown as MessageContent | null);
     if (!text) throw new BadRequestException('Esta mensagem não tem conteúdo para encaminhar.');
     return { type: 'text', text, forwarded: true };

@@ -192,6 +192,13 @@ legenda (`outboundMediaType`, `apps/api/src/modules/conversations/sticker.ts`). 
 `sendMedia`: chegava como foto, e parte ficava em "enviado" sem chegar ao cliente (Farmácia Amor & Saúde, 13
 de 98). Com legenda continua imagem, porque figurinha não leva texto.
 
+No painel (desde 18/11/2026):
+- **Aparece como no WhatsApp**: pequena, sem balão, com a hora numa pílula. A animada se mexe.
+- **Botão Figurinhas** na barra do campo: as recentes da empresa, recebidas e enviadas, sem repetir
+  (`GET /conversations/stickers`). Um clique envia o mesmo arquivo, sem baixar e anexar.
+- **Encaminhar** vale para figurinha (antes era recusado).
+- Figurinha não leva texto: a API descarta o texto que vier junto com `type: sticker`.
+
 ### Envio frio
 
 Mensagem para quem **não escreveu naquele número nas últimas 24 h** (a mesma janela da Meta,

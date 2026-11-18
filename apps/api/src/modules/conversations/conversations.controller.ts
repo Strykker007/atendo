@@ -51,7 +51,7 @@ class DepartmentDto {
   @ValidateIf((_, v) => v !== null) @IsUUID() departmentId: string | null;
 }
 class SendDto {
-  @IsIn(['text', 'image', 'audio', 'video', 'document']) type: 'text' | 'image' | 'audio' | 'video' | 'document';
+  @IsIn(['text', 'image', 'audio', 'video', 'document', 'sticker']) type: 'text' | 'image' | 'audio' | 'video' | 'document' | 'sticker';
   @IsOptional() @IsString() @MaxLength(4096) text?: string;
   @IsOptional() media?: { url: string; mimeType?: string; fileName?: string; caption?: string };
   /** chave devolvida por POST /uploads */
@@ -314,6 +314,12 @@ export class ConversationsController {
     const dept = departmentId === 'none' || (departmentId && /^[0-9a-f-]{36}$/i.test(departmentId)) ? departmentId : undefined;
     const numeros = numberId && /^[0-9a-f-]{36}(,[0-9a-f-]{36}){0,49}$/i.test(numberId) ? numberId : undefined;
     return this.conversations.counts(u.tenantId, u, numeros, dept, ticket === '1');
+  }
+
+  /** Figurinhas recentes da empresa para o seletor do campo de mensagem. */
+  @Get('stickers')
+  stickers(@CurrentUser() u: AuthUser) {
+    return this.conversations.recentStickers(u.tenantId, u);
   }
 
   @Get(':id')
