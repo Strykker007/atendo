@@ -196,7 +196,7 @@ export default function TagsPage() {
       )}
 
       {tags.isLoading && <SkeletonRows rows={4} />}
-      {tags.data?.length === 0 && <Empty icon={<TagIcon size={36} />} title="Nenhuma tag" text='Crie tags como "lead com interesse" ou "comprador recorrente".' />}
+      {tags.data?.length === 0 && <Empty icon={<TagIcon size={36} />} title="Nenhuma tag" text='Crie tags como "Primeiro contato", "Retorno" ou "Urgente".' />}
 
       {todas.length > 0 && visiveis.length === 0 && <p className="rounded-2xl border border-dashed border-line px-5 py-4 text-sm text-faint">Nenhuma tag com esse filtro.</p>}
 

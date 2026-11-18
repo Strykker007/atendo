@@ -6,7 +6,7 @@ import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview, readableColor } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { QueueBar } from '@/components/queue/Queue';
-import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
+import { useCloseReasons, useOutcomeLabels, useMarkRead, useMarkUnread, useConversation, useConversations, useOlderConversations, useConversationCounts, useNumbers, useTags, useMe, useAgents, useDepartments, useVocab, botPaused, type Conversation, type OrdemConversas } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
 import { ExemptConfirm, useExemptShortcut } from './ExemptConfirm';
 import { Avatar } from './Avatar';
@@ -63,6 +63,7 @@ export function ConversationList() {
   const isAdmin = useCan('conversations.view_all');
   const agents = useAgents();
   const [search, setSearch] = useState('');
+  const vocab = useVocab();
   const numbers = useNumbers();
   // filtro de números padrão de quem entrou (docs/18-perfis-de-acesso.md#número-padrão)
   useDefaultNumbers();
@@ -256,9 +257,9 @@ export function ConversationList() {
             porque o atendimento dele continua no histórico */}
         {isAdmin && status === 'closed' && (
           <select value={assigneeId ?? ''} onChange={(e) => setAssignee(e.target.value || null)} className="w-full rounded-lg bg-field text-ink px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40">
-            <option value="">Todos os consultores</option>
+            <option value="">Todos os {vocab.pessoas}</option>
             <option value="me">Só as minhas</option>
-            <option value="none">Sem consultor</option>
+            <option value="none">Sem {vocab.pessoa.toLowerCase()}</option>
             {agents.data?.filter((a) => a.id !== me.data?.id).map((a) => <option key={a.id} value={a.id}>{a.name}{a.isActive ? '' : ' (inativo)'}</option>)}
           </select>
         )}
@@ -308,14 +309,15 @@ export function ConversationList() {
           </select>
         </div>
 
-        {/* origem do lead — chips pequenos, um clique liga/desliga */}
-        <div className="flex flex-wrap gap-1">
+        {/* origem do lead — chips pequenos, um clique liga/desliga. Sem venda (condomínio,
+            escritório) não há anúncio nem campanha: os chips só confundiam */}
+        {(vocab.vendas || origin) && <div className="flex flex-wrap gap-1">
           {(['ad', 'link', 'post', 'organic'] as ConversationOrigin[]).map((o) => (
             <button key={o} onClick={() => setOrigin(origin === o ? null : o)} className={cn('text-[10.5px] font-semibold px-2 py-0.5 rounded-md border transition-colors', origin === o ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>
               {ORIGIN_META[o].label}
             </button>
           ))}
-        </div>
+        </div>}
         {/* ticket: quem abre atendimento, quem é isento (docs/contatos-isentos.md) ou todos */}
         <div className="space-y-1">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-faint">Ticket</div>

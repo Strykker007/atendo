@@ -115,7 +115,7 @@ padrão para não mudar nada nas farmácias com filiais. Ligar nas administrador
 - [x] Relatórios respeitam `salesEnabled` (seção "Resultados", sem faturamento/pagamentos).
 - [x] Divisórias de início/fim de atendimento no chat e na auditoria (`docs/08-frontend.md`).
 - [x] Exemplos neutros no orçamento (sem remédio).
-- [ ] Vocabulário neutro com `salesEnabled = false`: "Consultor" → "Atendente", "leads" → "contatos",
+- [x] Vocabulário neutro com `salesEnabled = false` (18/11/2026 — `useVocab()` em `lib/hooks/configuracoes.ts`; ver [38](38-segmentos.md)): "Consultor" → "Atendente", "leads" → "contatos",
       esconder origem/campanha de anúncio sem dado, metas/ranking só com critérios de atendimento.
 - [ ] **TMA** (tempo médio de atendimento) nos relatórios, dos `conversation_events` existentes.
 - [ ] **Modelo de perfil "Administradora de condomínios"**: departamentos (Administrativo, Financeiro/

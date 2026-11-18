@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { vendasPorConsultorSql } from '../../common/reports/sales-base';
-import { SURVEY_SCALE_MAX, normalizeRankingWeights, rankingScores, type SurveyScale } from '@atendo/shared';
+import { SURVEY_SCALE_MAX, effectiveRankingWeights, normalizeRankingWeights, rankingScores, type SurveyScale } from '@atendo/shared';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -533,8 +533,8 @@ export class ReportsController {
     const from = f.from ?? new Date(Date.now() - 29 * 86_400_000);
     assertReportRange(from, to);
     // pesos entram na chave do cache: mudou o peso, a próxima leitura já reordena
-    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { rankingWeights: true } });
-    const weights = normalizeRankingWeights(s?.rankingWeights);
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { rankingWeights: true, salesEnabled: true } });
+    const weights = effectiveRankingWeights(s?.rankingWeights, s?.salesEnabled ?? true);
     const nums = await reportScope(this.prisma, u, f.companyId);
     return this.load.cached(ReportLoadService.key(u.tenantId, 'ranking', { from, to, tags: f.tagIds?.join(','), w: JSON.stringify(weights), nums: nums?.join(',') }), () => this.rankingData(u.tenantId, from, to, f.tagIds, weights, nums));
   }
@@ -960,7 +960,7 @@ export class DailyReportService {
     const { from, to, label } = yesterdayIn(settings?.timezone || TZ_DEFAULT, now);
     const [overview, ranking] = await Promise.all([
       this.reports.overviewData(tenantId, from, to, {}),
-      this.reports.rankingData(tenantId, from, to, undefined, normalizeRankingWeights(settings?.rankingWeights)),
+      this.reports.rankingData(tenantId, from, to, undefined, effectiveRankingWeights(settings?.rankingWeights, settings?.salesEnabled ?? true)),
     ]);
     const salesEnabled = settings?.salesEnabled ?? true;
     const { subject, text, html } = buildDailyReportEmail({

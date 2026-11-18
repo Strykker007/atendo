@@ -58,7 +58,7 @@ export default function TransmissoesPage() {
       />
 
       {campaigns.isLoading && <SkeletonRows rows={3} />}
-      {campaigns.data?.length === 0 && <Empty icon={<Send size={36} />} title="Nenhuma transmissão" text='Ex.: mandar uma oferta para quem "Não comprou" por "Achou caro" nos últimos 30 dias.' />}
+      {campaigns.data?.length === 0 && <Empty icon={<Send size={36} />} title="Nenhuma transmissão" text='Ex.: um aviso para todos os contatos com uma tag, ou uma oferta para quem encerrou por um motivo nos últimos 30 dias.' />}
 
       <div className="space-y-3">
         {campaigns.data?.map((c) => <CampaignCard key={c.id} c={c} onOpen={() => setAberta(c.id)} />)}

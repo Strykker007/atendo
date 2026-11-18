@@ -65,7 +65,7 @@ export function DefaultFlowsSection() {
         field="onCloseFlowId"
         icon={<Send size={14} className="text-done" />}
         label="Ao encerrar o atendimento"
-        hint="Dispara sozinho toda vez que alguém encerra — pesquisa de satisfação, pós-venda. No encerramento ainda dá para escolher outro fluxo só para aquele atendimento."
+        hint="Dispara sozinho toda vez que alguém encerra — pesquisa de satisfação, pós-atendimento. No encerramento ainda dá para escolher outro fluxo só para aquele atendimento."
         value={s.onCloseFlowId}
       />
       <div className="pl-4 border-l-2 border-line">
@@ -74,7 +74,7 @@ export function DefaultFlowsSection() {
           field="wonFlowId"
           icon={<CheckCircle2 size={14} className="text-ok" />}
           label={labels.won}
-          hint="Pós-venda, pedido de avaliação, instruções de entrega."
+          hint="Pós-atendimento, pedido de avaliação, próximos passos."
           value={s.wonFlowId}
         />
         <Select

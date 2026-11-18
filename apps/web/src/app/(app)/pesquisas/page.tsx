@@ -45,7 +45,7 @@ export default function SurveysPage() {
   const alternar = (s: SatisfactionSurvey, patch: SurveyInput, msg: string) =>
     update.mutateAsync({ id: s.id, ...patch }).then(() => toast.ok(msg), toast.err);
 
-  if (!feature.loading && !feature.has) return <FeatureLocked title="Pesquisas de satisfação" text="Pergunte ao contato como foi o atendimento logo depois de encerrar e acompanhe a nota de cada consultor (CSAT/NPS)." />;
+  if (!feature.loading && !feature.has) return <FeatureLocked title="Pesquisas de satisfação" text="Pergunte ao contato como foi o atendimento logo depois de encerrar e acompanhe a nota de cada pessoa da equipe (CSAT/NPS)." />;
 
   return (
     <PageShell>

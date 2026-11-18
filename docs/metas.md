@@ -62,7 +62,9 @@ Cada métrica vira 0–100 em relação ao melhor do período; a nota é a médi
 | Satisfação | média da pesquisa ÷ teto da escala | 15 |
 | Tempo de atendimento | TMA mais rápido ÷ TMA do consultor (o mais rápido = 100) | 10 |
 
-Sem dado (nenhuma resposta de pesquisa, sem TMA), a métrica não conta e o peso dela vai para as outras — ninguém leva zero por não ter recebido pesquisa. Empate → faturamento → vendas → nome.
+Sem dado (nenhuma resposta de pesquisa, sem TMA, ninguém faturou ou fechou no período), a métrica não conta e o peso dela vai para as outras — ninguém leva zero por não ter recebido pesquisa.
+
+**Sem venda** (`salesEnabled = false`): o peso de Faturamento é zerado na API (`effectiveRankingWeights`, `packages/shared/src/ranking.ts`), a tela vira **Ranking da equipe**, esconde Faturamento e chama Vendas/Conversão pelo nome do resultado positivo ("Resolvido", "Taxa de “Resolvido”"). Metas do mês ficam só de quantidade. Antes, 35% da nota de todo mundo era um zero fixo. Empate → faturamento → vendas → nome.
 
 **Pesos**: botão **Pesos** na tela (`settings.manage`), 0 a 100 cada — vale a proporção; zero tira a métrica. Gravados em `tenant_settings.rankingWeights` (nulo = padrão; migração `20261207000000_ranking_weights`). A tabela ganhou as colunas **Pontuação** (passe o mouse: composição de cada parte) e **Faturamento**; clicar em qualquer coluna só reordena para conferir — o pódio e a posição seguem a pontuação.
 

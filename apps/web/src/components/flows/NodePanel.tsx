@@ -7,7 +7,7 @@ import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META, TRANSFORM_META, isTransform, DELAY_UNIT, FlowEditorRefs, fmtAtraso } from './nodes';
 import { OpOptions, TransformPreview } from './TransformPreview';
-import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useSurveys, reasonsFor, useAiAgents } from '@/lib/hooks';
+import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useVocab, useSurveys, reasonsFor, useAiAgents } from '@/lib/hooks';
 import { DEPARTMENT_NONE } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
 import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, START_DELAY_OPTIONS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type WaitUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
@@ -65,6 +65,8 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
   const departments = useDepartments();
   const closeReasons = useCloseReasons();
   const outcomeLabels = useOutcomeLabels();
+  // sem venda: sem "valor da venda" e sem falar em vendas no encerramento
+  const vendas = useVocab().vendas;
   // desativado só aparece se já for o escolhido (para não sumir do select sem aviso)
   const deptOptions = (current?: string) => (departments.data ?? []).filter((d) => d.isActive || d.id === current);
   const sched = useHasFeature('scheduling');
@@ -289,12 +291,12 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                   <Field label="Resultado">
                     {/* trocar o resultado limpa o motivo (as listas são diferentes) e o valor (só Comprou tem) */}
                     <select className={`${inputCls} min-w-0 max-w-full`} value={oc ?? ''} onChange={(e) => set({ outcome: e.target.value || undefined, closeReasonId: undefined, ...(e.target.value !== 'won' && { saleValue: undefined }) })}>
-                      <option value="">Sem resultado (não conta em vendas)</option>
+                      <option value="">{vendas ? 'Sem resultado (não conta em vendas)' : 'Sem resultado (não conta nos resultados)'}</option>
                       <option value="won">{outcomeLabels.won}</option>
                       <option value="lost">{outcomeLabels.lost}</option>
                     </select>
                   </Field>
-                  {oc === 'won' && (
+                  {oc === 'won' && vendas && (
                     <Field label="Valor da venda (opcional)" hint="Número ou variável do fluxo, ex.: {{valor_pedido}}. Vazio ou inválido = venda sem valor (não soma no faturamento).">
                       <TextWithVars multiline={false} value={d.saleValue ?? ''} onChange={(v) => set({ saleValue: v || undefined })} vars={vars} placeholder="R$ 0,00 ou {{valor}}" />
                     </Field>
@@ -321,7 +323,7 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                   <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">
                     {oc
                       ? <>Conta nos relatórios, no ranking e nas metas em nome do <b>dono da conversa</b> (sem dono, só no total da empresa). Para registrar tags, use <b>Aplicar etiqueta</b> antes deste bloco.</>
-                      : <>Encerra sem resultado: não entra em vendas, conversão nem ranking.</>}
+                      : <>Encerra sem resultado: não entra {vendas ? 'em vendas, conversão' : `em “${outcomeLabels.won}”, taxa`} nem ranking.</>}
                     {' '}Não dispara fluxo de encerramento{d.surveyId ? '' : ' nem pesquisa'}. Depois disso, Atraso e tempo limite deste fluxo param — a conversa está encerrada.
                   </p>
                 </>

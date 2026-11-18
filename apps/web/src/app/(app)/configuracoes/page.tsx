@@ -221,7 +221,7 @@ function DailyReportSection() {
     <section className="rounded-2xl bg-panel border border-line p-5 space-y-3">
       <div>
         <h2 className="font-display font-semibold text-ink flex items-center gap-2"><Mail size={16} className="text-muted" />Relatório diário por e-mail</h2>
-        <p className="text-sm text-muted">Todo dia às 7h: atendimentos, tempo de resposta, vendas e o ranking da equipe do dia anterior.</p>
+        <p className="text-sm text-muted">Todo dia às 7h: atendimentos, tempo de resposta, resultados e o ranking da equipe do dia anterior.</p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button

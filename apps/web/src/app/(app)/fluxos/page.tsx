@@ -145,7 +145,7 @@ export default function FluxosPage() {
       )} />
       <SectionTabs section="fluxos" label="Fluxos e agentes de IA" />
       {flows.isLoading && <SkeletonRows rows={3} />}
-      {flows.data?.length === 0 && <Empty icon={<Workflow size={36} />} title="Nenhum fluxo" text="Crie o primeiro: por exemplo, uma triagem com menu 'Vendas / Suporte'." />}
+      {flows.data?.length === 0 && <Empty icon={<Workflow size={36} />} title="Nenhum fluxo" text="Crie o primeiro: por exemplo, uma triagem com menu 'Atendimento / Financeiro'." />}
       {!!flows.data?.length && (
         <DragDropContext onDragEnd={onDragEnd}>
         <Droppable droppableId="fluxos" isDropDisabled={!isAdmin}>

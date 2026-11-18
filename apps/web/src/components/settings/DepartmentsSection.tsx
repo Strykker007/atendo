@@ -89,7 +89,7 @@ export function DepartmentsSection() {
         <div className="min-w-0 flex-1">
           <h2 className="font-display font-semibold text-ink">Departamentos</h2>
           <p className="text-sm text-muted">
-            Separe a fila por área (Vendas, Suporte, Balcão…). Quem participa de um departamento vê só as conversas dele e as sem departamento.
+            Separe a fila por área (Vendas, Financeiro, Portaria, Jurídico…). Quem participa de um departamento vê só as conversas dele e as sem departamento.
             Coloque um departamento abaixo de outro para montar a hierarquia: o gestor de cima vê os de baixo, o de baixo não vê os de cima.
             Só o administrador da conta vê todos. Fluxos podem direcionar a conversa (blocos Distribuidor e Ação).
           </p>
