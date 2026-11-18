@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.21.0 — 2026-11-18
+
+- test(segmentos): vocabulário e rótulos do ranking no shared, com testes
+- feat(segmentos): vocabulário e ranking para quem não vende; tickets de administradora e jurídico
+- fix(conversas): respondidas pelo celular voltam para a fila
+- fix(entrada): resposta sem o nono dígito cai no contato chamado com o 9
+
 ## 1.20.4 — 2026-11-17
 
 - fix(conversas): nome do contato no topo da conversa não some espremido pelas ações
