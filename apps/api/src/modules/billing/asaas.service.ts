@@ -43,7 +43,7 @@ export interface AsaasCardHolder {
 }
 
 interface AsaasCustomer { id: string; name: string; cpfCnpj: string; email: string | null; mobilePhone: string | null; postalCode: string | null; addressNumber: string | null }
-interface AsaasSubscription { id: string; customer: string; status: 'ACTIVE' | 'INACTIVE' | 'EXPIRED'; nextDueDate: string; value: number; cycle: string; billingType: string; externalReference: string | null; deleted?: boolean }
+export interface AsaasSubscription { id: string; customer: string; status: 'ACTIVE' | 'INACTIVE' | 'EXPIRED'; nextDueDate: string; value: number; cycle: string; billingType: string; externalReference: string | null; deleted?: boolean }
 export interface AsaasPayment {
   id: string;
   customer: string;
@@ -231,6 +231,29 @@ export class AsaasService {
     const c = await this.request<AsaasCustomer>('POST', '/customers', body);
     await this.prisma.tenant.update({ where: { id: tenantId }, data: { asaasCustomerId: c.id } });
     return c.id;
+  }
+
+  /**
+   * Assinaturas ATIVAS no Asaas para um CPF/CNPJ, em todos os customers com esse documento —
+   * inclusive as criadas fora do Atendo (Vogo antigo). A migração usa para reaproveitar em vez de
+   * criar outra (cobrança em dobro) — docs/05#assinatura-antiga-no-asaas.
+   */
+  async activeSubscriptionsByDocument(cpfCnpj: string): Promise<AsaasSubscription[]> {
+    const doc = onlyDigits(cpfCnpj);
+    if (!doc) return [];
+    const customers = await this.request<AsaasList<AsaasCustomer & { deleted?: boolean }>>('GET', `/customers?cpfCnpj=${doc}&limit=20`);
+    const out: AsaasSubscription[] = [];
+    for (const c of customers.data.filter((c) => !c.deleted)) {
+      const subs = await this.request<AsaasList<AsaasSubscription>>('GET', `/subscriptions?customer=${c.id}&status=ACTIVE&limit=20`);
+      out.push(...subs.data.filter((x) => !x.deleted && x.status === 'ACTIVE'));
+    }
+    return out;
+  }
+
+  /** Amarra uma assinatura que já existia no Asaas (customer + assinatura) ao tenant, sem mexer em valor nem cobranças. */
+  async adoptSubscription(tenantId: string, sub: Pick<AsaasSubscription, 'id' | 'customer'>) {
+    await this.request('PUT', `/customers/${sub.customer}`, { externalReference: tenantId, notificationDisabled: false });
+    await this.request('PUT', `/subscriptions/${sub.id}`, { externalReference: tenantId, updatePendingPayments: false });
   }
 
   /** Liga os avisos do Asaas num cliente já cadastrado (até 16/11/2026 eles nasciam desligados). */

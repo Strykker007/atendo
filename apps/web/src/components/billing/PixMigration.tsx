@@ -10,8 +10,11 @@ import { usePixEnroll, usePixSettings, useSetPixSettings, type PixEnrollRow } fr
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
 const RESULTADO: Record<PixEnrollRow['result'], { label: string; cls: string }> = {
-  would_enroll: { label: 'Vai migrar', cls: 'text-accent-ink' },
+  would_enroll: { label: 'Vai criar assinatura', cls: 'text-accent-ink' },
   enrolled: { label: 'Migrado', cls: 'text-ok' },
+  would_link: { label: 'Vai reaproveitar a assinatura que já está no Asaas', cls: 'text-accent-ink' },
+  linked: { label: 'Vinculado à assinatura do Asaas', cls: 'text-ok' },
+  remote_duplicate: { label: 'Assinatura em dobro no Asaas', cls: 'text-danger-ink' },
   no_document: { label: 'Falta CPF/CNPJ — o cliente vê o aviso no painel', cls: 'text-warn-ink' },
   not_live: { label: 'Assinatura suspensa/cancelada', cls: 'text-muted' },
   no_price: { label: 'Sem valor', cls: 'text-muted' },
@@ -36,13 +39,14 @@ export function PixMigration() {
   const [confirmar, setConfirmar] = useState(false);
   /** "Migrar só este": um cliente da prévia (ex.: quem vence primeiro, para testar de verdade) */
   const [umSo, setUmSo] = useState<PixEnrollRow | null>(null);
-  const aMigrar = linhas?.filter((l) => l.result === 'would_enroll') ?? [];
+  const aMigrar = linhas?.filter((l) => l.result === 'would_enroll' || l.result === 'would_link') ?? [];
+  const aVincular = aMigrar.filter((l) => l.result === 'would_link').length;
 
   const migrarUm = async (l: PixEnrollRow) => {
     try {
       const [r] = await enroll.mutateAsync({ dryRun: false, tenantId: l.tenantId });
       if (r) setLinhas((ls) => ls?.map((x) => (x.tenantId === r.tenantId ? r : x)) ?? null);
-      if (r?.result === 'enrolled') toast.ok(`${l.tenant} migrado para o Pix automático`);
+      if (r?.result === 'enrolled' || r?.result === 'linked') toast.ok(r.result === 'linked' ? `${l.tenant} vinculado à assinatura que já estava no Asaas` : `${l.tenant} migrado para o Pix automático`);
       else toast.err(r?.error ?? 'Não foi possível migrar este cliente');
     } catch (err) { toast.err(err); }
   };
@@ -52,7 +56,7 @@ export function PixMigration() {
       const r = await enroll.mutateAsync({ dryRun });
       setLinhas(r); setPrevia(dryRun);
       if (!dryRun) {
-        const ok = r.filter((l) => l.result === 'enrolled').length;
+        const ok = r.filter((l) => l.result === 'enrolled' || l.result === 'linked').length;
         const erros = r.filter((l) => l.result === 'error').length;
         if (erros) toast.err(`${ok} migrado(s), ${erros} com erro — veja a lista`); else toast.ok(`${ok} cliente(s) migrado(s) para o Pix automático`);
       }
@@ -102,8 +106,15 @@ export function PixMigration() {
                   <td className="py-2 pr-4 text-muted">{l.plan}</td>
                   <td className="py-2 pr-4 text-right tabular-nums">{brl(l.value)}</td>
                   <td className="py-2 pr-4 tabular-nums">{l.dueDate ? dataBR(l.dueDate) : '—'}</td>
-                  <td className={cn('py-2', RESULTADO[l.result].cls)}>{RESULTADO[l.result].label}{l.error ? `: ${l.error}` : ''}</td>
-                  <td className="py-2 text-right">{l.result === 'would_enroll' && <Button size="sm" variant="ghost" onClick={() => setUmSo(l)}>Migrar só este</Button>}</td>
+                  <td className={cn('py-2', RESULTADO[l.result].cls)}>
+                    {RESULTADO[l.result].label}{l.error ? `: ${l.error}` : ''}
+                    {l.remote?.map((r) => (
+                      <div key={r.id} className="text-[11.5px] text-muted">
+                        {r.ours ? 'Atendo' : 'Antiga'} · {r.billingType === 'UNDEFINED' ? 'cliente escolhe' : r.billingType.toLowerCase()} · {brl(r.value)}{Math.abs(r.value - l.value) > 0.009 && <span className="text-warn-ink"> (contratado aqui: {brl(l.value)})</span>} · próxima {dataBR(r.nextDueDate)} · <span className="font-mono">{r.id}</span>
+                      </div>
+                    ))}
+                  </td>
+                  <td className="py-2 text-right">{(l.result === 'would_enroll' || l.result === 'would_link') && <Button size="sm" variant="ghost" onClick={() => setUmSo(l)}>{l.result === 'would_link' ? 'Vincular só este' : 'Migrar só este'}</Button>}</td>
                 </tr>
               ))}
               {!linhas.length && <tr><td colSpan={6} className="py-6 text-center text-muted">Ninguém na cobrança manual para migrar.</td></tr>}
@@ -128,7 +139,9 @@ export function PixMigration() {
         onClose={() => setUmSo(null)}
         title={`Migrar ${umSo?.tenant ?? ''}`}
         confirmLabel="Migrar"
-        text={umSo ? `Cria a assinatura Pix no Asaas de ${brl(umSo.value)}/mês com 1º vencimento em ${umSo.dueDate ? dataBR(umSo.dueDate) : '—'}. Se vence em até 5 dias, o e-mail com o Pix sai agora. Os outros clientes não mudam.` : ''}
+        text={umSo ? (umSo.result === 'would_link'
+          ? `Liga ${umSo.tenant} à assinatura que já existe no Asaas (${brl(umSo.remote?.[0]?.value ?? umSo.value)}/mês, próximo vencimento ${umSo.dueDate ? dataBR(umSo.dueDate) : '—'}). Nada é criado nem cobrado de novo; valor e forma de pagamento continuam os do Asaas. Os outros clientes não mudam.`
+          : `Cria a assinatura no Asaas de ${brl(umSo.value)}/mês com 1º vencimento em ${umSo.dueDate ? dataBR(umSo.dueDate) : '—'}. Se vence em até 5 dias, o e-mail com o Pix sai agora. Os outros clientes não mudam.`) : ''}
         onConfirm={() => (umSo ? migrarUm(umSo) : undefined)}
       />
 
@@ -137,7 +150,7 @@ export function PixMigration() {
         onClose={() => setConfirmar(false)}
         title="Migrar para o Pix automático"
         confirmLabel={`Migrar ${aMigrar.length}`}
-        text={`Cria a assinatura no Asaas de ${aMigrar.length} cliente(s), somando ${brl(aMigrar.reduce((a, l) => a + l.value, 0))}/mês, com o vencimento que cada um já tem. Quem vence nos próximos 5 dias recebe o e-mail com o Pix agora.`}
+        text={`${aMigrar.length - aVincular} cliente(s) ganham assinatura nova no Asaas, com o vencimento que cada um já tem${aVincular ? `; ${aVincular} já tinham assinatura ativa no Asaas e só serão vinculados (nada é criado nem cobrado de novo)` : ''}. Assinatura em dobro no Asaas fica de fora até você cancelar a extra.`}
         onConfirm={() => rodar(false)}
       />
     </section>
