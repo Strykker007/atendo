@@ -6,6 +6,7 @@ import { env } from '../../../config/env';
 import type { MediaPayload, NumberContext, OutboundReaction, ParsedWebhook, WhatsAppProvider } from './provider.interface';
 import { describeMetaError, ProviderSendError } from './provider-error';
 import { textoQualquer } from './payload-text';
+import { audioForMeta } from './audio-convert';
 
 /** providerConfig (criptografado) de um número Meta */
 export interface MetaNumberConfig {
@@ -231,6 +232,8 @@ export class MetaProvider implements WhatsAppProvider {
 
   async send(ctx: NumberContext, m: OutboundMessage, media?: MediaPayload): Promise<SendResult> {
     const cfg = this.cfg(ctx);
+    // áudio gravado no Chrome (webm) a Meta recusa: converte para ogg/opus antes do upload
+    if (media && m.type === MessageType.AUDIO) media = await audioForMeta(media);
     const body: Record<string, unknown> = { messaging_product: 'whatsapp', to: m.to };
     let billingCategory: BillingCategory = BillingCategory.SERVICE;
 

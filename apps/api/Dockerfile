@@ -23,7 +23,8 @@ RUN pnpm --filter @atendo/shared build \
 
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
-RUN apk add --no-cache tini && addgroup -S app && adduser -S app -G app
+# ffmpeg: áudio gravado no navegador (webm) vira ogg/opus para a API oficial (providers/audio-convert.ts)
+RUN apk add --no-cache tini ffmpeg && addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=build /out ./
 COPY --from=build /app/apps/api/dist ./dist

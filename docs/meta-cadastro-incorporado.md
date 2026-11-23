@@ -63,6 +63,10 @@ suportado e duplicaria tudo.
   mexe na janela de 24 h da API. Erro `131060` = mensagem para aparelho não suportado — o cliente
   vê no app. Para sair, só pelo app (a API de descadastro não vale).
 
+## Áudio
+
+<a id="áudio"></a>A Cloud API só aceita áudio `aac`, `mp4`, `mpeg`, `amr` e `ogg`/`opus`. O gravador do painel no Chrome gera `audio/webm`, e a Meta recusava com `(#100) Param file must be a file with one of the following types…` (aconteceu em 23/11/2026; foto, vídeo e texto passavam). Agora `MetaProvider.send` passa o áudio por `audioForMeta` (`providers/audio-convert.ts`): formato aceito vai direto (sem o `;codecs=`); o resto vira **ogg/opus mono** com `ffmpeg`, instalado na imagem da API/worker (`apps/api/Dockerfile`). Sem ffmpeg (dev local), o envio falha com a mensagem "Conversão de áudio indisponível no servidor". A Evolution não precisa disso: ela converte sozinha.
+
 ## Portfólio do cliente
 
 Ao terminar a janela, o Atendo lê o **portfólio** (Business Manager) dono da WABA, com o nome e a
