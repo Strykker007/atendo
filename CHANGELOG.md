@@ -3,6 +3,20 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.22.0 — 2026-11-23
+
+- fix(meta): converter áudio webm para ogg/opus antes de enviar pela API oficial
+- feat(cobranca): corrigir assinatura em dobro no Asaas
+- feat(cobranca): migração reaproveita a assinatura antiga do Asaas
+- feat(chat): transcrever áudio sob demanda
+- feat(fluxos): encerrar sem resultado e fora dos relatórios
+- feat(meta): terminar verificação e registro do número oficial sem remover; R2 no roadmap
+- feat(clientes): tabela em largura total, ações fixas e alteração em massa; limite de log nos containers
+- fix(numeros): reabrir Adicionar número volta para Conectar com a Meta
+- feat(meta): portfólio do cliente no número oficial (business_management) e roteiro da análise do app
+- feat(figurinhas): mostrar como no WhatsApp, seletor de recentes e encaminhar
+- fix(envio): figurinha (.webp) sai como figurinha, não como foto
+
 ## 1.21.0 — 2026-11-18
 
 - test(segmentos): vocabulário e rótulos do ranking no shared, com testes
