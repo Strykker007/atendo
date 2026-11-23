@@ -41,11 +41,32 @@ export const useCreateNumber = () => {
 export const useMetaSignupConfig = (enabled = true) =>
   useQuery({ queryKey: ['meta-signup-config'], enabled, staleTime: 10 * 60_000, retry: false, queryFn: () => api<{ enabled: boolean; appId: string | null; configId: string | null; graphVersion: string }>('/numbers/meta-signup/config') });
 
+/** Portfólio da Meta dono do número (docs/meta-cadastro-incorporado.md#portfólio-do-cliente). */
+export interface MetaBusiness { id: string; name: string | null; verificationStatus: string | null }
+export const useMetaBusiness = (numberId: string, enabled: boolean) =>
+  useQuery({ queryKey: ['meta-business', numberId], enabled, staleTime: 10 * 60_000, retry: false, queryFn: () => api<{ business: MetaBusiness | null; error?: string }>(`/numbers/${numberId}/meta-business`) });
+
+/** Registro do número na Cloud API (docs/meta-cadastro-incorporado.md#registro-pendente). */
+export interface MetaRegistration { verification: string | null; status: string | null; platformType: string | null; nameStatus: string | null; quality: string | null; registered: boolean; coexist: boolean }
+export const useMetaRegistration = (numberId: string, enabled: boolean) =>
+  useQuery({ queryKey: ['meta-registration', numberId], enabled, staleTime: 5 * 60_000, retry: false, queryFn: () => api<{ registration: MetaRegistration | null; error?: string }>(`/numbers/${numberId}/meta-registration`) });
+/** Passos do registro: pedir código (SMS/ligação), confirmar e registrar. Cada um recarrega a situação. */
+export const useMetaRegistrationStep = (numberId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (s: { step: 'request-code'; method: 'SMS' | 'VOICE' } | { step: 'verify-code'; code: string } | { step: 'register' }) => {
+      const { step, ...body } = s;
+      return api<{ ok?: boolean; registration?: MetaRegistration }>(`/numbers/${numberId}/meta-registration/${step}`, { method: 'POST', body: JSON.stringify(body) });
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['meta-registration', numberId] }); },
+  });
+};
+
 export const useMetaSignup = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { code: string; wabaId: string; phoneNumberId?: string; label: string; coexist?: boolean }) =>
-      api<NumberItem & { verifiedName: string | null; registerError: string | null; syncErrors?: string[] }>('/numbers/meta-signup', { method: 'POST', body: JSON.stringify(body) }),
+    mutationFn: (body: { code: string; wabaId: string; phoneNumberId?: string; businessId?: string; label: string; coexist?: boolean }) =>
+      api<NumberItem & { verifiedName: string | null; registerError: string | null; syncErrors?: string[]; business?: MetaBusiness | null }>('/numbers/meta-signup', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: invalidateNumbers(qc),
   });
 };

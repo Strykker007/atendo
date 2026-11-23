@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock, Braces } from 'lucide-react';
+import { Paperclip, Zap, Workflow, Pause, Play, CircleStop, Smile, AtSign, Image as ImageIcon, Video, FileText, Search, AlarmClock, Braces, Sticker, Loader2 } from 'lucide-react';
 import { SHORTCUT_VARS, VarSyntaxHint } from '@/components/flows/TextWithVars';
 import { GlobalVarsMenuSection } from '@/components/variables/GlobalVariables';
 import { ScheduleMessageModal } from './ScheduledMessages';
@@ -10,8 +10,8 @@ import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
 import {
-  useAgents, useActiveRun, useFlows, useHasFeature, useMe, useQuickReplies, useConversation, usePauseBot, useResumeBot, useCancelFlow, botPaused, useCan,
-  type QuickReplyItem,
+  useAgents, useActiveRun, useFlows, useHasFeature, useMe, useQuickReplies, useConversation, usePauseBot, useResumeBot, useCancelFlow, botPaused, useCan, useRecentStickers,
+  type QuickReplyItem, type RecentSticker,
 } from '@/lib/hooks';
 
 /**
@@ -46,10 +46,12 @@ export interface ComposerBarProps {
   texto: string;
   /** agendou com o texto do campo: limpa o campo */
   onAgendado: () => void;
+  /** envia uma figurinha recente (sem o botão quando ausente: nota interna, sem permissão de responder) */
+  onFigurinha?: (s: RecentSticker) => void;
 }
 
-export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, assinaturaObrigatoria, onAssinando, direita, texto, onAgendado }: ComposerBarProps) {
-  const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'mencao' | 'variavel' | null>(null);
+export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, enviando, assinando, assinaturaObrigatoria, onAssinando, direita, texto, onAgendado, onFigurinha }: ComposerBarProps) {
+  const [aberto, setAberto] = useState<'anexo' | 'respostas' | 'fluxos' | 'pausa' | 'emoji' | 'figurinha' | 'mencao' | 'variavel' | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
   const [agendando, setAgendando] = useState(false);
   // vendido à parte: só aparece para quem tem no perfil
@@ -93,6 +95,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
       )}
       {podeAgendar && <Atalho icone={<AlarmClock size={16} />} titulo="Agendar mensagem" ativo={agendando} onClick={() => { setAberto(null); setAgendando(true); }} />}
       <Atalho icone={<Smile size={16} />} titulo="Emojis" ativo={aberto === 'emoji'} onClick={() => setAberto(aberto === 'emoji' ? null : 'emoji')} />
+      {onFigurinha && <Atalho icone={<Sticker size={16} />} titulo="Figurinhas" ativo={aberto === 'figurinha'} onClick={() => setAberto(aberto === 'figurinha' ? null : 'figurinha')} />}
       <Atalho icone={<Braces size={16} />} titulo="Inserir variável (trocada pelo valor no envio)" ativo={aberto === 'variavel'} onClick={() => setAberto(aberto === 'variavel' ? null : 'variavel')} />
       <Atalho icone={<AtSign size={16} />} titulo="Mencionar alguém da equipe" ativo={aberto === 'mencao'} onClick={() => setAberto(aberto === 'mencao' ? null : 'mencao')} />
       <Atalho
@@ -126,6 +129,7 @@ export function ComposerBar({ conversationId, onInserir, onEscolherArquivo, envi
           </div>
         </Menu>
       )}
+      {aberto === 'figurinha' && onFigurinha && <MenuFigurinhas onEscolher={(s) => { onFigurinha(s); setAberto(null); }} />}
       {aberto === 'mencao' && <MenuMencao onInserir={inserir} />}
       {aberto === 'variavel' && (
         // a API troca no envio (`{{...}}` desconhecida fica como foi escrita) — docs/variaveis.md
@@ -202,6 +206,32 @@ function MenuRespostas({ conversationId, onFechar }: { conversationId: string; o
  * Seletor de resposta rápida que abre ao digitar `/` no campo de mensagem. Sobe colado ao
  * campo (como um dropdown invertido), com a busca já focada. Clique fora fecha como Esc.
  */
+/**
+ * Figurinhas recentes da empresa (recebidas e enviadas), sem repetir: um clique envia. Antes a
+ * equipe baixava a figurinha e anexava de novo (docs/envio.md#figurinhas).
+ */
+function MenuFigurinhas({ onEscolher }: { onEscolher: (s: RecentSticker) => void }) {
+  const q = useRecentStickers(true);
+  return (
+    <Menu largura="w-80">
+      <div className="px-2 pt-1.5 pb-1 text-[11px] font-semibold text-muted">Figurinhas recentes</div>
+      {q.isLoading ? (
+        <div className="flex justify-center py-6 text-muted"><Loader2 size={16} className="animate-spin" /></div>
+      ) : !q.data?.length ? (
+        <p className="px-3 py-4 text-[12px] text-muted">Nenhuma figurinha ainda. As que chegarem ou forem enviadas nas conversas aparecem aqui.</p>
+      ) : (
+        <div className="grid grid-cols-4 gap-1 p-1 max-h-72 overflow-y-auto scrollbar-thin">
+          {q.data.map((s) => (
+            <button key={s.id} type="button" onClick={() => onEscolher(s)} title="Enviar figurinha" className="rounded-md hover:bg-field p-1">
+              <img src={s.url} alt="Figurinha" loading="lazy" className="w-full aspect-square object-contain" />
+            </button>
+          ))}
+        </div>
+      )}
+    </Menu>
+  );
+}
+
 export function QuickReplyPopover({ conversationId, onEscolhido, onCancelar }: { conversationId: string; onEscolhido: () => void; onCancelar: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {

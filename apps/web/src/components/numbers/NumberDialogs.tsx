@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { PhoneInput } from '@/components/ui/PhoneInput';
@@ -20,6 +20,8 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
   const signupCfg = useMetaSignupConfig(open);
   const incorporado = ps.provider === 'meta' && !!signupCfg.data?.enabled;
   const [manual, setManual] = useState(false);
+  // reabrir volta para a janela da Meta: o "preencher manualmente" de antes ficava grudado até recarregar
+  useEffect(() => { if (open) setManual(false); }, [open]);
   const formularioManual = !incorporado || manual;
 
   async function submit(e: React.FormEvent) {
@@ -51,9 +53,9 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
                 coexist={coexist}
                 onError={setError}
                 onDone={(r) => {
-                  if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}`);
+                  if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}. Termine pelo aviso no cartão do número — não precisa remover.`);
                   else if (r.syncErrors.length) toast.err(`Número conectado, mas a Meta recusou parte da sincronização (${r.syncErrors.join('; ')})`);
-                  else toast.ok(coexist ? 'Número conectado; contatos e histórico chegam nos próximos minutos' : 'Número conectado pela Meta');
+                  else toast.ok(`${coexist ? 'Número conectado; contatos e histórico chegam nos próximos minutos' : 'Número conectado pela Meta'}${r.businessName ? ` · portfólio ${r.businessName}` : ''}`);
                   onDone({ id: r.id, provider: 'meta' });
                   onClose();
                 }}

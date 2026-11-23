@@ -1060,7 +1060,8 @@ export class FlowEngineService {
         // consultor da pesquisa: o dono ANTES de encerrar (como no encerramento pelo painel)
         const dono = d.status === 'closed' && d.surveyId ? (await this.prisma.conversation.findUnique({ where: { id: run.conversationId }, select: { assigneeId: true } }))?.assigneeId ?? null : null;
         if (d.status !== 'closed' || !d.outcome) {
-          await this.conversations.setStatusSystem(run.conversationId, d.status);
+          // "Sem resultado e fora dos relatórios": só encerra, o atendimento não conta em nada
+          await this.conversations.setStatusSystem(run.conversationId, d.status, { ignoreInReports: d.status === 'closed' && !!d.ignoreInReports });
           if (d.status === 'closed' && d.surveyId) await this.surveyAfterClose(run, d.surveyId, dono);
           break;
         }

@@ -290,8 +290,10 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                 <>
                   <Field label="Resultado">
                     {/* trocar o resultado limpa o motivo (as listas são diferentes) e o valor (só Comprou tem) */}
-                    <select className={`${inputCls} min-w-0 max-w-full`} value={oc ?? ''} onChange={(e) => set({ outcome: e.target.value || undefined, closeReasonId: undefined, ...(e.target.value !== 'won' && { saleValue: undefined }) })}>
+                    {/* "ignore" não é um resultado: é sem resultado + ignoreInReports (só encerra, fora de todo relatório) */}
+                    <select className={`${inputCls} min-w-0 max-w-full`} value={oc ?? (d.ignoreInReports ? 'ignore' : '')} onChange={(e) => { const v = e.target.value; set({ outcome: v === 'won' || v === 'lost' ? v : undefined, ignoreInReports: v === 'ignore' ? true : undefined, closeReasonId: undefined, ...(v !== 'won' && { saleValue: undefined }) }); }}>
                       <option value="">{vendas ? 'Sem resultado (não conta em vendas)' : 'Sem resultado (não conta nos resultados)'}</option>
+                      <option value="ignore">Sem resultado e fora dos relatórios (só encerra)</option>
                       <option value="won">{outcomeLabels.won}</option>
                       <option value="lost">{outcomeLabels.lost}</option>
                     </select>
@@ -323,7 +325,9 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
                   <p className="text-[11px] text-muted rounded-lg bg-field px-3 py-2">
                     {oc
                       ? <>Conta nos relatórios, no ranking e nas metas em nome do <b>dono da conversa</b> (sem dono, só no total da empresa). Para registrar tags, use <b>Aplicar etiqueta</b> antes deste bloco.</>
-                      : <>Encerra sem resultado: não entra {vendas ? 'em vendas, conversão' : `em “${outcomeLabels.won}”, taxa`} nem ranking.</>}
+                      : d.ignoreInReports
+                        ? <>Só encerra: o atendimento fica <b>fora de todos os relatórios</b> (início, tempo de resposta, encerramentos, {vendas ? 'vendas, conversão' : 'resultados'} e ranking), como o encerramento interno.</>
+                        : <>Encerra sem resultado: não entra {vendas ? 'em vendas, conversão' : `em “${outcomeLabels.won}”, taxa`} nem ranking, mas conta como atendimento encerrado.</>}
                     {' '}Não dispara fluxo de encerramento{d.surveyId ? '' : ' nem pesquisa'}. Depois disso, Atraso e tempo limite deste fluxo param — a conversa está encerrada.
                   </p>
                 </>

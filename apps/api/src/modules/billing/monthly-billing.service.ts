@@ -6,10 +6,40 @@ import { env } from '../../config/env';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { MailService, senderName } from '../../common/mail/mail.service';
 import { UsageService } from './usage.service';
-import { AsaasService, chargeOf, contractedCharge } from './asaas.service';
+import { AsaasService, chargeOf, contractedCharge, type AsaasSubscription } from './asaas.service';
 import { REMINDER_DAYS, boletoFirstDueDate, cancelDeadline, diaSP, diasEntre, enrollSkip, qrSignature, reminderKind, reminderMail, type EnrollSkip, type ReminderKind } from './monthly-billing';
 
-export interface EnrollResult { tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null; result: 'enrolled' | 'would_enroll' | EnrollSkip | 'error'; error?: string }
+/**
+ * `would_link`/`linked`: já havia UMA assinatura ativa no Asaas para o CPF/CNPJ (Vogo antigo) — é
+ * reaproveitada em vez de criar outra. `remote_duplicate`: mais de uma ativa para o mesmo documento
+ * (cobrança em dobro) — nada é feito; cancelar as extras no Asaas.
+ */
+export interface EnrollResult {
+  tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null;
+  result: 'enrolled' | 'would_enroll' | 'would_link' | 'linked' | 'remote_duplicate' | EnrollSkip | 'error';
+  error?: string;
+  /** assinatura(s) que já estão no Asaas para o documento */
+  remote?: { id: string; value: number; billingType: string; nextDueDate: string; ours: boolean }[];
+}
+
+type PayView = { id: string; dueDate: string; value: number; status: string };
+/**
+ * Correção de assinatura em dobro no Asaas (docs/05#assinatura-em-dobro). `keep` fica; cada extra
+ * perde as cobranças em aberto a partir do 1º vencimento da `keep`. Extra sem cobrança anterior em
+ * aberto é excluída (`delete`); com cobrança anterior em aberto (dívida de verdade), só encerra a
+ * recorrência (`end`), porque excluir a assinatura apagaria essa cobrança junto.
+ */
+export interface DuplicateFix {
+  tenantId: string; tenant: string;
+  keep: { id: string; value: number; billingType: string; ours: boolean; from: string };
+  extras: { id: string; value: number; billingType: string; action: 'delete' | 'end'; endDate: string | null; deletePayments: PayView[]; keepPayments: PayView[] }[];
+  result: 'would_fix' | 'fixed' | 'error';
+  error?: string;
+}
+
+const OPEN = new Set(['PENDING', 'OVERDUE']);
+const payView = (p: { id: string; dueDate: string; value: number; status: string }): PayView => ({ id: p.id, dueDate: p.dueDate, value: p.value, status: p.status });
+const dayBefore = (ymd: string) => new Date(Date.parse(`${ymd}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
 
 /**
  * Mensalidade por Pix no Asaas (docs/05-planos-e-cobranca.md#migração-para-o-asaas):
@@ -97,20 +127,123 @@ export class MonthlyBillingService {
         // já assina pelo Asaas: só liga os avisos do Asaas (nasciam desligados até 16/11/2026)
         await this.asaas.enableNotifications(s.tenant.asaasCustomerId).catch((err) => this.log.warn(`avisos do Asaas tenant ${s.tenantId}: ${err?.message ?? err}`));
       }
+      // já no Asaas: na prévia, confere se sobrou outra assinatura ativa no mesmo documento (Vogo antigo)
+      if (skip === 'already' && s.gateway === 'asaas' && opts.dryRun && s.status !== 'canceled' && isValidCpfCnpj(s.tenant.document)) {
+        const remotas = await this.asaas.activeSubscriptionsByDocument(s.tenant.document!).catch(() => []);
+        if (remotas.some((r) => r.id !== s.externalId)) {
+          out.push({ ...base, dueDate: null, result: 'remote_duplicate', remote: remotas.map((r) => remoteView(r, s.externalId)), error: `${remotas.length} assinaturas ativas no Asaas para este CPF/CNPJ — cancele a que não é a do Atendo` });
+        }
+      }
       if (skip) { if (skip !== 'already' && skip !== 'free') out.push({ ...base, dueDate: null, result: skip }); continue; }
-      const openCharge = (await this.prisma.invoice.count({ where: { tenantId: s.tenantId, status: 'open', externalId: { not: null } } })) > 0;
-      const dueDate = boletoFirstDueDate(s.currentPeriodEnd, undefined, { openCharge, cycle: s.plan.billingCycle === 'yearly' ? 'yearly' : 'monthly' });
-      if (opts.dryRun) { out.push({ ...base, dueDate, result: 'would_enroll' }); continue; }
       try {
+        // assinatura que já existia no Asaas (Vogo antigo): reaproveita em vez de criar outra
+        const remotas = await this.asaas.activeSubscriptionsByDocument(s.tenant.document!);
+        if (remotas.length > 1) {
+          out.push({ ...base, dueDate: null, result: 'remote_duplicate', remote: remotas.map((r) => remoteView(r, null)), error: `${remotas.length} assinaturas ativas no Asaas para este CPF/CNPJ — cancele as extras e rode de novo` });
+          continue;
+        }
+        if (remotas.length === 1) {
+          const r = remotas[0];
+          const open = await this.asaas.openSubscriptionPayment(r.id).catch(() => null);
+          const dueDate = open?.dueDate ?? r.nextDueDate;
+          if (opts.dryRun) { out.push({ ...base, dueDate, result: 'would_link', remote: [remoteView(r, null)] }); continue; }
+          await this.linkOne(s.tenantId, r, dueDate);
+          out.push({ ...base, dueDate, result: 'linked', remote: [remoteView(r, r.id)] });
+          continue;
+        }
+        const openCharge = (await this.prisma.invoice.count({ where: { tenantId: s.tenantId, status: 'open', externalId: { not: null } } })) > 0;
+        const dueDate = boletoFirstDueDate(s.currentPeriodEnd, undefined, { openCharge, cycle: s.plan.billingCycle === 'yearly' ? 'yearly' : 'monthly' });
+        if (opts.dryRun) { out.push({ ...base, dueDate, result: 'would_enroll' }); continue; }
         await this.enrollOne(s.tenantId, { value, cycle, dueDate, planName: s.plan.name });
         out.push({ ...base, dueDate, result: 'enrolled' });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.log.error(`migração Asaas tenant ${s.tenantId} (${s.tenant.name}): ${msg}`);
-        out.push({ ...base, dueDate, result: 'error', error: msg });
+        out.push({ ...base, dueDate: null, result: 'error', error: msg });
       }
     }
     return out;
+  }
+
+  /**
+   * Assinatura em dobro no Asaas (docs/05#assinatura-em-dobro): mais de uma ativa no mesmo CPF/CNPJ.
+   * Fica a do Atendo; sem ela (cliente ainda não migrado), a que recebeu pagamento por último.
+   * `dryRun` só mostra o que faria.
+   */
+  async resolveDuplicates(opts: { dryRun: boolean; tenantId?: string }): Promise<DuplicateFix[]> {
+    if (!this.enabled) throw new BadRequestException('Asaas não configurado (ASAAS_API_KEY).');
+    const subs = await this.prisma.subscription.findMany({
+      where: { ...(opts.tenantId && { tenantId: opts.tenantId }), status: { not: 'canceled' }, tenant: { isActive: true }, OR: [{ gateway: null }, { gateway: 'asaas' }] },
+      include: { tenant: { select: { name: true, document: true } } },
+    });
+    const out: DuplicateFix[] = [];
+    for (const s of subs) {
+      if (!isValidCpfCnpj(s.tenant.document)) continue;
+      const base = { tenantId: s.tenantId, tenant: s.tenant.name };
+      try {
+        const remotas = await this.asaas.activeSubscriptionsByDocument(s.tenant.document!);
+        if (remotas.length < 2) continue;
+        const pays = new Map<string, Awaited<ReturnType<AsaasService['subscriptionPayments']>>>();
+        for (const r of remotas) pays.set(r.id, await this.asaas.subscriptionPayments(r.id));
+        const ultimoPago = (id: string) => pays.get(id)!.filter((p) => p.status === 'RECEIVED' || p.status === 'CONFIRMED' || p.status === 'RECEIVED_IN_CASH').map((p) => p.paymentDate ?? p.dueDate).sort().pop() ?? '';
+        let keep = s.gateway === 'asaas' ? remotas.find((r) => r.id === s.externalId) : undefined;
+        if (s.gateway === 'asaas' && !keep) {
+          out.push({ ...base, keep: { id: s.externalId ?? '—', value: 0, billingType: '', ours: true, from: '' }, extras: [], result: 'error', error: 'A assinatura do Atendo não está ativa no Asaas, mas há outras ativas. Resolva à mão.' });
+          continue;
+        }
+        keep ??= [...remotas].sort((a, b) => ultimoPago(b.id).localeCompare(ultimoPago(a.id)) || a.nextDueDate.localeCompare(b.nextDueDate))[0];
+        // a partir daqui quem cobra é a `keep`: o 1º vencimento dela em aberto, senão o próximo que vai gerar
+        const from = pays.get(keep.id)!.filter((p) => OPEN.has(p.status)).map((p) => p.dueDate).sort()[0] ?? keep.nextDueDate;
+        const extras = remotas.filter((r) => r.id !== keep!.id).map((r) => {
+          const abertas = pays.get(r.id)!.filter((p) => OPEN.has(p.status));
+          const deletePayments = abertas.filter((p) => p.dueDate >= from).map(payView);
+          const keepPayments = abertas.filter((p) => p.dueDate < from).map(payView);
+          const action: 'delete' | 'end' = keepPayments.length ? 'end' : 'delete';
+          return { id: r.id, value: r.value, billingType: r.billingType, action, endDate: action === 'end' ? dayBefore(from) : null, deletePayments, keepPayments };
+        });
+        const fix: DuplicateFix = { ...base, keep: { id: keep.id, value: keep.value, billingType: keep.billingType, ours: keep.id === s.externalId, from }, extras, result: 'would_fix' };
+        if (!opts.dryRun) {
+          for (const e of extras) {
+            if (e.action === 'delete') {
+              await this.asaas.cancelSubscription(e.id);
+            } else {
+              for (const p of e.deletePayments) await this.asaas.deletePayment(p.id);
+              await this.asaas.endSubscription(e.id, e.endDate!);
+            }
+            this.log.log(`assinatura em dobro tenant ${s.tenantId}: ${e.id} ${e.action === 'delete' ? 'excluída' : `encerrada em ${e.endDate}`}, ${e.deletePayments.length} cobrança(s) excluída(s); fica ${keep.id}`);
+          }
+          fix.result = 'fixed';
+        }
+        out.push(fix);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.error(`assinatura em dobro tenant ${s.tenantId} (${s.tenant.name}): ${msg}`);
+        out.push({ ...base, keep: { id: '—', value: 0, billingType: '', ours: false, from: '' }, extras: [], result: 'error', error: msg });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Reaproveita a assinatura que o cliente já tinha no Asaas (docs/05#assinatura-antiga-no-asaas):
+   * o valor, a forma de pagamento e as cobranças já geradas ficam como estão; só passa a ser a
+   * assinatura do tenant aqui (webhook, lembretes, carência e suspensão).
+   */
+  private async linkOne(tenantId: string, r: AsaasSubscription, dueDate: string) {
+    // o webhook acha o tenant pelo customer: um customer não pode servir a duas empresas
+    const dono = await this.prisma.tenant.findFirst({ where: { asaasCustomerId: r.customer, id: { not: tenantId } }, select: { name: true } });
+    if (dono) throw new BadRequestException(`O cadastro deste CPF/CNPJ no Asaas já está ligado a "${dono.name}". Vincule à mão.`);
+    await this.asaas.adoptSubscription(tenantId, r);
+    await this.prisma.tenant.update({ where: { id: tenantId }, data: { asaasCustomerId: r.customer } });
+    // só vira Asaas se ainda estava sem gateway (job + botão juntos): quem perdeu não mexe em nada —
+    // a assinatura remota é do cliente, nunca é cancelada aqui
+    const claimed = await this.prisma.subscription.updateMany({
+      where: { tenantId, gateway: null },
+      data: { gateway: 'asaas', externalId: r.id, currentPeriodEnd: new Date(`${dueDate}T23:59:59-03:00`) },
+    });
+    if (!claimed.count) return;
+    this.log.log(`tenant ${tenantId} vinculado à assinatura Asaas existente ${r.id} (${r.value} ${r.billingType}), vencimento ${dueDate}`);
+    await this.remindTenant(tenantId).catch((err) => this.log.warn(`fatura pós-vínculo tenant ${tenantId}: ${err?.message ?? err}`));
   }
 
   private async enrollOne(tenantId: string, c: { value: number; cycle: 'MONTHLY' | 'YEARLY'; dueDate: string; planName: string }) {
@@ -300,3 +433,5 @@ export class MonthlyBillingService {
     return { kind: 'payment_due' as const, value: Number(inv.totalAmount), dueDate, daysLeft: diasEntre(hoje, dueDate), hasCharge: true };
   }
 }
+
+const remoteView = (r: AsaasSubscription, oursId: string | null) => ({ id: r.id, value: r.value, billingType: r.billingType, nextDueDate: r.nextDueDate, ours: r.id === oursId });

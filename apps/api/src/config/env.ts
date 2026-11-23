@@ -153,6 +153,15 @@ const schema = z.object({
   AI_EMBED_PRICE_PER_1M: z.coerce.number().min(0).default(0.02),
   /** tamanho do vetor pedido ao fornecedor (512 = 2 KB por trecho, quase a mesma qualidade). 0 = o padrão do modelo */
   AI_EMBED_DIMENSIONS: z.coerce.number().int().min(0).max(4096).default(512),
+  /**
+   * Transcrição de áudio sob demanda (docs/transcricao-de-audio.md): `/audio/transcriptions` no
+   * formato da OpenAI (OpenAI ou Groq). Sem chave, o botão "Transcrever" não aparece.
+   */
+  AI_TRANSCRIBE_API_KEY: z.string().optional().default(''),
+  AI_TRANSCRIBE_BASE_URL: z.string().optional().default('https://api.openai.com/v1'),
+  AI_TRANSCRIBE_MODEL: z.string().optional().default('gpt-4o-mini-transcribe'),
+  /** USD por minuto de áudio (gpt-4o-mini-transcribe = 0,003; Groq whisper-large-v3-turbo ≈ 0,0007) */
+  AI_TRANSCRIBE_PRICE_PER_MIN: z.coerce.number().min(0).default(0.003),
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
   /** > 0: amostra memória/event loop a cada N ms no Redis (testes de carga locais; docs/30). 0 = desligado */
   DIAG_STATS_MS: z.coerce.number().int().min(0).default(0),

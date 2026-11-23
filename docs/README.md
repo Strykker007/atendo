@@ -42,6 +42,7 @@
 | [13 — Agendamento](13-agendamento.md) | Dev / Cliente | Profissionais, serviços, agenda, marcação pelo WhatsApp, lembretes ao cliente e ao profissional |
 | [14 — Qualidade e observabilidade](14-qualidade-e-observabilidade.md) | Dev / Ops | Testes automatizados, logs estruturados, erros e rastreio em produção |
 | [15 — IA](15-ia.md) | Dev / Negócio | Copiloto do atendente, bloco de IA nos fluxos, guarda-corpos, custo e cobrança por interação |
+| [Transcrição de áudio](transcricao-de-audio.md) | Dev / Cliente | Botão Transcrever no áudio do chat: sob demanda, fornecedor, custo e configuração |
 | [16 — Lacunas para o primeiro cliente](16-lacunas-primeiro-cliente.md) | Produto | O que o documento de funções pede, o que já existe e o que falta, em ordem de risco |
 | [17 — Entrada em produção](17-entrada-em-producao.md) | Você / Ops | Checklist de go-live: o que criar no Stripe, na Meta, no Resend e no servidor |
 | [18 — Perfis de acesso](18-perfis-de-acesso.md) | Dev / Produto | Permissões configuráveis por cliente: catálogo, guards e as travas contra escalada |
@@ -69,6 +70,7 @@
 | [36 — Fechamento financeiro](36-fechamento-financeiro.md) | Produto / Dono | A receber × recebido do mês, clientes em atraso (filtros e ações), custos fixos, folha, pró-labore, caixa e a parte de cada sócio no fechamento |
 | [37 — VogoPartners](37-vogopartners.md) | Negócio / Dono | Programa de parceiros (um nível): faixas de comissão por cliente ativo, instalação semanal, portal do parceiro, pagamento por Pix com autenticador e validação de saque no Asaas |
 | [38 — Segmentos](38-segmentos.md) | Produto / Dev | Avaliação por segmento (vendas, administradora, jurídico): vocabulário pelo `salesEnabled` (`useVocab`), o que foi corrigido e backlog (supervisão, carteira, modelos de perfil) |
+| [39 — Análise do app na Meta](39-app-review-meta.md) | Operação | App Review para o cadastro sem chaves: permissões (`whatsapp_business_management`, `whatsapp_business_messaging`, `business_management`), roteiro do vídeo, passo a passo do envio e textos em inglês |
 | [Desativar cliente](desativar-cliente.md) | Produto / Dev | O que para quando o dono desativa um cliente (sessões, números QR, envio, robô, cobrança) e como reativar |
 | [Cadastro incorporado da Meta](meta-cadastro-incorporado.md) | Produto / Dev | Cliente conecta o número oficial pela janela da Meta, sem token nem IDs; o que configurar na Meta (Tech Provider, configuração do login) |
 | [Gasto com a Meta](gasto-meta.md) | Produto / Dev | Painel do cliente com o gasto do mês na API oficial: estimativa na hora, valor real da Meta, projeção e orçamento com aviso |

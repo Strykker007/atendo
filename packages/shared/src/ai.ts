@@ -19,6 +19,8 @@ export const AiTask = {
   FLOW_AGENT: 'flow_agent',
   /** documentos do agente: gerar a busca por significado (embeddings) na hora do upload — não conta como interação */
   KNOWLEDGE: 'knowledge',
+  /** áudio transcrito a pedido do atendente (botão "Transcrever") — docs/transcricao-de-audio.md */
+  TRANSCRIBE: 'transcribe',
 } as const;
 export type AiTask = (typeof AiTask)[keyof typeof AiTask];
 
@@ -30,6 +32,7 @@ export const AI_TASK_LABEL: Record<AiTask, string> = {
   summary: 'Resumo da conversa',
   flow_agent: 'Agente de IA',
   knowledge: 'Leitura de documentos do agente',
+  transcribe: 'Transcrição de áudio',
 };
 
 export const REWRITE_TONES = {

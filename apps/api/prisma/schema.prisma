@@ -1526,6 +1526,9 @@ model Message {
   deletedForEveryone Boolean   @default(false)
   /// texto editado depois do envio (pelo atendente no painel ou no celular); o anterior fica no evento `message_edited`
   editedAt           DateTime?
+  /// Áudio transcrito a pedido do atendente (botão "Transcrever", docs/transcricao-de-audio.md).
+  /// null = nunca pedido; '' = transcrito sem fala reconhecida (não cobra de novo)
+  transcript         String?
   createdAt      DateTime         @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -2154,6 +2157,8 @@ enum AiTaskKind {
   flow_agent
   /// embeddings dos documentos do agente (não conta como interação)
   knowledge
+  /// áudio transcrito a pedido do atendente (docs/transcricao-de-audio.md)
+  transcribe
 }
 
 /// Agente de IA com etapas (docs/agente-ia.md): persona, regras, base e o roteiro em blocos.

@@ -38,7 +38,7 @@ function carregarSdk(appId: string, version: string): Promise<FbSdk> {
 }
 
 /** coexistência: a janela pode devolver só a WABA (o servidor acha o número) */
-interface Resultado { wabaId: string; phoneNumberId?: string }
+interface Resultado { wabaId: string; phoneNumberId?: string; /** portfólio escolhido na janela */ businessId?: string }
 
 /** dados que a janela da Meta manda por postMessage ao terminar (ou cancelar) */
 function esperarJanela(coexist: boolean): { promise: Promise<Resultado>; parar: () => void } {
@@ -49,8 +49,8 @@ function esperarJanela(coexist: boolean): { promise: Promise<Resultado>; parar: 
       let msg: { type?: string; event?: string; data?: Record<string, string> };
       try { msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch { return; }
       if (msg?.type !== 'WA_EMBEDDED_SIGNUP') return;
-      if (!coexist && msg.event === 'FINISH' && msg.data?.waba_id && msg.data?.phone_number_id) resolve({ wabaId: msg.data.waba_id, phoneNumberId: msg.data.phone_number_id });
-      else if (coexist && msg.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' && msg.data?.waba_id) resolve({ wabaId: msg.data.waba_id, phoneNumberId: msg.data.phone_number_id || undefined });
+      if (!coexist && msg.event === 'FINISH' && msg.data?.waba_id && msg.data?.phone_number_id) resolve({ wabaId: msg.data.waba_id, phoneNumberId: msg.data.phone_number_id, businessId: msg.data.business_id || undefined });
+      else if (coexist && msg.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' && msg.data?.waba_id) resolve({ wabaId: msg.data.waba_id, phoneNumberId: msg.data.phone_number_id || undefined, businessId: msg.data.business_id || undefined });
       else if (msg.event === 'CANCEL') reject(new Error('Cadastro cancelado na janela da Meta.'));
       else if (msg.event === 'ERROR') reject(new Error(msg.data?.error_message || 'A Meta recusou o cadastro.'));
       else if (msg.event?.startsWith('FINISH')) reject(new Error(coexist
@@ -67,7 +67,7 @@ function esperarJanela(coexist: boolean): { promise: Promise<Resultado>; parar: 
  * `coexist`: o número continua no aplicativo WhatsApp Business do celular e passa a funcionar
  * também pela API oficial (docs/meta-cadastro-incorporado.md#coexistência).
  */
-export function MetaSignupButton({ label, coexist = false, onDone, onError }: { label: string; coexist?: boolean; onDone: (r: { id: string; registerError: string | null; syncErrors: string[] }) => void; onError: (msg: string) => void }) {
+export function MetaSignupButton({ label, coexist = false, onDone, onError }: { label: string; coexist?: boolean; onDone: (r: { id: string; registerError: string | null; syncErrors: string[]; businessName: string | null }) => void; onError: (msg: string) => void }) {
   const cfg = useMetaSignupConfig();
   const signup = useMetaSignup();
   const [abrindo, setAbrindo] = useState(false);
@@ -107,7 +107,7 @@ export function MetaSignupButton({ label, coexist = false, onDone, onError }: { 
       cancelarRef.current = null; // daqui em diante é o servidor cadastrando: não dá mais para cancelar
       const ids = await Promise.race([janela.promise, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('A Meta não devolveu o número escolhido. Tente de novo.')), 15_000))]);
       const n = await signup.mutateAsync({ code, ...ids, label: label.trim(), ...(coexist && { coexist: true }) });
-      onDone({ id: n.id, registerError: n.registerError, syncErrors: n.syncErrors ?? [] });
+      onDone({ id: n.id, registerError: n.registerError, syncErrors: n.syncErrors ?? [], businessName: n.business?.name ?? null });
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Erro no cadastro pela Meta');
     } finally {

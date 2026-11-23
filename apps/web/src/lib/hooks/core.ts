@@ -80,9 +80,11 @@ export interface Message {
   deletedForEveryone?: boolean;
   /** texto trocado depois do envio (pelo atendente ou no celular) — a bolha mostra "editada" */
   editedAt?: string | null;
+  /** áudio transcrito pelo botão "Transcrever"; null = nunca pedido, '' = sem fala reconhecida */
+  transcript?: string | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
-export type SendInput = ({ type: 'text'; text: string } | { type: 'text'; /** chave Pix cadastrada: a API monta o cartão */ pixKeyId: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } }) & {
+export type SendInput = ({ type: 'text'; text: string } | { type: 'text'; /** chave Pix cadastrada: a API monta o cartão */ pixKeyId: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } } | { type: 'sticker'; mediaKey: string; media: { url: string; mimeType: string; fileName?: string } }) & {
   /** responder citando uma mensagem (o id dela no provider) */
   quotedExternalId?: string;
   /**
@@ -425,6 +427,11 @@ export const useMarkUnread = () => {
  * (quem escolhe o número é a conversa) e devolve 409 `number_changed` se a conversa mudou de canal —
  * aí recarrega a conversa para a tela mostrar o canal novo antes de qualquer reenvio.
  */
+/** Figurinha recente da empresa (seletor do campo): `key` reenvia o mesmo arquivo, `url` é a prévia. */
+export interface RecentSticker { id: string; key: string; url: string }
+/** Figurinhas recentes da empresa — só busca com o seletor aberto (docs/envio.md#figurinhas). */
+export const useRecentStickers = (enabled: boolean) => useQuery({ queryKey: ['stickers-recent'], queryFn: () => api<RecentSticker[]>('/conversations/stickers'), enabled, staleTime: 60_000 });
+
 export const useSendMessage = (conversationId: string | null, expectedNumberId?: string) => {
   const qc = useQueryClient();
   return useMutation({

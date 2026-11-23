@@ -1,17 +1,20 @@
 'use client';
 import { useState } from 'react';
-import { QrCode, Eye, Play } from 'lucide-react';
+import { QrCode, Eye, Play, CopyX } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { usePixEnroll, usePixSettings, useSetPixSettings, type PixEnrollRow } from '@/lib/hooks';
+import { usePixEnroll, usePixSettings, useSetPixSettings, useResolveDuplicates, type DuplicateFix, type PixEnrollRow } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
 const RESULTADO: Record<PixEnrollRow['result'], { label: string; cls: string }> = {
-  would_enroll: { label: 'Vai migrar', cls: 'text-accent-ink' },
+  would_enroll: { label: 'Vai criar assinatura', cls: 'text-accent-ink' },
   enrolled: { label: 'Migrado', cls: 'text-ok' },
+  would_link: { label: 'Vai reaproveitar a assinatura que já está no Asaas', cls: 'text-accent-ink' },
+  linked: { label: 'Vinculado à assinatura do Asaas', cls: 'text-ok' },
+  remote_duplicate: { label: 'Assinatura em dobro no Asaas', cls: 'text-danger-ink' },
   no_document: { label: 'Falta CPF/CNPJ — o cliente vê o aviso no painel', cls: 'text-warn-ink' },
   not_live: { label: 'Assinatura suspensa/cancelada', cls: 'text-muted' },
   no_price: { label: 'Sem valor', cls: 'text-muted' },
@@ -36,13 +39,14 @@ export function PixMigration() {
   const [confirmar, setConfirmar] = useState(false);
   /** "Migrar só este": um cliente da prévia (ex.: quem vence primeiro, para testar de verdade) */
   const [umSo, setUmSo] = useState<PixEnrollRow | null>(null);
-  const aMigrar = linhas?.filter((l) => l.result === 'would_enroll') ?? [];
+  const aMigrar = linhas?.filter((l) => l.result === 'would_enroll' || l.result === 'would_link') ?? [];
+  const aVincular = aMigrar.filter((l) => l.result === 'would_link').length;
 
   const migrarUm = async (l: PixEnrollRow) => {
     try {
       const [r] = await enroll.mutateAsync({ dryRun: false, tenantId: l.tenantId });
       if (r) setLinhas((ls) => ls?.map((x) => (x.tenantId === r.tenantId ? r : x)) ?? null);
-      if (r?.result === 'enrolled') toast.ok(`${l.tenant} migrado para o Pix automático`);
+      if (r?.result === 'enrolled' || r?.result === 'linked') toast.ok(r.result === 'linked' ? `${l.tenant} vinculado à assinatura que já estava no Asaas` : `${l.tenant} migrado para o Pix automático`);
       else toast.err(r?.error ?? 'Não foi possível migrar este cliente');
     } catch (err) { toast.err(err); }
   };
@@ -52,7 +56,7 @@ export function PixMigration() {
       const r = await enroll.mutateAsync({ dryRun });
       setLinhas(r); setPrevia(dryRun);
       if (!dryRun) {
-        const ok = r.filter((l) => l.result === 'enrolled').length;
+        const ok = r.filter((l) => l.result === 'enrolled' || l.result === 'linked').length;
         const erros = r.filter((l) => l.result === 'error').length;
         if (erros) toast.err(`${ok} migrado(s), ${erros} com erro — veja a lista`); else toast.ok(`${ok} cliente(s) migrado(s) para o Pix automático`);
       }
@@ -102,8 +106,15 @@ export function PixMigration() {
                   <td className="py-2 pr-4 text-muted">{l.plan}</td>
                   <td className="py-2 pr-4 text-right tabular-nums">{brl(l.value)}</td>
                   <td className="py-2 pr-4 tabular-nums">{l.dueDate ? dataBR(l.dueDate) : '—'}</td>
-                  <td className={cn('py-2', RESULTADO[l.result].cls)}>{RESULTADO[l.result].label}{l.error ? `: ${l.error}` : ''}</td>
-                  <td className="py-2 text-right">{l.result === 'would_enroll' && <Button size="sm" variant="ghost" onClick={() => setUmSo(l)}>Migrar só este</Button>}</td>
+                  <td className={cn('py-2', RESULTADO[l.result].cls)}>
+                    {RESULTADO[l.result].label}{l.error ? `: ${l.error}` : ''}
+                    {l.remote?.map((r) => (
+                      <div key={r.id} className="text-[11.5px] text-muted">
+                        {r.ours ? 'Atendo' : 'Antiga'} · {r.billingType === 'UNDEFINED' ? 'cliente escolhe' : r.billingType.toLowerCase()} · {brl(r.value)}{Math.abs(r.value - l.value) > 0.009 && <span className="text-warn-ink"> (contratado aqui: {brl(l.value)})</span>} · próxima {dataBR(r.nextDueDate)} · <span className="font-mono">{r.id}</span>
+                      </div>
+                    ))}
+                  </td>
+                  <td className="py-2 text-right">{(l.result === 'would_enroll' || l.result === 'would_link') && <Button size="sm" variant="ghost" onClick={() => setUmSo(l)}>{l.result === 'would_link' ? 'Vincular só este' : 'Migrar só este'}</Button>}</td>
                 </tr>
               ))}
               {!linhas.length && <tr><td colSpan={6} className="py-6 text-center text-muted">Ninguém na cobrança manual para migrar.</td></tr>}
@@ -111,6 +122,8 @@ export function PixMigration() {
           </table>
         </div>
       )}
+
+      <Duplicadas />
 
       <ConfirmDialog
         open={confirmarLiberar !== null}
@@ -128,7 +141,9 @@ export function PixMigration() {
         onClose={() => setUmSo(null)}
         title={`Migrar ${umSo?.tenant ?? ''}`}
         confirmLabel="Migrar"
-        text={umSo ? `Cria a assinatura Pix no Asaas de ${brl(umSo.value)}/mês com 1º vencimento em ${umSo.dueDate ? dataBR(umSo.dueDate) : '—'}. Se vence em até 5 dias, o e-mail com o Pix sai agora. Os outros clientes não mudam.` : ''}
+        text={umSo ? (umSo.result === 'would_link'
+          ? `Liga ${umSo.tenant} à assinatura que já existe no Asaas (${brl(umSo.remote?.[0]?.value ?? umSo.value)}/mês, próximo vencimento ${umSo.dueDate ? dataBR(umSo.dueDate) : '—'}). Nada é criado nem cobrado de novo; valor e forma de pagamento continuam os do Asaas. Os outros clientes não mudam.`
+          : `Cria a assinatura no Asaas de ${brl(umSo.value)}/mês com 1º vencimento em ${umSo.dueDate ? dataBR(umSo.dueDate) : '—'}. Se vence em até 5 dias, o e-mail com o Pix sai agora. Os outros clientes não mudam.`) : ''}
         onConfirm={() => (umSo ? migrarUm(umSo) : undefined)}
       />
 
@@ -137,9 +152,76 @@ export function PixMigration() {
         onClose={() => setConfirmar(false)}
         title="Migrar para o Pix automático"
         confirmLabel={`Migrar ${aMigrar.length}`}
-        text={`Cria a assinatura no Asaas de ${aMigrar.length} cliente(s), somando ${brl(aMigrar.reduce((a, l) => a + l.value, 0))}/mês, com o vencimento que cada um já tem. Quem vence nos próximos 5 dias recebe o e-mail com o Pix agora.`}
+        text={`${aMigrar.length - aVincular} cliente(s) ganham assinatura nova no Asaas, com o vencimento que cada um já tem${aVincular ? `; ${aVincular} já tinham assinatura ativa no Asaas e só serão vinculados (nada é criado nem cobrado de novo)` : ''}. Assinatura em dobro no Asaas fica de fora até você cancelar a extra.`}
         onConfirm={() => rodar(false)}
       />
     </section>
+  );
+}
+
+const FORMA = (b: string) => (b === 'UNDEFINED' ? 'cliente escolhe' : b.toLowerCase());
+const cobrancas = (ps: { dueDate: string; value: number }[]) => ps.map((p) => `${dataBR(p.dueDate)} (${brl(p.value)})`).join(', ');
+
+/**
+ * Assinatura em dobro no Asaas (docs/05#assinatura-em-dobro): o cliente tinha a do Vogo antigo e
+ * ganhou outra. Fica a do Atendo (ou, sem ela, a que recebeu por último); as cobranças em aberto
+ * repetidas somem. Cobrança antiga em aberto de antes disso é dívida de verdade e fica.
+ */
+function Duplicadas() {
+  const resolve = useResolveDuplicates();
+  const [linhas, setLinhas] = useState<DuplicateFix[] | null>(null);
+  const [confirmar, setConfirmar] = useState(false);
+  const aCorrigir = linhas?.filter((l) => l.result === 'would_fix') ?? [];
+
+  const rodar = async (dryRun: boolean) => {
+    try {
+      const r = await resolve.mutateAsync({ dryRun });
+      setLinhas(r);
+      if (!dryRun) {
+        const ok = r.filter((l) => l.result === 'fixed').length;
+        const erros = r.filter((l) => l.result === 'error').length;
+        if (erros) toast.err(`${ok} corrigido(s), ${erros} com erro — veja a lista`); else toast.ok(`${ok} cliente(s) corrigido(s)`);
+      }
+    } catch (err) { toast.err(err); }
+  };
+
+  return (
+    <div className="rounded-xl border border-line px-3 py-2.5 space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[240px] text-[12.5px]">
+          <div className="font-medium text-ink text-sm flex items-center gap-1.5"><CopyX size={14} className="text-danger" /> Assinaturas em dobro no Asaas</div>
+          <p className="text-muted">Clientes com mais de uma assinatura ativa no mesmo CPF/CNPJ (a do Vogo antigo e a nova). Fica uma; as cobranças repetidas são excluídas. Cobrança antiga em aberto de antes disso continua.</p>
+        </div>
+        <Button size="sm" variant="ghost" icon={<Eye size={14} />} loading={resolve.isPending && !confirmar} loadingText="Procurando…" onClick={() => rodar(true)}>Procurar</Button>
+        <Button size="sm" disabled={!aCorrigir.length} onClick={() => setConfirmar(true)}>Corrigir {aCorrigir.length || ''}</Button>
+      </div>
+      {linhas && !linhas.length && <p className="text-[12.5px] text-ok">Nenhuma assinatura em dobro.</p>}
+      {linhas?.map((l) => (
+        <div key={l.tenantId} className="text-[12.5px] border-t border-line pt-2">
+          <div className="font-medium text-ink">{l.tenant} <span className={cn('font-normal', l.result === 'fixed' ? 'text-ok' : l.result === 'error' ? 'text-danger-ink' : 'text-muted')}>{l.result === 'fixed' ? '· corrigido' : l.result === 'error' ? `· erro: ${l.error}` : ''}</span></div>
+          {l.result !== 'error' && (
+            <>
+              <div className="text-muted">Fica: {l.keep.ours ? 'a do Atendo' : 'a que recebeu por último'} · {FORMA(l.keep.billingType)} · {brl(l.keep.value)} · cobra a partir de {dataBR(l.keep.from)} · <span className="font-mono">{l.keep.id}</span></div>
+              {l.extras.map((e) => (
+                <div key={e.id} className="text-muted">
+                  {e.action === 'delete' ? 'Exclui' : `Encerra em ${dataBR(e.endDate!)}`}: {FORMA(e.billingType)} · {brl(e.value)} · <span className="font-mono">{e.id}</span>
+                  {!!e.deletePayments.length && <span className="text-danger-ink"> — exclui {cobrancas(e.deletePayments)}</span>}
+                  {!!e.keepPayments.length && <span className="text-warn-ink"> — mantém em aberto {cobrancas(e.keepPayments)}</span>}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      ))}
+      <ConfirmDialog
+        open={confirmar}
+        onClose={() => setConfirmar(false)}
+        title="Corrigir assinaturas em dobro"
+        confirmLabel={`Corrigir ${aCorrigir.length}`}
+        text={`Exclui ou encerra no Asaas as assinaturas extras de ${aCorrigir.length} cliente(s) e apaga ${aCorrigir.reduce((a, l) => a + l.extras.reduce((b, e) => b + e.deletePayments.length, 0), 0)} cobrança(s) repetida(s). Não dá para desfazer pelo painel.`}
+        danger
+        onConfirm={() => rodar(false)}
+      />
+    </div>
   );
 }

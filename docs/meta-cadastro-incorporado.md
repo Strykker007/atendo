@@ -27,7 +27,8 @@ do sócio ([31](31-migracao-meta-oficial.md)).
    um PIN de 6 dígitos novo, guardado criptografado em `providerConfig.pin`) e cadastra pelo mesmo
    caminho do manual — o `connect` inscreve o app na WABA (`subscribed_apps`).
 5. Registro recusado (número já com PIN de outro sistema) **não** impede o cadastro: o número entra,
-   a tela avisa e o log registra; o envio vai falhar com 133010 até registrar (WhatsApp Manager).
+   a tela avisa e o log registra; o envio vai falhar com 133010 até registrar — pelo próprio painel,
+   ver [Registro pendente](#registro-pendente).
 
 A forma de pagamento é do cliente, no WhatsApp Manager (*Visão geral → Adicionar forma de
 pagamento*): sem ela só sai resposta dentro de 24 h, nada de template.
@@ -62,6 +63,24 @@ suportado e duplicaria tudo.
   mexe na janela de 24 h da API. Erro `131060` = mensagem para aparelho não suportado — o cliente
   vê no app. Para sair, só pelo app (a API de descadastro não vale).
 
+## Áudio
+
+<a id="áudio"></a>A Cloud API só aceita áudio `aac`, `mp4`, `mpeg`, `amr` e `ogg`/`opus`. O gravador do painel no Chrome gera `audio/webm`, e a Meta recusava com `(#100) Param file must be a file with one of the following types…` (aconteceu em 23/11/2026; foto, vídeo e texto passavam). Agora `MetaProvider.send` passa o áudio por `audioForMeta` (`providers/audio-convert.ts`): formato aceito vai direto (sem o `;codecs=`); o resto vira **ogg/opus mono** com `ffmpeg`, instalado na imagem da API/worker (`apps/api/Dockerfile`). Sem ffmpeg (dev local), o envio falha com a mensagem "Conversão de áudio indisponível no servidor". A Evolution não precisa disso: ela converte sozinha.
+
+## Portfólio do cliente
+
+Ao terminar a janela, o Atendo lê o **portfólio** (Business Manager) dono da WABA, com o nome e a
+situação da verificação. Esse dado aparece na mensagem de sucesso e no cartão do número em
+**Números**: "Portfólio X · verificado". É o uso da permissão `business_management`
+(`MetaProvider.businessInfo`):
+- o id do portfólio vem do evento da janela (`business_id`) ou de `GET /{waba}?fields=owner_business_info`;
+- depois, `GET /{business_id}?fields=id,name,verification_status`, feito com o token do número.
+
+No cartão, a leitura é na hora: `GET /numbers/:id/meta-business`, com cache de 10 min na tela. Se a
+Meta falhar, o cadastro não é desfeito; o cartão só não mostra o portfólio.
+
+Roteiro do vídeo e respostas da análise do app: [39 — Análise do app na Meta](39-app-review-meta.md).
+
 ## O que configurar na Meta (uma vez)
 
 1. **Tornar-se Tech Provider** no app (painel do app → WhatsApp → *Tech Provider* / "Torne-se um
@@ -87,3 +106,23 @@ META_APP_SECRET=      # já existe (assinatura do webhook) — também troca o c
 
 Sem `META_APP_ID`/`META_ES_CONFIG_ID`/`META_APP_SECRET`, `GET /numbers/meta-signup/config`
 devolve `enabled: false` e o botão não aparece (só o manual).
+
+## Registro pendente
+
+Quando a verificação do número (código por SMS/ligação) não termina na janela da Meta, o
+`/register` volta *"Phone number needs to be verified before registering"*. O número entra no
+painel como conectado, mas **não envia nem recebe** até ser registrado na Cloud API. Não precisa
+remover e cadastrar de novo: o cartão do número (Números, só para quem gerencia) mostra o aviso
+**Não registrado na API oficial** com os passos.
+
+- `GET /numbers/:id/meta-registration` → `{ registration: { verification, status, platformType, nameStatus, quality, registered, coexist } }`
+  lido na hora da Meta (`GET /{phone_number_id}?fields=code_verification_status,status,platform_type,…`).
+  `registered` = `platform_type === 'CLOUD_API'`. Falha da Meta volta em `error` (o aviso só não aparece).
+- `POST …/meta-registration/request-code` `{ method: 'SMS' | 'VOICE' }` → `/{id}/request_code` (pt_BR).
+- `POST …/meta-registration/verify-code` `{ code }` (6 dígitos) → `/{id}/verify_code`.
+- `POST …/meta-registration/register` → `/{id}/register` com o PIN guardado (ou um novo), grava o
+  PIN criptografado em `providerConfig.pin` e refaz o `connect` (inscrição do app na WABA).
+- Todas com `numbers.manage` + `canManageNumber`; só números `meta`. Coexistência nunca registra
+  (derrubaria o aplicativo do celular) e não mostra o aviso.
+- No front: `MetaRegistrationNotice` — verificado e não registrado mostra só **Registrar agora**;
+  não verificado mostra **Código por SMS / Por ligação**, o campo do código e **Confirmar e registrar**.

@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -38,6 +38,7 @@ import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
 import { AudioMessage } from './AudioMessage';
+import { AudioTranscript } from './AudioTranscript';
 import { ContactSheet, ContactSummary } from './ContactSheet';
 import { MediaPreview, type Escolhido } from './MediaPreview';
 import { MediaViewerModal, type ViewerMedia } from './MediaViewer';
@@ -634,6 +635,18 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     }
   }
 
+  /** Figurinha recente (seletor do campo): reenvia o mesmo arquivo, sem texto. */
+  async function enviarFigurinha(f: RecentSticker) {
+    if (send.isPending) return;
+    const citando = respondendo?.externalId ? { quotedExternalId: respondendo.externalId } : {};
+    try {
+      await send.mutateAsync({ type: 'sticker', mediaKey: f.key, media: { url: f.key, mimeType: 'image/webp' }, ...citando, simulateTypingChars: 0, idempotencyKey: crypto.randomUUID() });
+      setRespondendo(null);
+    } catch (err) {
+      toast.err(err);
+    }
+  }
+
   return (
     <>
       {/* Cabeçalho: contato, tags, ações de status.
@@ -1071,6 +1084,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
               direita={ai.enabled ? <CopilotBar conversationId={conv.id} text={text} onText={setText} /> : null}
               texto={text}
               onAgendado={() => setText('')}
+              onFigurinha={noteMode ? undefined : enviarFigurinha}
             />
           )}
         </form>
@@ -1164,10 +1178,12 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
       </div>
     );
   }
+  // figurinha como no WhatsApp: solta, sem balão, com a hora numa pílula
+  const figurinha = m.type === 'sticker' && !!m.mediaUrl && !estruturado && !m.text && !m.quoted && !m.quotedId && !citada && !m.forwarded;
   return (
     <div id={`msg-${m.id}`} className={cn('group flex items-center gap-1 rounded-lg transition-colors duration-700', out ? 'justify-end' : 'justify-start')}>
       {out && <AcoesDaBolha m={m} out onResponder={onResponder} onEncaminhar={onEncaminhar} onApagar={onApagar} onEditar={onEditar} onTicket={onTicket} podeReagir={canResend} />}
-      <div className={cn('relative max-w-[72%] px-2.5 py-1.5 text-[13px]', m.reactions?.length && 'mb-3', out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
+      <div className={cn('relative max-w-[72%] text-[13px]', m.reactions?.length && 'mb-3', figurinha ? '' : 'px-2.5 py-1.5', figurinha ? '' : out ? 'bub-out text-chat-out-ink rounded-2xl rounded-br-md' : 'bub-in bg-chat-in text-chat-in-ink rounded-2xl rounded-bl-md')}>
         {!out && m.senderName && <span className="block text-[11.5px] font-semibold text-accent truncate" title={m.senderPhone ?? undefined}>{m.senderName}</span>}
         {m.forwarded && <ForwardedLabel score={m.forwardingScore} />}
         <Citacao m={m} citada={citada} contato={contato} onVerMidia={onVerMidia} />
@@ -1178,7 +1194,7 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
             {out && m.type === 'text' && <SecureMediaChip conversationId={m.conversationId} text={m.text} onVerMidia={onVerMidia} />}
           </>
         )}
-        <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', out ? 'text-chat-out-ink/75' : 'text-faint')}>
+        <div className={cn('flex items-center justify-end gap-1 mt-0.5 text-[10px] tnum font-mono', figurinha ? 'w-fit ml-auto rounded-full bg-black/45 text-white px-1.5 py-px' : out ? 'text-chat-out-ink/75' : 'text-faint')}>
           {m.editedAt && <span className="italic font-sans" title={`Editada em ${new Date(m.editedAt).toLocaleString('pt-BR')}`}>editada</span>}
           {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           {out && <StatusIcon status={m.status} error={m.error} />}
@@ -1349,7 +1365,7 @@ function AcoesDaBolha({ m, out, onResponder, onEncaminhar, onApagar, onEditar, o
   const reagir = podeReagir && m.status !== 'pending' && m.status !== 'failed' && <BotaoReagir m={m} out={out} />;
   const responder = onResponder && <BotaoResponder m={m} onResponder={onResponder} />;
   // figurinha não sai pelos providers; o resto vira envio normal (mídia, texto ou link)
-  const encaminhar = onEncaminhar && m.type !== 'sticker' && <BotaoAcao titulo="Encaminhar" onClick={() => onEncaminhar(m)}><Forward size={14} /></BotaoAcao>;
+  const encaminhar = onEncaminhar && <BotaoAcao titulo="Encaminhar" onClick={() => onEncaminhar(m)}><Forward size={14} /></BotaoAcao>;
   // só nas recebidas: é o que o contato mandou que fica pendente de leitura
   const naoLida = onNaoLida && !out && <BotaoAcao titulo="Marcar como não lida a partir daqui" onClick={() => onNaoLida(m)}><Mail size={14} /></BotaoAcao>;
   return <div className="flex items-center shrink-0">{out ? <>{apagar}{editar}{ticket}{encaminhar}{reagir}{responder}</> : <>{responder}{reagir}{encaminhar}{ticket}{naoLida}{apagar}</>}</div>;
@@ -1540,10 +1556,14 @@ function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) =
   if (!m.mediaUrl && m.imported && m.error) return <span className="italic text-muted text-xs" title="Mensagem anterior à conversa no painel: o WhatsApp não guarda mais este arquivo">[{labelOf(m.type)} antigo · o WhatsApp não guarda mais o arquivo]</span>;
   if (!m.mediaUrl) return <span className="italic text-muted text-xs">[{labelOf(m.type)}{m.error ? ' · indisponível' : m.status === 'pending' ? '' : ' · carregando…'}]</span>;
   // abre por cima, não em aba nova: abrir fora tirava o atendente da conversa
-  if (m.type === 'image' || m.type === 'sticker') {
+  // figurinha no tamanho do WhatsApp; a animada (webp animado) se mexe sozinha no <img>
+  if (m.type === 'sticker') {
+    return <img src={m.mediaUrl} alt="Figurinha" onClick={() => onVerMidia?.(m.mediaUrl!)} className="w-36 h-36 object-contain cursor-zoom-in" />;
+  }
+  if (m.type === 'image') {
     return <img src={m.mediaUrl} alt="" onClick={() => onVerMidia?.(m.mediaUrl!)} className="rounded-md max-h-72 max-w-full object-contain mb-1 cursor-zoom-in" />;
   }
-  if (m.type === 'audio') return <AudioMessage src={m.mediaUrl} mine={m.direction === 'out'} />;
+  if (m.type === 'audio') return <><AudioMessage src={m.mediaUrl} mine={m.direction === 'out'} /><AudioTranscript m={m} /></>;
   if (m.type === 'video') {
     // o play continua na bolha (clique no vídeo é do player); o botão abre em tela cheia
     return (

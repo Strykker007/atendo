@@ -207,6 +207,12 @@ export class EvolutionProvider implements WhatsAppProvider {
         method: 'POST',
         body: JSON.stringify({ number: m.to, audio: media.data.toString('base64'), quoted, delay }),
       }, this.shard(ctx), delay);
+    } else if (m.type === MessageType.STICKER && (media || m.media)) {
+      // figurinha tem rota própria: pelo sendMedia ela sai como foto
+      r = await this.api(`/message/sendSticker/${name}`, {
+        method: 'POST',
+        body: JSON.stringify({ number: m.to, sticker: media ? media.data.toString('base64') : m.media?.url, quoted, delay }),
+      }, this.shard(ctx), delay);
     } else if (media || m.media) {
       // a Evolution aceita `media` como URL ou base64 — mandamos base64 para não expor o storage
       r = await this.api(`/message/sendMedia/${name}`, {

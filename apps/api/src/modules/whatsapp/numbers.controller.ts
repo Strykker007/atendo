@@ -42,6 +42,14 @@ class MetaSignupDto {
   /** manter o número no aplicativo WhatsApp Business do celular (coexistência) */
   @IsOptional() @IsBoolean() coexist?: boolean;
   @IsOptional() @Matches(/^#[0-9a-fA-F]{6}$/) color?: string;
+  /** portfólio escolhido na janela (`business_id` do evento FINISH); sem ele, o dono da WABA */
+  @IsOptional() @Matches(/^\d{5,25}$/) businessId?: string;
+}
+class MetaRequestCodeDto {
+  @IsEnum(['SMS', 'VOICE']) method: 'SMS' | 'VOICE';
+}
+class MetaVerifyCodeDto {
+  @Matches(/^\d{6}$/, { message: 'O código tem 6 números.' }) code: string;
 }
 class SwitchProviderDto {
   @IsEnum(ProviderKind) provider: ProviderKind;
@@ -143,14 +151,14 @@ export class NumbersController {
   @UseGuards(PlanLimitGuard)
   @RequireLimit('maxNumbers')
   async metaSignup(@CurrentUser() user: AuthUser, @Body() dto: MetaSignupDto) {
-    const r = await this.meta.embeddedSignup(dto.code, dto.wabaId, dto.phoneNumberId, !!dto.coexist);
+    const r = await this.meta.embeddedSignup(dto.code, dto.wabaId, dto.phoneNumberId, !!dto.coexist, dto.businessId);
     if (!r.phone) throw new BadRequestException('A Meta não informou o telefone deste número. Tente de novo.');
     const n = await this.createNumber(user, { phone: r.phone, label: dto.label, color: dto.color, provider: 'meta', config: r.config as unknown as Record<string, unknown> });
     if (r.registerError) this.log.warn(`cadastro incorporado ${r.phone}: registro na Cloud API recusado (${r.registerError})`);
     // coexistência: o app já está inscrito na WABA (connect) — agora pede contatos e histórico
     const syncErrors = dto.coexist ? await this.meta.startCoexistenceSync(await this.numbers.context(n.id)) : [];
     if (syncErrors.length) this.log.warn(`coexistência ${r.phone}: ${syncErrors.join('; ')}`);
-    return { ...n, verifiedName: r.verifiedName, registerError: r.registerError ?? null, syncErrors };
+    return { ...n, verifiedName: r.verifiedName, registerError: r.registerError ?? null, syncErrors, business: r.business };
   }
 
   private async createNumber(user: AuthUser, dto: CreateNumberDto) {
@@ -311,6 +319,76 @@ export class NumbersController {
     const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null }, select: { id: true } });
     if (!canUseNumber(user, n.id)) throw new ForbiddenException('Você não opera este número.');
     return this.numbers.templates(n.id, refresh === '1' || refresh === 'true');
+  }
+
+  /**
+   * Portfólio da Meta dono do número (nome e verificação), lido na hora com o token do número
+   * (permissão `business_management`). Fora da Meta: `business: null`. Falha da Meta volta em
+   * `error` em vez de 4xx: o cartão do número só deixa de mostrar o portfólio.
+   */
+  @Get(':id/meta-business')
+  @RequirePermission('numbers.manage')
+  async metaBusiness(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const n = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id, tenantId: user.tenantId, deletedAt: null }, select: { id: true, provider: true } });
+    if (n.provider !== 'meta') return { business: null };
+    try {
+      return { business: await this.meta.businessInfo(await this.numbers.context(n.id)) };
+    } catch (err) {
+      return { business: null, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Registro na Cloud API (docs/meta-cadastro-incorporado.md#registro-pendente): situação do número
+   * na Meta e os passos para terminar sem remover e cadastrar de novo — pedir o código, confirmar e
+   * registrar. Falha da Meta na leitura volta em `error` (o cartão só não mostra o aviso).
+   */
+  @Get(':id/meta-registration')
+  @RequirePermission('numbers.manage')
+  async metaRegistration(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const n = await this.metaNumber(user, id);
+    try {
+      return { registration: await this.meta.registration(await this.numbers.context(n.id)) };
+    } catch (err) {
+      return { registration: null, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  @Post(':id/meta-registration/request-code')
+  @RequirePermission('numbers.manage')
+  async metaRequestCode(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: MetaRequestCodeDto) {
+    const n = await this.metaNumber(user, id);
+    await this.meta.requestCode(await this.numbers.context(n.id), dto.method);
+    return { ok: true };
+  }
+
+  @Post(':id/meta-registration/verify-code')
+  @RequirePermission('numbers.manage')
+  async metaVerifyCode(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: MetaVerifyCodeDto) {
+    const n = await this.metaNumber(user, id);
+    await this.meta.verifyCode(await this.numbers.context(n.id), dto.code);
+    return { ok: true };
+  }
+
+  /** Registra, grava o PIN (criptografado) e refaz a inscrição do app na WABA (`connect`). */
+  @Post(':id/meta-registration/register')
+  @RequirePermission('numbers.manage')
+  async metaRegister(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const n = await this.metaNumber(user, id);
+    const ctx = await this.numbers.context(n.id);
+    const pin = await this.meta.register(ctx);
+    const config = { ...ctx.config, pin };
+    await this.prisma.whatsAppNumber.update({ where: { id: n.id }, data: { providerConfig: this.crypto.encryptJson(config) } });
+    await this.meta.connect({ ...ctx, config });
+    this.log.log(`número ${n.id}: registrado na Cloud API pelo painel`);
+    return { registration: await this.meta.registration({ ...ctx, config }) };
+  }
+
+  /** Número oficial do tenant, que o usuário pode gerenciar. */
+  private async metaNumber(user: AuthUser, id: string) {
+    const n = await this.manageable(user, id);
+    if (n.provider !== 'meta') throw new BadRequestException('Só números da API oficial têm registro na Meta.');
+    return n;
   }
 
   /**

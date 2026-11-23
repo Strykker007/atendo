@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal, Download, QrCode } from 'lucide-react';
+import { Plus, Building2, Eye, Power, Pencil, Store, Layers, Search, X, SlidersHorizontal, Download, QrCode, ListChecks } from 'lucide-react';
 import { TenantTemplatesDialog } from '@/components/settings/TenantTemplatesDialog';
 import { CompaniesSection, CompanyBillingDialog } from '@/components/settings/CompaniesSection';
 import { PlanOverrideDialog } from '@/components/billing/PlanOverrideDialog';
@@ -245,6 +245,14 @@ export default function ClientesPage() {
   const lista = useMemo(() => filtrarClientes(tenants.data ?? [], filtros, liveDe), [tenants.data, filtros, liveDe]);
   const filtrando = JSON.stringify({ ...filtros, ordem: 'nome' }) !== JSON.stringify(FILTROS_VAZIOS);
   const acesso = useSetTenantActive();
+  // seleção para alterar em massa (BulkTenantsDialog)
+  const [marcados, setMarcados] = useState<string[]>([]);
+  const [emMassa, setEmMassa] = useState(false);
+  // trocar de filtro limpa a seleção: alterar em massa o que saiu da tela seria mexer no escuro
+  useEffect(() => { setMarcados([]); }, [filtros]);
+  const marcar = (id: string) => setMarcados((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+  const todosMarcados = lista.length > 0 && lista.every((t) => marcados.includes(t.id));
+  const selecionados = useMemo(() => (tenants.data ?? []).filter((t) => marcados.includes(t.id)), [tenants.data, marcados]);
   if (me.data && !me.data.systemOwner) return <PageShell><p className="text-sm text-muted">Área restrita ao dono do sistema.</p></PageShell>;
 
   async function enter(t: TenantRow) {
@@ -261,7 +269,8 @@ export default function ClientesPage() {
   }
 
   return (
-    <PageShell width="max-w-6xl">
+    // largura total: a tabela tem muitas colunas e as ações ficavam escondidas atrás do scroll
+    <PageShell width="max-w-none">
       <PageHeader title="Clientes" subtitle={`Todos os clientes do ${brandName}. Entre em qualquer um para ver o sistema como o admin dele.`} action={<div className="flex gap-2"><Button variant="ghost" icon={<Layers size={16} />} onClick={() => setModelos(true)}>Modelos de perfil</Button><Button icon={<Plus size={16} />} onClick={() => setCreating(true)}>Novo cliente</Button></div>} />
       {tenants.isLoading && <SkeletonRows rows={3} />}
       {tenants.data && (
@@ -328,19 +337,29 @@ export default function ClientesPage() {
           <span className="ml-auto text-[11px] text-faint">ao vivo</span>
         </div>
       )}
+      {marcados.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-3 rounded-xl border border-accent bg-accent-soft px-3 py-2 text-[13px] text-accent-ink">
+          <ListChecks size={15} />
+          <b className="tnum">{marcados.length}</b> cliente{marcados.length === 1 ? '' : 's'} selecionado{marcados.length === 1 ? '' : 's'}
+          <Button size="sm" className="ml-auto" onClick={() => setEmMassa(true)}>Alterar em massa</Button>
+          <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => setMarcados([])}>Limpar seleção</Button>
+        </div>
+      )}
       {tenants.data && (
         <div className="rounded-2xl bg-panel border border-line overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="px-4 py-2.5">Cliente</th><th className="px-3 py-2.5">Atividade</th><th className="px-3 py-2.5">Admin</th><th className="px-3 py-2.5">Plano</th><th className="px-3 py-2.5">Assinatura</th><th className="px-3 py-2.5">Vencimento</th><th className="px-3 py-2.5">Números</th><th className="px-3 py-2.5 text-right">Usuários</th><th className="px-3 py-2.5 text-right">Conversas</th><th className="px-4 py-2.5"></th></tr></thead>
+            <thead className="bg-field text-left text-xs text-muted uppercase tracking-wide"><tr><th className="pl-4 pr-1 py-2.5 w-8"><input type="checkbox" aria-label="Selecionar todos os clientes da lista" checked={todosMarcados} onChange={() => setMarcados(todosMarcados ? [] : lista.map((t) => t.id))} className="accent-accent" /></th><th className="px-3 py-2.5">Cliente</th><th className="px-3 py-2.5">Atividade</th><th className="px-3 py-2.5">Admin</th><th className="px-3 py-2.5">Plano</th><th className="px-3 py-2.5">Assinatura</th><th className="px-3 py-2.5">Vencimento</th><th className="px-3 py-2.5">Números</th><th className="px-3 py-2.5 text-right">Usuários</th><th className="px-3 py-2.5 text-right">Conversas</th><th className="px-3 py-2.5 sticky right-0 bg-field text-right">Ações</th></tr></thead>
             <tbody className="divide-y divide-line">
-              {lista.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-muted">Nenhum cliente com esses filtros.</td></tr>}
+              {lista.length === 0 && <tr><td colSpan={11}className="px-4 py-8 text-center text-sm text-muted">Nenhum cliente com esses filtros.</td></tr>}
               {lista.map((t) => {
                 const st = STATUS[t.subscription?.status ?? ''] ?? ['—', 'bg-field text-muted'];
                 return (
-                  <tr key={t.id} className={cn(!t.isActive && 'opacity-50')}>
-                    <td className="px-4 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}{t.partner && <span className="ml-1 text-accent-ink" title="VogoPartner que cuida deste cliente">· parceiro {t.partner.name}</span>}</div>{(t.legalName || t.document) && <div className="text-[11px] text-muted truncate max-w-[16rem]">{[t.legalName, fmtDoc(t.document)].filter(Boolean).join(' · ')}</div>}</td>
+                  // desativado fica apagado, menos as ações (fixas à direita: opacidade nelas deixaria vazar o que rola por baixo)
+                  <tr key={t.id} className={cn(!t.isActive && '[&>td:not(:last-child)]:opacity-50', marcados.includes(t.id) && 'bg-accent-soft/40')}>
+                    <td className="pl-4 pr-1 py-2.5"><input type="checkbox" aria-label={`Selecionar ${t.name}`} checked={marcados.includes(t.id)} onChange={() => marcar(t.id)} className="accent-accent" /></td>
+                    <td className="px-3 py-2.5"><div className="font-medium text-ink flex items-center gap-2"><Building2 size={14} className="text-faint" />{t.name}</div><div className="text-[11px] text-faint">{t.slug} · desde {new Date(t.createdAt).toLocaleDateString('pt-BR')}{t.partner && <span className="ml-1 text-accent-ink" title="VogoPartner que cuida deste cliente">· parceiro {t.partner.name}</span>}</div>{(t.legalName || t.document) && <div className="text-[11px] text-muted truncate max-w-[16rem]">{[t.legalName, fmtDoc(t.document)].filter(Boolean).join(' · ')}</div>}</td>
                     <td className="px-3 py-2.5"><Presenca live={liveDe.get(t.id)} /></td>
-                    <td className="px-3 py-2.5 text-muted">{t.users[0]?.email ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-muted"><div className="truncate max-w-[13rem]" title={t.users[0]?.email}>{t.users[0]?.email ?? '—'}</div></td>
                     <td className="px-3 py-2.5">
                       {t.companies.length > 0 && <div className="text-[10px] font-semibold uppercase tracking-wide text-faint mb-0.5">Plano do grupo{t.subscription && t.subscription.units > 1 ? ` × ${t.subscription.units}` : ''}</div>}
                       <select value={t.subscription?.plan.id ?? ''} disabled={busy === t.id} onChange={(e) => patch(t, { planId: e.target.value })} className="rounded-md border border-line bg-panel text-ink text-xs px-2 py-1">
@@ -393,12 +412,15 @@ export default function ClientesPage() {
                     <td className="px-3 py-2.5"><NumerosDoCliente live={liveDe.get(t.id)} total={t._count.numbers} /></td>
                     <td className="px-3 py-2.5 text-right tnum">{t._count.users}</td>
                     <td className="px-3 py-2.5 text-right tnum">{t._count.conversations}</td>
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditando(t)} title="Editar dados do cliente">Editar</Button>
-                      <Button size="sm" variant="ghost" className="ml-1" icon={<QrCode size={13} />} onClick={() => setAtivando(t.id)} title="Cobrança de ativação: instalação + 1ª mensalidade por Pix">Ativação</Button>
-                      <Button size="sm" variant="ghost" className="ml-1" icon={<Store size={13} />} onClick={() => setEmpresasDe(t)} title="Empresas e unidades do cliente">Empresas</Button>
-                      <Button size="sm" variant="ghost" className="ml-1" icon={<Power size={13} />} onClick={() => { setBusy(t.id); void mudarAcesso(t, !t.isActive, acesso).finally(() => setBusy(null)); }} loading={busy === t.id && acesso.isPending} title={t.isActive ? 'Desativar cliente' : 'Ativar cliente'}>{t.isActive ? 'Desativar' : 'Ativar'}</Button>
-                      <Button size="sm" className="ml-1" icon={<Eye size={13} />} onClick={() => enter(t)} loading={busy === t.id && impersonate.isPending} loadingText="Entrando…">Entrar como</Button>
+                    {/* ações fixas à direita: com a tabela larga, nunca precisam de scroll; as secundárias só com ícone (nome no title) */}
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap sticky right-0 bg-panel shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.15)]">
+                      <div className="inline-flex items-center gap-0.5">
+                        <Button size="icon" variant="ghost" icon={<Pencil size={14} />} onClick={() => setEditando(t)} title="Editar dados do cliente" aria-label="Editar" />
+                        <Button size="icon" variant="ghost" icon={<QrCode size={14} />} onClick={() => setAtivando(t.id)} title="Ativação: instalação + 1ª mensalidade por Pix" aria-label="Ativação" />
+                        <Button size="icon" variant="ghost" icon={<Store size={14} />} onClick={() => setEmpresasDe(t)} title="Empresas e unidades do cliente" aria-label="Empresas" />
+                        <Button size="icon" variant="ghost" className={t.isActive ? 'hover:text-danger-ink' : 'text-ok'} icon={<Power size={14} />} onClick={() => { setBusy(t.id); void mudarAcesso(t, !t.isActive, acesso).finally(() => setBusy(null)); }} loading={busy === t.id && acesso.isPending} title={t.isActive ? 'Desativar cliente' : 'Ativar cliente'} aria-label={t.isActive ? 'Desativar' : 'Ativar'} />
+                        <Button size="sm" className="ml-1" icon={<Eye size={13} />} onClick={() => enter(t)} loading={busy === t.id && impersonate.isPending} loadingText="Entrando…" title="Entrar como o admin deste cliente">Entrar</Button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -410,6 +432,7 @@ export default function ClientesPage() {
       <CreateTenantModal open={creating} onClose={() => setCreating(false)} onCriado={setAtivando} />
       {ativando && <ActivationDialog tenantId={ativando} onClose={() => setAtivando(null)} />}
       {editando && <EditTenantModal tenant={editando} onClose={() => setEditando(null)} />}
+      {emMassa && <BulkTenantsDialog tenants={selecionados} onClose={() => setEmMassa(false)} onDone={() => { setEmMassa(false); setMarcados([]); }} />}
       <Modal open={!!empresasDe} onClose={() => setEmpresasDe(null)} title={`Empresas — ${empresasDe?.name ?? ''}`} width="max-w-2xl">
         {empresasDe && <CompaniesSection tenantId={empresasDe.id} />}
       </Modal>
@@ -417,6 +440,141 @@ export default function ClientesPage() {
       {personalizando && <PlanOverrideDialog tenantId={personalizando.id} tenantName={personalizando.name} onClose={() => setPersonalizando(null)} />}
       {planoEmpresa && <CompanyBillingDialog tenantId={planoEmpresa.tenant.id} company={planoEmpresa.company} groupPlan={planoEmpresa.tenant.subscription?.plan.name} onClose={() => setPlanoEmpresa(null)} />}
     </PageShell>
+  );
+}
+
+type BulkResult = { tenant: TenantRow; status: 'ok' | 'pulado' | 'erro'; detalhe: string };
+
+/**
+ * Alterar vários clientes de uma vez (docs/08-frontend.md → clientes). Aplica, cliente a cliente,
+ * as mesmas rotas da edição individual (`PATCH /tenants/:id`, ativar/desativar): cada um passa
+ * pelas mesmas regras (gratuito cancela Stripe, vencimento de gateway não se edita…) e a falha de
+ * um não derruba os outros — no fim, a lista do que mudou, do que foi pulado e por quê.
+ * Só vai o que foi escolhido; "Não alterar" deixa o campo como está em cada cliente.
+ */
+function BulkTenantsDialog({ tenants, onClose, onDone }: { tenants: TenantRow[]; onClose: () => void; onDone: () => void }) {
+  const plans = usePlans();
+  const update = useUpdateTenant();
+  const acesso = useSetTenantActive();
+  const [f, setF] = useState({ planId: '', subscriptionStatus: '', vencimento: '', billingType: '' as '' | TenantRow['billingType'], acesso: '' as '' | 'ativar' | 'desativar', cancelBilling: false });
+  const [rodando, setRodando] = useState<number | null>(null);
+  const [resultado, setResultado] = useState<BulkResult[] | null>(null);
+  const nada = !f.planId && !f.subscriptionStatus && !f.vencimento && !f.billingType && !f.acesso;
+  const plano = plans.data?.find((p) => p.id === f.planId);
+
+  async function aplicar() {
+    const mudancas = [
+      plano && `plano → ${plano.name}`,
+      f.subscriptionStatus && `assinatura → ${STATUS[f.subscriptionStatus][0]}`,
+      f.vencimento && `vencimento → ${f.vencimento.split('-').reverse().join('/')}`,
+      f.billingType && `cobrança → ${f.billingType === 'INDIVIDUAL' ? 'uma assinatura' : 'por empresa'}`,
+      f.acesso && (f.acesso === 'ativar' ? 'reativar' : `desativar${f.cancelBilling ? ' e cancelar a cobrança' : ''}`),
+    ].filter(Boolean).join('\n• ');
+    if (!confirm(`Aplicar em ${tenants.length} cliente${tenants.length === 1 ? '' : 's'}?\n\n• ${mudancas}${f.acesso === 'desativar' ? '\n\nDesativar desconecta a equipe, exclui os números QR da Evolution e para de receber e enviar.' : ''}`)) return;
+    const out: BulkResult[] = [];
+    for (const [i, t] of tenants.entries()) {
+      setRodando(i + 1);
+      const pulos: string[] = [];
+      const body: Parameters<typeof update.mutateAsync>[0] = { id: t.id };
+      if (f.planId && f.planId !== t.subscription?.plan.id) body.planId = f.planId;
+      if (f.subscriptionStatus) {
+        if (!t.subscription && !body.planId) pulos.push('sem assinatura para mudar o status');
+        else if (f.subscriptionStatus !== t.subscription?.status) body.subscriptionStatus = f.subscriptionStatus;
+      }
+      if (f.vencimento) {
+        if (!t.subscription) pulos.push('sem assinatura para ter vencimento');
+        else if (t.subscription.gateway) pulos.push(`vencimento controlado pelo ${t.subscription.gateway === 'stripe' ? 'Stripe' : 'Asaas'}`);
+        else if (f.vencimento !== diaSP(t.subscription.currentPeriodEnd)) body.currentPeriodEnd = f.vencimento;
+      }
+      if (f.billingType && f.billingType !== t.billingType) body.billingType = f.billingType;
+      try {
+        const feito: string[] = [];
+        if (Object.keys(body).length > 1) { await update.mutateAsync(body); feito.push('dados atualizados'); }
+        const ativo = f.acesso === 'ativar';
+        if (f.acesso && ativo !== t.isActive) {
+          const sub = t.subscription;
+          const cobra = !ativo && f.cancelBilling && !!sub && sub.status !== 'canceled' && !sub.plan.isFree;
+          const r = await acesso.mutateAsync({ id: t.id, active: ativo, cancelBilling: cobra });
+          feito.push(ativo ? 'reativado' : r.billing?.canceled ? 'desativado e cobrança cancelada' : 'desativado');
+          if (r.billing?.error) pulos.push(`cobrança não cancelada: ${r.billing.error}`);
+        }
+        const detalhe = [...feito, ...pulos].join(' · ') || 'já estava assim';
+        out.push({ tenant: t, status: feito.length ? 'ok' : 'pulado', detalhe });
+      } catch (err) {
+        out.push({ tenant: t, status: 'erro', detalhe: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    setRodando(null);
+    setResultado(out);
+    const erros = out.filter((r) => r.status === 'erro').length;
+    if (erros) toast.warn(`${erros} cliente${erros === 1 ? '' : 's'} com erro — veja a lista`);
+    else toast.ok('Alteração em massa concluída');
+  }
+
+  const cor = { ok: 'text-ok', pulado: 'text-muted', erro: 'text-danger-ink' } as const;
+  return (
+    <Modal open onClose={rodando ? () => {} : resultado ? onDone : onClose} title={`Alterar ${tenants.length} cliente${tenants.length === 1 ? '' : 's'}`} width="max-w-2xl">
+      {resultado ? (
+        <div className="space-y-3">
+          <ul className="max-h-[50vh] overflow-y-auto divide-y divide-line rounded-lg border border-line text-[13px]">
+            {resultado.map((r) => (
+              <li key={r.tenant.id} className="flex items-baseline gap-2 px-3 py-1.5">
+                <span className="font-medium text-ink truncate">{r.tenant.name}</span>
+                <span className={cn('ml-auto text-right text-[12px]', cor[r.status])}>{r.detalhe}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-end"><Button onClick={onDone}>Fechar</Button></div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-[12px] text-muted">Só muda o que você escolher; o resto fica como está em cada cliente. {tenants.slice(0, 6).map((t) => t.name).join(', ')}{tenants.length > 6 ? ` e mais ${tenants.length - 6}` : ''}.</p>
+          <div className="grid sm:grid-cols-2 gap-3 items-start">
+            <Field label="Plano" hint={plano?.isFree ? 'Gratuito: quem pagava pelo Stripe tem a cobrança cancelada.' : f.planId ? 'Passa a valer o preço de tabela do plano.' : undefined}>
+              <select className={inputCls} value={f.planId} onChange={(e) => setF({ ...f, planId: e.target.value })}>
+                <option value="">Não alterar</option>
+                {plans.data?.map((p) => <option key={p.id} value={p.id}>{planoLabel(p, '/mês')}</option>)}
+              </select>
+            </Field>
+            <Field label="Assinatura">
+              <select className={inputCls} value={f.subscriptionStatus} onChange={(e) => setF({ ...f, subscriptionStatus: e.target.value })}>
+                <option value="">Não alterar</option>
+                {Object.entries(STATUS).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            </Field>
+            <Field label="Vencimento do plano" hint="Clientes no Stripe/Asaas são pulados: a data vem da cobrança.">
+              <input type="date" className={inputCls} value={f.vencimento} onChange={(e) => setF({ ...f, vencimento: e.target.value })} />
+            </Field>
+            <Field label="Cobrança das empresas">
+              <select className={inputCls} value={f.billingType} onChange={(e) => setF({ ...f, billingType: e.target.value as typeof f.billingType })}>
+                <option value="">Não alterar</option>
+                <option value="INDIVIDUAL">Uma assinatura (preço fixo)</option>
+                <option value="CONSOLIDATED_GROUP">Grupo: cobra por empresa ativa</option>
+              </select>
+            </Field>
+            <Field label="Acesso">
+              <select className={inputCls} value={f.acesso} onChange={(e) => setF({ ...f, acesso: e.target.value as typeof f.acesso })}>
+                <option value="">Não alterar</option>
+                <option value="ativar">Reativar</option>
+                <option value="desativar">Desativar</option>
+              </select>
+            </Field>
+            {f.acesso === 'desativar' && (
+              <label className="flex items-center gap-2 text-[13px] text-ink sm:mt-7">
+                <input type="checkbox" checked={f.cancelBilling} onChange={(e) => setF({ ...f, cancelBilling: e.target.checked })} className="accent-accent" />
+                Cancelar também a assinatura paga
+              </label>
+            )}
+          </div>
+          <p className="text-[11px] text-faint">Personalização de valor, empresas e cobrança de ativação continuam por cliente. Perfis, respostas e fluxos em massa: Modelos de perfil → Aplicar.</p>
+          <div className="flex items-center justify-end gap-2">
+            {rodando && <span className="mr-auto text-[12px] text-muted tnum">Aplicando {rodando} de {tenants.length}…</span>}
+            <Button variant="ghost" onClick={onClose} disabled={!!rodando}>Cancelar</Button>
+            <Button onClick={() => void aplicar()} disabled={nada} loading={!!rodando} loadingText="Aplicando…">Aplicar</Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

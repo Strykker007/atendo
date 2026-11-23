@@ -155,7 +155,29 @@ export const useSetBillingDocument = () => {
 };
 
 /** Linha da migração para a mensalidade por Pix no Asaas (dono do sistema). */
-export interface PixEnrollRow { tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null; result: 'enrolled' | 'would_enroll' | 'already' | 'free' | 'no_price' | 'not_live' | 'no_document' | 'error'; error?: string }
+export interface PixEnrollRow {
+  tenantId: string; tenant: string; plan: string; value: number; dueDate: string | null;
+  /** `would_link`/`linked`: reaproveita a assinatura que já existia no Asaas (Vogo antigo); `remote_duplicate`: mais de uma ativa no mesmo CPF/CNPJ */
+  result: 'enrolled' | 'would_enroll' | 'would_link' | 'linked' | 'remote_duplicate' | 'already' | 'free' | 'no_price' | 'not_live' | 'no_document' | 'error';
+  error?: string;
+  remote?: { id: string; value: number; billingType: string; nextDueDate: string; ours: boolean }[];
+}
+type DupPay = { id: string; dueDate: string; value: number; status: string };
+/** Assinatura em dobro no Asaas (docs/05#assinatura-em-dobro): fica `keep`; cada extra é excluída ou encerrada. */
+export interface DuplicateFix {
+  tenantId: string; tenant: string;
+  keep: { id: string; value: number; billingType: string; ours: boolean; from: string };
+  extras: { id: string; value: number; billingType: string; action: 'delete' | 'end'; endDate: string | null; deletePayments: DupPay[]; keepPayments: DupPay[] }[];
+  result: 'would_fix' | 'fixed' | 'error';
+  error?: string;
+}
+export const useResolveDuplicates = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ dryRun, tenantId }: { dryRun: boolean; tenantId?: string }) => api<DuplicateFix[]>('/billing/monthly/duplicates', { method: 'POST', body: JSON.stringify({ dryRun, tenantId }) }),
+    onSuccess: (_, v) => { if (!v.dryRun) qc.invalidateQueries({ queryKey: ['finance'] }); },
+  });
+};
 /** `dryRun: true` = só a prévia (nada é criado no Asaas); `tenantId` = só aquele cliente. */
 export const usePixEnroll = () => {
   const qc = useQueryClient();

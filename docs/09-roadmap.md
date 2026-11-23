@@ -34,6 +34,7 @@
 
 ## Próximos, em ordem sugerida
 
+0. **Mídia no Cloudflare R2 (urgente, prazo ~jan/2027)** — em 23/11/2026 a mídia ocupava 67 GB no disco da VM e cresce ~34 GB/mês (disco de 193 GB a 71%). O código já tem o driver `s3` com as mesmas chaves (`media/<tenant>/<aaaa-mm>/<uuid>`), sem mudança de código nem de banco: bucket e chave próprios no R2 → `rclone copy` de `infra/volumes/storage/media` → `STORAGE_DRIVER=s3` + `S3_*` no `.env.production` e reiniciar api/worker → `rclone copy` de novo (o que entrou na troca) → conferir mídia antiga e nova no painel → apagar a pasta local. Custo estimado: US$ 0,015/GB/mês, sem egress (~US$ 1/mês hoje, +US$ 0,50/mês) — entra na planilha de custo por cliente antes do lançamento. Junto: limpar arquivos órfãos (~13% na amostra) e retomar a manutenção do banco da Evolution (15 GB, [23](23-evolution-desempenho.md)).
 1. **IA, etapa 3** — agente autônomo: base de conhecimento por arquivo (PDF/planilha) com busca vetorial no `pgvector`, resposta fora do fluxo em toda conversa nova e handoff por confiança. As etapas 1 e 2 (bloco de IA no fluxo e copiloto) estão prontas — ver [15](15-ia.md).
 2. **Validar com credencial real** — Meta (WABA de teste), Stripe (chaves de teste) e Resend nunca rodaram fora do simulado. É o maior risco em aberto.
 3. **Testes de integração** — e2e de receber → responder com banco e fila de verdade (os atuais são unitários e offline).

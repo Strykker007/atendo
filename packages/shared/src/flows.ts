@@ -244,6 +244,11 @@ export type ActionNode = FlowNodeBase<'action', {
    * venda/conversão). `won`/`lost` contam nos relatórios em nome do dono da conversa.
    */ outcome?: 'won' | 'lost';
   /** set_status + closed: motivo de encerramento (lista `close_reasons`) */ closeReasonId?: string;
+  /**
+   * set_status + closed **sem** `outcome`: encerra fora de todos os relatórios (o evento sai com
+   * `ignoreInReports`, como o encerramento interno — início, TMR, encerramento e conversão não contam).
+   * Com `outcome` é ignorado: resultado sempre conta.
+   */ ignoreInReports?: boolean;
   /** set_status + closed + won: valor da venda; aceita {{variáveis}} ("R$ 1.234,56", "1234.56") */ saleValue?: string;
   /**
    * set_status + closed: pesquisa de satisfação depois de encerrar (docs/pesquisa-de-satisfacao.md).

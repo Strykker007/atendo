@@ -17,9 +17,11 @@ export interface AiUsageSummary { period: string; interactions: number; costBrl:
 /** IA configurada neste ambiente? Sem chave, o front esconde os botões em vez de dar erro. */
 export const useAiStatus = () => {
   const feature = useHasFeature('ai_copilot');
-  const q = useQuery({ queryKey: ['ai-status'], enabled: feature.has, retry: false, staleTime: 5 * 60_000, queryFn: () => api<{ available: boolean }>('/ai/status') });
-  return { enabled: feature.has && !!q.data?.available };
+  const q = useQuery({ queryKey: ['ai-status'], enabled: feature.has, retry: false, staleTime: 5 * 60_000, queryFn: () => api<{ available: boolean; transcribe?: boolean }>('/ai/status') });
+  return { enabled: feature.has && !!q.data?.available, transcribe: feature.has && !!q.data?.transcribe };
 };
+/** Transcrever um áudio (docs/transcricao-de-audio.md): o texto fica na mensagem, pedir de novo não cobra. */
+export const useAiTranscribe = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (b: { conversationId: string; messageId: string }) => api<{ transcript: string; cached: boolean }>('/ai/transcribe', { method: 'POST', body: JSON.stringify(b) }), onSuccess: (r) => { if (!r.cached) invAi(qc)(); } }); };
 export const useAiUsage = () => useQuery({ queryKey: ['ai-usage'], queryFn: () => api<AiUsageSummary>('/ai/usage'), retry: false });
 const invAi = (qc: ReturnType<typeof useQueryClient>) => () => qc.invalidateQueries({ queryKey: ['ai-usage'] });
 export const useAiSuggest = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (conversationId: string) => api<{ text: string }>('/ai/suggest', { method: 'POST', body: JSON.stringify({ conversationId }) }), onSuccess: invAi(qc) }); };

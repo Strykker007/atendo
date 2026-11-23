@@ -297,6 +297,31 @@ Liberar **só depois do webhook configurado** no painel do Asaas.
 - **Por cliente**: cria/atualiza o Customer (razão social ou nome, CPF/CNPJ, `billingEmail`, telefone, CEP) e a assinatura `BOLETO` com `nextDueDate` = 1º vencimento. Só grava `gateway = 'asaas'` se ainda estava sem gateway (`updateMany`); se outra rodada ganhou, a assinatura duplicada é cancelada no Asaas. O Asaas gera a 1ª parcela na hora e avisa o cliente; a fatura é espelhada em `invoices` em seguida.
 - **Depois de migrado vale o fluxo do Asaas**: pagou → `active` e o vencimento anda (webhook); venceu sem pagar → `past_due` com a carência do plano (`graceDays`, padrão 5) e **suspensão do envio** quando ela acaba — na cobrança manual nada suspendia sozinho. A 1ª cobrança não cobra excedente; a partir da 2ª, excedente do mês anterior vira cobrança avulsa (`addOverage`).
 
+### Assinatura antiga no Asaas
+
+<a id="assinatura-antiga-no-asaas"></a>Boa parte dos clientes já tinha assinatura ativa na mesma conta do Asaas, criada pelo Vogo antigo, sem `externalReference`. Criar outra cobraria em dobro (aconteceu com 4 clientes até 23/11/2026). Por isso, antes de criar, `enrollAll` procura pelo CPF/CNPJ (`AsaasService.activeSubscriptionsByDocument`: customers com o documento → assinaturas `ACTIVE`):
+
+- **Nenhuma**: cria a assinatura como antes (`would_enroll` → `enrolled`).
+- **Uma** (`would_link` → `linked`, `linkOne`): reaproveita. Põe `externalReference = tenantId` no customer e na assinatura do Asaas (`adoptSubscription`, `updatePendingPayments: false`), grava `tenants.asaasCustomerId` = customer dela (o webhook acha o tenant por aí) e `subscriptions.gateway/externalId`. `currentPeriodEnd` = vencimento da cobrança em aberto dessa assinatura, senão o `nextDueDate`. **Valor e forma de pagamento continuam os do Asaas**; a prévia mostra em amarelo quando diferem do contratado aqui. Recusa se o customer já estiver ligado a outra empresa (filiais com o mesmo CNPJ): vincular à mão.
+- **Mais de uma** (`remote_duplicate`): não faz nada e mostra as assinaturas. Cancelar as extras no Asaas e rodar de novo.
+
+Na **prévia**, quem já está no Asaas também é conferido: sobrou outra assinatura ativa no mesmo documento além da nossa → linha `remote_duplicate` ("Atendo" × "Antiga"). Cancele a **antiga** no Asaas. Se cancelar a do Atendo, o webhook `SUBSCRIPTION_DELETED` marca a nossa como cancelada.
+
+Vale também para a entrada automática (`enrollIfReady`, ao salvar o CPF/CNPJ).
+
+### Assinatura em dobro
+
+<a id="assinatura-em-dobro"></a>Financeiro → Cobrança por Pix → **Assinaturas em dobro** (`POST /billing/monthly/duplicates {dryRun, tenantId?}`, só o dono do sistema; `MonthlyBillingService.resolveDuplicates`). **Procurar** só mostra; **Corrigir** aplica no Asaas.
+
+- Entra quem está ativo, sem gateway ou no Asaas, com CPF/CNPJ válido e **mais de uma** assinatura `ACTIVE` no documento.
+- **Qual fica**: a do Atendo (`subscriptions.externalId`). Cliente ainda não migrado: a que recebeu pagamento por último (empate: a de próximo vencimento mais cedo). A do Atendo não está ativa no Asaas, mas há outras → erro, resolver à mão.
+- **A partir de quando** a que fica cobra (`from`): o 1º vencimento dela em aberto, senão o `nextDueDate`.
+- **Cada extra**: cobranças em aberto (`PENDING`/`OVERDUE`) com vencimento ≥ `from` são repetidas. As de antes são dívida de verdade (ex.: novembro vencido na assinatura antiga, com a do Atendo começando em dezembro).
+  - Sem cobrança anterior em aberto → **exclui a assinatura** (`DELETE /subscriptions/:id`). O Asaas apaga junto as pendentes e vencidas e mantém as pagas.
+  - Com cobrança anterior em aberto → exclui só as repetidas (`DELETE /payments/:id`) e **encerra a recorrência** (`endDate` = véspera de `from`, `AsaasService.endSubscription`). Excluir a assinatura apagaria a dívida junto.
+- A nossa assinatura nunca é tocada: o webhook `SUBSCRIPTION_DELETED` só cancela quando o id é o `externalId` do tenant.
+- Cliente não migrado: depois de corrigir, **Ver prévia** da migração mostra "Vai reaproveitar" com a assinatura que ficou.
+
 ### Clientes novos
 
 <a id="clientes-novos"></a>Cliente pago entra na assinatura do Asaas **assim que tiver CPF/CNPJ**, sem esperar ninguém rodar a migração (`MonthlyBillingService.enrollIfReady` → `enrollAll({tenantId})`; melhor esforço, a falha só vai para o log):
