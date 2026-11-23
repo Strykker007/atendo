@@ -800,7 +800,8 @@ export class ConversationsService {
     return m;
   }
 
-  async setStatusSystem(conversationId: string, status: ConversationStatus) {
+  /** `ignoreInReports`: encerramento do fluxo "fora dos relatórios" (docs/fluxos.md#ação) — vai congelado no evento */
+  async setStatusSystem(conversationId: string, status: ConversationStatus, opts: { ignoreInReports?: boolean } = {}) {
     const antes = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { status: true, botPausedAt: true } });
     if (status === 'closed' && antes?.status !== 'closed' && await this.reaberturaSilenciosa(conversationId)) {
       return this.fecharDeNovo(conversationId);
@@ -828,7 +829,7 @@ export class ConversationsService {
     // ator nulo: foi o fluxo, não uma pessoa — e a diferença importa na auditoria (o ranking não
     // conta). `targetId` = quem da equipe atendeu: o filtro de consultor do relatório traz o
     // atendimento dele que o robô fechou (docs/07-api.md › /reports/attendances). Só robô = nulo
-    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação', ...(atendeu && { targetId: atendeu }), ...(transitorias && { stageTagId: transitorias.get(conversationId)?.stage ?? null, tagSnapshot: transitorias.get(conversationId)?.ids ?? [] }) });
+    await this.registrar({ tenantId: conv.tenantId, conversationId, type: tipoDaTransicao(antes?.status, status), fromStatus: antes?.status, toStatus: status, reason: 'automação', ...(atendeu && { targetId: atendeu }), ...(status === 'closed' && opts.ignoreInReports && { ignoreInReports: true }), ...(transitorias && { stageTagId: transitorias.get(conversationId)?.stage ?? null, tagSnapshot: transitorias.get(conversationId)?.ids ?? [] }) });
     if (status === 'closed') await this.limparTransitorias([conversationId]);
     if (status === 'closed' && antes?.botPausedAt) await this.registrar({ tenantId: conv.tenantId, conversationId, type: 'bot_resumed', reason: BOT_RESUMED_ON_CLOSE });
     if (status === 'closed') await this.encerrarFluxosPausados([conversationId]);
