@@ -15,11 +15,19 @@ name: atendo-prod
 #  - `cpus` é teto rígido, só onde esperar não prejudica ninguém. Valores ≤ 1 de propósito: o
 #    Docker recusa `cpus` maior que o nº de núcleos da máquina.
 
+# ---- logs: teto por container ----
+# Sem isto o json-file do Docker cresce para sempre: em 23/11/2026 o log da Evolution tinha
+# 12,7 GB e o disco chegou a 95%. 3 arquivos × 50 MB = no máximo 150 MB por container.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "50m", max-file: "3" }
+
 x-api-image: &api-image
   build: { context: .., dockerfile: apps/api/Dockerfile }
   image: atendo/api:latest
   env_file: ../.env.production
   restart: unless-stopped
+  logging: *logging
   # Mídia com STORAGE_DRIVER=local. Precisa ser volume compartilhado: são 2 réplicas, e um
   # arquivo gravado por uma teria de ser servido pela outra. Sem isto, some no deploy.
   # O container roda como uid 100 — o dono do diretório no host tem de ser 100:101.
@@ -51,6 +59,7 @@ services:
     mem_limit: 2g
 
   web:
+    logging: *logging
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
@@ -66,6 +75,7 @@ services:
 
   # Site público (docs/21-site.md): landing + /privacidade (URL exigida pela Meta no app)
   site:
+    logging: *logging
     build:
       context: ..
       dockerfile: apps/site/Dockerfile
@@ -80,6 +90,7 @@ services:
 
   # Proxy reverso com HTTPS automático (Let's Encrypt). Domínios vêm do .env.production.
   caddy:
+    logging: *logging
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
@@ -94,6 +105,7 @@ services:
     depends_on: [api, web, site]
 
   postgres:
+    logging: *logging
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -108,6 +120,7 @@ services:
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-atendo}"], interval: 5s, retries: 10 }
 
   redis:
+    logging: *logging
     image: redis:7-alpine
     restart: unless-stopped
     # 2 GB: o cache de sessão da Evolution (chaves Signal, db 6) divide este Redis com as filas e
@@ -126,6 +139,7 @@ services:
   # 2,5 GB e 2 CPUs protegem Postgres e Evolution (o kernel mata o Ollama, nunca os bancos).
   # Sem porta publicada.
   ollama:
+    logging: *logging
     image: ollama/ollama:0.6.8
     restart: unless-stopped
     mem_limit: 2.5g
@@ -136,6 +150,7 @@ services:
 
   # Provider QR code. Para muitos números, repita este bloco como evolution-2, evolution-3 (shards).
   evolution:
+    logging: *logging
     # versão FIXA (docs/04-providers-whatsapp.md#versão-da-evolution): `:latest` atualizava sozinha
     # a cada deploy — mudança de comportamento do cliente WhatsApp Web sem ninguém testar. Trocar
     # só depois de testar a nova em homologação.
@@ -203,6 +218,7 @@ services:
   # A API só manda para cá as instâncias de EVOLUTION_CANARY_INSTANCES. Fora do deploy comum, como a
   # principal: sobe só com `--profile evolution-canary`.
   evolution-canary:
+    logging: *logging
     build: ./evolution
     profiles: ["evolution-canary"]
     image: ${EVOLUTION_CANARY_IMAGE:-atendo/evolution-api:v2.3.7-atendo.6}
@@ -246,6 +262,7 @@ services:
   # Sem isto, perder o servidor significa perder as conversas do cliente e o pareamento
   # de todos os números.
   backup:
+    logging: *logging
     build: ./backup
     restart: unless-stopped
     # roda todo dia em BACKUP_AT (padrão 03:30, horário de Brasília) — de dia o pg_dump do banco da
@@ -290,6 +307,7 @@ services:
       - ./volumes/storage:/data/storage:ro
 
   evolution-db:
+    logging: *logging
     image: postgres:16-alpine
     restart: unless-stopped
     # teto: num pico (consulta sem índice, backup) o banco da Evolution não toma a máquina inteira e

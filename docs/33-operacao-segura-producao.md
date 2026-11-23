@@ -65,3 +65,15 @@ docker local (teste do próprio script).
 
 Leitura em produção só pelo `read.sh` (papel `atendo_ro`). Escrita, nunca: prepara o arquivo `.sql`
 e o comando, e quem roda é o usuário. A permissão do Claude Code já bloqueia escrita remota.
+
+## Disco: logs dos containers e cache de build
+
+Em 23/11/2026 o disco chegou a 95%: o log json-file da Evolution tinha 12,7 GB, os das APIs
+1,7 GB cada, e o cache de build do Docker 33 GB. Disco cheio para o Postgres e derruba tudo.
+
+- `infra/docker-compose.prod.yml` limita o log de **todos** os serviços (`x-logging`: 3 × 50 MB).
+  Só vale para containers recriados — passa a valer no deploy seguinte (`up -d`).
+- Limpeza segura, sem reiniciar nada: `docker builder prune -af` (o próximo build fica mais
+  lento) e `sudo truncate -s 0 $(docker inspect -f '{{.LogPath}}' <container>)` (perde o histórico
+  do `docker logs` daquele container).
+- Conferir: `df -h /` e `docker system df`. Acima de 85%, investigar antes de virar incidente.
