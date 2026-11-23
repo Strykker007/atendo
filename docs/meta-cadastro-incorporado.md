@@ -65,7 +65,7 @@ suportado e duplicaria tudo.
 
 ## Áudio
 
-<a id="áudio"></a>A Cloud API só aceita áudio `aac`, `mp4`, `mpeg`, `amr` e `ogg`/`opus`. O gravador do painel no Chrome gera `audio/webm`, e a Meta recusava com `(#100) Param file must be a file with one of the following types…` (aconteceu em 23/11/2026; foto, vídeo e texto passavam). Agora `MetaProvider.send` passa o áudio por `audioForMeta` (`providers/audio-convert.ts`): formato aceito vai direto (sem o `;codecs=`); o resto vira **ogg/opus mono** com `ffmpeg`, instalado na imagem da API/worker (`apps/api/Dockerfile`). Sem ffmpeg (dev local), o envio falha com a mensagem "Conversão de áudio indisponível no servidor". A Evolution não precisa disso: ela converte sozinha.
+<a id="áudio"></a>A Cloud API só aceita áudio `aac`, `mp4`, `mpeg`, `amr` e `ogg`/`opus`. O gravador do painel no Chrome gera `audio/webm`, e a Meta recusava com `(#100) Param file must be a file with one of the following types…` (aconteceu em 23/11/2026; foto, vídeo e texto passavam). Agora `MetaProvider.send` passa o áudio por `audioForMeta` (`providers/audio-convert.ts`): aac/mp4/mpeg/amr vão direto; o resto vira **ogg/opus mono** com `ffmpeg`, instalado na imagem da API/worker (`apps/api/Dockerfile`). Sem ffmpeg (dev local), o envio falha com a mensagem "Conversão de áudio indisponível no servidor". Ogg **sempre** sobe com o tipo `audio/ogg; codecs=opus`: com `audio/ogg` puro a Meta aceita o upload, mas a mensagem falha depois com `131053` ("não conseguiu processar a mídia") — foi o 2º erro de 23/11, já com o ffmpeg. A Evolution não precisa disso: ela converte sozinha.
 
 ## Portfólio do cliente
 
