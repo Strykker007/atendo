@@ -9,6 +9,7 @@ import { SkeletonCards } from '@/components/ui/Skeleton';
 import { CreateNumberModal, SwitchProviderModal } from '@/components/numbers/NumberDialogs';
 import { SendingCard } from '@/components/numbers/SendingCard';
 import { MetaBusinessLine } from '@/components/numbers/MetaBusinessLine';
+import { MetaRegistrationNotice } from '@/components/numbers/MetaRegistrationNotice';
 import { NumberReceivers } from '@/components/numbers/NumberReceivers';
 import { QrModal } from '@/components/numbers/QrModal';
 import { ConfirmDialog } from '@/components/ui/Confirm';
@@ -177,6 +178,7 @@ export default function NumerosPage() {
                 </div>
                 {/* portfólio da Meta dono do número (permissão business_management) */}
                 {n.provider === 'meta' && gerencia && <MetaBusinessLine numberId={n.id} />}
+                {n.provider === 'meta' && gerencia && <MetaRegistrationNotice numberId={n.id} />}
 
                 {/* número reservado (docs/18-perfis-de-acesso.md#número-reservado) */}
                 {podeReservar && (

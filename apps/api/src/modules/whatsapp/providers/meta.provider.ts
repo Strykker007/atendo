@@ -18,6 +18,18 @@ export interface MetaNumberConfig {
   coexist?: boolean;
 }
 
+/** Situação do número na Meta (GET /{phone_number_id}). `verification`: VERIFIED, NOT_VERIFIED, EXPIRED. */
+export interface MetaRegistration {
+  verification: string | null;
+  status: string | null;
+  platformType: string | null;
+  nameStatus: string | null;
+  quality: string | null;
+  /** registrado na Cloud API: envia e recebe */
+  registered: boolean;
+  coexist: boolean;
+}
+
 /** portfólio (Business Manager) dono da WABA — `verificationStatus`: verified, not_verified, pending… */
 export interface MetaBusinessInfo { id: string; name: string | null; verificationStatus: string | null }
 
@@ -92,6 +104,53 @@ export class MetaProvider implements WhatsAppProvider {
     if (!id) return null;
     const b = await this.graph<{ id: string; name?: string; verification_status?: string }>(cfg, `${id}?fields=id,name,verification_status`);
     return { id: b.id, name: b.name ?? null, verificationStatus: b.verification_status ?? null };
+  }
+
+  // ---- registro na Cloud API depois do cadastro (docs/meta-cadastro-incorporado.md#registro-pendente) ----
+  // Se a verificação do número (código por SMS/ligação) não terminou na janela da Meta, o /register
+  // do cadastro é recusado e o número entra sem enviar nem receber. Daqui dá para terminar sem
+  // remover e cadastrar de novo: pedir o código, confirmar e registrar.
+
+  /** Situação do número na Meta: verificado? registrado na Cloud API (`platform_type` = CLOUD_API)? */
+  async registration(ctx: NumberContext): Promise<MetaRegistration> {
+    const cfg = this.cfg(ctx);
+    const r = await this.graph<{ code_verification_status?: string; status?: string; platform_type?: string; name_status?: string; quality_rating?: string }>(
+      cfg, `${cfg.phoneNumberId}?fields=code_verification_status,status,platform_type,name_status,quality_rating`,
+    );
+    return {
+      verification: r.code_verification_status ?? null,
+      status: r.status ?? null,
+      platformType: r.platform_type ?? null,
+      nameStatus: r.name_status ?? null,
+      quality: r.quality_rating ?? null,
+      registered: r.platform_type === 'CLOUD_API',
+      coexist: !!cfg.coexist,
+    };
+  }
+
+  /** Pede à Meta o código de verificação, por SMS ou ligação, para o próprio número. */
+  async requestCode(ctx: NumberContext, method: 'SMS' | 'VOICE') {
+    const cfg = this.cfg(ctx);
+    await this.graph(cfg, `${cfg.phoneNumberId}/request_code`, { method: 'POST', body: JSON.stringify({ code_method: method, language: 'pt_BR' }) });
+  }
+
+  /** Confirma o código recebido no número. */
+  async verifyCode(ctx: NumberContext, code: string) {
+    const cfg = this.cfg(ctx);
+    await this.graph(cfg, `${cfg.phoneNumberId}/verify_code`, { method: 'POST', body: JSON.stringify({ code }) });
+  }
+
+  /**
+   * Registra na Cloud API com o PIN de duas etapas. Reusa o PIN guardado (registrar de novo não
+   * troca a senha de quem já registrou); sem PIN, gera um. Devolve o PIN para gravar na config.
+   * Coexistência nunca registra: derrubaria o aplicativo do celular.
+   */
+  async register(ctx: NumberContext): Promise<string> {
+    const cfg = this.cfg(ctx);
+    if (cfg.coexist) throw new BadRequestException('Número em coexistência já é registrado pelo aplicativo do celular.');
+    const pin = cfg.pin ?? String(randomInt(0, 1_000_000)).padStart(6, '0');
+    await this.graph(cfg, `${cfg.phoneNumberId}/register`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', pin }) });
+    return pin;
   }
 
   async embeddedSignup(code: string, wabaId: string, phoneNumberId?: string, coexist = false, businessId?: string) {

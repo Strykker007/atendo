@@ -27,7 +27,8 @@ do sócio ([31](31-migracao-meta-oficial.md)).
    um PIN de 6 dígitos novo, guardado criptografado em `providerConfig.pin`) e cadastra pelo mesmo
    caminho do manual — o `connect` inscreve o app na WABA (`subscribed_apps`).
 5. Registro recusado (número já com PIN de outro sistema) **não** impede o cadastro: o número entra,
-   a tela avisa e o log registra; o envio vai falhar com 133010 até registrar (WhatsApp Manager).
+   a tela avisa e o log registra; o envio vai falhar com 133010 até registrar — pelo próprio painel,
+   ver [Registro pendente](#registro-pendente).
 
 A forma de pagamento é do cliente, no WhatsApp Manager (*Visão geral → Adicionar forma de
 pagamento*): sem ela só sai resposta dentro de 24 h, nada de template.
@@ -101,3 +102,23 @@ META_APP_SECRET=      # já existe (assinatura do webhook) — também troca o c
 
 Sem `META_APP_ID`/`META_ES_CONFIG_ID`/`META_APP_SECRET`, `GET /numbers/meta-signup/config`
 devolve `enabled: false` e o botão não aparece (só o manual).
+
+## Registro pendente
+
+Quando a verificação do número (código por SMS/ligação) não termina na janela da Meta, o
+`/register` volta *"Phone number needs to be verified before registering"*. O número entra no
+painel como conectado, mas **não envia nem recebe** até ser registrado na Cloud API. Não precisa
+remover e cadastrar de novo: o cartão do número (Números, só para quem gerencia) mostra o aviso
+**Não registrado na API oficial** com os passos.
+
+- `GET /numbers/:id/meta-registration` → `{ registration: { verification, status, platformType, nameStatus, quality, registered, coexist } }`
+  lido na hora da Meta (`GET /{phone_number_id}?fields=code_verification_status,status,platform_type,…`).
+  `registered` = `platform_type === 'CLOUD_API'`. Falha da Meta volta em `error` (o aviso só não aparece).
+- `POST …/meta-registration/request-code` `{ method: 'SMS' | 'VOICE' }` → `/{id}/request_code` (pt_BR).
+- `POST …/meta-registration/verify-code` `{ code }` (6 dígitos) → `/{id}/verify_code`.
+- `POST …/meta-registration/register` → `/{id}/register` com o PIN guardado (ou um novo), grava o
+  PIN criptografado em `providerConfig.pin` e refaz o `connect` (inscrição do app na WABA).
+- Todas com `numbers.manage` + `canManageNumber`; só números `meta`. Coexistência nunca registra
+  (derrubaria o aplicativo do celular) e não mostra o aviso.
+- No front: `MetaRegistrationNotice` — verificado e não registrado mostra só **Registrar agora**;
+  não verificado mostra **Código por SMS / Por ligação**, o campo do código e **Confirmar e registrar**.

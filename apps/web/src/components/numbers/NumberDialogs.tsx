@@ -53,7 +53,7 @@ export function CreateNumberModal({ open, onClose, onDone }: { open: boolean; on
                 coexist={coexist}
                 onError={setError}
                 onDone={(r) => {
-                  if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}`);
+                  if (r.registerError) toast.err(`Número cadastrado, mas a Meta não registrou na API oficial: ${r.registerError}. Termine pelo aviso no cartão do número — não precisa remover.`);
                   else if (r.syncErrors.length) toast.err(`Número conectado, mas a Meta recusou parte da sincronização (${r.syncErrors.join('; ')})`);
                   else toast.ok(`${coexist ? 'Número conectado; contatos e histórico chegam nos próximos minutos' : 'Número conectado pela Meta'}${r.businessName ? ` · portfólio ${r.businessName}` : ''}`);
                   onDone({ id: r.id, provider: 'meta' });
