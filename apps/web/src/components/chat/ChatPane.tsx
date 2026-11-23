@@ -38,6 +38,7 @@ import { HistorySheet } from './HistorySheet';
 import { AudioRecorder } from './AudioRecorder';
 import { usePersistedState } from '@/lib/persisted';
 import { AudioMessage } from './AudioMessage';
+import { AudioTranscript } from './AudioTranscript';
 import { ContactSheet, ContactSummary } from './ContactSheet';
 import { MediaPreview, type Escolhido } from './MediaPreview';
 import { MediaViewerModal, type ViewerMedia } from './MediaViewer';
@@ -1562,7 +1563,7 @@ function MediaBody({ m, onVerMidia }: { m: Message; onVerMidia?: (url: string) =
   if (m.type === 'image') {
     return <img src={m.mediaUrl} alt="" onClick={() => onVerMidia?.(m.mediaUrl!)} className="rounded-md max-h-72 max-w-full object-contain mb-1 cursor-zoom-in" />;
   }
-  if (m.type === 'audio') return <AudioMessage src={m.mediaUrl} mine={m.direction === 'out'} />;
+  if (m.type === 'audio') return <><AudioMessage src={m.mediaUrl} mine={m.direction === 'out'} /><AudioTranscript m={m} /></>;
   if (m.type === 'video') {
     // o play continua na bolha (clique no vídeo é do player); o botão abre em tela cheia
     return (

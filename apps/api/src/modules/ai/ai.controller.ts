@@ -6,6 +6,7 @@ import { TenantGuard } from '../auth/tenant.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { AiService } from './ai.service';
+import { transcribeOn } from './providers/transcribe';
 
 class SuggestDto {
   @IsUUID() conversationId: string;
@@ -14,6 +15,10 @@ class RewriteDto {
   @IsString() @MaxLength(2000) text: string;
   @IsIn(Object.keys(REWRITE_TONES)) tone: RewriteTone;
   @IsOptional() @IsUUID() conversationId?: string;
+}
+class TranscribeDto {
+  @IsUUID() conversationId: string;
+  @IsUUID() messageId: string;
 }
 class SummaryDto {
   @IsUUID() conversationId: string;
@@ -34,7 +39,8 @@ export class AiController {
   /** Se a IA está configurada neste ambiente — o front esconde os botões quando não está. */
   @Get('status')
   async status(@CurrentUser() u: AuthUser) {
-    return { available: await this.ai.available(u.tenantId) };
+    // `transcribe`: chave de transcrição configurada — independente da IA de texto
+    return { available: await this.ai.available(u.tenantId), transcribe: transcribeOn() };
   }
 
   @Get('usage')
@@ -50,6 +56,12 @@ export class AiController {
   @Post('rewrite')
   async rewrite(@CurrentUser() u: AuthUser, @Body() dto: RewriteDto) {
     return { text: await this.ai.rewrite(u.tenantId, dto.text, dto.tone, u.id, dto.conversationId) };
+  }
+
+  /** Transcrever um áudio (docs/transcricao-de-audio.md). Já transcrito: devolve o texto sem cobrar. */
+  @Post('transcribe')
+  transcribe(@CurrentUser() u: AuthUser, @Body() dto: TranscribeDto) {
+    return this.ai.transcribe(u.tenantId, dto.conversationId, dto.messageId, u.id);
   }
 
   @Post('summary')

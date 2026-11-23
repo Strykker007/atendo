@@ -80,6 +80,8 @@ export interface Message {
   deletedForEveryone?: boolean;
   /** texto trocado depois do envio (pelo atendente ou no celular) — a bolha mostra "editada" */
   editedAt?: string | null;
+  /** áudio transcrito pelo botão "Transcrever"; null = nunca pedido, '' = sem fala reconhecida */
+  transcript?: string | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
 export type SendInput = ({ type: 'text'; text: string } | { type: 'text'; /** chave Pix cadastrada: a API monta o cartão */ pixKeyId: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } } | { type: 'sticker'; mediaKey: string; media: { url: string; mimeType: string; fileName?: string } }) & {

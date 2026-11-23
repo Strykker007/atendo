@@ -1,7 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { AiTaskKind } from '@prisma/client';
 import { PLAN_FEATURE_LABEL, type PlanFeature, type RewriteTone } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
 import { AppLogger } from '../../common/observability/app-logger';
 import { UsageService } from '../billing/usage.service';
 import { AiProviderRegistry } from './ai-provider.registry';
@@ -12,6 +13,7 @@ import { AiBusyError } from './ai-busy';
 import { decideCanUseAi, decideWithCredit, platformBudgetStatus } from './ai-quota';
 import { HISTORY_LIMIT, answerSystemPrompt, classifySystemPrompt, rewriteSystemPrompt, suggestSystemPrompt, summarySystemPrompt, toMessages, toTranscript, transcriptMessage } from './prompts';
 import type { AiMessage, AiProvider } from './ai.types';
+import { TRANSCRIBE_MAX_BYTES, transcribeAudio, transcribeCostUsd, transcribeOn } from './providers/transcribe';
 import { env } from '../../config/env';
 
 interface RunInput {
@@ -36,6 +38,7 @@ export class AiService {
     private readonly usage: UsageService,
     private readonly ownKeys: AiOwnKeyService,
     private readonly credits: AiCreditsService,
+    private readonly storage: StorageService,
   ) {}
 
   /** IA utilizável por este tenant: a da plataforma ou a chave própria dele. */
@@ -83,18 +86,62 @@ export class AiService {
   /** IA da plataforma: incluído no plano → saldo de IA → excedente → bloqueia. */
   private async platform(input: RunInput, plan: Awaited<ReturnType<UsageService['limits']>>) {
     const provider = this.registry.get();
-    const [used, platformSpent] = await Promise.all([this.aiUsage.current(input.tenantId), this.aiUsage.platformCost()]);
+    const { creditMarkupPct } = await this.platformGate(input.tenantId, plan);
+    return this.call(input, provider, env.AI_MODEL || provider.defaultModel, { creditMarkupPct });
+  }
+
+  /** Orçamento da plataforma e quota do tenant (com o saldo de IA). Lança quando não pode. */
+  private async platformGate(tenantId: string, plan: Awaited<ReturnType<UsageService['limits']>>) {
+    const [used, platformSpent] = await Promise.all([this.aiUsage.current(tenantId), this.aiUsage.platformCost()]);
     // orçamento da plataforma antes da quota do tenant: protege o crédito da conta do fornecedor
     if (platformBudgetStatus(platformSpent, env.AI_PLATFORM_BUDGET_BRL).blocked) {
       throw new ServiceUnavailableException('IA temporariamente indisponível. Tente novamente mais tarde.');
     }
     const base = decideCanUseAi(plan, used);
     // só lê a carteira quando o incluído do plano não cobre
-    const balance = base.ok && !base.overage ? 0 : (await this.credits.wallet(input.tenantId)).balanceBrl;
+    const balance = base.ok && !base.overage ? 0 : (await this.credits.wallet(tenantId)).balanceBrl;
     const decision = decideWithCredit(plan, used, balance);
     if (!decision.ok) throw new ForbiddenException(decision.reason);
-    const creditMarkupPct = decision.credit ? await this.credits.markupPct() : undefined;
-    return this.call(input, provider, env.AI_MODEL || provider.defaultModel, { creditMarkupPct });
+    return { creditMarkupPct: decision.credit ? await this.credits.markupPct() : undefined };
+  }
+
+  // ---------- transcrição de áudio (docs/transcricao-de-audio.md) ----------
+
+  /**
+   * Transcreve um áudio da conversa a pedido do atendente. Sempre pela chave de transcrição da
+   * plataforma (`AI_TRANSCRIBE_*`), contando na quota de IA do plano como uma interação. O texto
+   * fica na mensagem: pedir de novo (ou outro atendente abrir) não cobra outra vez.
+   */
+  async transcribe(tenantId: string, conversationId: string, messageId: string, userId: string): Promise<{ transcript: string; cached: boolean }> {
+    const m = await this.prisma.message.findFirst({
+      where: { id: messageId, conversationId, deletedAt: null, conversation: { tenantId } },
+      select: { type: true, mediaUrl: true, mediaMime: true, transcript: true },
+    });
+    if (!m) throw new NotFoundException('Mensagem não encontrada.');
+    if (m.type !== 'audio') throw new BadRequestException('Só dá para transcrever áudio.');
+    if (m.transcript !== null) return { transcript: m.transcript, cached: true };
+    if (!transcribeOn()) throw new ServiceUnavailableException('Transcrição não configurada neste ambiente.');
+    if (!m.mediaUrl?.startsWith(`media/${tenantId}/`)) throw new BadRequestException('O áudio ainda está sendo baixado. Tente de novo em instantes.');
+
+    const plan = await this.usage.limits(tenantId);
+    if (!plan) throw new ForbiddenException('Sem assinatura ativa');
+    const { creditMarkupPct } = await this.platformGate(tenantId, plan);
+
+    const obj = await this.storage.get(m.mediaUrl);
+    if (obj.data.length > TRANSCRIBE_MAX_BYTES) throw new BadRequestException('Áudio grande demais para transcrever (limite de 25 MB).');
+    const started = Date.now();
+    const base = { tenantId, kind: 'transcribe' as const, provider: 'transcribe', model: env.AI_TRANSCRIBE_MODEL, tokensIn: 0, tokensOut: 0, conversationId, userId };
+    try {
+      const out = await transcribeAudio(obj.data, m.mediaMime || obj.mimeType);
+      await this.aiUsage.record({ ...base, model: out.model, latencyMs: Date.now() - started, costUsd: transcribeCostUsd(out.seconds), creditMarkupPct });
+      await this.prisma.message.updateMany({ where: { id: messageId, transcript: null }, data: { transcript: out.text } });
+      return { transcript: out.text, cached: false };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      await this.aiUsage.record({ ...base, latencyMs: Date.now() - started, error: reason.slice(0, 300) }).catch(() => undefined);
+      this.log.warn(`transcrição falhou: ${reason}`, { kind: 'transcribe' });
+      throw new BadRequestException('Não foi possível transcrever este áudio agora. Tente de novo.');
+    }
   }
 
   /** Chamada + ledger (sucesso e falha). */
