@@ -22,6 +22,25 @@ export interface EnrollResult {
   remote?: { id: string; value: number; billingType: string; nextDueDate: string; ours: boolean }[];
 }
 
+type PayView = { id: string; dueDate: string; value: number; status: string };
+/**
+ * Correção de assinatura em dobro no Asaas (docs/05#assinatura-em-dobro). `keep` fica; cada extra
+ * perde as cobranças em aberto a partir do 1º vencimento da `keep`. Extra sem cobrança anterior em
+ * aberto é excluída (`delete`); com cobrança anterior em aberto (dívida de verdade), só encerra a
+ * recorrência (`end`), porque excluir a assinatura apagaria essa cobrança junto.
+ */
+export interface DuplicateFix {
+  tenantId: string; tenant: string;
+  keep: { id: string; value: number; billingType: string; ours: boolean; from: string };
+  extras: { id: string; value: number; billingType: string; action: 'delete' | 'end'; endDate: string | null; deletePayments: PayView[]; keepPayments: PayView[] }[];
+  result: 'would_fix' | 'fixed' | 'error';
+  error?: string;
+}
+
+const OPEN = new Set(['PENDING', 'OVERDUE']);
+const payView = (p: { id: string; dueDate: string; value: number; status: string }): PayView => ({ id: p.id, dueDate: p.dueDate, value: p.value, status: p.status });
+const dayBefore = (ymd: string) => new Date(Date.parse(`${ymd}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
 /**
  * Mensalidade por Pix no Asaas (docs/05-planos-e-cobranca.md#migração-para-o-asaas):
  * - migra quem paga hoje sem gateway (cobrança manual) para uma assinatura recorrente no Asaas,
@@ -141,6 +160,65 @@ export class MonthlyBillingService {
         const msg = err instanceof Error ? err.message : String(err);
         this.log.error(`migração Asaas tenant ${s.tenantId} (${s.tenant.name}): ${msg}`);
         out.push({ ...base, dueDate: null, result: 'error', error: msg });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Assinatura em dobro no Asaas (docs/05#assinatura-em-dobro): mais de uma ativa no mesmo CPF/CNPJ.
+   * Fica a do Atendo; sem ela (cliente ainda não migrado), a que recebeu pagamento por último.
+   * `dryRun` só mostra o que faria.
+   */
+  async resolveDuplicates(opts: { dryRun: boolean; tenantId?: string }): Promise<DuplicateFix[]> {
+    if (!this.enabled) throw new BadRequestException('Asaas não configurado (ASAAS_API_KEY).');
+    const subs = await this.prisma.subscription.findMany({
+      where: { ...(opts.tenantId && { tenantId: opts.tenantId }), status: { not: 'canceled' }, tenant: { isActive: true }, OR: [{ gateway: null }, { gateway: 'asaas' }] },
+      include: { tenant: { select: { name: true, document: true } } },
+    });
+    const out: DuplicateFix[] = [];
+    for (const s of subs) {
+      if (!isValidCpfCnpj(s.tenant.document)) continue;
+      const base = { tenantId: s.tenantId, tenant: s.tenant.name };
+      try {
+        const remotas = await this.asaas.activeSubscriptionsByDocument(s.tenant.document!);
+        if (remotas.length < 2) continue;
+        const pays = new Map<string, Awaited<ReturnType<AsaasService['subscriptionPayments']>>>();
+        for (const r of remotas) pays.set(r.id, await this.asaas.subscriptionPayments(r.id));
+        const ultimoPago = (id: string) => pays.get(id)!.filter((p) => p.status === 'RECEIVED' || p.status === 'CONFIRMED' || p.status === 'RECEIVED_IN_CASH').map((p) => p.paymentDate ?? p.dueDate).sort().pop() ?? '';
+        let keep = s.gateway === 'asaas' ? remotas.find((r) => r.id === s.externalId) : undefined;
+        if (s.gateway === 'asaas' && !keep) {
+          out.push({ ...base, keep: { id: s.externalId ?? '—', value: 0, billingType: '', ours: true, from: '' }, extras: [], result: 'error', error: 'A assinatura do Atendo não está ativa no Asaas, mas há outras ativas. Resolva à mão.' });
+          continue;
+        }
+        keep ??= [...remotas].sort((a, b) => ultimoPago(b.id).localeCompare(ultimoPago(a.id)) || a.nextDueDate.localeCompare(b.nextDueDate))[0];
+        // a partir daqui quem cobra é a `keep`: o 1º vencimento dela em aberto, senão o próximo que vai gerar
+        const from = pays.get(keep.id)!.filter((p) => OPEN.has(p.status)).map((p) => p.dueDate).sort()[0] ?? keep.nextDueDate;
+        const extras = remotas.filter((r) => r.id !== keep!.id).map((r) => {
+          const abertas = pays.get(r.id)!.filter((p) => OPEN.has(p.status));
+          const deletePayments = abertas.filter((p) => p.dueDate >= from).map(payView);
+          const keepPayments = abertas.filter((p) => p.dueDate < from).map(payView);
+          const action: 'delete' | 'end' = keepPayments.length ? 'end' : 'delete';
+          return { id: r.id, value: r.value, billingType: r.billingType, action, endDate: action === 'end' ? dayBefore(from) : null, deletePayments, keepPayments };
+        });
+        const fix: DuplicateFix = { ...base, keep: { id: keep.id, value: keep.value, billingType: keep.billingType, ours: keep.id === s.externalId, from }, extras, result: 'would_fix' };
+        if (!opts.dryRun) {
+          for (const e of extras) {
+            if (e.action === 'delete') {
+              await this.asaas.cancelSubscription(e.id);
+            } else {
+              for (const p of e.deletePayments) await this.asaas.deletePayment(p.id);
+              await this.asaas.endSubscription(e.id, e.endDate!);
+            }
+            this.log.log(`assinatura em dobro tenant ${s.tenantId}: ${e.id} ${e.action === 'delete' ? 'excluída' : `encerrada em ${e.endDate}`}, ${e.deletePayments.length} cobrança(s) excluída(s); fica ${keep.id}`);
+          }
+          fix.result = 'fixed';
+        }
+        out.push(fix);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.error(`assinatura em dobro tenant ${s.tenantId} (${s.tenant.name}): ${msg}`);
+        out.push({ ...base, keep: { id: '—', value: 0, billingType: '', ours: false, from: '' }, extras: [], result: 'error', error: msg });
       }
     }
     return out;

@@ -309,6 +309,19 @@ Na **prévia**, quem já está no Asaas também é conferido: sobrou outra assin
 
 Vale também para a entrada automática (`enrollIfReady`, ao salvar o CPF/CNPJ).
 
+### Assinatura em dobro
+
+<a id="assinatura-em-dobro"></a>Financeiro → Cobrança por Pix → **Assinaturas em dobro** (`POST /billing/monthly/duplicates {dryRun, tenantId?}`, só o dono do sistema; `MonthlyBillingService.resolveDuplicates`). **Procurar** só mostra; **Corrigir** aplica no Asaas.
+
+- Entra quem está ativo, sem gateway ou no Asaas, com CPF/CNPJ válido e **mais de uma** assinatura `ACTIVE` no documento.
+- **Qual fica**: a do Atendo (`subscriptions.externalId`). Cliente ainda não migrado: a que recebeu pagamento por último (empate: a de próximo vencimento mais cedo). A do Atendo não está ativa no Asaas, mas há outras → erro, resolver à mão.
+- **A partir de quando** a que fica cobra (`from`): o 1º vencimento dela em aberto, senão o `nextDueDate`.
+- **Cada extra**: cobranças em aberto (`PENDING`/`OVERDUE`) com vencimento ≥ `from` são repetidas. As de antes são dívida de verdade (ex.: novembro vencido na assinatura antiga, com a do Atendo começando em dezembro).
+  - Sem cobrança anterior em aberto → **exclui a assinatura** (`DELETE /subscriptions/:id`). O Asaas apaga junto as pendentes e vencidas e mantém as pagas.
+  - Com cobrança anterior em aberto → exclui só as repetidas (`DELETE /payments/:id`) e **encerra a recorrência** (`endDate` = véspera de `from`, `AsaasService.endSubscription`). Excluir a assinatura apagaria a dívida junto.
+- A nossa assinatura nunca é tocada: o webhook `SUBSCRIPTION_DELETED` só cancela quando o id é o `externalId` do tenant.
+- Cliente não migrado: depois de corrigir, **Ver prévia** da migração mostra "Vai reaproveitar" com a assinatura que ficou.
+
 ### Clientes novos
 
 <a id="clientes-novos"></a>Cliente pago entra na assinatura do Asaas **assim que tiver CPF/CNPJ**, sem esperar ninguém rodar a migração (`MonthlyBillingService.enrollIfReady` → `enrollAll({tenantId})`; melhor esforço, a falha só vai para o log):

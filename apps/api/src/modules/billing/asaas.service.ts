@@ -256,6 +256,21 @@ export class AsaasService {
     await this.request('PUT', `/subscriptions/${sub.id}`, { externalReference: tenantId, updatePendingPayments: false });
   }
 
+  /** Cobranças (não excluídas) de uma assinatura, até 100. */
+  async subscriptionPayments(subscriptionId: string): Promise<AsaasPayment[]> {
+    const l = await this.request<AsaasList<AsaasPayment>>('GET', `/subscriptions/${subscriptionId}/payments?limit=100`);
+    return l.data.filter((p) => !p.deleted);
+  }
+
+  /**
+   * Encerra a recorrência sem excluir a assinatura: nenhuma cobrança nova vence depois de `endDate`,
+   * e as já geradas ficam. Usado quando a assinatura tem cobrança antiga em aberto que é dívida de
+   * verdade — excluir a assinatura apagaria essa cobrança junto (docs/05#assinatura-em-dobro).
+   */
+  async endSubscription(subscriptionId: string, endDate: string) {
+    await this.request('PUT', `/subscriptions/${subscriptionId}`, { endDate, updatePendingPayments: false });
+  }
+
   /** Liga os avisos do Asaas num cliente já cadastrado (até 16/11/2026 eles nasciam desligados). */
   async enableNotifications(customerId: string) {
     await this.request('PUT', `/customers/${customerId}`, { notificationDisabled: false });

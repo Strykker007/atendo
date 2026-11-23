@@ -1,11 +1,11 @@
 'use client';
 import { useState } from 'react';
-import { QrCode, Eye, Play } from 'lucide-react';
+import { QrCode, Eye, Play, CopyX } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { toast } from '@/components/ui/Toast';
-import { usePixEnroll, usePixSettings, useSetPixSettings, type PixEnrollRow } from '@/lib/hooks';
+import { usePixEnroll, usePixSettings, useSetPixSettings, useResolveDuplicates, type DuplicateFix, type PixEnrollRow } from '@/lib/hooks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString('pt-BR');
@@ -123,6 +123,8 @@ export function PixMigration() {
         </div>
       )}
 
+      <Duplicadas />
+
       <ConfirmDialog
         open={confirmarLiberar !== null}
         onClose={() => setConfirmarLiberar(null)}
@@ -154,5 +156,72 @@ export function PixMigration() {
         onConfirm={() => rodar(false)}
       />
     </section>
+  );
+}
+
+const FORMA = (b: string) => (b === 'UNDEFINED' ? 'cliente escolhe' : b.toLowerCase());
+const cobrancas = (ps: { dueDate: string; value: number }[]) => ps.map((p) => `${dataBR(p.dueDate)} (${brl(p.value)})`).join(', ');
+
+/**
+ * Assinatura em dobro no Asaas (docs/05#assinatura-em-dobro): o cliente tinha a do Vogo antigo e
+ * ganhou outra. Fica a do Atendo (ou, sem ela, a que recebeu por último); as cobranças em aberto
+ * repetidas somem. Cobrança antiga em aberto de antes disso é dívida de verdade e fica.
+ */
+function Duplicadas() {
+  const resolve = useResolveDuplicates();
+  const [linhas, setLinhas] = useState<DuplicateFix[] | null>(null);
+  const [confirmar, setConfirmar] = useState(false);
+  const aCorrigir = linhas?.filter((l) => l.result === 'would_fix') ?? [];
+
+  const rodar = async (dryRun: boolean) => {
+    try {
+      const r = await resolve.mutateAsync({ dryRun });
+      setLinhas(r);
+      if (!dryRun) {
+        const ok = r.filter((l) => l.result === 'fixed').length;
+        const erros = r.filter((l) => l.result === 'error').length;
+        if (erros) toast.err(`${ok} corrigido(s), ${erros} com erro — veja a lista`); else toast.ok(`${ok} cliente(s) corrigido(s)`);
+      }
+    } catch (err) { toast.err(err); }
+  };
+
+  return (
+    <div className="rounded-xl border border-line px-3 py-2.5 space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[240px] text-[12.5px]">
+          <div className="font-medium text-ink text-sm flex items-center gap-1.5"><CopyX size={14} className="text-danger" /> Assinaturas em dobro no Asaas</div>
+          <p className="text-muted">Clientes com mais de uma assinatura ativa no mesmo CPF/CNPJ (a do Vogo antigo e a nova). Fica uma; as cobranças repetidas são excluídas. Cobrança antiga em aberto de antes disso continua.</p>
+        </div>
+        <Button size="sm" variant="ghost" icon={<Eye size={14} />} loading={resolve.isPending && !confirmar} loadingText="Procurando…" onClick={() => rodar(true)}>Procurar</Button>
+        <Button size="sm" disabled={!aCorrigir.length} onClick={() => setConfirmar(true)}>Corrigir {aCorrigir.length || ''}</Button>
+      </div>
+      {linhas && !linhas.length && <p className="text-[12.5px] text-ok">Nenhuma assinatura em dobro.</p>}
+      {linhas?.map((l) => (
+        <div key={l.tenantId} className="text-[12.5px] border-t border-line pt-2">
+          <div className="font-medium text-ink">{l.tenant} <span className={cn('font-normal', l.result === 'fixed' ? 'text-ok' : l.result === 'error' ? 'text-danger-ink' : 'text-muted')}>{l.result === 'fixed' ? '· corrigido' : l.result === 'error' ? `· erro: ${l.error}` : ''}</span></div>
+          {l.result !== 'error' && (
+            <>
+              <div className="text-muted">Fica: {l.keep.ours ? 'a do Atendo' : 'a que recebeu por último'} · {FORMA(l.keep.billingType)} · {brl(l.keep.value)} · cobra a partir de {dataBR(l.keep.from)} · <span className="font-mono">{l.keep.id}</span></div>
+              {l.extras.map((e) => (
+                <div key={e.id} className="text-muted">
+                  {e.action === 'delete' ? 'Exclui' : `Encerra em ${dataBR(e.endDate!)}`}: {FORMA(e.billingType)} · {brl(e.value)} · <span className="font-mono">{e.id}</span>
+                  {!!e.deletePayments.length && <span className="text-danger-ink"> — exclui {cobrancas(e.deletePayments)}</span>}
+                  {!!e.keepPayments.length && <span className="text-warn-ink"> — mantém em aberto {cobrancas(e.keepPayments)}</span>}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      ))}
+      <ConfirmDialog
+        open={confirmar}
+        onClose={() => setConfirmar(false)}
+        title="Corrigir assinaturas em dobro"
+        confirmLabel={`Corrigir ${aCorrigir.length}`}
+        text={`Exclui ou encerra no Asaas as assinaturas extras de ${aCorrigir.length} cliente(s) e apaga ${aCorrigir.reduce((a, l) => a + l.extras.reduce((b, e) => b + e.deletePayments.length, 0), 0)} cobrança(s) repetida(s). Não dá para desfazer pelo painel.`}
+        danger
+        onConfirm={() => rodar(false)}
+      />
+    </div>
   );
 }

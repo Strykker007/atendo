@@ -39,6 +39,15 @@ export class MonthlyBillingController {
     return this.monthly.enrollAll({ dryRun: dto.dryRun ?? true, tenantId: dto.tenantId });
   }
 
+  /** Dono do sistema: assinatura em dobro no Asaas (docs/05#assinatura-em-dobro). Comece com `dryRun: true`. */
+  @Post('duplicates')
+  @HttpCode(200)
+  @NoTenantOk()
+  @Roles('super_admin')
+  duplicates(@Body() dto: EnrollDto) {
+    return this.monthly.resolveDuplicates({ dryRun: dto.dryRun ?? true, tenantId: dto.tenantId });
+  }
+
   /** Dono do sistema: a cobrança por Pix está liberada para os clientes? (botão em Financeiro) */
   @Get('settings')
   @NoTenantOk()
