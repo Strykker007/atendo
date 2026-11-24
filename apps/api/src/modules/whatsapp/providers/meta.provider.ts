@@ -279,6 +279,8 @@ export class MetaProvider implements WhatsAppProvider {
       const mediaId = await this.uploadMedia(cfg, media);
       body.type = m.type;
       body[m.type] = { id: mediaId, ...metaMediaExtras(m.type, m.media?.caption ?? m.text, media.fileName) };
+      // ogg/opus com `voice: true` chega como mensagem de voz (bolinha verde), não como arquivo de áudio
+      if (m.type === MessageType.AUDIO && media.mimeType.startsWith('audio/ogg')) (body.audio as Record<string, unknown>).voice = true;
     } else if (m.media?.url) {
       body.type = m.type;
       body[m.type] = { link: m.media.url, ...metaMediaExtras(m.type, m.media.caption, m.media.fileName) };
