@@ -2,21 +2,29 @@ import { spawn } from 'node:child_process';
 import type { MediaPayload } from './provider.interface';
 
 /** Áudio que a Cloud API aceita (erro `#100 Param file must be a file with one of the following types`). */
-const META_AUDIO = new Set(['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr', 'audio/ogg', 'audio/opus']);
+const META_AUDIO = new Set(['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr']);
+/**
+ * Ogg só vale com o codec escrito: a Meta aceita o upload de `audio/ogg` puro, mas falha depois ao
+ * processar (status `failed`, erro 131053). Por isso ogg/opus sempre sobe como `audio/ogg; codecs=opus`.
+ */
+const OGG_OPUS = 'audio/ogg; codecs=opus';
 
 const baseMime = (mime: string) => mime.split(';')[0].trim().toLowerCase();
 
 /**
  * Áudio para a API oficial (docs/meta-cadastro-incorporado.md#áudio). O Chrome grava `audio/webm`
  * (opus), que a Meta recusa; a Evolution converte sozinha, a Meta não. Fora da lista, vira ogg/opus
- * mono — o formato da nota de voz do WhatsApp. Formato aceito passa direto (só tira o `;codecs=`).
+ * mono — o formato da nota de voz do WhatsApp. aac/mp4/mpeg/amr passam direto; ogg sobe como
+ * `audio/ogg; codecs=opus`.
  */
 export async function audioForMeta(media: MediaPayload): Promise<MediaPayload> {
   const mime = baseMime(media.mimeType);
   if (META_AUDIO.has(mime)) return { ...media, mimeType: mime };
+  // ogg do WhatsApp/Firefox e `audio/opus` já são opus em ogg: só o rótulo muda
+  if (mime === 'audio/ogg' || mime === 'audio/opus') return { ...media, mimeType: OGG_OPUS };
   const data = await ffmpegToOggOpus(media.data);
   const name = (media.fileName ?? 'audio').replace(/\.[a-z0-9]+$/i, '');
-  return { ...media, data, mimeType: 'audio/ogg', fileName: `${name}.ogg` };
+  return { ...media, data, mimeType: OGG_OPUS, fileName: `${name}.ogg` };
 }
 
 function ffmpegToOggOpus(input: Buffer, timeoutMs = 30_000): Promise<Buffer> {
