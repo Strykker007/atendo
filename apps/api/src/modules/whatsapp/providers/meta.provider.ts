@@ -499,6 +499,13 @@ export class MetaProvider implements WhatsAppProvider {
         return { type: MessageType.TEXT, text: `🛒 Pedido (${msg.order?.product_items?.length ?? 0} itens)${msg.order?.text ? `\n${msg.order.text}` : ''}` };
       case 'system':
         return { type: MessageType.TEXT, text: msg.system?.body };
+      case 'unsupported': {
+        // a Meta avisa que chegou algo mas não manda o conteúdo (131060 "This message is unavailable":
+        // visualização única, enquete, evento, mensagem que o WhatsApp não liberou para a API…)
+        if (textoQualquer(msg)) break;
+        const code = Number(msg.errors?.[0]?.code);
+        return { type: MessageType.UNKNOWN, content: { kind: 'unavailable', ...(Number.isFinite(code) && { code }) } };
+      }
     }
     // `unsupported`, tipos novos: qualquer texto que houver, em vez de "unknown"
     const text = textoQualquer(msg);

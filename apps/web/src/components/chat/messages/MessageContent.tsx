@@ -19,6 +19,7 @@ export function structuredBody(m: Message): ReactNode | null {
   if (c?.kind === 'buttons') return <ButtonsMessage text={m.text} header={c.header} footer={c.footer} buttons={c.buttons} replyTo={m.direction === 'in' ? { conversationId: m.conversationId, externalId: m.externalId ?? undefined } : undefined} />;
   if (c?.kind === 'list') return <ListMessage text={m.text} header={c.header} footer={c.footer} buttonText={c.buttonText} sections={c.sections} />;
   if (c?.kind === 'location') return <LocationMessage {...c} text={m.text} />;
+  if (c?.kind === 'unavailable') return <UnknownMessageFallback unavailable />;
   if (c?.kind === 'contacts') return <><ContactMessage contacts={c.contacts} />{m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}</>;
   // tipo estruturado sem `content` (mensagem antiga, gravada antes deste mapeamento) ou unknown
   if (m.type === 'interactive' || m.type === 'unknown' || ((m.type === 'location' || m.type === 'contact') && !c)) {
