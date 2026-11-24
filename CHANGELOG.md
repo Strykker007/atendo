@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.22.1 — 2026-11-24
+
+- fix(meta): áudio ogg sobe como audio/ogg; codecs=opus
+
 ## 1.22.0 — 2026-11-23
 
 - fix(meta): converter áudio webm para ogg/opus antes de enviar pela API oficial
