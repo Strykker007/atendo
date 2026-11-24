@@ -30,7 +30,14 @@ export async function audioForMeta(media: MediaPayload): Promise<MediaPayload> {
 function ffmpegToOggOpus(input: Buffer, timeoutMs = 30_000): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     // re-encode (não só copia o stream): garante mono/opus mesmo com gravação estranha; voz curta é rápido
-    const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-map_metadata', '-1', '-ac', '1', '-c:a', 'libopus', '-b:a', '32k', '-f', 'ogg', 'pipe:1']);
+    // `-avoid_negative_ts make_zero`: sem isso o ogg começa em tempo negativo (pré-skip do opus) e a
+    // Meta aceita o upload mas falha a entrega com 131053. Os áudios que ela entrega começam em ~0,006 s.
+    const p = spawn('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-map_metadata', '-1',
+      '-ac', '1', '-ar', '48000', '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip',
+      '-avoid_negative_ts', 'make_zero', '-fflags', '+bitexact', '-flags:a', '+bitexact',
+      '-f', 'ogg', 'pipe:1',
+    ]);
     const out: Buffer[] = [];
     let err = '';
     const timer = setTimeout(() => { p.kill('SIGKILL'); reject(new Error('Conversão do áudio demorou demais.')); }, timeoutMs);
