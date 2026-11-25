@@ -217,8 +217,8 @@ export default function EquipePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
+                {/* desativado fica apagado, menos as ações (fixas à direita: opacidade nelas deixaria vazar o que rola por baixo) */}
                 {agents.data.map((a) => (
-                  {/* desativado fica apagado, menos as ações (fixas à direita: opacidade nelas deixaria vazar o que rola por baixo) */}
                   <tr key={a.id} className={cn('align-middle', !a.isActive && '[&>td:not(:last-child)]:opacity-50')}>
                     <td className="px-4 py-3 min-w-48">{pessoa(a)}</td>
                     <td className="px-4 py-3">{perfil(a)}</td>
