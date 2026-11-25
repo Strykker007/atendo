@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.25.0 — 2026-11-25
+
+- feat(kanban): marcar como não lida / lida pelo card
+- fix(equipe): comentário JSX fora do map (quebrava o typecheck)
+- feat(evolution): chave Pix em texto logo depois do cartão
+- feat(equipe): tabela em largura total com ações fixas à direita
+
 ## 1.24.0 — 2026-11-25
 
 - feat(kanban): tags permanentes como colunas (📌, do contato)
