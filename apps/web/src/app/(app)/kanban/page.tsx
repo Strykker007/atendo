@@ -6,6 +6,8 @@ import { KANBAN_NO_STAGE, type KanbanCard as Card, type KanbanColumn } from '@at
 import Link from 'next/link';
 import { KanbanCard } from '@/components/kanban/KanbanCard';
 import { KanbanChatDialog } from '@/components/kanban/KanbanChatDialog';
+import { CloseModal } from '@/components/chat/CloseModal';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMinuto } from '@/components/chat/ConversationList';
 import { Empty } from '@/components/ui/Page';
 import { toast } from '@/components/ui/Toast';
@@ -24,6 +26,9 @@ export default function KanbanPage() {
   const [numberId, setNumberId] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
   const [aberto, setAberto] = useState<string | null>(null);
+  // encerrar direto do card: o mesmo modal do chat (resultado, motivo, tags, venda, fluxo)
+  const [encerrando, setEncerrando] = useState<string | null>(null);
+  const qc = useQueryClient();
   const board = useKanban(numberId);
   const numbers = useNumbers();
   const move = useSetPrimaryTag();
@@ -85,6 +90,7 @@ export default function KanbanPage() {
                         dragging={ds.isDragging}
                         onOpen={() => setAberto(card.id)}
                         onPromote={(tagId) => move.mutateAsync({ id: card.id, tagId }).catch(toast.err)}
+                        onEncerrar={() => setEncerrando(card.id)}
                       />
                     </div>
                   )}
@@ -104,7 +110,7 @@ export default function KanbanPage() {
       <header className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-line bg-panel">
         <div className="mr-auto">
           <h1 className="font-display text-lg font-semibold text-ink tracking-tight">Kanban</h1>
-          <p className="text-[13px] text-muted">Atendimentos abertos por etapa. Arraste para mudar a tag principal; duplo clique abre a conversa.</p>
+          <p className="text-[13px] text-muted">Atendimentos abertos por etapa. Arraste para mudar a tag principal; duplo clique abre a conversa; ✓ no card encerra.</p>
         </div>
         <label className="flex items-center gap-1.5 rounded-lg bg-field px-2 h-8">
           <Search size={14} className="text-faint" />
@@ -163,6 +169,8 @@ export default function KanbanPage() {
       )}
 
       {aberto && <KanbanChatDialog conversationId={aberto} onClose={fechar} />}
+      {/* encerrado: o card sai do quadro (o socket também avisa; aqui é na hora) */}
+      {encerrando && <CloseModal conversationId={encerrando} onClose={() => setEncerrando(null)} onClosed={() => qc.invalidateQueries({ queryKey: ['kanban'] })} />}
     </div>
   );
 }

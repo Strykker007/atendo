@@ -1,5 +1,5 @@
 'use client';
-import { Maximize2, Star } from 'lucide-react';
+import { CheckCircle2, Maximize2, Star } from 'lucide-react';
 import type { KanbanCard as Card, KanbanColumn } from '@atendo/shared';
 import { Avatar } from '@/components/chat/Avatar';
 import { SeloEspera, formatTime } from '@/components/chat/ConversationList';
@@ -8,15 +8,18 @@ import { formatPhone } from '@/components/ui/PhoneInput';
 
 /**
  * Card do atendimento. Duplo clique (ou o botão, no celular) abre o mini-chat; clicar numa
- * pílula que é etapa do Kanban a promove a principal e o card muda de coluna.
+ * pílula que é etapa do Kanban a promove a principal e o card muda de coluna. Os ícones do canto
+ * (abrir / encerrar) só aparecem ao passar o mouse — no celular ficam sempre à vista.
  */
-export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote }: {
+export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote, onEncerrar }: {
   card: Card;
   primary?: KanbanColumn;
   agora: number;
   dragging: boolean;
   onOpen: () => void;
   onPromote: (tagId: string) => void;
+  /** encerrar sem abrir a conversa (mesmo modal do chat) */
+  onEncerrar: () => void;
 }) {
   const nome = card.contact.name ?? formatPhone(card.contact.phone);
   return (
@@ -37,9 +40,14 @@ export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote }
             {card.unreadCount > 0 && <span className="text-[10px] font-bold text-white bg-accent rounded-full min-w-4 h-4 px-1 grid place-items-center tnum">{card.unreadCount}</span>}
           </div>
         </div>
-        <button onClick={onOpen} className="md:opacity-0 md:group-hover:opacity-100 text-faint hover:text-ink p-0.5 -mr-1 -mt-0.5" title="Abrir conversa">
-          <Maximize2 size={13} />
-        </button>
+        <div className="flex items-center gap-0.5 -mr-1 -mt-0.5 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity" onDoubleClick={(e) => e.stopPropagation()}>
+          <button type="button" onClick={onEncerrar} className="text-faint hover:text-ok p-0.5" title="Encerrar atendimento" aria-label={`Encerrar atendimento de ${nome}`}>
+            <CheckCircle2 size={13} />
+          </button>
+          <button type="button" onClick={onOpen} className="text-faint hover:text-ink p-0.5" title="Abrir conversa" aria-label={`Abrir conversa de ${nome}`}>
+            <Maximize2 size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-1 mt-2">

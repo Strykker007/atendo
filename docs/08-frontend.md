@@ -575,6 +575,7 @@ Configurações → Atendimento → **Encerramento** → **Avisar o cliente ao e
 - Clicar numa pílula que é etapa promove a tag e move o card. Pílula de tag que não é etapa fica desabilitada.
 - Arrastar colunas só para quem tem `tags.manage` (`PATCH /kanban/columns`); sem a permissão o arraste de colunas nem é montado.
 - Duplo clique (ou o botão no card, para o celular) abre `KanbanChatDialog`, que é o próprio `ChatPane` em modo embutido (`<ChatPane conversationId=…/>`): não lê nem mexe na seleção/filtros da tela de conversas. Envio, cota do plano, janela de 24h e posse são os mesmos do chat.
+- **Encerrar pelo card** (✓ ao lado do abrir, só no hover; no celular sempre à vista): abre o mesmo `CloseModal` do chat (resultado, motivo, tags, venda, fluxo, pesquisa) sem entrar na conversa. Encerrado, o card sai do quadro (invalida `['kanban']`; o socket também avisa). Quem pode encerrar é a regra da API, igual ao chat.
 - Não é feature paga e não tem limite próprio: se a cota de mensagens acabar, o `UsageBanner` global e o composer do mini-chat bloqueiam igual à tela de conversas.
 
 No chat, a tag principal aparece cheia e com estrela no `TagPicker` (não fica mais repetida ao lado do nome no cabeçalho — sobrepunha o nome) (clicar numa tag de coluna já selecionada a torna principal) e no card da `ConversationList`.
