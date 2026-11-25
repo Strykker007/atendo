@@ -12,7 +12,7 @@ import { FeatureGuard, RequireFeature } from '../billing/feature.guard';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { createTicketTypesFromPortable, ticketTypesToPortable } from '../tenants/portable-db';
 import {
-  TicketsService, CreateTicketDto, TypeDto, PresetDto, UpdateTicketDto, CommentDto, StatusDto, HoldDto, NoteDto, TransferDto, ParticipantDto, HoldReasonDto, ListDto,
+  TicketsService, CreateTicketDto, TypeDto, PresetDto, UpdateTicketDto, CommentDto, StatusDto, HoldDto, NoteDto, TransferDto, ParticipantDto, HoldReasonDto, ListDto, BulkDto, ReportDto, NoticeTemplatesDto,
 } from './tickets.service';
 
 export { TicketsService } from './tickets.service';
@@ -31,6 +31,18 @@ class TicketsController {
 
   @Get('summary')
   summary(@CurrentUser() u: AuthUser) { return this.tickets.summary(u); }
+
+  /** Relatório de tickets: quem vê relatórios ou toda a fila de tickets. */
+  @Get('reports') @RequirePermission('reports.view', 'tickets.view_all', 'tickets.manage')
+  report(@CurrentUser() u: AuthUser, @Query() q: ReportDto) { return this.tickets.report(u, q); }
+
+  /** Seleção na lista: cada ticket segue a regra do individual (`failed` = os que não deram). */
+  @Post('bulk')
+  bulk(@CurrentUser() u: AuthUser, @Body() dto: BulkDto) { return this.tickets.bulk(u, dto); }
+
+  /** Modelos do aviso ao reclamante (abertura e encerramento); null = texto padrão. */
+  @Patch('notice-templates') @RequirePermission('tickets.manage')
+  noticeTemplates(@CurrentUser() u: AuthUser, @Body() dto: NoticeTemplatesDto) { return this.tickets.saveNoticeTemplates(u, dto); }
 
   @Get('options')
   options(@CurrentUser() u: AuthUser) { return this.tickets.options(u); }

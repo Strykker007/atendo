@@ -1,6 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { MessageSquare, X } from 'lucide-react';
+import { BellRing, MessageSquare, X } from 'lucide-react';
 import { TICKET_PRIORITIES, TICKET_PRIORITY_LABEL, TICKET_TEXT_MAX, TICKET_TITLE_MAX, type TicketPriority } from '@atendo/shared';
 import { cn } from '@/lib/utils';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { useTicketWrite, type TicketOptions } from '@/lib/hooks';
 import { CamposDoTipo } from './TicketTypes';
+import { ReclamantePicker, type Reclamante } from './Requester';
 
 export const hojeYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 /** "AAAA-MM-DD" → fim do dia em Brasília (prazo e retomada valem o dia inteiro) */
@@ -72,6 +73,10 @@ export function NewTicketModal({ opts, onClose, onCriado, origem }: { opts: Tick
   const w = useTicketWrite();
   const conversa = useUI((s) => s.conversationId);
   const [f, setF] = useState({ title: '', description: '', priority: 'normal' as TicketPriority, departmentId: '', responsibleId: '', participantIds: [] as string[], dueAt: '', vincular: false, typeId: '', fields: {} as Record<string, string> });
+  // reclamante: da conversa (origem ou "ligar ao atendimento") por padrão; ou um contato escolhido
+  const [reclamante, setReclamante] = useState<Reclamante | null>(null);
+  const [outro, setOutro] = useState(false);
+  const [avisar, setAvisar] = useState(true);
   const tipos = opts.types.filter((t) => t.isActive);
   const tipo = tipos.find((t) => t.id === f.typeId) ?? null;
   /** escolher o tipo traz setor, prioridade e prazo padrão dele (dá para mudar depois) */
@@ -83,6 +88,8 @@ export function NewTicketModal({ opts, onClose, onCriado, origem }: { opts: Tick
   const ligacao = origem
     ? { conversationId: origem.conversationId, ...(origem.messageId && { messageId: origem.messageId }) }
     : f.vincular && conversa ? { conversationId: conversa } : {};
+  const daConversa = 'conversationId' in ligacao && !outro;
+  const temReclamante = daConversa || !!reclamante;
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -92,6 +99,8 @@ export function NewTicketModal({ opts, onClose, onCriado, origem }: { opts: Tick
           responsibleId: f.responsibleId || undefined, participantIds: f.participantIds, dueAt: f.dueAt ? fimDoDia(f.dueAt) : undefined,
           ...ligacao,
           ...(tipo && { typeId: tipo.id, fields: f.fields }),
+          ...(!daConversa && reclamante && { requesterContactId: reclamante.id }),
+          ...(temReclamante && { notifyRequester: avisar }),
         },
       });
       if ('id' in r && 'number' in r) { toast.ok(`Ticket #${r.number} aberto`); onCriado(r.id, r.number); }
@@ -136,6 +145,23 @@ export function NewTicketModal({ opts, onClose, onCriado, origem }: { opts: Tick
           onResponsavel={(responsibleId) => setF((x) => ({ ...x, responsibleId }))} onParticipantes={(participantIds) => setF((x) => ({ ...x, participantIds }))} />
         <p className="text-[11px] text-faint">Sem responsável, o ticket fica para quem atende o setor. Quem você incluir recebe o aviso na hora.</p>
         {!origem && conversa && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.vincular} onChange={(e) => setF({ ...f, vincular: e.target.checked })} /> Ligar ao atendimento aberto nas conversas</label>}
+        {/* reclamante (docs/tickets.md#reclamante): quem pediu e recebe o retorno no WhatsApp */}
+        <div className="rounded-lg border border-line p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-ink">Reclamante</span>
+            {'conversationId' in ligacao && <button type="button" className="text-[11px] text-muted underline hover:text-ink" onClick={() => { setOutro(!outro); setReclamante(null); }}>{outro ? 'Usar o contato da conversa' : 'Outra pessoa'}</button>}
+          </div>
+          {daConversa
+            ? <p className="text-sm text-muted">{origem ? origem.contato : 'O contato do atendimento aberto'} (da conversa)</p>
+            : <ReclamantePicker value={reclamante} onChange={setReclamante} />}
+          {temReclamante && (
+            <label className="flex items-center gap-2 text-xs text-muted cursor-pointer">
+              <input type="checkbox" checked={avisar} onChange={(e) => setAvisar(e.target.checked)} />
+              <BellRing size={12} /> Avisar no WhatsApp ao abrir e ao encerrar (com o motivo e a conclusão)
+            </label>
+          )}
+          {!temReclamante && <p className="text-[11px] text-faint">Opcional. Com reclamante, ele recebe o número do chamado e o retorno quando for encerrado.</p>}
+        </div>
         <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" loading={w.isPending}>Abrir ticket</Button></div>
       </form>
     </Modal>

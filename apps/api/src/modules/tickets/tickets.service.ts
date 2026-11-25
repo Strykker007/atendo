@@ -2,11 +2,11 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 import {
-  DEFAULT_TICKET_HOLD_REASONS, TICKET_ACTIVE_STATUSES, TICKET_CONTEXT_SIZE, messagePreview, type MessageContent, type TicketContextMessage, TICKET_MAX_PARTICIPANTS, TICKET_PRIORITIES, TICKET_STATUS_LABEL, TICKET_STATUSES, TICKET_TEXT_MAX, TICKET_TITLE_MAX,
+  DEFAULT_TICKET_HOLD_REASONS, TICKET_ACTIVE_STATUSES, TICKET_CONTEXT_SIZE, TICKET_PRIORITY_LABEL, messagePreview, type MessageContent, type TicketContextMessage, TICKET_MAX_PARTICIPANTS, TICKET_PRIORITIES, TICKET_STATUS_LABEL, TICKET_STATUSES, TICKET_TEXT_MAX, TICKET_TITLE_MAX,
   type Permission, type TicketEventType, type TicketPriority, type TicketStatus,
-  TICKET_SOURCES, TICKET_SOURCE_LABEL, TICKET_TYPE_PRESETS, checkTicketValues, cleanTicketFields, type TicketField, type TicketSource, type TicketType,
+  TICKET_SOURCES, TICKET_SOURCE_LABEL, TICKET_TYPE_PRESETS, DEFAULT_TICKET_OPENED_MESSAGE, DEFAULT_TICKET_CLOSED_MESSAGE, TICKET_NOTICE_MAX, renderTicketNotice, checkTicketValues, cleanTicketFields, type TicketField, type TicketSource, type TicketType,
 } from '@atendo/shared';
 import { UsageService } from '../billing/usage.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -15,6 +15,7 @@ import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { ConversationsService } from '../conversations/conversations.service';
 import { canUseNumber } from '../auth/number-scope';
 import { canSeeDepartment } from '../auth/department-scope';
+import { computeTicketReport } from './tickets-report';
 
 const NULLABLE = (_: unknown, v: unknown) => v !== null;
 
@@ -33,6 +34,10 @@ export class CreateTicketDto {
   @IsOptional() @IsUUID() typeId?: string;
   /** valores dos campos do tipo, por chave */
   @IsOptional() @IsObject() fields?: Record<string, unknown>;
+  /** reclamante (contato); aberto de uma conversa, vem dela se não informado */
+  @IsOptional() @IsUUID() requesterContactId?: string;
+  /** avisar o reclamante no WhatsApp na abertura e no encerramento (padrão: sim) */
+  @IsOptional() @IsBoolean() notifyRequester?: boolean;
 }
 export class TypeDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(60) name?: string;
@@ -52,6 +57,14 @@ export class UpdateTicketDto {
   @IsOptional() @IsIn(TICKET_PRIORITIES) priority?: TicketPriority;
   @IsOptional() @ValidateIf(NULLABLE) @IsDateString() dueAt?: string | null;
   @IsOptional() @IsObject() fields?: Record<string, unknown>;
+  /** null = tira o reclamante */
+  @IsOptional() @ValidateIf(NULLABLE) @IsUUID() requesterContactId?: string | null;
+  @IsOptional() @IsBoolean() notifyRequester?: boolean;
+}
+export class NoticeTemplatesDto {
+  /** null = volta ao texto padrão */
+  @IsOptional() @ValidateIf(NULLABLE) @IsString() @MaxLength(TICKET_NOTICE_MAX) openedMessage?: string | null;
+  @IsOptional() @ValidateIf(NULLABLE) @IsString() @MaxLength(TICKET_NOTICE_MAX) closedMessage?: string | null;
 }
 export class CommentDto {
   @IsString() @MinLength(1) @MaxLength(TICKET_TEXT_MAX) body: string;
@@ -59,6 +72,10 @@ export class CommentDto {
 export class StatusDto {
   @IsIn(['open', 'in_progress', 'resolved', 'canceled']) status: Exclude<TicketStatus, 'on_hold'>;
   @IsOptional() @IsString() @MaxLength(TICKET_TEXT_MAX) note?: string;
+  /** resolver/cancelar com reclamante: false = não avisar desta vez */
+  @IsOptional() @IsBoolean() notify?: boolean;
+  /** texto final do aviso (revisado na tela); sem ele, o modelo da empresa */
+  @IsOptional() @IsString() @MaxLength(TICKET_NOTICE_MAX) message?: string;
 }
 export class HoldDto {
   @IsUUID() reasonId: string;
@@ -87,8 +104,19 @@ export class HoldReasonDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 export class ListDto {
-  /** mine = sou responsável ou participante · department = dos meus setores · created = abri · all = tudo que posso ver */
-  @IsOptional() @IsIn(['mine', 'department', 'created', 'all']) scope?: 'mine' | 'department' | 'created' | 'all';
+  /**
+   * mine = sou responsável ou participante · department = dos meus setores · created = abri ·
+   * to_pick = aberto sem responsável que eu posso pegar · all = tudo que posso ver
+   */
+  @IsOptional() @IsIn(['mine', 'department', 'created', 'to_pick', 'all']) scope?: 'mine' | 'department' | 'created' | 'to_pick' | 'all';
+  /** prazo: overdue = vencido (aberto/em andamento) · today = vence hoje, ainda não venceu */
+  @IsOptional() @IsIn(['overdue', 'today']) due?: 'overdue' | 'today';
+  /** responsável atual; `none` = sem responsável */
+  @IsOptional() @IsString() @MaxLength(40) responsibleId?: string;
+  /** updated (padrão) · due = prazo mais perto primeiro · priority = urgente primeiro · created = mais novos */
+  @IsOptional() @IsIn(['updated', 'due', 'priority', 'created']) sort?: 'updated' | 'due' | 'priority' | 'created';
+  /** itens por página (o quadro pede mais por coluna) */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(10) @Max(200) pageSize?: number;
   /** status; `active` = aberto + em andamento + em espera */
   @IsOptional() @IsIn([...TICKET_STATUSES, 'active']) status?: TicketStatus | 'active';
   @IsOptional() @IsIn(TICKET_PRIORITIES) priority?: TicketPriority;
@@ -100,8 +128,32 @@ export class ListDto {
 }
 
 const PAGE = 50;
+/** teto de uma ação em massa (a tela manda os selecionados da página) */
+const BULK_MAX = 100;
+
+export class BulkDto {
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(BULK_MAX) @IsUUID('4', { each: true }) ids: string[];
+  /** assign = responsável (null = ninguém) · status · priority · hold = congelar com motivo */
+  @IsIn(['assign', 'status', 'priority', 'hold']) action: 'assign' | 'status' | 'priority' | 'hold';
+  @IsOptional() @ValidateIf(NULLABLE) @IsUUID() responsibleId?: string | null;
+  @IsOptional() @IsIn(['open', 'in_progress', 'resolved', 'canceled']) status?: Exclude<TicketStatus, 'on_hold'>;
+  @IsOptional() @IsIn(TICKET_PRIORITIES) priority?: TicketPriority;
+  @IsOptional() @IsUUID() reasonId?: string;
+  @IsOptional() @IsDateString() until?: string;
+  @IsOptional() @IsString() @MaxLength(TICKET_TEXT_MAX) note?: string;
+}
+export class ReportDto {
+  @IsDateString() startDate: string;
+  @IsDateString() endDate: string;
+  @IsOptional() @IsString() @MaxLength(40) departmentId?: string;
+  @IsOptional() @IsUUID() typeId?: string;
+}
+/** teto de tickets num relatório: acima disso o período é grande demais para calcular na hora */
+const REPORT_MAX = 20_000;
+/** ordem de "prioridade": urgente primeiro */
+const PRIO_ORDEM: TicketPriority[] = ['urgent', 'high', 'normal', 'low'];
 /** fim do dia (Brasília) daqui a N dias — prazo vale o dia inteiro, como no formulário */
-const endOfDayIn = (days: number) => {
+const endOfDayIn = (days: number): Date => {
   const ymd = new Date(Date.now() + days * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
   return new Date(`${ymd}T23:59:00-03:00`);
 };
@@ -111,6 +163,7 @@ const LIST_INCLUDE = {
   department: { select: { id: true, name: true, color: true } },
   holdReason: { select: { id: true, name: true } },
   type: { select: { id: true, name: true, color: true, fields: true } },
+  requester: { select: { id: true, name: true, phone: true } },
   createdBy: pessoa,
   participants: { include: { user: pessoa }, orderBy: { addedAt: 'asc' } },
   _count: { select: { events: { where: { type: 'comment' } } } },
@@ -208,7 +261,56 @@ export class TicketsService {
       typeFields: (t.type?.fields as unknown as TicketField[] | undefined) ?? [],
       fields: (t.fields as Record<string, string> | null) ?? {},
       source: (TICKET_SOURCES as readonly string[]).includes(t.source) ? (t.source as TicketSource) : 'panel',
+      requester: t.requester,
+      notifyRequester: t.notifyRequester,
     };
+  }
+
+  // ---------- reclamante (docs/tickets.md#reclamante) ----------
+
+  /** Modelos de aviso da empresa (nulo = padrão do sistema). */
+  private async modelos(tenantId: string) {
+    const s = await this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { ticketOpenedMessage: true, ticketClosedMessage: true } });
+    return { opened: s?.ticketOpenedMessage ?? null, closed: s?.ticketClosedMessage ?? null };
+  }
+
+  async saveNoticeTemplates(u: AuthUser, dto: NoticeTemplatesDto) {
+    const limpo = (v: string | null | undefined) => (v === undefined ? undefined : v?.trim() || null);
+    const data = { ...(dto.openedMessage !== undefined && { ticketOpenedMessage: limpo(dto.openedMessage) }), ...(dto.closedMessage !== undefined && { ticketClosedMessage: limpo(dto.closedMessage) }) };
+    await this.prisma.tenantSettings.upsert({ where: { tenantId: u.tenantId }, create: { tenantId: u.tenantId, ...data }, update: data });
+    return this.options(u);
+  }
+
+  /** Contato do cliente (o id vem do corpo da requisição). */
+  private async assertContact(tenantId: string, id: string) {
+    const c = await this.prisma.contact.findFirst({ where: { id, tenantId }, select: { id: true } });
+    if (!c) throw new BadRequestException('Reclamante não encontrado nos contatos.');
+  }
+
+  /**
+   * Manda o aviso no WhatsApp: pela conversa de origem quando ela é do reclamante, senão pela
+   * conversa dele (`sendToContact`, sem reabrir). Passa pela mesma regra de todo envio automático
+   * (descadastro, número conectado, janela de 24h da Meta, cota). Não derruba a ação do ticket:
+   * o resultado (ou o motivo de não ter saído) fica na linha do tempo e volta para a tela.
+   */
+  private async avisarReclamante(t: { id: string; tenantId: string; conversationId: string | null; requesterContactId: string | null }, kind: 'opened' | 'closed', text: string, actorId: string | null): Promise<string | null> {
+    if (!t.requesterContactId || !text.trim()) return null;
+    const key = kind === 'opened' ? `ticket-${t.id}-opened` : `ticket-${t.id}-closed-${Date.now()}`;
+    let erro: string | null = null;
+    try {
+      const conv = t.conversationId ? await this.prisma.conversation.findUnique({ where: { id: t.conversationId }, select: { contactId: true } }) : null;
+      if (conv && conv.contactId === t.requesterContactId) await this.conversations.sendAsSystem(t.conversationId!, text, undefined, undefined, { allowClosed: true, idempotencyKey: key });
+      else await this.conversations.sendToContact(t.tenantId, t.requesterContactId, text, { allowClosed: true, idempotencyKey: key });
+    } catch (e) {
+      erro = e instanceof Error ? e.message : 'Não foi possível enviar.';
+    }
+    await this.prisma.$transaction((tx) => this.event(tx, t, actorId, 'notice', text, { kind, ok: !erro, ...(erro ? { error: erro } : {}) })).catch(() => undefined);
+    return erro;
+  }
+
+  /** Variáveis do aviso a partir do ticket carregado. */
+  private varsDoAviso(t: TicketRow, extra: { situacao?: string; conclusao?: string | null } = {}) {
+    return { nome: t.requester?.name ?? '', numero: t.number, titulo: t.title, tipo: t.type?.name ?? '', setor: t.department?.name ?? '', ...extra };
   }
 
   /** Pessoas ativas da equipe (para responsável/participantes). */
@@ -243,6 +345,12 @@ export class TicketsService {
       const s = this.setores(u);
       and.push(s ? { departmentId: { in: s } } : { departmentId: { not: null } });
     }
+    if (scope === 'to_pick') and.push(this.paraPegar(u), { status: 'open' }, { participants: { none: { role: 'responsible' } } });
+    const agora = new Date();
+    if (q.due === 'overdue') and.push({ status: { in: ['open', 'in_progress'] }, dueAt: { lt: agora } });
+    if (q.due === 'today') and.push({ status: { in: ['open', 'in_progress'] }, dueAt: { gte: agora, lte: endOfDayIn(0) } });
+    if (q.responsibleId === 'none') and.push({ participants: { none: { role: 'responsible' } } });
+    else if (q.responsibleId) and.push({ participants: { some: { userId: q.responsibleId, role: 'responsible' } } });
     if (q.status === 'active') and.push({ status: { in: TICKET_ACTIVE_STATUSES } });
     else if (q.status) and.push({ status: q.status });
     if (q.priority) and.push({ priority: q.priority });
@@ -256,14 +364,51 @@ export class TicketsService {
     }
     const where: Prisma.TicketWhereInput = { AND: and };
     const page = q.page ?? 1;
-    const [rows, total] = await Promise.all([
-      this.prisma.ticket.findMany({ where, include: LIST_INCLUDE, orderBy: [{ updatedAt: 'desc' }], skip: (page - 1) * PAGE, take: PAGE }),
-      this.prisma.ticket.count({ where }),
-    ]);
+    const size = q.pageSize ?? PAGE;
+    const [rows, total] = q.sort === 'priority'
+      ? await this.porPrioridade(where, (page - 1) * size, size)
+      : await Promise.all([
+        this.prisma.ticket.findMany({ where, include: LIST_INCLUDE, orderBy: this.ordem(q.sort), skip: (page - 1) * size, take: size }),
+        this.prisma.ticket.count({ where }),
+      ]);
     // não lido só nos que me dizem respeito (os ids vêm do mesmo filtro do resumo)
     const meus = rows.length ? await this.prisma.ticket.findMany({ where: { AND: [{ id: { in: rows.map((r) => r.id) } }, this.paraMim(u)] }, select: { id: true, updatedAt: true } }) : [];
     const novos = await this.naoLidos(u, meus);
-    return { items: rows.map((t) => ({ ...this.present(u, t), unread: novos.has(t.id) })), total, page, pageSize: PAGE };
+    return { items: rows.map((t) => ({ ...this.present(u, t), unread: novos.has(t.id) })), total, page, pageSize: size };
+  }
+
+  private ordem(sort?: ListDto['sort']): Prisma.TicketOrderByWithRelationInput[] {
+    if (sort === 'due') return [{ dueAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }];
+    if (sort === 'created') return [{ createdAt: 'desc' }];
+    return [{ updatedAt: 'desc' }];
+  }
+
+  /**
+   * Urgente primeiro. `priority` é texto (a ordem alfabética não serve) e não há coluna de peso:
+   * pagina grupo a grupo, na ordem, dentro de cada um o prazo mais perto primeiro.
+   */
+  private async porPrioridade(where: Prisma.TicketWhereInput, skip: number, take: number): Promise<[TicketRow[], number]> {
+    const contagem = await this.prisma.ticket.groupBy({ by: ['priority'], where, _count: { _all: true } });
+    const n = new Map(contagem.map((c) => [c.priority, c._count._all]));
+    const grupos = [...PRIO_ORDEM, ...contagem.map((c) => c.priority).filter((p) => !(PRIO_ORDEM as string[]).includes(p))];
+    const total = [...n.values()].reduce((a, b) => a + b, 0);
+    const out: TicketRow[] = [];
+    let pular = skip;
+    for (const p of grupos) {
+      const qtd = n.get(p) ?? 0;
+      if (out.length >= take) break;
+      if (pular >= qtd) { pular -= qtd; continue; }
+      const rows = await this.prisma.ticket.findMany({ where: { AND: [where, { priority: p }] }, include: LIST_INCLUDE, orderBy: [{ dueAt: { sort: 'asc', nulls: 'last' } }, { updatedAt: 'desc' }], skip: pular, take: take - out.length });
+      out.push(...rows);
+      pular = 0;
+    }
+    return [out, total];
+  }
+
+  /** "Para pegar": setores que a pessoa atende (gestão: todos; quem não atende setor: nenhum). */
+  private paraPegar(u: AuthUser): Prisma.TicketWhereInput {
+    const s = this.setores(u);
+    return has(u, 'tickets.manage') ? {} : has(u, 'tickets.handle') ? (s ? { departmentId: { in: s } } : { departmentId: { not: null } }) : { id: '-' };
   }
 
   /** Contagens do menu e das abas. */
@@ -273,19 +418,82 @@ export class TicketsService {
     const s = this.setores(u);
     const agora = new Date();
     // "para pegar": aberto, sem responsável, num setor que eu atendo (ou sem setor, para a gestão)
-    const paraPegar: Prisma.TicketWhereInput = has(u, 'tickets.manage') ? {} : has(u, 'tickets.handle') ? (s ? { departmentId: { in: s } } : { departmentId: { not: null } }) : { id: '-' };
-    const [mine, department, onHold, holdExpired, overdue, toPick] = await Promise.all([
+    const paraPegar: Prisma.TicketWhereInput = { AND: [this.paraPegar(u), { participants: { none: { role: 'responsible' } } }] };
+    const [mine, department, onHold, holdExpired, overdue, toPick, dueToday] = await Promise.all([
       this.prisma.ticket.count({ where: { AND: [base, ativos, { participants: { some: { userId: u.id } } }] } }),
       has(u, 'tickets.handle') ? this.prisma.ticket.count({ where: { AND: [base, ativos, s ? { departmentId: { in: s } } : { departmentId: { not: null } }] } }) : 0,
       this.prisma.ticket.count({ where: { AND: [base, { status: 'on_hold' }] } }),
       this.prisma.ticket.count({ where: { AND: [base, { status: 'on_hold', holdUntil: { lt: agora } }] } }),
       this.prisma.ticket.count({ where: { AND: [base, { status: { in: ['open', 'in_progress'] }, dueAt: { lt: agora } }] } }),
       this.prisma.ticket.count({ where: { AND: [base, paraPegar, { status: 'open' }] } }),
+      this.prisma.ticket.count({ where: { AND: [base, { status: { in: ['open', 'in_progress'] }, dueAt: { gte: agora, lte: endOfDayIn(0) } }] } }),
     ]);
     // não lidos (docs/tickets.md#não-lidos): os ativos que me dizem respeito e mudaram depois que abri
     const candidatos = await this.prisma.ticket.findMany({ where: { AND: [base, ativos, this.paraMim(u)] }, select: { id: true, updatedAt: true }, orderBy: { updatedAt: 'desc' }, take: 500 });
     const unread = (await this.naoLidos(u, candidatos)).size;
-    return { mine, department, onHold, holdExpired, overdue, toPick, unread };
+    return { mine, department, onHold, holdExpired, overdue, toPick, dueToday, unread };
+  }
+
+  /**
+   * Ação em massa (seleção na lista). Cada ticket passa pela mesma regra do individual — quem não
+   * atua num deles recebe o erro daquele e os outros seguem. Devolve o que deu e o que não deu.
+   */
+  async bulk(u: AuthUser, dto: BulkDto) {
+    if (dto.action === 'status' && !dto.status) throw new BadRequestException('Escolha a situação.');
+    if (dto.action === 'priority' && !dto.priority) throw new BadRequestException('Escolha a prioridade.');
+    if (dto.action === 'hold' && !dto.reasonId) throw new BadRequestException('Escolha o motivo da espera.');
+    if (dto.action === 'assign' && dto.responsibleId === undefined) throw new BadRequestException('Escolha o responsável.');
+    const ids = [...new Set(dto.ids)];
+    const numeros = new Map((await this.prisma.ticket.findMany({ where: { id: { in: ids }, tenantId: u.tenantId }, select: { id: true, number: true } })).map((t) => [t.id, t.number]));
+    const falhas: { id: string; number: number | null; error: string }[] = [];
+    let ok = 0;
+    // em sequência: cada um grava linha do tempo e avisa quem atua
+    for (const id of ids) {
+      try {
+        if (dto.action === 'assign') await this.transfer(u, id, { responsibleId: dto.responsibleId, keepMe: true, note: dto.note });
+        else if (dto.action === 'status') await this.setStatus(u, id, { status: dto.status!, note: dto.note });
+        else if (dto.action === 'priority') await this.update(u, id, { priority: dto.priority });
+        else await this.hold(u, id, { reasonId: dto.reasonId!, note: dto.note, until: dto.until });
+        ok++;
+      } catch (e) {
+        falhas.push({ id, number: numeros.get(id) ?? null, error: e instanceof Error ? e.message : 'Erro' });
+      }
+    }
+    return { ok, failed: falhas };
+  }
+
+  /** Relatório (docs/tickets.md#relatório): período por data de abertura/resolução + retrato de agora. */
+  async report(u: AuthUser, dto: ReportDto) {
+    const from = new Date(dto.startDate);
+    const to = new Date(dto.endDate);
+    if (!(from < to)) throw new BadRequestException('Período inválido.');
+    if (to.getTime() - from.getTime() > 366 * 86_400_000) throw new BadRequestException('Escolha um período de até 1 ano.');
+    const filtro: Prisma.TicketWhereInput = {
+      tenantId: u.tenantId,
+      ...(dto.departmentId && { departmentId: dto.departmentId === 'none' ? null : dto.departmentId }),
+      ...(dto.typeId && { typeId: dto.typeId }),
+    };
+    // o que mexeu no período (abriu ou resolveu) + o que está pendente agora
+    const where: Prisma.TicketWhereInput = { AND: [filtro, { OR: [{ createdAt: { gte: from, lt: to } }, { resolvedAt: { gte: from, lt: to } }, { status: { in: TICKET_ACTIVE_STATUSES } }, { status: 'canceled', updatedAt: { gte: from } }] }] };
+    const total = await this.prisma.ticket.count({ where });
+    if (total > REPORT_MAX) throw new BadRequestException(`Período com ${total} tickets: escolha um intervalo menor.`);
+    const [rows, events, tenant, departments, types, users] = await Promise.all([
+      this.prisma.ticket.findMany({ where, select: { id: true, status: true, priority: true, departmentId: true, typeId: true, source: true, createdAt: true, resolvedAt: true, dueAt: true, createdById: true, participants: { where: { role: 'responsible' }, select: { userId: true } } } }),
+      this.prisma.ticketEvent.findMany({ where: { tenantId: u.tenantId, type: { in: ['comment', 'status', 'hold', 'resume', 'transfer', 'participant_added'] }, ticket: where }, select: { ticketId: true, type: true, actorId: true, data: true, createdAt: true } }),
+      this.prisma.tenantSettings.findUnique({ where: { tenantId: u.tenantId }, select: { timezone: true } }),
+      this.prisma.department.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true } }),
+      this.prisma.ticketType.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true } }),
+      this.prisma.user.findMany({ where: { tenantId: u.tenantId }, select: { id: true, name: true } }),
+    ]);
+    return computeTicketReport(
+      rows.map(({ participants, ...t }) => ({ ...t, responsibleId: participants[0]?.userId ?? null })),
+      events,
+      {
+        from, to, now: new Date(), timezone: tenant?.timezone || 'America/Sao_Paulo',
+        names: { departments: new Map(departments.map((d) => [d.id, d.name])), types: new Map(types.map((t) => [t.id, t.name])), users: new Map(users.map((x) => [x.id, x.name])) },
+        priorityLabel: TICKET_PRIORITY_LABEL, sourceLabel: TICKET_SOURCE_LABEL,
+      },
+    );
   }
 
   async get(u: AuthUser, id: string) {
@@ -320,7 +528,7 @@ export class TicketsService {
 
   /** A conversa existe no cliente e a pessoa pode abri-la (mesmo critério do painel: número e setor). */
   private async assertConversation(u: AuthUser, conversationId: string) {
-    const c = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId: u.tenantId }, select: { id: true, numberId: true, departmentId: true } });
+    const c = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId: u.tenantId }, select: { id: true, numberId: true, departmentId: true, contactId: true } });
     if (!c || !canUseNumber(u, c.numberId) || !canSeeDepartment(u, c.departmentId)) throw new BadRequestException('Atendimento não encontrado');
     return c;
   }
@@ -365,11 +573,14 @@ export class TicketsService {
       this.prisma.ticketHoldReason.findMany({ where: { tenantId: u.tenantId }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
       this.listTypes(u.tenantId),
     ]);
+    const m = await this.modelos(u.tenantId);
     return {
       users: users.map((x) => ({ id: x.id, name: x.name, departmentIds: x.departments.map((d) => d.departmentId) })),
       departments,
       holdReasons: holdReasons.map((r) => ({ id: r.id, name: r.name, isActive: r.isActive })),
       types,
+      // modelos do aviso ao reclamante: `custom` = a empresa escreveu o dela
+      notices: { opened: m.opened ?? DEFAULT_TICKET_OPENED_MESSAGE, closed: m.closed ?? DEFAULT_TICKET_CLOSED_MESSAGE, openedCustom: !!m.opened, closedCustom: !!m.closed },
     };
   }
 
@@ -380,7 +591,10 @@ export class TicketsService {
     const participantes = [...new Set((dto.participantIds ?? []).filter((id) => id !== dto.responsibleId))];
     await this.assertUsers(u.tenantId, [...(dto.responsibleId ? [dto.responsibleId] : []), ...participantes]);
     if (dto.messageId && !dto.conversationId) throw new BadRequestException('Informe a conversa da mensagem');
-    if (dto.conversationId) await this.assertConversation(u, dto.conversationId);
+    const conversa = dto.conversationId ? await this.assertConversation(u, dto.conversationId) : null;
+    if (dto.requesterContactId) await this.assertContact(u.tenantId, dto.requesterContactId);
+    // aberto de uma conversa: o contato dela é o reclamante (a não ser que escolham outro)
+    const requesterContactId = dto.requesterContactId ?? conversa?.contactId ?? null;
     const tipo = dto.typeId ? await this.typeOf(u.tenantId, dto.typeId) : null;
     const campos = tipo ? checkTicketValues(tipo.fields, dto.fields) : null;
     if (campos?.missing.length) throw new BadRequestException(`Preencha: ${campos.missing.join(', ')}.`);
@@ -389,7 +603,13 @@ export class TicketsService {
       title: dto.title, description: dto.description, priority: dto.priority, departmentId: dto.departmentId, responsibleId: dto.responsibleId, participantIds: participantes,
       conversationId: dto.conversationId, messageId: dto.messageId, dueAt: dto.dueAt ? new Date(dto.dueAt) : undefined, type: tipo, fields: campos?.values,
       source: dto.conversationId ? 'conversation' : 'panel', actorId: u.id, actorName: u.name,
+      requesterContactId, notifyRequester: dto.notifyRequester ?? true,
     });
+    if (requesterContactId && (dto.notifyRequester ?? true)) {
+      const carregado = await this.load(u, t.id);
+      const modelo = (await this.modelos(u.tenantId)).opened ?? DEFAULT_TICKET_OPENED_MESSAGE;
+      await this.avisarReclamante(carregado, 'opened', renderTicketNotice(modelo, this.varsDoAviso(carregado)), u.id);
+    }
     return this.get(u, t.id);
   }
 
@@ -426,6 +646,8 @@ export class TicketsService {
       title: input.title.trim().slice(0, TICKET_TITLE_MAX) || tipo?.name || 'Solicitação', description: input.description?.slice(0, TICKET_TEXT_MAX), priority: input.priority,
       departmentId, responsibleId: responsibleId ?? undefined, participantIds: [], conversationId: input.conversationId,
       dueAt: dueDays ? endOfDayIn(dueDays) : undefined, type: tipo, fields: campos?.values, source: input.source, actorId: null, actorName: input.originName,
+      // reclamante = o contato da conversa; sem aviso de abertura (o próprio fluxo/agente responde a ele)
+      requesterContactId: (await this.prisma.conversation.findUnique({ where: { id: input.conversationId }, select: { contactId: true } }))?.contactId ?? null, notifyRequester: true,
     });
     return { id: t.id, number: t.number, warnings };
   }
@@ -437,6 +659,7 @@ export class TicketsService {
   private async insert(tenantId: string, i: {
     title: string; description?: string; priority?: TicketPriority; departmentId?: string | null; responsibleId?: string; participantIds: string[];
     conversationId?: string; messageId?: string; dueAt?: Date; type: TicketType | null; fields?: Record<string, string>; source: TicketSource; actorId: string | null; actorName: string;
+    requesterContactId?: string | null; notifyRequester?: boolean;
   }) {
     const departmentId = i.departmentId || i.type?.departmentId || null;
     const priority = i.priority ?? i.type?.priority ?? 'normal';
@@ -452,6 +675,7 @@ export class TicketsService {
               priority, departmentId, conversationId: i.conversationId ?? null, createdById: i.actorId,
               messageId: snap?.anchorId ?? null, ...(snap && snap.context.length ? { context: snap.context as unknown as Prisma.InputJsonValue } : {}),
               dueAt, status: i.responsibleId ? 'in_progress' : 'open', typeId: i.type?.id ?? null, source: i.source,
+              requesterContactId: i.requesterContactId ?? null, notifyRequester: i.notifyRequester ?? true,
               ...(i.fields && Object.keys(i.fields).length ? { fields: i.fields } : {}),
               participants: { create: [...(i.responsibleId ? [{ userId: i.responsibleId, role: 'responsible' }] : []), ...i.participantIds.map((userId) => ({ userId, role: 'participant' }))] },
             },
@@ -562,7 +786,12 @@ export class TicketsService {
       ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
       ...(dto.priority && { priority: dto.priority }),
       ...(dto.dueAt !== undefined && { dueAt: dto.dueAt ? new Date(dto.dueAt) : null }),
+      ...(dto.notifyRequester !== undefined && { notifyRequester: dto.notifyRequester }),
     };
+    if (dto.requesterContactId !== undefined) {
+      if (dto.requesterContactId) await this.assertContact(u.tenantId, dto.requesterContactId);
+      data.requester = dto.requesterContactId ? { connect: { id: dto.requesterContactId } } : { disconnect: true };
+    }
     if (dto.fields !== undefined) {
       const tipo = t.type ? await this.typeOf(u.tenantId, t.type.id) : null;
       if (!tipo) throw new BadRequestException('Este ticket não tem tipo com campos.');
@@ -616,6 +845,12 @@ export class TicketsService {
     // a conversa de origem fica sabendo do desfecho: resolvido, cancelado ou reaberto
     const nota = dto.note?.trim() ? `\n${dto.note.trim()}` : '';
     this.markConversation(t, `🎫 Ticket #${t.number} ${TICKET_STATUS_LABEL[dto.status].toLowerCase()} por ${u.name}: ${t.title}${nota}`, { kind: 'ticket', ticketId: t.id, number: t.number, event: 'status', status: dto.status });
+    // encerrou: o reclamante fica sabendo (texto revisado na tela ou o modelo da empresa)
+    if ((dto.status === 'resolved' || dto.status === 'canceled') && t.requesterContactId && t.notifyRequester && dto.notify !== false) {
+      const modelo = (await this.modelos(u.tenantId)).closed ?? DEFAULT_TICKET_CLOSED_MESSAGE;
+      const texto = dto.message?.trim() || renderTicketNotice(modelo, this.varsDoAviso(t, { situacao: dto.status === 'resolved' ? 'resolvido' : 'cancelado', conclusao: dto.note }));
+      await this.avisarReclamante(t, 'closed', texto, u.id);
+    }
     return this.get(u, id);
   }
 

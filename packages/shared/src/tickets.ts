@@ -25,7 +25,8 @@ export const TICKET_ROLES = ['responsible', 'participant'] as const;
 export type TicketRole = (typeof TICKET_ROLES)[number];
 
 /** Linha do tempo: comentário e cada ação, com quem fez e quando. */
-export const TICKET_EVENT_TYPES = ['created', 'comment', 'status', 'hold', 'resume', 'transfer', 'participant_added', 'participant_removed', 'edited'] as const;
+/** `notice` = aviso ao reclamante no WhatsApp (data: { kind: 'opened' | 'closed', ok, error? }) */
+export const TICKET_EVENT_TYPES = ['created', 'comment', 'status', 'hold', 'resume', 'transfer', 'participant_added', 'participant_removed', 'edited', 'notice'] as const;
 export type TicketEventType = (typeof TICKET_EVENT_TYPES)[number];
 
 /** Motivos de espera que toda empresa ganha (editáveis em Tickets → Motivos de espera). */
@@ -221,3 +222,39 @@ export const TICKET_TYPE_PRESETS: TicketTypePreset[] = [
     ],
   },
 ];
+
+// ---------- reclamante (docs/tickets.md#reclamante) ----------
+
+/** Variáveis dos avisos ao reclamante. `conclusao` = o que foi feito (resolvido) ou o motivo (cancelado). */
+export const TICKET_NOTICE_VARS: Record<string, string> = {
+  nome: 'Nome do reclamante',
+  numero: 'Número do ticket',
+  titulo: 'Título (o assunto)',
+  tipo: 'Tipo do ticket',
+  setor: 'Setor',
+  situacao: 'resolvido / cancelado',
+  conclusao: 'O que foi feito (ou o motivo do cancelamento)',
+};
+export const DEFAULT_TICKET_OPENED_MESSAGE = 'Olá, {{nome}}! Registramos sua solicitação: *{{titulo}}* (chamado #{{numero}}). Vamos avisar você por aqui assim que for concluída.';
+export const DEFAULT_TICKET_CLOSED_MESSAGE = 'Olá, {{nome}}! Seu chamado #{{numero}} (*{{titulo}}*) foi {{situacao}}.\n{{conclusao}}';
+export const TICKET_NOTICE_MAX = 1000;
+
+/**
+ * Monta o aviso: troca as variáveis. Linha com variável em que TODAS vieram vazias some inteira
+ * (ex.: "Conclusão: {{conclusao}}" sem conclusão); linha em branco escrita no modelo fica.
+ * "Olá, !" (sem nome) vira "Olá!".
+ */
+export function renderTicketNotice(template: string, vars: Partial<Record<keyof typeof TICKET_NOTICE_VARS, string | number | null | undefined>>): string {
+  const re = /\{\{\s*(\w+)\s*\}\}/g;
+  const valor = (k: string) => String((vars as Record<string, unknown>)[k] ?? '').trim();
+  return template
+    .split('\n')
+    .flatMap((linha) => {
+      const nomes = [...linha.matchAll(re)].map((m) => m[1]);
+      if (nomes.length && nomes.every((k) => !valor(k))) return [];
+      return [linha.replace(re, (_, k: string) => valor(k)).replace(/,\s*!/g, '!')];
+    })
+    .join('\n')
+    .trim()
+    .slice(0, TICKET_NOTICE_MAX);
+}

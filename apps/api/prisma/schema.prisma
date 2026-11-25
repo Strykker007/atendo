@@ -704,6 +704,11 @@ model TenantSettings {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  /// aviso ao reclamante do ticket (docs/tickets.md#reclamante): modelos com {{nome}}, {{numero}},
+  /// {{titulo}}, {{tipo}}, {{setor}}, {{situacao}}, {{conclusao}}. Nulo = texto padrão do sistema
+  ticketOpenedMessage String?
+  ticketClosedMessage String?
+
   @@map("tenant_settings")
 }
 
@@ -873,6 +878,8 @@ model Contact {
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
   tags          ContactTag[]
+  /// tickets em que a pessoa é o reclamante (docs/tickets.md#reclamante)
+  requestedTickets Ticket[]  @relation("ticketRequester")
   appointments  Appointment[]
   sales         Sale[]
 
@@ -3298,6 +3305,10 @@ model Ticket {
   fields         Json?
   /// TICKET_SOURCES: panel | conversation | flow | agent
   source         String    @default("panel")
+  /// Reclamante (docs/tickets.md#reclamante): o contato que pediu. Aberto de uma conversa, é o
+  /// contato dela. Recebe aviso no WhatsApp na abertura e no encerramento se `notifyRequester`
+  requesterContactId String?
+  notifyRequester    Boolean   @default(true)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -3307,6 +3318,7 @@ model Ticket {
   createdBy    User?               @relation("ticketCreator", fields: [createdById], references: [id], onDelete: SetNull)
   holdReason   TicketHoldReason?   @relation(fields: [holdReasonId], references: [id], onDelete: SetNull)
   type         TicketType?         @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  requester    Contact?            @relation("ticketRequester", fields: [requesterContactId], references: [id], onDelete: SetNull)
   participants TicketParticipant[]
   events       TicketEvent[]
   /// quando cada pessoa abriu o ticket pela última vez (não lido = mudou depois disso)
@@ -3317,6 +3329,7 @@ model Ticket {
   @@index([departmentId])
   @@index([conversationId])
   @@index([tenantId, typeId])
+  @@index([requesterContactId])
   @@map("tickets")
 }
 

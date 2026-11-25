@@ -81,7 +81,61 @@ para `{{ticket}}` (ou a variável escolhida) para o fluxo responder o protocolo 
 - **Contador no menu** (item Tickets): **não lidos**, como nas conversas — ver [Não lidos](#não-lidos).
   O "alguém precisa pegar" (`summary.toPick`, abertos sem responsável nos setores da pessoa) ficou na
   faixa do topo da tela de Tickets.
-- Faixa no topo da tela de Tickets: "N sem responsável esperando alguém pegar" (abre o filtro).
+- **Filas prontas** (abas com contagem do `summary`): Comigo, Do meu setor, Sem responsável
+  (`scope=to_pick`), Atrasados (`due=overdue`), Vencem hoje (`due=today`), Que abri, Todos.
+- **Lista ou quadro** (preferência guardada no navegador). Lista: ordenar por última mudança,
+  prazo, prioridade (urgente primeiro) ou mais novos; filtro por responsável; selos "atrasado Nd" /
+  "vence hoje"; botão **Pegar** (vira responsável) no que está sem ninguém.
+- **Quadro**: colunas Aberto, Em andamento, Em espera, Resolvido (até 50 por coluna, mesmos
+  filtros; cancelado fica só na lista). Arrastar muda a situação; para Em espera pede o motivo;
+  sair da espera é "retomar"; para Resolvido abre a conclusão (e o aviso ao reclamante).
+- **Ações em massa** (seleção na lista): atribuir (para mim / ninguém / pessoa), situação,
+  prioridade, congelar. `POST /tickets/bulk` aplica ticket a ticket a regra do individual e devolve
+  os que não deram (`failed`, com o motivo).
+- **Editar** no detalhe: título, descrição, prioridade, prazo e campos do tipo.
+
+## Relatório
+
+`/relatorios/tickets` (`GET /tickets/reports`, para quem tem `reports.view`, `tickets.view_all` ou
+`tickets.manage`). Calculado na hora a partir das datas do ticket e da linha do tempo
+(`tickets/tickets-report.ts`, função pura com teste) — sem tabela própria.
+
+- **Período**: abertos (`createdAt`), resolvidos (`resolvedAt`) e cancelados (evento de status)
+  dentro dele. **Agora**: pendentes, atrasados (aberto/em andamento com prazo vencido), sem
+  responsável, em espera.
+- **1ª resposta**: da abertura até a primeira ação (comentário, status, espera, transferência,
+  incluir pessoa) de alguém que **não é quem abriu** (aberto pela automação: qualquer pessoa).
+- **Resolução**: abertura → resolvido; **sem a espera** desconta o tempo parado em espera até
+  resolver. Mostrado como mediana (o típico; um ticket esquecido não distorce) e média.
+- **No prazo**: dos resolvidos no período que tinham prazo, quantos terminaram até ele.
+- Série diária (fuso do cliente) abertos × resolvidos; quebra por responsável (o atual; resolvido
+  sem responsável conta para quem resolveu), setor, tipo, prioridade e origem; espera por motivo
+  (esperas iniciadas no período, tempo total e médio).
+- Teto de 20 mil tickets e 1 ano por consulta.
+
+## Reclamante
+
+O contato que pediu (`tickets.requesterContactId`). Aberto de uma conversa (botão, mensagem ou
+"ligar ao atendimento"), é o contato dela — dá para escolher outra pessoa; pela tela de Tickets,
+escolhe-se nos contatos que a pessoa enxerga. Dá para vincular, trocar ou tirar depois, no detalhe.
+
+**Aviso no WhatsApp** (`notifyRequester`, padrão ligado, desligável por ticket):
+
+- **Abertura** — modelo `tenant_settings.ticketOpenedMessage`. Só para o aberto por pessoa
+  (painel/conversa): o do fluxo ou do agente de IA não avisa (a própria automação responde).
+- **Encerramento** (resolver ou cancelar) — modelo `ticketClosedMessage`. A tela mostra a
+  mensagem pronta para revisar e editar; `{{conclusao}}` é o "o que foi feito" (ou o motivo do
+  cancelamento). Na ação em massa e na API sem `message`, sai o modelo como está.
+- Variáveis: `{{nome}} {{numero}} {{titulo}} {{tipo}} {{setor}} {{situacao}} {{conclusao}}`
+  (`renderTicketNotice` no shared: linha com variáveis todas vazias some). Modelo nulo = texto
+  padrão (`DEFAULT_TICKET_*_MESSAGE`). Edição em Tickets → **Avisos** (`tickets.manage`).
+- Sai pela conversa de origem quando ela é do reclamante, senão pela conversa dele
+  (`sendToContact`), **sem reabrir** a conversa. Mesmas regras de todo envio automático:
+  descadastro, sem WhatsApp, número desconectado, **janela de 24h da Meta** (sem template), cota.
+  Se não sair, o ticket encerra igual e a linha do tempo registra o evento `notice` com o motivo
+  (a tela avisa).
+- Migração `20270219000000_ticket_requester` (aditiva): tickets antigos abertos de conversa
+  ganham o contato dela como reclamante **com o aviso desligado** (sem aviso retroativo).
 
 ## Não lidos
 
@@ -141,19 +195,22 @@ Abas: **Comigo** (sou responsável ou participante), **Do meu setor** (`tickets.
 
 | Método | Rota | O quê |
 |---|---|---|
-| GET | `/tickets?scope=mine\|department\|created\|all&status=active\|<status>&priority=&departmentId=\|none&search=&page=` | lista (50 por página) |
-| GET | `/tickets/summary` | `{mine, department, onHold, holdExpired, overdue, toPick}` |
+| GET | `/tickets?scope=mine\|department\|created\|to_pick\|all&status=active\|<status>&due=overdue\|today&responsibleId=<id>\|none&sort=updated\|due\|priority\|created&priority=&departmentId=\|none&search=&page=&pageSize=` | lista (50 por página; `pageSize` 10–200) |
+| GET | `/tickets/summary` | `{mine, department, onHold, holdExpired, overdue, toPick, dueToday, unread}` |
+| POST | `/tickets/bulk` | `{ids (até 100), action: assign\|status\|priority\|hold, responsibleId?, status?, priority?, reasonId?, until?, note?}` → `{ok, failed: [{id, number, error}]}` |
+| GET | `/tickets/reports?startDate=&endDate=&departmentId=&typeId=` | [relatório](#relatório) — `reports.view` ou `tickets.view_all` ou `tickets.manage` |
+| PATCH | `/tickets/notice-templates` | `{openedMessage?, closedMessage?}` (null = padrão) — `tickets.manage`; devolve as opções |
 | GET | `/tickets/types` | tipos da empresa (`TicketType[]`, também em `/tickets/options`) |
 | POST / PATCH / DELETE | `/tickets/types[/:id]` | `{name, color, departmentId, priority, dueDays, fields, isActive}` — `tickets.manage`; apagar usado = desativar |
 | GET / POST | `/tickets/types/export` · `/tickets/types/import` | formato portável (`{bundle}` / `{portable}`); importar cria os que faltam pelo nome — `tickets.manage`. Cabe no [modelo de perfil](20-modelos-de-perfil.md) |
 | POST | `/tickets/types/preset` | `{niche}` importa os tipos do modelo — `tickets.manage` |
-| GET | `/tickets/options` | equipe ativa (com setores), setores e motivos de espera |
+| GET | `/tickets/options` | equipe ativa (com setores), setores, motivos de espera, tipos e `notices` (modelos do aviso ao reclamante) |
 | GET | `/tickets/:id` | detalhe com linha do tempo, `messageId`, `context` e `conversation.canOpen` |
 | GET | `/tickets/conversation/:conversationId` | tickets que nasceram da conversa e que a pessoa enxerga (`{id, number, title, status, messageId, createdAt}`) |
-| POST | `/tickets` | `{title, description?, priority?, departmentId?, responsibleId?, participantIds?, conversationId?, messageId?, dueAt?, typeId?, fields?}`: com `conversationId`, grava o retrato e o marco na conversa; `messageId` (da mesma conversa) marca o momento — `tickets.create` |
-| PATCH | `/tickets/:id` | `{title?, description?, priority?, dueAt?}` |
+| POST | `/tickets` | `{title, description?, priority?, departmentId?, responsibleId?, participantIds?, conversationId?, messageId?, dueAt?, typeId?, fields?}`: com `conversationId`, grava o retrato e o marco na conversa; `messageId` (da mesma conversa) marca o momento; `requesterContactId?` (sem ele, o contato da conversa), `notifyRequester?` — `tickets.create` |
+| PATCH | `/tickets/:id` | `{title?, description?, priority?, dueAt?, fields?, requesterContactId? (null tira), notifyRequester?}` |
 | POST | `/tickets/:id/comments` | `{body}` |
-| POST | `/tickets/:id/status` | `{status: open\|in_progress\|resolved\|canceled, note?}` |
+| POST | `/tickets/:id/status` | `{status: open\|in_progress\|resolved\|canceled, note?, notify?, message?}` — resolver/cancelar com reclamante avisa (ver [Reclamante](#reclamante)) |
 | POST | `/tickets/:id/hold` · `/resume` | `{reasonId, note?, until?}` · `{note?}` |
 | POST | `/tickets/:id/transfer` | `{departmentId?, responsibleId?, keepMe?, note?}` |
 | POST / DELETE | `/tickets/:id/participants[/:userId]` | `{userId, role?}` / tirar (sair de si mesmo sempre pode) |
@@ -161,4 +218,4 @@ Abas: **Comigo** (sou responsável ou participante), **Do meu setor** (`tickets.
 
 ## Limites desta versão
 
-Sem anexos nos comentários e sem retomada automática na data. O ticket se liga a uma conversa quando aberto de dentro dela (botão ou mensagem) ou, pela tela de Tickets, com a conversa aberta no painel (caixa no formulário). Não dá para ligar um ticket já aberto a uma conversa depois. O selo do topo mostra até 2 tickets (os ativos primeiro). Os campos do tipo não são editáveis no detalhe pela tela (a API aceita `fields` no PATCH). O agente de IA ainda não abre ticket (`source = agent` já existe para isso).
+Sem anexos nos comentários e sem retomada automática na data. O ticket se liga a uma conversa quando aberto de dentro dela (botão ou mensagem) ou, pela tela de Tickets, com a conversa aberta no painel (caixa no formulário). Não dá para ligar um ticket já aberto a uma conversa depois. O selo do topo mostra até 2 tickets (os ativos primeiro). O aviso ao reclamante não usa template da Meta: fora da janela de 24h (API oficial) ele não sai e fica registrado. O agente de IA ainda não abre ticket (`source = agent` já existe para isso).
