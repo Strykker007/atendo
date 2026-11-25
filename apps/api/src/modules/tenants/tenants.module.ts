@@ -525,7 +525,7 @@ class TenantsController {
       // temporário expirado: ativar não adianta (o login continua recusado) — renova com prazo novo
       const temp = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId }, select: { isTemporary: true, expiredAt: true, accessExpiresAt: true } });
       if (temp?.isTemporary && (temp.expiredAt || (temp.accessExpiresAt && temp.accessExpiresAt <= new Date()))) {
-        throw new BadRequestException('Este acesso temporário expirou. Para liberar de novo, use "Renovar" em Escalas → Aprovações e escolha o novo prazo.');
+        throw new BadRequestException('Este acesso temporário expirou. Em Escalas → Aprovações: "Renovar" libera por um prazo novo; "Tornar permanente" traz a pessoa para a equipe sem prazo.');
       }
     }
     if (receiveNumberIds &&u.role !== 'tenant_admin' && !u.impersonatorId) throw new ForbiddenException('Só o administrador da conta define quem recebe os atendimentos.');

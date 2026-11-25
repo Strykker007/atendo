@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { CalendarClock, Check, Copy, Hand, KeyRound, RotateCcw, ShieldCheck, TimerOff, UserPlus, X } from 'lucide-react';
+import { CalendarClock, Check, Copy, Hand, KeyRound, RotateCcw, ShieldCheck, TimerOff, UserCheck, UserPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { Button } from '@/components/ui/Button';
@@ -9,7 +9,7 @@ import { toast } from '@/components/ui/Toast';
 import { Modal, Field, inputCls } from '@/components/ui/Modal';
 import { EscalasTabs } from '@/components/escalas/EscalasTabs';
 import {
-  useAccessRequests, useCan, useCreateOverride, useCreateTemporaryUser, useDecideAccessRequest, useExpireTemporaryUser, useRenewTemporaryUser, useRevokeOverride, useScheduleOverrides, useTeamShifts, useTemporaryUsers, useWorkSchedules,
+  useAccessRequests, useCan, useCreateOverride, useCreateTemporaryUser, useDecideAccessRequest, useExpireTemporaryUser, useMakeTemporaryPermanent, useRenewTemporaryUser, useRevokeOverride, useScheduleOverrides, useTeamShifts, useTemporaryUsers, useWorkSchedules,
   type AccessRequest, type TeamShift, type TemporaryUser,
 } from '@/lib/hooks';
 
@@ -35,6 +35,7 @@ export default function AprovacoesPage() {
   const [autorizar, setAutorizar] = useState<TeamShift | true | null>(null);
   const [gerar, setGerar] = useState(false);
   const [renovar, setRenovar] = useState<TemporaryUser | null>(null);
+  const [efetivar, setEfetivar] = useState<TemporaryUser | null>(null);
   const pedidos = useAccessRequests();
   const decidir = useDecideAccessRequest();
   const [aprovar, setAprovar] = useState<AccessRequest | null>(null);
@@ -141,6 +142,7 @@ export default function AprovacoesPage() {
                     onClick={() => expirar.mutate(t.id, { onSuccess: () => toast.ok('Acesso encerrado.'), onError: (err) => toast.err(err) })}><TimerOff size={13} /> Encerrar agora</Button>
                 )}
                 <Button size="sm" variant="subtle" onClick={() => setRenovar(t)}><RotateCcw size={13} /> Renovar</Button>
+                <Button size="sm" variant="subtle" onClick={() => setEfetivar(t)}><UserCheck size={13} /> Tornar permanente</Button>
               </li>
             ))}
           </ul>
@@ -150,8 +152,52 @@ export default function AprovacoesPage() {
       {autorizar && <OverrideModal pessoa={autorizar === true ? null : autorizar} equipe={escalados} onClose={() => setAutorizar(null)} />}
       {gerar && <TemporaryModal onClose={() => setGerar(false)} />}
       {renovar && <RenewModal pessoa={renovar} onClose={() => setRenovar(null)} />}
+      {efetivar && <PermanentModal pessoa={efetivar} onClose={() => setEfetivar(null)} />}
       {aprovar && <ApproveRequestModal pedido={aprovar} onClose={() => setAprovar(null)} />}
     </PageShell>
+  );
+}
+
+/**
+ * Tornar permanente: o temporário entra para a equipe sem prazo (mesma conta, histórico e escala).
+ * Login provisório pede o e-mail real; aí sai convite para a pessoa definir a senha.
+ */
+function PermanentModal({ pessoa, onClose }: { pessoa: TemporaryUser; onClose: () => void }) {
+  const efetivar = useMakeTemporaryPermanent();
+  const provisorio = !pessoa.email || pessoa.email.endsWith('.temp');
+  const [email, setEmail] = useState(provisorio ? '' : pessoa.email);
+  const [link, setLink] = useState<string | null>(null);
+  if (link) {
+    return (
+      <Modal open onClose={onClose} title={`${pessoa.name} agora é da equipe`} width="max-w-md">
+        <div className="space-y-3 text-sm">
+          <p className="text-muted">O convite não foi enviado por e-mail. Copie o link e mande para a pessoa definir a senha (vale 3 dias).</p>
+          <div className="flex gap-2"><input readOnly className={inputCls} value={link} /><Button type="button" variant="subtle" onClick={() => { void navigator.clipboard.writeText(link); toast.ok('Link copiado.'); }}><Copy size={14} /></Button></div>
+          <div className="flex justify-end"><Button type="button" onClick={onClose}>Fechar</Button></div>
+        </div>
+      </Modal>
+    );
+  }
+  return (
+    <Modal open onClose={onClose} title={`Tornar permanente · ${pessoa.name}`} width="max-w-sm">
+      <form className="space-y-4" onSubmit={(e) => {
+        e.preventDefault();
+        efetivar.mutate({ id: pessoa.id, email: email.trim() }, {
+          onSuccess: (r) => {
+            if (!r.invited) { toast.ok(`${pessoa.name} agora é da equipe, sem prazo. Entra com o login e a senha que já tem.`); return onClose(); }
+            if (r.emailSent) { toast.ok(`${pessoa.name} agora é da equipe. Convite enviado para ${email.trim()}.`); return onClose(); }
+            setLink(r.inviteLink ?? null);
+          },
+          onError: (err) => toast.err(err),
+        });
+      }}>
+        <p className="text-sm text-muted">O acesso deixa de ter prazo e a pessoa passa a aparecer na Equipe como as demais. Perfil, departamentos e números ajuste depois em Equipe.</p>
+        <Field label="E-mail (login)" hint={provisorio ? 'O login de plantão é provisório: informe o e-mail da pessoa. Ela recebe um convite para definir a própria senha.' : 'Mantendo este e-mail, a senha atual continua valendo. Trocando, sai um convite para definir uma nova.'}>
+          <input type="email" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus maxLength={160} />
+        </Field>
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose} disabled={efetivar.isPending}>Cancelar</Button><Button type="submit" loading={efetivar.isPending} loadingText="Salvando…">Tornar permanente</Button></div>
+      </form>
+    </Modal>
   );
 }
 

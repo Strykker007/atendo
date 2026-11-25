@@ -120,6 +120,14 @@ export const useRenewTemporaryUser = () => {
     onSuccess: () => { invalidar(qc); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['agents'] }); },
   });
 };
+/** Temporário que ficou na equipe: vira conta normal; com e-mail novo (ou sem senha própria) sai convite */
+export const useMakeTemporaryPermanent = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { id: string; email?: string }) => api<{ ok: true; invited: boolean; emailSent?: boolean; inviteLink?: string }>(`/users/temporary/${b.id}/make-permanent`, { method: 'POST', body: JSON.stringify({ email: b.email || undefined }) }),
+    onSuccess: () => { invalidar(qc); qc.invalidateQueries({ queryKey: ['usage'] }); qc.invalidateQueries({ queryKey: ['agents'] }); },
+  });
+};
 export const useExpireTemporaryUser = () => {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api(`/users/temporary/${id}/expire`, { method: 'POST' }), onSuccess: () => { invalidar(qc); qc.invalidateQueries({ queryKey: ['usage'] }); } });
