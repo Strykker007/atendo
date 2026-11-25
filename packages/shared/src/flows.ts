@@ -228,7 +228,10 @@ function legacyRule(d: LegacyConditionData): ConditionRule | undefined {
   return undefined;
 }
 
-/** scope: 'conversation' (padrão) = tag do atendimento; 'contact' = tag da pessoa, vale para sempre */
+/**
+ * scope: formato antigo. Hoje o TIPO da tag decide onde ela vai (`tagScopeOf`): transição no
+ * atendimento, permanente no contato. Só viaja na exportação para o destino criar o tipo certo.
+ */
 /**
  * set_var é legado: fluxos novos usam o bloco "Manipulador". "Encerrar conversa" no editor é
  * `set_status` + `closed`.

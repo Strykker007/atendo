@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsHexColor, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
+import { BadRequestException, Body, Controller, Delete, Get, Module, NotFoundException, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import type { Prisma, TagKind } from '@prisma/client';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsHexColor, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
@@ -11,8 +12,12 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { MAX_CONFLICTS_PER_TAG, conflictPair } from './conflicts';
 
+const KINDS: TagKind[] = ['transition', 'permanent'];
+
 class TagDto {
   @IsString() @MaxLength(40) name: string;
+  /** transição (atendimento) ou permanente (contato); padrão transição */
+  @IsOptional() @IsIn(KINDS) kind?: TagKind;
   @IsOptional() @IsHexColor() color?: string;
   /** vira coluna no Kanban */
   @IsOptional() @IsBoolean() isKanban?: boolean;
@@ -31,6 +36,7 @@ class BulkIdsDto {
   @IsArray() @ArrayNotEmpty() @ArrayMaxSize(BULK_MAX) @IsUUID('4', { each: true }) ids: string[];
 }
 class BulkUpdateDto extends BulkIdsDto {
+  @IsOptional() @IsIn(KINDS) kind?: TagKind;
   @IsOptional() @IsHexColor() color?: string;
   @IsOptional() @IsBoolean() isKanban?: boolean;
   @IsOptional() @IsBoolean() showOnWon?: boolean;
@@ -53,9 +59,30 @@ class BulkCreateDto {
   /** uma por tag (a tela manda uma linha por tag); repetida ou já existente é ignorada */
   @IsArray() @ArrayNotEmpty() @ArrayMaxSize(BULK_MAX) @ValidateNested({ each: true }) @Type(() => BulkCreateItemDto) items: BulkCreateItemDto[];
   @IsOptional() @IsHexColor() color?: string;
+  @IsOptional() @IsIn(KINDS) kind?: TagKind;
   @IsOptional() @IsBoolean() isKanban?: boolean;
   @IsOptional() @IsBoolean() showOnWon?: boolean;
   @IsOptional() @IsBoolean() showOnLost?: boolean;
+}
+
+type Flags = { kind?: TagKind; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean };
+/** Kanban e encerramento são do atendimento: tag permanente nunca tem essas marcas. */
+function flagsDoTipo<T extends Flags>(d: T, kindAtual?: TagKind): T {
+  const kind = d.kind ?? kindAtual;
+  if (kind !== 'permanent') return d;
+  if (d.isKanban || d.showOnWon || d.showOnLost) throw new BadRequestException('Tag permanente não pode ser etapa do Kanban nem tag de encerramento — use uma tag de transição.');
+  return { ...d, isKanban: false, showOnWon: false, showOnLost: false } as T;
+}
+
+/**
+ * Virou permanente: sai da etapa do Kanban (continua como tag nas conversas que já a têm) e
+ * perde as opostas do outro tipo (conflito só vale entre tags do mesmo tipo).
+ */
+async function aoMudarTipo(tx: Prisma.TransactionClient, tenantId: string, ids: string[], kind: TagKind) {
+  if (!ids.length) return;
+  if (kind === 'permanent') await tx.conversationTag.updateMany({ where: { tagId: { in: ids }, isPrimary: true, tag: { tenantId } }, data: { isPrimary: false } });
+  const outroTipo = { tenantId, kind: { not: kind } };
+  await tx.tagConflict.deleteMany({ where: { OR: [{ tagId: { in: ids }, other: outroTipo }, { otherId: { in: ids }, tag: outroTipo }] } });
 }
 
 /** Tags são criadas dinamicamente em configurações e viram filtros/relatórios. */
@@ -65,10 +92,11 @@ class TagsController {
   constructor(private readonly prisma: PrismaService, private readonly gateway: ConversationsGateway) {}
 
   // na ordem do Kanban: é a mesma lista que monta as colunas
+  // `?kind=` recorta um tipo; sem ele, todas (cada tela filtra pelo `kind`)
   @Get()
-  async list(@CurrentUser() u: AuthUser) {
+  async list(@CurrentUser() u: AuthUser, @Query('kind') kind?: string) {
     const tags = await this.prisma.tag.findMany({
-      where: { tenantId: u.tenantId },
+      where: { tenantId: u.tenantId, ...(KINDS.includes(kind as TagKind) && { kind: kind as TagKind }) },
       orderBy: [{ position: 'asc' }, { name: 'asc' }],
       include: { _count: { select: { conversations: true, contacts: true } }, conflictsA: { select: { otherId: true } }, conflictsB: { select: { tagId: true } } },
     });
@@ -83,9 +111,10 @@ class TagsController {
   @Put(':id/conflicts')
   @RequirePermission('tags.manage')
   async setConflicts(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: ConflictsDto) {
-    const tag = await this.prisma.tag.findFirst({ where: { id, tenantId: u.tenantId }, select: { id: true } });
+    const tag = await this.prisma.tag.findFirst({ where: { id, tenantId: u.tenantId }, select: { id: true, kind: true } });
     if (!tag) throw new NotFoundException('Tag não encontrada');
-    const outras = await this.prisma.tag.findMany({ where: { tenantId: u.tenantId, id: { in: [...new Set(dto.ids)].filter((x) => x !== id) } }, select: { id: true } });
+    // oposta só do mesmo tipo: uma tag do atendimento não tira a da pessoa (nem o contrário)
+    const outras = await this.prisma.tag.findMany({ where: { tenantId: u.tenantId, kind: tag.kind, id: { in: [...new Set(dto.ids)].filter((x) => x !== id) } }, select: { id: true } });
     await this.prisma.$transaction([
       this.prisma.tagConflict.deleteMany({ where: { OR: [{ tagId: id }, { otherId: id }] } }),
       this.prisma.tagConflict.createMany({ data: outras.map((o) => conflictPair(id, o.id)), skipDuplicates: true }),
@@ -98,7 +127,7 @@ class TagsController {
   async create(@CurrentUser() u: AuthUser, @Body() dto: TagDto) {
     // tag nova entra como última coluna
     const last = await this.prisma.tag.aggregate({ where: { tenantId: u.tenantId }, _max: { position: true } });
-    const tag = await this.prisma.tag.create({ data: { tenantId: u.tenantId, position: (last._max.position ?? -1) + 1, ...dto } });
+    const tag = await this.prisma.tag.create({ data: { tenantId: u.tenantId, position: (last._max.position ?? -1) + 1, ...flagsDoTipo(dto) } });
     this.gateway.emitKanban(u.tenantId);
     return tag;
   }
@@ -120,8 +149,9 @@ class TagsController {
     if (!names.length) return { created: 0, skipped: 0 };
     const last = await this.prisma.tag.aggregate({ where: { tenantId: u.tenantId }, _max: { position: true } });
     const start = (last._max.position ?? -1) + 1;
+    flagsDoTipo(dto);
     const r = await this.prisma.tag.createMany({
-      data: names.map((name, i) => ({ tenantId: u.tenantId, name, position: start + i, isKanban: dto.isKanban ?? false, showOnWon: dto.showOnWon ?? false, showOnLost: dto.showOnLost ?? false, ...(porNome.get(name) && { color: porNome.get(name) }) })),
+      data: names.map((name, i) => ({ tenantId: u.tenantId, name, position: start + i, kind: dto.kind ?? 'transition', isKanban: dto.isKanban ?? false, showOnWon: dto.showOnWon ?? false, showOnLost: dto.showOnLost ?? false, ...(porNome.get(name) && { color: porNome.get(name) }) })),
       skipDuplicates: true,
     });
     this.gateway.emitKanban(u.tenantId);
@@ -131,9 +161,13 @@ class TagsController {
   @Patch('bulk')
   @RequirePermission('tags.manage')
   async bulkUpdate(@CurrentUser() u: AuthUser, @Body() dto: BulkUpdateDto) {
-    const { ids, ...data } = dto;
+    const { ids, ...pedido } = dto;
     const r = await this.prisma.$transaction(async (tx) => {
-      const res = await tx.tag.updateMany({ where: { tenantId: u.tenantId, id: { in: ids } }, data });
+      // marcar Kanban/encerramento numa seleção que tem permanente: só as de transição recebem
+      const data = pedido.kind ? flagsDoTipo(pedido) : pedido;
+      const marcaAtendimento = !pedido.kind && (pedido.isKanban || pedido.showOnWon || pedido.showOnLost);
+      const res = await tx.tag.updateMany({ where: { tenantId: u.tenantId, id: { in: ids }, ...(marcaAtendimento && { kind: 'transition' as const }) }, data });
+      if (pedido.kind) await aoMudarTipo(tx, u.tenantId, ids, pedido.kind);
       // deixou de ser etapa: quem a tinha como principal volta para "Sem etapa" (continua como tag)
       if (data.isKanban === false) await tx.conversationTag.updateMany({ where: { tagId: { in: ids }, isPrimary: true, tag: { tenantId: u.tenantId } }, data: { isPrimary: false } });
       return res;
@@ -162,9 +196,16 @@ class TagsController {
   @Patch(':id')
   @RequirePermission('tags.manage')
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: Partial<TagDto>) {
-    const tag = await this.prisma.tag.update({ where: { id, tenantId: u.tenantId }, data: dto });
-    // deixou de ser etapa: quem a tinha como principal volta para "Sem etapa" (continua como tag)
-    if (dto.isKanban === false) await this.prisma.conversationTag.updateMany({ where: { tagId: id, isPrimary: true }, data: { isPrimary: false } });
+    const atual = await this.prisma.tag.findFirst({ where: { id, tenantId: u.tenantId }, select: { kind: true } });
+    if (!atual) throw new NotFoundException('Tag não encontrada');
+    const data = flagsDoTipo(dto, atual.kind);
+    const tag = await this.prisma.$transaction(async (tx) => {
+      const t = await tx.tag.update({ where: { id, tenantId: u.tenantId }, data });
+      if (data.kind && data.kind !== atual.kind) await aoMudarTipo(tx, u.tenantId, [id], data.kind);
+      // deixou de ser etapa: quem a tinha como principal volta para "Sem etapa" (continua como tag)
+      if (data.isKanban === false) await tx.conversationTag.updateMany({ where: { tagId: id, isPrimary: true }, data: { isPrimary: false } });
+      return t;
+    });
     this.gateway.emitKanban(u.tenantId);
     return tag;
   }

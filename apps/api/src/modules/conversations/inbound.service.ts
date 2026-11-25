@@ -574,7 +574,13 @@ export class InboundService {
   private async autoTagAd(conversationId: string, tenantId: string, headline?: string) {
     const names = ['Anúncio', ...(headline ? [`Anúncio: ${headline.slice(0, 32)}`] : [])];
     for (const name of names) {
+      // nasce de transição (é do atendimento); se o cliente a tornou permanente, vai para o contato
       const tag = await this.prisma.tag.upsert({ where: { tenantId_name: { tenantId, name } }, create: { tenantId, name, color: '#f97316' }, update: {} });
+      if (tag.kind === 'permanent') {
+        const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { contactId: true } });
+        if (conv) await this.prisma.contactTag.upsert({ where: { contactId_tagId: { contactId: conv.contactId, tagId: tag.id } }, create: { contactId: conv.contactId, tagId: tag.id }, update: {} });
+        continue;
+      }
       await this.prisma.conversationTag.upsert({ where: { conversationId_tagId: { conversationId, tagId: tag.id } }, create: { conversationId, tagId: tag.id }, update: {} });
     }
   }

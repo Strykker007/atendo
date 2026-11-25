@@ -5,18 +5,18 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type InfiniteD
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, getAccessToken, onAccessToken } from '../api';
-import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission } from '@atendo/shared';
+import type { ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, TagKind } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 import { Tag } from './core';
 
 // ---- Tags (admin) ----
 export const useCreateTag = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: { name: string; color: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean }) => api<Tag>('/tags', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
+  return useMutation({ mutationFn: (b: { name: string; color: string; kind?: TagKind; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean }) => api<Tag>('/tags', { method: 'POST', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }) });
 };
 export const useUpdateTag = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean }) => api<Tag>(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['kanban'] }); } });
+  return useMutation({ mutationFn: ({ id, ...b }: { id: string; name?: string; color?: string; kind?: TagKind; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean }) => api<Tag>(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['kanban'] }); } });
 };
 export const useDeleteTag = () => {
   const qc = useQueryClient();
@@ -24,7 +24,7 @@ export const useDeleteTag = () => {
 };
 
 // ---- Tags em massa (selecionar várias na tela de Tags) ----
-type TagFlags = { color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean };
+type TagFlags = { kind?: TagKind; color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean };
 const refreshTags = (qc: ReturnType<typeof useQueryClient>) => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['kanban'] }); };
 /** uma tag por item, cada uma com a sua cor (sem cor = `color`); repetida ou já existente é ignorada (`skipped`) */
 export const useBulkCreateTags = () => {
@@ -33,7 +33,8 @@ export const useBulkCreateTags = () => {
 };
 export const useBulkUpdateTags = () => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: { ids: string[] } & TagFlags) => api<{ updated: number }>('/tags/bulk', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => refreshTags(qc) });
+  // trocar o tipo muda o que as caixas da conversa oferecem: a conversa aberta recarrega
+  return useMutation({ mutationFn: (b: { ids: string[] } & TagFlags) => api<{ updated: number }>('/tags/bulk', { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => { refreshTags(qc); qc.invalidateQueries({ queryKey: ['conversation'] }); } });
 };
 export const useBulkDeleteTags = () => {
   const qc = useQueryClient();

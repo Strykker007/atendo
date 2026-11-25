@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Conversation, FlowRun, Message, WhatsAppNumber } from '@prisma/client';
-import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, START_MAX_DELAY_SEC, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, waitDurationMs, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
+import { CONTENT_MAX_DELAY_SEC, DEPARTMENT_NONE, MAX_FLOW_HOPS, START_MAX_DELAY_SEC, RETRIES_EXHAUSTED_HANDLE, REPLY_TIMEOUT_HANDLE, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_ERROR_HANDLE, WEBHOOK_MAX_TIMEOUT_SEC, normalizeCondition, normalizeContent, parseMoneyText, tagScopeOf, waitDurationMs, type ContentItem, type FlowDefinition, type FlowNode, type FlowTrigger } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
 import { ConversationsService } from '../conversations/conversations.service';
@@ -847,7 +847,8 @@ export class FlowEngineService {
         const acao = (data: Extract<FlowNode, { type: 'action' }>['data']) => this.act({ id: node.id, type: 'action', position: { x: 0, y: 0 }, data } as Extract<FlowNode, { type: 'action' }>, run);
         switch (a.tool) {
           case 'add_tag':
-            await acao({ kind: 'add_tag', tagId: a.tagId, scope: 'conversation' });
+            // vai para o atendimento ou para o contato conforme o tipo da tag (`act`)
+            await acao({ kind: 'add_tag', tagId: a.tagId });
             break;
           case 'set_contact_field':
             await saveFlowContactField(this.prisma, run.tenantId, run.conversationId, a.field, a.value);
@@ -1032,13 +1033,15 @@ export class FlowEngineService {
         if (!d.tagId) break;
         // tag apagada (ou de outro tenant) depois do fluxo montado: pula o nó e segue — antes a FK
         // derrubava a execução inteira e o contato ficava sem o resto do fluxo
-        if (!(await this.prisma.tag.count({ where: { id: d.tagId, tenantId: run.tenantId } }))) {
+        const tag = await this.prisma.tag.findFirst({ where: { id: d.tagId, tenantId: run.tenantId }, select: { kind: true } });
+        if (!tag) {
           await this.warnTeam(run, 'Adicionar tag: a tag escolhida foi apagada. O fluxo seguiu sem marcar — escolha a tag de novo no fluxo.');
           break;
         }
         // mesma troca do chat: sai só quem conflita direto com a tag marcada
         const opostas = [...((await conflictMap(this.prisma, [d.tagId])).get(d.tagId) ?? [])];
-        if (d.scope === 'contact') {
+        // o tipo da tag decide onde ela vai (o `scope` gravado no nó é do formato antigo)
+        if (tagScopeOf(tag.kind) === 'contact') {
           if (opostas.length) await this.prisma.contactTag.deleteMany({ where: { contactId: run.conversation.contactId, tagId: { in: opostas } } });
           await this.prisma.contactTag.upsert({ where: { contactId_tagId: { contactId: run.conversation.contactId, tagId: d.tagId } }, create: { contactId: run.conversation.contactId, tagId: d.tagId }, update: {} });
         } else {
@@ -1047,11 +1050,14 @@ export class FlowEngineService {
         }
         break;
       }
-      case 'remove_tag':
+      case 'remove_tag': {
         if (!d.tagId) break;
-        if (d.scope === 'contact') await this.prisma.contactTag.deleteMany({ where: { contactId: run.conversation.contactId, tagId: d.tagId } });
+        const tag = await this.prisma.tag.findFirst({ where: { id: d.tagId, tenantId: run.tenantId }, select: { kind: true } });
+        if (!tag) break;
+        if (tagScopeOf(tag.kind) === 'contact') await this.prisma.contactTag.deleteMany({ where: { contactId: run.conversation.contactId, tagId: d.tagId } });
         else await this.prisma.conversationTag.deleteMany({ where: { conversationId: run.conversationId, tagId: d.tagId } });
         break;
+      }
       case 'assign':
         if (d.agentId) await this.prisma.conversation.update({ where: { id: run.conversationId }, data: { assigneeId: d.agentId, status: 'in_progress' } });
         break;

@@ -9,7 +9,7 @@ import type { ContactField } from './flows.js';
 export const AGENT_TOOLS = {
   transfer_department: { label: 'Transferir para departamento', desc: 'Passa a conversa para um departamento e entrega para a equipe.' },
   handoff: { label: 'Chamar um atendente', desc: 'Entrega a conversa para a fila humana quando a IA não deve seguir.' },
-  add_tag: { label: 'Etiquetar', desc: 'Marca a conversa com uma das etiquetas liberadas.' },
+  add_tag: { label: 'Etiquetar', desc: 'Marca o atendimento (tag de transição) ou o contato (tag permanente) com uma das etiquetas liberadas.' },
   set_contact_field: { label: 'Salvar dado do contato', desc: 'Grava nome, e-mail, endereço ou um campo personalizado da ficha que o contato informou.' },
   close: { label: 'Encerrar a conversa', desc: 'Encerra com um dos motivos liberados quando o assunto terminou.' },
 } as const;

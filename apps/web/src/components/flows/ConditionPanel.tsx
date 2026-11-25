@@ -2,7 +2,7 @@
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { useSchedules, useTags } from '@/lib/hooks';
+import { useSchedules, useTags, tagsOfKind } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 import { TextWithVars, type FlowVar } from './TextWithVars';
 import { newBranch, newRule } from './nodes';
@@ -77,7 +77,8 @@ function RuleEditor({ rule, vars, onChange, onRemove, canRemove }: { rule: Condi
       {rule.operand === 'tag' && (
         <select className={`${inputCls} min-w-0 max-w-full`} value={rule.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}>
           <option value="">Etiqueta…</option>
-          {tags.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          <optgroup label="Transição (atendimento)">{tagsOfKind(tags.data, 'transition').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+          <optgroup label="📌 Permanentes (contato)">{tagsOfKind(tags.data, 'permanent').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
         </select>
       )}
 
