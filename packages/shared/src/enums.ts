@@ -78,3 +78,14 @@ export const Role = {
   AGENT: 'agent', // atendente
 } as const;
 export type Role = (typeof Role)[keyof typeof Role];
+
+/**
+ * Tipo da tag (docs/06-modelo-de-dados.md#tags). `transition` = do atendimento: caixa "Conversa",
+ * etapa do Kanban e tag de encerramento — sai ao encerrar. `permanent` = da pessoa (📌), vale em
+ * todas as conversas dela. Cada caixa só oferece o seu tipo.
+ */
+export const TagKind = { PERMANENT: 'permanent', TRANSITION: 'transition' } as const;
+export type TagKind = (typeof TagKind)[keyof typeof TagKind];
+export const TAG_KIND_LABEL: Record<TagKind, string> = { transition: 'Transição', permanent: 'Permanente' };
+/** onde uma tag é colocada: a de transição no atendimento, a permanente no contato */
+export const tagScopeOf = (kind: TagKind | undefined | null): 'conversation' | 'contact' => (kind === 'permanent' ? 'contact' : 'conversation');

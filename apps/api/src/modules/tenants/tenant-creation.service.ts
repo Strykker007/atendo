@@ -79,7 +79,7 @@ export class TenantCreationService {
       // (docs/06-modelo-de-dados.md#encerramento); continuam tag só se também forem etapa do Kanban
       const modelo = provisionedTags(content);
       const deEncerramento = modelo.filter((t) => t.showOnWon || t.showOnLost);
-      await tx.tag.createMany({ data: modelo.filter((t) => t.isKanban || !(t.showOnWon || t.showOnLost)).map((t, position) => ({ tenantId: tenant.id, name: t.name, position, isKanban: !!t.isKanban, ...(t.color && { color: t.color }) })), skipDuplicates: true });
+      await tx.tag.createMany({ data: modelo.filter((t) => t.isKanban || !(t.showOnWon || t.showOnLost)).map((t, position) => ({ tenantId: tenant.id, name: t.name, position, kind: t.kind ?? 'transition', isKanban: !!t.isKanban, ...(t.color && { color: t.color }) })), skipDuplicates: true });
       // "conflita com" do modelo: só entre as que ficaram tag (as que viraram motivo não são tag aqui)
       const pares = templateTagConflictPairs(modelo);
       if (pares.length) {

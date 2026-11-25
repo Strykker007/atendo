@@ -140,7 +140,26 @@ Escalas → Aprovações → Acessos temporários.
 
 **Ativar pela Equipe não renova.** Antes, isso só ligava `isActive`: a pessoa aparecia ativa, mas o
 login continuava dando "acesso temporário expirou". Agora o `PATCH /tenants/me/agents/:id` com
-`isActive: true` numa conta temporária vencida responde 400 e manda usar o Renovar.
+`isActive: true` numa conta temporária vencida responde 400 e manda usar o Renovar ou o Tornar permanente.
+
+### Tornar permanente
+
+O temporário que ficou na equipe vira conta normal: `POST /users/temporary/:id/make-permanent` com
+`{ email? }` (`team.manage`). Grava `isTemporary = false`, `accessExpiresAt = null`,
+`expiredAt = null` e `isActive = true`. A conta, o histórico e a escala continuam os mesmos. Se a
+conta estava inativa ou expirada, confere `maxAgents`, como no Renovar.
+
+- Login provisório (`plantao-…@….temp`) exige o e-mail real (400 sem ele). E-mail já usado por
+  outra conta também dá 400.
+- E-mail novo, ou pessoa sem senha própria: a senha do plantão deixa de valer (hash aleatório,
+  `passwordSetAt = null`) e sai um convite. Sem provedor de e-mail, a resposta traz `inviteLink`
+  para copiar.
+- Mesmo e-mail com senha já definida (aceitou convite antes): nada de convite, ela entra com a
+  senha que já tem.
+
+Antes não havia esse caminho. Mandar convite para um temporário trocava o e-mail e a senha, mas
+`isTemporary` continuava `true`, então o login seguia barrado como "acesso temporário expirou".
+Na tela, é o botão **Tornar permanente** em Escalas → Aprovações → Acessos temporários.
 
 ## Calendário: folga, turno extra e troca (`shift_exceptions`)
 

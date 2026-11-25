@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, Tag as TagIcon, Columns3, CheckCircle2, ListPlus, Palette, X, GripVertical, ChevronDown, ArrowLeftRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, Tag as TagIcon, Columns3, CheckCircle2, ListPlus, Palette, X, GripVertical, ChevronDown, ArrowLeftRight, Pin, Repeat } from 'lucide-react';
+import type { TagKind } from '@atendo/shared';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { PageHeader, PageShell, Empty } from '@/components/ui/Page';
 import { SkeletonRows } from '@/components/ui/Skeleton';
@@ -15,6 +16,14 @@ import { PALETTE, ColorSwatches, ColorPopover } from '@/components/ui/ColorSwatc
 
 type TagWithCount = Tag & { _count?: { conversations: number; contacts: number } };
 
+/** tag sem `kind` (resposta antiga) conta como transição, o padrão da API */
+const kindOf = (t: Tag): TagKind => t.kind ?? 'transition';
+/** as duas abas da tela: cada tipo tem a sua lista, ordem e ações */
+const ABAS: { id: TagKind; label: string; hint: string }[] = [
+  { id: 'transition', label: 'Transição', hint: 'Do atendimento: caixa "Conversa", etapas do Kanban e encerramento. Saem ao encerrar (ficam no histórico).' },
+  { id: 'permanent', label: 'Permanentes', hint: 'Da pessoa (📌): valem em todas as conversas dela, para sempre. Servem para filtrar, segmentar transmissões e relatórios.' },
+];
+
 /** filtros da lista: com dezenas de tags, achar as do encerramento ou as abandonadas era rolar e ler */
 const FILTROS = [
   { id: 'todas', label: 'Todas', match: () => true },
@@ -23,10 +32,12 @@ const FILTROS = [
   { id: 'nao-comprou', label: 'Não comprou', match: (t: TagWithCount) => !!t.showOnLost },
   { id: 'sem-uso', label: 'Sem uso', match: (t: TagWithCount) => !t._count?.conversations && !t._count?.contacts },
 ] as const;
+/** Kanban e encerramento são só do atendimento: na aba Permanentes sobram estes */
+const FILTROS_PERMANENTES = new Set(['todas', 'sem-uso']);
 type Filtro = (typeof FILTROS)[number]['id'];
 /** mesmo teto da API (MAX_CONFLICTS_PER_TAG): é a trava contra uma marcação limpar tags em massa */
 const MAX_OPOSTAS = 20;
-type Flags = { color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean };
+type Flags = { kind?: TagKind; color?: string; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean };
 
 /** interruptor das colunas (Comprou / Não comprou) */
 function Sw({ on, onClick, label, disabled }: { on: boolean; onClick: () => void; label: string; disabled?: boolean }) {
@@ -54,10 +65,18 @@ export default function TagsPage() {
   const bulkDelete = useBulkDeleteTags();
   const [q, setQ] = useState('');
   const [filtro, setFiltro] = useState<Filtro>('todas');
+  const [aba, setAba] = useState<TagKind>('transition');
   const [sel, setSel] = useState<string[]>([]);
   const todas = (tags.data ?? []) as TagWithCount[];
+  /** só as da aba: busca, filtros, seleção e ordem valem dentro do tipo */
+  const daAba = useMemo(() => todas.filter((t) => kindOf(t) === aba), [todas, aba]);
+  const permanente = aba === 'permanent';
+  const filtros = permanente ? FILTROS.filter((f) => FILTROS_PERMANENTES.has(f.id)) : FILTROS;
+  // trocar de aba limpa a seleção e um filtro que não existe na outra
+  useEffect(() => { setSel([]); setFiltro((f) => (aba === 'permanent' && !FILTROS_PERMANENTES.has(f) ? 'todas' : f)); }, [aba]);
   /** `cores`: cor escolhida para cada nome; sem ela, a "cor de todas" */
-  const [lote, setLote] = useState<{ nomes: string; color: string; isKanban: boolean; showOnWon: boolean; showOnLost: boolean; cores: Record<string, string> } | null>(null);
+  const [lote, setLote] = useState<{ nomes: string; kind: TagKind; color: string; isKanban: boolean; showOnWon: boolean; showOnLost: boolean; cores: Record<string, string> } | null>(null);
+  const lotePermanente = lote?.kind === 'permanent';
   // nomes do lote na ordem, sem repetir (a API faz o mesmo: vale a primeira)
   const nomesDoLote = lote ? [...new Set(lote.nomes.split(/\r?\n|;/).map((n) => n.trim().slice(0, 40)).filter(Boolean))] : [];
   const existentes = new Set(todas.map((t) => t.name.toLowerCase()));
@@ -72,8 +91,8 @@ export default function TagsPage() {
   const visiveis = useMemo(() => {
     const f = FILTROS.find((x) => x.id === filtro)!;
     const busca = q.trim().toLowerCase();
-    return todas.filter((t) => f.match(t) && (!busca || t.name.toLowerCase().includes(busca)));
-  }, [todas, filtro, q]);
+    return daAba.filter((t) => f.match(t) && (!busca || t.name.toLowerCase().includes(busca)));
+  }, [daAba, filtro, q]);
   // tag excluída (aqui ou por outra pessoa) sai da seleção
   useEffect(() => setSel((s) => s.filter((id) => todas.some((t) => t.id === id))), [todas]);
   const visiveisIds = visiveis.map((t) => t.id);
@@ -82,14 +101,17 @@ export default function TagsPage() {
   const alternar = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const selecionadas = todas.filter((t) => sel.includes(t.id));
   const usoSelecionadas = selecionadas.reduce((a, t) => a + (t._count?.conversations ?? 0), 0);
+  const contatosSelecionadas = selecionadas.reduce((a, t) => a + (t._count?.contacts ?? 0), 0);
   // arrastar só com a lista inteira à vista: com busca/filtro, "entre quais" fica ambíguo
   const podeArrastar = isAdmin && filtro === 'todas' && !q.trim();
   function onDragEnd(r: DropResult) {
     if (!r.destination || r.destination.index === r.source.index) return;
-    const ids = todas.map((t) => t.id);
-    const [movida] = ids.splice(r.source.index, 1);
-    ids.splice(r.destination.index, 0, movida);
-    reorder.mutate(ids, { onError: toast.err });
+    // reordena dentro da aba e devolve a lista inteira (a API grava a posição de todas)
+    const daqui = daAba.map((t) => t.id);
+    const [movida] = daqui.splice(r.source.index, 1);
+    daqui.splice(r.destination.index, 0, movida);
+    let i = 0;
+    reorder.mutate(todas.map((t) => (kindOf(t) === aba ? daqui[i++] : t.id)), { onError: toast.err });
   }
 
   async function emMassa(data: Flags, ok: string) {
@@ -104,8 +126,10 @@ export default function TagsPage() {
     if (!lote) return;
     if (!novosDoLote.length) return;
     try {
-      const r = await bulkCreate.mutateAsync({ items: novosDoLote.map((name) => ({ name, color: lote.cores[name] ?? lote.color })), color: lote.color, isKanban: lote.isKanban, showOnWon: lote.showOnWon, showOnLost: lote.showOnLost });
+      const r = await bulkCreate.mutateAsync({ items: novosDoLote.map((name) => ({ name, color: lote.cores[name] ?? lote.color })), color: lote.color, kind: lote.kind, ...(!lotePermanente && { isKanban: lote.isKanban, showOnWon: lote.showOnWon, showOnLost: lote.showOnLost }) });
       toast.ok(r.skipped ? `${r.created} criada(s) · ${r.skipped} já existiam` : `${r.created} tag(s) criada(s)`);
+      // mostra a aba onde elas entraram
+      setAba(lote.kind);
       setLote(null);
     } catch (err) { toast.err(err); }
   }
@@ -114,12 +138,15 @@ export default function TagsPage() {
     e.preventDefault();
     if (!editing?.name) return;
     try {
+      // permanente não tem Kanban nem encerramento (a API recusa)
+      const perm = kindOf(editing as Tag) === 'permanent';
+      const marcas = perm ? { isKanban: false, showOnWon: false, showOnLost: false } : { isKanban: editing.isKanban ?? !editing.id, showOnWon: editing.showOnWon ?? false, showOnLost: editing.showOnLost ?? false };
       const salva = editing.id
-        ? await update.mutateAsync({ id: editing.id, name: editing.name, color: editing.color, isKanban: editing.isKanban, showOnWon: editing.showOnWon, showOnLost: editing.showOnLost })
-        : await create.mutateAsync({ name: editing.name, color: editing.color ?? PALETTE[0], isKanban: editing.isKanban ?? true, showOnWon: editing.showOnWon ?? false, showOnLost: editing.showOnLost ?? false });
-      // opostas só vão se mudaram (tag nova sem opostas não chama)
+        ? await update.mutateAsync({ id: editing.id, name: editing.name, color: editing.color, kind: kindOf(editing as Tag), ...marcas })
+        : await create.mutateAsync({ name: editing.name, color: editing.color ?? PALETTE[0], kind: kindOf(editing as Tag), ...marcas });
+      // opostas só vão se mudaram (tag nova sem opostas não chama); só do mesmo tipo
       const antes = todas.find((t) => t.id === editing.id)?.conflictIds ?? [];
-      const depois = editing.conflictIds ?? [];
+      const depois = (editing.conflictIds ?? []).filter((id) => todas.some((t) => t.id === id && kindOf(t) === kindOf(editing as Tag)));
       if (antes.length !== depois.length || depois.some((id) => !antes.includes(id))) await setConflicts.mutateAsync({ id: salva.id, ids: depois });
       toast.ok(editing.id ? 'Tag atualizada' : 'Tag criada');
       setEditing(null);
@@ -132,22 +159,34 @@ export default function TagsPage() {
     <PageShell width="max-w-3xl">
       <PageHeader
         title="Tags"
-        subtitle="Classifique conversas durante o atendimento. As tags viram filtros, relatórios e — marcadas como etapa — colunas do Kanban."
+        subtitle="Tags de transição marcam o atendimento (e viram etapas do Kanban e opções do encerramento); tags permanentes marcam a pessoa. Todas viram filtros e relatórios."
         action={isAdmin && (
           <div className="flex gap-2">
-            <Button variant="ghost" icon={<ListPlus size={16} />} onClick={() => setLote({ nomes: '', color: PALETTE[0], isKanban: false, showOnWon: false, showOnLost: false, cores: {} })}>Criar várias</Button>
-            <Button onClick={() => setEditing({ color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })} icon={<Plus size={16} />}>Nova tag</Button>
+            <Button variant="ghost" icon={<ListPlus size={16} />} onClick={() => setLote({ nomes: '', kind: aba, color: PALETTE[0], isKanban: false, showOnWon: false, showOnLost: false, cores: {} })}>Criar várias</Button>
+            <Button onClick={() => setEditing({ kind: aba, color: PALETTE[Math.floor(Math.random() * PALETTE.length)] })} icon={<Plus size={16} />}>Nova tag</Button>
           </div>
         )}
       />
 
-      {todas.length > 0 && (
+      {/* abas por tipo: cada uma com a sua lista, ordem e ações */}
+      <div role="tablist" aria-label="Tipo de tag" className="flex gap-1 border-b border-line mb-1">
+        {ABAS.map((a) => (
+          <button key={a.id} type="button" role="tab" aria-selected={aba === a.id} onClick={() => setAba(a.id)}
+            className={cn('inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px', aba === a.id ? 'border-accent text-ink' : 'border-transparent text-muted hover:text-ink')}>
+            {a.id === 'permanent' ? <Pin size={14} /> : <Repeat size={14} />}
+            {a.label} <span className="tnum text-xs opacity-70">{todas.filter((t) => kindOf(t) === a.id).length}</span>
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-faint mb-3">{ABAS.find((a) => a.id === aba)!.hint}</p>
+
+      {daAba.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar tag…" className={cn(inputCls, 'sm:w-64 py-1.5')} aria-label="Buscar tag" />
           <div className="flex flex-wrap gap-1">
-            {FILTROS.map((f) => {
+            {filtros.map((f) => {
               const rotuloFiltro = f.id === 'comprou' ? labels.won : f.id === 'nao-comprou' ? labels.lost : f.label;
-              const n = todas.filter(f.match).length;
+              const n = daAba.filter(f.match).length;
               return (
                 <button key={f.id} type="button" onClick={() => setFiltro(f.id)} aria-pressed={filtro === f.id} className={cn('rounded-full px-2.5 py-1 text-xs font-medium border', filtro === f.id ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:text-ink')}>
                   {rotuloFiltro} <span className="tnum opacity-70">{n}</span>
@@ -165,6 +204,7 @@ export default function TagsPage() {
           <span className="text-muted flex-1 min-w-[8rem]">{sel.length ? `${sel.length} selecionada(s)` : `Selecionar todas (${visiveis.length})`}</span>
           {sel.length > 0 && (
             <>
+              {!permanente && (<>
               <div className="relative">
                 <Button size="sm" variant="ghost" icon={<CheckCircle2 size={13} />} disabled={bulkUpdate.isPending} onClick={() => setMenuEnc((v) => !v)}>Encerramento <ChevronDown size={12} /></Button>
                 {menuEnc && (
@@ -184,6 +224,11 @@ export default function TagsPage() {
               </div>
               <Button size="sm" variant="ghost" icon={<Columns3 size={13} />} disabled={bulkUpdate.isPending} onClick={() => emMassa({ isKanban: true }, 'no Kanban')}>Pôr no Kanban</Button>
               <Button size="sm" variant="ghost" disabled={bulkUpdate.isPending} onClick={() => emMassa({ isKanban: false }, 'fora do Kanban')}>Tirar do Kanban</Button>
+              </>)}
+              {/* trocar de tipo: os vínculos que já existem ficam; a tag passa a ser oferecida só no outro lugar */}
+              <Button size="sm" variant="ghost" icon={permanente ? <Repeat size={13} /> : <Pin size={13} />} disabled={bulkUpdate.isPending} onClick={() => { const kind: TagKind = permanente ? 'transition' : 'permanent'; void emMassa({ kind }, permanente ? 'movidas para Transição' : 'movidas para Permanentes'); setSel([]); }}>
+                {permanente ? 'Mover para Transição' : 'Mover para Permanentes'}
+              </Button>
               <div className="relative">
                 <Button size="sm" variant="ghost" icon={<Palette size={13} />} disabled={bulkUpdate.isPending} onClick={() => setPaleta((p) => !p)}>Cor</Button>
                 {paleta && <ColorPopover align="right" onClose={() => setPaleta(false)} onPick={(c) => { setPaleta(false); void emMassa({ color: c }, 'com a nova cor'); }} />}
@@ -196,19 +241,23 @@ export default function TagsPage() {
       )}
 
       {tags.isLoading && <SkeletonRows rows={4} />}
-      {tags.data?.length === 0 && <Empty icon={<TagIcon size={36} />} title="Nenhuma tag" text='Crie tags como "Primeiro contato", "Retorno" ou "Urgente".' />}
+      {tags.data && daAba.length === 0 && (permanente
+        ? <Empty icon={<Pin size={36} />} title="Nenhuma tag permanente" text='Crie tags da pessoa, como "Cliente VIP", "Atacado" ou "Já comprou".' />
+        : <Empty icon={<TagIcon size={36} />} title="Nenhuma tag de transição" text='Crie tags do atendimento, como "Primeiro contato", "Em negociação" ou "Urgente".' />)}
 
-      {todas.length > 0 && visiveis.length === 0 && <p className="rounded-2xl border border-dashed border-line px-5 py-4 text-sm text-faint">Nenhuma tag com esse filtro.</p>}
+      {daAba.length > 0 && visiveis.length === 0 && <p className="rounded-2xl border border-dashed border-line px-5 py-4 text-sm text-faint">Nenhuma tag com esse filtro.</p>}
 
       {visiveis.length > 0 && (
         <div className="rounded-2xl bg-panel border border-line overflow-hidden">
           <div className="flex items-end gap-3 px-5 py-2 border-b border-line text-[11px] font-medium uppercase tracking-wide text-faint">
             {isAdmin && <span className="w-9 shrink-0" />}
             <span className="flex-1">Tag</span>
-            <span className="w-44 shrink-0 text-center leading-tight">
-              Aparece ao encerrar
-              <span className="flex normal-case tracking-normal font-normal"><span className="flex-1">{labels.won}</span><span className="flex-1">{labels.lost}</span></span>
-            </span>
+            {!permanente && (
+              <span className="w-44 shrink-0 text-center leading-tight">
+                Aparece ao encerrar
+                <span className="flex normal-case tracking-normal font-normal"><span className="flex-1">{labels.won}</span><span className="flex-1">{labels.lost}</span></span>
+              </span>
+            )}
             {isAdmin && <span className="w-[54px] shrink-0" />}
           </div>
           <DragDropContext onDragEnd={onDragEnd}>
@@ -221,7 +270,7 @@ export default function TagsPage() {
                         <div ref={drag.innerRef} {...drag.draggableProps} className={cn('flex items-center gap-3 px-5 py-3 bg-panel', sel.includes(t.id) && 'bg-accent-soft/40', snap.isDragging && 'shadow-lg rounded-lg ring-1 ring-line')}>
                           {isAdmin && (
                             <span className="flex items-center gap-1 shrink-0">
-                              <span {...drag.dragHandleProps} title={podeArrastar ? 'Arraste para reordenar (é a ordem das colunas do Kanban)' : 'Limpe a busca e o filtro para reordenar'} className={cn('text-faint', podeArrastar ? 'cursor-grab hover:text-ink' : 'opacity-30 cursor-not-allowed')}>
+                              <span {...drag.dragHandleProps} title={podeArrastar ? (permanente ? 'Arraste para reordenar' : 'Arraste para reordenar (é a ordem das colunas do Kanban)') : 'Limpe a busca e o filtro para reordenar'} className={cn('text-faint', podeArrastar ? 'cursor-grab hover:text-ink' : 'opacity-30 cursor-not-allowed')}>
                                 <GripVertical size={15} />
                               </span>
                               <input type="checkbox" aria-label={`Selecionar ${t.name}`} checked={sel.includes(t.id)} onChange={() => alternar(t.id)} />
@@ -236,15 +285,20 @@ export default function TagsPage() {
                             </div>
                           ) : <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: t.color }} />}
                           <span className="flex-1 font-medium text-sm">{t.name}</span>
-                          {t.isKanban !== false && <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted bg-field rounded-md px-1.5 py-0.5" title="Aparece como coluna no Kanban"><Columns3 size={11} />Kanban</span>}
+                          {!permanente && t.isKanban !== false && <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted bg-field rounded-md px-1.5 py-0.5" title="Aparece como coluna no Kanban"><Columns3 size={11} />Kanban</span>}
                           {!!t.conflictIds?.length && (
                             <button type="button" disabled={!isAdmin} onClick={() => setEditing(t)} className="inline-flex items-center gap-1 text-[10px] font-semibold text-warn bg-warn-soft rounded-md px-1.5 py-0.5 disabled:cursor-default" title={`Conflita com: ${t.conflictIds.map((id) => todas.find((x) => x.id === id)?.name).filter(Boolean).join(', ')} — marcar uma tira a outra`}>
                               <ArrowLeftRight size={11} />{t.conflictIds.length}
                             </button>
                           )}
-                          <span className="text-xs text-faint tnum">{t._count?.conversations ?? 0} conversa{(t._count?.conversations ?? 0) === 1 ? '' : 's'} · 📌 {t._count?.contacts ?? 0} contato{(t._count?.contacts ?? 0) === 1 ? '' : 's'}</span>
+                          {/* o uso do próprio tipo primeiro; o do outro lado só aparece se sobrou de antes da separação */}
+                          <span className="text-xs text-faint tnum">
+                            {permanente
+                              ? <>📌 {t._count?.contacts ?? 0} contato{(t._count?.contacts ?? 0) === 1 ? '' : 's'}{!!t._count?.conversations && ` · ${t._count.conversations} conversa${t._count.conversations === 1 ? '' : 's'}`}</>
+                              : <>{t._count?.conversations ?? 0} conversa{(t._count?.conversations ?? 0) === 1 ? '' : 's'}{!!t._count?.contacts && ` · 📌 ${t._count.contacts} contato${t._count.contacts === 1 ? '' : 's'}`}</>}
+                          </span>
                           {/* colunas com título no cabeçalho: Comprou e Não comprou são escolhas separadas */}
-                          <div className="w-44 shrink-0 flex">
+                          {!permanente && <div className="w-44 shrink-0 flex">
                             {([['showOnWon', labels.won], ['showOnLost', labels.lost]] as const).map(([campo, rotulo]) => (
                               <span key={campo} className="flex-1 flex justify-center">
                                 {isAdmin
@@ -252,7 +306,7 @@ export default function TagsPage() {
                                   : t[campo] ? <CheckCircle2 size={15} className="text-ok" aria-label={`Aparece em ${rotulo}`} /> : <span className="text-faint">—</span>}
                               </span>
                             ))}
-                          </div>
+                          </div>}
                           {isAdmin && (
                             <>
                               <button onClick={() => setEditing(t)} className="text-faint hover:text-ink p-1" title="Editar"><Pencil size={15} /></button>
@@ -279,8 +333,28 @@ export default function TagsPage() {
             <span className="text-ink font-medium">Cor</span>
             <ColorSwatches value={editing?.color} onChange={(c) => setEditing({ ...editing, color: c })} />
           </div>
+          {/* tipo: decide onde a tag é oferecida (atendimento × contato) */}
+          <div className="text-sm space-y-1.5">
+            <span className="text-ink font-medium">Tipo</span>
+            <div className="grid grid-cols-2 gap-2">
+              {ABAS.map((a) => {
+                const on = kindOf((editing ?? {}) as Tag) === a.id;
+                return (
+                  <button key={a.id} type="button" aria-pressed={on} onClick={() => setEditing({ ...editing, kind: a.id, conflictIds: (editing?.conflictIds ?? []).filter((id) => todas.some((t) => t.id === id && kindOf(t) === a.id)) })}
+                    className={cn('rounded-lg border px-3 py-2 text-left', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>
+                    <span className="flex items-center gap-1.5 font-medium">{a.id === 'permanent' ? <Pin size={13} /> : <Repeat size={13} />}{a.id === 'permanent' ? 'Permanente' : 'Transição'}</span>
+                    <span className="block text-[11px] opacity-80">{a.id === 'permanent' ? 'Da pessoa — vale sempre' : 'Do atendimento — sai ao encerrar'}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {editing?.id && kindOf(editing as Tag) !== kindOf(todas.find((t) => t.id === editing.id) ?? (editing as Tag)) && (
+              <span className="block text-xs text-warn">Onde ela já está marcada, continua. Daqui em diante ela só é oferecida {kindOf(editing as Tag) === 'permanent' ? 'no contato (📌) — e sai do Kanban e do encerramento' : 'no atendimento'}.</span>
+            )}
+          </div>
+          {kindOf((editing ?? {}) as Tag) === 'transition' && (<>
           <label className="flex items-start gap-2 text-sm cursor-pointer">
-            <input type="checkbox" className="mt-0.5" checked={editing?.isKanban ?? true} onChange={(e) => setEditing({ ...editing, isKanban: e.target.checked })} />
+            <input type="checkbox" className="mt-0.5" checked={editing?.isKanban ?? !editing?.id} onChange={(e) => setEditing({ ...editing, isKanban: e.target.checked })} />
             <span>
               <span className="text-ink font-medium">Etapa no Kanban</span>
               <span className="block text-xs text-faint">Vira uma coluna do quadro. Desmarcar tira os atendimentos dessa etapa (a tag continua neles).</span>
@@ -294,11 +368,12 @@ export default function TagsPage() {
             </div>
             <span className="block text-xs text-faint">Nenhum marcado: a tag não aparece no encerramento (interna, operacional).</span>
           </div>
+          </>)}
           {/* div, não Field: o Field é <label>, e o clique no título abria o seletor */}
           <div className="text-sm space-y-1">
             <span className="text-ink font-medium inline-flex items-center gap-1.5"><ArrowLeftRight size={14} /> Conflita com</span>
-            <TagPicker tags={todas.filter((t) => t.id !== editing?.id)} value={editing?.conflictIds ?? []} onChange={(ids) => setEditing({ ...editing, conflictIds: ids.slice(0, MAX_OPOSTAS) })} placeholder="Ex.: Comprou × Não comprou" />
-            <span className="block text-xs text-faint">Ao marcar esta tag num atendimento, as daqui saem sozinhas (e vice-versa). Só as opostas diretas — nada em cadeia. Até {MAX_OPOSTAS}.</span>
+            <TagPicker tags={todas.filter((t) => t.id !== editing?.id && kindOf(t) === kindOf((editing ?? {}) as Tag))} value={editing?.conflictIds ?? []} onChange={(ids) => setEditing({ ...editing, conflictIds: ids.slice(0, MAX_OPOSTAS) })} placeholder="Ex.: Comprou × Não comprou" />
+            <span className="block text-xs text-faint">Ao marcar esta tag {kindOf((editing ?? {}) as Tag) === 'permanent' ? 'num contato' : 'num atendimento'}, as daqui saem sozinhas (e vice-versa). Só tags do mesmo tipo. Só as opostas diretas — nada em cadeia. Até {MAX_OPOSTAS}.</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted">
             Prévia: <span className="text-[11px] text-white rounded px-1.5 py-0.5" style={{ background: editing?.color }}>{editing?.name || 'nome da tag'}</span>
@@ -313,6 +388,19 @@ export default function TagsPage() {
       <Modal open={!!lote} onClose={() => setLote(null)} title="Criar várias tags" width="max-w-lg">
         {lote && (
           <form onSubmit={criarLote} className="space-y-4">
+            {/* tipo das novas (começa no da aba aberta) */}
+            <div className="text-sm space-y-1.5">
+              <span className="text-ink font-medium">Tipo</span>
+              <div className="grid grid-cols-2 gap-2">
+                {ABAS.map((a) => (
+                  <button key={a.id} type="button" aria-pressed={lote.kind === a.id} onClick={() => setLote({ ...lote, kind: a.id })}
+                    className={cn('rounded-lg border px-3 py-2 text-left', lote.kind === a.id ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field')}>
+                    <span className="flex items-center gap-1.5 font-medium">{a.id === 'permanent' ? <Pin size={13} /> : <Repeat size={13} />}{a.id === 'permanent' ? 'Permanentes' : 'Transição'}</span>
+                    <span className="block text-[11px] opacity-80">{a.id === 'permanent' ? 'Da pessoa — valem sempre' : 'Do atendimento — saem ao encerrar'}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <Field label="Nomes" hint="Uma por linha (ou separadas por ;). Até 40 caracteres cada; as que já existem são ignoradas.">
               <textarea className={cn(inputCls, 'resize-none font-mono text-[13px]')} rows={5} autoFocus value={lote.nomes} onChange={(e) => setLote({ ...lote, nomes: e.target.value })} placeholder={'Achou caro\nNão respondeu\nVai vir na loja'} />
             </Field>
@@ -349,12 +437,14 @@ export default function TagsPage() {
                 </div>
               </div>
             )}
+            {!lotePermanente && (<>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
               <span className="text-ink">Aparecem ao encerrar como:</span>
               <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={lote.showOnWon} onChange={(e) => setLote({ ...lote, showOnWon: e.target.checked })} /> {labels.won}</label>
               <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={lote.showOnLost} onChange={(e) => setLote({ ...lote, showOnLost: e.target.checked })} /> {labels.lost}</label>
             </div>
             <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={lote.isKanban} onChange={(e) => setLote({ ...lote, isKanban: e.target.checked })} /> Viram etapas do Kanban</label>
+            </>)}
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="ghost" onClick={() => setLote(null)}>Cancelar</Button>
               <Button type="submit" loading={bulkCreate.isPending} loadingText="Criando…" disabled={!novosDoLote.length}>Criar {novosDoLote.length || ''}</Button>
@@ -369,7 +459,7 @@ export default function TagsPage() {
         title={`Excluir ${sel.length} tag(s)`}
         danger
         confirmLabel={`Excluir ${sel.length}`}
-        text={`${selecionadas.slice(0, 5).map((t) => `"${t.name}"`).join(', ')}${selecionadas.length > 5 ? ` e mais ${selecionadas.length - 5}` : ''} serão removidas${usoSelecionadas ? ` de ${usoSelecionadas} conversa(s)` : ''}. Relatórios antigos deixam de contá-las.`}
+        text={`${selecionadas.slice(0, 5).map((t) => `"${t.name}"`).join(', ')}${selecionadas.length > 5 ? ` e mais ${selecionadas.length - 5}` : ''} serão removidas${usoSelecionadas ? ` de ${usoSelecionadas} conversa(s)` : ''}${contatosSelecionadas ? `${usoSelecionadas ? ' e' : ''} de ${contatosSelecionadas} contato(s)` : ''}. Relatórios antigos deixam de contá-las.`}
         onConfirm={async () => { try { const r = await bulkDelete.mutateAsync(sel); setSel([]); toast.ok(`${r.deleted} tag(s) excluída(s)`); } catch (err) { toast.err(err); throw err; } }}
       />
 
@@ -379,7 +469,7 @@ export default function TagsPage() {
         title="Excluir tag"
         danger
         confirmLabel="Excluir"
-        text={`A tag "${deleting?.name}" será removida de ${deleting?._count?.conversations ?? 0} conversa(s). Relatórios antigos deixam de contá-la.`}
+        text={`A tag "${deleting?.name}" será removida de ${deleting?._count?.conversations ?? 0} conversa(s) e ${deleting?._count?.contacts ?? 0} contato(s). Relatórios antigos deixam de contá-la.`}
         onConfirm={async () => { if (!deleting) return; try { await remove.mutateAsync(deleting.id); toast.ok('Tag excluída'); } catch (err) { toast.err(err); throw err; } }}
       />
     </PageShell>

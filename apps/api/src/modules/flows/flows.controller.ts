@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, IsInt, MaxLength, Min } from 'class-validator';
 import { randomUUID } from 'node:crypto';
-import { copyName, flowFromPortable, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type VariableAssignment, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
+import { copyName, flowFromPortable, flowPermanentTagNames, flowTagNames, flowToPortable, listJsonPaths, normalizeContent, parsePortableFlowFile, toBundle, uniqueName, type FlowDefinition, type HttpNode, type VariableAssignment, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
 import { refMaps } from '../tenants/portable-db';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -320,15 +320,16 @@ export class FlowsController {
   private async exportMany(tenantId: string, ids: string[]) {
     const flows = await this.prisma.flow.findMany({ where: { id: { in: ids }, tenantId }, orderBy: { name: 'asc' } });
     if (flows.length !== new Set(ids).size) throw new BadRequestException('Fluxo não encontrado.');
-    const tags = await this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true } });
+    const tags = await this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, kind: true } });
     const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
+    const permanentTagIds = tags.filter((t) => t.kind === 'permanent').map((t) => t.id);
     const flowNameById = Object.fromEntries((await this.prisma.flow.findMany({ where: { tenantId }, select: { id: true, name: true } })).map((f) => [f.id, f.name]));
     // agente de IA e tipo de ticket viajam pelo nome
     const { names: refNames } = await refMaps(this.prisma, tenantId);
     const items: PortableFlow[] = [];
     const warnings = new Set<string>();
     for (const flow of flows) {
-      const out = flowToPortable({ name: flow.name, description: flow.description, showOnClosing: flow.showOnClosing, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, { tagNameById, flowNameById, ...refNames });
+      const out = flowToPortable({ name: flow.name, description: flow.description, showOnClosing: flow.showOnClosing, trigger: flow.trigger as unknown as FlowTrigger, definition: flow.definition as unknown as FlowDefinition }, { tagNameById, flowNameById, permanentTagIds, ...refNames });
       items.push(out.portable);
       // num lote, o aviso diz de qual fluxo é
       out.warnings.forEach((w) => warnings.add(flows.length > 1 ? `${flow.name}: ${w}` : w));
@@ -354,7 +355,9 @@ export class FlowsController {
 
     const names = [...new Set(items.flatMap((p) => flowTagNames(p.definition)))];
     if (names.length) {
-      await this.prisma.tag.createMany({ data: names.map((name) => ({ tenantId: u.tenantId, name })), skipDuplicates: true });
+      // tag que não existe nasce com o tipo que tinha na origem; a que já existe fica como está
+      const permanentes = new Set(items.flatMap((p) => flowPermanentTagNames(p.definition)));
+      await this.prisma.tag.createMany({ data: names.map((name) => ({ tenantId: u.tenantId, name, kind: permanentes.has(name) ? 'permanent' as const : 'transition' as const })), skipDuplicates: true });
     }
     const tags = await this.prisma.tag.findMany({ where: { tenantId: u.tenantId, name: { in: names } }, select: { id: true, name: true } });
     const tagIdByName = Object.fromEntries(tags.map((t) => [t.name, t.id]));

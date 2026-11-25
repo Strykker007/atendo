@@ -7,7 +7,7 @@ import { cn, readableColor } from '@/lib/utils';
 import { inputCls, Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useAttendances, useAttendanceMessages, useTags, useCloseReasons, useOutcomeLabels, type AttendanceRow } from '@/lib/hooks';
+import { useAgents, useAttendances, useAttendanceMessages, useTags, tagsOfKind, useCloseReasons, useOutcomeLabels, type AttendanceRow } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 
 const PAGE_SIZE = 25;
@@ -77,8 +77,8 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
   const d = q.data;
   const paginas = d ? Math.max(1, Math.ceil(d.total / PAGE_SIZE)) : 1;
   // tags que fazem sentido filtrar: as do resultado escolhido (ou as de qualquer encerramento)
-  // tags do atendimento: qualquer tag (as transitórias ficam congeladas no encerramento)
-  const tagsDoFiltro = tags.data ?? [];
+  // tags do atendimento: as de transição (ficam congeladas no encerramento); a escolhida fica na lista
+  const tagsDoFiltro = tagsOfKind(tags.data, 'transition', tagId ? [tagId] : []);
 
   return (
     <section ref={ref} className="space-y-3 scroll-mt-4">

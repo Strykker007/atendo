@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, tagsOfKind, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -830,12 +830,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       {/* Tags: do atendimento (transitórias — saem ao encerrar e ficam no histórico) e da pessoa (valem para sempre) */}
       <div className="bg-panel border-b border-line px-3 py-1 grid sm:grid-cols-2 gap-x-3 gap-y-1">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint shrink-0 w-14" title="Tags deste atendimento — saem ao encerrar (ficam no histórico do atendimento)">Conversa</span>
-          <div className="flex-1 min-w-0"><TagPicker compact exclusive tags={tags.data ?? []} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} primaryId={primaryTag?.id ?? null} onPrimary={(tagId) => setPrimary.mutateAsync({ id: conv.id, tagId }).catch(toast.err)} placeholder="Adicionar tag" /></div>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint shrink-0 w-14" title="Tags de transição deste atendimento — saem ao encerrar (ficam no histórico do atendimento)">Conversa</span>
+          <div className="flex-1 min-w-0"><TagPicker compact exclusive tags={tagsOfKind(tags.data, 'transition', conv.tags.map((t) => t.tag.id))} value={conv.tags.map((t) => t.tag.id)} onChange={(ids) => setTags.mutate({ id: conv.id, tagIds: ids })} primaryId={primaryTag?.id ?? null} onPrimary={(tagId) => setPrimary.mutateAsync({ id: conv.id, tagId }).catch(toast.err)} placeholder="Adicionar tag" /></div>
         </div>
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint shrink-0 w-14" title="Tags da pessoa — valem em todas as conversas dela">📌 Contato</span>
-          <div className="flex-1 min-w-0"><TagPicker compact exclusive tags={tags.data ?? []} value={(conv.contact.tags ?? []).map((t) => t.tag.id)} onChange={(ids) => setContactTags.mutate({ contactId: conv.contact.id, tagIds: ids })} placeholder="Tag permanente" /></div>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint shrink-0 w-14" title="Tags permanentes da pessoa — valem em todas as conversas dela">📌 Contato</span>
+          <div className="flex-1 min-w-0"><TagPicker compact exclusive tags={tagsOfKind(tags.data, 'permanent', (conv.contact.tags ?? []).map((t) => t.tag.id))} value={(conv.contact.tags ?? []).map((t) => t.tag.id)} onChange={(ids) => setContactTags.mutate({ contactId: conv.contact.id, tagIds: ids })} placeholder="Tag permanente" /></div>
         </div>
       </div>
 

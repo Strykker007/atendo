@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module,
 import { BullModule, InjectQueue, Processor } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import { randomBytes } from 'node:crypto';
-import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsEmail, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TrackedWorkerHost } from '../../common/observability/tracked-worker.host';
 import { AuthModule } from '../auth/auth.module';
@@ -68,6 +68,10 @@ class OverrideDto {
 /** Renovar acesso temporário: nova validade, contada a partir de agora */
 class RenewTemporaryDto {
   @IsInt() @Min(1) @Max(72) hours: number;
+}
+class MakePermanentDto {
+  /** e-mail real da pessoa; obrigatório se o login ainda for o provisório (`plantao-…@….temp`) */
+  @IsOptional() @IsEmail() @MaxLength(160) email?: string;
 }
 class TemporaryUserDto {
   @IsString() @MinLength(1) @MaxLength(80) name: string;
@@ -323,6 +327,40 @@ class UsersScheduleController {
     const accessExpiresAt = new Date(Date.now() + dto.hours * 3_600_000);
     await this.prisma.user.update({ where: { id: target.id }, data: { isActive: true, expiredAt: null, accessExpiresAt } });
     return { ok: true, accessExpiresAt };
+  }
+
+  /**
+   * Temporário que ficou na equipe: vira conta normal (sem prazo, ativa). Login provisório exige
+   * o e-mail real; com e-mail novo, a senha do plantão deixa de valer e a pessoa define a dela pelo
+   * convite. Mesmo e-mail com senha já definida (aceitou convite antes): entra direto com a dela.
+   * (docs/escalas.md#tornar-permanente)
+   */
+  @Post('temporary/:id/make-permanent')
+  async makePermanent(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: MakePermanentDto) {
+    const target = await this.prisma.user.findFirst({ where: { id, tenantId: u.tenantId, isTemporary: true, ...teamWhere(u) }, select: { id: true, isActive: true, email: true, passwordSetAt: true } });
+    if (!target) throw new NotFoundException('Acesso temporário não encontrado.');
+    const email = dto.email?.trim().toLowerCase() || target.email?.toLowerCase() || '';
+    if (!email || email.endsWith('.temp')) throw new BadRequestException('Informe o e-mail da pessoa: o login provisório (plantao-…@….temp) não serve para a conta permanente.');
+    const trocouEmail = email !== target.email?.toLowerCase();
+    if (trocouEmail) {
+      const dono = await this.prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, id: { not: target.id } }, select: { id: true } });
+      if (dono) throw new BadRequestException('Este e-mail já é login de outra conta.');
+    }
+    // expirado/desativado volta a ocupar vaga do plano (mesma conta da criação)
+    if (!target.isActive) await this.usage.assertRoom(u.tenantId, 'maxAgents');
+    const convidar = trocouEmail || !target.passwordSetAt;
+    await this.prisma.user.update({
+      where: { id: target.id },
+      data: {
+        isTemporary: false, accessExpiresAt: null, expiredAt: null, isActive: true, email,
+        // senha do plantão foi entregue por terceiros: com login novo, só vale a que a pessoa definir
+        ...(convidar && { passwordHash: await this.auth.hashPassword(randomBytes(24).toString('base64url')), passwordSetAt: null, invitedAt: new Date() }),
+      },
+    });
+    if (!convidar) return { ok: true, invited: false };
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: u.tenantId }, select: { name: true } });
+    const link = await this.auth.sendInvite(target.id, u.name, tenant.name).catch(() => null);
+    return { ok: true, invited: true, emailSent: !!link, inviteLink: link ?? (await this.auth.inviteLink(target.id)).link };
   }
 
   /** Encerra o acesso temporário antes do prazo (status EXPIRED, sessões derrubadas). */

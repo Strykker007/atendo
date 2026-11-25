@@ -112,13 +112,15 @@ export class ContactsIoService {
       if (dono && (!porTelefone.has(dono) || c.phone === dono)) porTelefone.set(dono, c);
     }
 
-    const tags = await this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true } });
-    const tagPorNome = new Map(tags.map((t) => [t.name.trim().toLowerCase(), t.id]));
+    // contato só recebe tag PERMANENTE; a de transição (do atendimento) volta no relatório como não aplicada
+    const tags = await this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, kind: true } });
+    const tagPorNome = new Map(tags.map((t) => [t.name.trim().toLowerCase(), t]));
     const unknownTags = new Set<string>();
     const tagIds = (r: ImportRecord) => r.tags.flatMap((n) => {
-      const id = tagPorNome.get(n.toLowerCase());
-      if (!id) unknownTags.add(n);
-      return id ? [id] : [];
+      const t = tagPorNome.get(n.toLowerCase());
+      if (!t) unknownTags.add(n);
+      else if (t.kind !== 'permanent') unknownTags.add(`${n} (tag de transição — só vai no atendimento)`);
+      return t?.kind === 'permanent' ? [t.id] : [];
     });
 
     const novos = records.filter((r) => !porTelefone.has(r.phone));

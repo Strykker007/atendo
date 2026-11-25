@@ -95,7 +95,7 @@ export class AiAgentsService {
   async catalog(tenantId: string): Promise<AgentCatalog> {
     const [departments, tags, closeReasons, attrs] = await Promise.all([
       this.prisma.department.findMany({ where: { tenantId, isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
-      this.prisma.tag.findMany({ where: { tenantId }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+      this.prisma.tag.findMany({ where: { tenantId }, orderBy: { name: 'asc' }, select: { id: true, name: true, kind: true } }),
       this.prisma.closeReason.findMany({ where: { tenantId }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
       this.prisma.contactAttribute.findMany({ where: { tenantId }, distinct: ['label'], orderBy: { label: 'asc' }, select: { label: true }, take: 100 }),
     ]);

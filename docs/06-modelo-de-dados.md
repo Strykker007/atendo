@@ -75,11 +75,26 @@ Cada `closed` é **um atendimento**: a mesma pessoa volta semanas depois, na mes
 
 **tags** / **conversation_tags** — N:N. Índice em `tagId` para o filtro por tag.
 
+### Tags
+
+`tags.kind` (`TagKind`, padrão `transition`) separa dois catálogos, cada um numa aba da tela de Tags:
+
+- **Transição** (`transition`) — do atendimento: caixa "Conversa" do chat (`conversation_tags`), etapas do Kanban (`isKanban`), escolha do encerramento (`showOnWon`/`showOnLost`). Sai da conversa ao encerrar (fica no evento `closed`).
+- **Permanente** (`permanent`) — da pessoa: caixa "📌 Contato" (`contact_tags`), vale em todas as conversas dela. Nunca é etapa nem de encerramento (a API força `isKanban`/`showOnWon`/`showOnLost` = `false` e recusa pedido explícito).
+
+Regras (API): `PATCH /conversations/:id/tags` só **acrescenta** tag de transição; `PATCH /conversations/contacts/:id/tags` só acrescenta permanente. Vínculo do outro tipo que já existia (de antes da separação, ou de uma tag que mudou de tipo) **continua** e pode ser removido — só não se cria novo. Encerramento (`tagIds`), coluna do Kanban e tag principal só aceitam transição. Conflito ("conflita com") só entre tags do mesmo tipo: trocar o tipo apaga os pares com o outro tipo e, se virou permanente, tira a tag de principal (continua nas conversas).
+
+Onde a tag é aplicada segue o **tipo**, não o lugar que pediu (`tagScopeOf` em `@atendo/shared`): bloco "Aplicar/Remover etiqueta" do fluxo (o `scope` gravado no nó é do formato antigo — só viaja na exportação para o destino criar a tag com o tipo certo), ferramenta "Etiquetar" do agente de IA e a tag automática de anúncio (`Anúncio`, que nasce transição). Importação de contatos só liga tags permanentes (a de transição volta em `unknownTags`). Modelo de perfil leva `kind` na tag (ausente = transição).
+
+Filtros da lista de conversas, transmissões e condição "tem a etiqueta" do fluxo aceitam os dois tipos: casam a tag no atendimento **ou** no contato. **Relatórios só contam tag de transição** (o retrato do atendimento: `conversation_tags` aberta ou `tagIds`/`tagSnapshot` do encerramento) — tag permanente não tem data e não entra neles. No front as listas mistas mostram 📌 nas permanentes (`TagPicker`).
+
+Migração `20270218000000_tag_kind`: aditiva (enum + coluna com padrão). Classificação das existentes **pelo uso**: vira permanente só a tag que está em algum contato e nunca marcou atendimento (não é Kanban/encerramento, não está em `conversation_tags` nem em `tagIds`/`tagSnapshot`/`stageTagId` de eventos); o resto fica transição. Nenhum vínculo é apagado — uma tag usada nos dois lugares virou transição e continua nos contatos onde estava. Volta: a API anterior ignora a coluna; dá para reclassificar pela tela (Mover para Permanentes/Transição).
+
 **tag_conflicts** — pares de tags opostas (ex.: "Comprou" × "Não comprou"). Simétrico: uma linha por par, `tagId` < `otherId`, cascade nas duas pontas. Marcar uma tag (chat, `PATCH /conversations/:id/tags`, tags do contato, mover card no Kanban, ação "adicionar tag" do fluxo) tira **só as opostas diretas** dela — nunca em cadeia — e só quando a tag é nova no atendimento (pares que já conviviam antes da configuração ficam). Até 20 opostas por tag. Lógica em `apps/api/src/modules/tags/conflicts.ts`.
 - `tags.isKanban` (default `true`) faz da tag uma coluna do Kanban; `tags.position` é a ordem da coluna (tag nova entra no fim).
 - **Encerramento** (migração `20261120`):
   - **Motivo** (`close_reasons`: nome, cor, `outcome` won/lost/both, ordem, `isActive`) é a lista da empresa, separada das tags. Obrigatório ao encerrar quando há motivo ativo para o resultado (`CloseReasonsService.resolve`, erro `close_reason_required`). Excluir = desativar. A migração criou os motivos a partir das tags que apareciam no encerramento (e tirou delas a marca, para o modal não repetir o nome) e dos motivos antigos em texto (inativos, só histórico), e ligou os encerramentos antigos ao motivo.
-  - **Tags transitórias**: as da conversa (`conversation_tags`, inclusive a etapa do Kanban) são do atendimento. Ao encerrar vão para o evento `closed` (`tagSnapshot`, `stageTagId` = etapa) e **saem da conversa** — nada fica "Em negociação" depois de concluído. Permanentes são as do contato (`contact_tags`, 📌).
+  - **Tags transitórias**: as da conversa (`conversation_tags`, inclusive a etapa do Kanban) são do atendimento. Ao encerrar vão para o evento `closed` (`tagSnapshot`, `stageTagId` = etapa) e **saem da conversa** — nada fica "Em negociação" depois de concluído. Permanentes são as do contato (`contact_tags`, 📌) — ver [Tags](#tags).
   - Evento `closed`: `closeReasonId` + `reason` (nome congelado), `tagIds` (escolhidas no modal), `tagSnapshot`, `stageTagId`.
   - Conversa: `lastClosedAt`, `lastCloseOutcome`, `lastCloseReasonId` — o último encerramento, que **sobrevive à reabertura** (topo da conversa, aba Encerrado, filtro em todas as abas).
   - **Carência** (`reopen.ts`, `CLOSE_GRACE_MS` = 2 h): confirmação do cliente ("ok", "obrigada", figurinha — `ehConfirmacao`) e mensagem da loja pelo celular logo depois de encerrar entram no histórico **sem reabrir** (e sem automação). Pergunta, áudio, foto reabrem. Com fluxo esperando resposta (pesquisa), a regra não vale. Eco atrasado do que o painel enviou é reconhecido (mesmo texto, sem `externalId`) e não vira mensagem "do celular".

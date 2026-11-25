@@ -1921,11 +1921,11 @@ export class ConversationsService {
     return { closed: fechadas.length, ignored: pedidos.length - fechadas.length, withPayment: comPagamento };
   }
 
-  /** Tags escolhidas no encerramento, recortadas pelo tenant e na ordem do pedido. */
+  /** Tags escolhidas no encerramento, recortadas pelo tenant e na ordem do pedido. Só de transição: marcam o atendimento. */
   private async closingTags(tenantId: string, ids?: string[]) {
     const pedidos = [...new Set(ids ?? [])];
     if (!pedidos.length) return [];
-    const tags = await this.prisma.tag.findMany({ where: { tenantId, id: { in: pedidos } }, select: { id: true, name: true } });
+    const tags = await this.prisma.tag.findMany({ where: { tenantId, kind: 'transition', id: { in: pedidos } }, select: { id: true, name: true } });
     return pedidos.map((id) => tags.find((t) => t.id === id)).filter((t): t is { id: string; name: string } => !!t);
   }
 
@@ -2123,20 +2123,22 @@ export class ConversationsService {
    * assume. Sem isso, marcar uma etapa pelo chat não moveria o card.
    * Tag nova tira as opostas diretas dela (`tags/conflicts.ts`) — vale para quem chamar a API
    * sem passar pela tela.
+   * Só tag de TRANSIÇÃO entra no atendimento; uma permanente que já estava (de antes da
+   * separação dos tipos) pode continuar, mas não se coloca nova.
    */
   async setTags(tenantId: string, id: string, tagIds: string[]) {
     await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId } });
     // só tags deste tenant: o id vem do corpo da requisição
     const pedidas = await this.prisma.tag.findMany({
       where: { id: { in: [...new Set(tagIds)] }, tenantId },
-      select: { id: true, isKanban: true },
+      select: { id: true, isKanban: true, kind: true },
       orderBy: [{ position: 'asc' }, { name: 'asc' }],
     });
     await this.prisma.$transaction(async (tx) => {
       await this.lockConversation(tx, id);
       const antes = (await tx.conversationTag.findMany({ where: { conversationId: id }, select: { tagId: true } })).map((t) => t.tagId);
       // ordem do pedido (a última marcada vence), não a do Kanban
-      const ordem = [...new Set(tagIds)].filter((t) => pedidas.some((p) => p.id === t));
+      const ordem = [...new Set(tagIds)].filter((t) => pedidas.some((p) => p.id === t && (p.kind === 'transition' || antes.includes(t))));
       const ficam = new Set(resolveConflicts(antes, ordem, await conflictMap(tx, ordem)));
       const validas = pedidas.filter((t) => ficam.has(t.id));
       const atual = await tx.conversationTag.findFirst({ where: { conversationId: id, isPrimary: true }, select: { tagId: true } });
@@ -2158,9 +2160,9 @@ export class ConversationsService {
   async setPrimaryTag(tenantId: string, id: string, tagId: string | null) {
     await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId } });
     if (tagId) {
-      const tag = await this.prisma.tag.findFirst({ where: { id: tagId, tenantId }, select: { isKanban: true } });
+      const tag = await this.prisma.tag.findFirst({ where: { id: tagId, tenantId }, select: { isKanban: true, kind: true } });
       if (!tag) throw new NotFoundException('Tag não encontrada');
-      if (!tag.isKanban) throw new BadRequestException('Essa tag não é uma etapa do Kanban');
+      if (!tag.isKanban || tag.kind !== 'transition') throw new BadRequestException('Essa tag não é uma etapa do Kanban');
     }
     await this.prisma.$transaction(async (tx) => {
       await this.lockConversation(tx, id);
@@ -2190,14 +2192,17 @@ export class ConversationsService {
     await tx.$queryRaw(Prisma.sql`SELECT 1 FROM "conversations" WHERE "id" = ${id} FOR UPDATE`);
   }
 
-  /** Tags da pessoa (valem para todas as conversas dela). */
+  /**
+   * Tags da pessoa (valem para todas as conversas dela). Só tag PERMANENTE entra nova; uma de
+   * transição que já estava no contato (de antes da separação dos tipos) pode continuar.
+   */
   async setContactTags(tenantId: string, contactId: string, tagIds: string[]) {
     await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
     // só tags deste tenant, na ordem do pedido; tag nova tira as opostas diretas dela
-    const doTenant = new Set((await this.prisma.tag.findMany({ where: { id: { in: [...new Set(tagIds)] }, tenantId }, select: { id: true } })).map((t) => t.id));
-    const pedidas = [...new Set(tagIds)].filter((t) => doTenant.has(t));
+    const doTenant = new Map((await this.prisma.tag.findMany({ where: { id: { in: [...new Set(tagIds)] }, tenantId }, select: { id: true, kind: true } })).map((t) => [t.id, t.kind]));
     await this.prisma.$transaction(async (tx) => {
       const antes = (await tx.contactTag.findMany({ where: { contactId }, select: { tagId: true } })).map((t) => t.tagId);
+      const pedidas = [...new Set(tagIds)].filter((t) => doTenant.get(t) === 'permanent' || (doTenant.has(t) && antes.includes(t)));
       const ficam = resolveConflicts(antes, pedidas, await conflictMap(tx, pedidas));
       await tx.contactTag.deleteMany({ where: { contactId } });
       await tx.contactTag.createMany({ data: ficam.map((tagId) => ({ contactId, tagId })) });

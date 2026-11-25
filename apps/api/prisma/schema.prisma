@@ -1553,11 +1553,21 @@ model Message {
 // Tags (viram filtros e relatórios)
 // ============================================================
 
+/// Tipo da tag (docs/06-modelo-de-dados.md#tags): `transition` marca o atendimento (sai ao
+/// encerrar, é etapa do Kanban e tag de encerramento); `permanent` marca a pessoa (vale sempre).
+enum TagKind {
+  permanent
+  transition
+}
+
 model Tag {
   id        String   @id @default(uuid())
   tenantId  String
   name      String
   color     String   @default("#6366f1")
+  /// só `transition` vai no atendimento (caixa "Conversa", Kanban, encerramento); só `permanent`
+  /// vai no contato (📌). Vínculos antigos do outro tipo são mantidos, só não se criam novos.
+  kind      TagKind  @default(transition)
   /// vira coluna no Kanban (tag principal do atendimento = etapa do funil)
   isKanban  Boolean  @default(true)
   /// ordem da coluna no Kanban
@@ -1576,6 +1586,7 @@ model Tag {
   conflictsB    TagConflict[]     @relation("tagConflictB")
 
   @@unique([tenantId, name])
+  @@index([tenantId, kind])
   @@map("tags")
 }
 

@@ -129,6 +129,8 @@ export type MessageContent =
   | { kind: 'list'; header?: string; footer?: string; buttonText?: string; sections: { title?: string; rows: ContentListRow[] }[] }
   | { kind: 'location'; lat: number; lng: number; name?: string; address?: string; live?: boolean }
   | { kind: 'contacts'; contacts: ContentContact[] }
+  /** o WhatsApp avisou que chegou algo mas não entregou o conteúdo (Meta `unsupported`, ex.: erro 131060) */
+  | { kind: 'unavailable'; code?: number }
   /** marco na conversa (nota interna): um ticket nasceu daqui ou mudou de situação (docs/tickets.md) */
   | { kind: 'ticket'; ticketId: string; number: number; event: 'opened' | 'status'; status?: string; fromMessageId?: string | null };
 
@@ -159,6 +161,7 @@ export function messagePreview(m: { type: MessageType | string; text?: string | 
   const c = m.content;
   if (c?.kind === 'location') return `📍 ${c.name ?? c.address ?? (c.live ? 'Localização em tempo real' : 'Localização')}`;
   if (c?.kind === 'contacts') return `👤 ${c.contacts.map((x) => x.name).join(', ') || 'Contato'}`;
+  if (c?.kind === 'unavailable') return '⚠️ Mensagem indisponível';
   if (m.type === 'document' && m.mediaName) return `📄 ${m.mediaName}`;
   return MESSAGE_TYPE_LABEL[m.type as MessageType] ?? 'Mensagem';
 }

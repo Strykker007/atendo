@@ -6,7 +6,7 @@ import { Modal, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { MoneyInput } from '@/components/ui/MoneyInput';
-import { useCan, useFlows, useHasFeature, useSetStatus, useTags, useTenantSettings, useCloseReasons, reasonsFor, useOutcomeLabels, useSurveys, useBudgets, useConversation } from '@/lib/hooks';
+import { useCan, useFlows, useHasFeature, useSetStatus, useTags, tagsOfKind, useTenantSettings, useCloseReasons, reasonsFor, useOutcomeLabels, useSurveys, useBudgets, useConversation } from '@/lib/hooks';
 
 /**
  * Bloco do formulário de encerramento: rótulo, explicação logo abaixo dele e o campo. A dica
@@ -49,7 +49,8 @@ export function CloseTagsField({ outcome, value, onChange }: { outcome: CloseOut
   const tags = useTags();
   const labels = useOutcomeLabels();
   const [busca, setBusca] = useState('');
-  const doResultado = (tags.data ?? []).filter((t) => (outcome === 'won' ? t.showOnWon : t.showOnLost));
+  // só de transição: o encerramento marca o atendimento
+  const doResultado = tagsOfKind(tags.data, 'transition').filter((t) => (outcome === 'won' ? t.showOnWon : t.showOnLost));
   useEffect(() => {
     if (!tags.data) return;
     const validas = value.filter((id) => doResultado.some((t) => t.id === id));

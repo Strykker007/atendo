@@ -219,7 +219,7 @@ export class TemplateRolloutService {
     if (!novas.length) return;
     if (!dryRun) {
       await tx.tag.createMany({
-        data: novas.map((t) => ({ tenantId, name: t.name, position: position++, isKanban: !!t.isKanban, ...(t.color && { color: t.color }) })),
+        data: novas.map((t) => ({ tenantId, name: t.name, position: position++, kind: t.kind ?? 'transition', isKanban: !!t.isKanban, ...(t.color && { color: t.color }) })),
         skipDuplicates: true,
       });
     }

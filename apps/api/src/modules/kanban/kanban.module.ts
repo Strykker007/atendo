@@ -51,7 +51,8 @@ export class KanbanService {
     };
     const [columns, rows] = await Promise.all([
       this.prisma.tag.findMany({
-        where: { tenantId: u.tenantId, isKanban: true },
+        // etapa é do atendimento: só tag de transição vira coluna
+        where: { tenantId: u.tenantId, isKanban: true, kind: 'transition' },
         select: { id: true, name: true, color: true, position: true },
         orderBy: [{ position: 'asc' }, { name: 'asc' }],
       }),

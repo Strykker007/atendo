@@ -44,6 +44,8 @@ export interface TemplateTag {
   name: string;
   /** `#rrggbb`; sem ela, a cor padrão de tag */
   color?: string;
+  /** `permanent` = da pessoa (📌); ausente = transição (do atendimento — Kanban e encerramento só nela) */
+  kind?: 'permanent' | 'transition';
   /** vira coluna do Kanban (etapa do funil) */
   isKanban?: boolean;
   /** aparece para escolha ao encerrar como "Comprou" */
@@ -261,7 +263,9 @@ export function parseTemplateContent(raw: unknown): TemplateContent {
       if (t.color !== undefined && (typeof t.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(t.color))) throw new Error(`Cor da tag "${name}" inválida (use #rrggbb).`);
       // `showOnClose` (formato de antes de separar Comprou / Não comprou) valia para os dois
       const legado = (t as { showOnClose?: unknown }).showOnClose === true;
-      tags.push({ name, ...(t.color && { color: t.color.toLowerCase() }), isKanban: t.isKanban === true, showOnWon: t.showOnWon === true || legado, showOnLost: t.showOnLost === true || legado });
+      // permanente não é etapa nem de encerramento (mesma regra da tela de Tags)
+      const permanente = t.kind === 'permanent' && !legado;
+      tags.push({ name, ...(t.color && { color: t.color.toLowerCase() }), ...(permanente && { kind: 'permanent' as const }), isKanban: !permanente && t.isKanban === true, showOnWon: (!permanente && t.showOnWon === true) || legado, showOnLost: (!permanente && t.showOnLost === true) || legado });
     }
     if (tags.length > TEMPLATE_TAGS_MAX) throw new Error(`No máximo ${TEMPLATE_TAGS_MAX} tags no modelo.`);
     tagConflicts(tags, o.tags as Partial<TemplateTag>[]);

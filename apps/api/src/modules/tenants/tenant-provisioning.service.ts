@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { SYSTEM_PROFILES, copyName, flowFromPortable, flowTagNames, flowToPortable, uniqueName, type FlowDefinition, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
+import { SYSTEM_PROFILES, copyName, flowFromPortable, flowPermanentTagNames, flowTagNames, flowToPortable, uniqueName, type FlowDefinition, type FlowNodeType, type FlowTrigger, type PortableFlow } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { assertOwnFlowMedia, validateDefinition } from '../flows/flow-validation';
 import { toPortableReply } from '../quick-replies/portable';
@@ -82,7 +82,8 @@ export class TenantProvisioningService {
 
     if (!content.flows.length) return;
     const tagNames = [...new Set(content.flows.flatMap((p) => flowTagNames(p.definition)))];
-    if (tagNames.length) await tx.tag.createMany({ data: tagNames.map((name) => ({ tenantId, name })), skipDuplicates: true });
+    const permanentes = new Set(content.flows.flatMap((p) => flowPermanentTagNames(p.definition)));
+    if (tagNames.length) await tx.tag.createMany({ data: tagNames.map((name) => ({ tenantId, name, kind: permanentes.has(name) ? 'permanent' as const : 'transition' as const })), skipDuplicates: true });
     const tags = await tx.tag.findMany({ where: { tenantId }, select: { id: true, name: true } });
     const tagIdByName = Object.fromEntries(tags.map((t) => [t.name, t.id]));
     const { refs } = await refMaps(tx, tenantId);
@@ -107,7 +108,7 @@ export class TenantProvisioningService {
       this.prisma.accessProfile.findMany({ where: { tenantId }, orderBy: [{ isSystem: 'desc' }, { name: 'asc' }] }),
       this.prisma.quickReply.findMany({ where: { folder: { tenantId } }, include: { folder: { select: { name: true } } }, orderBy: [{ folder: { position: 'asc' } }, { position: 'asc' }] }),
       this.prisma.flow.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
-      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, isKanban: true, showOnWon: true, showOnLost: true, conflictsA: { select: { otherId: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
+      this.prisma.tag.findMany({ where: { tenantId }, select: { id: true, name: true, color: true, kind: true, isKanban: true, showOnWon: true, showOnLost: true, conflictsA: { select: { otherId: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
       this.prisma.closeReason.findMany({ where: { tenantId, isActive: true }, select: { name: true, color: true, outcome: true }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
       this.prisma.tenantSettings.findUnique({ where: { tenantId }, select: { salesEnabled: true, requireSignature: true, wonLabel: true, lostLabel: true, autoReassignWaiting: true, autoReassignAssigned: true, autoReassignBaseMinutes: true, autoReassignMaxMinutes: true, autoReassignMaxTimes: true, releaseAwayEnabled: true, releaseAwayMinutes: true } }),
       this.prisma.department.findMany({ where: { tenantId, isActive: true }, select: { id: true, name: true, color: true, description: true, parentId: true }, orderBy: { name: 'asc' } }),
@@ -128,7 +129,7 @@ export class TenantProvisioningService {
     const qr = replies.map((r) => toPortableReply(r, r.folder.name));
     qr.forEach((o) => o.warnings.forEach((w) => warnings.add(w)));
     const portableFlows = flows.map((f) => {
-      const out = flowToPortable({ name: f.name, description: f.description, showOnClosing: f.showOnClosing, trigger: f.trigger as unknown as FlowTrigger, definition: f.definition as unknown as FlowDefinition }, { tagNameById, flowNameById, ...refNames });
+      const out = flowToPortable({ name: f.name, description: f.description, showOnClosing: f.showOnClosing, trigger: f.trigger as unknown as FlowTrigger, definition: f.definition as unknown as FlowDefinition }, { tagNameById, flowNameById, permanentTagIds: tags.filter((t) => t.kind === 'permanent').map((t) => t.id), ...refNames });
       out.warnings.forEach((w) => warnings.add(`${f.name}: ${w}`));
       return out.portable;
     });
@@ -143,7 +144,7 @@ export class TenantProvisioningService {
         // + motivos de encerramento como tags marcadas Comprou/Não comprou (no cliente novo voltam a ser motivo)
         tags: [
           // "conflita com": um lado só basta (o par é simétrico); `tagId` < `otherId` na linha guardada
-          ...tags.map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), isKanban: t.isKanban, showOnWon: t.showOnWon, showOnLost: t.showOnLost, ...(t.conflictsA.length && { conflictsWith: t.conflictsA.map((c) => tagNameById[c.otherId]).filter(Boolean) }) })),
+          ...tags.map((t) => ({ name: t.name, ...(/^#[0-9a-f]{6}$/i.test(t.color) && { color: t.color.toLowerCase() }), ...(t.kind === 'permanent' && { kind: 'permanent' as const }), isKanban: t.isKanban, showOnWon: t.showOnWon, showOnLost: t.showOnLost, ...(t.conflictsA.length && { conflictsWith: t.conflictsA.map((c) => tagNameById[c.otherId]).filter(Boolean) }) })),
           ...motivos.filter((m) => !tags.some((t) => t.name.toLowerCase() === m.name.toLowerCase())).map((m) => ({ name: m.name, ...(/^#[0-9a-f]{6}$/i.test(m.color) && { color: m.color.toLowerCase() }), isKanban: false, showOnWon: m.outcome !== 'lost', showOnLost: m.outcome !== 'won' })),
         ].slice(0, TEMPLATE_TAGS_MAX),
         // configurações de atendimento como estão no cliente

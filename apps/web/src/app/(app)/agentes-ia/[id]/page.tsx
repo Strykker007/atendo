@@ -254,7 +254,8 @@ function Alvos({ f, cat, usadas, set }: { f: AiAgentConfig; cat: AgentCatalog; u
         <Checks itens={cat.departments} marcados={t.departmentIds ?? []} onChange={(v) => setT({ departmentIds: v })} vazio="Nenhum departamento cadastrado." />
       </Grupo>
       <Grupo label={`Etiquetas que pode marcar${aviso('add_tag')}`}>
-        <Checks itens={cat.tags} marcados={t.tagIds ?? []} onChange={(v) => setT({ tagIds: v })} vazio="Nenhuma etiqueta cadastrada." />
+        {/* transição primeiro (marca o atendimento); permanente com 📌 (vai para o contato) */}
+        <Checks itens={[...cat.tags].sort((a, b) => Number(a.kind === 'permanent') - Number(b.kind === 'permanent')).map((x) => (x.kind === 'permanent' ? { ...x, name: `📌 ${x.name}` } : x))} marcados={t.tagIds ?? []} onChange={(v) => setT({ tagIds: v })} vazio="Nenhuma etiqueta cadastrada." />
       </Grupo>
       <Grupo label={`Dados do contato que pode salvar${aviso('set_contact_field')}`}>
         <Checks itens={campos} marcados={t.contactFields ?? []} onChange={(v) => setT({ contactFields: v })} vazio="" />

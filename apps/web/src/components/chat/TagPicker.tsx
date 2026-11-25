@@ -17,6 +17,9 @@ import type { Tag } from '@/lib/hooks';
  *
  * Com `field`, tem a mesma borda, fundo e altura dos campos de formulário (`inputCls`) — para
  * ficar alinhado numa linha de filtros com selects e datas.
+ *
+ * Lista com os dois tipos (filtros, transmissões): as de transição vêm primeiro e as permanentes
+ * levam 📌 — quem lê sabe se está filtrando pelo atendimento ou pela pessoa.
  */
 export function TagPicker({ tags, value, onChange, placeholder, compact, field, primaryId, onPrimary, exclusive }: { tags: Tag[]; value: string[]; onChange: (ids: string[]) => void; placeholder?: string; compact?: boolean; field?: boolean; primaryId?: string | null; onPrimary?: (id: string) => void; exclusive?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -30,7 +33,10 @@ export function TagPicker({ tags, value, onChange, placeholder, compact, field, 
   }, []);
 
   const selected = tags.filter((t) => value.includes(t.id));
-  const options = tags.filter((t) => !value.includes(t.id) && t.name.toLowerCase().includes(q.toLowerCase()));
+  const misto = tags.some((t) => t.kind === 'permanent') && tags.some((t) => t.kind !== 'permanent');
+  const options = tags
+    .filter((t) => !value.includes(t.id) && t.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (misto ? Number(a.kind === 'permanent') - Number(b.kind === 'permanent') : 0));
   const toggle = (id: string) => {
     if (value.includes(id)) return onChange(value.filter((v) => v !== id));
     const nova = tags.find((t) => t.id === id);
@@ -53,6 +59,7 @@ export function TagPicker({ tags, value, onChange, placeholder, compact, field, 
             onClick={(e) => { if (!onPrimary || t.id === primaryId || t.isKanban === false) return; e.stopPropagation(); onPrimary(t.id); }}
           >
             {t.id === primaryId && <Star size={10} className="fill-current" />}
+            {misto && t.kind === 'permanent' && <span title="Tag permanente (da pessoa)">📌</span>}
             {t.name}
             <X size={11} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); toggle(t.id); }} />
           </span>
@@ -77,6 +84,7 @@ export function TagPicker({ tags, value, onChange, placeholder, compact, field, 
             <button key={t.id} type="button" onClick={() => { toggle(t.id); setQ(''); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-field flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full" style={{ background: t.color }} />
               {t.name}
+              {misto && <span className="ml-auto text-[10px] text-faint">{t.kind === 'permanent' ? '📌 permanente' : 'transição'}</span>}
             </button>
           ))}
         </div>

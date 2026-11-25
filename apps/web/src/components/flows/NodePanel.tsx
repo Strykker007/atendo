@@ -7,8 +7,8 @@ import { Field, inputCls } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { NODE_META, TRANSFORM_META, isTransform, DELAY_UNIT, FlowEditorRefs, fmtAtraso } from './nodes';
 import { OpOptions, TransformPreview } from './TransformPreview';
-import { useTags, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useVocab, useSurveys, reasonsFor, useAiAgents } from '@/lib/hooks';
-import { DEPARTMENT_NONE } from '@atendo/shared';
+import { useTags, tagsOfKind, useAgents, useServices, useProfessionals, useHasFeature, useDepartments, useCloseReasons, useOutcomeLabels, useVocab, useSurveys, reasonsFor, useAiAgents } from '@/lib/hooks';
+import { DEPARTMENT_NONE, tagScopeOf } from '@atendo/shared';
 import { TextWithVars, SYSTEM_VARS, type FlowVar } from './TextWithVars';
 import { CONTACT_FIELD_LABEL, MAX_FLOW_HOPS, START_DELAY_OPTIONS, WEBHOOK_DEFAULT_TIMEOUT_SEC, WEBHOOK_MAX_TIMEOUT_SEC, WEBHOOK_METHODS, distributeRemaining, normalizeCondition, normalizeContent, randomizerLockedTotal, randomizerTotal, type ContactField, type DelayUnit, type WaitUnit, type FlowNode, type ReplyTimeout, type VariableAssignment, type VariableOp, type WebhookHeader } from '@atendo/shared';
 import { ConditionPanel } from './ConditionPanel';
@@ -250,13 +250,18 @@ export function NodePanel({ node, onChange, onDelete, vars }: { node: FlowNode; 
             )}
             {(node.data.kind === 'add_tag' || node.data.kind === 'remove_tag') && (
               <>
-                <Field label="Tag"><select className={`${inputCls} min-w-0 max-w-full`} value={node.data.tagId ?? ''} onChange={(e) => set({ tagId: e.target.value })}><option value="">Escolha…</option>{tags.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
-                <Field label="Aplicar em" hint="Contato = vale para sempre, em todas as conversas dessa pessoa (ex.: comprador recorrente)">
-                  <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2">
-                    {([['conversation', 'Esta conversa'], ['contact', '📌 Contato']] as const).map(([v, l]) => (
-                      <button type="button" key={v} onClick={() => set({ scope: v })} className={`rounded-lg border px-3 py-1.5 text-sm ${(node.data.scope ?? 'conversation') === v ? 'border-accent bg-accent-soft text-ink' : 'border-line text-muted hover:bg-field'}`}>{l}</button>
-                    ))}
-                  </div>
+                {/* o TIPO da tag decide onde ela vai: transição no atendimento, permanente no contato.
+                    `scope` acompanha só para a exportação levar o tipo (portable.ts). */}
+                <Field label="Tag" hint={(() => {
+                  const t = tags.data?.find((x) => x.id === node.data.tagId);
+                  if (!t) return 'Transição = só neste atendimento (sai ao encerrar). Permanente = na pessoa, vale para sempre.';
+                  return t.kind === 'permanent' ? '📌 Permanente: vai no contato e vale em todas as conversas dessa pessoa.' : 'Transição: vai neste atendimento e sai ao encerrar.';
+                })()}>
+                  <select className={`${inputCls} min-w-0 max-w-full`} value={node.data.tagId ?? ''} onChange={(e) => { const t = tags.data?.find((x) => x.id === e.target.value); set({ tagId: e.target.value, scope: tagScopeOf(t?.kind) }); }}>
+                    <option value="">Escolha…</option>
+                    <optgroup label="Transição (atendimento)">{tagsOfKind(tags.data, 'transition').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+                    <optgroup label="📌 Permanentes (contato)">{tagsOfKind(tags.data, 'permanent').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+                  </select>
                 </Field>
               </>
             )}

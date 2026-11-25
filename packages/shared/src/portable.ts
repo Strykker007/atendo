@@ -100,6 +100,8 @@ export type PortableFlowBundle = PortableBundle<'flow', PortableFlow>;
 /** Nomes do cliente de origem, para traduzir id → nome (o que não estiver aqui sai com aviso). */
 export interface SourceNames {
   tagNameById?: Record<string, string>;
+  /** tags permanentes da origem: o bloco de tag sai com `scope: 'contact'` e o destino as cria permanentes */
+  permanentTagIds?: string[];
   flowNameById?: Record<string, string>;
   /** agente de IA do bloco IA (modo Agente) e tipo do "Abrir ticket": viajam pelo nome */
   aiAgentNameById?: Record<string, string>;
@@ -152,6 +154,7 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
   const warnings: string[] = [];
   const definition = clone(def);
   const tagNameById = names.tagNameById ?? {};
+  const permanentes = new Set(names.permanentTagIds ?? []);
   const flowNameById = names.flowNameById ?? {};
 
   for (const node of definition.nodes as unknown as AnyNode[]) {
@@ -160,6 +163,8 @@ export function scrubFlowDefinition(def: FlowDefinition, names: SourceNames = {}
     for (const holder of tagHolders(node)) {
       if (typeof holder.tagId !== 'string') continue;
       const name = tagNameById[holder.tagId];
+      // o tipo da tag viaja no `scope` do bloco de ação (é por ele que o destino cria o tipo certo)
+      if (name && holder === d && node.type === 'action') holder.scope = permanentes.has(holder.tagId) ? 'contact' : 'conversation';
       delete holder.tagId;
       if (name) holder.tagName = name;
       else {
@@ -281,6 +286,15 @@ export function flowRefNames(def: FlowDefinition): { aiAgents: string[]; ticketT
   const nodes = def.nodes as unknown as AnyNode[];
   const of = (k: string) => [...new Set(nodes.map((n) => n.data[k]).filter((v): v is string => typeof v === 'string' && v.trim() !== ''))];
   return { aiAgents: of('aiAgentName'), ticketTypes: of('ticketTypeName') };
+}
+
+/** Das etiquetas do desenho portável, as que são permanentes (bloco de ação com `scope: 'contact'`). */
+export function flowPermanentTagNames(def: FlowDefinition): string[] {
+  const names = (def.nodes as unknown as AnyNode[])
+    .filter((n) => n.type === 'action' && n.data.scope === 'contact')
+    .map((n) => n.data.tagName)
+    .filter((v): v is string => typeof v === 'string' && v.trim() !== '');
+  return [...new Set(names)];
 }
 
 /** Nomes de etiqueta citados no desenho portável — o destino precisa garantir que existam antes. */

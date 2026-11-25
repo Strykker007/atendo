@@ -6,7 +6,8 @@ import { api } from '../api';
 
 export interface AgentCatalog {
   departments: { id: string; name: string }[];
-  tags: { id: string; name: string }[];
+  /** transição vai no atendimento; permanente (📌), no contato */
+  tags: { id: string; name: string; kind?: 'permanent' | 'transition' }[];
   closeReasons: { id: string; name: string }[];
   /** rótulos dos campos personalizados da ficha */
   customFields: string[];

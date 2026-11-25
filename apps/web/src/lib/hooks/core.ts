@@ -7,10 +7,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, onAccessToken } from '../api';
 import { useUI, type ConversationTab } from '../store';
-import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal } from '@atendo/shared';
+import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal, TagKind } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
-export interface Tag { id: string; name: string; color: string; isKanban?: boolean; position?: number; /** aparece ao encerrar como "Comprou" */ showOnWon?: boolean; /** aparece ao encerrar como "Não comprou" */ showOnLost?: boolean; /** opostas diretas: marcar esta tira estas (nos dois sentidos) */ conflictIds?: string[] }
+export interface Tag { id: string; name: string; color: string; /** transição = do atendimento (padrão); permanente = da pessoa (📌) */ kind?: TagKind; isKanban?: boolean; position?: number; /** aparece ao encerrar como "Comprou" */ showOnWon?: boolean; /** aparece ao encerrar como "Não comprou" */ showOnLost?: boolean; /** opostas diretas: marcar esta tira estas (nos dois sentidos) */ conflictIds?: string[] }
 export type SendDelayProfile = 'instant' | 'fast' | 'short' | 'moderate' | 'medium' | 'long';
 export interface NumberItem { id: string; phone: string; label: string; color: string; provider: 'meta' | 'evolution'; status: string; isActive: boolean; createdAt: string; sendDelay: SendDelayProfile; sendDailyLimit: number; /** teto de transmissão por 24h (QR Code) */ campaignDailyLimit?: number; sendLimits?: Partial<SendLimits> | null; warmupStartedAt: string | null; infraCostMonth?: string | number; /** quadro de horários próprio; null = o padrão */ scheduleId?: string | null; /** empresa/unidade do número; null = sem empresa */ companyId?: string | null; /** última vez que o WhatsApp derrubou a conexão (401 device_removed) */ waRemovedAt?: string | null; /** quedas seguidas em 24h */ waRemovedCount?: number; /** conectado, mas parou de receber (chaves corrompidas) — ler o QR de novo */ receiveStalledAt?: string | null; /** reconectou neste instante: mensagens de quando estava fora ainda chegando (NumberSyncNotice) */ syncStartedAt?: string | null; /** reconectar antes disto pede confirmação */ reconnectBlockedUntil?: string | null; /** aquecimento da sessão (QR lido há < 72h); null = operação normal */ warmup?: { phase: number; newConvPerHour: number; minGapMs: number; autoPerHour: number; endsAt: string } | null; /** quem pediu pode gerenciar a conexão deste número (QR, reconectar, excluir) */ manageable?: boolean; /** só quem tem o número marcado em Equipe enxerga (docs/18-perfis-de-acesso.md#número-reservado) */ reserved?: boolean; /** quem recebe atendimento automático (docs/distribuicao-por-numero.md); vazio = todos que enxergam */ receiverIds?: string[]; /** departamento em que as conversas do número nascem (docs/departamentos.md#departamento-do-número) */ defaultDepartmentId?: string | null }
 export interface SendingStatus { ok: boolean; reason?: string; limit: number; sent: number; sendDelay: SendDelayProfile; warmupStartedAt: string | null }
@@ -100,6 +100,12 @@ export interface Folder { id: string; name: string; replies: QuickReplyItem[] }
 
 export const useNumbers = () => useQuery({ queryKey: ['numbers'], queryFn: () => api<NumberItem[]>('/numbers') });
 export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => api<Tag[]>('/tags') });
+/**
+ * Tags oferecidas num lugar: só as do tipo (`transition` no atendimento, `permanent` no contato)
+ * + as já marcadas ali (vínculo de antes da separação dos tipos continua visível e removível).
+ * Sem `kind` na resposta conta como transição.
+ */
+export const tagsOfKind = (all: Tag[] | undefined, kind: TagKind, keep: string[] = []) => (all ?? []).filter((t) => (t.kind ?? 'transition') === kind || keep.includes(t.id));
 export const useQuickReplies = () => useQuery({ queryKey: ['quick-replies'], queryFn: () => api<Folder[]>('/quick-replies') });
 /** No cliente: se o preço escala por empresa. Na empresa: herda do grupo ou tem assinatura própria (docs/empresas.md#cobrança). */
 export type BillingType = 'INDIVIDUAL' | 'CONSOLIDATED_GROUP';

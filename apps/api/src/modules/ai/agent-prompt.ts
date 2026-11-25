@@ -12,7 +12,8 @@ import { AGENT_TONES, AGENT_TOOLS, CONTACT_FIELD_LABEL, type KnowledgeHit, type 
 /** Nomes dos alvos, para a IA escolher por nome e o código conferir por id. */
 export interface AgentCatalog {
   departments: { id: string; name: string }[];
-  tags: { id: string; name: string }[];
+  /** `kind`: transição vai no atendimento; permanente, no contato (`tagScopeOf`) */
+  tags: { id: string; name: string; kind?: 'permanent' | 'transition' }[];
   closeReasons: { id: string; name: string }[];
   /** rótulos dos campos personalizados da ficha (`attribute:<rótulo>`) */
   customFields: string[];
@@ -46,7 +47,7 @@ function toolLines(stage: AgentStage, agent: AiAgentConfig, catalog: AgentCatalo
       if (deps.length) out.push(`${base} Campos: "departmentId" (um destes: ${deps.map((d) => `${d.id} = ${d.name}`).join('; ')}), "reason".`);
     } else if (tool === 'add_tag') {
       const tags = pick(catalog.tags, t.tagIds);
-      if (tags.length) out.push(`${base} Campo: "tagId" (um destes: ${tags.map((d) => `${d.id} = ${d.name}`).join('; ')}).`);
+      if (tags.length) out.push(`${base} Campo: "tagId" (um destes: ${tags.map((d) => `${d.id} = ${d.name}${d.kind === 'permanent' ? ' (permanente: fica no contato)' : ''}`).join('; ')}).`);
     } else if (tool === 'close') {
       const rs = pick(catalog.closeReasons, t.closeReasonIds);
       out.push(`${base} Campos opcionais: "outcome" ("won" venda/conversão ou "lost")${rs.length ? `, "closeReasonId" (um destes: ${rs.map((d) => `${d.id} = ${d.name}`).join('; ')})` : ''}.`);
