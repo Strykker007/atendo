@@ -181,7 +181,8 @@ export default function EquipePage() {
   );
 
   return (
-    <PageShell width="max-w-6xl">
+    // largura total: com muitas colunas, as ações ficavam escondidas atrás do scroll (mesmo padrão de Clientes)
+    <PageShell width="max-w-none">
       <PageHeader
         title="Equipe"
         subtitle={<>Escolha o perfil de acesso de cada pessoa — ele define exatamente o que ela pode fazer. {max !== undefined && <>Plano <b>{usage.data?.plan}</b>: {max === null ? `${count} membros (ilimitado)` : `${count}/${max} membros`}.</>}</>}
@@ -212,19 +213,20 @@ export default function EquipePage() {
                   <th className="px-4 py-2.5">Números</th>
                   <th className="px-4 py-2.5 hidden lg:table-cell" title="Velocidade do &quot;digitando…&quot; que o contato vê nas mensagens que a pessoa não digitou (resposta rápida, texto colado, encaminhada, agendada). Máximo de 10 segundos por mensagem.">Digitação</th>
                   <th className="px-4 py-2.5">Último acesso</th>
-                  <th className="px-4 py-2.5"><span className="sr-only">Ações</span></th>
+                  <th className="px-3 py-2.5 sticky right-0 bg-field text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {agents.data.map((a) => (
-                  <tr key={a.id} className={cn('align-middle', !a.isActive && 'opacity-50')}>
+                  {/* desativado fica apagado, menos as ações (fixas à direita: opacidade nelas deixaria vazar o que rola por baixo) */}
+                  <tr key={a.id} className={cn('align-middle', !a.isActive && '[&>td:not(:last-child)]:opacity-50')}>
                     <td className="px-4 py-3 min-w-48">{pessoa(a)}</td>
                     <td className="px-4 py-3">{perfil(a)}</td>
                     <td className="px-4 py-3">{departamentos(a)}</td>
                     <td className="px-4 py-3"><NumberScopeButton agent={a} onOpen={abreAcesso(a) ?? (() => undefined)} /></td>
                     <td className="px-4 py-3 hidden lg:table-cell">{digitacao(a)}</td>
                     <td className="px-4 py-3 text-muted whitespace-nowrap">{ultimoAcesso(a)}</td>
-                    <td className="px-4 py-3"><div className="flex items-center justify-end gap-0.5 whitespace-nowrap">{acoes(a, true)}</div></td>
+                    <td className="px-3 py-3 sticky right-0 bg-panel shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.15)]"><div className="flex items-center justify-end gap-0.5 whitespace-nowrap">{acoes(a, true)}</div></td>
                   </tr>
                 ))}
               </tbody>
