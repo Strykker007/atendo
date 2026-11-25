@@ -2142,7 +2142,8 @@ export class ConversationsService {
       const ficam = new Set(resolveConflicts(antes, ordem, await conflictMap(tx, ordem)));
       const validas = pedidas.filter((t) => ficam.has(t.id));
       const atual = await tx.conversationTag.findFirst({ where: { conversationId: id, isPrimary: true }, select: { tagId: true } });
-      const principal = atual && validas.some((t) => t.id === atual.tagId) ? atual.tagId : validas.find((t) => t.isKanban)?.id ?? null;
+      // etapa do atendimento é de transição (permanente-coluna vale pelo contato)
+      const principal = atual && validas.some((t) => t.id === atual.tagId) ? atual.tagId : validas.find((t) => t.isKanban && t.kind === 'transition')?.id ?? null;
       await tx.conversationTag.deleteMany({ where: { conversationId: id } });
       await tx.conversationTag.createMany({ data: validas.map((t) => ({ conversationId: id, tagId: t.id, isPrimary: t.id === principal })) });
     });
@@ -2156,18 +2157,31 @@ export class ConversationsService {
    * Troca a tag principal — é o "mover card" do Kanban. A antiga continua no atendimento,
    * rebaixada a secundária; a nova entra se ainda não estava. `null` tira da etapa.
    * Só tag de coluna (`isKanban`) pode ser principal: as outras não têm onde aparecer no quadro.
+   *
+   * Coluna PERMANENTE (docs/06-modelo-de-dados.md#tags): a tag vai para o contato — tirando a
+   * outra permanente-coluna dele (o card só fica numa) e as opostas — e o atendimento perde a
+   * etapa (senão a etapa, que tem prioridade, seguraria o card na coluna antiga). `null` ("Sem
+   * etapa"): tira a etapa e as permanentes-coluna do contato; as demais tags dele ficam.
    */
   async setPrimaryTag(tenantId: string, id: string, tagId: string | null) {
-    await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId } });
+    const conversa = await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId }, select: { contactId: true } });
+    const tag = tagId ? await this.prisma.tag.findFirst({ where: { id: tagId, tenantId }, select: { isKanban: true, kind: true } }) : null;
     if (tagId) {
-      const tag = await this.prisma.tag.findFirst({ where: { id: tagId, tenantId }, select: { isKanban: true, kind: true } });
       if (!tag) throw new NotFoundException('Tag não encontrada');
-      if (!tag.isKanban || tag.kind !== 'transition') throw new BadRequestException('Essa tag não é uma etapa do Kanban');
+      if (!tag.isKanban) throw new BadRequestException('Essa tag não é uma etapa do Kanban');
     }
+    const colunasDoContato = { contactId: conversa.contactId, tag: { tenantId, isKanban: true, kind: 'permanent' as const } };
     await this.prisma.$transaction(async (tx) => {
       await this.lockConversation(tx, id);
       await tx.conversationTag.updateMany({ where: { conversationId: id, isPrimary: true }, data: { isPrimary: false } });
-      if (tagId) {
+      if (!tagId) {
+        await tx.contactTag.deleteMany({ where: colunasDoContato });
+      } else if (tag!.kind === 'permanent') {
+        const jaTinha = await tx.contactTag.count({ where: { contactId: conversa.contactId, tagId } });
+        const opostas = jaTinha ? [] : [...((await conflictMap(tx, [tagId])).get(tagId) ?? [])];
+        await tx.contactTag.deleteMany({ where: { OR: [{ ...colunasDoContato, tagId: { not: tagId } }, { contactId: conversa.contactId, tagId: { in: opostas } }] } });
+        await tx.contactTag.upsert({ where: { contactId_tagId: { contactId: conversa.contactId, tagId } }, create: { contactId: conversa.contactId, tagId }, update: {} });
+      } else {
         // mover o card para uma etapa que ainda não estava tira as opostas diretas dela
         const jaTinha = await tx.conversationTag.count({ where: { conversationId: id, tagId } });
         const opostas = jaTinha ? [] : [...((await conflictMap(tx, [tagId])).get(tagId) ?? [])];
@@ -2181,6 +2195,12 @@ export class ConversationsService {
     });
     const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id }, include: { tags: { include: { tag: true } } } });
     this.gateway.emitConversation(tenantId, conv);
+    // tag do contato mudou: as outras conversas dele (e o quadro) também
+    if (tag?.kind === 'permanent' || !tagId) {
+      const outras = await this.prisma.conversation.findMany({ where: { contactId: conversa.contactId, id: { not: id } } });
+      for (const c of outras) this.gateway.emitConversation(tenantId, c);
+      this.gateway.emitKanban(tenantId);
+    }
     return conv;
   }
 

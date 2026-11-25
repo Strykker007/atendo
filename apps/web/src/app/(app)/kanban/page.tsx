@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useMemo, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { Columns3, GripVertical, Search } from 'lucide-react';
+import { Columns3, GripVertical, Pin, Search } from 'lucide-react';
 import { KANBAN_NO_STAGE, type KanbanCard as Card, type KanbanColumn } from '@atendo/shared';
 import Link from 'next/link';
 import { KanbanCard } from '@/components/kanban/KanbanCard';
@@ -44,7 +44,8 @@ export default function KanbanPage() {
     const map = new Map<string, Card[]>([[KANBAN_NO_STAGE, []], ...columns.map((c) => [c.id, []] as [string, Card[]])]);
     for (const card of board.data?.cards ?? []) {
       if (q && !(card.contact.name ?? '').toLowerCase().includes(q) && !card.contact.phone.includes(q)) continue;
-      map.get(card.primaryTagId && ids.has(card.primaryTagId) ? card.primaryTagId : KANBAN_NO_STAGE)!.push(card);
+      // a API já diz a coluna (etapa do atendimento, senão a permanente do contato)
+      map.get(ids.has(card.columnId) ? card.columnId : KANBAN_NO_STAGE)!.push(card);
     }
     return map;
   }, [board.data, columns, busca]);
@@ -69,11 +70,15 @@ export default function KanbanPage() {
     const id = col?.id ?? KANBAN_NO_STAGE;
     const cards = porColuna.get(id) ?? [];
     return (
-      <div className="w-72 shrink-0 flex flex-col max-h-full rounded-2xl bg-field/60 border border-line">
+      <div className={cn('w-72 shrink-0 flex flex-col max-h-full rounded-2xl bg-field/60 border', col?.kind === 'permanent' ? 'border-dashed border-line-strong' : 'border-line')}>
         <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
           {handle}
-          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: col?.color ?? 'var(--color-faint, #94a3b8)' }} />
-          <span className="font-semibold text-sm text-ink truncate flex-1">{col?.name ?? 'Sem etapa'}</span>
+          {/* permanente: 📌 no lugar da bolinha e o aviso de que a coluna é do contato */}
+          {col?.kind === 'permanent'
+            ? <Pin size={12} className="shrink-0" style={{ color: col.color }} aria-hidden />
+            : <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: col?.color ?? 'var(--color-faint, #94a3b8)' }} />}
+          <span className="font-semibold text-sm text-ink truncate flex-1" title={col?.kind === 'permanent' ? 'Tag permanente (do contato): o atendimento fica aqui enquanto não tiver etapa própria' : undefined}>{col?.name ?? 'Sem etapa'}</span>
+          {col?.kind === 'permanent' && <span className="text-[10px] font-semibold uppercase tracking-wide text-faint border border-dashed border-line rounded px-1 py-px shrink-0">contato</span>}
           <span className="text-xs text-faint tnum">{cards.length}</span>
         </div>
         <Droppable droppableId={id} type="CARD">

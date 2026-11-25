@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Injectable, Module, Patch, Query, UseGuards } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsOptional, IsUUID } from 'class-validator';
 import type { Prisma } from '@prisma/client';
-import type { KanbanBoard, KanbanCard, KanbanTag, ReorderColumnsInput } from '@atendo/shared';
+import { KANBAN_NO_STAGE, type KanbanBoard, type KanbanCard, type KanbanTag, type ReorderColumnsInput } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -51,9 +51,9 @@ export class KanbanService {
     };
     const [columns, rows] = await Promise.all([
       this.prisma.tag.findMany({
-        // etapa é do atendimento: só tag de transição vira coluna
-        where: { tenantId: u.tenantId, isKanban: true, kind: 'transition' },
-        select: { id: true, name: true, color: true, position: true },
+        // transição (etapa do atendimento) e permanente (classificação do contato, 📌)
+        where: { tenantId: u.tenantId, isKanban: true },
+        select: { id: true, name: true, color: true, position: true, kind: true },
         orderBy: [{ position: 'asc' }, { name: 'asc' }],
       }),
       this.prisma.conversation.findMany({
@@ -70,10 +70,17 @@ export class KanbanService {
     ]);
 
     const truncated = rows.length > BOARD_LIMIT;
-    const pill = (t: { id: string; name: string; color: string; isKanban: boolean }): KanbanTag => ({ id: t.id, name: t.name, color: t.color, isKanban: t.isKanban });
+    const pill = (t: { id: string; name: string; color: string; isKanban: boolean; kind: KanbanTag['kind'] }): KanbanTag => ({ id: t.id, name: t.name, color: t.color, isKanban: t.isKanban, kind: t.kind });
+    const coluna = new Map(columns.map((c, i) => [c.id, { ...c, ordem: i }]));
     const cards = rows.slice(0, BOARD_LIMIT).map((r): KanbanCard => {
       const c = this.conversations.presentContact(r);
       const primary = r.tags.find((t) => t.isPrimary);
+      // atendimento primeiro; sem etapa dele, a 1ª permanente-coluna do contato (ordem do quadro)
+      const permanente = r.contact.tags
+        .map((t) => coluna.get(t.tagId))
+        .filter((c): c is NonNullable<typeof c> => !!c && c.kind === 'permanent')
+        .sort((a, b) => a.ordem - b.ordem)[0];
+      const columnId = (primary && coluna.has(primary.tagId) ? primary.tagId : permanente?.id) ?? KANBAN_NO_STAGE;
       return {
         id: r.id,
         status: r.status as KanbanCard['status'],
@@ -85,6 +92,7 @@ export class KanbanService {
         assignee: r.assignee,
         number: r.number,
         primaryTagId: primary?.tagId ?? null,
+        columnId,
         secondaryTags: r.tags.filter((t) => !t.isPrimary).map((t) => pill(t.tag)),
         contactTags: r.contact.tags.map((t) => pill(t.tag)),
       };

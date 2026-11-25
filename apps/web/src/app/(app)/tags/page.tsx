@@ -21,7 +21,7 @@ const kindOf = (t: Tag): TagKind => t.kind ?? 'transition';
 /** as duas abas da tela: cada tipo tem a sua lista, ordem e ações */
 const ABAS: { id: TagKind; label: string; hint: string }[] = [
   { id: 'transition', label: 'Transição', hint: 'Do atendimento: caixa "Conversa", etapas do Kanban e encerramento. Saem ao encerrar (ficam no histórico).' },
-  { id: 'permanent', label: 'Permanentes', hint: 'Da pessoa (📌): valem em todas as conversas dela, para sempre. Servem para filtrar, segmentar transmissões e relatórios.' },
+  { id: 'permanent', label: 'Permanentes', hint: 'Da pessoa (📌): valem em todas as conversas dela, para sempre. Servem para filtrar, segmentar transmissões e — marcadas como coluna — classificar no Kanban (o atendimento fica nela enquanto não tiver etapa própria).' },
 ];
 
 /** filtros da lista: com dezenas de tags, achar as do encerramento ou as abandonadas era rolar e ler */
@@ -32,8 +32,8 @@ const FILTROS = [
   { id: 'nao-comprou', label: 'Não comprou', match: (t: TagWithCount) => !!t.showOnLost },
   { id: 'sem-uso', label: 'Sem uso', match: (t: TagWithCount) => !t._count?.conversations && !t._count?.contacts },
 ] as const;
-/** Kanban e encerramento são só do atendimento: na aba Permanentes sobram estes */
-const FILTROS_PERMANENTES = new Set(['todas', 'sem-uso']);
+/** encerramento é só do atendimento: na aba Permanentes sobram estes (Kanban vale para as duas) */
+const FILTROS_PERMANENTES = new Set(['todas', 'kanban', 'sem-uso']);
 type Filtro = (typeof FILTROS)[number]['id'];
 /** mesmo teto da API (MAX_CONFLICTS_PER_TAG): é a trava contra uma marcação limpar tags em massa */
 const MAX_OPOSTAS = 20;
@@ -126,7 +126,7 @@ export default function TagsPage() {
     if (!lote) return;
     if (!novosDoLote.length) return;
     try {
-      const r = await bulkCreate.mutateAsync({ items: novosDoLote.map((name) => ({ name, color: lote.cores[name] ?? lote.color })), color: lote.color, kind: lote.kind, ...(!lotePermanente && { isKanban: lote.isKanban, showOnWon: lote.showOnWon, showOnLost: lote.showOnLost }) });
+      const r = await bulkCreate.mutateAsync({ items: novosDoLote.map((name) => ({ name, color: lote.cores[name] ?? lote.color })), color: lote.color, kind: lote.kind, isKanban: lote.isKanban, ...(!lotePermanente && { showOnWon: lote.showOnWon, showOnLost: lote.showOnLost }) });
       toast.ok(r.skipped ? `${r.created} criada(s) · ${r.skipped} já existiam` : `${r.created} tag(s) criada(s)`);
       // mostra a aba onde elas entraram
       setAba(lote.kind);
@@ -140,7 +140,8 @@ export default function TagsPage() {
     try {
       // permanente não tem Kanban nem encerramento (a API recusa)
       const perm = kindOf(editing as Tag) === 'permanent';
-      const marcas = perm ? { isKanban: false, showOnWon: false, showOnLost: false } : { isKanban: editing.isKanban ?? !editing.id, showOnWon: editing.showOnWon ?? false, showOnLost: editing.showOnLost ?? false };
+      // permanente pode ser coluna do Kanban (pelo contato), mas nunca aparece no encerramento
+      const marcas = perm ? { isKanban: editing.isKanban ?? false, showOnWon: false, showOnLost: false } : { isKanban: editing.isKanban ?? !editing.id, showOnWon: editing.showOnWon ?? false, showOnLost: editing.showOnLost ?? false };
       const salva = editing.id
         ? await update.mutateAsync({ id: editing.id, name: editing.name, color: editing.color, kind: kindOf(editing as Tag), ...marcas })
         : await create.mutateAsync({ name: editing.name, color: editing.color ?? PALETTE[0], kind: kindOf(editing as Tag), ...marcas });
@@ -222,9 +223,9 @@ export default function TagsPage() {
                   </>
                 )}
               </div>
+              </>)}
               <Button size="sm" variant="ghost" icon={<Columns3 size={13} />} disabled={bulkUpdate.isPending} onClick={() => emMassa({ isKanban: true }, 'no Kanban')}>Pôr no Kanban</Button>
               <Button size="sm" variant="ghost" disabled={bulkUpdate.isPending} onClick={() => emMassa({ isKanban: false }, 'fora do Kanban')}>Tirar do Kanban</Button>
-              </>)}
               {/* trocar de tipo: os vínculos que já existem ficam; a tag passa a ser oferecida só no outro lugar */}
               <Button size="sm" variant="ghost" icon={permanente ? <Repeat size={13} /> : <Pin size={13} />} disabled={bulkUpdate.isPending} onClick={() => { const kind: TagKind = permanente ? 'transition' : 'permanent'; void emMassa({ kind }, permanente ? 'movidas para Transição' : 'movidas para Permanentes'); setSel([]); }}>
                 {permanente ? 'Mover para Transição' : 'Mover para Permanentes'}
@@ -270,7 +271,7 @@ export default function TagsPage() {
                         <div ref={drag.innerRef} {...drag.draggableProps} className={cn('flex items-center gap-3 px-5 py-3 bg-panel', sel.includes(t.id) && 'bg-accent-soft/40', snap.isDragging && 'shadow-lg rounded-lg ring-1 ring-line')}>
                           {isAdmin && (
                             <span className="flex items-center gap-1 shrink-0">
-                              <span {...drag.dragHandleProps} title={podeArrastar ? (permanente ? 'Arraste para reordenar' : 'Arraste para reordenar (é a ordem das colunas do Kanban)') : 'Limpe a busca e o filtro para reordenar'} className={cn('text-faint', podeArrastar ? 'cursor-grab hover:text-ink' : 'opacity-30 cursor-not-allowed')}>
+                              <span {...drag.dragHandleProps} title={podeArrastar ? 'Arraste para reordenar (é a ordem das colunas do Kanban)' : 'Limpe a busca e o filtro para reordenar'} className={cn('text-faint', podeArrastar ? 'cursor-grab hover:text-ink' : 'opacity-30 cursor-not-allowed')}>
                                 <GripVertical size={15} />
                               </span>
                               <input type="checkbox" aria-label={`Selecionar ${t.name}`} checked={sel.includes(t.id)} onChange={() => alternar(t.id)} />
@@ -285,7 +286,7 @@ export default function TagsPage() {
                             </div>
                           ) : <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: t.color }} />}
                           <span className="flex-1 font-medium text-sm">{t.name}</span>
-                          {!permanente && t.isKanban !== false && <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted bg-field rounded-md px-1.5 py-0.5" title="Aparece como coluna no Kanban"><Columns3 size={11} />Kanban</span>}
+                          {t.isKanban !== false && <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted bg-field rounded-md px-1.5 py-0.5" title="Aparece como coluna no Kanban"><Columns3 size={11} />Kanban</span>}
                           {!!t.conflictIds?.length && (
                             <button type="button" disabled={!isAdmin} onClick={() => setEditing(t)} className="inline-flex items-center gap-1 text-[10px] font-semibold text-warn bg-warn-soft rounded-md px-1.5 py-0.5 disabled:cursor-default" title={`Conflita com: ${t.conflictIds.map((id) => todas.find((x) => x.id === id)?.name).filter(Boolean).join(', ')} — marcar uma tira a outra`}>
                               <ArrowLeftRight size={11} />{t.conflictIds.length}
@@ -349,17 +350,19 @@ export default function TagsPage() {
               })}
             </div>
             {editing?.id && kindOf(editing as Tag) !== kindOf(todas.find((t) => t.id === editing.id) ?? (editing as Tag)) && (
-              <span className="block text-xs text-warn">Onde ela já está marcada, continua. Daqui em diante ela só é oferecida {kindOf(editing as Tag) === 'permanent' ? 'no contato (📌) — e sai do Kanban e do encerramento' : 'no atendimento'}.</span>
+              <span className="block text-xs text-warn">Onde ela já está marcada, continua. Daqui em diante ela só é oferecida {kindOf(editing as Tag) === 'permanent' ? 'no contato (📌) — e sai do encerramento; se for coluna do Kanban, passa a valer pelo contato' : 'no atendimento'}.</span>
             )}
           </div>
-          {kindOf((editing ?? {}) as Tag) === 'transition' && (<>
           <label className="flex items-start gap-2 text-sm cursor-pointer">
-            <input type="checkbox" className="mt-0.5" checked={editing?.isKanban ?? !editing?.id} onChange={(e) => setEditing({ ...editing, isKanban: e.target.checked })} />
+            <input type="checkbox" className="mt-0.5" checked={editing?.isKanban ?? (!editing?.id && kindOf((editing ?? {}) as Tag) === 'transition')} onChange={(e) => setEditing({ ...editing, isKanban: e.target.checked })} />
             <span>
-              <span className="text-ink font-medium">Etapa no Kanban</span>
-              <span className="block text-xs text-faint">Vira uma coluna do quadro. Desmarcar tira os atendimentos dessa etapa (a tag continua neles).</span>
+              <span className="text-ink font-medium">Coluna no Kanban</span>
+              <span className="block text-xs text-faint">{kindOf((editing ?? {}) as Tag) === 'permanent'
+                ? 'Vira uma coluna 📌 do quadro. O atendimento fica nela pelo contato, enquanto não tiver etapa própria; arrastar um card para ela marca a tag no contato.'
+                : 'Vira uma coluna do quadro (etapa do atendimento). Desmarcar tira os atendimentos dessa etapa (a tag continua neles).'}</span>
             </span>
           </label>
+          {kindOf((editing ?? {}) as Tag) === 'transition' && (<>
           <div className="text-sm space-y-1.5">
             <span className="text-ink font-medium">Aparece ao encerrar como</span>
             <div className="flex gap-4">
@@ -443,8 +446,8 @@ export default function TagsPage() {
               <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={lote.showOnWon} onChange={(e) => setLote({ ...lote, showOnWon: e.target.checked })} /> {labels.won}</label>
               <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={lote.showOnLost} onChange={(e) => setLote({ ...lote, showOnLost: e.target.checked })} /> {labels.lost}</label>
             </div>
-            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={lote.isKanban} onChange={(e) => setLote({ ...lote, isKanban: e.target.checked })} /> Viram etapas do Kanban</label>
             </>)}
+            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={lote.isKanban} onChange={(e) => setLote({ ...lote, isKanban: e.target.checked })} /> Viram colunas do Kanban{lotePermanente ? ' (📌, pelo contato)' : ''}</label>
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="ghost" onClick={() => setLote(null)}>Cancelar</Button>
               <Button type="submit" loading={bulkCreate.isPending} loadingText="Criando…" disabled={!novosDoLote.length}>Criar {novosDoLote.length || ''}</Button>

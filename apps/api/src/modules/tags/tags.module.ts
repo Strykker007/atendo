@@ -66,17 +66,21 @@ class BulkCreateDto {
 }
 
 type Flags = { kind?: TagKind; isKanban?: boolean; showOnWon?: boolean; showOnLost?: boolean };
-/** Kanban e encerramento são do atendimento: tag permanente nunca tem essas marcas. */
+/**
+ * Encerramento é do atendimento: tag permanente nunca aparece nele. Coluna do Kanban ela pode
+ * ser (classificação do contato — o card fica nela enquanto o atendimento não tiver etapa).
+ */
 function flagsDoTipo<T extends Flags>(d: T, kindAtual?: TagKind): T {
   const kind = d.kind ?? kindAtual;
   if (kind !== 'permanent') return d;
-  if (d.isKanban || d.showOnWon || d.showOnLost) throw new BadRequestException('Tag permanente não pode ser etapa do Kanban nem tag de encerramento — use uma tag de transição.');
-  return { ...d, isKanban: false, showOnWon: false, showOnLost: false } as T;
+  if (d.showOnWon || d.showOnLost) throw new BadRequestException('Tag permanente não aparece no encerramento — use uma tag de transição.');
+  return { ...d, showOnWon: false, showOnLost: false } as T;
 }
 
 /**
- * Virou permanente: sai da etapa do Kanban (continua como tag nas conversas que já a têm) e
- * perde as opostas do outro tipo (conflito só vale entre tags do mesmo tipo).
+ * Virou permanente: deixa de ser etapa do atendimento (continua como tag nas conversas que já a
+ * têm; se for coluna, passa a valer pelo contato) e perde as opostas do outro tipo (conflito só
+ * vale entre tags do mesmo tipo).
  */
 async function aoMudarTipo(tx: Prisma.TransactionClient, tenantId: string, ids: string[], kind: TagKind) {
   if (!ids.length) return;
@@ -163,9 +167,9 @@ class TagsController {
   async bulkUpdate(@CurrentUser() u: AuthUser, @Body() dto: BulkUpdateDto) {
     const { ids, ...pedido } = dto;
     const r = await this.prisma.$transaction(async (tx) => {
-      // marcar Kanban/encerramento numa seleção que tem permanente: só as de transição recebem
+      // marcar encerramento numa seleção que tem permanente: só as de transição recebem
       const data = pedido.kind ? flagsDoTipo(pedido) : pedido;
-      const marcaAtendimento = !pedido.kind && (pedido.isKanban || pedido.showOnWon || pedido.showOnLost);
+      const marcaAtendimento = !pedido.kind && (pedido.showOnWon || pedido.showOnLost);
       const res = await tx.tag.updateMany({ where: { tenantId: u.tenantId, id: { in: ids }, ...(marcaAtendimento && { kind: 'transition' as const }) }, data });
       if (pedido.kind) await aoMudarTipo(tx, u.tenantId, ids, pedido.kind);
       // deixou de ser etapa: quem a tinha como principal volta para "Sem etapa" (continua como tag)
