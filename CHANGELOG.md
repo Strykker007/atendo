@@ -3,6 +3,11 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.24.0 — 2026-11-25
+
+- feat(kanban): tags permanentes como colunas (📌, do contato)
+- feat(kanban): encerrar atendimento pelo card
+
 ## 1.23.0 — 2026-11-25
 
 - feat(tags): tags de transição × permanentes
