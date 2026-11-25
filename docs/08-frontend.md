@@ -39,7 +39,7 @@ src/
 │       ├── pesquisas/      pesquisas de satisfação: lista (padrão, desativar), editor com escala, recusa, comentário, agradecimento, prazo e prévia do WhatsApp ([pesquisa-de-satisfacao.md](pesquisa-de-satisfacao.md)). Modal de encerrar: 'Enviar pesquisa de satisfação ao encerrar' (marcada com a padrão; desabilita o fluxo)
 │       ├── tags/           CRUD com paleta de cores; "Conflita com" no modal (badge ⇄ N na linha)
 │       │                   abas Transição × Permanentes (`tags.kind`); `tagsOfKind` recorta o tipo em cada caixa
-│       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha
+│       ├── equipe/         atendentes: criar, ativar/desativar, redefinir senha. Tabela (md+) em largura total, com a coluna **Ações fixa à direita** (só ícones); no celular, cartões
 │       ├── escalas/        tudo que é horário, em abas (`components/escalas/EscalasTabs`, cada aba com a permissão dela): `aprovacoes/` painel do gestor — quem está no turno, plantão excepcional, acesso temporário (`team.manage`); `turnos/` escalas de trabalho e vínculo com colaboradores (`team.manage`; `/configuracoes/escalas` redireciona); `horario-atendimento/` quadros/faixas/exceções (`settings.manage`) ([escalas.md](escalas.md))
 │       ├── plano/          medidores de uso, excedente, explicação do limite; checkout Asaas em modal (PIX com QR + copia e cola e polling de 4 s, ou cartão) — `components/billing/AsaasCheckoutModal`
 │       ├── configuracoes/  aparência, boas-vindas, fluxos padrão, segurança; horários e escalas viraram atalhos para `escalas/`
