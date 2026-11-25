@@ -392,16 +392,22 @@ export function useTypingPresence(conversationId: string | null | undefined) {
   return { digitou, parar };
 }
 
+/** Badge de não lidas no cache da lista de conversas e nos cards do Kanban (mesmo atendimento). */
+function aplicarNaoLidas(qc: ReturnType<typeof useQueryClient>, id: string, n: (atual: number) => number) {
+  qc.setQueriesData<Conversation[]>({ queryKey: ['conversations'] }, (old) =>
+    old?.map((c) => (c.id === id ? { ...c, unreadCount: n(c.unreadCount) } : c)),
+  );
+  qc.setQueriesData<{ cards: { id: string; unreadCount: number }[] }>({ queryKey: ['kanban'] }, (b) =>
+    b && { ...b, cards: b.cards.map((c) => (c.id === id ? { ...c, unreadCount: n(c.unreadCount) } : c)) },
+  );
+}
+
 export const useMarkRead = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api(`/conversations/${id}/read`, { method: 'POST' }),
     // some da lista na hora, sem esperar o servidor: é só um badge, e esperar faz piscar
-    onMutate: (id) => {
-      qc.setQueriesData<Conversation[]>({ queryKey: ['conversations'] }, (old) =>
-        old?.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)),
-      );
-    },
+    onMutate: (id) => aplicarNaoLidas(qc, id, () => 0),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conversation-counts'] }),
   });
 };
@@ -412,10 +418,7 @@ export const useMarkRead = () => {
  */
 export const useMarkUnread = () => {
   const qc = useQueryClient();
-  const aplicar = (id: string, n: (atual: number) => number) =>
-    qc.setQueriesData<Conversation[]>({ queryKey: ['conversations'] }, (old) =>
-      old?.map((c) => (c.id === id ? { ...c, unreadCount: n(c.unreadCount) } : c)),
-    );
+  const aplicar = (id: string, n: (atual: number) => number) => aplicarNaoLidas(qc, id, n);
   return useMutation({
     mutationFn: ({ id, messageId }: { id: string; messageId?: string }) =>
       api<{ unreadCount: number }>(`/conversations/${id}/unread`, { method: 'PATCH', body: JSON.stringify({ messageId }) }),
@@ -424,7 +427,7 @@ export const useMarkUnread = () => {
       aplicar(id, () => conv.unreadCount);
       qc.invalidateQueries({ queryKey: ['conversation-counts'] });
     },
-    onError: () => qc.invalidateQueries({ queryKey: ['conversations'] }),
+    onError: () => { qc.invalidateQueries({ queryKey: ['conversations'] }); qc.invalidateQueries({ queryKey: ['kanban'] }); },
   });
 };
 
