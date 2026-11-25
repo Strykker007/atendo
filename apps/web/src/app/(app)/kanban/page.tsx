@@ -11,7 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useMinuto } from '@/components/chat/ConversationList';
 import { Empty } from '@/components/ui/Page';
 import { toast } from '@/components/ui/Toast';
-import { useCan, useKanban, useNumbers, useReorderColumns, useSetPrimaryTag } from '@/lib/hooks';
+import { useCan, useKanban, useMarkRead, useMarkUnread, useNumbers, useReorderColumns, useSetPrimaryTag } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 
 /**
@@ -33,6 +33,8 @@ export default function KanbanPage() {
   const numbers = useNumbers();
   const move = useSetPrimaryTag();
   const reorder = useReorderColumns();
+  const marcarLida = useMarkRead();
+  const marcarNaoLida = useMarkUnread();
   const podeOrdenar = useCan('tags.manage');
   const agora = useMinuto();
   const fechar = useCallback(() => setAberto(null), []);
@@ -96,6 +98,7 @@ export default function KanbanPage() {
                         onOpen={() => setAberto(card.id)}
                         onPromote={(tagId) => move.mutateAsync({ id: card.id, tagId }).catch(toast.err)}
                         onEncerrar={() => setEncerrando(card.id)}
+                        onAlternarLida={() => card.unreadCount > 0 ? marcarLida.mutate(card.id) : marcarNaoLida.mutateAsync({ id: card.id }).catch(toast.err)}
                       />
                     </div>
                   )}

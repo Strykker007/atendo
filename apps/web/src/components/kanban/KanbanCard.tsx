@@ -1,5 +1,5 @@
 'use client';
-import { CheckCircle2, Maximize2, Star } from 'lucide-react';
+import { CheckCircle2, Mail, MailOpen, Maximize2, Star } from 'lucide-react';
 import type { KanbanCard as Card, KanbanColumn } from '@atendo/shared';
 import { Avatar } from '@/components/chat/Avatar';
 import { SeloEspera, formatTime } from '@/components/chat/ConversationList';
@@ -9,9 +9,9 @@ import { formatPhone } from '@/components/ui/PhoneInput';
 /**
  * Card do atendimento. Duplo clique (ou o botão, no celular) abre o mini-chat; clicar numa
  * pílula que é etapa do Kanban a promove a principal e o card muda de coluna. Os ícones do canto
- * (abrir / encerrar) só aparecem ao passar o mouse — no celular ficam sempre à vista.
+ * (não lida / encerrar / abrir) só aparecem ao passar o mouse — no celular ficam sempre à vista.
  */
-export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote, onEncerrar }: {
+export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote, onEncerrar, onAlternarLida }: {
   card: Card;
   primary?: KanbanColumn;
   agora: number;
@@ -20,6 +20,8 @@ export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote, 
   onPromote: (tagId: string) => void;
   /** encerrar sem abrir a conversa (mesmo modal do chat) */
   onEncerrar: () => void;
+  /** com não lidas: marca como lida; sem: "marcar como não lida" (lembrete, como no WhatsApp) */
+  onAlternarLida: () => void;
 }) {
   const nome = card.contact.name ?? formatPhone(card.contact.phone);
   // na coluna de uma tag permanente o card está ali pelo contato (📌), não por etapa do atendimento
@@ -43,6 +45,9 @@ export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote, 
           </div>
         </div>
         <div className="flex items-center gap-0.5 -mr-1 -mt-0.5 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity" onDoubleClick={(e) => e.stopPropagation()}>
+          <button type="button" onClick={onAlternarLida} className="text-faint hover:text-ink p-0.5" title={card.unreadCount > 0 ? 'Marcar como lida' : 'Marcar como não lida'} aria-label={`${card.unreadCount > 0 ? 'Marcar como lida' : 'Marcar como não lida'}: ${nome}`}>
+            {card.unreadCount > 0 ? <MailOpen size={13} /> : <Mail size={13} />}
+          </button>
           <button type="button" onClick={onEncerrar} className="text-faint hover:text-ok p-0.5" title="Encerrar atendimento" aria-label={`Encerrar atendimento de ${nome}`}>
             <CheckCircle2 size={13} />
           </button>
