@@ -160,9 +160,9 @@ export class EvolutionProvider implements WhatsAppProvider {
     const quoted = m.quotedExternalId ? { key: { id: m.quotedExternalId } } : undefined;
     // `delay`: a Evolution mostra "digitando…" (no áudio, "gravando…") por esse tempo e só então entrega
     const delay = m.typingMs && m.typingMs > 0 ? Math.round(m.typingMs) : undefined;
-    // cartão nativo do Pix ("Copiar chave Pix"), só com EVOLUTION_PIX_BUTTON: em conta QR o
-    // WhatsApp aceita e confirma a entrega, mas o aparelho não mostra — e não há erro para cair
-    // no texto. Desligado (padrão), vai o texto, que já traz título, tipo e chave. Evolution sem
+    // cartão nativo do Pix ("Copiar chave Pix"), só com EVOLUTION_PIX_BUTTON: exige a imagem com o
+    // patch do <biz> (sem ele o WhatsApp confirma a entrega e o aparelho não mostra, sem erro).
+    // Desligado (padrão), vai o texto, que já traz título, tipo e chave. Evolution sem
     // o botão `pix` recusa com 400/404 e também cai no texto — nada saiu ainda
     const cartaoPix = m.pix && env.EVOLUTION_PIX_BUTTON ? await this.api<any>(`/message/sendButtons/${name}`, {
       method: 'POST',
@@ -192,6 +192,15 @@ export class EvolutionProvider implements WhatsAppProvider {
     }) : null;
     if (cartaoPix) {
       r = cartaoPix;
+      // O cartão sai num envelope de "visualização única" (é o que faz o celular desenhar o botão);
+      // o WhatsApp Web não abre esse envelope e mostra só "mensagem de visualização única". Logo
+      // depois vai a chave sozinha em texto: no Web é o que o contato copia; no celular, "Copiar"
+      // na mensagem pega só a chave. Falha aqui só loga: o cartão já saiu, e o retry da fila
+      // reenviaria o cartão inteiro. O eco volta pelo webhook e entra no histórico como enviada.
+      await this.api(`/message/sendText/${name}`, {
+        method: 'POST',
+        body: JSON.stringify({ number: m.to, text: m.pix!.key }),
+      }, this.shard(ctx)).catch((err) => this.logger.warn(`Chave Pix em texto depois do cartão não saiu: ${err instanceof Error ? err.message : err}`));
     } else if (botoes) {
       r = botoes;
     } else if (m.type === MessageType.TEXT || m.interactive) {
