@@ -3,6 +3,12 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.23.0 — 2026-11-25
+
+- feat(tags): tags de transição × permanentes
+- feat(escalas): tornar acesso temporário permanente
+- feat(meta): mensagem indisponível (131060) com aviso claro no chat
+
 ## 1.22.3 — 2026-11-24
 
 - feat(meta): áudio ogg/opus sai como mensagem de voz (voice: true)
