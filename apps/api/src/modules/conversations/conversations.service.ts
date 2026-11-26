@@ -58,6 +58,8 @@ const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permis
  * fora dos relatórios (docs/contatos-isentos.md).
  */
 export const LIVRE = { ticketExempt: true, status: 'in_progress', assigneeId: null } satisfies Prisma.ConversationWhereInput;
+/** o que a lista de conversas traz de cada linha (abas, busca em todas as abas e conversa aberta) */
+const LIST_INCLUDE = { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } }, budgets: { where: { status: 'PAID', closeEventId: null }, select: { id: true, totalValue: true, paidAt: true } } } satisfies Prisma.ConversationInclude;
 /** quantas figurinhas o seletor mostra */
 const STICKERS_RECENT_MAX = 60;
 const ehLivre = (c: { ticketExempt: boolean; status: string; assigneeId: string | null }) => c.ticketExempt && c.status === 'in_progress' && !c.assigneeId;
@@ -214,11 +216,39 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; free?: boolean; ticket?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
+    q: { status?: ConversationStatus; free?: boolean; ticket?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; everywhere?: boolean; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
     const isAdmin = may(viewer, 'conversations.view_all');
+    // Busca em todas as abas: achar o contato sem saber se está aguardando, em atendimento ou
+    // encerrado. Vale o que a pessoa vê nas abas: atendente comum não enxerga o atendimento em
+    // andamento de outra pessoa (só os seus e os livres); aguardando e encerrado, todos.
+    if (q.everywhere && q.search?.trim()) {
+      const visao: Prisma.ConversationWhereInput = isAdmin ? {} : { OR: [{ status: { not: 'in_progress' } }, { assigneeId: viewer.id }, LIVRE] };
+      const dept = departmentWhere(viewer, q.departmentId);
+      const scoped = narrowTo(viewer, q.numberId);
+      const rows = await this.prisma.conversation.findMany({
+        where: {
+          tenantId,
+          number: { deletedAt: null },
+          ...(q.ticket && { ticketExempt: false }),
+          ...(q.assigneeId && isAdmin && { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId }),
+          ...(q.origin && { origin: q.origin }),
+          ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
+          AND: [visao, ...(dept ? [dept] : [])],
+          ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
+          contact: textSearch(q.search),
+          ...(q.lastOutcome && { lastCloseOutcome: q.lastOutcome }),
+          ...(q.closeReasonId && { lastCloseReasonId: q.closeReasonId }),
+        },
+        include: LIST_INCLUDE,
+        orderBy: [{ lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+        take: q.take ?? 50,
+        ...(q.cursor && { cursor: { id: q.cursor }, skip: 1 }),
+      });
+      return rows.map((r) => this.presentContact(r));
+    }
     const scoped = narrowTo(viewer, q.numberId);
     // departamento: escopo do usuário ∩ filtro da tela. Vai num AND porque o filtro de tags
     // abaixo também usa OR, e dois OR no mesmo nível se sobrescreveriam
@@ -254,7 +284,7 @@ export class ConversationsService {
     };
     const rows = await this.prisma.conversation.findMany({
       where,
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } }, budgets: { where: { status: 'PAID', closeEventId: null }, select: { id: true, totalValue: true, paidAt: true } } },
+      include: LIST_INCLUDE,
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
       // "Encerradas": quem acabou de encerrar primeiro (`closedAt`). Pela última mensagem, a recém-
@@ -573,7 +603,7 @@ export class ConversationsService {
   async one(tenantId: string, id: string) {
     const row = await this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } }, budgets: { where: { status: 'PAID', closeEventId: null }, select: { id: true, totalValue: true, paidAt: true } } },
+      include: LIST_INCLUDE,
     });
     return this.presentContact(row);
   }

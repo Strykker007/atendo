@@ -168,7 +168,7 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export type ConversationsQuery = { status: ConversationTab; /** vazio/ausente = todos os números */ numberIds?: string[]; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null; onlyTickets?: boolean };
+export type ConversationsQuery = { status: ConversationTab; /** vazio/ausente = todos os números */ numberIds?: string[]; departmentId?: string | null; tagIds: string[]; search?: string; /** com `search`: procura em todas as abas (aguardando, atendendo, encerrado) */ everywhere?: boolean; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null; onlyTickets?: boolean };
 /** Tamanho da página no servidor (`take` padrão de GET /conversations). Página cheia = pode haver mais. */
 export const CONVERSATIONS_PAGE = 50;
 
@@ -182,6 +182,7 @@ function conversationsParams(q: ConversationsQuery) {
   if (q.origin) p.set('origin', q.origin);
   if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
   if (q.search) p.set('search', q.search);
+  if (q.search && q.everywhere) p.set('everywhere', '1');
   if (q.sort && q.sort !== 'recent') p.set('sort', q.sort);
   if (q.closeReasonId) p.set('closeReasonId', q.closeReasonId);
   if (q.lastOutcome) p.set('lastOutcome', q.lastOutcome);
@@ -232,7 +233,7 @@ export function useOlderConversations(q: ConversationsQuery, primeira: Conversat
   }, [carregando, temMais, primeira, atual, chave]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const naPrimeira = new Set((primeira ?? []).map((c) => c.id));
-  return { itens: atual.itens.filter((c) => !naPrimeira.has(c.id) && c.status === q.status), carregar, carregando, temMais };
+  return { itens: atual.itens.filter((c) => !naPrimeira.has(c.id) && ((q.everywhere && q.search) || c.status === q.status)), carregar, carregando, temMais };
 }
 
 export const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
@@ -627,7 +628,13 @@ export const useSetStatus = () => {
     onSuccess: (_, v) => {
       // sai na hora das listas de outro status (sem esperar o refetch) e a aberta já vê o novo status
       for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
-        if ((key[1] as { status?: ConversationStatus } | undefined)?.status === v.status) continue;
+        const filtro = key[1] as { status?: ConversationStatus; everywhere?: boolean; search?: string } | undefined;
+        // busca em todas as abas: a conversa continua no resultado, só troca o status
+        if (filtro?.everywhere && filtro.search) {
+          qc.setQueryData<Conversation[]>(key, (old) => old?.map((c) => (c.id === v.id ? { ...c, status: v.status } : c)));
+          continue;
+        }
+        if (filtro?.status === v.status) continue;
         qc.setQueryData<Conversation[]>(key, (old) => old?.filter((c) => c.id !== v.id));
       }
       qc.setQueryData<Conversation>(['conversation', v.id], (old) => (old ? { ...old, status: v.status } : old));

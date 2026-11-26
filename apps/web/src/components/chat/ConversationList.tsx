@@ -95,7 +95,10 @@ export function ConversationList() {
     else if (status === 'free') setStatus('in_progress');
   };
   const abaMeta = status === 'free' ? FREE_META : STATUS_META[status];
-  const filtroLista = { status, numberIds, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome, onlyTickets };
+  // com texto na busca, procura em TODAS as abas: ninguém precisa saber se o contato está
+  // aguardando, em atendimento ou encerrado para achá-lo (cada card mostra onde ele está)
+  const buscaGeral = !!search.trim();
+  const filtroLista = { status, numberIds, departmentId, tagIds, origin, sort: status === 'closed' ? 'recent' as const : ordem, search: search || undefined, everywhere: buscaGeral || undefined, assigneeId: isAdmin && assigneeId ? (assigneeId === 'me' ? me.data?.id : assigneeId) : undefined, closeReasonId: closeFilter.reasonId, lastOutcome: closeFilter.outcome, onlyTickets };
   const conversations = useConversations(filtroLista);
   // rolou até o fim: páginas seguintes (a primeira é a que o tempo real atualiza)
   const anteriores = useOlderConversations(filtroLista, conversations.data);
@@ -143,7 +146,7 @@ export function ConversationList() {
   // que muda de aba — senão ela seguia em "Em atendimento" até trocar de conversa ou dar F5
   // livre (grupo, isenta antiga sem dono) fica também em "Atendendo" (junto da fila, com o selo Livre);
   // contato isento comum segue as abas como qualquer conversa
-  const fixadaFora = fixadaAtual && !(fixadaAtual.status === 'closed' && status !== 'closed') && (status === 'free' ? !!fixadaAtual.ticketExempt : !isFreeChat(fixadaAtual) || status === 'in_progress') ? fixadaAtual : null;
+  const fixadaFora = fixadaAtual && !buscaGeral && !(fixadaAtual.status === 'closed' && status !== 'closed') && (status === 'free' ? !!fixadaAtual.ticketExempt : !isFreeChat(fixadaAtual) || status === 'in_progress') ? fixadaAtual : null;
   const linhas = fixadaFora ? [fixadaFora, ...visiveis] : visiveis;
   // trocar de filtro limpa a seleção: encerrar em massa o que saiu da tela seria fechar no
   // escuro, e é exatamente o tipo de erro que não dá para desfazer em trinta conversas
@@ -218,7 +221,12 @@ export function ConversationList() {
         <div className="flex items-center gap-1">
           <div className="relative flex-1 min-w-0">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contato" aria-label="Buscar contato ou telefone" title="Buscar por nome ou telefone" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-8 pr-3 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setSearch(''); }} placeholder="Buscar contato em todas as abas" aria-label="Buscar contato ou telefone em todas as abas" title="Nome ou telefone, com ou sem acento — procura em Aguardando, Atendendo e Encerrado" className="w-full rounded-lg bg-field text-ink placeholder:text-faint pl-8 pr-7 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-accent/40" />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} title="Limpar busca (Esc)" aria-label="Limpar busca" className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-faint hover:text-ink">
+                <X size={14} />
+              </button>
+            )}
           </div>
           <button onClick={() => setIniciando(true)} title="Nova conversa" className="shrink-0 w-8 h-8 rounded-lg grid place-items-center text-faint hover:text-ink hover:bg-field">
             <MessageSquarePlus size={15} />
@@ -379,11 +387,11 @@ export function ConversationList() {
         {conversations.data?.length === 0 && !fixadaFora && (
           <div className="p-8 text-center">
             <div className={cn('mx-auto w-10 h-10 rounded-full grid place-items-center mb-2', abaMeta.soft, abaMeta.color)}>0</div>
-            <p className="text-sm text-muted">Nenhuma conversa em <b className="text-ink">{abaMeta.short.toLowerCase()}</b>.</p>
+            <p className="text-sm text-muted">{buscaGeral ? <>Nenhum contato encontrado para <b className="text-ink">“{search.trim()}”</b> em nenhuma aba.</> : <>Nenhuma conversa em <b className="text-ink">{abaMeta.short.toLowerCase()}</b>.</>}</p>
           </div>
         )}
         {/* na aba Livres tudo é livre: a lista fica sem as seções extras */}
-        {(groupByAssignee ? agruparPorAtendente(linhas) : status === 'free' ? [{ key: '', nome: '', itens: linhas, naoLidas: 0 }] : separarSecoes(linhas)).map((g) => {
+        {(buscaGeral ? [{ key: '', nome: '', itens: linhas, naoLidas: 0 }] : groupByAssignee ? agruparPorAtendente(linhas) : status === 'free' ? [{ key: '', nome: '', itens: linhas, naoLidas: 0 }] : separarSecoes(linhas)).map((g) => {
           const fechado = !!g.key && recolhidos.includes(g.key);
           return (
             <div key={g.key || 'lista'}>
@@ -403,7 +411,8 @@ export function ConversationList() {
                 <ConversationRow
                   key={c.id}
                   c={c}
-                  encerramento={status === 'closed' ? 'lugar' : closeFilter.outcome || motivoFiltrado ? 'extra' : null}
+                  encerramento={!buscaGeral && status === 'closed' ? 'lugar' : closeFilter.outcome || motivoFiltrado ? 'extra' : null}
+                  mostrarStatus={buscaGeral}
                   active={c.id === conversationId}
                   onClick={() => (selecionando ? alternar(c.id) : setConversation(c.id))}
                   agora={agora}
@@ -486,7 +495,7 @@ function pagoNaConversa(c: Conversation) {
   return (c.budgets ?? []).filter((b) => b.paidAt && new Date(b.paidAt).getTime() > desde).reduce((a, b) => a + Number(b.totalValue), 0);
 }
 
-function ConversationRow({ c, active, onClick, agora, selecionando, marcado, encerramento }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean; encerramento: 'lugar' | 'extra' | null }) {
+function ConversationRow({ c, active, onClick, agora, selecionando, marcado, encerramento, mostrarStatus }: { c: Conversation; active: boolean; onClick: () => void; agora: number; selecionando: boolean; marcado: boolean; encerramento: 'lugar' | 'extra' | null; /** busca em todas as abas: diz em qual aba o contato está */ mostrarStatus?: boolean }) {
   const name = c.contact.name ?? formatPhone(c.contact.phone);
   const time = useMemo(() => (c.lastMessageAt ? formatTime(c.lastMessageAt) : ''), [c.lastMessageAt]);
   // livre (contato isento) em "Atendendo": cor e selo próprios, para não parecer atendimento
@@ -532,6 +541,7 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
             todo card tem a mesma altura em qualquer aba. Se só aparecesse quando há badge, a fila
             "Aguardando" (quase sempre sem atendente/tag) ficava com cards mais baixos que as outras */}
         <div className="flex flex-nowrap items-center gap-1 mt-1 h-5 min-w-0">
+          {mostrarStatus && <span className={cn('text-[10px] font-semibold rounded-md px-1.5 py-0.5 shrink-0', m.soft, m.color)}>{m.short}</span>}
           {c.ticketExempt && <span className="text-[10px] font-semibold rounded-md px-1.5 py-0.5 shrink-0 bg-field text-muted" title={livre ? 'Conversa livre: sem dono, fora da fila e dos relatórios' : 'Contato isento: atendimento normal, mas fora dos relatórios'}>{livre ? 'Livre' : 'Sem relatório'}</span>}
           <DepartmentBadge department={c.department} className="max-w-[110px] shrink-0" />
           <OriginBadge origin={c.origin} data={c.originData} />

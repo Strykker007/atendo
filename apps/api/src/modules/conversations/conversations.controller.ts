@@ -32,6 +32,8 @@ class ListDto {
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;
   @IsOptional() @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean))) @IsArray() tagIds?: string[];
   @IsOptional() @IsString() @MaxLength(100) search?: string;
+  /** com `search`: procura em todas as abas (ignora `status`/`free`), respeitando o que a pessoa pode ver */
+  @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() everywhere?: boolean;
   @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
   /** admin: filtrar por atendente; `none` = só as sem atendente */
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() assigneeId?: string;

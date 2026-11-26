@@ -108,7 +108,10 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     && (m.status === 'pending' || (conv?.number.provider !== 'meta' && Date.now() - new Date(m.createdAt).getTime() < MESSAGE_EDIT_WINDOW_MS));
   const mine = !!conv && conv.assignee?.id === me.data?.id;
   // contato isento (equipe/diretoria): o dono não trava — quem responde assume (docs/contatos-isentos.md#dono-não-trava)
-  const ownedByOther = !!conv && !!conv.assignee && !mine && !conv.ticketExempt;
+  // encerrada não é "de ninguém": o `assignee` que sobra é só quem atendeu por último (card,
+  // transmissões). Contava como dono e o rodapé dizia "Fulano está atendendo" — quem chegava
+  // depois não achava como abrir um atendimento novo (ID Vida Urbana, 26/11/2026)
+  const ownedByOther = !!conv && conv.status !== 'closed' && !!conv.assignee && !mine && !conv.ticketExempt;
   // Modo nota interna: o composer vira âmbar e o que sai é NOTA (só a equipe vê, nunca vai ao
   // WhatsApp). Vale em qualquer conversa; na de outra pessoa é o único jeito de escrever (cadeado).
   // Texto separado do da resposta: desligar o modo nunca manda a nota para o cliente por engano.
@@ -973,7 +976,13 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
           {botaoNota}
         </div>
       ) : conv.status === 'closed' ? (
-        <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted flex items-center justify-center gap-3">Conversa encerrada. Reabra para responder.{botaoNota}</div>
+        <div className="bg-panel border-t border-line px-4 py-3 text-sm text-muted flex flex-wrap items-center justify-center gap-3">
+          <span>Atendimento encerrado{conv.assignee ? <> (atendido por <b className="text-ink">{conv.assignee.name}</b>)</> : null}. Para falar de novo, comece um novo atendimento — ele fica com você.</span>
+          <Button size="sm" icon={<RotateCcw size={14} />} loading={setStatus.isPending} onClick={() => setStatus.mutateAsync({ id: conv.id, status: 'in_progress' }).then(() => { toast.ok('Novo atendimento aberto com você'); setFilterStatus('in_progress', true); }).catch(toast.err)}>
+            Novo atendimento
+          </Button>
+          {botaoNota}
+        </div>
       ) : janelaFechada ? (
         <div className="bg-warn-soft border-t border-warn/30 px-4 py-3 text-sm text-warn-ink flex items-center gap-2">
           <Clock size={16} className="shrink-0" />
