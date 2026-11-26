@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, ReceiptText, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail, AtSign } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, ReceiptText, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail, AtSign, ClipboardCheck } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { ExemptConfirm } from './ExemptConfirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, tagsOfKind, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, useReadNotes, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, tagsOfKind, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, useReadNotes, useReviewsByAttendance, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -29,6 +29,7 @@ import { Modal, inputCls } from '@/components/ui/Modal';
 import { ComposerBar, QuickReplyPopover } from './ComposerBar';
 import { useMention } from './MentionSuggest';
 import { ImageMarkup } from './ImageMarkup';
+import { AttendanceFeedbackModal } from '@/components/feedback/Feedback';
 import { BudgetModal, OrcamentosAguardando } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
@@ -261,6 +262,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const encerramentos = useMemo(() => (eventos.data ?? []).filter((e) => e.type === 'closed').sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [eventos.data]);
   /** encerramentos entre a mensagem anterior e esta; antes da 1ª carregada só se não houver página anterior */
   const encerradosAntes = (anterior: Message | undefined, atual: Message) => encerramentos.filter((e) => e.createdAt <= atual.createdAt && (anterior ? e.createdAt > anterior.createdAt : !messages.hasNextPage));
+  // feedback do gestor pela linha "Atendimento encerrado" (docs/feedback-de-atendimento.md#onde-dar)
+  const podeFeedback = useCan('reviews.manage');
+  const feedbacksPorAtendimento = useReviewsByAttendance(encerramentos.map((e) => e.id), podeFeedback).data;
+  const [feedbackDe, setFeedbackDe] = useState<ConversationEvent | null>(null);
+  const marcoFeedback = (e: ConversationEvent) =>
+    podeFeedback && e.actor && e.actor.id !== me.data?.id ? { onFeedback: () => setFeedbackDe(e), feedbacks: feedbacksPorAtendimento?.[e.id] ?? 0 } : {};
   const ultima = mensagens[mensagens.length - 1];
   // o canal mostrado na tela vai junto: se a conversa mudou de número, a API recusa (409) em vez de enviar
   const send = useSendMessage(conversationId, conv?.number.id);
@@ -946,8 +953,8 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{encerradosAntes(mensagens[i - 1], m).map((e) => <MarcoDeAtendimento key={e.id} e={e} seguinte />)}{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} onTicket={podeAbrirTicket ? abrirTicket : undefined} ticketsDaqui={ticketsPorMensagem.get(m.id)} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
-        {ultima && encerramentos.filter((e) => e.createdAt > ultima.createdAt).map((e) => <MarcoDeAtendimento key={e.id} e={e} />)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{encerradosAntes(mensagens[i - 1], m).map((e) => <MarcoDeAtendimento key={e.id} e={e} seguinte {...marcoFeedback(e)} />)}{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} onTicket={podeAbrirTicket ? abrirTicket : undefined} ticketsDaqui={ticketsPorMensagem.get(m.id)} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {ultima && encerramentos.filter((e) => e.createdAt > ultima.createdAt).map((e) => <MarcoDeAtendimento key={e.id} e={e} {...marcoFeedback(e)} />)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
       </div>
@@ -1024,6 +1031,11 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       {/* agendadas desta conversa: aparece mesmo com o campo bloqueado (encerrada, de outra pessoa) */}
       <ScheduledMessagesBar conversationId={conv.id} />
 
+      {feedbackDe?.actor && (
+        <AttendanceFeedbackModal conversationId={conv.id} closeEventId={feedbackDe.id} closedAt={feedbackDe.createdAt}
+          startedAt={[...encerramentos].reverse().find((x) => x.createdAt < feedbackDe.createdAt)?.createdAt ?? null}
+          agent={feedbackDe.actor} contato={nomeContato} onClose={() => setFeedbackDe(null)} />
+      )}
       {/* editor da imagem da nota: abre ao colar/escolher e no "Marcar" da miniatura */}
       {marcando && (
         <ImageMarkup file={marcando.blob}
@@ -1507,17 +1519,30 @@ function LinhaDeLigacao({ m }: { m: Message }) {
   );
 }
 
-function MarcoDeAtendimento({ e, seguinte }: { e: ConversationEvent; seguinte?: boolean }) {
+/**
+ * Linha "Atendimento encerrado". Para quem dá feedback (`reviews.manage`), o atalho fica aqui
+ * (docs/feedback-de-atendimento.md#onde-dar): discreto — aparece ao passar o mouse (sempre no
+ * toque) — e, com feedback já dado, vira o contador 📋 n à vista.
+ */
+function MarcoDeAtendimento({ e, seguinte, onFeedback, feedbacks = 0 }: { e: ConversationEvent; seguinte?: boolean; onFeedback?: () => void; feedbacks?: number }) {
   const labels = useOutcomeLabels();
   const resultado = e.outcome === 'won' || e.outcome === 'lost' ? labels[e.outcome] : null;
   const quando = new Date(e.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
   return (
-    <div className="flex flex-col items-center gap-1 py-2 select-none">
+    <div className="group/marco flex flex-col items-center gap-1 py-2 select-none">
       <div className="flex w-full items-center gap-2">
         <span className="h-px flex-1 bg-line" />
         <span className="text-[11px] font-semibold text-muted bg-panel/90 rounded-full px-2.5 py-0.5 shadow-sm text-center">
           Atendimento encerrado{resultado && ` · ${resultado}`}{e.actor && ` · ${e.actor.name}`} · {quando}
         </span>
+        {onFeedback && (
+          <button type="button" onClick={onFeedback}
+            title={feedbacks ? `${feedbacks} feedback(s) neste atendimento — dar outro` : `Dar feedback para ${e.actor?.name ?? 'o atendente'} sobre este atendimento`}
+            className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold shadow-sm transition-opacity',
+              feedbacks ? 'bg-accent-soft text-accent-ink' : 'bg-panel/90 text-muted hover:text-accent-ink opacity-0 group-hover/marco:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:opacity-100')}>
+            <ClipboardCheck size={12} />{feedbacks ? feedbacks : 'Dar feedback'}
+          </button>
+        )}
         <span className="h-px flex-1 bg-line" />
       </div>
       {seguinte && <span className="text-[10.5px] uppercase tracking-wider text-faint">novo atendimento</span>}
