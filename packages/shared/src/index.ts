@@ -8,6 +8,7 @@ export * from './ai-agent.js';
 export * from './attendance-queue.js';
 export * from './auto-reassign.js';
 export * from './kanban.js';
+export * from './reviews.js';
 export * from './portable.js';
 export * from './portable-extras.js';
 export * from './schedule.js';

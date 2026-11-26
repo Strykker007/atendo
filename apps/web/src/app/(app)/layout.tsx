@@ -17,6 +17,7 @@ import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner';
 import { VersionWatcher } from '@/components/layout/VersionWatcher';
 import { NoticePopups } from '@/components/layout/SystemNotices';
 import { TransferAlerts } from '@/components/layout/TransferAlert';
+import { AttentionGate } from '@/components/feedback/Feedback';
 import { CallAlerts } from '@/components/layout/CallAlert';
 import { InternalChatWidget } from '@/components/layout/InternalChatWidget';
 
@@ -85,6 +86,8 @@ function Shell({ children }: { children: React.ReactNode }) {
       <ShiftEndScreen />
       <NoticePopups />
       <TransferAlerts />
+      {/* feedback do gestor e notas internas não lidas ao entrar (docs/feedback-de-atendimento.md) */}
+      <AttentionGate />
       <CallAlerts />
       {/* chat interno da equipe: fica no shell para sobreviver à troca de página */}
       <InternalChatWidget />

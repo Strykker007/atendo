@@ -7,7 +7,7 @@ import Redis from 'ioredis';
 import type { Conversation, SystemNotice, WhatsAppNumber } from '@prisma/client';
 // type-only: o service importa este gateway em tempo de execução, então um import de valor aqui fecharia o ciclo
 import type { PresentedMessage } from './conversations.service';
-import type { TypingEvent } from '@atendo/shared';
+import type { ReviewAlertEvent, TypingEvent } from '@atendo/shared';
 import { env, webOrigins } from '../../config/env';
 import { RedisService } from '../../common/redis/redis.service';
 
@@ -288,6 +288,14 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
    */
   emitTransferAlert(tenantId: string, userId: string, event: TransferAlert) {
     this.to(`user:${tenantId}:${userId}`).emit('transfer_alert', event);
+  }
+  /** Feedback de atendimento (docs/feedback-de-atendimento.md): novo para o atendente; ciência/prazo para o gestor. */
+  emitReviewAlert(tenantId: string, userId: string, event: ReviewAlertEvent) {
+    this.to(`user:${tenantId}:${userId}`).emit('review_alert', event);
+  }
+  /** Nota interna para esta pessoa (atendente da conversa ou citada com @): mesmo destaque da transferência. */
+  emitNoteAlert(tenantId: string, userId: string, event: { conversationId: string; contactName: string; byName: string; text: string }) {
+    this.to(`user:${tenantId}:${userId}`).emit('note_alert', event);
   }
 
   /**

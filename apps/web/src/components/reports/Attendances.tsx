@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, MinusCircle, Search, ExternalLink, Lock, Paperclip, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, MinusCircle, Search, ExternalLink, Lock, Paperclip, X, ClipboardCheck } from 'lucide-react';
+import { ReviewComposer } from '@/components/feedback/Feedback';
 import { MESSAGE_TYPE_LABEL, type MessageType } from '@atendo/shared';
 import { cn, readableColor } from '@/lib/utils';
 import { inputCls, Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useAttendances, useAttendanceMessages, useTags, tagsOfKind, useCloseReasons, useOutcomeLabels, type AttendanceRow } from '@/lib/hooks';
+import { useAgents, useAttendances, useAttendanceMessages, useTags, tagsOfKind, useCloseReasons, useOutcomeLabels, useCan, useMe, useReviewsByAttendance, type AttendanceRow, type Message } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 
 const PAGE_SIZE = 25;
@@ -74,6 +75,9 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
   useEffect(() => setPage(1), [de, ate, atendente, outcome, tagId, closeReasonId, reason, search, companyId]);
 
   const q = useAttendances({ startDate: inicioDe(de), endDate: inicioDe(somaDias(ate, 1)), companyId, userId: atendente || undefined, outcome: outcome || undefined, tagIds: tagId || undefined, closeReasonId: closeReasonId || undefined, reason: reason?.value, search: search || undefined, page, pageSize: PAGE_SIZE });
+  // linhas que já têm feedback do gestor (docs/feedback-de-atendimento.md)
+  const podeFeedback = useCan('reviews.manage');
+  const comFeedback = useReviewsByAttendance(q.data?.rows.map((r) => r.id) ?? [], podeFeedback);
   const d = q.data;
   const paginas = d ? Math.max(1, Math.ceil(d.total / PAGE_SIZE)) : 1;
   // tags que fazem sentido filtrar: as do resultado escolhido (ou as de qualquer encerramento)
@@ -149,9 +153,13 @@ export function Attendances({ from, to, userId, focus, companyId }: { from: stri
               {d && d.rows.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-muted">Nenhum atendimento com esses filtros.</td></tr>}
               {d?.rows.map((a) => {
                 const r = RESULTADO[a.outcome ?? 'none'];
+                const nFeedback = comFeedback.data?.[a.id] ?? 0;
                 return (
                   <tr key={a.id} onClick={() => setAberto(a)} className="border-b border-line last:border-0 cursor-pointer hover:bg-field">
-                    <td className="px-4 py-2.5 tnum whitespace-nowrap text-ink">{new Date(a.closedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                    <td className="px-4 py-2.5 tnum whitespace-nowrap text-ink">
+                      {new Date(a.closedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                      {nFeedback > 0 && <span title={`${nFeedback} feedback(s) neste atendimento`} className="ml-1.5 inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-accent-ink"><ClipboardCheck size={11} />{nFeedback}</span>}
+                    </td>
                     <td className="px-4 py-2.5">
                       <div className="text-ink truncate max-w-[200px]">{a.contact.name || 'Sem nome'}</div>
                       <div className="text-[11px] text-muted tnum">{a.contact.phoneFormatted}</div>
@@ -220,6 +228,16 @@ function Tags({ a }: { a: AttendanceRow }) {
 }
 
 /**
+ * Quem escreveu cada balão. Enviada sem atendente não é sempre "automático": a maioria saiu do
+ * celular/WhatsApp Web do próprio número (`sentFrom`, calculado pela API a partir do provider).
+ */
+const ORIGEM_ENVIO = { phone: 'Pelo celular', web: 'Pelo WhatsApp Web', device: 'Por outro aparelho', auto: 'Automático' } as const;
+function autorDe(m: Message, contato: string): string {
+  if (m.direction === 'in') return m.senderName || contato;
+  return m.author?.name ?? m.authorName ?? (m.sentFrom ? ORIGEM_ENVIO[m.sentFrom] : 'Automático');
+}
+
+/**
  * Um atendimento: cabeçalho com o desfecho e as mensagens da janela dele, só leitura. "Abrir
  * conversa" leva ao chat (a conversa inteira, como está hoje).
  */
@@ -231,6 +249,14 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
   const labels = useOutcomeLabels();
   const fmt = (iso: string) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
   const lista = msgs.data ?? [];
+  const contato = a.contact.name || a.contact.phoneFormatted;
+  // feedback (docs/feedback-de-atendimento.md): quem atendeu recebe; clicar nas mensagens marca o trecho
+  const podeFeedback = useCan('reviews.manage');
+  const me = useMe().data;
+  const atendeu = a.user ?? (a.owner ? { id: a.owner.id, name: a.owner.name ?? 'atendente' } : null);
+  const [apontando, setApontando] = useState(false);
+  const [marcadas, setMarcadas] = useState<string[]>([]);
+  const alternar = (id: string) => setMarcadas((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
 
   return (
     <Modal open onClose={onClose} title={a.contact.name || a.contact.phoneFormatted} width="max-w-2xl">
@@ -255,12 +281,12 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
             const corpo = m.deletedAt ? <i className="text-muted">mensagem apagada</i> : m.text || (m.mediaName ? <span className="inline-flex items-center gap-1"><Paperclip size={12} />{m.mediaName}</span> : MESSAGE_TYPE_LABEL[m.type as MessageType] ?? m.type);
             return (
               <div key={m.id} className={cn('flex', sai ? 'justify-end' : 'justify-start')}>
-                <div className={cn('max-w-[80%] rounded-xl px-3 py-1.5 text-[13px] shadow-sm', nota ? 'bg-warn-soft text-warn-ink' : sai ? 'bg-accent-soft text-ink' : 'bg-panel text-ink')}>
-                  {(sai || nota) && (
-                    <div className="text-[10.5px] font-semibold opacity-70 flex items-center gap-1">
-                      {nota && <Lock size={10} />}{m.authorName ?? m.author?.name ?? (sai ? 'Automático' : '')}
-                    </div>
-                  )}
+                <div onClick={apontando && !nota ? () => alternar(m.id) : undefined}
+                  className={cn('max-w-[80%] rounded-xl px-3 py-1.5 text-[13px] shadow-sm transition', nota ? 'bg-warn-soft text-warn-ink' : sai ? 'bg-accent-soft text-ink' : 'bg-panel text-ink',
+                    apontando && !nota && 'cursor-pointer hover:ring-2 hover:ring-danger/40', marcadas.includes(m.id) && 'ring-2 ring-danger')}>
+                  <div className={cn('text-[10.5px] font-semibold flex items-center gap-1', sai || nota ? 'opacity-70' : 'text-accent')}>
+                    {nota && <Lock size={10} />}{autorDe(m, contato)}
+                  </div>
                   {m.mediaUrl && m.mediaMime?.startsWith('image/') && !m.deletedAt && <img src={m.mediaUrl} alt="" className="mt-1 max-h-40 rounded-lg" />}
                   <div className="whitespace-pre-wrap break-words">{corpo}</div>
                   <div className="text-[10px] text-faint text-right tnum">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
@@ -272,9 +298,16 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
           {lista.length >= 1000 && <p className="text-center text-[11.5px] text-muted">Mostrando as primeiras 1000 mensagens deste atendimento.</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2">
+        {apontando && atendeu && (
+          <ReviewComposer conversationId={a.conversationId} closeEventId={a.id} agent={atendeu} selected={marcadas} onClear={() => setMarcadas([])}
+            onDone={() => { setApontando(false); setMarcadas([]); }} />
+        )}
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="mr-auto text-[11.5px] text-faint">Na conversa, cada atendimento termina numa linha “Atendimento encerrado”.</span>
           <Button variant="ghost" onClick={onClose}>Fechar</Button>
+          {podeFeedback && atendeu && atendeu.id !== me?.id && !apontando && (
+            <Button variant="ghost" icon={<ClipboardCheck size={14} />} onClick={() => setApontando(true)} title={`Correção, oportunidade, orientação ou elogio para ${atendeu.name} — só vocês dois veem`}>Dar feedback</Button>
+          )}
           <Button icon={<ExternalLink size={14} />} onClick={() => { setConversation(a.conversationId); router.push('/conversas'); }}>Abrir conversa</Button>
         </div>
       </div>

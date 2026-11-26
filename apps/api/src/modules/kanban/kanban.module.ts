@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Injectable, Module, Patch, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsOptional, IsUUID } from 'class-validator';
-import type { Prisma } from '@prisma/client';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { ConversationOrigin, type Prisma } from '@prisma/client';
 import { KANBAN_NO_STAGE, type KanbanBoard, type KanbanCard, type KanbanTag, type ReorderColumnsInput } from '@atendo/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { textSearch } from '../../common/text-search';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../auth/permissions.guard';
@@ -19,9 +21,25 @@ import { ConversationsGateway } from '../conversations/conversations.gateway';
  */
 const BOARD_LIMIT = 500;
 
+const lista = ({ value }: { value: unknown }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean));
+const booleano = ({ value }: { value: unknown }) => value === true || value === '1' || value === 'true';
+
+/** Mesmos filtros da lista de conversas que fazem sentido para atendimento aberto. */
 class BoardQuery {
-  @IsOptional() @IsUUID() numberId?: string;
+  /** um número ou vários separados por vírgula */
+  @IsOptional() @Matches(/^[0-9a-f-]{36}(,[0-9a-f-]{36}){0,49}$/i, { message: 'numberId inválido' }) numberId?: string;
+  /** id do departamento ou `none` (só as sem departamento) */
+  @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;
+  /** tag da conversa OU do contato */
+  @IsOptional() @Transform(lista) @IsArray() @ArrayMaxSize(50) @IsUUID('4', { each: true }) tagIds?: string[];
+  @IsOptional() @IsIn(['waiting', 'in_progress']) status?: 'waiting' | 'in_progress';
+  /** só com `conversations.view_all`; `none` = sem atendente */
+  @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() assigneeId?: string;
+  @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
+  @IsOptional() @Transform(booleano) @IsBoolean() unread?: boolean;
+  @IsOptional() @IsString() @MaxLength(100) search?: string;
 }
+type BoardFilters = Partial<BoardQuery>;
 class ReorderDto implements ReorderColumnsInput {
   @IsArray() @ArrayMaxSize(200) @IsUUID('4', { each: true }) tagIds: string[];
 }
@@ -39,15 +57,23 @@ export class KanbanService {
    * Mesma regra de posse da lista de conversas: `waiting` todo mundo vê; `in_progress` só o
    * dono, a não ser com `conversations.view_all`. E só dos números e departamentos que ela opera.
    */
-  async board(u: AuthUser, numberId?: string): Promise<KanbanBoard> {
+  async board(u: AuthUser, f: BoardFilters = {}): Promise<KanbanBoard> {
     const viewAll = u.role === 'super_admin' || !!u.permissions?.includes('conversations.view_all');
-    const scoped = narrowTo(u, numberId);
+    // o número pedido é interseccionado com o escopo; `null` = nada sobrou, e o quadro vem vazio
+    const scoped = narrowTo(u, f.numberId);
     const where: Prisma.ConversationWhereInput = {
       tenantId: u.tenantId,
-      status: { in: ['waiting', 'in_progress'] },
+      status: f.status ?? { in: ['waiting', 'in_progress'] },
       ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
+      // filtro por atendente é de quem vê a equipe; para os outros a regra de posse abaixo já basta
+      ...(viewAll && f.assigneeId && { assigneeId: f.assigneeId === 'none' ? null : f.assigneeId }),
+      ...(f.origin && { origin: f.origin }),
+      ...(f.unread && { unreadCount: { gt: 0 } }),
+      ...(f.search?.trim() && { contact: textSearch(f.search) }),
+      // tag da conversa OU tag do contato (mesma regra da lista de conversas)
+      ...(f.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: f.tagIds } } } }, { contact: { tags: { some: { tagId: { in: f.tagIds } } } } }] }),
       // posse e departamento usam OR: cada um no seu item do AND
-      AND: [departmentWhere(u) ?? {}, viewAll ? {} : { OR: [{ status: 'waiting' }, { assigneeId: u.id }] }],
+      AND: [departmentWhere(u, f.departmentId) ?? {}, viewAll ? {} : { OR: [{ status: 'waiting' }, { assigneeId: u.id }] }],
     };
     const [columns, rows] = await Promise.all([
       this.prisma.tag.findMany({
@@ -115,7 +141,7 @@ class KanbanController {
 
   @Get()
   board(@CurrentUser() u: AuthUser, @Query() q: BoardQuery) {
-    return this.kanban.board(u, q.numberId);
+    return this.kanban.board(u, q);
   }
 
   @Patch('columns')

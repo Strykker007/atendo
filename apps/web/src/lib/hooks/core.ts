@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, onAccessToken } from '../api';
 import { useUI, type ConversationTab } from '../store';
+import { useReviewGate } from '../review-gate';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal, TagKind } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
@@ -68,6 +69,8 @@ export interface Message {
   reactions?: { emoji: string; fromMe: boolean; at: string }[] | null;
   /** nota interna (cadeado): só a equipe vê. `authorName` = nome gravado na nota (sobrevive à remoção do usuário) */
   internal?: boolean; authorId?: string | null; author?: { name: string } | null; authorName?: string | null;
+  /** nota interna: quem precisa ler e quando leu (docs/notas-internas.md#leitura) */
+  noteReceipts?: { userId: string; userName: string; readAt: string | null }[];
   /** recebida num grupo: quem escreveu (docs/grupos.md#grupos-nas-conversas) */
   senderName?: string | null; senderPhone?: string | null;
   /** botões, lista, localização ou contato; o corpo continua em `text` */
@@ -81,7 +84,8 @@ export interface Message {
   /** texto trocado depois do envio (pelo atendente ou no celular) — a bolha mostra "editada" */
   editedAt?: string | null;
   /** áudio transcrito pelo botão "Transcrever"; null = nunca pedido, '' = sem fala reconhecida */
-  transcript?: string | null;
+  transcript?: string | null;  /** enviada sem atendente: pelo celular, WhatsApp Web, outro aparelho ou pela automação */
+  sentFrom?: 'phone' | 'web' | 'device' | 'auto' | null;
 }
 export interface Upload { key: string; url: string; mimeType: string; fileName: string; size: number }
 export type SendInput = ({ type: 'text'; text: string } | { type: 'text'; /** chave Pix cadastrada: a API monta o cartão */ pixKeyId: string } | { type: 'image' | 'audio' | 'video' | 'document'; mediaKey: string; text?: string; media: { url: string; mimeType: string; fileName: string } } | { type: 'sticker'; mediaKey: string; media: { url: string; mimeType: string; fileName?: string } }) & {
@@ -168,7 +172,7 @@ export const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api
 
 export type OrdemConversas = 'recent' | 'waiting';
 
-export type ConversationsQuery = { status: ConversationTab; /** vazio/ausente = todos os números */ numberIds?: string[]; departmentId?: string | null; tagIds: string[]; search?: string; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null; onlyTickets?: boolean };
+export type ConversationsQuery = { status: ConversationTab; /** vazio/ausente = todos os números */ numberIds?: string[]; departmentId?: string | null; tagIds: string[]; search?: string; /** com `search`: procura em todas as abas (aguardando, atendendo, encerrado) */ everywhere?: boolean; origin?: ConversationOrigin | null; assigneeId?: string | null; sort?: OrdemConversas; closeReasonId?: string | null; lastOutcome?: 'won' | 'lost' | null; onlyTickets?: boolean };
 /** Tamanho da página no servidor (`take` padrão de GET /conversations). Página cheia = pode haver mais. */
 export const CONVERSATIONS_PAGE = 50;
 
@@ -182,6 +186,7 @@ function conversationsParams(q: ConversationsQuery) {
   if (q.origin) p.set('origin', q.origin);
   if (q.tagIds.length) p.set('tagIds', q.tagIds.join(','));
   if (q.search) p.set('search', q.search);
+  if (q.search && q.everywhere) p.set('everywhere', '1');
   if (q.sort && q.sort !== 'recent') p.set('sort', q.sort);
   if (q.closeReasonId) p.set('closeReasonId', q.closeReasonId);
   if (q.lastOutcome) p.set('lastOutcome', q.lastOutcome);
@@ -232,7 +237,7 @@ export function useOlderConversations(q: ConversationsQuery, primeira: Conversat
   }, [carregando, temMais, primeira, atual, chave]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const naPrimeira = new Set((primeira ?? []).map((c) => c.id));
-  return { itens: atual.itens.filter((c) => !naPrimeira.has(c.id) && c.status === q.status), carregar, carregando, temMais };
+  return { itens: atual.itens.filter((c) => !naPrimeira.has(c.id) && ((q.everywhere && q.search) || c.status === q.status)), carregar, carregando, temMais };
 }
 
 export const invConv = (qc: ReturnType<typeof useQueryClient>, id: string) => {
@@ -255,7 +260,8 @@ export const useConversationCounts = (numberIds: string[] = [], departmentId: st
   });
 
 // ---- posse do atendimento ----
-export const useClaim = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/claim`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
+// feedback pendente que trava (docs/feedback-de-atendimento.md#trava): a recusa abre a tela de pendências
+export const useClaim = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/claim`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id), onError: (e) => { if (e instanceof ApiError && e.code === 'reviews_pending') useReviewGate.getState().show(true); } }); };
 /** Quem pode receber a conversa: tem acesso ao número dela (mesma filial ou "todos os números"). */
 export const useTransferTargets = (id: string, enabled: boolean) =>
   useQuery({ queryKey: ['transfer-targets', id], enabled, queryFn: () => api<{ id: string; name: string }[]>(`/conversations/${id}/transfer-targets`) });
@@ -475,7 +481,14 @@ function moverConversaParaTopo(qc: ReturnType<typeof useQueryClient>, m: Message
 
 export const useSendNote = (conversationId: string | null) => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (text: string) => api<Message>(`/conversations/${conversationId}/notes`, { method: 'POST', body: JSON.stringify({ text }) }), onSuccess: (m) => upsertMessageInCache(qc, m) });
+  // texto e/ou imagem (print do atendimento, docs/notas-internas.md#imagem)
+  return useMutation({
+    mutationFn: (v: string | { text: string; image?: Upload | null }) => {
+      const { text, image } = typeof v === 'string' ? { text: v, image: null } : v;
+      return api<Message>(`/conversations/${conversationId}/notes`, { method: 'POST', body: JSON.stringify({ text, ...(image && { mediaKey: image.key, mediaMime: image.mimeType, mediaName: image.fileName }) }) });
+    },
+    onSuccess: (m) => upsertMessageInCache(qc, m),
+  });
 };
 
 export const useResend = () =>
@@ -627,7 +640,13 @@ export const useSetStatus = () => {
     onSuccess: (_, v) => {
       // sai na hora das listas de outro status (sem esperar o refetch) e a aberta já vê o novo status
       for (const [key] of qc.getQueriesData<Conversation[]>({ queryKey: ['conversations'] })) {
-        if ((key[1] as { status?: ConversationStatus } | undefined)?.status === v.status) continue;
+        const filtro = key[1] as { status?: ConversationStatus; everywhere?: boolean; search?: string } | undefined;
+        // busca em todas as abas: a conversa continua no resultado, só troca o status
+        if (filtro?.everywhere && filtro.search) {
+          qc.setQueryData<Conversation[]>(key, (old) => old?.map((c) => (c.id === v.id ? { ...c, status: v.status } : c)));
+          continue;
+        }
+        if (filtro?.status === v.status) continue;
         qc.setQueryData<Conversation[]>(key, (old) => old?.filter((c) => c.id !== v.id));
       }
       qc.setQueryData<Conversation>(['conversation', v.id], (old) => (old ? { ...old, status: v.status } : old));

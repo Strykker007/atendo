@@ -2,7 +2,7 @@
 import { CheckCircle2, Mail, MailOpen, Maximize2, Star } from 'lucide-react';
 import type { KanbanCard as Card, KanbanColumn } from '@atendo/shared';
 import { Avatar } from '@/components/chat/Avatar';
-import { SeloEspera, formatTime } from '@/components/chat/ConversationList';
+import { SeloEspera, SeloNota, formatTime } from '@/components/chat/ConversationList';
 import { cn, formatPreview, readableColor } from '@/lib/utils';
 import { formatPhone } from '@/components/ui/PhoneInput';
 
@@ -41,6 +41,7 @@ export function KanbanCard({ card, primary, agora, dragging, onOpen, onPromote, 
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <p className="text-xs text-muted truncate flex-1">{formatPreview(card.lastMessagePreview)}</p>
+            <SeloNota conversationId={card.id} />
             {card.unreadCount > 0 && <span className="text-[10px] font-bold text-white bg-accent rounded-full min-w-4 h-4 px-1 grid place-items-center tnum">{card.unreadCount}</span>}
           </div>
         </div>

@@ -1,17 +1,22 @@
 'use client';
 import { useCallback, useMemo, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { Columns3, GripVertical, Pin, Search } from 'lucide-react';
+import { ChevronDown, Columns3, GripVertical, Pin, Search, SlidersHorizontal } from 'lucide-react';
 import { KANBAN_NO_STAGE, type KanbanCard as Card, type KanbanColumn } from '@atendo/shared';
 import Link from 'next/link';
 import { KanbanCard } from '@/components/kanban/KanbanCard';
 import { KanbanChatDialog } from '@/components/kanban/KanbanChatDialog';
 import { CloseModal } from '@/components/chat/CloseModal';
 import { useQueryClient } from '@tanstack/react-query';
-import { useMinuto } from '@/components/chat/ConversationList';
+import { useMinuto, STATUS_META } from '@/components/chat/ConversationList';
+import { NumberFilter, useDefaultNumbers } from '@/components/chat/NumberFilter';
+import { TagPicker } from '@/components/chat/TagPicker';
+import { ORIGIN_META } from '@/components/chat/OriginBadge';
+import { usePersistedState } from '@/lib/persisted';
+import { useUI } from '@/lib/store';
 import { Empty } from '@/components/ui/Page';
 import { toast } from '@/components/ui/Toast';
-import { useCan, useKanban, useMarkRead, useMarkUnread, useNumbers, useReorderColumns, useSetPrimaryTag } from '@/lib/hooks';
+import { useAgents, useCan, useDebounced, useDepartments, useKanban, useMarkRead, useMarkUnread, useMe, useNumbers, useReorderColumns, useSetPrimaryTag, useTags, useVocab, type ConversationOrigin } from '@/lib/hooks';
 import { cn } from '@/lib/utils';
 
 /**
@@ -22,15 +27,44 @@ import { cn } from '@/lib/utils';
  * Não tem limite nem cobrança próprios: o mini-chat é o mesmo da tela de conversas, então a
  * cota do plano bloqueia o envio aqui do mesmo jeito (e o aviso global aparece no topo).
  */
+/** Filtros só do Kanban (número e departamento são os mesmos da tela de conversas). */
+type FiltrosKanban = { status: 'waiting' | 'in_progress' | null; assigneeId: string | null; tagIds: string[]; origin: ConversationOrigin | null; unread: boolean };
+const SEM_FILTRO: FiltrosKanban = { status: null, assigneeId: null, tagIds: [], origin: null, unread: false };
+
 export default function KanbanPage() {
-  const [numberId, setNumberId] = useState<string | null>(null);
+  // número e departamento: o mesmo estado da lista de conversas (inclui o número padrão da pessoa)
+  const { companyId, numberIds, departmentId, setDepartment } = useUI();
+  useDefaultNumbers();
+  const [filtros, setFiltros] = usePersistedState<FiltrosKanban>('kanban-filtros', SEM_FILTRO);
+  const f = { ...SEM_FILTRO, ...filtros };
+  const mudar = (p: Partial<FiltrosKanban>) => setFiltros((v) => ({ ...SEM_FILTRO, ...v, ...p }));
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   const [busca, setBusca] = useState('');
+  const buscaApi = useDebounced(busca, 350);
   const [aberto, setAberto] = useState<string | null>(null);
   // encerrar direto do card: o mesmo modal do chat (resultado, motivo, tags, venda, fluxo)
   const [encerrando, setEncerrando] = useState<string | null>(null);
   const qc = useQueryClient();
-  const board = useKanban(numberId);
+  const me = useMe();
+  const veEquipe = useCan('conversations.view_all');
+  const agents = useAgents();
+  const tags = useTags();
+  const vocab = useVocab();
+  const departments = useDepartments();
   const numbers = useNumbers();
+  const numerosDaEmpresa = (numbers.data ?? []).filter((n) => (!companyId || n.companyId === companyId) && (!departmentId || departmentId === 'none' || !n.defaultDepartmentId || n.defaultDepartmentId === departmentId));
+  const deptOptions = (departments.data ?? []).filter((d) => d.isActive || d.id === departmentId);
+  const board = useKanban({
+    numberIds,
+    departmentId,
+    tagIds: f.tagIds,
+    status: f.status,
+    assigneeId: veEquipe && f.assigneeId ? (f.assigneeId === 'me' ? me.data?.id ?? null : f.assigneeId) : null,
+    origin: f.origin,
+    unread: f.unread,
+    search: buscaApi,
+  });
+  const filtrosAtivos = (f.status ? 1 : 0) + (veEquipe && f.assigneeId ? 1 : 0) + (f.tagIds.length ? 1 : 0) + (f.origin ? 1 : 0) + (f.unread ? 1 : 0);
   const move = useSetPrimaryTag();
   const reorder = useReorderColumns();
   const marcarLida = useMarkRead();
@@ -42,15 +76,13 @@ export default function KanbanPage() {
   const columns = board.data?.columns ?? [];
   const porColuna = useMemo(() => {
     const ids = new Set(columns.map((c) => c.id));
-    const q = busca.trim().toLowerCase();
     const map = new Map<string, Card[]>([[KANBAN_NO_STAGE, []], ...columns.map((c) => [c.id, []] as [string, Card[]])]);
     for (const card of board.data?.cards ?? []) {
-      if (q && !(card.contact.name ?? '').toLowerCase().includes(q) && !card.contact.phone.includes(q)) continue;
       // a API já diz a coluna (etapa do atendimento, senão a permanente do contato)
       map.get(ids.has(card.columnId) ? card.columnId : KANBAN_NO_STAGE)!.push(card);
     }
     return map;
-  }, [board.data, columns, busca]);
+  }, [board.data, columns]);
 
   function onDragEnd(r: DropResult) {
     if (!r.destination) return;
@@ -124,13 +156,58 @@ export default function KanbanPage() {
           <Search size={14} className="text-faint" />
           <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar contato…" className="bg-transparent text-[13px] w-40 focus:outline-none" />
         </label>
-        {(numbers.data?.length ?? 0) > 1 && (
-          <select value={numberId ?? ''} onChange={(e) => setNumberId(e.target.value || null)} className="rounded-lg bg-field px-2 h-8 text-[13px]">
-            <option value="">Todos os números</option>
-            {numbers.data!.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
-          </select>
+        <div className="w-full sm:w-56 flex"><NumberFilter options={numerosDaEmpresa} /></div>
+        {(deptOptions.length > 0 || departmentId) && (
+          <div className="relative w-full sm:w-48">
+            <select value={departmentId ?? ''} onChange={(e) => setDepartment(e.target.value || null)} title="Filtrar por departamento"
+              className={cn('w-full appearance-none rounded-lg bg-field text-ink pl-2.5 pr-6 py-1.5 text-[12px] font-semibold truncate focus:outline-none focus:ring-2 focus:ring-accent/40', departmentId && 'ring-1 ring-accent')}>
+              <option value="">Todos os departamentos</option>
+              {deptOptions.map((d) => <option key={d.id} value={d.id}>{d.name}{d.isActive ? '' : ' (desativado)'}</option>)}
+              <option value="none">Sem departamento</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-faint pointer-events-none" />
+          </div>
         )}
+        <button
+          onClick={() => setFiltrosAbertos((v) => !v)}
+          title={filtrosAtivos ? `${filtrosAtivos} filtro(s) ligado(s)` : 'Filtros'}
+          className={cn('relative shrink-0 w-8 h-8 rounded-lg grid place-items-center', filtrosAbertos || filtrosAtivos ? 'bg-accent-soft text-accent-ink' : 'text-faint hover:text-ink hover:bg-field')}
+        >
+          <SlidersHorizontal size={15} />
+          {filtrosAtivos > 0 && <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-white text-[9px] font-bold grid place-items-center tnum">{filtrosAtivos}</span>}
+        </button>
       </header>
+
+      {/* Filtros escondidos atrás do ícone, como na lista de conversas: o ponto avisa quando há
+          algum ligado (senão o card some e ninguém lembra por quê) */}
+      {filtrosAbertos && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b border-line bg-panel">
+          <div className="flex gap-1">
+            {([[null, 'Todos'], ['in_progress', STATUS_META.in_progress.short], ['waiting', STATUS_META.waiting.short]] as const).map(([st, l]) => (
+              <button key={l} onClick={() => mudar({ status: st })} className={chip(f.status === st)}>{l}</button>
+            ))}
+          </div>
+          {veEquipe && (
+            <select value={f.assigneeId ?? ''} onChange={(e) => mudar({ assigneeId: e.target.value || null })} aria-label="Filtrar por atendente"
+              className={cn('rounded-lg bg-field text-ink px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent/40', f.assigneeId && 'ring-1 ring-accent')}>
+              <option value="">Todos os {vocab.pessoas}</option>
+              <option value="me">Só os meus</option>
+              <option value="none">Sem {vocab.pessoa.toLowerCase()}</option>
+              {agents.data?.filter((a) => a.id !== me.data?.id && a.isActive).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          )}
+          <div className="w-full sm:w-64"><TagPicker tags={tags.data ?? []} value={f.tagIds} onChange={(ids) => mudar({ tagIds: ids })} placeholder="Filtrar por tag…" /></div>
+          {(vocab.vendas || f.origin) && (
+            <div className="flex flex-wrap gap-1">
+              {(['ad', 'link', 'post', 'organic'] as ConversationOrigin[]).map((o) => (
+                <button key={o} onClick={() => mudar({ origin: f.origin === o ? null : o })} className={chip(f.origin === o)}>{ORIGIN_META[o].label}</button>
+              ))}
+            </div>
+          )}
+          <button onClick={() => mudar({ unread: !f.unread })} className={chip(f.unread)}>Só não lidas</button>
+          {filtrosAtivos > 0 && <button onClick={() => setFiltros(SEM_FILTRO)} className="text-[11px] text-accent-ink hover:underline">Limpar filtros</button>}
+        </div>
+      )}
 
       {board.data?.truncated && (
         <p className="px-4 py-1.5 text-xs bg-warn-soft text-warn-ink">Mostrando os {board.data.limit} atendimentos abertos mais recentes. Filtre por número ou encerre os parados para ver o resto.</p>
@@ -182,3 +259,5 @@ export default function KanbanPage() {
     </div>
   );
 }
+
+const chip = (on: boolean) => cn('text-[10.5px] font-semibold px-2 py-0.5 rounded-md border transition-colors', on ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line text-muted hover:bg-field');

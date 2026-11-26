@@ -75,6 +75,27 @@ export class NumbersService {
   }
 
   /**
+   * Timeouts SEGUIDOS de envio no número (zerado a cada envio que passa). Depois de um 503 do
+   * WhatsApp a sessão pode reconectar "recuperada" mas sem conseguir enviar: recebe tudo, e todo
+   * `sendText` estoura o prazo sem erro de conexão — a AC Farma ficou 14 h assim (25→26/11/2026).
+   * Devolve quantos já foram (janela de 10 min); 0 se o Redis falhar (nunca lança).
+   */
+  async noteSendTimeout(numberId: string): Promise<number> {
+    try {
+      const key = `wa:send-timeouts:${numberId}`;
+      const n = await this.redis.incr(key);
+      await this.redis.pexpire(key, 600_000);
+      return n;
+    } catch {
+      return 0;
+    }
+  }
+
+  async clearSendTimeouts(numberId: string): Promise<void> {
+    await this.redis.del(`wa:send-timeouts:${numberId}`).catch(() => undefined);
+  }
+
+  /**
    * Conta online enquanto há atividade (envio, "digitando"), offline ~45 s depois da última —
    * como alguém com o WhatsApp Web aberto. Sem isto o WhatsApp não mostra "digitando" (a instância
    * conecta offline), e o oposto — `alwaysOnline` — deixaria o número online 24 h, padrão de robô.

@@ -15,7 +15,10 @@ import { TrackedWorkerHost } from '../../common/observability/tracked-worker.hos
 import { enrichContext } from '../../common/observability/request-context';
 import { SendPacer } from './send-pacer';
 import { countsTowardDailyLimit } from './sending-policy';
-import { isTransientSendError, retryDelayMs } from './providers/provider-error';
+import { isTransientSendError, ProviderTimeoutError, retryDelayMs } from './providers/provider-error';
+
+/** timeouts seguidos no mesmo número que indicam sessão travada para envio (doc 04) */
+const SEND_TIMEOUTS_TO_RESTART = 3;
 import { expiredReason, headOf, holdForProtection, planSend, promoteNext, releaseHeld } from './send-queue';
 import { humanTiming, typingMs, warmupPhase } from './number-warmup';
 import type { NumberContext } from './providers/provider.interface';
@@ -225,6 +228,16 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
         this.log.warn(`Número ${ctx.numberId}: sessão zumbi, reiniciando instância`);
         await provider.restart(ctx).catch(() => undefined);
       }
+      // Sessão que recebe mas não envia (todo envio estoura o prazo, sem "Connection Closed"):
+      // a partir do 3º timeout seguido no número, reinicia a instância — mesma vaga de 2 min
+      if (err instanceof ProviderTimeoutError && provider.restart) {
+        const seguidos = await this.numbers.noteSendTimeout(ctx.numberId);
+        if (seguidos >= SEND_TIMEOUTS_TO_RESTART && await this.numbers.claimRestart(ctx.numberId)) {
+          this.log.warn(`Número ${ctx.numberId}: ${seguidos} envios seguidos sem resposta, reiniciando instância`);
+          await this.numbers.clearSendTimeouts(ctx.numberId);
+          await provider.restart(ctx).catch(() => undefined);
+        }
+      }
       const transient = isTransientSendError(err);
       const last = !transient || job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
       if (last) {
@@ -246,6 +259,7 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
       data: { status: result.status, externalId: result.externalId, error: null },
     });
     if (proativo) await this.pacer.countSend(num.id).catch(() => undefined);
+    if (num.provider !== 'meta') await this.numbers.clearSendTimeouts(num.id);
     // o intervalo até o próximo envio conta da entrega, não da reserva (mídia lenta não "gasta" o intervalo)
     await this.pacer.delivered({ numberId: num.id, conversationId: message.conversationId, profile: num.sendDelay, limits }).catch((err) => this.log.warn(`ritmo pós-envio não gravado: ${err instanceof Error ? err.message : err}`));
     this.gateway.emitMessage(ctx.tenantId, this.conversations.present(updated));

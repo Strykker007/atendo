@@ -78,6 +78,7 @@ export function InternalChatWidget() {
   // entrando como: a única conversa é o canal de suporte do cliente, aberto direto
   const chatId = entrandoComo ? chatsEquipe.data?.find((c) => c.isSupport)?.id ?? null : chatSalvo;
   const online = ((ehDono ? colegas.data : equipe.data) ?? []).filter((u) => u.online);
+  const onlineIds = new Set(online.map((u) => u.id));
   const vp = useViewport();
 
   // tamanho do que está na tela: botão, barra minimizada ou janela (limitada ao tamanho da tela)
@@ -169,7 +170,14 @@ export function InternalChatWidget() {
           <button data-no-drag type="button" onClick={voltar} className="p-1 rounded hover:bg-white/10" aria-label="Voltar"><ArrowLeft size={15} /></button>
         )}
         <ChatGlyph size={18} className="shrink-0" />
-        <span className="flex-1 min-w-0 truncate text-sm font-semibold">{aberta && !minimized ? aberta.name : titulo}</span>
+        <span className="flex-1 min-w-0 leading-tight">
+          <span className="block truncate text-sm font-semibold">{aberta && !minimized ? aberta.name : titulo}</span>
+          {aberta && !minimized && outroDaDireta(aberta, me.data?.id) && (
+            <span className="block text-[10.5px] font-medium text-white/80">
+              {onlineIds.has(outroDaDireta(aberta, me.data?.id)!) ? '● online agora' : 'offline'}
+            </span>
+          )}
+        </span>
         {naoLidas > 0 && minimized && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-[10px] font-bold grid place-items-center tnum">{naoLidas}</span>}
         <button data-no-drag type="button" onClick={() => set({ minimized: !minimized })} className="p-1 rounded hover:bg-white/10" aria-label={minimized ? 'Expandir' : 'Minimizar'}>
           {minimized ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
@@ -530,10 +538,22 @@ function SupportTicketBar({ ticket, owner, actions, meId }: { ticket: SupportTic
   );
 }
 
-/** Lista de conversas + equipe (online primeiro) + novo grupo. */
+/** Conversa direta (não grupo, não suporte): o id do outro membro — é quem tem online/offline. */
+function outroDaDireta(c: InternalChat, meId: string | undefined): string | null {
+  if (c.isGroup || c.isSupport || c.isStaff) return null;
+  return c.members.find((m) => m.id !== meId)?.id ?? null;
+}
+
+/**
+ * Lista de conversas + equipe (online primeiro) + novo grupo. Na aba Conversas também aparece
+ * quem está online (faixa no topo + ponto verde na conversa direta) — antes só a aba Equipe dizia.
+ */
 function Home({ chats, loading, onOpen }: { chats: InternalChat[]; loading: boolean; onOpen: (id: string) => void }) {
   const [aba, setAba] = useState<'chats' | 'equipe' | 'grupo'>(chats.length ? 'chats' : 'equipe');
   const users = useInternalUsers(true);
+  const meId = useMe().data?.id;
+  const onlineAgora = (users.data ?? []).filter((u) => u.online);
+  const onlineIds = new Set(onlineAgora.map((u) => u.id));
   const create = useCreateInternalChat();
   const [marcados, setMarcados] = useState<string[]>([]);
   const [nome, setNome] = useState('');
@@ -558,13 +578,35 @@ function Home({ chats, loading, onOpen }: { chats: InternalChat[]; loading: bool
           loading ? <p className="p-4 text-sm text-faint">Carregando…</p> : !chats.length ? (
             <p className="p-4 text-sm text-muted">Nenhuma conversa ainda. Escolha alguém em <b>Equipe</b>.</p>
           ) : (
+            <>
+            {onlineAgora.length > 0 && (
+              <div className="px-3 pt-1 pb-2 border-b border-line">
+                <p className="text-[10.5px] font-semibold uppercase tracking-wider text-muted mb-1.5"><span className="inline-block w-1.5 h-1.5 rounded-full bg-ok mr-1 align-middle" />Online agora · {onlineAgora.length}</p>
+                <div className="flex gap-2 overflow-x-auto scrollbar-thin pb-0.5">
+                  {onlineAgora.map((u) => (
+                    <button key={u.id} type="button" disabled={create.isPending} onClick={() => void abrirCom([u.id])} title={`Conversar com ${u.name}`} className="flex flex-col items-center w-12 shrink-0 group">
+                      <span className="relative w-9 h-9 rounded-full bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold group-hover:ring-2 group-hover:ring-accent/40">
+                        {iniciais(u.name)}
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-panel bg-ok" />
+                      </span>
+                      <span className="mt-0.5 w-full truncate text-center text-[10.5px] text-muted">{u.name.split(' ')[0]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <ul className="divide-y divide-line">
               {chats.map((c) => (
                 <li key={c.id}>
                   <button type="button" onClick={() => onOpen(c.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-field">
                     {c.isSupport
                       ? <span className="w-8 h-8 rounded-[11px] bg-gradient-to-br from-accent to-accent-hover text-white grid place-items-center shrink-0 shadow-sm"><Headset size={15} /></span>
-                      : <span className="w-8 h-8 rounded-full bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold shrink-0">{c.isGroup ? <Users size={14} /> : iniciais(c.name)}</span>}
+                      : (
+                        <span className="relative w-8 h-8 rounded-full bg-accent-soft text-accent-ink grid place-items-center text-[11px] font-bold shrink-0">
+                          {c.isGroup ? <Users size={14} /> : iniciais(c.name)}
+                          {outroDaDireta(c, meId) && <span className={cn('absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-panel', onlineIds.has(outroDaDireta(c, meId)!) ? 'bg-ok' : 'bg-faint')} title={onlineIds.has(outroDaDireta(c, meId)!) ? 'Online agora' : 'Offline'} />}
+                        </span>
+                      )}
                     <span className="flex-1 min-w-0">
                       <span className="flex items-center gap-1"><span className="truncate text-sm font-medium text-ink">{c.name}</span>{c.lastMessageAt && <span className="ml-auto text-[10.5px] text-faint shrink-0">{hora(c.lastMessageAt)}</span>}</span>
                       <span className="block truncate text-[12px] text-muted">{c.lastMessagePreview ?? (c.isGroup ? `${c.members.length} membros` : 'Sem mensagens')}</span>
@@ -574,6 +616,7 @@ function Home({ chats, loading, onOpen }: { chats: InternalChat[]; loading: bool
                 </li>
               ))}
             </ul>
+            </>
           )
         )}
         {(aba === 'equipe' || aba === 'grupo') && (
@@ -644,7 +687,12 @@ function ChatView({ chat, meId, scope, api = scope, onLeave }: { chat: InternalC
     if (ultima && chat.unread) read.mutate(chat.id);
   }, [ultima]); // eslint-disable-line react-hooks/exhaustive-deps
   // trocou de conversa: a citação era da outra
-  useEffect(() => { setRespondendo(null); setPainel(false); }, [chat.id]);
+  useEffect(() => {
+    setRespondendo(null);
+    setPainel(false);
+    // abriu a conversa: o campo já vem focado (fora de tela de toque, onde abriria o teclado)
+    if (!window.matchMedia?.('(pointer: coarse)').matches) requestAnimationFrame(() => campo.current?.focus());
+  }, [chat.id]);
 
   function responder(m: InternalMessage) {
     setRespondendo(m);

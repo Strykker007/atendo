@@ -208,6 +208,12 @@ atendente (índices por `tenantId + closedAt` e `tenantId + userId + closedAt`).
 
 **saved_reports** — `definition` jsonb com o `ReportDefinition` (métrica, agrupamento, filtros, tipo de gráfico).
 
+### Feedback e leitura de notas
+
+- `AttendanceReview` (`attendance_reviews`): feedback do gestor sobre um atendimento, com a regra copiada e o relógio de horas online. Ver [feedback-de-atendimento](feedback-de-atendimento.md#modelo).
+- `NoteReceipt` (`note_receipts`): quem precisa ler cada nota interna e quando leu. Ver [notas-internas](notas-internas.md#leitura).
+- `TenantSettings.reviewSettings` (JSON, null = padrão).
+
 ## Enums
 
 | Enum | Valores |

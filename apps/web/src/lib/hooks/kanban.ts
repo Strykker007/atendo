@@ -3,15 +3,41 @@
  * Kanban: colunas de transição (etapa do atendimento) e permanentes (📌, do contato). Mover card
  * = PATCH primary-tag; a regra de onde o card fica está em `@atendo/shared` (kanban.ts).
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { KANBAN_NO_STAGE, type KanbanBoard, type KanbanCard } from '@atendo/shared';
 import { api } from '../api';
 import { invConv } from './core';
 
-export const useKanban = (numberId: string | null) =>
+/** Filtros do quadro (docs/kanban): vão para a API, porque o quadro corta nos mais recentes. */
+export interface KanbanFilters {
+  numberIds?: string[];
+  departmentId?: string | null;
+  tagIds?: string[];
+  status?: 'waiting' | 'in_progress' | null;
+  assigneeId?: string | null;
+  origin?: string | null;
+  unread?: boolean;
+  search?: string;
+}
+
+export const useKanban = (f: KanbanFilters) =>
   useQuery({
-    queryKey: ['kanban', numberId],
-    queryFn: () => api<KanbanBoard>(`/kanban${numberId ? `?numberId=${numberId}` : ''}`),
+    queryKey: ['kanban', f],
+    queryFn: () => {
+      const p = new URLSearchParams();
+      if (f.numberIds?.length) p.set('numberId', f.numberIds.join(','));
+      if (f.departmentId) p.set('departmentId', f.departmentId);
+      if (f.tagIds?.length) p.set('tagIds', f.tagIds.join(','));
+      if (f.status) p.set('status', f.status);
+      if (f.assigneeId) p.set('assigneeId', f.assigneeId);
+      if (f.origin) p.set('origin', f.origin);
+      if (f.unread) p.set('unread', '1');
+      if (f.search?.trim()) p.set('search', f.search.trim());
+      const qs = p.toString();
+      return api<KanbanBoard>(`/kanban${qs ? `?${qs}` : ''}`);
+    },
+    // trocar filtro não pisca o quadro vazio
+    placeholderData: keepPreviousData,
   });
 
 /**

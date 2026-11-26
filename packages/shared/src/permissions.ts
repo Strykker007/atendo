@@ -42,6 +42,9 @@ export const PERMISSIONS = {
   'campaigns.manage': 'Criar e disparar transmissões em massa',
   'agenda.manage': 'Configurar profissionais, serviços e horários da agenda',
   'reports.view': 'Ver relatórios do cliente',
+  // feedback de atendimento (docs/feedback-de-atendimento.md): apontar correção/oportunidade/elogio
+  // num atendimento de outra pessoa e acompanhar a ciência. O atendente sempre vê os SEUS
+  'reviews.manage': 'Dar feedback nos atendimentos da equipe e acompanhar a ciência',
   'team.manage': 'Convidar, editar e desativar membros da equipe',
   'profiles.manage': 'Criar e editar perfis de acesso',
   'settings.manage': 'Mudar horário de funcionamento e fluxos padrão',
@@ -67,7 +70,7 @@ export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
   { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.delete_conversation', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit', 'contacts.import_export'] },
   { label: 'Conteúdo', items: ['tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage'] },
   { label: 'Tickets', items: ['tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'] },
-  { label: 'Gestão', items: ['reports.view', 'team.manage', 'profiles.manage', 'settings.manage', 'internal_chat.audit'] },
+  { label: 'Gestão', items: ['reports.view', 'reviews.manage', 'team.manage', 'profiles.manage', 'settings.manage', 'internal_chat.audit'] },
   { label: 'Conta', items: ['numbers.manage', 'billing.manage'] },
 ];
 
@@ -81,7 +84,7 @@ export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
  */
 export const DEFAULT_PERMISSIONS: Record<'tenant_admin' | 'manager' | 'agent', Permission[]> = {
   tenant_admin: [...ALL_PERMISSIONS],
-  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'contacts.edit', 'contacts.import_export', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'team.manage', 'settings.manage', 'tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'],
+  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'contacts.edit', 'contacts.import_export', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'reviews.manage', 'team.manage', 'settings.manage', 'tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'],
   // o padrão do atendente reproduz EXATAMENTE o que ele já podia antes dos perfis: respostas
   // rápidas e relatórios nunca foram restritos, e tirá-los agora seria perder acesso numa
   // migração. Quem quiser restringir, cria um perfil sem eles. Nota interna entrou depois

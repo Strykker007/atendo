@@ -32,6 +32,8 @@ class ListDto {
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() departmentId?: string;
   @IsOptional() @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',').filter(Boolean))) @IsArray() tagIds?: string[];
   @IsOptional() @IsString() @MaxLength(100) search?: string;
+  /** com `search`: procura em todas as abas (ignora `status`/`free`), respeitando o que a pessoa pode ver */
+  @IsOptional() @Transform(({ value }) => value === true || value === '1' || value === 'true') @IsBoolean() everywhere?: boolean;
   @IsOptional() @IsEnum(ConversationOrigin) origin?: ConversationOrigin;
   /** admin: filtrar por atendente; `none` = só as sem atendente */
   @IsOptional() @ValidateIf((_, v) => v !== 'none') @IsUUID() assigneeId?: string;
@@ -94,7 +96,12 @@ class ForwardDto {
   @IsArray() @ArrayNotEmpty() @ArrayMaxSize(FORWARD_MAX_TARGETS) @IsUUID('4', { each: true }) targetConversationIds: string[];
 }
 class NoteDto {
-  @IsString() @IsNotEmpty() @MaxLength(4096) text: string;
+  /** pode vir vazio quando a nota é só a imagem (print do atendimento) */
+  @IsOptional() @IsString() @MaxLength(4096) text?: string;
+  /** imagem já enviada por `POST /uploads` (docs/notas-internas.md#imagem) */
+  @IsOptional() @IsString() @MaxLength(300) mediaKey?: string;
+  @IsOptional() @IsString() @Matches(/^image\//, { message: 'Na nota interna só vai imagem.' }) mediaMime?: string;
+  @IsOptional() @IsString() @MaxLength(200) mediaName?: string;
 }
 class SaleItemDto {
   /** opcional: dá para registrar só o valor */
@@ -266,14 +273,25 @@ export class ConversationsController {
   /** Nota interna (cadeado) — só equipe vê. */
   @Post(':id/notes')
   note(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: NoteDto) {
-    return this.conversations.note(u.tenantId, u, id, dto.text);
+    // mediaKey só pode apontar para o storage do próprio tenant (mesma regra do envio)
+    if (dto.mediaKey && !dto.mediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('mediaKey inválida');
+    if (dto.mediaKey && !dto.mediaMime) throw new BadRequestException('Informe o tipo da imagem.');
+    return this.conversations.note(u.tenantId, u, id, dto.text ?? '', dto.mediaKey ? { key: dto.mediaKey, mime: dto.mediaMime!, name: dto.mediaName } : undefined);
   }
 
   @Post(':id/claim')
   async claim(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     // fila travada: atendente não puxa (docs/fila-de-atendimento.md#quem-pode-puxar)
     await this.conversations.assertQueueAllows(u.tenantId, u);
+    // feedback pendente que trava (docs/feedback-de-atendimento.md#trava): dá ciência antes de pegar outro
+    await this.conversations.assertNoBlockingReviews(u.tenantId, u.id, id);
     return this.conversations.claim(u.tenantId, id, u);
+  }
+
+  /** Quem abriu a conversa leu as notas internas endereçadas a ele (docs/notas-internas.md#leitura). */
+  @Post(':id/notes/read')
+  readNotes(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.conversations.readNotes(u.tenantId, u.id, id);
   }
 
   /** Quem pode receber a transferência desta conversa (mesmo número/filial ou acesso a ele). */

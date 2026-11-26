@@ -127,6 +127,8 @@ Abra http://localhost:3000 e entre com `demo@atendo.local / demo12345`.
 | `pnpm db:migrate:create nome` | Cria e aplica migration **sem** o modo interativo do Prisma (usa um banco shadow `atendo_shadow`) |
 | `pnpm stripe:sync` | Cria os planos no Stripe (precisa de `STRIPE_SECRET_KEY`) |
 | `pnpm --filter @atendo/shared build` | Recompila os tipos compartilhados (a API importa do `dist`) |
+| `cd apps/api && npx tsx scripts/demo-loja.ts criar` | Conta fictícia de farmácia (`carla@demo-loja.local` / `demo12345`): 30 dias de atendimentos encerrados, casos com falha de conduta para auditar (gabarito no terminal) e abertos no Kanban. `limpar` remove. Só banco local, telefones DDD 00, nada é enviado |
+| `cd apps/api && npx tsx scripts/demo-administradora.ts criar` | Conta fictícia de administradora de condomínios (`renata@demo-administradora.local` / `demo12345`). `limpar` remove |
 
 ## Erros comuns
 

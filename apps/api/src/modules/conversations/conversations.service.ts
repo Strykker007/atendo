@@ -21,7 +21,7 @@ import { phoneVariants } from './phone-variants';
 import { canSeeDepartment, departmentWhere } from '../auth/department-scope';
 import { BOT_PAUSE_CLEAR } from './bot-pause';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
-import { textSearch } from '../../common/text-search';
+import { foldSearch, textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
 import { spin } from './spin';
 import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, hasColdSlot, isWarm } from './cold-send';
@@ -58,6 +58,8 @@ const may = (v: Viewer, p: Permission) => v.role === 'super_admin' || !!v.permis
  * fora dos relatórios (docs/contatos-isentos.md).
  */
 export const LIVRE = { ticketExempt: true, status: 'in_progress', assigneeId: null } satisfies Prisma.ConversationWhereInput;
+/** o que a lista de conversas traz de cada linha (abas, busca em todas as abas e conversa aberta) */
+const LIST_INCLUDE = { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } }, budgets: { where: { status: 'PAID', closeEventId: null }, select: { id: true, totalValue: true, paidAt: true } } } satisfies Prisma.ConversationInclude;
 /** quantas figurinhas o seletor mostra */
 const STICKERS_RECENT_MAX = 60;
 const ehLivre = (c: { ticketExempt: boolean; status: string; assigneeId: string | null }) => c.ticketExempt && c.status === 'in_progress' && !c.assigneeId;
@@ -87,10 +89,13 @@ export const MESSAGE_INCLUDE = {
   quotedMessage: {
     select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, deletedAt: true, senderName: true, author: { select: { name: true } } },
   },
+  // quem precisa ler a nota interna e se já leu (vazio em mensagem comum)
+  noteReceipts: { select: { userId: true, userName: true, readAt: true }, orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.MessageInclude;
 
 export type MessageRow = Message & {
   author?: { name: string } | null;
+  noteReceipts?: { userId: string; userName: string; readAt: Date | null }[];
   quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; deletedAt?: Date | null; senderName?: string | null; author: { name: string } | null } | null;
 };
 
@@ -101,7 +106,20 @@ export type MessageRow = Message & {
  * para o gateway exigir **isto**, e não a linha do Prisma: enquanto a assinatura aceitava
  * `Message`, qualquer coluna nova entrava no payload sem ninguém decidir.
  */
-export type PresentedMessage = Omit<MessageRow, 'queueSeq' | 'raw'> & { quoted: QuotedRef | null };
+export type PresentedMessage = Omit<MessageRow, 'queueSeq' | 'raw'> & { quoted: QuotedRef | null; sentFrom: SentFrom | null };
+
+/**
+ * De onde saiu uma mensagem enviada sem atendente (`authorId` null): do celular/WhatsApp Web do
+ * cliente (o provider manda `source` no eco) ou da automação (robô, fluxo, mensagem automática).
+ * Sem isto o relatório chamava de "Automático" o que a portaria respondeu pelo celular.
+ */
+export type SentFrom = 'phone' | 'web' | 'device' | 'auto';
+function sentFromOf(m: Pick<MessageRow, 'direction' | 'internal' | 'authorId' | 'raw'>): SentFrom | null {
+  if (m.direction !== 'out' || m.internal || m.authorId) return null;
+  const source = (m.raw as { source?: unknown } | null)?.source;
+  if (typeof source !== 'string') return 'auto';
+  return source === 'web' ? 'web' : source === 'android' || source === 'ios' ? 'phone' : 'device';
+}
 
 /** WhatsApp limita o encaminhamento a 5 conversas por vez; seguimos a mesma regra. */
 export const FORWARD_MAX_TARGETS = 5;
@@ -160,14 +178,15 @@ export class ConversationsService {
     // morria dentro do `ingestInbound`). `raw` é o payload cru do provider — não tem por que
     // sair daqui. Os dois ficam de fora explicitamente para o spread não os trazer de volta.
     const { queueSeq: _queueSeq, raw: _raw, ...rest } = m;
+    const sentFrom = sentFromOf(m);
     if (m.deletedAt) {
       // Apagada: o original continua no banco (auditoria) e NÃO sai daqui — nem por socket,
       // que vai para a sala do tenant inteiro. Quem tem `conversations.view_deleted` lê por
       // `deletedOriginal()`. Reação e citação também saem: as duas carregam pedaço do conteúdo.
-      return { ...rest, text: null, transcript: null, mediaUrl: null, mediaMime: null, mediaName: null, content: null, reactions: null, error: null, quotedId: null, quotedMessageId: null, quotedPreview: null, quotedMediaUrl: null, quotedMediaMime: null, quotedMessage: null, quoted: null };
+      return { ...rest, text: null, transcript: null, mediaUrl: null, mediaMime: null, mediaName: null, content: null, reactions: null, error: null, quotedId: null, quotedMessageId: null, quotedPreview: null, quotedMediaUrl: null, quotedMediaMime: null, quotedMessage: null, quoted: null, sentFrom };
     }
     const mediaUrl = m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl;
-    return { ...rest, mediaUrl, quoted: this.quotedRef(m) };
+    return { ...rest, mediaUrl, quoted: this.quotedRef(m), sentFrom };
   }
 
   /**
@@ -214,11 +233,39 @@ export class ConversationsService {
   async list(
     tenantId: string,
     viewer: Viewer,
-    q: { status?: ConversationStatus; free?: boolean; ticket?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
+    q: { status?: ConversationStatus; free?: boolean; ticket?: boolean; numberId?: string; departmentId?: string; tagIds?: string[]; search?: string; everywhere?: boolean; origin?: ConversationOrigin; assigneeId?: string; sort?: 'recent' | 'waiting'; cursor?: string; take?: number; closeReasonId?: string; lastOutcome?: 'won' | 'lost' },
   ) {
     // quem vê os atendimentos da equipe é decidido por permissão, não pelo papel: é isso que
     // permite um "atendente líder" enxergar a equipe sem virar gerente
     const isAdmin = may(viewer, 'conversations.view_all');
+    // Busca em todas as abas: achar o contato sem saber se está aguardando, em atendimento ou
+    // encerrado. Vale o que a pessoa vê nas abas: atendente comum não enxerga o atendimento em
+    // andamento de outra pessoa (só os seus e os livres); aguardando e encerrado, todos.
+    if (q.everywhere && q.search?.trim()) {
+      const visao: Prisma.ConversationWhereInput = isAdmin ? {} : { OR: [{ status: { not: 'in_progress' } }, { assigneeId: viewer.id }, LIVRE] };
+      const dept = departmentWhere(viewer, q.departmentId);
+      const scoped = narrowTo(viewer, q.numberId);
+      const rows = await this.prisma.conversation.findMany({
+        where: {
+          tenantId,
+          number: { deletedAt: null },
+          ...(q.ticket && { ticketExempt: false }),
+          ...(q.assigneeId && isAdmin && { assigneeId: q.assigneeId === 'none' ? null : q.assigneeId }),
+          ...(q.origin && { origin: q.origin }),
+          ...(scoped === null ? { numberId: '-' } : scoped !== undefined ? { numberId: scoped } : {}),
+          AND: [visao, ...(dept ? [dept] : [])],
+          ...(q.tagIds?.length && { OR: [{ tags: { some: { tagId: { in: q.tagIds } } } }, { contact: { tags: { some: { tagId: { in: q.tagIds } } } } }] }),
+          contact: textSearch(q.search),
+          ...(q.lastOutcome && { lastCloseOutcome: q.lastOutcome }),
+          ...(q.closeReasonId && { lastCloseReasonId: q.closeReasonId }),
+        },
+        include: LIST_INCLUDE,
+        orderBy: [{ lastMessageAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+        take: q.take ?? 50,
+        ...(q.cursor && { cursor: { id: q.cursor }, skip: 1 }),
+      });
+      return rows.map((r) => this.presentContact(r));
+    }
     const scoped = narrowTo(viewer, q.numberId);
     // departamento: escopo do usuário ∩ filtro da tela. Vai num AND porque o filtro de tags
     // abaixo também usa OR, e dois OR no mesmo nível se sobrescreveriam
@@ -254,7 +301,7 @@ export class ConversationsService {
     };
     const rows = await this.prisma.conversation.findMany({
       where,
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } }, budgets: { where: { status: 'PAID', closeEventId: null }, select: { id: true, totalValue: true, paidAt: true } } },
+      include: LIST_INCLUDE,
       // "espera": quem está há mais tempo sem resposta primeiro. `nulls: 'last'` é o que joga
       // as já respondidas para o fim em vez de empilhá-las no topo
       // "Encerradas": quem acabou de encerrar primeiro (`closedAt`). Pela última mensagem, a recém-
@@ -313,6 +360,18 @@ export class ConversationsService {
     await this.registrar({ tenantId, conversationId: id, type: 'claimed', actorId: user.id, toStatus: 'in_progress' });
     this.gateway.emitConversation(tenantId, conv);
     return conv;
+  }
+
+  /**
+   * Trava do feedback (docs/feedback-de-atendimento.md#trava): apontamento do tipo que trava (por
+   * padrão, Correção) sem ciência impede assumir OUTRO atendimento. Pegar de volta o que já é seu
+   * não trava — a pessoa não pode ficar presa no meio de uma conversa.
+   */
+  async assertNoBlockingReviews(tenantId: string, userId: string, conversationId: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, select: { assigneeId: true } });
+    if (!conv || conv.assigneeId === userId) return;
+    const n = await this.prisma.attendanceReview.count({ where: { tenantId, agentId: userId, blocksClaim: true, acknowledgedAt: null } });
+    if (n) throw new ConflictException({ code: 'reviews_pending', message: n === 1 ? 'Você tem um feedback do gestor para dar ciência antes de assumir outro atendimento.' : `Você tem ${n} feedbacks do gestor para dar ciência antes de assumir outro atendimento.` });
   }
 
   /**
@@ -573,7 +632,7 @@ export class ConversationsService {
   async one(tenantId: string, id: string) {
     const row = await this.prisma.conversation.findFirstOrThrow({
       where: { id, tenantId },
-      include: { contact: { include: { tags: { include: { tag: true } } } }, tags: { include: { tag: true } }, assignee: { select: { id: true, name: true } }, botPausedBy: { select: { id: true, name: true } }, department: { select: DEPARTMENT_SELECT }, number: { select: { id: true, label: true, phone: true, color: true, provider: true, status: true } }, lastCloseReason: { select: { id: true, name: true, color: true } }, budgets: { where: { status: 'PAID', closeEventId: null }, select: { id: true, totalValue: true, paidAt: true } } },
+      include: LIST_INCLUDE,
     });
     return this.presentContact(row);
   }
@@ -1627,18 +1686,99 @@ export class ConversationsService {
    * Nota interna ("cadeado"): admin/gerente orienta o atendente dentro da conversa.
    * Fica no histórico com destaque, só a equipe vê, nunca vai ao WhatsApp, não conta no uso.
    */
-  async note(tenantId: string, author: Viewer & { name: string }, conversationId: string, text: string) {
+  async note(tenantId: string, author: Viewer & { name: string }, conversationId: string, text: string, media?: { key: string; mime: string; name?: string }) {
     if (!may(author, 'conversations.internal_note')) throw new ForbiddenException('Seu perfil de acesso não permite escrever notas internas.');
     const body = text.trim();
-    if (!body) throw new BadRequestException('A nota está vazia.');
+    if (!body && !media) throw new BadRequestException('A nota está vazia.');
     const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
+    // imagem (print do atendimento, docs/notas-internas.md#imagem): fica no storage do tenant, como
+    // a mídia do chat — `present()` assina o link. Nunca vai ao WhatsApp nem conta no uso
     const message = await this.prisma.message.create({
-      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text: body, authorId: author.id, authorName: author.name, internal: true },
+      data: {
+        conversationId: conv.id, direction: 'out', type: media ? 'image' : 'text', status: 'delivered', text: body || null,
+        ...(media && { mediaUrl: media.key, mediaMime: media.mime, mediaName: media.name?.slice(0, 200) ?? null }),
+        authorId: author.id, authorName: author.name, internal: true,
+      },
       include: MESSAGE_INCLUDE,
     });
     this.gateway.emitMessage(tenantId, this.present(message));
+    void this.alertNote(tenantId, author, conv, body || '📷 Imagem', message.id).catch((e) => this.log.warn(`Aviso de nota interna falhou: ${e}`));
     return this.present(message);
+  }
+
+  /**
+   * Nota interna chama a atenção de quem precisa ler (docs/notas-internas.md#avisos): antes ela só
+   * entrava no histórico e ninguém via. Recebem o aviso (som + cartão fixo, evento `note_alert`):
+   * - quem está com o atendimento (sem dono: quem atendeu por último);
+   * - quem já escreveu nota nesta conversa nos últimos 30 dias (a resposta chega a quem perguntou);
+   * - quem foi citado com @Nome (primeiro nome ou nome completo, sem acento/maiúscula);
+   * - com `@todos`/`@equipe`, todo mundo ativo que atende pelo número da conversa.
+   * Quem escreveu nunca recebe. Citado que não atende por aquele número também não (não abriria).
+   */
+  private async alertNote(tenantId: string, author: { id: string; name: string }, conv: Conversation, text: string, messageId: string) {
+    const lido = foldSearch(text);
+    const citacoes = new Set([...lido.matchAll(/@([\p{L}\p{N}_.-]+(?:\s+[\p{L}\p{N}_.-]+)?)/gu)].map((m) => m[1]));
+    const todos = /@(todos|equipe|time)\b/.test(lido);
+    // Responsável pela conversa: quem está com ela; sem dono (aguardando, encerrada), quem atendeu por
+    // último (assumiu, recebeu a transferência ou encerrou). E quem já escreveu nota aqui: nota é troca
+    // entre a equipe, a resposta tem de chegar a quem perguntou
+    const [ultimo, autores] = await Promise.all([
+      conv.assigneeId ? null : this.prisma.conversationEvent.findFirst({
+        where: { conversationId: conv.id, type: { in: ['claimed', 'transferred', 'closed'] } },
+        orderBy: { createdAt: 'desc' }, select: { type: true, actorId: true, targetId: true },
+      }),
+      this.prisma.message.findMany({
+        where: { conversationId: conv.id, internal: true, authorId: { not: null }, id: { not: messageId }, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+        distinct: ['authorId'], select: { authorId: true }, take: 20,
+      }),
+    ]);
+    const responsavel = conv.assigneeId ?? (ultimo?.type === 'transferred' ? ultimo.targetId : ultimo?.actorId) ?? null;
+    const daConversa = new Set([responsavel, ...autores.map((a) => a.authorId)].filter((x): x is string => !!x && x !== author.id));
+    if (!citacoes.size && !todos && !daConversa.size) return;
+    const users = await this.prisma.user.findMany({ where: { tenantId, isActive: true, id: { not: author.id } }, select: { id: true, name: true, role: true } });
+    const citado = (nome: string) => {
+      const n = foldSearch(nome).trim();
+      const primeiro = n.split(/\s+/)[0];
+      return [...citacoes].some((c) => c === n || c.split(/\s+/)[0] === primeiro || n.startsWith(c));
+    };
+    const alvos = users.filter((u) => todos || daConversa.has(u.id) || citado(u.name));
+    if (!alvos.length) return;
+    const contact = await this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { name: true, phone: true } });
+    const event = { conversationId: conv.id, contactName: contact?.name || contact?.phone || 'Cliente', byName: author.name, text: clip(text, 160) };
+    const leitores: { id: string; name: string }[] = [];
+    for (const u of alvos) {
+      if (!(await this.canReceive(tenantId, u, conv))) continue;
+      leitores.push(u);
+      this.gateway.emitNoteAlert(tenantId, u.id, event);
+    }
+    if (!leitores.length) return;
+    // leitura (docs/notas-internas.md#leitura): quem escreveu passa a ver "aguardando leitura de X";
+    // vale também para quem está offline — o aviso volta quando a pessoa entrar
+    await this.prisma.noteReceipt.createMany({ data: leitores.map((u) => ({ messageId, userId: u.id, userName: u.name, tenantId, conversationId: conv.id })), skipDuplicates: true });
+    const m = await this.prisma.message.findUnique({ where: { id: messageId }, include: MESSAGE_INCLUDE });
+    if (m) this.gateway.emitMessage(tenantId, this.present(m));
+  }
+
+  /** Marca como lidas as notas internas desta conversa endereçadas a esta pessoa e avisa quem escreveu. */
+  async readNotes(tenantId: string, userId: string, conversationId: string) {
+    const pendentes = await this.prisma.noteReceipt.findMany({ where: { tenantId, conversationId, userId, readAt: null }, select: { messageId: true } });
+    if (!pendentes.length) return { read: 0 };
+    await this.prisma.noteReceipt.updateMany({ where: { tenantId, conversationId, userId, readAt: null }, data: { readAt: new Date() } });
+    const msgs = await this.prisma.message.findMany({ where: { id: { in: pendentes.map((p) => p.messageId) } }, include: MESSAGE_INCLUDE });
+    for (const m of msgs) this.gateway.emitMessage(tenantId, this.present(m));
+    return { read: pendentes.length };
+  }
+
+  /** Notas internas ainda não lidas por esta pessoa: reaparecem como aviso quando ela entra. */
+  async pendingNotes(tenantId: string, userId: string) {
+    const rows = await this.prisma.noteReceipt.findMany({
+      where: { tenantId, userId, readAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { conversationId: true, message: { select: { text: true, authorName: true, conversation: { select: { contact: { select: { name: true, phone: true } } } } } } },
+    });
+    return rows.map((r) => ({ conversationId: r.conversationId, byName: r.message.authorName ?? 'Equipe', text: clip(r.message.text || '📷 Imagem', 160), contactName: r.message.conversation.contact.name || r.message.conversation.contact.phone }));
   }
 
   /** Nota interna do sistema (sem autor): o robô avisando a equipe. Nunca vai ao WhatsApp. */
