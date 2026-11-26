@@ -170,7 +170,7 @@ function DaEquipe({ onOpen, enviados }: { onOpen: (id: string) => void; enviados
       </div>
       {q.isLoading ? <p className="text-sm text-muted">Carregando…</p>
         : !lista.length && algumFiltro ? <SemResultado onLimpar={() => { setF(FILTRO_VAZIO); setAgentId(''); setStatus(enviados ? 'all' : 'pending'); }} />
-        : !lista.length ? <Empty icon={<ClipboardCheck size={36} />} title={enviados ? 'Você ainda não enviou feedback' : 'Nada por aqui'} text="Para dar feedback: Relatórios → Auditoria de atendimentos → abra um atendimento → Dar feedback." />
+        : !lista.length ? <Empty icon={<ClipboardCheck size={36} />} title={enviados ? 'Você ainda não enviou feedback' : 'Nada por aqui'} text="Abra a conversa e, na linha “Atendimento encerrado”, clique em Dar feedback — ou pela auditoria em Relatórios." />
         : <Secao itens={lista} onOpen={onOpen} gestor enviados={enviados} />}
     </div>
   );

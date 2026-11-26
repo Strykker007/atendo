@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { receiveNoteAlert } from '@/components/layout/TransferAlert';
 import { useReviewGate } from '@/lib/review-gate';
-import { useAckReview, useAttention, useCan, useCreateReview, useDeleteReview, useMe, useReview, useReviewMessages, useReviewSettings, useSeenReview, type Message } from '@/lib/hooks';
+import { useAckReview, useAttendanceMessages, useAttention, useCan, useCreateReview, useDeleteReview, useMe, useReview, useReviewMessages, useReviewSettings, useSeenReview, type Message } from '@/lib/hooks';
 
 /**
  * Feedback de atendimento (docs/feedback-de-atendimento.md): peças usadas na auditoria (gestor
@@ -232,6 +232,32 @@ export function AttentionGate() {
           <Button variant="ghost" onClick={hide}>Depois</Button>
           <Button onClick={() => ver(items.length === 1 ? items[0].id : undefined)}>Ver agora</Button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Feedback direto da conversa (docs/feedback-de-atendimento.md#onde-dar): a linha "Atendimento
+ * encerrado" do chat abre isto — as mensagens daquele atendimento (do encerramento anterior até
+ * este) e o formulário, sem passar pelos relatórios.
+ */
+export function AttendanceFeedbackModal({ conversationId, closeEventId, startedAt, closedAt, agent, contato, onClose }: {
+  conversationId: string; closeEventId: string; startedAt: string | null; closedAt: string; agent: { id: string; name: string }; contato: string; onClose: () => void;
+}) {
+  const msgs = useAttendanceMessages({ conversationId, startedAt, closedAt });
+  const [marcadas, setMarcadas] = useState<string[]>([]);
+  const alternar = (id: string) => setMarcadas((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+  return (
+    <Modal open onClose={onClose} title={`Feedback para ${agent.name}`} width="max-w-2xl">
+      <div className="space-y-3">
+        <p className="text-[12.5px] text-muted">Atendimento de <b className="text-ink">{contato}</b> encerrado em {fmt(closedAt)}. Só você e {agent.name.split(' ')[0]} veem.</p>
+        <div className="rounded-xl border border-line bg-field/40 p-3 max-h-[40vh] overflow-y-auto space-y-1.5">
+          {msgs.isLoading && <p className="py-6 text-center text-sm text-muted">Carregando o atendimento…</p>}
+          {msgs.data && !msgs.data.length && <p className="py-6 text-center text-sm text-muted">Sem mensagens neste atendimento.</p>}
+          {msgs.data && <AttendanceBubbles msgs={msgs.data} contato={contato} selected={marcadas} onToggle={alternar} />}
+        </div>
+        <ReviewComposer conversationId={conversationId} closeEventId={closeEventId} agent={agent} selected={marcadas} onClear={() => setMarcadas([])} onDone={onClose} />
       </div>
     </Modal>
   );

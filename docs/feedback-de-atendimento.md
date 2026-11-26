@@ -6,9 +6,16 @@ O feedback fica **entre gestor e atendente**. O contato nunca vê. Os colegas ta
 
 ## Fluxo
 
-1. **Gestor** (`reviews.manage`): vai em Relatórios → Auditoria de atendimentos → abre um atendimento → **Dar feedback**. Escolhe o tipo, escreve o texto e, se quiser, clica nas mensagens para marcar o trecho (ficam em vermelho). Não é possível dar feedback para si mesmo. Linha da auditoria com feedback ganha o ícone 📋 com a contagem.
+1. **Gestor** (`reviews.manage`) dá o feedback por um de dois caminhos (ver [Onde dar](#onde-dar)). Escolhe o tipo, escreve o texto e, se quiser, clica nas mensagens para marcar o trecho (ficam em vermelho). Não é possível dar feedback para si mesmo. Linha da auditoria com feedback ganha o ícone 📋 com a contagem.
 2. **Atendente**: recebe o aviso e abre o feedback em **Feedbacks** (menu Atendimento). Vê o texto e o atendimento em modo leitura, com o trecho em destaque, e clica em **Li e estou ciente**.
 3. **Gestor** acompanha em Feedbacks → **Enviados** (só os que ele apontou, todos por padrão) ou → **Da equipe** (de todos os gestores, começando pelos sem ciência). Os filtros são: busca (contato, telefone, atendente ou texto), período (7/30/90 dias ou datas escolhidas), tipo, atendente e situação (sem ciência, prazo vencido, cientes, todos). Em "Todos", cada situação mostra a contagem. Em Enviados e Da equipe, os filtros vão para a API (até 300 por consulta). Em Recebidos, a busca, o tipo e o período filtram na própria tela. O aviso de ciência, resposta ou prazo vencido abre direto em Enviados. A linha de situação de cada um mostra: "ainda não entrou desde o feedback", "visto em…, sem ciência", "1h20 de 4h online" ou "ciente em…". O gestor pode **apagar** o feedback enquanto não houver ciência (engano); depois ele fica no histórico.
+
+## Onde dar
+
+- **Na própria conversa** (o caminho mais curto): cada linha "Atendimento encerrado" do chat ganha **📋 Dar feedback**. Para não poluir a conversa, o botão só aparece ao passar o mouse (no toque, fica sempre à vista). Atendimento que já tem feedback mostra o contador **📋 n** o tempo todo. O clique abre `AttendanceFeedbackModal`, com as mensagens daquele atendimento (do encerramento anterior até este; clicar marca o trecho) e o formulário. Vale na tela de conversas e no mini-chat do Kanban. O botão não aparece quando quem encerrou foi a automação (sem atendente) nem quando foi o próprio gestor.
+- **Pela auditoria**: Relatórios → Auditoria de atendimentos → abrir um atendimento → **Dar feedback**. É o caminho para achar atendimentos por período, resultado, motivo ou atendente.
+
+O texto sem feedbacks em *Feedbacks → Enviados* explica os dois caminhos.
 
 ## Garantia de leitura
 
