@@ -14,7 +14,8 @@ import { playMessageSound, unlockMessageSound } from '../message-sound';
 import { useUI } from '../store';
 import { alertInternalMessage } from '../internal-alert';
 import { toast } from '@/components/ui/Toast';
-import { receiveNoteAlert, receiveTransferAlert, type NoteAlertEvent, type TransferAlertEvent } from '@/components/layout/TransferAlert';
+import { receiveNoteAlert, receiveReviewAlert, receiveTransferAlert, type NoteAlertEvent, type TransferAlertEvent } from '@/components/layout/TransferAlert';
+import type { ReviewAlertEvent } from '@atendo/shared';
 import { receiveCall, type CallEvent } from '@/components/layout/CallAlert';
 import { upsertInternalMessage, type InternalMessage } from './chat-interno';
 import { create } from 'zustand';
@@ -289,7 +290,13 @@ export function useRealtime() {
       receiveTransferAlert(e);
     });
     // nota interna para mim (sou o atendente ou fui citado com @): som + cartão fixo, como a transferência
-    socket.on('note_alert', (e: NoteAlertEvent) => receiveNoteAlert(e));
+    socket.on('note_alert', (e: NoteAlertEvent) => { qc.invalidateQueries({ queryKey: ['attention'] }); receiveNoteAlert(e); });
+    // feedback de atendimento (docs/feedback-de-atendimento.md): cartão fixo + listas e contador do menu
+    socket.on('review_alert', (e: ReviewAlertEvent) => {
+      qc.invalidateQueries({ queryKey: ['reviews'] });
+      qc.invalidateQueries({ queryKey: ['attention'] });
+      receiveReviewAlert(e);
+    });
     // chat interno da equipe (sala só dos membros): entra na conversa e toca para quem não escreveu
     socket.on('internal_message', (m: InternalMessage) => {
       upsertInternalMessage(qc, m);

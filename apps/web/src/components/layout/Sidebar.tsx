@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { MessageSquare, Ticket, Zap, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, Loader2, ChevronDown, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, AlarmClock, BookUser, Tags, CalendarClock, KeyRound, Handshake, LayoutDashboard, Receipt } from 'lucide-react';
+import { MessageSquare, Ticket, Zap, BarChart3, Settings, Users, Smartphone, PanelLeftClose, PanelLeftOpen, LogOut, Loader2, ChevronDown, ShieldCheck, Workflow, Building2, CalendarDays, Package, Columns3, Megaphone, Send, AlarmClock, BookUser, Tags, CalendarClock, KeyRound, Handshake, LayoutDashboard, Receipt, ClipboardCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/lib/store';
 import { api, setAccessToken } from '@/lib/api';
@@ -15,7 +15,7 @@ import { NoticeBell } from './SystemNotices';
 import { PauseControl } from '@/components/queue/Queue';
 import { MarcaIcone, MarcaMenu } from '@/components/ui/Marca';
 import { useTheme, applyTheme } from '@/lib/theme';
-import { useAccessRequests, useAppVersion, useConversationCounts, useMe, usePermissions, useTicketsSummary, useUsage } from '@/lib/hooks';
+import { useAccessRequests, useAppVersion, useAttention, useConversationCounts, useMe, usePermissions, useTicketsSummary, useUsage } from '@/lib/hooks';
 import type { Permission, PlanFeature } from '@atendo/shared';
 
 const OWNER_ITEMS = [
@@ -59,6 +59,8 @@ const GROUPS: { id: string | null; label: string; items: NavItem[] }[] = [
       // de todos sem poder agendar). Sem nenhuma das duas, a lista seria só das próprias — que não existem
       { href: '/agendadas', label: 'Mensagens agendadas', icon: AlarmClock, need: ['conversations.schedule_message', 'conversations.view_all'] },
       { href: '/contatos', label: 'Contatos', icon: BookUser },
+      // feedback do gestor (docs/feedback-de-atendimento.md): todo mundo recebe os seus; o número é o pendente
+      { href: '/feedbacks', label: 'Feedbacks', icon: ClipboardCheck },
       { href: '/tags', label: 'Tags', icon: Tags, need: ['tags.manage'] },
     ],
   },
@@ -160,7 +162,8 @@ export function Sidebar() {
   // número do menu = tickets NÃO LIDOS que me dizem respeito (novo pra mim, comentário, transferência…),
   // como as conversas (docs/tickets.md#não-lidos). Qualquer um que atua em ticket vê, não só quem pega
   const tickets = useTicketsSummary(me.data?.role !== 'super_admin' && !!usage.data?.limits?.features?.includes('tickets') && (['tickets.create', 'tickets.handle', 'tickets.manage'] as Permission[]).some(permitido)).data?.unread ?? 0;
-  const badgeDe = (i: NavItem) => (i.href === '/conversas' && waiting > 0 ? waiting : i.href.startsWith('/escalas') && pedidos > 0 ? pedidos : i.href === '/tickets' && tickets > 0 ? tickets : null);
+  const feedbacks = useAttention(!!me.data?.tenantId && me.data.role !== 'super_admin' && me.data.role !== 'partner' && !me.data.impersonatorId).data?.reviews.pending ?? 0;
+  const badgeDe = (i: NavItem) => (i.href === '/conversas' && waiting > 0 ? waiting : i.href === '/feedbacks' && feedbacks > 0 ? feedbacks : i.href.startsWith('/escalas') && pedidos > 0 ? pedidos : i.href === '/tickets' && tickets > 0 ? tickets : null);
 
   return (
     <aside className={cn('h-full bg-side text-side-ink flex flex-col transition-[width] duration-200 border-r border-side-line', collapsed ? 'w-14' : 'w-52')}>

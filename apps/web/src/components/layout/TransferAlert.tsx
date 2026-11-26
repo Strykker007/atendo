@@ -2,7 +2,8 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { useRouter } from 'next/navigation';
-import { ArrowRightLeft, Lock, MessagesSquare, X } from 'lucide-react';
+import { ArrowRightLeft, ClipboardCheck, Lock, MessagesSquare, X } from 'lucide-react';
+import { REVIEW_KIND_LABEL, type ReviewAlertEvent } from '@atendo/shared';
 import { useUI } from '@/lib/store';
 import { playInternalSound, playTransferAlarm } from '@/lib/message-sound';
 import { openInternalChat, useWidget } from '@/lib/internal-chat-store';
@@ -21,10 +22,12 @@ export interface NoteAlertEvent { conversationId: string; contactName: string; b
 type Alert =
   | ({ kind: 'transfer' } & TransferAlertEvent)
   | ({ kind: 'note' } & NoteAlertEvent)
-  | { kind: 'internal'; chatId: string; title: string; text: string };
+  | { kind: 'internal'; chatId: string; title: string; text: string }
+  // o evento tem o próprio `kind` (tipo do feedback): vai inteiro em `ev` para não colidir
+  | { kind: 'review'; ev: ReviewAlertEvent };
 type Item = Alert & { key: string; at: number };
 
-const keyOf = (a: Alert) => (a.kind === 'internal' ? `internal:${a.chatId}` : `${a.kind}:${a.conversationId}`);
+const keyOf = (a: Alert) => (a.kind === 'internal' ? `internal:${a.chatId}` : a.kind === 'review' ? `review:${a.ev.reviewId}` : `${a.kind}:${a.conversationId}`);
 
 interface State { items: Item[]; push: (a: Alert) => void; remove: (key: string) => void }
 
@@ -51,6 +54,23 @@ export function receiveNoteAlert(e: NoteAlertEvent) {
   desktopNotify(`Nota interna de ${e.byName} · ${e.contactName}`, e.text, `note-${e.conversationId}`);
 }
 
+/**
+ * Feedback de atendimento (docs/feedback-de-atendimento.md): novo (para o atendente), ciência,
+ * resposta ou prazo vencido (para quem apontou). Ciência só atualiza a lista, sem cartão.
+ */
+export function receiveReviewAlert(e: ReviewAlertEvent) {
+  if (e.type === 'acknowledged') return;
+  useTeamAlerts.getState().push({ kind: 'review', ev: e });
+  if (!useUI.getState().soundMuted) playInternalSound();
+  desktopNotify(REVIEW_TITLE[e.type](e), e.text, `review-${e.reviewId}`);
+}
+const REVIEW_TITLE: Record<ReviewAlertEvent['type'], (e: ReviewAlertEvent) => string> = {
+  new: (e) => `${REVIEW_KIND_LABEL[e.kind]} de ${e.byName}`,
+  overdue: (e) => `${e.byName} ainda não deu ciência do feedback`,
+  acknowledged: (e) => `${e.byName} deu ciência`,
+  replied: (e) => `${e.byName} respondeu ao feedback`,
+};
+
 export function pushInternalAlert(chatId: string, title: string, text: string) {
   useTeamAlerts.getState().push({ kind: 'internal', chatId, title, text });
   desktopNotify(`Equipe: ${title}`, text, `internal-${chatId}`, () => openInternalChat(chatId));
@@ -76,6 +96,7 @@ const VISUAL = {
   transfer: { icon: <ArrowRightLeft size={17} />, cls: 'border-accent ring-accent/20', dot: 'bg-accent' },
   note: { icon: <Lock size={16} />, cls: 'border-warn ring-warn/20', dot: 'bg-warn' },
   internal: { icon: <MessagesSquare size={17} />, cls: 'border-accent ring-accent/20', dot: 'bg-accent' },
+  review: { icon: <ClipboardCheck size={17} />, cls: 'border-danger ring-danger/20', dot: 'bg-danger' },
 } as const;
 
 export function TransferAlerts() {
@@ -93,6 +114,7 @@ export function TransferAlerts() {
   const abrir = (t: Item) => {
     remove(t.key);
     if (t.kind === 'internal') return openInternalChat(t.chatId);
+    if (t.kind === 'review') return router.push(`/feedbacks?abrir=${t.ev.reviewId}${t.ev.type === 'new' ? '' : '&aba=enviados'}`);
     setConversation(t.conversationId);
     router.push('/conversas');
   };
@@ -118,6 +140,13 @@ export function TransferAlerts() {
                   <div className="mt-1 text-sm text-ink line-clamp-3 whitespace-pre-wrap break-words">{t.text}</div>
                 </>
               )}
+              {t.kind === 'review' && (
+                <>
+                  <div className="font-display font-semibold text-ink">{REVIEW_TITLE[t.ev.type](t.ev)}</div>
+                  <div className="text-[12px] text-muted truncate">atendimento de <b className="text-ink">{t.ev.contactName}</b></div>
+                  <div className="mt-1 text-sm text-ink line-clamp-3 whitespace-pre-wrap break-words">{t.ev.text}</div>
+                </>
+              )}
               {t.kind === 'internal' && (
                 <>
                   <div className="font-display font-semibold text-ink truncate">💬 {t.title}</div>
@@ -125,7 +154,7 @@ export function TransferAlerts() {
                 </>
               )}
               <button type="button" onClick={() => abrir(t)} className={`mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 ${v.dot}`}>
-                {t.kind === 'internal' ? 'Responder' : 'Abrir conversa'}
+                {t.kind === 'internal' ? 'Responder' : t.kind === 'review' ? 'Ver feedback' : 'Abrir conversa'}
               </button>
             </div>
             <button type="button" onClick={() => remove(t.key)} className="text-muted hover:text-ink" aria-label="Dispensar"><X size={16} /></button>

@@ -171,7 +171,9 @@ export class AttendanceQueueService implements OnModuleInit {
     // disponível = painel aberto, no turno e fora de pausa
     const online = await this.gateway.availableUserIds(tenantId);
     if (!online.size) return;
-    const agents = await this.prisma.user.findMany({ where: { tenantId, isActive: true, role: { not: 'super_admin' }, id: { in: [...online] } }, select: { id: true, name: true, role: true } });
+    // feedback que trava sem ciência (docs/feedback-de-atendimento.md#trava): a fila também não entrega
+    const travados = new Set((await this.prisma.attendanceReview.findMany({ where: { tenantId, agentId: { in: [...online] }, blocksClaim: true, acknowledgedAt: null }, select: { agentId: true }, distinct: ['agentId'] })).map((r) => r.agentId));
+    const agents = (await this.prisma.user.findMany({ where: { tenantId, isActive: true, role: { not: 'super_admin' }, id: { in: [...online] } }, select: { id: true, name: true, role: true } })).filter((a) => !travados.has(a.id));
     if (!agents.length) return;
     const openCount = await this.openCount(tenantId, agents.map((a) => a.id));
     const nome = new Map(agents.map((a) => [a.id, a.name]));

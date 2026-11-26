@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, onAccessToken } from '../api';
 import { useUI, type ConversationTab } from '../store';
+import { useReviewGate } from '../review-gate';
 import type { BillingCycle, ConversationStatus, PlanLimits, FlowDefinition, FlowTrigger, Permission, QuotedRef, MessageContent, SendLimits, DeletedMessageOriginal, TagKind } from '@atendo/shared';
 import { ALL_PERMISSIONS } from '@atendo/shared';
 
@@ -68,6 +69,8 @@ export interface Message {
   reactions?: { emoji: string; fromMe: boolean; at: string }[] | null;
   /** nota interna (cadeado): só a equipe vê. `authorName` = nome gravado na nota (sobrevive à remoção do usuário) */
   internal?: boolean; authorId?: string | null; author?: { name: string } | null; authorName?: string | null;
+  /** nota interna: quem precisa ler e quando leu (docs/notas-internas.md#leitura) */
+  noteReceipts?: { userId: string; userName: string; readAt: string | null }[];
   /** recebida num grupo: quem escreveu (docs/grupos.md#grupos-nas-conversas) */
   senderName?: string | null; senderPhone?: string | null;
   /** botões, lista, localização ou contato; o corpo continua em `text` */
@@ -257,7 +260,8 @@ export const useConversationCounts = (numberIds: string[] = [], departmentId: st
   });
 
 // ---- posse do atendimento ----
-export const useClaim = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/claim`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
+// feedback pendente que trava (docs/feedback-de-atendimento.md#trava): a recusa abre a tela de pendências
+export const useClaim = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/claim`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id), onError: (e) => { if (e instanceof ApiError && e.code === 'reviews_pending') useReviewGate.getState().show(true); } }); };
 /** Quem pode receber a conversa: tem acesso ao número dela (mesma filial ou "todos os números"). */
 export const useTransferTargets = (id: string, enabled: boolean) =>
   useQuery({ queryKey: ['transfer-targets', id], enabled, queryFn: () => api<{ id: string; name: string }[]>(`/conversations/${id}/transfer-targets`) });
@@ -477,7 +481,14 @@ function moverConversaParaTopo(qc: ReturnType<typeof useQueryClient>, m: Message
 
 export const useSendNote = (conversationId: string | null) => {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (text: string) => api<Message>(`/conversations/${conversationId}/notes`, { method: 'POST', body: JSON.stringify({ text }) }), onSuccess: (m) => upsertMessageInCache(qc, m) });
+  // texto e/ou imagem (print do atendimento, docs/notas-internas.md#imagem)
+  return useMutation({
+    mutationFn: (v: string | { text: string; image?: Upload | null }) => {
+      const { text, image } = typeof v === 'string' ? { text: v, image: null } : v;
+      return api<Message>(`/conversations/${conversationId}/notes`, { method: 'POST', body: JSON.stringify({ text, ...(image && { mediaKey: image.key, mediaMime: image.mimeType, mediaName: image.fileName }) }) });
+    },
+    onSuccess: (m) => upsertMessageInCache(qc, m),
+  });
 };
 
 export const useResend = () =>

@@ -89,10 +89,13 @@ export const MESSAGE_INCLUDE = {
   quotedMessage: {
     select: { id: true, direction: true, type: true, text: true, mediaName: true, content: true, deletedAt: true, senderName: true, author: { select: { name: true } } },
   },
+  // quem precisa ler a nota interna e se já leu (vazio em mensagem comum)
+  noteReceipts: { select: { userId: true, userName: true, readAt: true }, orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.MessageInclude;
 
 export type MessageRow = Message & {
   author?: { name: string } | null;
+  noteReceipts?: { userId: string; userName: string; readAt: Date | null }[];
   quotedMessage?: { id: string; direction: MessageDirection; type: MessageType; text: string | null; mediaName: string | null; content: Prisma.JsonValue; deletedAt?: Date | null; senderName?: string | null; author: { name: string } | null } | null;
 };
 
@@ -357,6 +360,18 @@ export class ConversationsService {
     await this.registrar({ tenantId, conversationId: id, type: 'claimed', actorId: user.id, toStatus: 'in_progress' });
     this.gateway.emitConversation(tenantId, conv);
     return conv;
+  }
+
+  /**
+   * Trava do feedback (docs/feedback-de-atendimento.md#trava): apontamento do tipo que trava (por
+   * padrão, Correção) sem ciência impede assumir OUTRO atendimento. Pegar de volta o que já é seu
+   * não trava — a pessoa não pode ficar presa no meio de uma conversa.
+   */
+  async assertNoBlockingReviews(tenantId: string, userId: string, conversationId: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, select: { assigneeId: true } });
+    if (!conv || conv.assigneeId === userId) return;
+    const n = await this.prisma.attendanceReview.count({ where: { tenantId, agentId: userId, blocksClaim: true, acknowledgedAt: null } });
+    if (n) throw new ConflictException({ code: 'reviews_pending', message: n === 1 ? 'Você tem um feedback do gestor para dar ciência antes de assumir outro atendimento.' : `Você tem ${n} feedbacks do gestor para dar ciência antes de assumir outro atendimento.` });
   }
 
   /**
@@ -1671,47 +1686,99 @@ export class ConversationsService {
    * Nota interna ("cadeado"): admin/gerente orienta o atendente dentro da conversa.
    * Fica no histórico com destaque, só a equipe vê, nunca vai ao WhatsApp, não conta no uso.
    */
-  async note(tenantId: string, author: Viewer & { name: string }, conversationId: string, text: string) {
+  async note(tenantId: string, author: Viewer & { name: string }, conversationId: string, text: string, media?: { key: string; mime: string; name?: string }) {
     if (!may(author, 'conversations.internal_note')) throw new ForbiddenException('Seu perfil de acesso não permite escrever notas internas.');
     const body = text.trim();
-    if (!body) throw new BadRequestException('A nota está vazia.');
+    if (!body && !media) throw new BadRequestException('A nota está vazia.');
     const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
     if (!conv) throw new NotFoundException('Conversa não encontrada');
+    // imagem (print do atendimento, docs/notas-internas.md#imagem): fica no storage do tenant, como
+    // a mídia do chat — `present()` assina o link. Nunca vai ao WhatsApp nem conta no uso
     const message = await this.prisma.message.create({
-      data: { conversationId: conv.id, direction: 'out', type: 'text', status: 'delivered', text: body, authorId: author.id, authorName: author.name, internal: true },
+      data: {
+        conversationId: conv.id, direction: 'out', type: media ? 'image' : 'text', status: 'delivered', text: body || null,
+        ...(media && { mediaUrl: media.key, mediaMime: media.mime, mediaName: media.name?.slice(0, 200) ?? null }),
+        authorId: author.id, authorName: author.name, internal: true,
+      },
       include: MESSAGE_INCLUDE,
     });
     this.gateway.emitMessage(tenantId, this.present(message));
-    void this.alertNote(tenantId, author, conv, body).catch((e) => this.log.warn(`Aviso de nota interna falhou: ${e}`));
+    void this.alertNote(tenantId, author, conv, body || '📷 Imagem', message.id).catch((e) => this.log.warn(`Aviso de nota interna falhou: ${e}`));
     return this.present(message);
   }
 
   /**
    * Nota interna chama a atenção de quem precisa ler (docs/notas-internas.md#avisos): antes ela só
    * entrava no histórico e ninguém via. Recebem o aviso (som + cartão fixo, evento `note_alert`):
-   * - quem está com o atendimento (ou foi o último a atender, se já encerrou);
+   * - quem está com o atendimento (sem dono: quem atendeu por último);
+   * - quem já escreveu nota nesta conversa nos últimos 30 dias (a resposta chega a quem perguntou);
    * - quem foi citado com @Nome (primeiro nome ou nome completo, sem acento/maiúscula);
    * - com `@todos`/`@equipe`, todo mundo ativo que atende pelo número da conversa.
    * Quem escreveu nunca recebe. Citado que não atende por aquele número também não (não abriria).
    */
-  private async alertNote(tenantId: string, author: { id: string; name: string }, conv: Conversation, text: string) {
+  private async alertNote(tenantId: string, author: { id: string; name: string }, conv: Conversation, text: string, messageId: string) {
     const lido = foldSearch(text);
     const citacoes = new Set([...lido.matchAll(/@([\p{L}\p{N}_.-]+(?:\s+[\p{L}\p{N}_.-]+)?)/gu)].map((m) => m[1]));
     const todos = /@(todos|equipe|time)\b/.test(lido);
-    if (!citacoes.size && !todos && (!conv.assigneeId || conv.assigneeId === author.id)) return;
+    // Responsável pela conversa: quem está com ela; sem dono (aguardando, encerrada), quem atendeu por
+    // último (assumiu, recebeu a transferência ou encerrou). E quem já escreveu nota aqui: nota é troca
+    // entre a equipe, a resposta tem de chegar a quem perguntou
+    const [ultimo, autores] = await Promise.all([
+      conv.assigneeId ? null : this.prisma.conversationEvent.findFirst({
+        where: { conversationId: conv.id, type: { in: ['claimed', 'transferred', 'closed'] } },
+        orderBy: { createdAt: 'desc' }, select: { type: true, actorId: true, targetId: true },
+      }),
+      this.prisma.message.findMany({
+        where: { conversationId: conv.id, internal: true, authorId: { not: null }, id: { not: messageId }, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+        distinct: ['authorId'], select: { authorId: true }, take: 20,
+      }),
+    ]);
+    const responsavel = conv.assigneeId ?? (ultimo?.type === 'transferred' ? ultimo.targetId : ultimo?.actorId) ?? null;
+    const daConversa = new Set([responsavel, ...autores.map((a) => a.authorId)].filter((x): x is string => !!x && x !== author.id));
+    if (!citacoes.size && !todos && !daConversa.size) return;
     const users = await this.prisma.user.findMany({ where: { tenantId, isActive: true, id: { not: author.id } }, select: { id: true, name: true, role: true } });
     const citado = (nome: string) => {
       const n = foldSearch(nome).trim();
       const primeiro = n.split(/\s+/)[0];
       return [...citacoes].some((c) => c === n || c.split(/\s+/)[0] === primeiro || n.startsWith(c));
     };
-    const alvos = users.filter((u) => todos || u.id === conv.assigneeId || citado(u.name));
+    const alvos = users.filter((u) => todos || daConversa.has(u.id) || citado(u.name));
     if (!alvos.length) return;
     const contact = await this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { name: true, phone: true } });
     const event = { conversationId: conv.id, contactName: contact?.name || contact?.phone || 'Cliente', byName: author.name, text: clip(text, 160) };
+    const leitores: { id: string; name: string }[] = [];
     for (const u of alvos) {
-      if (await this.canReceive(tenantId, u, conv)) this.gateway.emitNoteAlert(tenantId, u.id, event);
+      if (!(await this.canReceive(tenantId, u, conv))) continue;
+      leitores.push(u);
+      this.gateway.emitNoteAlert(tenantId, u.id, event);
     }
+    if (!leitores.length) return;
+    // leitura (docs/notas-internas.md#leitura): quem escreveu passa a ver "aguardando leitura de X";
+    // vale também para quem está offline — o aviso volta quando a pessoa entrar
+    await this.prisma.noteReceipt.createMany({ data: leitores.map((u) => ({ messageId, userId: u.id, userName: u.name, tenantId, conversationId: conv.id })), skipDuplicates: true });
+    const m = await this.prisma.message.findUnique({ where: { id: messageId }, include: MESSAGE_INCLUDE });
+    if (m) this.gateway.emitMessage(tenantId, this.present(m));
+  }
+
+  /** Marca como lidas as notas internas desta conversa endereçadas a esta pessoa e avisa quem escreveu. */
+  async readNotes(tenantId: string, userId: string, conversationId: string) {
+    const pendentes = await this.prisma.noteReceipt.findMany({ where: { tenantId, conversationId, userId, readAt: null }, select: { messageId: true } });
+    if (!pendentes.length) return { read: 0 };
+    await this.prisma.noteReceipt.updateMany({ where: { tenantId, conversationId, userId, readAt: null }, data: { readAt: new Date() } });
+    const msgs = await this.prisma.message.findMany({ where: { id: { in: pendentes.map((p) => p.messageId) } }, include: MESSAGE_INCLUDE });
+    for (const m of msgs) this.gateway.emitMessage(tenantId, this.present(m));
+    return { read: pendentes.length };
+  }
+
+  /** Notas internas ainda não lidas por esta pessoa: reaparecem como aviso quando ela entra. */
+  async pendingNotes(tenantId: string, userId: string) {
+    const rows = await this.prisma.noteReceipt.findMany({
+      where: { tenantId, userId, readAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { conversationId: true, message: { select: { text: true, authorName: true, conversation: { select: { contact: { select: { name: true, phone: true } } } } } } },
+    });
+    return rows.map((r) => ({ conversationId: r.conversationId, byName: r.message.authorName ?? 'Equipe', text: clip(r.message.text || '📷 Imagem', 160), contactName: r.message.conversation.contact.name || r.message.conversation.contact.phone }));
   }
 
   /** Nota interna do sistema (sem autor): o robô avisando a equipe. Nunca vai ao WhatsApp. */

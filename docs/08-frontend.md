@@ -568,6 +568,14 @@ Configurações → Atendimento → **Encerramento** → **Avisar o cliente ao e
 - não sai no encerramento **interno**, no **em massa** (`closeMany`) nem no da automação (`closeByFlow`);
 - o "ok/obrigado" do cliente em resposta cai na carência (`reopen.ts`) e não reabre.
 
+## Foco no campo ao abrir
+
+Abrir uma conversa (lista, mini-chat do Kanban, aviso) foca o campo de mensagem, ou o da nota, se o modo nota estiver ligado. É uma vez por conversa, quando ela carrega. Sem campo (atendimento de outra pessoa, número desconectado), nada acontece. O chat interno da equipe faz o mesmo ao trocar de conversa. Em tela de toque (`pointer: coarse`) não foca, para o teclado não abrir por cima de quem só queria ler.
+
+## Feedbacks (`/feedbacks`) e notas internas
+
+Feedback do gestor sobre atendimentos (Recebidos / Da equipe), botão **Dar feedback** na auditoria, tela de pendências ao entrar (`AttentionGate` no shell) e contador no menu: [feedback-de-atendimento](feedback-de-atendimento.md#front). Leitura das notas internas no balão (`LeituraDaNota` no `ChatPane`): [notas-internas](notas-internas.md#leitura).
+
 ## Kanban (`/kanban`)
 
 `app/(app)/kanban/page.tsx` + `components/kanban/`. Uma coluna por tag com `isKanban`, na ordem de `position`, mais a coluna fixa "Sem etapa" (`KANBAN_NO_STAGE`, não é tag). O card fica **só** na coluna da tag principal; as outras tags do atendimento viram pílulas, e as do contato (📌) aparecem só para leitura.
@@ -575,7 +583,8 @@ Configurações → Atendimento → **Encerramento** → **Avisar o cliente ao e
 - Arrastar card (`@hello-pangea/dnd`) → `useSetPrimaryTag` → `PATCH /conversations/:id/primary-tag`, otimista no cache `['kanban']` e desfeito se a API recusar. Ordem dentro da coluna não é guardada (manda a última mensagem).
 - Clicar numa pílula que é etapa promove a tag e move o card. Pílula de tag que não é etapa fica desabilitada.
 - Arrastar colunas só para quem tem `tags.manage` (`PATCH /kanban/columns`); sem a permissão o arraste de colunas nem é montado.
-- Duplo clique (ou o botão no card, para o celular) abre `KanbanChatDialog`, que é o próprio `ChatPane` em modo embutido (`<ChatPane conversationId=…/>`): não lê nem mexe na seleção/filtros da tela de conversas. Envio, cota do plano, janela de 24h e posse são os mesmos do chat.
+- Duplo clique (ou o botão no card, para o celular) abre `KanbanChatDialog`, que é o próprio `ChatPane` em modo embutido (`<ChatPane conversationId=…/>`): não lê nem mexe na seleção/filtros da tela de conversas. Envio, cota do plano, janela de 24h e posse são os mesmos do chat. Em telas largas (`lg`+) o modal alarga e mostra ao lado o mesmo `QuickRepliesPanel` (Mensagens/Fluxos/dados da conversa), preso à conversa do card por prop (`<QuickRepliesPanel conversationId onClose/>`, contexto `PanelConversation`; sem prop ele segue o store da tela de conversas). Recolher/abrir pelo ícone do cabeçalho do modal, guardado em `kanban-painel` (separado do painel da tela de conversas).
+- **Filtros**: busca (na API, com espera de 350 ms), **números** (`NumberFilter`) e **departamento** — os mesmos do store da tela de conversas, inclusive o número padrão da pessoa — e, atrás do ícone de filtros (com contador), status (Todos/Atendendo/Aguardando), atendente (só com `conversations.view_all`: meus, sem atendente, cada pessoa), tags (do atendimento ou do contato), origem (só com vendas) e só não lidas. Esses ficam em `kanban-filtros` (navegador). Tudo vai para `GET /kanban`: o quadro corta nos 500 mais recentes, e filtrar só no front esconderia o que passou do corte.
 - **Colunas permanentes (📌)**: tag permanente marcada como coluna aparece com cabeçalho 📌, borda tracejada e selo "contato"; o card nela mostra a pílula 📌 com contorno. Regra de onde o card fica e do arrastar: [Kanban com tags permanentes](06-modelo-de-dados.md#kanban-com-tags-permanentes). `useSetPrimaryTag` repete a regra no cache (`moverNoQuadro`).
 - **Encerrar pelo card** (✓ ao lado do abrir, só no hover; no celular sempre à vista): abre o mesmo `CloseModal` do chat (resultado, motivo, tags, venda, fluxo, pesquisa) sem entrar na conversa. Encerrado, o card sai do quadro (invalida `['kanban']`; o socket também avisa). Quem pode encerrar é a regra da API, igual ao chat.
 - **Marcar como não lida / lida pelo card** (envelope, junto do ✓ e do abrir): sem não lidas, marca como não lida (`PATCH /conversations/:id/unread`, lembrete do atendente, o contato não fica sabendo); com não lidas, marca como lida. O badge muda na hora no card e na lista de conversas (`useMarkRead`/`useMarkUnread` atualizam `['conversations']` e `['kanban']`).

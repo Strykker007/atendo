@@ -21,6 +21,7 @@ export * from './hooks/ia';
 export * from './hooks/configuracoes';
 export * from './hooks/fila';
 export * from './hooks/kanban';
+export * from './hooks/feedback';
 export * from './hooks/departamentos';
 export * from './hooks/empresas';
 export * from './hooks/fotos';

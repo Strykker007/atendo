@@ -121,6 +121,7 @@ model Tenant {
   ignoredContacts     IgnoredContact[]
   internalChats       InternalChat[]
   paymentGateway      PaymentGateway?
+  attendanceReviews   AttendanceReview[]
   @@index([partnerId])
   @@map("tenants")
 }
@@ -700,6 +701,9 @@ model TenantSettings {
   autoDistributeMax       Int     @default(4)
   /// com a fila ligada, atendente não puxa contato da fila (só a distribuição e quem pode transferir)
   autoDistributeLockClaim Boolean @default(true)
+  /// Feedback de atendimento (docs/feedback-de-atendimento.md): por tipo, se exige ciência, prazo em
+  /// horas ONLINE do atendente e se trava assumir novo atendimento. null = padrão (`REVIEW_SETTINGS_DEFAULT`)
+  reviewSettings Json?
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1278,6 +1282,7 @@ model Conversation {
 
   @@map("conversations")
   tickets           Ticket[]
+  reviews           AttendanceReview[]
 }
 
 enum MessageDirection {
@@ -1538,6 +1543,7 @@ model Message {
   /// Apagar a citada não pode apagar as respostas a ela — por isso SetNull.
   quotedMessage Message?    @relation("MessageQuote", fields: [quotedMessageId], references: [id], onDelete: SetNull)
   quotes        Message[]   @relation("MessageQuote")
+  noteReceipts  NoteReceipt[]
 
   @@unique([numberId, externalId])
   @@unique([conversationId, idempotencyKey])
@@ -3566,4 +3572,65 @@ model PartnerEvent {
   @@index([partnerId, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
   @@map("partner_events")
+}
+
+/// Quem precisa ler uma nota interna (docs/notas-internas.md#leitura): o atendente da conversa e os
+/// citados com @. Quem escreveu vê "aguardando leitura" / "lida às 14:32". Nome copiado na hora.
+model NoteReceipt {
+  messageId      String
+  userId         String
+  userName       String
+  tenantId       String
+  conversationId String
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([tenantId, userId, readAt])
+  @@index([conversationId, userId])
+  @@map("note_receipts")
+}
+
+/// Feedback do gestor sobre UM atendimento (docs/feedback-de-atendimento.md): correção, oportunidade,
+/// orientação ou elogio, privado entre gestor e atendente. O atendimento é o encerramento
+/// (`closeEventId`) e a janela de mensagens dele. Nomes copiados: o rastro não some com o usuário.
+/// O prazo de ciência conta só o tempo em que o atendente esteve ONLINE (`onlineMinutes`), para
+/// folga, escala e ausência não estourarem o prazo.
+model AttendanceReview {
+  id             String    @id @default(uuid())
+  tenantId       String
+  conversationId String
+  closeEventId   String?
+  windowStart    DateTime?
+  windowEnd      DateTime?
+  agentId        String?
+  agentName      String
+  reviewerId     String?
+  reviewerName   String
+  /// correction | opportunity | guidance | praise
+  kind           String
+  text           String
+  /// mensagens marcadas pelo gestor (o trecho do problema)
+  messageIds     String[]  @default([])
+  /// cópia da configuração no momento do apontamento
+  requiresAck    Boolean   @default(true)
+  blocksClaim    Boolean   @default(false)
+  deadlineMinutes Int?
+  onlineMinutes  Int       @default(0)
+  seenAt         DateTime?
+  acknowledgedAt DateTime?
+  agentReply     String?
+  repliedAt      DateTime?
+  overdueAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, agentId, acknowledgedAt])
+  @@index([tenantId, createdAt])
+  @@index([closeEventId])
+  @@map("attendance_reviews")
 }

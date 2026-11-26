@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import { Image as ImageIcon, Mic, Video, FileText, Folder, FolderOpen, Zap, Workflow, Play, Lock, ChevronDown, ChevronRight, Copy, PanelRightClose, QrCode } from 'lucide-react';
 import { PIX_KEY_TYPE_LABEL } from '@atendo/shared';
 import { Button } from '@/components/ui/Button';
@@ -14,9 +14,28 @@ import { usePersistedState } from '@/lib/persisted';
 import { useStartFlowConfirm } from './useStartFlowConfirm';
 import { QUICK_REPLY_EVENT, type QuickReplyEventDetail } from './quick-reply-event';
 
+/**
+ * Conversa do painel: a aberta na tela de conversas (store) ou, no mini-chat do Kanban, a que
+ * veio por prop — lá o store não muda, senão abrir um card trocaria a conversa da outra tela.
+ */
+const PanelConversation = createContext<string | null | undefined>(undefined);
+function usePanelConversationId() {
+  const doStore = useUI().conversationId;
+  const daProp = useContext(PanelConversation);
+  return daProp === undefined ? doStore : daProp;
+}
+
 /** Painel direito: sessões (pastas) com mensagens pré-configuradas. Clique insere no composer. */
-export function QuickRepliesPanel() {
+export function QuickRepliesPanel({ conversationId, onClose }: { conversationId?: string; onClose?: () => void } = {}) {
   const { toggleRightPanel } = useUI();
+  return (
+    <PanelConversation.Provider value={conversationId}>
+      <PanelBody onClose={onClose ?? toggleRightPanel} />
+    </PanelConversation.Provider>
+  );
+}
+
+function PanelBody({ onClose }: { onClose: () => void }) {
   // a aba escolhida também fica guardada: trocar de conversa não deve devolver o painel ao padrão
   const [tab, setTab] = usePersistedState<'replies' | 'flows'>('painel-aba', 'replies');
   return (
@@ -25,7 +44,7 @@ export function QuickRepliesPanel() {
         {/* recolher fica aqui dentro, como no menu da esquerda: quem quer mais espaço para a
             conversa fecha de onde está olhando, sem procurar o botão no cabeçalho do chat
             (que continua existindo, porque fechado é de lá que se reabre) */}
-        <button onClick={toggleRightPanel} className="shrink-0 p-1 rounded-md text-faint hover:text-ink hover:bg-field" title="Recolher painel">
+        <button onClick={onClose} className="shrink-0 p-1 rounded-md text-faint hover:text-ink hover:bg-field" title="Recolher painel">
           <PanelRightClose size={17} />
         </button>
         <div className="grid grid-cols-2 flex-1 min-w-0 rounded-lg bg-field p-0.5 text-[12px] font-semibold">
@@ -51,7 +70,7 @@ export function QuickRepliesPanel() {
  */
 function DadosDaConversa() {
   const [aberto, setAberto] = usePersistedState('painel-dados', true);
-  const { conversationId } = useUI();
+  const conversationId = usePanelConversationId();
   const conv = useConversation(conversationId).data;
   const me = useMe();
   // campos livres da ficha ("Outras informações deste cliente"): também entram com um clique
@@ -105,7 +124,7 @@ const dataBR = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split('-').reve
 
 /** Aba Fluxos: dispara um fluxo na conversa aberta. Plugável no plano. */
 function FlowsTab() {
-  const { conversationId } = useUI();
+  const conversationId = usePanelConversationId();
   const feature = useHasFeature('flows');
   const flows = useFlows();
   const { run, dialog, start } = useStartFlowConfirm();
@@ -195,7 +214,7 @@ function RepliesTab() {
   const [q, setQ] = useState('');
 
   const me = useMe();
-  const { conversationId } = useUI();
+  const conversationId = usePanelConversationId();
   const conv = useConversation(conversationId).data;
 
   /**

@@ -687,7 +687,12 @@ function ChatView({ chat, meId, scope, api = scope, onLeave }: { chat: InternalC
     if (ultima && chat.unread) read.mutate(chat.id);
   }, [ultima]); // eslint-disable-line react-hooks/exhaustive-deps
   // trocou de conversa: a citação era da outra
-  useEffect(() => { setRespondendo(null); setPainel(false); }, [chat.id]);
+  useEffect(() => {
+    setRespondendo(null);
+    setPainel(false);
+    // abriu a conversa: o campo já vem focado (fora de tela de toque, onde abriria o teclado)
+    if (!window.matchMedia?.('(pointer: coarse)').matches) requestAnimationFrame(() => campo.current?.focus());
+  }, [chat.id]);
 
   function responder(m: InternalMessage) {
     setRespondendo(m);

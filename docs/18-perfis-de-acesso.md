@@ -27,7 +27,7 @@ senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 | Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.close_internal`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit`, `contacts.import_export` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `variables.manage`, `agenda.manage`, `campaigns.manage` |
 | Tickets | `tickets.create`, `tickets.handle`, `tickets.view_all`, `tickets.manage` — ver [Tickets internos](tickets.md#quem-vê-e-quem-atua) |
-| Gestão | `reports.view`, `team.manage`, `profiles.manage`, `settings.manage`, `internal_chat.audit` |
+| Gestão | `reports.view`, `reviews.manage` ([feedback](feedback-de-atendimento.md); padrão de Administrador e Gerente), `team.manage`, `profiles.manage`, `settings.manage`, `internal_chat.audit` |
 | Conta | `numbers.manage`, `billing.manage` |
 
 `DEFAULT_PERMISSIONS` reproduz **exatamente** o acesso que cada papel já tinha antes dos

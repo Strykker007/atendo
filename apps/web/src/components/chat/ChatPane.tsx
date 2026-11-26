@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, ReceiptText, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail } from 'lucide-react';
+import { FileText, Download, X, RefreshCw, Reply, SmilePlus, Forward, WifiOff, Hand, ArrowRightLeft, Undo2, UserRound, Lock, StickyNote, ReceiptText, CalendarPlus, Image as ImageIcon, Video, Building2, Trash2, Eraser, Ban, Eye, EyeOff, Maximize2, Pencil, Mail, AtSign } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/Confirm';
 import { ExemptConfirm } from './ExemptConfirm';
 import { AppointmentModal } from '@/components/scheduling/AppointmentModal';
@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
-import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, tagsOfKind, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
+import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, tagsOfKind, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, useReadNotes, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
 import { STATUS_META } from './ConversationList';
@@ -27,6 +27,8 @@ import { CopilotBar, SummaryButton } from './Copilot';
 import { CloseModal } from './CloseModal';
 import { Modal, inputCls } from '@/components/ui/Modal';
 import { ComposerBar, QuickReplyPopover } from './ComposerBar';
+import { useMention } from './MentionSuggest';
+import { ImageMarkup } from './ImageMarkup';
 import { BudgetModal, OrcamentosAguardando } from './BudgetModal';
 import { ScheduledMessagesBar } from './ScheduledMessages';
 import { useAutoResize } from './useAutoResize';
@@ -120,6 +122,39 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const [textoNota, setTextoNota] = useState('');
   useEffect(() => { setModoNota(false); setTextoNota(''); }, [conversationId]);
   const notaRef = useRef<HTMLTextAreaElement>(null);
+  // imagem na nota (print do atendimento, docs/notas-internas.md#imagem): botão, Ctrl+V ou arrastar.
+  // Antes de subir, abre o editor para riscar (`ImageMarkup`); o arquivo local fica guardado para
+  // marcar de novo sem baixar do storage (o canvas não exporta imagem de outra origem)
+  const [imagemNota, setImagemNota] = useState<Upload | null>(null);
+  const [arquivoNota, setArquivoNota] = useState<{ blob: Blob; nome: string } | null>(null);
+  const [marcando, setMarcando] = useState<{ blob: Blob; nome: string; nova: boolean } | null>(null);
+  const [subindoImagem, setSubindoImagem] = useState(false);
+  const imagemNotaInput = useRef<HTMLInputElement>(null);
+  useEffect(() => { setImagemNota(null); setArquivoNota(null); setMarcando(null); }, [conversationId]);
+  function anexarNaNota(file: File | null | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast.err(new Error('Na nota interna só vai imagem (print, foto).'));
+    // print colado vem sem nome: dá um, para o download fazer sentido
+    const nome = file.name && file.name !== 'image.png' ? file.name : `print-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+    setMarcando({ blob: file, nome, nova: true });
+  }
+  async function subirImagemNota(blob: Blob, nome: string) {
+    const tipo = blob.type || 'image/png';
+    const final = nome.replace(/\.[a-z0-9]+$/i, '') + (tipo === 'image/jpeg' ? '.jpg' : '.png');
+    if (blob.size > 10 * 1024 * 1024) return toast.err(new Error('Imagem grande demais para a nota (máx. 10 MB).'));
+    setSubindoImagem(true);
+    try {
+      setImagemNota(await uploadFile(new File([blob], final, { type: tipo })));
+      setArquivoNota({ blob, nome: final });
+      requestAnimationFrame(() => notaRef.current?.focus());
+    } catch (err) {
+      toast.err(err);
+    } finally {
+      setSubindoImagem(false);
+    }
+  }
+  // @menção com sugestão da equipe no campo da nota (docs/notas-internas.md#avisos)
+  const mencao = useMention(textoNota, setTextoNota, notaRef);
   // alternar nota ⇄ mensagem não pode tirar a mão do teclado: o campo do modo novo já vem focado.
   // Só na troca (não ao abrir a conversa); o campo do modo novo monta neste render, por isso o rAF
   const notaAntes = useRef(modoNota);
@@ -134,6 +169,26 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       el.setSelectionRange(el.value.length, el.value.length);
     });
   }, [modoNota]);
+  /**
+   * Abriu a conversa (lista, Kanban, aviso): o campo já vem focado, para responder sem procurar
+   * o mouse. Uma vez por conversa, quando ela carrega; o campo pode nem existir (atendimento de
+   * outra pessoa, número desconectado) e aí nada acontece. Em tela de toque não foca: o teclado
+   * abriria por cima da conversa que a pessoa só queria ler.
+   */
+  const focouEm = useRef<string | null>(null);
+  const carregou = !!conv;
+  useEffect(() => {
+    if (!conversationId || !carregou || focouEm.current === conversationId) return;
+    focouEm.current = conversationId;
+    if (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches) return;
+    requestAnimationFrame(() => {
+      const el = (modoNota ? notaRef.current : campoRef.current) ?? notaRef.current;
+      if (!el || el.disabled) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, carregou]);
   // orçamento (docs/orcamentos.md): atalho na linha das abas; o link entra no campo da MENSAGEM
   const [orcando, setOrcando] = useState(false);
   // Alt+N liga/desliga. `code`, não `key`: no Mac Alt+N é tecla morta ("˜")
@@ -406,6 +461,14 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     marcarLida.mutate(conversationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, mensagens.length]);
+  // nota interna para mim ainda não lida (docs/notas-internas.md#leitura): abriu a conversa = leu
+  const lerNotas = useReadNotes();
+  const eu = me.data?.id;
+  const notaPendente = !!eu && mensagens.some((m) => m.internal && m.noteReceipts?.some((r) => r.userId === eu && !r.readAt));
+  useEffect(() => {
+    if (conversationId && notaPendente && !lerNotas.isPending) lerNotas.mutate(conversationId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, notaPendente]);
 
   /**
    * Manter o fim da conversa à vista.
@@ -617,12 +680,15 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     presenca.parar();
     if (noteMode) {
       const nota = textoNota.trim();
-      if (!nota || sendNote.isPending) return;
+      const imagem = imagemNota;
+      if ((!nota && !imagem) || sendNote.isPending || subindoImagem) return;
       setTextoNota('');
+      setImagemNota(null);
       try {
-        await sendNote.mutateAsync(nota);
+        await sendNote.mutateAsync({ text: nota, image: imagem });
       } catch (err) {
         setTextoNota(nota);
+        setImagemNota(imagem);
         toast.err(err);
       }
       return;
@@ -958,24 +1024,57 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       {/* agendadas desta conversa: aparece mesmo com o campo bloqueado (encerrada, de outra pessoa) */}
       <ScheduledMessagesBar conversationId={conv.id} />
 
+      {/* editor da imagem da nota: abre ao colar/escolher e no "Marcar" da miniatura */}
+      {marcando && (
+        <ImageMarkup file={marcando.blob}
+          onCancel={() => setMarcando(null)}
+          onDone={(b) => { const m = marcando; setMarcando(null); void subirImagemNota(b, m.nome); }} />
+      )}
       {/* Composer */}
       {noteMode ? (
-        <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5">
+        <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5"
+          onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+          onDrop={(e) => { const f = e.dataTransfer.files?.[0]; if (f) { e.preventDefault(); void anexarNaNota(f); } }}>
           <AbasDoEnvio nota onNota={setModoNota} podeNota onOrcamento={!ownedByOther ? () => setOrcando(true) : undefined} />
-          <div className="flex items-end gap-2">
+          {(imagemNota || subindoImagem) && (
+            <div className="flex items-center gap-2 rounded-lg bg-panel/70 border border-warn/30 p-1.5 w-fit max-w-full">
+              {imagemNota ? <img src={imagemNota.url} alt="" className="h-14 w-14 rounded object-cover shrink-0" /> : <div className="h-14 w-14 rounded bg-warn/10 grid place-items-center shrink-0"><Loader2 size={16} className="animate-spin text-warn-ink" /></div>}
+              <div className="min-w-0 text-[11.5px] text-warn-ink">
+                <div className="font-semibold truncate max-w-[220px]">{imagemNota?.fileName ?? 'Enviando imagem…'}</div>
+                <div className="opacity-80">Vai junto com a nota — só a equipe vê</div>
+              </div>
+              {imagemNota && arquivoNota && (
+                <button type="button" onClick={() => setMarcando({ ...arquivoNota, nova: false })} title="Riscar, destacar ou apontar na imagem"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] font-semibold text-warn-ink hover:bg-warn/15"><Pencil size={12} />Marcar</button>
+              )}
+              {imagemNota && <button type="button" onClick={() => { setImagemNota(null); setArquivoNota(null); }} title="Tirar a imagem" aria-label="Tirar a imagem" className="p-1 rounded text-warn-ink/70 hover:text-danger"><X size={14} /></button>}
+            </div>
+          )}
+          <div className="relative flex items-end gap-2">
+            {mencao.popover}
+            <input ref={imagemNotaInput} type="file" accept="image/*" className="hidden" onChange={(e) => { void anexarNaNota(e.target.files?.[0]); e.target.value = ''; }} />
+            <button type="button" onClick={() => imagemNotaInput.current?.click()} disabled={subindoImagem}
+              title="Anexar imagem à nota (ou cole um print com Ctrl+V)" aria-label="Anexar imagem à nota"
+              className="h-9 shrink-0 inline-flex items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold text-warn-ink border border-warn/40 bg-panel/60 hover:bg-warn/15 disabled:opacity-50">
+              <ImageIcon size={16} /><span className="hidden sm:inline">Imagem</span>
+            </button>
             <textarea
               ref={notaRef}
               value={textoNota}
-              onChange={(e) => setTextoNota(e.target.value)}
+              onChange={(e) => { setTextoNota(e.target.value); mencao.sync(e.target); }}
+              onSelect={(e) => mencao.sync(e.currentTarget)}
+              // print colado (Ctrl+V): vira a imagem da nota em vez de texto
+              onPaste={(e) => { const f = [...e.clipboardData.files].find((x) => x.type.startsWith('image/')); if (f) { e.preventDefault(); void anexarNaNota(f); } }}
               onKeyDown={(e) => {
+                if (mencao.onKeyDown(e)) return;
                 if (e.key === 'Escape') return setModoNota(false);
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
               }}
               rows={1}
-              placeholder={ownedByOther ? `Nota para ${conv.assignee?.name} — o contato não vê` : 'Nota para a equipe — o contato não vê'}
+              placeholder={ownedByOther ? `Nota para ${conv.assignee?.name} — o contato não vê (cole um print com Ctrl+V)` : 'Nota para a equipe — cite @Nome e cole um print com Ctrl+V (o contato não vê)'}
               className="flex-1 resize-none min-h-[38px] max-h-40 overflow-y-hidden scrollbar-thin rounded-xl bg-panel border border-warn/40 text-ink placeholder:text-warn-ink/60 px-3.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-warn/50"
             />
-            <Button type="submit" className="h-9 rounded-full px-3.5 bg-warn hover:bg-warn/90 text-white border-0" disabled={!textoNota.trim()} loading={sendNote.isPending} icon={<StickyNote size={15} />}>Adicionar nota</Button>
+            <Button type="submit" className="h-9 rounded-full px-3.5 bg-warn hover:bg-warn/90 text-white border-0" disabled={(!textoNota.trim() && !imagemNota) || subindoImagem} loading={sendNote.isPending} icon={<StickyNote size={15} />}>Adicionar nota</Button>
           </div>
         </form>
       ) : ownedByOther && podeNota ? (
@@ -1185,6 +1284,54 @@ export function resumoDaMensagem(m: Message): string {
   return messagePreview(m);
 }
 
+/**
+ * Quem precisa ler a nota e se já leu (docs/notas-internas.md#leitura): o atendente da conversa e
+ * os citados com @. Sem ninguém, diz isso — antes a nota ia para o histórico e ninguém sabia se
+ * alguém tinha visto.
+ */
+function LeituraDaNota({ m }: { m: Message }) {
+  const r = m.noteReceipts ?? [];
+  const hora = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (!r.length) {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-warn-ink/80">
+        <AtSign size={11} className="shrink-0" />
+        <span>Ninguém foi avisado — cite com <b>@Nome</b> para chamar alguém.</span>
+      </div>
+    );
+  }
+  const lidas = r.filter((x) => x.readAt).length;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className={cn('text-[10.5px] font-semibold uppercase tracking-wide', lidas === r.length ? 'text-ok' : 'text-warn-ink/80')}>
+        {lidas === r.length ? (r.length > 1 ? 'Todos leram' : 'Lida') : `Leitura ${lidas}/${r.length}`}
+      </span>
+      {r.map((x) => (
+        <span key={x.userId} title={x.readAt ? `${x.userName} leu em ${hora(x.readAt)}` : `${x.userName} ainda não abriu a conversa`}
+          className={cn('inline-flex items-center gap-1 rounded-full pl-0.5 pr-2 py-0.5 text-[10.5px] font-semibold', x.readAt ? 'bg-ok-soft text-ok' : 'bg-panel/80 text-warn-ink ring-1 ring-warn/40')}>
+          <span className={cn('grid place-items-center w-4 h-4 rounded-full text-[9px] font-bold text-white', x.readAt ? 'bg-ok' : 'bg-warn')}>{x.userName.trim().charAt(0).toUpperCase()}</span>
+          {x.userName.split(' ')[0]}
+          {x.readAt ? <><CheckCheck size={11} /><span className="tnum font-normal opacity-80">{hora(x.readAt)}</span></> : <><Clock size={11} /><span className="font-normal">não leu</span></>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Texto da nota com as @menções destacadas (quem foi chamado salta aos olhos). */
+function TextoDaNota({ texto }: { texto: string }) {
+  const partes = texto.split(/(@[\p{L}\p{N}_.-]+)/u);
+  // só é menção com espaço (ou nada) antes: "ana@loja.com" continua e-mail
+  const mencao = (i: number) => partes[i].startsWith('@') && (i === 0 || /(^|\s)$/.test(partes[i - 1]));
+  return (
+    <p className="whitespace-pre-wrap break-words text-ink leading-relaxed">
+      {partes.map((p, i) => (mencao(i)
+        ? <span key={i} className="rounded px-1 py-px bg-warn/20 text-warn-ink font-semibold">{p}</span>
+        : <span key={i}>{p}</span>))}
+    </p>
+  );
+}
+
 function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar, onEditar, onNaoLida, onTicket, ticketsDaqui, podeVerApagada, citada, contato }: { m: Message; canResend: boolean; onVerMidia?: (url: string) => void; onResponder?: (m: Message) => void; onEncaminhar?: (m: Message) => void; onApagar?: (m: Message) => void; onEditar?: (m: Message) => void; onNaoLida?: (m: Message) => void; onTicket?: (m: Message) => void; ticketsDaqui?: ConversationTicket[]; podeVerApagada: boolean; citada?: Message; contato: string }) {
   const out = m.direction === 'out';
   const resend = useResend();
@@ -1197,17 +1344,36 @@ function Bubble({ m, canResend, onVerMidia, onResponder, onEncaminhar, onApagar,
     // `author` some se o usuário for removido; `authorName` é o nome gravado na nota.
     // Sem nenhum dos dois = aviso do sistema (fluxo, agenda).
     const autor = m.author?.name ?? m.authorName;
+    const hora = new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     return (
-      <div className="flex justify-center my-1.5">
-        <div className="max-w-[80%] min-w-[220px] rounded-lg border border-dashed border-warn/70 bg-warn-soft px-3 py-2 text-[13px] shadow-sm">
-          <div className="flex items-center gap-1.5 text-[11px] text-warn-ink mb-1">
-            <StickyNote size={12} className="shrink-0" />
-            <span className="flex-1 min-w-0 truncate">{autor ? <>Nota interna adicionada por <b>{autor}</b></> : <b>Aviso automático do sistema</b>}</span>
-            <span className="tnum font-mono text-[10px] text-warn-ink/70">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
-            {onApagar && <button type="button" onClick={() => onApagar(m)} title="Apagar nota" aria-label="Apagar nota" className="text-warn-ink/70 hover:text-danger p-0.5"><Trash2 size={12} /></button>}
+      <div id={`msg-${m.id}`} className="flex justify-center my-2">
+        <div className="group/nota relative w-full max-w-[78%] min-w-[240px] overflow-hidden rounded-xl border border-warn/40 bg-warn-soft shadow-sm">
+          {/* faixa lateral: identifica a nota de longe, sem depender do texto */}
+          <span className="absolute left-0 top-0 bottom-0 w-1 bg-warn" aria-hidden />
+          <div className="flex items-center gap-2 pl-4 pr-2.5 pt-2 pb-1.5">
+            <span className={cn('grid place-items-center w-7 h-7 rounded-full shrink-0 text-white text-[11px] font-bold shadow-sm', autor ? 'bg-warn' : 'bg-warn/70')}>
+              {autor ? autor.trim().charAt(0).toUpperCase() : <StickyNote size={13} />}
+            </span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="text-[12.5px] font-semibold text-ink truncate">{autor ?? 'Aviso automático do sistema'}</div>
+              <div className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide text-warn-ink/80"><Lock size={9} /> Nota interna · só a equipe vê</div>
+            </div>
+            <span className="tnum text-[10.5px] text-warn-ink/70 self-start mt-0.5">{hora}</span>
+            {onApagar && <button type="button" onClick={() => onApagar(m)} title="Apagar nota" aria-label="Apagar nota" className="self-start text-warn-ink/50 hover:text-danger p-0.5 opacity-0 group-hover/nota:opacity-100 focus:opacity-100 transition-opacity"><Trash2 size={13} /></button>}
           </div>
-          <p className="whitespace-pre-wrap break-words text-ink">{m.text}</p>
-          <div className="flex items-center gap-1 text-[10px] text-warn-ink/70 mt-1"><Lock size={10} /> Visível apenas para a equipe</div>
+          <div className="pl-4 pr-3 pb-2 text-[13px] space-y-1.5">
+            {m.mediaUrl && m.mediaMime?.startsWith('image/') && (
+              <button type="button" onClick={() => onVerMidia?.(m.mediaUrl!)} title="Ampliar imagem" className="block rounded-lg overflow-hidden border border-warn/30 bg-panel/60 hover:opacity-95">
+                <img src={m.mediaUrl} alt={m.mediaName ?? 'Imagem da nota'} className="max-h-64 max-w-full object-contain" loading="lazy" />
+              </button>
+            )}
+            {m.text && <TextoDaNota texto={m.text} />}
+          </div>
+          {autor && (
+            <div className="pl-4 pr-3 py-1.5 border-t border-warn/25 bg-panel/40">
+              <LeituraDaNota m={m} />
+            </div>
+          )}
         </div>
       </div>
     );

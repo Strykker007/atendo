@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronDown, ChevronRight, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX, Smartphone, BellOff, Bell } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, CheckSquare, Square, X, Clock, SlidersHorizontal, Star, BotOff, MessageSquarePlus, Users, MoreVertical, MailOpen, Mail, Volume2, VolumeX, Smartphone, BellOff, Bell, Lock } from 'lucide-react';
 import type { ConversationStatus } from '@atendo/shared';
 import { cn, formatPreview, readableColor } from '@/lib/utils';
 import { useUI } from '@/lib/store';
@@ -21,7 +21,7 @@ import { NewConversationModal } from './NewConversationModal';
 import { NumberFilter, useDefaultNumbers } from './NumberFilter';
 import { Button } from '@/components/ui/Button';
 import { usePersistedState } from '@/lib/persisted';
-import { isFreeChat, useCan } from '@/lib/hooks';
+import { isFreeChat, useCan, usePendingNotes } from '@/lib/hooks';
 import { formatPhone } from '@/components/ui/PhoneInput';
 
 /** Semáforo: cada status tem cor (texto/faixa) e fundo suave. */
@@ -535,6 +535,7 @@ function ConversationRow({ c, active, onClick, agora, selecionando, marcado, enc
               <Smartphone size={9} /> Celular
             </span>
           )}
+          <SeloNota conversationId={c.id} />
           {c.unreadCount > 0 && <span className="tnum text-[10px] font-bold bg-accent text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{c.unreadCount}</span>}
         </div>
         {/* linha única, de altura fixa e sempre presente (mesmo vazia): nada quebra para baixo e
@@ -741,4 +742,19 @@ export function formatTime(iso: string) {
   const d = new Date(iso);
   const today = new Date().toDateString() === d.toDateString();
   return today ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+/**
+ * Nota interna para mim ainda não lida nesta conversa (docs/notas-internas.md#leitura): selo
+ * âmbar piscando na lista e no Kanban, para quem dispensou o cartão não perder a nota de vista.
+ */
+export function SeloNota({ conversationId, className }: { conversationId: string; className?: string }) {
+  const n = usePendingNotes().get(conversationId);
+  if (!n) return null;
+  return (
+    <span title={`${n.count > 1 ? `${n.count} notas internas` : 'Nota interna'} de ${n.byName} para você — abra a conversa para ler`}
+      className={cn('inline-flex items-center gap-0.5 text-[10px] font-bold rounded-md px-1.5 py-0.5 shrink-0 bg-warn text-white animate-pulse', className)}>
+      <Lock size={9} /> Nota{n.count > 1 ? ` ${n.count}` : ''}
+    </span>
+  );
 }

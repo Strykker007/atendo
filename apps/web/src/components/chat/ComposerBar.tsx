@@ -393,9 +393,9 @@ function MenuPausa({ conversationId, pausado, pausadoPor, run, onFechar }: {
 /**
  * Menção à equipe.
  *
- * Insere `@Nome` no texto. Serve para a nota interna ("@Ana, esse é seu cliente") — o contato
- * não vê nota. **Não notifica ainda**: o sistema não tem notificação interna, e fingir que
- * avisa seria pior do que não ter.
+ * Insere `@Nome` no texto. Na nota interna o citado é avisado (docs/notas-internas.md#avisos) —
+ * lá o campo já sugere a equipe ao digitar "@" (`useMention`). Numa mensagem comum o texto vai
+ * para o contato como está.
  */
 function MenuMencao({ onInserir }: { onInserir: (t: string) => void }) {
   const agents = useAgents();

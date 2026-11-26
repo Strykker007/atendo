@@ -35,6 +35,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { env } from './config/env';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { KanbanModule } from './modules/kanban/kanban.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
@@ -68,6 +69,7 @@ import { WorkSchedulesModule } from './modules/work-schedules/work-schedules.mod
     DepartmentsModule,
     CompaniesModule,
     KanbanModule,
+    ReviewsModule,
     QuickRepliesModule,
     PixKeysModule,
     BudgetsModule,
