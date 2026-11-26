@@ -14,7 +14,7 @@ import { playMessageSound, unlockMessageSound } from '../message-sound';
 import { useUI } from '../store';
 import { alertInternalMessage } from '../internal-alert';
 import { toast } from '@/components/ui/Toast';
-import { receiveTransferAlert, type TransferAlertEvent } from '@/components/layout/TransferAlert';
+import { receiveNoteAlert, receiveTransferAlert, type NoteAlertEvent, type TransferAlertEvent } from '@/components/layout/TransferAlert';
 import { receiveCall, type CallEvent } from '@/components/layout/CallAlert';
 import { upsertInternalMessage, type InternalMessage } from './chat-interno';
 import { create } from 'zustand';
@@ -288,6 +288,8 @@ export function useRealtime() {
       qc.invalidateQueries({ queryKey: ['queue-status'] });
       receiveTransferAlert(e);
     });
+    // nota interna para mim (sou o atendente ou fui citado com @): som + cartão fixo, como a transferência
+    socket.on('note_alert', (e: NoteAlertEvent) => receiveNoteAlert(e));
     // chat interno da equipe (sala só dos membros): entra na conversa e toca para quem não escreveu
     socket.on('internal_message', (m: InternalMessage) => {
       upsertInternalMessage(qc, m);

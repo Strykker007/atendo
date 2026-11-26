@@ -21,7 +21,7 @@ import { phoneVariants } from './phone-variants';
 import { canSeeDepartment, departmentWhere } from '../auth/department-scope';
 import { BOT_PAUSE_CLEAR } from './bot-pause';
 import { InterpolationService } from '../../common/interpolation/interpolation.service';
-import { textSearch } from '../../common/text-search';
+import { foldSearch, textSearch } from '../../common/text-search';
 import { interpolate } from '../flows/answer';
 import { spin } from './spin';
 import { COLD_UNOFFICIAL_MESSAGE, claimColdContact, coldQuota, coldQuotaMessage, hasColdSlot, isWarm } from './cold-send';
@@ -103,7 +103,20 @@ export type MessageRow = Message & {
  * para o gateway exigir **isto**, e não a linha do Prisma: enquanto a assinatura aceitava
  * `Message`, qualquer coluna nova entrava no payload sem ninguém decidir.
  */
-export type PresentedMessage = Omit<MessageRow, 'queueSeq' | 'raw'> & { quoted: QuotedRef | null };
+export type PresentedMessage = Omit<MessageRow, 'queueSeq' | 'raw'> & { quoted: QuotedRef | null; sentFrom: SentFrom | null };
+
+/**
+ * De onde saiu uma mensagem enviada sem atendente (`authorId` null): do celular/WhatsApp Web do
+ * cliente (o provider manda `source` no eco) ou da automação (robô, fluxo, mensagem automática).
+ * Sem isto o relatório chamava de "Automático" o que a portaria respondeu pelo celular.
+ */
+export type SentFrom = 'phone' | 'web' | 'device' | 'auto';
+function sentFromOf(m: Pick<MessageRow, 'direction' | 'internal' | 'authorId' | 'raw'>): SentFrom | null {
+  if (m.direction !== 'out' || m.internal || m.authorId) return null;
+  const source = (m.raw as { source?: unknown } | null)?.source;
+  if (typeof source !== 'string') return 'auto';
+  return source === 'web' ? 'web' : source === 'android' || source === 'ios' ? 'phone' : 'device';
+}
 
 /** WhatsApp limita o encaminhamento a 5 conversas por vez; seguimos a mesma regra. */
 export const FORWARD_MAX_TARGETS = 5;
@@ -162,14 +175,15 @@ export class ConversationsService {
     // morria dentro do `ingestInbound`). `raw` é o payload cru do provider — não tem por que
     // sair daqui. Os dois ficam de fora explicitamente para o spread não os trazer de volta.
     const { queueSeq: _queueSeq, raw: _raw, ...rest } = m;
+    const sentFrom = sentFromOf(m);
     if (m.deletedAt) {
       // Apagada: o original continua no banco (auditoria) e NÃO sai daqui — nem por socket,
       // que vai para a sala do tenant inteiro. Quem tem `conversations.view_deleted` lê por
       // `deletedOriginal()`. Reação e citação também saem: as duas carregam pedaço do conteúdo.
-      return { ...rest, text: null, transcript: null, mediaUrl: null, mediaMime: null, mediaName: null, content: null, reactions: null, error: null, quotedId: null, quotedMessageId: null, quotedPreview: null, quotedMediaUrl: null, quotedMediaMime: null, quotedMessage: null, quoted: null };
+      return { ...rest, text: null, transcript: null, mediaUrl: null, mediaMime: null, mediaName: null, content: null, reactions: null, error: null, quotedId: null, quotedMessageId: null, quotedPreview: null, quotedMediaUrl: null, quotedMediaMime: null, quotedMessage: null, quoted: null, sentFrom };
     }
     const mediaUrl = m.mediaUrl && !m.mediaUrl.startsWith('http') ? this.storage.signedUrl(m.mediaUrl) : m.mediaUrl;
-    return { ...rest, mediaUrl, quoted: this.quotedRef(m) };
+    return { ...rest, mediaUrl, quoted: this.quotedRef(m), sentFrom };
   }
 
   /**
@@ -1668,7 +1682,36 @@ export class ConversationsService {
       include: MESSAGE_INCLUDE,
     });
     this.gateway.emitMessage(tenantId, this.present(message));
+    void this.alertNote(tenantId, author, conv, body).catch((e) => this.log.warn(`Aviso de nota interna falhou: ${e}`));
     return this.present(message);
+  }
+
+  /**
+   * Nota interna chama a atenção de quem precisa ler (docs/notas-internas.md#avisos): antes ela só
+   * entrava no histórico e ninguém via. Recebem o aviso (som + cartão fixo, evento `note_alert`):
+   * - quem está com o atendimento (ou foi o último a atender, se já encerrou);
+   * - quem foi citado com @Nome (primeiro nome ou nome completo, sem acento/maiúscula);
+   * - com `@todos`/`@equipe`, todo mundo ativo que atende pelo número da conversa.
+   * Quem escreveu nunca recebe. Citado que não atende por aquele número também não (não abriria).
+   */
+  private async alertNote(tenantId: string, author: { id: string; name: string }, conv: Conversation, text: string) {
+    const lido = foldSearch(text);
+    const citacoes = new Set([...lido.matchAll(/@([\p{L}\p{N}_.-]+(?:\s+[\p{L}\p{N}_.-]+)?)/gu)].map((m) => m[1]));
+    const todos = /@(todos|equipe|time)\b/.test(lido);
+    if (!citacoes.size && !todos && (!conv.assigneeId || conv.assigneeId === author.id)) return;
+    const users = await this.prisma.user.findMany({ where: { tenantId, isActive: true, id: { not: author.id } }, select: { id: true, name: true, role: true } });
+    const citado = (nome: string) => {
+      const n = foldSearch(nome).trim();
+      const primeiro = n.split(/\s+/)[0];
+      return [...citacoes].some((c) => c === n || c.split(/\s+/)[0] === primeiro || n.startsWith(c));
+    };
+    const alvos = users.filter((u) => todos || u.id === conv.assigneeId || citado(u.name));
+    if (!alvos.length) return;
+    const contact = await this.prisma.contact.findUnique({ where: { id: conv.contactId }, select: { name: true, phone: true } });
+    const event = { conversationId: conv.id, contactName: contact?.name || contact?.phone || 'Cliente', byName: author.name, text: clip(text, 160) };
+    for (const u of alvos) {
+      if (await this.canReceive(tenantId, u, conv)) this.gateway.emitNoteAlert(tenantId, u.id, event);
+    }
   }
 
   /** Nota interna do sistema (sem autor): o robô avisando a equipe. Nunca vai ao WhatsApp. */

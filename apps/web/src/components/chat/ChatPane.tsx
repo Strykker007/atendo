@@ -298,6 +298,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const noFim = useRef(true);
   /** último scrollTop visto em `aoRolar`, para saber se a rolagem subiu ou desceu */
   const ultimaPosicao = useRef(0);
+  /** selo flutuante "Hoje"/"Ontem"/"17/10" no topo enquanto a pessoa rola (some parado) */
+  const [diaFlutuante, setDiaFlutuante] = useState<string | null>(null);
+  const someDia = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** conversa que já foi levada ao fim ao abrir — trocar de conversa sempre recomeça lá embaixo */
   const conversaAberta = useRef<string | null>(null);
   /** id da última mensagem já posicionada: mudou = chegou mensagem nova (rola suave) */
@@ -488,11 +491,30 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
     // solta o chat do fim: uma imagem que carrega entre o `scrollTop = scrollHeight` e este
     // evento aumenta a distância até o fim e, antes, desligava o acompanhamento.
     noFim.current = subiu ? pertoDoFim : noFim.current || pertoDoFim;
+    marcarDiaNoTopo(el);
     // perto do topo = a pessoa está indo para trás na conversa: busca a página anterior
     if (el.scrollTop > 160 || !messages.hasNextPage || messages.isFetchingNextPage) return;
     alturaAntes.current = el.scrollHeight;
     void messages.fetchNextPage();
   }
+
+  /**
+   * Como no WhatsApp: rolando, um selo no topo diz de que dia são as mensagens que estão lá em
+   * cima. É o último separador de dia que já passou do topo; parado por 1,2s, o selo some.
+   */
+  function marcarDiaNoTopo(el: HTMLDivElement) {
+    const topo = el.getBoundingClientRect().top + 8;
+    let dia: string | null = null;
+    for (const sep of el.querySelectorAll<HTMLElement>('[data-dia]')) {
+      if (sep.getBoundingClientRect().top > topo) break;
+      dia = sep.dataset.dia ?? null;
+    }
+    setDiaFlutuante(dia ? rotuloDoDia(dia) : null);
+    clearTimeout(someDia.current);
+    someDia.current = setTimeout(() => setDiaFlutuante(null), 1200);
+  }
+  useEffect(() => () => clearTimeout(someDia.current), []);
+  useEffect(() => setDiaFlutuante(null), [conversationId]);
 
   // permite que o painel de respostas rápidas insira texto no composer
   useEffect(() => {
@@ -844,6 +866,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
       {/* Mensagens */}
       <div ref={rolagemRef} onScroll={aoRolar} className="flex-1 overflow-y-auto chat-bg px-4 py-2.5 space-y-1 scrollbar-thin">
+        <div aria-hidden className="sticky top-0 z-10 h-0 flex justify-center pointer-events-none">
+          <span className={cn('mt-1 text-[11px] font-semibold uppercase tracking-wider text-ink bg-panel rounded-full px-3 py-1 shadow-md border border-line transition-opacity duration-300', diaFlutuante ? 'opacity-100' : 'opacity-0')}>{diaFlutuante ?? ' '}</span>
+        </div>
         {messages.isFetchingNextPage && <div className="py-2 text-center text-[11.5px] text-muted">Carregando mensagens anteriores…</div>}
         {!messages.hasNextPage && !messages.isLoading && mensagens.length >= PAGINA_MENSAGENS && (
           <div className="py-2 text-center text-[11px] text-faint">Começo da conversa</div>
@@ -1336,7 +1361,7 @@ function MarcoDeAtendimento({ e, seguinte }: { e: ConversationEvent; seguinte?: 
 
 function SeparadorDeDia({ data }: { data: string }) {
   return (
-    <div className="dia-sep flex items-center gap-3 py-2 select-none">
+    <div data-dia={data} className="dia-sep flex items-center gap-3 py-2 select-none">
       <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted bg-panel/80 rounded-full px-2.5 py-0.5 shadow-sm">{rotuloDoDia(data)}</span>
     </div>
   );
@@ -1350,7 +1375,7 @@ function rotuloDoDia(iso: string) {
   if (d.toDateString() === ontem.toDateString()) return 'Ontem';
   // dentro da semana o dia da semana diz mais que a data: "terça" se localiza melhor que 30/09
   if ((hoje.getTime() - d.getTime()) / 86_400_000 < 7) return d.toLocaleDateString('pt-BR', { weekday: 'long' });
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: d.getFullYear() === hoje.getFullYear() ? undefined : 'numeric' });
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: d.getFullYear() === hoje.getFullYear() ? undefined : 'numeric' });
 }
 
 function mudouODia(anterior: Message | undefined, atual: Message) {

@@ -30,8 +30,8 @@ meio do atendimento. Agora (`lib/internal-alert.ts`, chamado no `internal_messag
 | Aviso | Quando |
 |---|---|
 | **Som próprio** (três notas subindo, `playInternalSound`) | sempre que outra pessoa escreve; respeita "silenciar sons" |
-| **Cartão na tela** (`toast.message`): "💬 Ana" ou "💬 Ana em Grupo", prévia e **Abrir conversa** (abre o widget direto nela — `openInternalChat`). Mensagens seguidas da mesma conversa trocam o cartão em vez de empilhar; some em 12 s | em qualquer página, menos para quem já está com aquela conversa aberta e a aba visível |
-| **Notificação do sistema** (Windows/macOS), uma por conversa (`tag`); clicar foca o painel e abre a conversa | aba em segundo plano e permissão dada. A faixa "Receber aviso… — **Ativar**" aparece no widget enquanto o navegador não tiver a resposta (a permissão só pode ser pedida com clique) |
+| **Cartão fixo no topo** (`pushInternalAlert` → `components/layout/TransferAlert.tsx`, o mesmo dos avisos de transferência e de nota interna): "💬 Ana" ou "💬 Ana em Grupo", prévia e **Responder** (abre o widget direto nela — `openInternalChat`). **Não some sozinho** (até 26/11/2026 era um toast de 12 s e "ninguém via"): sai ao responder, dispensar ou abrir aquela conversa no widget. Mensagens seguidas da mesma conversa trocam o cartão; no máximo 3 na tela | em qualquer página, menos para quem já está com aquela conversa aberta, com a janela em foco |
+| **Notificação do sistema** (Windows/macOS), uma por conversa (`tag`), fica até ser clicada (`requireInteraction`); clicar foca o painel e abre a conversa | sempre que a janela do painel **não está em foco** (`document.hasFocus()`) — antes só com a aba escondida, e o painel atrás de outro programa conta como "visível". Precisa de permissão: além da faixa "Receber aviso… — **Ativar**" do widget, o próprio cartão mostra "🔔 Ativar avisos no computador" enquanto o navegador não tiver a resposta (só pode ser pedida com clique) |
 | **Título da aba** "(3) 💬 …" | enquanto houver não lidas (`useUnreadTitle` no widget) |
 
 Avisos de sistema do grupo ("Ana adicionou Bruno") e o canal Suporte (escondido do cliente) não avisam.
@@ -140,6 +140,10 @@ por isso continua aberto e na mesma conversa ao trocar de página.
 - **Sempre inteiro na tela**: a janela abre a partir da lateral travada — para cima quando o botão
   está na metade de baixo da tela, para baixo na metade de cima — e é limitada ao tamanho da tela
   (margem de 12 px). Redimensionar a janela do navegador reencaixa na hora.
+- **Quem está online** aparece também na aba **Conversas** (antes só em Equipe): faixa "Online agora · N"
+  com as iniciais de quem está com o painel aberto (clicar abre a conversa direta), ponto verde/cinza
+  no avatar de cada conversa direta e "● online agora"/"offline" no cabeçalho da conversa direta aberta.
+  A lista vem de `GET /internal-chat/users` (recarrega a cada 30 s).
 - Aberto: abas **Conversas**, **Equipe** (online primeiro; clicar abre a conversa direta) e
   **Novo grupo** (marcar pessoas + nome). Arrasta pelo cabeçalho; minimiza para a barra — clicar em qualquer ponto da barra minimizada (sem arrastar) reabre.
 - **Responder**: botão de seta ao passar o mouse no balão (ou duplo clique). A citação aparece

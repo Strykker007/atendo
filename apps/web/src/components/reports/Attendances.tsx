@@ -7,7 +7,7 @@ import { cn, readableColor } from '@/lib/utils';
 import { inputCls, Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { fmtBRL } from '@/components/reports/ReportChart';
-import { useAgents, useAttendances, useAttendanceMessages, useTags, tagsOfKind, useCloseReasons, useOutcomeLabels, type AttendanceRow } from '@/lib/hooks';
+import { useAgents, useAttendances, useAttendanceMessages, useTags, tagsOfKind, useCloseReasons, useOutcomeLabels, type AttendanceRow, type Message } from '@/lib/hooks';
 import { useUI } from '@/lib/store';
 
 const PAGE_SIZE = 25;
@@ -220,6 +220,16 @@ function Tags({ a }: { a: AttendanceRow }) {
 }
 
 /**
+ * Quem escreveu cada balão. Enviada sem atendente não é sempre "automático": a maioria saiu do
+ * celular/WhatsApp Web do próprio número (`sentFrom`, calculado pela API a partir do provider).
+ */
+const ORIGEM_ENVIO = { phone: 'Pelo celular', web: 'Pelo WhatsApp Web', device: 'Por outro aparelho', auto: 'Automático' } as const;
+function autorDe(m: Message, contato: string): string {
+  if (m.direction === 'in') return m.senderName || contato;
+  return m.author?.name ?? m.authorName ?? (m.sentFrom ? ORIGEM_ENVIO[m.sentFrom] : 'Automático');
+}
+
+/**
  * Um atendimento: cabeçalho com o desfecho e as mensagens da janela dele, só leitura. "Abrir
  * conversa" leva ao chat (a conversa inteira, como está hoje).
  */
@@ -231,6 +241,7 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
   const labels = useOutcomeLabels();
   const fmt = (iso: string) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
   const lista = msgs.data ?? [];
+  const contato = a.contact.name || a.contact.phoneFormatted;
 
   return (
     <Modal open onClose={onClose} title={a.contact.name || a.contact.phoneFormatted} width="max-w-2xl">
@@ -256,11 +267,9 @@ function AttendanceModal({ a, onClose }: { a: AttendanceRow; onClose: () => void
             return (
               <div key={m.id} className={cn('flex', sai ? 'justify-end' : 'justify-start')}>
                 <div className={cn('max-w-[80%] rounded-xl px-3 py-1.5 text-[13px] shadow-sm', nota ? 'bg-warn-soft text-warn-ink' : sai ? 'bg-accent-soft text-ink' : 'bg-panel text-ink')}>
-                  {(sai || nota) && (
-                    <div className="text-[10.5px] font-semibold opacity-70 flex items-center gap-1">
-                      {nota && <Lock size={10} />}{m.authorName ?? m.author?.name ?? (sai ? 'Automático' : '')}
-                    </div>
-                  )}
+                  <div className={cn('text-[10.5px] font-semibold flex items-center gap-1', sai || nota ? 'opacity-70' : 'text-accent')}>
+                    {nota && <Lock size={10} />}{autorDe(m, contato)}
+                  </div>
                   {m.mediaUrl && m.mediaMime?.startsWith('image/') && !m.deletedAt && <img src={m.mediaUrl} alt="" className="mt-1 max-h-40 rounded-lg" />}
                   <div className="whitespace-pre-wrap break-words">{corpo}</div>
                   <div className="text-[10px] text-faint text-right tnum">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>

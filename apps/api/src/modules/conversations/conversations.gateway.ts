@@ -289,6 +289,10 @@ export class ConversationsGateway implements OnGatewayInit, OnGatewayConnection,
   emitTransferAlert(tenantId: string, userId: string, event: TransferAlert) {
     this.to(`user:${tenantId}:${userId}`).emit('transfer_alert', event);
   }
+  /** Nota interna para esta pessoa (atendente da conversa ou citada com @): mesmo destaque da transferência. */
+  emitNoteAlert(tenantId: string, userId: string, event: { conversationId: string; contactName: string; byName: string; text: string }) {
+    this.to(`user:${tenantId}:${userId}`).emit('note_alert', event);
+  }
 
   /**
    * Chat interno da equipe (docs/chat-interno.md): vai só para a sala de cada membro — o resto do
