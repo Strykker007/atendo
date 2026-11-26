@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.26.0 — 2026-11-26
+
+- feat: feedback de atendimento; notas internas com leitura, @menção e imagem; filtros no Kanban
+- feat: avisos da equipe que chamam atenção; nomes no relatório; selo de data ao rolar
+- feat(conversas): busca em todas as abas; encerrada não trava a resposta
+- fix(evolution): reinicia a instância após 3 timeouts seguidos de envio
+
 ## 1.25.0 — 2026-11-25
 
 - feat(kanban): marcar como não lida / lida pelo card
