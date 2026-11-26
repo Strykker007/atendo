@@ -3,6 +3,10 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.26.1 — 2026-11-26
+
+- feat(feedback): dar feedback direto da linha "Atendimento encerrado" na conversa
+
 ## 1.26.0 — 2026-11-26
 
 - feat: feedback de atendimento; notas internas com leitura, @menção e imagem; filtros no Kanban
