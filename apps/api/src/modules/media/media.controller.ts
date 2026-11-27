@@ -12,6 +12,8 @@ import { env } from '../../config/env';
  * documento (`mediaTypeOf` no front). Só fica de fora conteúdo que o navegador EXECUTA ao abrir —
  * servido pelo domínio da API, um HTML/SVG/JS rodaria script ali.
  */
+/** O mesmo, pela extensão da chave (`makeKey` usa a do arquivo quando o tipo não é conhecido) */
+const ACTIVE_EXT = /\.(html?|xhtml|xht|svgz?|js|mjs|xml)$/i;
 const ACTIVE_CONTENT = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|(text|application)\/(x-)?(javascript|ecmascript))$/;
 
 @Controller()
@@ -46,6 +48,18 @@ export class MediaController {
   async serve(@Param('path') path: string | string[], @Query('exp') exp = '', @Query('sig') sig = '', @Query('dl') dl: string | undefined, @Headers('range') range = '', @Res() res: Response) {
     const key = 'media/' + (Array.isArray(path) ? path.join('/') : path);
     if (!this.storage.verify(key, exp, sig)) throw new UnauthorizedException('Link expirado ou inválido');
+    // no bucket (docs/midia-no-r2.md): o navegador baixa direto de lá — Range, cache e banda são
+    // do bucket, não desta API. A URL de destino é a mesma durante a janela de 30 min, e o próprio
+    // redirecionamento vai com cache até o fim dela
+    const onde = await this.storage.locate(key, Number(exp), {
+      // sem o tipo em mãos (estaria no bucket): HTML/SVG/JS reconhecido pela extensão da chave
+      disposition: typeof dl === 'string' ? contentDisposition(dl) : ACTIVE_EXT.test(key) ? 'attachment' : undefined,
+    });
+    if (onde.kind === 'remote') {
+      const restoDaJanela = Math.max(0, 1800 - (Math.floor(Date.now() / 1000) % 1800));
+      res.setHeader('Cache-Control', `private, max-age=${restoDaJanela}`);
+      return res.redirect(302, onde.url);
+    }
     const obj = await this.storage.get(key);
 
     res.setHeader('Content-Type', obj.mimeType);

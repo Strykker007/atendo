@@ -78,6 +78,12 @@ const schema = z.object({
   S3_BUCKET: z.string().optional().default(''),
   S3_ACCESS_KEY_ID: z.string().optional().default(''),
   S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
+  /**
+   * Migração do disco para o S3/R2 (docs/midia-no-r2.md): com `STORAGE_DRIVER=s3`, o que ainda
+   * estiver no disco (`STORAGE_LOCAL_DIR`) é lido de lá; o que não estiver, do bucket. Arquivo
+   * novo vai sempre para o bucket. Desligar depois de copiar e conferir tudo.
+   */
+  STORAGE_LOCAL_FALLBACK: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   MEDIA_MAX_MB: z.coerce.number().default(25),
   /** consultas de relatório ao mesmo tempo por processo (o resto espera): protege o pool do chat */
   REPORT_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(3),
