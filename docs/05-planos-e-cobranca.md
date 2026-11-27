@@ -361,6 +361,12 @@ Modelo: `activation_charges` (`items` jsonb, `discount`, `totalValue`, `firstMon
 
 ### Lembretes da mensalidade
 
+**Faixa no topo do painel** (`MonthlyBillingService.notice` → `UsageBanner`): "vence em dd/mm" até
+5 dias antes, "vence amanhã" e "vence hoje" no dia. **Depois do vencimento, enquanto a conta
+ainda não virou "em atraso"**, a faixa fica vermelha com "venceu em dd/mm". Antes ela continuava
+dizendo "vence hoje" no Asaas e sumia no Pix manual. Em atraso (`past_due`/`suspended`), quem
+avisa é a faixa de pagamento pendente.
+
 <a id="lembretes-da-mensalidade"></a>Job `monthly-reminders` da fila de cobrança, todo dia às **12:00 UTC (9h em Brasília)**.
 
 **Assinatura no Asaas: quem lembra é o Asaas** (desde 16/11/2026; antes era o nosso e-mail). O job só busca a parcela em aberto **no Asaas** e espelha em `invoices` (aviso do painel e Financeiro), sem depender do webhook. Mandar o nosso e-mail também duplicaria o aviso.

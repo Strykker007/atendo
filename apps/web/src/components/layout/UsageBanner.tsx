@@ -62,9 +62,11 @@ function MensalidadeBanner({ notice, atrasada }: { notice: Usage['billingNotice'
       </>
     );
   }
-  const quando = notice.daysLeft <= 0 ? 'vence hoje' : notice.daysLeft === 1 ? 'vence amanhã' : `vence em ${dataBR(notice.dueDate)}`;
+  // daysLeft < 0 = já venceu e a conta ainda não virou "em atraso": dizer "vence hoje" ali era o bug
+  const vencida = notice.daysLeft < 0;
+  const quando = vencida ? `venceu em ${dataBR(notice.dueDate)}` : notice.daysLeft === 0 ? 'vence hoje' : notice.daysLeft === 1 ? 'vence amanhã' : `vence em ${dataBR(notice.dueDate)}`;
   return (
-    <div className={`flex flex-wrap items-center gap-2 px-4 py-1.5 text-[13px] ${notice.daysLeft <= 0 ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink'}`}>
+    <div className={`flex flex-wrap items-center gap-2 px-4 py-1.5 text-[13px] ${vencida ? 'bg-danger-soft text-danger-ink' : notice.daysLeft === 0 ? 'bg-warn-soft text-warn-ink' : 'bg-accent-soft text-accent-ink'}`}>
       <QrCode size={16} className="shrink-0" />
       <span className="flex-1 min-w-[200px]">Sua mensalidade de <b>{brl(notice.value)}</b> {quando}. Pague por Pix pelo painel — a baixa é automática.</span>
       <Link href={notice.hasCharge === false ? '/plano/vencimentos' : '/plano?pagar=1'} className="underline font-medium whitespace-nowrap">Pagar com Pix</Link>
