@@ -193,7 +193,7 @@ importers:
         specifier: ^3.1133.0
         version: 3.1135.0
       '@aws-sdk/s3-request-presigner':
-        specifier: 3.1135.0
+        specifier: ^3.1135.0
         version: 3.1135.0
       '@nestjs/bullmq':
         specifier: ^11.0.0
