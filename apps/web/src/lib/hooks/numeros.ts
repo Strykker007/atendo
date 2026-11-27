@@ -283,7 +283,7 @@ export function useRealtime() {
     socket.on('system_notice', (n: SystemNotice) => receiveSystemNotice(qc, n));
     // atendimento transferido para MIM (sala só minha): alarme + aviso em destaque
     // ligação no WhatsApp: quem liga e para qual número (só para quem opera o número)
-    socket.on('call', (e: CallEvent) => receiveCall(e, qc.getQueryData<{ role?: string; numberIds?: string[] }>(['me'])));
+    socket.on('call', (e: CallEvent) => receiveCall(e, qc.getQueryData<{ role?: string; numberIds?: string[] }>(['me']), qc.getQueryData<{ numberIds: string[] }>(['call-mutes'])?.numberIds));
     socket.on('transfer_alert', (e: TransferAlertEvent) => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.invalidateQueries({ queryKey: ['queue-status'] });

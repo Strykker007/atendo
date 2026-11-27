@@ -16,6 +16,14 @@ export const PERMISSIONS = {
   // quem atende sempre pode transferir ou devolver o SEU atendimento; esta permissão é
   // para mexer no atendimento dos outros
   'conversations.transfer_any': 'Transferir ou devolver atendimento de outra pessoa',
+  // conversa em atendimento com OUTRA pessoa trava o envio (só nota interna). Com esta permissão a
+  // pessoa assume na hora — pelo botão ou simplesmente respondendo — e o atendimento passa para
+  // ela, com registro no histórico (docs/18-perfis-de-acesso.md#assumir-atendimento-de-outra-pessoa).
+  // Padrão só do Administrador; os outros recebem por perfil
+  'conversations.take_over': 'Assumir e responder atendimento que está com outra pessoa',
+  // API oficial: a conversa passa a enviar por outro número oficial, sem virar conversa nova
+  // (docs/troca-de-numero.md). Padrão de Administrador, Gerente e Atendente
+  'conversations.switch_number': 'Trocar o número de envio da conversa (API oficial)',
   'conversations.internal_note': 'Escrever notas internas',
   // quem enviou sempre pode apagar a SUA mensagem recente; esta permissão é para apagar a dos
   // outros, a do robô, a recebida e a antiga (docs/apagar-mensagens.md)
@@ -67,7 +75,7 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 /** Agrupamento só para a tela de edição do perfil não virar uma lista de 14 itens soltos. */
 export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
-  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.delete_conversation', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit', 'contacts.import_export'] },
+  { label: 'Atendimento', items: ['conversations.view_all', 'conversations.transfer_any', 'conversations.take_over', 'conversations.switch_number', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.delete_conversation', 'conversations.close_internal', 'conversations.view_deleted', 'conversations.schedule_message', 'contacts.edit', 'contacts.import_export'] },
   { label: 'Conteúdo', items: ['tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage'] },
   { label: 'Tickets', items: ['tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'] },
   { label: 'Gestão', items: ['reports.view', 'reviews.manage', 'team.manage', 'profiles.manage', 'settings.manage', 'internal_chat.audit'] },
@@ -84,13 +92,13 @@ export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
  */
 export const DEFAULT_PERMISSIONS: Record<'tenant_admin' | 'manager' | 'agent', Permission[]> = {
   tenant_admin: [...ALL_PERMISSIONS],
-  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'contacts.edit', 'contacts.import_export', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'reviews.manage', 'team.manage', 'settings.manage', 'tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'],
+  manager: ['conversations.view_all', 'conversations.transfer_any', 'conversations.switch_number', 'conversations.internal_note', 'conversations.edit_message', 'conversations.delete_message', 'conversations.delete_chat', 'conversations.close_internal', 'conversations.view_deleted', 'contacts.edit', 'contacts.import_export', 'tags.manage', 'quick_replies.manage', 'flows.manage', 'variables.manage', 'agenda.manage', 'campaigns.manage', 'reports.view', 'reviews.manage', 'team.manage', 'settings.manage', 'tickets.create', 'tickets.handle', 'tickets.view_all', 'tickets.manage'],
   // o padrão do atendente reproduz EXATAMENTE o que ele já podia antes dos perfis: respostas
   // rápidas e relatórios nunca foram restritos, e tirá-los agora seria perder acesso numa
   // migração. Quem quiser restringir, cria um perfil sem eles. Nota interna entrou depois
   // (passagem de bastão entre atendentes — ver docs/08-frontend.md); transferir o atendimento
   // dos outros, agendar mensagem e conectar números também (migration agent_default_permissions).
-  agent: ['conversations.transfer_any', 'conversations.internal_note', 'conversations.edit_message', 'conversations.schedule_message', 'contacts.edit', 'quick_replies.manage', 'reports.view', 'numbers.manage', 'tickets.create', 'tickets.handle'],
+  agent: ['conversations.transfer_any', 'conversations.switch_number', 'conversations.internal_note', 'conversations.edit_message', 'conversations.schedule_message', 'contacts.edit', 'quick_replies.manage', 'reports.view', 'numbers.manage', 'tickets.create', 'tickets.handle'],
 };
 
 /** Nomes dos perfis criados junto com o cliente. */

@@ -12,6 +12,7 @@ import { afterBatch, decideDispatch, eligible, failureStreak, FAILURE_STREAK, qr
 import { QUEUE_CAMPAIGN, type CampaignJob } from './queues';
 import { GroupSender } from './group-sender';
 import { UsageService } from '../billing/usage.service';
+import { channelConversation, lastInboundOn } from '../conversations/channel';
 
 type MediaType = 'image' | 'document' | 'audio' | 'video';
 
@@ -112,7 +113,7 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
       const check = eligible({
         provider: campaign.number.provider as 'meta' | 'evolution',
         hasTemplate: !!tpl,
-        lastInboundAt: await this.lastInboundAt(campaign.numberId, target.contactId),
+        lastInboundAt: await this.lastInboundAt(campaign.number, target.contactId),
         optedOut: !!target.contact.optOutAt,
         now: Date.now(),
       });
@@ -225,7 +226,12 @@ export class CampaignProcessor extends TrackedWorkerHost<CampaignJob> {
   }
 
   /** Última mensagem recebida deste contato neste número — base da janela de 24h da Meta. */
-  private async lastInboundAt(numberId: string, contactId: string) {
+  private async lastInboundAt(number: { id: string; provider: string }, contactId: string) {
+    const numberId = number.id;
+    // contato numa conversa que usa este número como canal (docs/troca-de-numero.md): a janela
+    // conta as mensagens dele por este número nela também
+    const doCanal = await channelConversation(this.prisma, number, contactId);
+    if (doCanal) return (await lastInboundOn(this.prisma, doCanal, numberId))?.getTime() ?? null;
     const conv = await this.prisma.conversation.findFirst({
       where: { numberId, contactId, lastInboundAt: { not: null } },
       orderBy: { lastInboundAt: 'desc' },

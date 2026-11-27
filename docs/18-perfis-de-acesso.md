@@ -19,12 +19,12 @@ Quem autoriza é o **perfil de acesso** (`AccessProfile`), que cada cliente mont
 
 ### Catálogo (`packages/shared/src/permissions.ts`)
 
-Lista **fechada** de 19 permissões. Perfil nunca guarda permissão que o código não conheça —
+Lista **fechada** de permissões (a fonte é o arquivo acima). Perfil nunca guarda permissão que o código não conheça —
 senão vira texto livre no banco e ninguém mais sabe o que autoriza o quê.
 
 | Grupo | Permissões |
 |---|---|
-| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.close_internal`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit`, `contacts.import_export` |
+| Atendimento | `conversations.view_all`, `conversations.transfer_any`, `conversations.take_over` ([assumir de outra pessoa](#assumir-atendimento-de-outra-pessoa); padrão só do Administrador), `conversations.switch_number` ([trocar o número de envio](troca-de-numero.md), API oficial; padrão de Administrador, Gerente e Atendente), `conversations.internal_note`, `conversations.edit_message`, `conversations.delete_message`, `conversations.delete_chat`, `conversations.close_internal`, `conversations.view_deleted`, `conversations.schedule_message`, `contacts.edit`, `contacts.import_export` |
 | Conteúdo | `tags.manage`, `quick_replies.manage`, `flows.manage`, `variables.manage`, `agenda.manage`, `campaigns.manage` |
 | Tickets | `tickets.create`, `tickets.handle`, `tickets.view_all`, `tickets.manage` — ver [Tickets internos](tickets.md#quem-vê-e-quem-atua) |
 | Gestão | `reports.view`, `reviews.manage` ([feedback](feedback-de-atendimento.md); padrão de Administrador e Gerente), `team.manage`, `profiles.manage`, `settings.manage`, `internal_chat.audit` |
@@ -74,6 +74,29 @@ empresa com `variables.manage` ou `flows.manage`).
 quem escreve nota interna. Elas agora leem permissão. **Sem isso o "atendente líder" não
 existiria**: trocar só os decorators dos controllers o deixaria vendo apenas os próprios
 atendimentos.
+
+### Assumir atendimento de outra pessoa
+
+Sem permissão, conversa **em atendimento com outra pessoa** trava o envio: só nota interna (cadeado)
+ou transferir para si. Com `conversations.take_over` a trava some para quem tem:
+
+- O composer fica aberto, com a faixa "**Fulano** está atendendo. Se você responder, o atendimento
+  passa para você" e o botão **Assumir agora**.
+- **Responder assume**: a mensagem sai e a conversa passa a ser de quem escreveu (`assigneeId`). O
+  mesmo vale para "Assumir agora" (`POST /conversations/:id/claim`, que com a permissão aceita
+  conversa com dono) e para abrir conversa pelo "Nova conversa" num contato que está com outra pessoa.
+- Reagir a mensagem também é liberado (reagir não assume).
+- Cada troca grava no histórico um evento `transferred` (ator = alvo = quem assumiu) com o motivo
+  "Assumiu o atendimento de Fulano (respondendo | pelo botão)" — aparece na auditoria do atendimento.
+- A troca é atômica: só acontece se a conversa ainda está com quem estava; se mudou de mãos no meio,
+  o envio falha e pede para abrir de novo. Feedback com trava pendente
+  ([feedback](feedback-de-atendimento.md#trava)) também barra o "Assumir agora".
+- Não passa pela trava da fila (não está tirando ninguém da fila) e não muda contato isento nem
+  grupo, que já não têm dono que trave.
+
+Padrão: **Administrador** (todas as permissões; a migration `take_over_permission` acrescenta ao
+perfil padrão de Administrador de todo cliente, editado ou não, porque a permissão não existia).
+Gerente, Atendente e perfis próprios recebem em **Configurações → Perfis de acesso**.
 
 ## Regras que protegem o cliente de si mesmo
 

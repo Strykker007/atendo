@@ -363,6 +363,14 @@ fluxo, boas-vindas, faixa, lembrete (`sendAsSystem` recusa com `contact_opted_ou
 automação nem roda para as mensagens dele. O atendente continua respondendo. A ficha do contato
 mostra o aviso e o botão "O contato pediu para voltar a receber" (`PATCH contacts/:id {resubscribe: true}`).
 
+### Número de envio (troca de número)
+
+O número por onde a mensagem sai é gravado nela (`Message.numberId`) **na criação**, a partir do
+número de envio da conversa (`channelNumberId ?? numberId`) ou do número próprio do envio
+(transmissão, lembrete pelo número do sistema). O worker sempre envia por ele. Janela de 24h,
+cota, envio frio e template são conferidos para esse número. Regras em
+[troca de número](troca-de-numero.md).
+
 ### Número sem WhatsApp
 
 Antes do 1º envio a um contato num número (contato que nunca escreveu por ele), a Evolution

@@ -10,12 +10,13 @@ import { Ticket as TicketIcon } from 'lucide-react';
 import { TICKET_STATUS_LABEL, type MessageContent } from '@atendo/shared';
 import { NewTicketModal, type TicketOrigin } from '@/components/tickets/NewTicketModal';
 import { useConversationTickets, useTicketOptions, type ConversationTicket } from '@/lib/hooks';
-import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2, Phone, PhoneMissed } from 'lucide-react';
+import { ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, CheckCircle2, RotateCcw, History, BotOff, BellOff, FileCheck2, CircleDashed, Play, Loader2, Phone, PhoneMissed, Smartphone, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useUI } from '@/lib/store';
 import { isFreeChat, useAiStatus, useDepartments, useSetConversationDepartment, useTenantSettings, useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 import { DepartmentBadge } from './DepartmentBadge';
+import { useNumbers, useSwitchChannel, type NumberItem } from '@/lib/hooks';
 import { useConversation, useMessages, useResend, useReact, useClaim, useTransfer, useTransferTargets, useRelease, useMe, useSendNote, useActiveRun, useStopFlow, botPaused, useSetContactTags, useHasFeature, useContactCard, useSendMessage, useSetStatus, useSetTags, useSetPrimaryTag, useTags, tagsOfKind, useUsage, useMarkRead, useMarkUnread, useCan, useTyping, useDeleteMessage, useEditMessage, useDeletedOriginal, useClearHistory, useDeleteConversation, uploadFile, useTypingPresence, useColdQuota, useQuickReplies, useQueueStatus, useReadNotes, useReviewsByAttendance, mediaTypeOf, openMediaInTab, downloadMedia, mensagensEmOrdem, PAGINA_MENSAGENS, type Message, type Upload, type RecentSticker } from '@/lib/hooks';
 import { TagPicker } from './TagPicker';
 import { LastCloseBar } from './LastClose';
@@ -79,6 +80,14 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const setDepartment = useSetConversationDepartment();
   // permissão, não papel (ver ConversationList)
   const podeTransferir = useCan('conversations.transfer_any');
+  // assumir/responder atendimento de outra pessoa (padrão do Administrador; os outros, por perfil)
+  const podeAssumir = useCan('conversations.take_over');
+  // número de envio (docs/troca-de-numero.md): só API oficial → API oficial
+  const podeTrocarNumero = useCan('conversations.switch_number');
+  const numeros = useNumbers();
+  const trocarCanal = useSwitchChannel();
+  const [canalOpen, setCanalOpen] = useState(false);
+  const [trocandoPara, setTrocandoPara] = useState<NumberItem | null>(null);
   // fila com distribuição automática e "atendente não puxa": quem não transfere não assume da fila (docs/fila-de-atendimento.md)
   const fila = useQueueStatus();
   const filaTravada = !!fila.data?.enabled && fila.data.lockClaim && !podeTransferir;
@@ -115,6 +124,9 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   // transmissões). Contava como dono e o rodapé dizia "Fulano está atendendo" — quem chegava
   // depois não achava como abrir um atendimento novo (ID Vida Urbana, 26/11/2026)
   const ownedByOther = !!conv && conv.status !== 'closed' && !!conv.assignee && !mine && !conv.ticketExempt;
+  // de outra pessoa e sem `conversations.take_over`: só nota interna. Com a permissão o composer
+  // fica aberto e responder assume (docs/18-perfis-de-acesso.md#assumir-atendimento-de-outra-pessoa)
+  const travado = ownedByOther && !podeAssumir;
   // Modo nota interna: o composer vira âmbar e o que sai é NOTA (só a equipe vê, nunca vai ao
   // WhatsApp). Vale em qualquer conversa; na de outra pessoa é o único jeito de escrever (cadeado).
   // Texto separado do da resposta: desligar o modo nunca manda a nota para o cliente por engano.
@@ -217,6 +229,20 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   const tags = useTags();
   const messages = useMessages(conversationId);
   const mensagens = useMemo(() => mensagensEmOrdem(messages.data), [messages.data]);
+  // conversa que já trocou de número (docs/troca-de-numero.md): divisor onde o número muda entre
+  // uma mensagem e a seguinte (notas não contam) e o nome do número em cada trecho
+  const nomeDoNumero = useMemo(() => new Map((numeros.data ?? []).map((n) => [n.id, n.label])), [numeros.data]);
+  const trocasDeNumero = useMemo(() => {
+    const out = new Map<string, string>();
+    if (!conv?.channelChangedAt) return out;
+    let anterior: string | null = null;
+    for (const m of mensagens) {
+      if (m.internal || !m.numberId) continue;
+      if (anterior && anterior !== m.numberId) out.set(m.id, m.numberId);
+      anterior = m.numberId;
+    }
+    return out;
+  }, [mensagens, conv?.channelChangedAt]);
   // tickets que nasceram desta conversa (docs/tickets.md#aberto-de-uma-conversa)
   const temTickets = useHasFeature('tickets').has;
   const podeAbrirTicket = useCan('tickets.create') && temTickets;
@@ -671,12 +697,20 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
   /** API oficial e o contato não escreve há 24h: texto livre seria recusado, só template */
   const janelaFechada = conv.number.provider === 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
   /** QR e o contato não escreve há 24h: responder gasta uma vaga de contato frio do número */
+  // trocar o número de envio: conversa aberta, enviando por número oficial, de quem troca (ou
+  // livre/isenta, ou quem assume a dos outros). A API confere tudo de novo
+  const opcoesDeCanal = conv.status !== 'closed' && conv.number.provider === 'meta' && !conv.contact.isGroup
+    ? (numeros.data ?? []).filter((n) => n.provider === 'meta' && n.isActive && n.status === 'connected' && n.id !== conv.number.id)
+    : [];
+  const podeMexerNoCanal = podeTrocarNumero && opcoesDeCanal.length > 0 && (mine || !!conv.ticketExempt || (ownedByOther && podeAssumir));
+  // mostra por onde está saindo sempre que a conversa já trocou (mesmo sem poder trocar)
+  const mostraCanal = conv.number.provider === 'meta' && (podeMexerNoCanal || !!conv.channelChangedAt);
   const contatoFrio = conv.number.provider !== 'meta' && (!conv.lastInboundAt || agora - Date.parse(conv.lastInboundAt) >= 24 * 60 * 60 * 1000);
   const primaryTag = conv.tags.find((t) => t.isPrimary)?.tag;
   /** quem aparece como autor da citação recebida e na faixa "Respondendo a …" */
   const nomeContato = conv.contact.name ?? formatPhone(conv.contact.phone);
-  // conversa de outra pessoa: ninguém responde por ela (a API recusa) — só nota interna
-  podeResponderRef.current = !noteMode && !ownedByOther && !numberOffline && !quotaHit && conv.status !== 'closed';
+  // conversa de outra pessoa: sem permissão para assumir, ninguém responde por ela (a API recusa) — só nota interna
+  podeResponderRef.current = !noteMode && !travado && !numberOffline && !quotaHit && conv.status !== 'closed';
   /** atalho para a nota nas barras em que não dá para responder (encerrada, número caído, cota) */
   const botaoNota = podeNota && (
     <button type="button" onClick={() => setModoNota(true)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-warn-ink bg-warn-soft hover:bg-warn-soft/70 whitespace-nowrap" title="Nota interna — só a equipe vê (Alt+N)"><StickyNote size={13} /> Nota interna</button>
@@ -834,6 +868,28 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             <span className="hidden sm:inline">Assumir</span>
           </Button>
         )}
+        {mostraCanal && (
+          <div className="relative">
+            <Button size="sm" variant="ghost" icon={<Smartphone size={14} />} onClick={podeMexerNoCanal ? () => setCanalOpen((o) => !o) : undefined}
+              title={podeMexerNoCanal ? `Enviando por ${conv.number.label} — trocar o número de envio` : `Enviando por ${conv.number.label}`}>
+              <span className="hidden md:inline max-w-[140px] truncate">{conv.number.label}</span>
+              {podeMexerNoCanal && <ChevronDown size={12} className="hidden md:inline" />}
+            </Button>
+            {canalOpen && podeMexerNoCanal && (
+              <div className="absolute right-0 top-full mt-1 z-20 w-64 max-w-[calc(100vw-2rem)] rounded-xl bg-panel border border-line shadow-lg py-1 text-sm" onMouseLeave={() => setCanalOpen(false)}>
+                <div className="px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">Enviar por outro número</div>
+                {opcoesDeCanal.map((n) => (
+                  <button key={n.id} onClick={() => { setCanalOpen(false); setTrocandoPara(n); }} className="w-full text-left px-3 py-1.5 hover:bg-field text-ink flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: n.color }} />
+                    <span className="truncate">{n.label}</span>
+                    {n.id === conv.homeNumber?.id && <span className="ml-auto text-[10.5px] text-muted shrink-0">original</span>}
+                  </button>
+                ))}
+                <div className="px-3 pt-1.5 pb-1 text-[11px] text-muted border-t border-line mt-1">A conversa continua a mesma; só muda o número por onde as próximas mensagens saem.</div>
+              </div>
+            )}
+          </div>
+        )}
         {conv.status === 'in_progress' && (mine || podeTransferir) && (
           <div className="relative">
             <Button size="sm" variant="ghost" icon={<ArrowRightLeft size={14} />} onClick={() => setTransferOpen((o) => !o)} title="Transferir ou devolver à fila">
@@ -953,7 +1009,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             ))}
           </div>
         )}
-        {mensagens.map((m, i) => <Fragment key={m.id}>{encerradosAntes(mensagens[i - 1], m).map((e) => <MarcoDeAtendimento key={e.id} e={e} seguinte {...marcoFeedback(e)} />)}{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} onTicket={podeAbrirTicket ? abrirTicket : undefined} ticketsDaqui={ticketsPorMensagem.get(m.id)} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
+        {mensagens.map((m, i) => <Fragment key={m.id}>{encerradosAntes(mensagens[i - 1], m).map((e) => <MarcoDeAtendimento key={e.id} e={e} seguinte {...marcoFeedback(e)} />)}{mudouODia(mensagens[i - 1], m) && <SeparadorDeDia data={m.createdAt} />}{trocasDeNumero.has(m.id) && <SeparadorDeNumero label={nomeDoNumero.get(trocasDeNumero.get(m.id)!) ?? 'outro número'} recebida={m.direction === 'in'} />}<Bubble m={m} canResend={!numberOffline} onVerMidia={setVendoMidia} onResponder={setRespondendo} onEncaminhar={setEncaminhando} onApagar={podeApagar(m) ? setApagando : undefined} onEditar={podeEditar(m) ? setEditando : undefined} onNaoLida={naoLidaDaqui} onTicket={podeAbrirTicket ? abrirTicket : undefined} ticketsDaqui={ticketsPorMensagem.get(m.id)} podeVerApagada={podeVerApagada} citada={m.quotedId ? mensagens.find((x) => x.externalId === m.quotedId) : undefined} contato={nomeContato} /></Fragment>)}
         {ultima && encerramentos.filter((e) => e.createdAt > ultima.createdAt).map((e) => <MarcoDeAtendimento key={e.id} e={e} {...marcoFeedback(e)} />)}
         {typing && <TypingBubble recording={typing.state === 'recording'} />}
         <div ref={bottomRef} />
@@ -961,6 +1017,20 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
 
       {closing && <CloseModal conversationId={conv.id} onClose={() => setClosing(false)} onClosed={() => { if (!embedded) ui.setConversation(null); }} />}
       {historico && <HistorySheet conversationId={conv.id} onClose={() => setHistorico(false)} />}
+      <ConfirmDialog
+        open={!!trocandoPara}
+        title={`Enviar por ${trocandoPara?.label ?? ''}?`}
+        confirmLabel="Trocar número"
+        text={`As próximas mensagens desta conversa saem pelo número ${trocandoPara?.label ?? ''}${trocandoPara?.phone ? ` (${formatPhone(trocandoPara.phone)})` : ''}. O histórico continua aqui, e cada trecho mostra por qual número passou. No celular do cliente é outro número: se ele não falou por esse número nas últimas 24h, a primeira mensagem precisa ser um template aprovado. Se ele responder pelo número antigo, a conversa volta a responder por lá.`}
+        onConfirm={() => trocandoPara ? trocarCanal.mutateAsync({ id: conv.id, numberId: trocandoPara.id })
+          .then((c) => {
+            const aberta = !!c.lastInboundAt && Date.now() - Date.parse(c.lastInboundAt) < 24 * 60 * 60 * 1000;
+            if (aberta) toast.ok(`Agora a conversa envia por ${c.number.label}`);
+            else toast.warn(`Agora a conversa envia por ${c.number.label}. Comece com um template: o cliente não falou por esse número nas últimas 24h.`);
+          })
+          .catch((err) => { toast.err(err); throw err; }) : undefined}
+        onClose={() => setTrocandoPara(null)}
+      />
       {editando && <EditMessageModal m={editando} onClose={() => setEditando(null)} />}
       <ConfirmDialog
         open={!!apagando}
@@ -1047,7 +1117,7 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
         <form onSubmit={submit} className="border-t-2 border-dashed border-warn/60 bg-warn-soft px-3 py-2 space-y-1.5"
           onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
           onDrop={(e) => { const f = e.dataTransfer.files?.[0]; if (f) { e.preventDefault(); void anexarNaNota(f); } }}>
-          <AbasDoEnvio nota onNota={setModoNota} podeNota onOrcamento={!ownedByOther ? () => setOrcando(true) : undefined} />
+          <AbasDoEnvio nota onNota={setModoNota} podeNota onOrcamento={!travado ? () => setOrcando(true) : undefined} />
           {(imagemNota || subindoImagem) && (
             <div className="flex items-center gap-2 rounded-lg bg-panel/70 border border-warn/30 p-1.5 w-fit max-w-full">
               {imagemNota ? <img src={imagemNota.url} alt="" className="h-14 w-14 rounded object-cover shrink-0" /> : <div className="h-14 w-14 rounded bg-warn/10 grid place-items-center shrink-0"><Loader2 size={16} className="animate-spin text-warn-ink" /></div>}
@@ -1089,12 +1159,12 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
             <Button type="submit" className="h-9 rounded-full px-3.5 bg-warn hover:bg-warn/90 text-white border-0" disabled={(!textoNota.trim() && !imagemNota) || subindoImagem} loading={sendNote.isPending} icon={<StickyNote size={15} />}>Adicionar nota</Button>
           </div>
         </form>
-      ) : ownedByOther && podeNota ? (
+      ) : travado && podeNota ? (
         <div className="bg-field border-t border-line px-3 py-2 flex items-center gap-2">
           <Button type="button" variant="ghost" className="w-9 h-9 rounded-full p-0 border-0 bg-transparent text-muted hover:text-warn-ink" onClick={() => setModoNota(true)} title="Abrir cadeado para enviar nota interna (Alt+N)" icon={<Lock size={18} />} />
           <div className="flex-1 text-sm text-muted py-2.5"><b className="text-ink">{conv.assignee?.name}</b> está atendendo. Abra o cadeado (Alt+N) para mandar uma nota interna, ou transfira para você.</div>
         </div>
-      ) : ownedByOther ? (
+      ) : travado ? (
         <div className="bg-field border-t border-line px-4 py-3 text-sm text-muted flex items-center gap-2">
           <UserRound size={16} className="shrink-0" />
           <span className="flex-1"><b className="text-ink">{conv.assignee?.name}</b> está atendendo esta conversa. Peça a transferência ou aguarde a devolução à fila.</span>
@@ -1129,6 +1199,13 @@ export function ChatPane({ conversationId: embeddedId }: { conversationId?: stri
       ) : (
         <form onSubmit={submit} className="bg-panel border-t border-line px-2.5 py-1.5 space-y-1.5">
           <AbasDoEnvio nota={false} onNota={setModoNota} podeNota={podeNota} onOrcamento={() => setOrcando(true)} />
+          {ownedByOther && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warn-soft border border-warn/30 px-3 py-1.5 text-xs text-warn-ink">
+              <UserRound size={14} className="shrink-0" />
+              <span className="flex-1 min-w-0"><b>{conv.assignee?.name}</b> está atendendo. Se você responder, o atendimento passa para você.</span>
+              <button type="button" disabled={claim.isPending} onClick={() => claim.mutateAsync(conv.id).then(() => toast.ok('Você assumiu este atendimento')).catch(toast.err)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold bg-panel/70 hover:bg-panel whitespace-nowrap disabled:opacity-60"><Hand size={13} /> Assumir agora</button>
+            </div>
+          )}
           <OrcamentosAguardando conversationId={conv.id} ultimaDoContato={ultimaDoContato} onEnviar={enviarTexto} />
           {contatoFrio && <ColdContactNotice numberId={conv.number.id} />}
           {attachment && (
@@ -1554,6 +1631,20 @@ function SeparadorDeDia({ data }: { data: string }) {
   return (
     <div data-dia={data} className="dia-sep flex items-center gap-3 py-2 select-none">
       <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted bg-panel/80 rounded-full px-2.5 py-0.5 shadow-sm">{rotuloDoDia(data)}</span>
+    </div>
+  );
+}
+
+/** Ponto em que a conversa passou a outro número (docs/troca-de-numero.md). */
+function SeparadorDeNumero({ label, recebida }: { label: string; recebida: boolean }) {
+  return (
+    <div className="flex items-center gap-2 py-2 select-none">
+      <span className="h-px flex-1 bg-line" />
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-accent-ink bg-accent-soft rounded-full px-2.5 py-0.5 max-w-[80%]">
+        <Smartphone size={12} className="shrink-0" />
+        <span className="truncate">{recebida ? 'O cliente escreveu pelo número' : 'Daqui em diante pelo número'} <b>{label}</b></span>
+      </span>
+      <span className="h-px flex-1 bg-line" />
     </div>
   );
 }

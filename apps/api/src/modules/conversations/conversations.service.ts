@@ -35,6 +35,7 @@ import { exemptMode, isTicketExempt } from '../ignored-contacts/ignored-contacts
 import type { Principal } from '../auth/permissions';
 import { clip } from '../../common/clip';
 import { dedupeStickers, outboundMediaType } from './sticker';
+import { channelConversation, channelIdOf, lastInboundOn, type ChannelFields } from './channel';
 
 /**
  * Quem está pedindo. `permissions` vem do JwtAuthGuard; o papel fica só para o dono do
@@ -363,6 +364,31 @@ export class ConversationsService {
   }
 
   /**
+   * Assumir o atendimento que está com OUTRA pessoa (`conversations.take_over`, padrão do
+   * Administrador — docs/18-perfis-de-acesso.md#assumir-atendimento-de-outra-pessoa). Devolve
+   * `null` quando não é esse caso (sem dono, já é seu, encerrada, isento ou sem permissão) — aí
+   * vale o `claim` normal. Não passa pela trava da fila: não está tirando ninguém da fila.
+   */
+  async takeOver(tenantId: string, id: string, by: Viewer) {
+    if (!may(by, 'conversations.take_over')) return null;
+    const c = await this.prisma.conversation.findFirst({ where: { id, tenantId }, select: { assigneeId: true, status: true, ticketExempt: true } });
+    if (!c || c.status === 'closed' || !c.assigneeId || c.assigneeId === by.id) return null;
+    await this.assertNoBlockingReviews(tenantId, by.id, id);
+    const r = await this.prisma.conversation.updateMany({ where: { id, tenantId, assigneeId: c.assigneeId, status: { not: 'closed' } }, data: { assigneeId: by.id, status: 'in_progress' } });
+    if (r.count === 0) throw new ConflictException('O atendimento mudou de mãos agora há pouco. Abra a conversa de novo.');
+    await this.registrarAssumiu(tenantId, id, by.id, c.assigneeId, c.status, 'pelo botão');
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id } });
+    this.gateway.emitConversation(tenantId, conv);
+    return conv;
+  }
+
+  /** Histórico (e auditoria do atendimento) de quem assumiu a conversa de quem. */
+  private async registrarAssumiu(tenantId: string, conversationId: string, byId: string, fromId: string, fromStatus: ConversationStatus, como: string) {
+    const anterior = await this.prisma.user.findUnique({ where: { id: fromId }, select: { name: true } });
+    await this.registrar({ tenantId, conversationId, type: 'transferred', actorId: byId, targetId: byId, fromStatus, toStatus: 'in_progress', reason: `Assumiu o atendimento de ${anterior?.name ?? 'outra pessoa'} (${como})` });
+  }
+
+  /**
    * Trava do feedback (docs/feedback-de-atendimento.md#trava): apontamento do tipo que trava (por
    * padrão, Correção) sem ciência impede assumir OUTRO atendimento. Pegar de volta o que já é seu
    * não trava — a pessoa não pode ficar presa no meio de uma conversa.
@@ -634,7 +660,135 @@ export class ConversationsService {
       where: { id, tenantId },
       include: LIST_INCLUDE,
     });
-    return this.presentContact(row);
+    return this.presentContact(await this.presentChannel(row));
+  }
+
+  /**
+   * Conversa aberta na tela: `number`/`numberId`/`lastInboundAt` são os do número de ENVIO
+   * (docs/troca-de-numero.md) — é com eles que o composer decide janela, template e o
+   * `expectedNumberId`. `homeNumber` = o número em que a conversa nasceu. Nunca trocou: igual.
+   */
+  private async presentChannel<T extends ChannelFields & { tenantId: string; number: { id: string } }>(row: T) {
+    const base = { ...row, homeNumber: row.number };
+    if (!row.channelChangedAt) return base;
+    const lastInboundAt = await lastInboundOn(this.prisma, row, channelIdOf(row));
+    if (!row.channelNumberId) return { ...base, lastInboundAt };
+    const number = await this.prisma.whatsAppNumber.findFirst({ where: { id: row.channelNumberId, tenantId: row.tenantId }, select: LIST_INCLUDE.number.select });
+    return number ? { ...base, number: number as T['number'], numberId: number.id, lastInboundAt } : { ...base, lastInboundAt };
+  }
+
+  /**
+   * A conversa vista pelo número de envio: `numberId`, `number` (linha inteira) e `lastInboundAt`
+   * (janela de 24h) passam a ser os do canal — ou os de `via`, quando o envio tem número próprio
+   * (transmissão, lembrete pelo número do sistema). Conversa que nunca trocou de número e envio
+   * pelo número dela voltam como vieram: regra antiga intacta (docs/troca-de-numero.md).
+   */
+  async comCanal<T extends ChannelFields & { tenantId: string; number: unknown }>(conv: T, via?: string | null): Promise<T> {
+    const alvo = via ?? channelIdOf(conv);
+    if (!conv.channelChangedAt && alvo === conv.numberId) return conv;
+    const lastInboundAt = await lastInboundOn(this.prisma, conv, alvo);
+    const number = alvo === conv.numberId && conv.number && typeof conv.number === 'object' && 'tenantId' in conv.number
+      ? conv.number
+      : await this.prisma.whatsAppNumber.findFirst({ where: { id: alvo, tenantId: conv.tenantId } });
+    if (!number) throw new UnprocessableEntityException('O número de envio desta conversa não existe mais. Escolha outro em "Enviando por".');
+    return { ...conv, numberId: alvo, number: number as T['number'], lastInboundAt };
+  }
+
+  /**
+   * Atendente troca o número de envio (docs/troca-de-numero.md). Só API oficial → API oficial,
+   * conversa aberta e de quem troca (ou livre/isenta, ou quem pode assumir a dos outros). Não
+   * manda nada: com a janela do número novo fechada, o composer pede o template.
+   */
+  async switchChannel(tenantId: string, by: Viewer, id: string, numberId: string) {
+    if (!may(by, 'conversations.switch_number')) throw new ForbiddenException('Você não tem permissão para trocar o número de envio.');
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId }, include: { number: true, contact: { select: { isGroup: true } } } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Abra um novo atendimento para trocar o número.');
+    if (conv.contact.isGroup) throw new BadRequestException('Grupo não troca de número.');
+    if (conv.assigneeId && conv.assigneeId !== by.id && !conv.ticketExempt && !may(by, 'conversations.take_over')) {
+      throw new ForbiddenException('Só quem está atendendo pode trocar o número de envio.');
+    }
+    if (!conv.assigneeId && !conv.ticketExempt) throw new BadRequestException('Assuma o atendimento antes de trocar o número de envio.');
+    const atual = await this.comCanal(conv);
+    if (atual.number.provider !== 'meta') throw new BadRequestException('Trocar o número de envio só existe na API oficial.');
+    if (atual.numberId === numberId) return this.one(tenantId, id);
+    const destino = await this.prisma.whatsAppNumber.findFirst({ where: { id: numberId, tenantId, deletedAt: null } });
+    if (!destino || !canUseNumber(by, destino.id)) throw new NotFoundException('Número não encontrado');
+    if (destino.provider !== 'meta') throw new BadRequestException('O número novo precisa ser da API oficial.');
+    if (!destino.isActive || destino.status !== 'connected') throw new BadRequestException(`O número "${destino.label}" está desconectado.`);
+    // o contato já tem atendimento ABERTO no número novo (conversa própria ou outra que envia por ele):
+    // juntar dois atendimentos abertos não é troca de número — abra aquela
+    const aberta = await this.prisma.conversation.findFirst({
+      where: { tenantId, contactId: conv.contactId, id: { not: conv.id }, status: { not: 'closed' }, OR: [{ numberId: destino.id }, { channelNumberId: destino.id }] },
+      select: { id: true },
+    });
+    if (aberta) throw new ConflictException({ code: 'channel_busy', conversationId: aberta.id, message: `Este contato já tem um atendimento aberto pelo número "${destino.label}". Abra aquela conversa.` });
+    await this.aplicarCanal(conv.id, destino.id, by.id);
+    return this.one(tenantId, id);
+  }
+
+  /**
+   * Mensagem do contato numa conversa que já trocou de número: entrou pelo número de envio →
+   * atualiza a janela dele; entrou por outro (o antigo, por exemplo) → a conversa passa a
+   * responder por ele, que é onde a janela está aberta. Mensagem fora de ordem (mais antiga que a
+   * última recebida) não muda o canal. Nunca derruba a entrada da mensagem.
+   */
+  async followInboundChannel(antes: ChannelFields & { channelHistory: string[] }, numberId: string, at: Date) {
+    if (!antes.channelChangedAt) return;
+    try {
+      if (channelIdOf(antes) === numberId) {
+        await this.prisma.conversation.updateMany({ where: { id: antes.id, OR: [{ channelLastInboundAt: null }, { channelLastInboundAt: { lt: at } }] }, data: { channelLastInboundAt: at } });
+        return;
+      }
+      if (antes.lastInboundAt && at < antes.lastInboundAt) return;
+      await this.aplicarCanal(antes.id, numberId, null, 'o contato escreveu por este número');
+    } catch (err) {
+      this.log.error(`canal da conversa ${antes.id} não acompanhou a mensagem do número ${numberId}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /**
+   * Grava a troca do número de envio — sem conferir permissão nem posse (quem chama confere).
+   * `alvo` = o número da conversa: volta ao normal (`channelNumberId` nulo). Leva a janela de 24h
+   * do número novo, o histórico de canais e o evento `channel_changed`. Devolve false se já era ele.
+   */
+  private async aplicarCanal(conversationId: string, alvo: string, actorId: string | null, motivo?: string) {
+    const conv = await this.prisma.conversation.findUniqueOrThrow({ where: { id: conversationId }, include: { number: { select: { label: true } }, channelNumber: { select: { label: true } } } });
+    const atual = channelIdOf(conv);
+    if (atual === alvo) return false;
+    const destino = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: alvo, tenantId: conv.tenantId }, select: { label: true } });
+    const janela = await lastInboundOn(this.prisma, conv, alvo);
+    const home = alvo === conv.numberId;
+    // o número era canal de outra conversa ENCERRADA do contato: a partir daqui ele é desta
+    if (!home) await this.prisma.conversation.updateMany({ where: { contactId: conv.contactId, channelNumberId: alvo, id: { not: conv.id }, status: 'closed' }, data: { channelNumberId: null } });
+    let r: Prisma.BatchPayload;
+    try {
+      r = await this.prisma.conversation.updateMany({
+        // otimista: se outra troca passou no meio, esta não sobrescreve
+        where: { id: conv.id, channelNumberId: conv.channelNumberId },
+        data: {
+          channelNumberId: home ? null : alvo,
+          channelChangedAt: new Date(),
+          channelLastInboundAt: janela,
+          ...(!home && !conv.channelHistory.includes(alvo) && { channelHistory: { set: [...conv.channelHistory, alvo] } }),
+        },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') throw new ConflictException('Este número já está em uso por outra conversa deste contato.');
+      throw err;
+    }
+    if (r.count === 0) throw new ConflictException('O número de envio desta conversa mudou agora há pouco. Abra a conversa de novo.');
+    const de = (conv.channelNumber ?? conv.number).label;
+    await this.registrar({ tenantId: conv.tenantId, conversationId: conv.id, type: 'channel_changed', actorId, fromStatus: conv.status, toStatus: conv.status, reason: `${de} → ${destino.label}${motivo ? ` (${motivo})` : ''}` });
+    this.gateway.emitConversation(conv.tenantId, await this.prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } }));
+    return true;
+  }
+
+  /** Número de envio da conversa (linha inteira) — template no composer é conferido nele. */
+  async channelNumberOf(tenantId: string, id: string) {
+    const conv = await this.prisma.conversation.findFirst({ where: { id, tenantId }, include: { number: true } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    return (await this.comCanal(conv)).number;
   }
 
   /**
@@ -722,8 +876,10 @@ export class ConversationsService {
    * tivesse escrito) — depois disso as mensagens do fluxo passam (`hasColdSlot`).
    */
   async assertFlowCanStart(conversationId: string) {
-    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: { select: { provider: true, status: true, sendLimits: true } }, contact: { select: { optOutAt: true } } } });
-    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    const achada = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: { select: { provider: true, status: true, sendLimits: true } }, contact: { select: { optOutAt: true } } } });
+    if (!achada) throw new NotFoundException('Conversa não encontrada');
+    // o fluxo sai pelo número de envio (docs/troca-de-numero.md)
+    const conv = await this.comCanal(achada);
     if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para iniciar um fluxo.');
     if (conv.number.status !== 'connected') throw new BadRequestException('O número está desconectado: o fluxo não teria como enviar. Conecte de novo em Números.');
     if (conv.contact.optOutAt) throw new BadRequestException('O contato pediu para não receber mensagens automáticas, então o fluxo não pode ser enviado. Responda pelo campo de mensagem.');
@@ -755,6 +911,8 @@ export class ConversationsService {
     allowClosed?: boolean;
     /** dispensa a regra do envio frio — só a Agenda (lembretes e aviso ao profissional), ver cold-send.ts */
     allowCold?: boolean;
+    /** sai por este número, não pelo de envio da conversa (transmissão, número do sistema) — docs/troca-de-numero.md */
+    numberId?: string;
   }) {
     const key = opts?.idempotencyKey;
     if (key) {
@@ -762,8 +920,10 @@ export class ConversationsService {
       const dup = await this.byIdempotencyKey(conversationId, key);
       if (dup) return dup;
     }
-    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true, contact: { select: { optOutAt: true, waInvalidAt: true } } } });
-    if (!conv || (conv.status === 'closed' && !opts?.allowClosed)) throw new BadRequestException('Conversa indisponível');
+    const achada = await this.prisma.conversation.findUnique({ where: { id: conversationId }, include: { number: true, contact: { select: { optOutAt: true, waInvalidAt: true } } } });
+    if (!achada || (achada.status === 'closed' && !opts?.allowClosed)) throw new BadRequestException('Conversa indisponível');
+    // número, janela e cota daqui para baixo são os do número por onde a mensagem sai
+    const conv = await this.comCanal(achada, opts?.numberId);
     // descadastro vale para TODO envio automático (docs/envio.md#descadastro); o atendente segue respondendo
     if (conv.contact.optOutAt) throw new BadRequestException({ code: 'contact_opted_out', message: 'O contato pediu para não receber mensagens automáticas.' });
     if (conv.contact.waInvalidAt) throw new BadRequestException({ code: 'contact_no_whatsapp', message: 'Este telefone não tem WhatsApp.' });
@@ -810,15 +970,23 @@ export class ConversationsService {
   async sendToContact(tenantId: string, contactId: string, text: string, opts?: { preferredNumberId?: string | null; interactive?: import('@atendo/shared').InteractiveMenu; idempotencyKey?: string; allowClosed?: boolean; allowCold?: boolean; checkPhone?: PhoneCheck; outsideWindow?: (numberId: string) => Promise<TemplateOutbound | null> }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
     let conv = await this.prisma.conversation.findFirst({ where: { tenantId, contactId, status: { not: 'closed' } }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } });
+    // sem conversa aberta: sai pelo número do sistema (não pelo canal de uma conversa encerrada)
+    let via: string | undefined;
     if (!conv) {
       const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
-      conv = (opts?.allowClosed && (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId: number.id }, orderBy: { lastMessageAt: 'desc' }, include: { number: { select: { provider: true } } } })))
+      via = number.id;
+      const doNumero = opts?.allowClosed
+        ? (await channelConversation(this.prisma, number, contactId, { tenantId })) ?? (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } }))
+        : null;
+      conv = (doNumero && (await this.prisma.conversation.findUnique({ where: { id: doNumero.id }, include: { number: { select: { provider: true } } } })))
         || (await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) }, include: { number: { select: { provider: true } } } }));
     }
-    await this.assertHasWhatsApp(contact.id, conv.numberId, contact.phone, opts?.checkPhone);
-    const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed, allowCold: opts?.allowCold };
-    if (conv.number.provider === 'meta' && !inMetaWindow(conv.lastInboundAt) && opts?.outsideWindow) {
-      const tpl = await opts.outsideWindow(conv.numberId);
+    // aberta: pelo número de envio dela (docs/troca-de-numero.md)
+    const canal = await this.comCanal(conv, via);
+    await this.assertHasWhatsApp(contact.id, canal.numberId, contact.phone, opts?.checkPhone);
+    const send = { idempotencyKey: opts?.idempotencyKey, allowClosed: opts?.allowClosed, allowCold: opts?.allowCold, numberId: via };
+    if (canal.number.provider === 'meta' && !inMetaWindow(canal.lastInboundAt) && opts?.outsideWindow) {
+      const tpl = await opts.outsideWindow(canal.numberId);
       if (!tpl?.template) throw new BadRequestException('O contato não escreve há mais de 24 horas e não há template aprovado configurado para este envio (na API oficial, depois de 24 horas só sai template).');
       return this.sendAsSystem(conv.id, tpl.text, tpl.systemMedia, undefined, { ...send, template: tpl.template });
     }
@@ -834,10 +1002,13 @@ export class ConversationsService {
    */
   async sendCampaign(tenantId: string, contactId: string, numberId: string, p: { text?: string; media?: { key: string; type: 'image' | 'document' | 'audio' | 'video'; name?: string }; template?: NonNullable<OutboundMessage['template']>; idempotencyKey: string }) {
     const contact = await this.prisma.contact.findFirstOrThrow({ where: { id: contactId, tenantId } });
-    const conv = (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId }, orderBy: { lastMessageAt: 'desc' } }))
+    // a conversa que usa o número da campanha como canal é a do contato (docs/troca-de-numero.md)
+    const number = await this.prisma.whatsAppNumber.findFirstOrThrow({ where: { id: numberId, tenantId }, select: { id: true, provider: true } });
+    const conv = (await channelConversation(this.prisma, number, contactId, { tenantId }))
+      ?? (await this.prisma.conversation.findFirst({ where: { tenantId, contactId, numberId }, orderBy: { lastMessageAt: 'desc' } }))
       ?? (await this.prisma.conversation.create({ data: { tenantId, numberId, contactId, status: 'closed', closedAt: new Date() } }));
     await this.assertHasWhatsApp(contact.id, numberId, contact.phone);
-    return this.sendAsSystem(conv.id, p.text, p.media, undefined, { idempotencyKey: p.idempotencyKey, template: p.template, allowClosed: true, allowCold: true });
+    return this.sendAsSystem(conv.id, p.text, p.media, undefined, { idempotencyKey: p.idempotencyKey, template: p.template, allowClosed: true, allowCold: true, numberId });
   }
 
   /** Manda para um telefone qualquer (ex.: WhatsApp do barbeiro). Cria contato/conversa se preciso. */
@@ -846,11 +1017,12 @@ export class ConversationsService {
     const contact = await this.prisma.contact.upsert({ where: { tenantId_phone: { tenantId, phone: clean } }, create: { tenantId, phone: clean, name: opts?.contactName, ...(opts?.contactName && { nameSource: 'manual' as const }) }, update: {} });
     const number = await this.systemNumber(tenantId, opts?.preferredNumberId);
     await this.assertHasWhatsApp(contact.id, number.id, clean, opts?.checkPhone);
-    let conv = await this.prisma.conversation.findFirst({ where: { contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } });
+    let conv = (await channelConversation(this.prisma, number, contact.id, { tenantId }))
+      ?? (await this.prisma.conversation.findFirst({ where: { contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } }));
     if (!conv) conv = await this.prisma.conversation.create({ data: { tenantId, numberId: number.id, contactId: contact.id, status: 'closed', closedAt: new Date(), ticketExempt: await isTicketExempt(this.prisma, tenantId, contact.phone) } });
     // conversa fechada: sendAsSystem exige aberta → abre, envia, fecha de novo (não polui a fila)
     if (conv.status === 'closed') await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'in_progress' } });
-    const m = await this.sendAsSystem(conv.id, text, undefined, undefined, { idempotencyKey: opts?.idempotencyKey, allowCold: opts?.allowCold });
+    const m = await this.sendAsSystem(conv.id, text, undefined, undefined, { idempotencyKey: opts?.idempotencyKey, allowCold: opts?.allowCold, numberId: number.id });
     if (opts?.closeAfter !== false) {
       const fechada = await this.prisma.conversation.update({ where: { id: conv.id }, data: { status: 'closed', closedAt: new Date(), ...BOT_PAUSE_CLEAR } });
       // o envio acima emitiu a conversa aberta; sem este aviso ela ficava em "Em atendimento" até o F5
@@ -987,11 +1159,14 @@ export class ConversationsService {
    */
   async send(tenantId: string, author: Viewer, conversationId: string, input: Omit<OutboundMessage, 'to'> & { mediaKey?: string; forwarded?: boolean; expectedNumberId?: string; idempotencyKey?: string; simulateTypingChars?: number; /** cartão no nosso chat (ex.: Pix com "Copiar chave Pix") */ content?: MessageContent }) {
     const authorId = author.id;
-    const conv = await this.prisma.conversation.findFirst({
+    const achada = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
       include: { number: true },
     });
-    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (!achada) throw new NotFoundException('Conversa não encontrada');
+    // daqui para baixo `numberId`/`number`/`lastInboundAt` são os do número de ENVIO
+    // (docs/troca-de-numero.md) — conversa que nunca trocou volta igual
+    const conv = await this.comCanal(achada);
     // clique duplo / reenvio do front com a mesma chave: devolve a mensagem que já foi criada,
     // antes de qualquer regra (a primeira já passou por todas)
     const key = input.idempotencyKey;
@@ -1022,8 +1197,10 @@ export class ConversationsService {
     if (!quota.ok) throw new ForbiddenException(quota.reason);
 
     // Responder = assumir. Atômico: se outra atendente assumiu no meio tempo, falha com o nome dela.
-    // Conversa de OUTRA pessoa: ninguém (nem admin) responde ao cliente por ela — admin/gerente usa
-    // nota interna (cadeado). Para atender, transfere para si.
+    // Conversa de OUTRA pessoa: sem permissão, ninguém responde ao cliente por ela — usa nota interna
+    // (cadeado) ou transfere para si. Com `conversations.take_over` (padrão do Administrador),
+    // responder assume: o atendimento passa para quem escreveu, com registro no histórico
+    // (docs/18-perfis-de-acesso.md#assumir-atendimento-de-outra-pessoa).
     // Conversa livre (grupo, docs/grupos.md) não tem dono: responder não assume. Contato isento
     // assume como qualquer atendimento, mas o dono NÃO trava: quem responde passa a ser o dono
     // (equipe/diretoria esquecida "em atendimento" com alguém não pode ficar sem resposta —
@@ -1032,10 +1209,15 @@ export class ConversationsService {
       // fila com distribuição automática: atendente não pega da fila respondendo
       if (!conv.assigneeId && !conv.ticketExempt) await this.assertQueueAllows(tenantId, author);
       const anterior = conv.assigneeId;
-      const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, ...(!conv.ticketExempt && { OR: [{ assigneeId: null }, { assigneeId: authorId }] }) }, data: { assigneeId: authorId, status: 'in_progress' } });
+      const assume = !!anterior && !conv.ticketExempt && may(author, 'conversations.take_over');
+      const livreParaMim = { OR: [{ assigneeId: null }, { assigneeId: authorId }] };
+      // assumindo: só troca se ainda está com quem estava (outra pessoa pode ter assumido no meio)
+      const onde = conv.ticketExempt ? {} : assume ? { OR: [...livreParaMim.OR, { assigneeId: anterior }] } : livreParaMim;
+      const r = await this.prisma.conversation.updateMany({ where: { id: conv.id, ...onde }, data: { assigneeId: authorId, status: 'in_progress' } });
       if (r.count > 0 && conv.ticketExempt && anterior) {
         await this.registrar({ tenantId, conversationId: conv.id, type: 'transferred', actorId: authorId, targetId: authorId, fromStatus: conv.status, toStatus: 'in_progress', reason: 'Respondeu contato isento que estava com outra pessoa' });
       }
+      if (r.count > 0 && assume) await this.registrarAssumiu(tenantId, conv.id, authorId, anterior!, conv.status, 'respondendo');
       if (r.count === 0) {
         const owner = await this.prisma.conversation.findUnique({ where: { id: conv.id }, include: { assignee: { select: { name: true } } } });
         throw new ConflictException(`${owner?.assignee?.name ?? 'Outro atendente'} está atendendo. Use uma nota interna ou transfira para você.`);
@@ -1243,13 +1425,16 @@ export class ConversationsService {
         }));
     }
 
-    let conv = await this.prisma.conversation.findFirst({ where: { tenantId, contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } });
+    // o número escolhido já é (ou foi) canal de uma conversa do contato: é ela (docs/troca-de-numero.md)
+    let conv = (await channelConversation(this.prisma, number, contact.id, { tenantId }))
+      ?? (await this.prisma.conversation.findFirst({ where: { tenantId, contactId: contact.id, numberId: number.id }, orderBy: { lastMessageAt: 'desc' } }));
     // conversa existente num departamento que esta pessoa não vê: não pode virar porta dos fundos
     if (conv && !canSeeDepartment(author, conv.departmentId)) {
       throw new ConflictException({ code: 'other_department', message: 'Este contato já é atendido por um departamento que você não acessa neste número.' });
     }
     // isento: o dono não trava (o `send` passa a conversa para quem escreveu)
-    if (conv && conv.status !== 'closed' && conv.assigneeId && conv.assigneeId !== author.id && !conv.ticketExempt) {
+    // com `conversations.take_over` passa: o `send` assume a conversa
+    if (conv && conv.status !== 'closed' && conv.assigneeId && conv.assigneeId !== author.id && !conv.ticketExempt && !may(author, 'conversations.take_over')) {
       const owner = await this.prisma.user.findUnique({ where: { id: conv.assigneeId }, select: { name: true } });
       throw new ConflictException({ code: 'already_assigned', conversationId: conv.id, message: `${owner?.name ?? 'Outro atendente'} já está atendendo este contato neste número.` });
     }
@@ -1263,14 +1448,15 @@ export class ConversationsService {
       }
       return { conversationId: conv.id, status: conv.status, message: null };
     }
+    // janela do número ESCOLHIDO (a conversa pode estar enviando por outro)
+    const janela = conv ? await lastInboundOn(this.prisma, conv, number.id) : null;
     if (number.provider === 'meta' && !input.template) {
-      const inWindow = conv?.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;
-      if (!inWindow) throw new BadRequestException('Na API oficial só dá para falar primeiro com template aprovado (o contato não escreveu nas últimas 24h).');
+      if (!inMetaWindow(janela)) throw new BadRequestException('Na API oficial só dá para falar primeiro com template aprovado (o contato não escreveu nas últimas 24h).');
     }
     // telefone sem WhatsApp: diz isso (e não "contato frio"), antes de criar/reabrir
     await this.assertHasWhatsApp(contact.id, number.id, contact.phone, checkPhone);
     // envio frio antes de criar/reabrir: recusado não pode deixar conversa reaberta à toa
-    await this.assertColdAllowed({ tenantId, contactId: contact.id, numberId: number.id, lastInboundAt: conv?.lastInboundAt ?? null, number }, author);
+    await this.assertColdAllowed({ tenantId, contactId: contact.id, numberId: number.id, lastInboundAt: janela, number }, author);
     const quota = await this.usage.canSend(tenantId, input.template ? 'templates' : 'messages', number.id);
     if (!quota.ok) throw new ForbiddenException(quota.reason);
 
@@ -1286,6 +1472,8 @@ export class ConversationsService {
     } else if (conv.status === 'closed') {
       conv = await this.setStatus(tenantId, conv.id, 'in_progress', author.id);
     }
+    // conversa achada pelo canal, enviando por outro número agora: passa a enviar pelo escolhido
+    if (channelIdOf(conv) !== number.id) await this.aplicarCanal(conv.id, number.id, author.id);
     const { systemMedia: _m, ...msg } = message;
     const sent = await this.send(tenantId, author, conv.id, { ...msg, idempotencyKey: input.idempotencyKey });
     return { conversationId: conv.id, status: 'in_progress' as const, message: sent };
@@ -1375,10 +1563,12 @@ export class ConversationsService {
   async resend(tenantId: string, messageId: string) {
     const m = await this.prisma.message.findFirst({ where: { id: messageId, direction: 'out', status: 'failed', internal: false, deletedAt: null, conversation: { tenantId } }, include: { conversation: { include: { number: true } } } });
     if (!m) throw new NotFoundException('Mensagem não encontrada ou não está com falha');
-    if (m.numberId && m.numberId !== m.conversation.numberId) {
-      throw new ConflictException({ code: 'number_changed', message: `O canal desta conversa mudou para "${m.conversation.number.label}". Envie a mensagem de novo.` });
+    // compara com o número de ENVIO de agora (docs/troca-de-numero.md)
+    const canal = await this.comCanal(m.conversation);
+    if (m.numberId && m.numberId !== canal.numberId) {
+      throw new ConflictException({ code: 'number_changed', message: `O canal desta conversa mudou para "${canal.number.label}". Envie a mensagem de novo.` });
     }
-    if (m.conversation.number.status !== 'connected') throw new BadRequestException(`O número "${m.conversation.number.label}" está desconectado.`);
+    if (canal.number.status !== 'connected') throw new BadRequestException(`O número "${canal.number.label}" está desconectado.`);
     // `externalId: null`: a falha pode ter vindo DEPOIS de o provider aceitar (status ERROR do
     // WhatsApp no webhook). Com o id antigo o worker achava que já tinha saído, só marcava
     // "enviada" e nada chegava ao contato — o reenvio tem de mandar de verdade.
@@ -1425,10 +1615,12 @@ export class ConversationsService {
     });
     if (!m) throw new NotFoundException('Mensagem não encontrada');
     if (!m.externalId || m.status === 'pending' || m.status === 'failed') throw new BadRequestException('Essa mensagem não chegou ao WhatsApp — não dá para reagir a ela.');
-    const conv = m.conversation;
+    // reação vai pelo número por onde a mensagem passou (docs/troca-de-numero.md), com a janela dele
+    const conv = await this.comCanal(m.conversation, m.numberId ?? m.conversation.numberId);
     if (conv.status === 'closed') throw new BadRequestException('Conversa encerrada. Reabra para reagir.');
     if (conv.number.status !== 'connected') throw new BadRequestException(`O número "${conv.number.label}" está desconectado.`);
-    if (conv.assigneeId && conv.assigneeId !== author.id) throw new ConflictException('Outro atendente está atendendo esta conversa.');
+    // reagir não assume; quem pode assumir (`conversations.take_over`) também pode reagir
+    if (conv.assigneeId && conv.assigneeId !== author.id && !may(author, 'conversations.take_over')) throw new ConflictException('Outro atendente está atendendo esta conversa.');
     // reação é mensagem livre para a Meta: fora da janela de 24h ela recusa
     if (conv.number.provider === 'meta') {
       const inWindow = conv.lastInboundAt && Date.now() - conv.lastInboundAt.getTime() < META_WINDOW_MS;

@@ -417,7 +417,8 @@ export class MonthlyBillingService {
         const due = await this.manualDue(sub);
         const hoje = diaSP();
         const dias = due ? diasEntre(hoje, due.dueDate) : null;
-        if (due && dias !== null && dias >= 0 && dias <= REMINDER_DAYS) return { kind: 'payment_due' as const, value: due.value, dueDate: due.dueDate, daysLeft: dias, hasCharge: !!due.invoice };
+        // vencida e ainda ativa (antes de virar atraso): continua avisando, agora como "venceu em"
+        if (due && dias !== null && dias <= REMINDER_DAYS) return { kind: 'payment_due' as const, value: due.value, dueDate: due.dueDate, daysLeft: dias, hasCharge: !!due.invoice };
       }
       // pedir o CPF/CNPJ só quando a cobrança por Pix estiver liberada para os clientes
       if (!(await this.clientBilling())) return null;

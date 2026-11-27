@@ -130,8 +130,10 @@ export class ScheduledMessagesService {
   }
 
   async create(tenantId: string, userId: string, conversationId: string, input: ScheduleInput) {
-    const conv = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, include: { number: true } });
-    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    const achada = await this.prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, include: { number: true } });
+    if (!achada) throw new NotFoundException('Conversa não encontrada');
+    // janela e provider do número de ENVIO (docs/troca-de-numero.md)
+    const conv = await this.conversations.comCanal(achada);
     const content = input.content.trim();
     if (!content && !input.mediaKey) throw new BadRequestException('Escreva a mensagem ou anexe um arquivo');
     if (input.mediaKey && !input.mediaKey.startsWith(`media/${tenantId}/`)) throw new BadRequestException('mediaKey inválida');

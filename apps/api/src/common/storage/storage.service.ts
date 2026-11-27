@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, resolve } from 'node:path';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from '../../config/env';
 
 export interface StoredObject {
@@ -17,10 +18,22 @@ const EXT_BY_MIME: Record<string, string> = {
   'application/pdf': 'pdf',
 };
 
+/** Janela das URLs assinadas: dentro dela a mesma mídia tem a MESMA URL e o navegador usa o cache. */
+const JANELA_S = 1800;
+
+/** Onde o `GET /media` busca o arquivo: no disco (serve como sempre) ou no bucket (redireciona). */
+export type MediaLocation = { kind: 'local' } | { kind: 'remote'; url: string };
+
 /**
  * Armazena mídia de forma privada. Dois drivers, escolhidos por STORAGE_DRIVER:
  *   local → disco (dev, grátis)      s3 → qualquer S3-compatível (R2, S3, MinIO)
  * A chave (`key`) é o que fica em Message.mediaUrl; o navegador recebe uma URL assinada e temporária.
+ *
+ * Com `s3`, o navegador baixa direto do bucket: o `GET /media` confere a NOSSA assinatura e
+ * redireciona para uma URL pré-assinada do bucket (`locate`). A API não carrega o arquivo — com
+ * vídeo, cada pedaço pedido pelo player baixaria o arquivo inteiro do bucket.
+ * `STORAGE_LOCAL_FALLBACK`: durante a migração, o que ainda está no disco sai do disco. Chaves
+ * nunca são reescritas (`makeKey` é aleatória), então o disco nunca tem versão velha de nada.
  */
 @Injectable()
 export class StorageService {
@@ -54,13 +67,44 @@ export class StorageService {
   }
 
   async get(key: string): Promise<StoredObject> {
-    if (this.s3) {
+    if (this.s3 && !(await this.noDisco(key))) {
       const r = await this.s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
       return { data: Buffer.from(await r.Body!.transformToByteArray()), mimeType: r.ContentType ?? 'application/octet-stream' };
     }
     const path = this.localPath(key);
     const [data, mimeType] = await Promise.all([readFile(path), readFile(path + '.mime', 'utf8').catch(() => 'application/octet-stream')]);
     return { data, mimeType };
+  }
+
+  /** Migração: o arquivo ainda está no disco? Só com o fallback ligado (senão, nem olha o disco). */
+  private async noDisco(key: string) {
+    if (!env.STORAGE_LOCAL_FALLBACK) return false;
+    try {
+      return (await stat(this.localPath(key))).isFile();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Onde servir a chave. `remote`: URL pré-assinada do bucket, válida até `exp` (o mesmo prazo da
+   * nossa URL) e IGUAL dentro da janela de 30 min — assinada com o início da janela, e não com o
+   * segundo de agora, para o navegador reaproveitar o cache (ver `signedUrl`). Nome do download,
+   * "baixar em vez de abrir" e cache vão como `response-*` da própria URL.
+   */
+  async locate(key: string, exp: number, opts: { disposition?: string } = {}): Promise<MediaLocation> {
+    if (!this.s3 || (await this.noDisco(key))) return { kind: 'local' };
+    const agora = Math.floor(Date.now() / 1000);
+    const inicio = Math.floor(agora / JANELA_S) * JANELA_S;
+    // a URL do bucket não pode durar mais que a nossa, nem menos que o resto da janela
+    const expiresIn = Math.max(60, Math.min(exp - inicio, 7 * 86_400));
+    const url = await getSignedUrl(this.s3, new GetObjectCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      ResponseCacheControl: 'private, max-age=3600',
+      ...(opts.disposition && { ResponseContentDisposition: opts.disposition }),
+    }), { expiresIn, signingDate: new Date(inicio * 1000) });
+    return { kind: 'remote', url };
   }
 
   // ---- URLs assinadas: o navegador não manda header em <img>, então a autorização vai na query ----
@@ -71,7 +115,7 @@ export class StorageService {
     // por meia hora e o navegador usa o cache. Com o segundo exato, cada recarga da lista gerava
     // URL nova e baixava tudo de novo (~27 mil GET /media por hora em 17/10/2026). Vale entre
     // `ttlSeconds` e `ttlSeconds` + 30 min.
-    const janela = 1800;
+    const janela = JANELA_S;
     const exp = (Math.floor(Date.now() / 1000 / janela) + 1) * janela + ttlSeconds;
     const sig = this.sign(key, exp);
     // `dl` fora da assinatura de propósito: só muda o nome sugerido no download, não dá acesso a nada
