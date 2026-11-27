@@ -25,6 +25,7 @@ import { phoneVariants } from './phone-variants';
 import type { InboundCall } from '../whatsapp/providers/provider.interface';
 import { callExternalId, desfechoDaLigacao, ficouSemResposta, textoDaLigacao, type CallContent } from './call-record';
 import { clip } from '../../common/clip';
+import { channelConversation } from './channel';
 
 const isGroupJid = (jid: string) => jid.endsWith('@g.us');
 
@@ -110,10 +111,12 @@ export class InboundService {
 
     // A conversa com esta pessoa neste número é UMA só, encerrada ou não (ver reopen.ts).
     // Encerrada, ela volta para a fila; o que começa de novo é o atendimento, não a conversa.
-    let conversation = await this.prisma.conversation.findFirst({
-      where: { numberId: number.id, contactId: contact.id },
-      orderBy: { lastMessageAt: 'desc' },
-    });
+    // Número que é (ou foi) canal de envio de uma conversa do contato: é ela (docs/troca-de-numero.md)
+    let conversation = (await channelConversation(this.prisma, number, contact.id, { tenantId: number.tenantId }))
+      ?? (await this.prisma.conversation.findFirst({
+        where: { numberId: number.id, contactId: contact.id },
+        orderBy: { lastMessageAt: 'desc' },
+      }));
     const origin = this.originOf(msg.referral);
     // contexto para os fluxos padrão do cliente: é a primeira vez desta pessoa, ou ela
     // está voltando depois de um atendimento encerrado?
@@ -194,6 +197,7 @@ export class InboundService {
       include: MESSAGE_INCLUDE,
     });
 
+    const antesDaMensagem = conversation;
     conversation = await this.prisma.conversation.update({
       where: { id: conversation.id },
       data: {
@@ -207,6 +211,9 @@ export class InboundService {
         deviceReplyAt: null,
       },
     });
+    // conversa que já trocou de número: a janela do canal anda, ou o canal segue o número por onde
+    // o contato escreveu (docs/troca-de-numero.md). Nunca trocou: não faz nada
+    if (antesDaMensagem.channelChangedAt) await this.conversations.followInboundChannel(antesDaMensagem, number.id, msg.timestamp);
 
     await this.usage.record({
       tenantId: number.tenantId,
@@ -242,11 +249,12 @@ export class InboundService {
     const contact = await this.findContact(number.tenantId, msg.from)
       ?? (isGroupJid(msg.from) ? await this.createGroupContact(number, msg.from) : await this.createContact(number, msg.from));
 
-    // mesma regra da entrada: uma conversa por pessoa neste número (ver reopen.ts)
-    let conversation = await this.prisma.conversation.findFirst({
-      where: { numberId: number.id, contactId: contact.id },
-      orderBy: { lastMessageAt: 'desc' },
-    });
+    // mesma regra da entrada: uma conversa por pessoa neste número (ver reopen.ts), contando o canal
+    let conversation = (await channelConversation(this.prisma, number, contact.id, { tenantId: number.tenantId }))
+      ?? (await this.prisma.conversation.findFirst({
+        where: { numberId: number.id, contactId: contact.id },
+        orderBy: { lastMessageAt: 'desc' },
+      }));
     // conversa iniciada do celular: precisa existir no painel, senão a resposta do contato
     // abriria outra e o histórico nasceria partido
     const isNew = !conversation;
@@ -371,7 +379,8 @@ export class InboundService {
       const nome = lista.find((m) => !m.fromMe && m.contactName)?.contactName;
       const contact = (await this.findContact(number.tenantId, phone)) ?? (await this.createContact(number, phone, nome));
       const ultima = lista.reduce((a, b) => (a.timestamp > b.timestamp ? a : b)).timestamp;
-      const conversation = (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
+      const conversation = (await channelConversation(this.prisma, number, contact.id, { tenantId: number.tenantId }))
+        ?? (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
         ?? (await this.prisma.conversation.create({ data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'closed', lastMessageAt: ultima } }));
       const r = await this.importHistory({ id: conversation.id, tenantId: number.tenantId, numberId: number.id }, lista);
       imported += r.imported;
@@ -416,7 +425,8 @@ export class InboundService {
     const nome = msgs.find((m) => !m.fromMe && m.contactName)?.contactName;
     const contact = await this.findContact(number.tenantId, phone)
       ?? (isGroupJid(phone) ? await this.createGroupContact(number, phone) : await this.createContact(number, phone, nome));
-    let conversation = await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } });
+    let conversation = (await channelConversation(this.prisma, number, contact.id, { tenantId: number.tenantId }))
+      ?? (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }));
 
     if (conversation) {
       // histórico limpo no painel: o que veio antes da limpeza não volta
@@ -461,6 +471,7 @@ export class InboundService {
     if (!criadas.length) return null;
 
     const ultima = plano.ultima !== undefined ? msgs[plano.ultima] : undefined;
+    const antesDaRecuperacao = conversation;
     conversation = await this.prisma.conversation.update({
       where: { id: conversation.id },
       data: {
@@ -470,6 +481,8 @@ export class InboundService {
         ...(plano.awaitingSince !== undefined && { awaitingSince: plano.awaitingSince }),
       },
     });
+    // mesma regra da entrada ao vivo para o canal de envio (docs/troca-de-numero.md)
+    if (antesDaRecuperacao.channelChangedAt && plano.lastInboundAt) await this.conversations.followInboundChannel(antesDaRecuperacao, number.id, plano.lastInboundAt);
 
     for (const m of criadas) {
       await this.usage.record({
@@ -905,7 +918,8 @@ export class InboundService {
       ?? (await this.createContact(number, phone));
     const modo = contact.isGroup ? 'free' : await exemptMode(this.prisma, number.tenantId, contact.phone);
     const isento = modo !== 'none';
-    let conversation = (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
+    let conversation = (await channelConversation(this.prisma, number, contact.id, { tenantId: number.tenantId }))
+      ?? (await this.prisma.conversation.findFirst({ where: { numberId: number.id, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } }))
       ?? (await this.prisma.conversation.create({ data: { tenantId: number.tenantId, numberId: number.id, contactId: contact.id, status: 'waiting', ticketExempt: isento } }));
     conversation = await this.departamentoDoNumero(conversation, number);
 

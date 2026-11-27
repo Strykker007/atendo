@@ -1,5 +1,5 @@
 'use client';
-import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Eraser, Hand, Pencil, Play, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, BotOff, Building2, CheckCircle2, Eraser, Hand, Pencil, Play, RotateCcw, Smartphone, Trash2, Undo2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useConversationEvents, useOutcomeLabels, type ConversationEvent } from '@/lib/hooks';
 
@@ -59,6 +59,8 @@ const META: Record<ConversationEvent['type'], { icon: React.ReactNode; texto: st
   history_cleared: { icon: <Eraser size={14} />, texto: 'limpou o histórico da conversa', cor: 'text-danger' },
   // `reason` traz o texto anterior: é o que permite auditar o que o contato leu antes
   message_edited: { icon: <Pencil size={14} />, texto: 'editou uma mensagem', cor: 'text-accent' },
+  // `reason` traz "Loja Centro → Loja Shopping"; sem ator = o contato escreveu pelo outro número (docs/troca-de-numero.md)
+  channel_changed: { icon: <Smartphone size={14} />, texto: 'trocou o número de envio', cor: 'text-accent' },
 };
 
 function Linha({ e }: { e: ConversationEvent }) {
@@ -70,6 +72,8 @@ function Linha({ e }: { e: ConversationEvent }) {
   const quem = e.actor?.name ?? 'Automação';
   // retomada sem ator = fim do tempo ou atendimento encerrado (o motivo vem embaixo)
   const automatico = e.type === 'bot_resumed' && !e.actor;
+  // troca de número sem ator: a conversa seguiu o número por onde o contato escreveu
+  const canalAuto = e.type === 'channel_changed' && !e.actor;
   const valor = e.outcomeValue ? Number(e.outcomeValue) : null;
 
   return (
@@ -77,7 +81,7 @@ function Linha({ e }: { e: ConversationEvent }) {
       <span className={`mt-0.5 shrink-0 ${m.cor}`}>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-ink">
-          {automatico ? <>Fluxo retomado automaticamente</> : e.viaFlow ? <>Fluxo <b>“{e.viaFlow}”</b> {m.texto}</> : <><b>{quem}</b> {m.texto}</>}
+          {canalAuto ? <>Número de envio trocado automaticamente</> : automatico ? <>Fluxo retomado automaticamente</> : e.viaFlow ? <>Fluxo <b>“{e.viaFlow}”</b> {m.texto}</> : <><b>{quem}</b> {m.texto}</>}
           {e.type === 'transferred' && e.target && <> para <b>{e.target.name}</b></>}
           {e.type === 'closed' && e.outcome && <> · {resultado[e.outcome] ?? e.outcome}</>}
           {valor != null && valor > 0 && <> · <span className="tnum">{valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></>}

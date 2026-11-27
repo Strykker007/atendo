@@ -827,6 +827,7 @@ model WhatsAppNumber {
   company       Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
   schedule      BusinessSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   conversations Conversation[]
+  channelConversations Conversation[] @relation("conversationChannel")
   messages      Message[]
   usage         MessageUsage[]
   metaCosts     MetaCostDaily[]
@@ -1191,8 +1192,20 @@ model Conversation {
   origin     ConversationOrigin @default(organic)
   /// LeadReferral (packages/shared): id/título do anúncio, ctwa_clid, url
   originData Json?
-  /// Última mensagem recebida do contato — define a janela de 24h da Meta
+  /// Última mensagem recebida do contato — define a janela de 24h da Meta (enquanto a conversa
+  /// nunca trocou de número; depois disso vale `channelLastInboundAt`)
   lastInboundAt  DateTime?
+  // ---- troca do número de envio (docs/troca-de-numero.md) — só API oficial ----
+  /// número por onde a conversa envia agora; nulo = o da conversa (`numberId`). Nunca igual a `numberId`
+  channelNumberId      String?
+  /// todos os números (além do `numberId`) que já foram canal desta conversa: mensagem do
+  /// contato por qualquer um deles cai AQUI, não numa conversa nova
+  channelHistory       String[]  @default([])
+  /// preenchido = a conversa já trocou de número ao menos uma vez; a janela de 24h passa a vir
+  /// de `channelLastInboundAt` (a janela da Meta é por número)
+  channelChangedAt     DateTime?
+  /// última mensagem do contato pelo número de envio atual
+  channelLastInboundAt DateTime?
   lastMessageAt  DateTime?
   /// Desde quando o contato espera resposta: marcado na mensagem recebida, limpo quando a
   /// equipe responde. Guarda o momento da PRIMEIRA mensagem sem resposta — se a pessoa manda
@@ -1233,6 +1246,7 @@ model Conversation {
 
   tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   number   WhatsAppNumber    @relation(fields: [numberId], references: [id], onDelete: Cascade)
+  channelNumber WhatsAppNumber? @relation("conversationChannel", fields: [channelNumberId], references: [id], onDelete: SetNull)
   contact  Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
   assignee User?             @relation("assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   department Department?     @relation(fields: [departmentId], references: [id], onDelete: SetNull)
@@ -1264,6 +1278,8 @@ model Conversation {
   secureMedia       SecureMedia[]
   surveyResponses   SurveyResponse[]
   @@unique([numberId, contactId])
+  /// um número é canal de no máximo UMA conversa do contato (nulo não conta)
+  @@unique([contactId, channelNumberId])
   @@index([tenantId, status, lastMessageAt(sort: Desc)])
   /// fila por tempo de espera
   @@index([tenantId, status, awaitingSince])
@@ -1336,6 +1352,9 @@ enum ConversationEventType {
   history_cleared
   /// atendente editou a própria mensagem (docs/editar-mensagens.md); `reason` = texto anterior
   message_edited
+  /// número de envio trocado (docs/troca-de-numero.md); `reason` = "Loja Centro → Loja Shopping".
+  /// Ator nulo = o contato escreveu por outro número e a conversa passou a responder por ele
+  channel_changed
 }
 
 /// Histórico do atendimento — quem fez o quê e quando.

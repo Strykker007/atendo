@@ -45,6 +45,10 @@ class ListDto {
   /** resultado do último encerramento */
   @IsOptional() @IsIn(['won', 'lost']) lastOutcome?: 'won' | 'lost';
 }
+class ChannelDto {
+  @IsUUID() numberId: string;
+}
+
 class TransferDto {
   @IsUUID() agentId: string;
 }
@@ -279,8 +283,18 @@ export class ConversationsController {
     return this.conversations.note(u.tenantId, u, id, dto.text ?? '', dto.mediaKey ? { key: dto.mediaKey, mime: dto.mediaMime!, name: dto.mediaName } : undefined);
   }
 
+  /** Troca o número de envio (só API oficial) — docs/troca-de-numero.md */
+  @Post(':id/channel')
+  @RequirePermission('conversations.switch_number')
+  switchChannel(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: ChannelDto) {
+    return this.conversations.switchChannel(u.tenantId, u, id, dto.numberId);
+  }
+
   @Post(':id/claim')
   async claim(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    // está com outra pessoa e quem pede tem `conversations.take_over`: assume direto
+    const assumida = await this.conversations.takeOver(u.tenantId, id, u);
+    if (assumida) return assumida;
     // fila travada: atendente não puxa (docs/fila-de-atendimento.md#quem-pode-puxar)
     await this.conversations.assertQueueAllows(u.tenantId, u);
     // feedback pendente que trava (docs/feedback-de-atendimento.md#trava): dá ciência antes de pegar outro
@@ -374,9 +388,11 @@ export class ConversationsController {
     if (dto.mediaKey && !dto.mediaKey.startsWith(`media/${u.tenantId}/`)) throw new BadRequestException('mediaKey inválida');
     if (dto.template) {
       // janela expirada no composer: o template é conferido na Meta no número DA CONVERSA
-      const conv = await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { numberId: true, contactId: true, number: { select: { provider: true } } } });
-      if (conv.number.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
-      const definition = await this.numbers.template(conv.numberId, dto.template.name, dto.template.language);
+      // número de ENVIO: depois de trocar, o template é o do número novo (docs/troca-de-numero.md)
+      const conv = await this.prisma.conversation.findFirstOrThrow({ where: { id, tenantId: u.tenantId }, select: { contactId: true } });
+      const canal = await this.conversations.channelNumberOf(u.tenantId, id);
+      if (canal.provider !== 'meta') throw new BadRequestException('Template só existe na API oficial (Meta).');
+      const definition = await this.numbers.template(canal.id, dto.template.name, dto.template.language);
       const { systemMedia: _m, ...msg } = await this.conversations.templateMessage(u.tenantId, conv.contactId, definition, dto.template, { agentName: u.name });
       return this.conversations.send(u.tenantId, u, id, { ...msg, expectedNumberId: dto.expectedNumberId, idempotencyKey: dto.idempotencyKey });
     }

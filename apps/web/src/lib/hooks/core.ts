@@ -44,6 +44,13 @@ export interface Conversation {
   departmentId?: string | null;
   department?: { id: string; name: string; color: string; isActive: boolean } | null;
   number: { id: string; label: string; phone?: string; color?: string; provider?: 'meta' | 'evolution'; status?: string };
+  /**
+   * Troca do número de envio (docs/troca-de-numero.md). Na conversa aberta (`GET /conversations/:id`),
+   * `number`/`numberId`/`lastInboundAt` já são os do número de ENVIO e `homeNumber` é o número em
+   * que a conversa nasceu. `channelChangedAt` preenchido = já trocou ao menos uma vez.
+   */
+  homeNumber?: { id: string; label: string; phone?: string; color?: string; provider?: 'meta' | 'evolution'; status?: string };
+  channelChangedAt?: string | null;
   /** contato isento: segue a fila normalmente, só fica fora dos relatórios (docs/contatos-isentos.md) */
   ticketExempt?: boolean;
 }
@@ -56,6 +63,8 @@ export interface Message {
   id: string; conversationId: string; direction: 'in' | 'out'; type: string; status: string;
   text: string | null; mediaUrl: string | null; mediaMime: string | null; mediaName: string | null; createdAt: string; error?: string | null;
   externalId?: string | null;
+  /** número por onde a mensagem entrou/saiu (null = nota ou mensagem antiga) */
+  numberId?: string | null;
   /** veio do histórico do WhatsApp, anterior à conversa no painel (docs/historico-de-mensagens.md) */
   imported?: boolean;
   /** id da mensagem citada no provider */
@@ -266,6 +275,8 @@ export const useClaim = () => { const qc = useQueryClient(); return useMutation(
 export const useTransferTargets = (id: string, enabled: boolean) =>
   useQuery({ queryKey: ['transfer-targets', id], enabled, queryFn: () => api<{ id: string; name: string }[]>(`/conversations/${id}/transfer-targets`) });
 export const useTransfer = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, agentId }: { id: string; agentId: string }) => api<Conversation>(`/conversations/${id}/transfer`, { method: 'POST', body: JSON.stringify({ agentId }) }), onSuccess: (_, v) => invConv(qc, v.id) }); };
+/** Troca o número de envio da conversa — só API oficial (docs/troca-de-numero.md) */
+export const useSwitchChannel = () => { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, numberId }: { id: string; numberId: string }) => api<Conversation>(`/conversations/${id}/channel`, { method: 'POST', body: JSON.stringify({ numberId }) }), onSuccess: (_, v) => { invConv(qc, v.id); qc.invalidateQueries({ queryKey: ['conversation-events', v.id] }); } }); };
 export const useRelease = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api<Conversation>(`/conversations/${id}/release`, { method: 'POST' }), onSuccess: (_, id) => invConv(qc, id) }); };
 
 export const useConversation = (id: string | null) =>
@@ -726,7 +737,7 @@ export const useDeletePlan = () => {
 
 export interface ConversationEvent {
   id: string;
-  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed' | 'department_changed' | 'message_deleted' | 'history_cleared' | 'message_edited';
+  type: 'claimed' | 'transferred' | 'released' | 'closed' | 'reopened' | 'bot_paused' | 'bot_resumed' | 'department_changed' | 'message_deleted' | 'history_cleared' | 'message_edited' | 'channel_changed';
   actor: { id: string; name: string } | null;
   target: { id: string; name: string } | null;
   fromStatus: ConversationStatus | null;

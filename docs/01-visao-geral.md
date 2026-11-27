@@ -54,7 +54,7 @@ O número é do **cliente**, não de um usuário: todas as atendentes do cliente
 
 ### O cadeado (nota interna)
 
-Gerente/admin **não responde ao cliente** numa conversa que é de uma atendente — para isso transfere para si. O que ele tem é o **cadeado** na barra de mensagem:
+Gerente/admin **não responde ao cliente** numa conversa que é de uma atendente — para isso transfere para si. Exceção: quem tem a permissão `conversations.take_over` (padrão do Administrador, liberável por perfil) assume na hora, respondendo ou pelo botão **Assumir agora** — ver [perfis](18-perfis-de-acesso.md#assumir-atendimento-de-outra-pessoa). O que ele tem é o **cadeado** na barra de mensagem:
 
 - Fechado (padrão): não envia nada.
 - Aberto: o campo vira âmbar "Nota interna para Maria — o cliente não vê". A nota entra no histórico com destaque (borda âmbar, "Nota interna · Gil · só a equipe vê"), chega na hora para a atendente, **nunca vai ao WhatsApp** e não conta no uso do plano.

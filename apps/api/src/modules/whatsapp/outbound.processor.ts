@@ -133,7 +133,11 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
 
     // ---- proteção do número (bloqueio/banimento) ----
     // teto do dia e aquecimento valem só para envio proativo; resposta de atendimento nunca trava
-    const proativo = countsTowardDailyLimit(message.conversation.lastInboundAt);
+    // janela do número por onde ESTA mensagem sai: conversa que trocou de número tem a do canal
+    // (docs/troca-de-numero.md); saindo por outro que não o canal, conta como proativa
+    const cv = message.conversation;
+    const janela = !cv.channelChangedAt ? cv.lastInboundAt : num.id === (cv.channelNumberId ?? cv.numberId) ? cv.channelLastInboundAt : null;
+    const proativo = countsTowardDailyLimit(janela);
     const day = proativo ? await this.pacer.dailyStatus(num) : { ok: true as const };
     if (!day.ok) {
       // teto do dia: não adianta tentar de novo hoje, então nada de retry
@@ -282,7 +286,9 @@ export class OutboundProcessor extends TrackedWorkerHost<OutboundJob> {
   /** Marca a última recebida da conversa como lida no provider (uma vez por mensagem). Nunca derruba o envio. */
   private async markLastInboundRead(provider: { markRead(ctx: NumberContext, id: string, phone?: string): Promise<void> }, ctx: NumberContext, conversationId: string, phone: string) {
     try {
-      const last = await this.prisma.message.findFirst({ where: { conversationId, direction: 'in', externalId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { externalId: true } });
+      // a recebida pelo MESMO número do envio: o id de uma mensagem de outro número não existe
+      // para este (conversa que trocou de número, docs/troca-de-numero.md). Sem número = antiga, do número da conversa
+      const last = await this.prisma.message.findFirst({ where: { conversationId, direction: 'in', externalId: { not: null }, OR: [{ numberId: ctx.numberId }, { numberId: null }] }, orderBy: { createdAt: 'desc' }, select: { externalId: true } });
       if (last?.externalId && (await this.pacer.shouldMarkRead(conversationId, last.externalId))) await provider.markRead(ctx, last.externalId, phone);
     } catch (err) {
       this.log.debug(`marcar como lida: ${err instanceof Error ? err.message : err}`);

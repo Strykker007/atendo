@@ -18,6 +18,7 @@
 | [Grupos restritos](grupos.md) | Dev / Cliente | Opt-in estrito de grupos do WhatsApp: descarte no webhook, grupos só como destino de transmissão, travas antiban |
 | [Departamentos](departamentos.md) | Dev / Cliente | Departamentos, quem vê qual fila, transferência entre departamentos e integração com o Distribuidor/Ação |
 | [Editar mensagem enviada](editar-mensagens.md) | Dev / Cliente | Permissão `conversations.edit_message`, prazo de 15 min do WhatsApp, Evolution × Meta, auditoria do texto anterior |
+| [Troca do número de envio](troca-de-numero.md) | Dev / Cliente | API oficial: a mesma conversa passa a enviar por outro número oficial; resposta por qualquer número cai nela; janela de 24h por número; permissão `conversations.switch_number` |
 | [Apagar mensagem e limpar histórico](apagar-mensagens.md) | Dev / Cliente | Quem pode apagar, apagar para todos (Evolution) × só no painel (Meta), registro de auditoria e conteúdo original |
 | [Histórico anterior ao painel](historico-de-mensagens.md) | Dev / Cliente | Mensagens de antes de conectar o número, trazidas da Evolution conforme a pessoa rola: sem duplicar, sem automação, sem cobrança |
 | [Foto protegida](foto-protegida.md) | Dev / Cliente | Foto de remédio/receita por link com validade em vez de mídia no WhatsApp: menos risco de banimento |
