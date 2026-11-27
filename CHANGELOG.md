@@ -3,6 +3,13 @@
 Uma entrada por versão publicada (`bash scripts/deploy.sh` gera a partir dos commits desde a
 última tag). MAIOR.MENOR.CORREÇÃO — ver docs/17-entrada-em-producao.md#versões.
 
+## 1.27.0 — 2026-11-27
+
+- feat(mídia): servir do R2 por redirecionamento e migrar o disco sem buraco
+- fix(cobrança): faixa da mensalidade diz "venceu em" depois do vencimento, não "vence hoje"
+- feat(ligações): silenciar o aviso de ligação por número, para cada pessoa
+- feat: assumir atendimento de outra pessoa; trocar o número de envio na mesma conversa (API oficial)
+
 ## 1.26.1 — 2026-11-26
 
 - feat(feedback): dar feedback direto da linha "Atendimento encerrado" na conversa
