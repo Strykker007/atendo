@@ -24,6 +24,25 @@ telefone) e ele não resolve — o contato nunca trocou mensagem com o número �
 números vinculados = todos; com vínculo (ou empresa/unidade selecionada) = só esses. O filtro é
 no front, com o `numberIds` do `GET /auth/me`; o evento vai para a sala do tenant.
 
+## Silenciar por número
+
+Cada pessoa escolhe **de quais números da empresa** quer o aviso. Exemplo: no condomínio, quem não
+cuida da portaria silencia só as ligações para a **Portaria** e continua avisado das ligações para os
+outros números.
+
+- **No próprio aviso:** botão **Silenciar este número**. Os avisos daquele número somem e os
+  próximos não aparecem mais.
+- **Em Configurações → Minha conta → Notificações:** a lista "Aviso de ligação no WhatsApp" mostra
+  os números que a pessoa opera, cada um com uma chave **Avisar / Silenciado**. É por ali que se
+  reativa.
+- Vale **só para quem silenciou**, em qualquer navegador (fica na conta, `users.mutedCallNumberIds`).
+  O resto da equipe continua recebendo o aviso. Não precisa de permissão: é preferência, não acesso.
+  Por isso não vai no perfil de acesso nem no modelo de perfil (os números são de cada cliente).
+- Silenciado some **o aviso e o alarme**. A ligação continua registrada na conversa (linha
+  "Ligação perdida…", não lidas, volta para a fila), como em qualquer ligação.
+- O filtro é no front (`receiveCall`, com a lista em cache de `GET /numbers/call-mutes`), igual ao
+  filtro por número operado. Número excluído sai da lista na próxima gravação.
+
 ## Como funciona
 
 ```

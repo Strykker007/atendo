@@ -112,6 +112,15 @@ export interface QuickReplyItem { id: string; title: string; body: string; media
 export interface Folder { id: string; name: string; replies: QuickReplyItem[] }
 
 export const useNumbers = () => useQuery({ queryKey: ['numbers'], queryFn: () => api<NumberItem[]>('/numbers') });
+/** Números cujas ligações não me avisam (docs/ligacoes.md#silenciar-por-número). Preferência só minha. */
+export const useCallMutes = () => useQuery({ queryKey: ['call-mutes'], queryFn: () => api<{ numberIds: string[] }>('/numbers/call-mutes'), staleTime: 60_000 });
+export const useSetCallMutes = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (numberIds: string[]) => api<{ numberIds: string[] }>('/numbers/call-mutes', { method: 'PUT', body: JSON.stringify({ numberIds }) }),
+    onSuccess: (r) => qc.setQueryData(['call-mutes'], r),
+  });
+};
 export const useTags = () => useQuery({ queryKey: ['tags'], queryFn: () => api<Tag[]>('/tags') });
 /**
  * Tags oferecidas num lugar: só as do tipo (`transition` no atendimento, `permanent` no contato)

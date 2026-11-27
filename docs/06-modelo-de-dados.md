@@ -37,6 +37,8 @@ tenant_templates (global) ── tenants.templateId
 
 **refresh_tokens** — só o hash SHA-256 do token; `revokedAt` permite logout e rotação. Guardamos `userAgent`/`ip` para auditoria. Limpeza diária (03:30 UTC, fila `work-schedules`, `AuthService.purgeStaleRefreshTokens`): apaga vencidos e revogados há mais de 1 dia, mantendo sempre o mais recente de cada usuário (é a "última atividade" do Monitor).
 
+
+`users.mutedCallNumberIds` (migration `20270222000000_user_muted_call_numbers`): números da empresa cujas ligações não abrem o aviso para esta pessoa. É preferência pessoal, não escopo de acesso ([ligações](ligacoes.md#silenciar-por-número)).
 ### WhatsApp
 
 **whatsapp_numbers** — um canal. Campos-chave:

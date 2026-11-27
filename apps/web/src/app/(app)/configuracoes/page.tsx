@@ -26,6 +26,7 @@ import { AiOwnKeySection } from '@/components/settings/AiOwnKeySection';
 import { PublicPagesSection } from '@/components/settings/PublicPagesSection';
 import Link from 'next/link';
 import { BellOff, CalendarClock, MessagesSquare, Smartphone, Mail, CreditCard } from 'lucide-react';
+import { useCallMutes, useSetCallMutes } from '@/lib/hooks';
 import { useCan, useMe, useChangePassword, useNumbers, useUpdateMe, useHasFeature, useDailyEmail, useSetDailyEmail, usePreviewDailyEmail } from '@/lib/hooks';
 
 type Aba = 'conta' | 'empresa' | 'atendimento';
@@ -202,7 +203,58 @@ function NotificationsSection() {
         <Button size="sm" variant="ghost" onClick={() => previewMessageSound('message')}>Testar som</Button>
         <Button size="sm" variant="ghost" onClick={() => previewMessageSound('alarm')}>Testar alarme de transferência</Button>
       </div>
+      <CallMutesBlock />
     </section>
+  );
+}
+
+/**
+ * Ligações por número (docs/ligacoes.md#silenciar-por-número): cada pessoa escolhe de quais
+ * números da empresa quer o aviso de ligação. Fica na conta (vale em qualquer navegador) e não
+ * mexe no aviso do resto da equipe. A ligação continua registrada na conversa.
+ */
+function CallMutesBlock() {
+  const numeros = useNumbers();
+  const mutes = useCallMutes();
+  const salvar = useSetCallMutes();
+  const lista = (numeros.data ?? []).filter((n) => n.isActive);
+  if (!lista.length) return null;
+  const silenciados = new Set(mutes.data?.numberIds ?? []);
+  function alternar(id: string) {
+    const prox = new Set(silenciados);
+    if (prox.has(id)) prox.delete(id); else prox.add(id);
+    salvar.mutateAsync([...prox]).catch(toast.err);
+  }
+  return (
+    <div className="border-t border-line pt-3 space-y-2">
+      <div>
+        <h3 className="text-sm font-semibold text-ink">Aviso de ligação no WhatsApp</h3>
+        <p className="text-xs text-muted">Escolha de quais números você quer o aviso e o alarme quando alguém liga. Vale só para você e em qualquer navegador; a ligação continua aparecendo na conversa.</p>
+      </div>
+      <ul className="divide-y divide-line rounded-xl border border-line">
+        {lista.map((n) => {
+          const avisa = !silenciados.has(n.id);
+          return (
+            <li key={n.id} className="flex items-center gap-3 px-3 py-2 min-w-0">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: n.color }} />
+              <span className="flex-1 min-w-0 text-sm text-ink truncate">{n.label}</span>
+              <span className={cn('text-xs shrink-0', avisa ? 'text-muted' : 'text-warn-ink')}>{avisa ? 'Avisar' : 'Silenciado'}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={avisa}
+                aria-label={`Aviso de ligação de ${n.label}`}
+                disabled={mutes.isLoading || salvar.isPending}
+                onClick={() => alternar(n.id)}
+                className={cn('relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-60', avisa ? 'bg-accent' : 'bg-line')}
+              >
+                <span className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', avisa ? 'left-[18px]' : 'left-0.5')} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

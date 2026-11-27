@@ -186,6 +186,9 @@ model User {
   /// Números que a tela de conversas já abre filtrada ao entrar (docs/18-perfis-de-acesso.md#número-padrão).
   /// Vazio = "Todos os números". Só vale o que a pessoa ainda opera
   defaultNumberIds String[] @default([])
+  /// números da empresa cujas ligações NÃO avisam esta pessoa (popup + alarme) — preferência
+  /// pessoal, não acesso (docs/ligacoes.md#silenciar-por-número). A ligação continua no chat
+  mutedCallNumberIds String[] @default([])
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

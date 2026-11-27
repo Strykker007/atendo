@@ -2,7 +2,8 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { useRouter } from 'next/navigation';
-import { Phone, PhoneMissed, Video, X, Copy } from 'lucide-react';
+import { Phone, PhoneMissed, Video, X, Copy, BellOff } from 'lucide-react';
+import { useCallMutes, useSetCallMutes } from '@/lib/hooks/core';
 import { useUI } from '@/lib/store';
 import { playTransferAlarm } from '@/lib/message-sound';
 import { formatPhoneBR } from '@/lib/utils';
@@ -57,10 +58,16 @@ export const useCallAlerts = create<State>((set) => ({
 
 type Me = { role?: string; numberIds?: string[] } | undefined;
 
-/** Só para quem opera o número (lista vazia = todos, igual à API: number-scope.ts). */
-export function receiveCall(e: CallEvent, me: Me) {
+/**
+ * Só para quem opera o número (lista vazia = todos, igual à API: number-scope.ts) e não silenciou
+ * as ligações dele (`muted`, docs/ligacoes.md#silenciar-por-número): nem aviso nem alarme. A
+ * linha da ligação continua no chat.
+ */
+export function receiveCall(e: CallEvent, me: Me, muted?: string[]) {
   const restrito = me && me.role !== 'super_admin' && (me.numberIds?.length ?? 0) > 0;
   if (restrito && !me!.numberIds!.includes(e.numberId)) return;
+  // silenciou enquanto o aviso estava aberto: os próximos eventos da mesma ligação também somem
+  if (muted?.includes(e.numberId)) { useCallAlerts.getState().remove(e.callId); return; }
   const novo = (e.status === 'offer' || e.status === 'ringing') && !useCallAlerts.getState().items.some((i) => i.callId === e.callId);
   useCallAlerts.getState().apply(e);
   if (novo && !useUI.getState().soundMuted) playTransferAlarm();
@@ -71,6 +78,19 @@ const fone = (p: string) => (p.startsWith('55') ? formatPhoneBR(p) : `+${p}`);
 /** Aviso fixo no topo até abrir ou dispensar — igual ao de transferência. */
 export function CallAlerts() {
   const { items, remove, apply } = useCallAlerts();
+  // carrega cedo: o socket lê do cache para decidir se a ligação avisa
+  const mutes = useCallMutes();
+  const setMutes = useSetCallMutes();
+  function silenciar(c: Item) {
+    const atual = mutes.data?.numberIds ?? [];
+    setMutes.mutateAsync([...new Set([...atual, c.numberId])])
+      .then(() => {
+        // todos os avisos deste número saem (pode haver outra ligação tocando para ele)
+        for (const i of useCallAlerts.getState().items) if (i.numberId === c.numberId) remove(i.callId);
+        toast.ok(`Ligações para ${c.numberLabel} silenciadas só para você. Reative em Configurações → Notificações.`);
+      })
+      .catch(toast.err);
+  }
   const setConversation = useUI((s) => s.setConversation);
   const router = useRouter();
 
@@ -110,7 +130,7 @@ export function CallAlerts() {
               <div className="text-sm text-ink truncate"><b>{quem}</b>{c.contactName && c.phone ? <span className="text-muted"> · {fone(c.phone)}</span> : null}{novo ? <span className="text-muted"> · primeiro contato com este número</span> : null}</div>
               <div className="text-xs text-muted truncate">para <b className="text-ink">{c.numberLabel}</b> · {fone(c.numberPhone)}</div>
               {!perdida && <div className="text-xs text-muted mt-0.5">Atenda pelo celular deste número.</div>}
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {c.conversationId ? (
                   <button
                     type="button"
@@ -128,6 +148,15 @@ export function CallAlerts() {
                     <Copy size={12} /> Copiar número
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  disabled={setMutes.isPending}
+                  onClick={() => silenciar(c)}
+                  title={`Não avisar mais ligações para ${c.numberLabel} (só para você; as dos outros números continuam)`}
+                  className="flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-muted hover:text-ink hover:bg-black/5 disabled:opacity-60"
+                >
+                  <BellOff size={12} /> Silenciar este número
+                </button>
               </div>
             </div>
             <button type="button" onClick={() => remove(c.callId)} className="text-muted hover:text-ink" aria-label="Dispensar"><X size={16} /></button>

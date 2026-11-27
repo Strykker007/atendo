@@ -89,6 +89,10 @@ class ConnectDto {
   @IsOptional() @IsBoolean() force?: boolean;
 }
 
+class CallMutesDto {
+  @IsArray() @ArrayMaxSize(200) @IsUUID('all', { each: true }) numberIds: string[];
+}
+
 @Controller('numbers')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class NumbersController {
@@ -116,6 +120,25 @@ export class NumbersController {
     // `manageable`: a tela mostra QR/reconectar/excluir só onde a API vai aceitar
     const podeGerenciar = !!user.permissions?.includes('numbers.manage') || user.role === 'super_admin';
     return rows.map(({ receivers, ...n }) => ({ ...n, receiverIds: receivers.map((r) => r.userId), warmup: warmupPhase(n), manageable: podeGerenciar && canManageNumber(user, n.id) }));
+  }
+
+  /**
+   * Ligações silenciadas para MIM (docs/ligacoes.md#silenciar-por-número): números da empresa
+   * cujas ligações não abrem o aviso nem tocam o alarme para esta pessoa. Preferência pessoal —
+   * não precisa de permissão e não muda nada para o resto da equipe.
+   */
+  @Get('call-mutes')
+  async callMutes(@CurrentUser() user: AuthUser) {
+    const u = await this.prisma.user.findUnique({ where: { id: user.id }, select: { mutedCallNumberIds: true } });
+    return { numberIds: u?.mutedCallNumberIds ?? [] };
+  }
+
+  @Put('call-mutes')
+  async setCallMutes(@CurrentUser() user: AuthUser, @Body() dto: CallMutesDto) {
+    // só números deste cliente (os ids vêm do corpo); número excluído sai sozinho da lista
+    const validos = await this.prisma.whatsAppNumber.findMany({ where: { tenantId: user.tenantId, deletedAt: null, id: { in: [...new Set(dto.numberIds)] } }, select: { id: true } });
+    const u = await this.prisma.user.update({ where: { id: user.id }, data: { mutedCallNumberIds: validos.map((n) => n.id) }, select: { mutedCallNumberIds: true } });
+    return { numberIds: u.mutedCallNumberIds };
   }
 
   /** Número da conta que esta pessoa pode gerenciar (ver `canManageNumber`); senão 403. */
