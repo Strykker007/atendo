@@ -65,11 +65,28 @@ if [ -t 0 ]; then
   [ "$OK" = "s" ] || [ "$OK" = "S" ] || { echo "Cancelado."; exit 1; }
 fi
 
+# Deploy que falha (build quebrado, servidor fora, Ctrl+C) desfaz a versão que ELE criou: a tag e o
+# commit "chore(release)". Sem isto, a próxima tentativa com o mesmo tipo dizia "tag já existe" e só
+# passava com "mesma" — e a versão ficava numerada sem nunca ter ido ao ar. Só o que ainda não foi
+# para o GitHub: o push é o último passo, depois do deploy no ar. O reset é seguro porque a pasta
+# estava sem alterações (conferido acima) e o commit desfeito é só o de versão.
+ROLLBACK_TAG=""
+ROLLBACK_HEAD=""
+rollback() {
+  local code=$?
+  [ "$code" -eq 0 ] && return
+  if [ -n "$ROLLBACK_TAG" ] && git tag -d "$ROLLBACK_TAG" >/dev/null 2>&1; then echo "↩ Deploy falhou: tag $ROLLBACK_TAG desfeita" >&2; fi
+  if [ -n "$ROLLBACK_HEAD" ] && git reset -q --hard "$ROLLBACK_HEAD"; then echo "↩ Commit de versão desfeito: package.json/CHANGELOG voltam para $CUR" >&2; fi
+  if [ -n "$ROLLBACK_TAG$ROLLBACK_HEAD" ]; then echo "ℹ Corrija e rode de novo com o MESMO tipo de versão." >&2; fi
+}
+trap rollback EXIT
+
 # só numera de verdade quando o deploy é da main (DEPLOY_ANY_BRANCH é emergência, não release)
 RELEASE=0
 if [ "${DEPLOY_ANY_BRANCH:-}" != "1" ] && ! git rev-parse -q --verify "refs/tags/v$NEW" >/dev/null; then
   RELEASE=1
   if [ "$NEW" != "$CUR" ]; then
+    ROLLBACK_HEAD=$(git rev-parse HEAD)
     node -e "const f='package.json',p=require('./'+f);p.version='$NEW';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
     # entrada do CHANGELOG com os commits desde a última versão (sem merges nem releases)
     RANGE=${LAST_TAG:+$LAST_TAG..HEAD}
@@ -85,6 +102,7 @@ if [ "${DEPLOY_ANY_BRANCH:-}" != "1" ] && ! git rev-parse -q --verify "refs/tags
     git commit -q -m "chore(release): v$NEW"
   fi
   git tag -a "v$NEW" -m "v$NEW"
+  ROLLBACK_TAG="v$NEW"
   echo "▶ Versão v$NEW (tag criada)"
 fi
 
@@ -115,6 +133,9 @@ $SSH "$HOST" "cd ~/atendo \
   && (grep -q '^APP_VERSION=' .env.production || echo 'APP_VERSION=' >> .env.production) \
   && sed -i 's|^APP_VERSION=.*|APP_VERSION=$VERSION|' .env.production \
   && $(pc_app_up_cmd)"
+# a aplicação nova subiu: daqui para frente a versão é de verdade, nada é desfeito
+ROLLBACK_TAG=""
+ROLLBACK_HEAD=""
 # shellcheck disable=SC2029
 # shellcheck disable=SC2029
 $SSH "$HOST" "cd ~/atendo && $(pc_caddy_sync_cmd)"

@@ -193,8 +193,11 @@ Sem o tipo, o `deploy.sh` mostra o menu com as quatro opções e a versão que c
 pede confirmação. Com versão nova ele, **antes** de enviar: grava o número no `package.json`,
 acrescenta ao `CHANGELOG.md` os commits desde a última tag (sem merges; dá para reescrever a
 entrada depois), commita `chore(release): vX.Y.Z` e cria a tag `vX.Y.Z`. Com o deploy no ar,
-envia `main` + tag para o GitHub. Falhou no meio: rode de novo com `mesma` — a tag já existe,
-não numera outra vez, e o push sai.
+envia `main` + tag para o GitHub. **Falhou antes de a aplicação subir** (build quebrado, servidor
+fora do ar, Ctrl+C): o script desfaz a tag e o commit de versão que ele mesmo criou ("↩ Deploy
+falhou: tag vX.Y.Z desfeita") — corrija e rode de novo com o **mesmo tipo**. Falhou **depois** de a
+aplicação subir (sincronizar o Caddy, push para o GitHub): a versão já está no ar e fica; rode de
+novo com `mesma`, que não numera outra vez e manda o push.
 
 No servidor, `APP_VERSION=X.Y.Z+<commit>` (`/health` → `version`, release do Sentry). O painel
 mostra "Versão vX.Y.Z" no rodapé do menu (o commit no tooltip) e o `VersionWatcher` avisa quem
